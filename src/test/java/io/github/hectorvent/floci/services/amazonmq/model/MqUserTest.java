@@ -33,4 +33,24 @@ class MqUserTest {
         assertTrue(roundTripped.isConsoleAccess());
         assertEquals(List.of("admin"), roundTripped.getGroups());
     }
+
+    @Test
+    void stagedChangeIsPersistedButItsPasswordIsNot() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        MqUser user = new MqUser("tenant", null, false, null);
+        user.setPendingChange(MqUser.CHANGE_CREATE);
+        user.setPendingConsoleAccess(true);
+        user.setPendingGroups(List.of("tenants"));
+        user.setPendingPassword("StagedPassw0rd!");
+
+        String json = mapper.writeValueAsString(user);
+        assertFalse(json.contains("StagedPassw0rd!"), "staged password value must not be serialized");
+        assertFalse(json.toLowerCase().contains("password"), "staged password key must not be serialized");
+
+        MqUser roundTripped = mapper.readValue(json, MqUser.class);
+        assertEquals(MqUser.CHANGE_CREATE, roundTripped.getPendingChange());
+        assertEquals(Boolean.TRUE, roundTripped.getPendingConsoleAccess());
+        assertEquals(List.of("tenants"), roundTripped.getPendingGroups());
+        assertNull(roundTripped.getPendingPassword());
+    }
 }

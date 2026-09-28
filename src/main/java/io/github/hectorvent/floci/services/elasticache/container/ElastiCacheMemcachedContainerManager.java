@@ -49,6 +49,7 @@ public class ElastiCacheMemcachedContainerManager {
     private final EmulatorConfig config;
     private final RegionResolver regionResolver;
     private final Map<String, ElastiCacheContainerHandle> activeContainers = new ConcurrentHashMap<>();
+    private volatile boolean dockerUnavailableLogged;
 
     @Inject
     public ElastiCacheMemcachedContainerManager(ContainerBuilder containerBuilder,
@@ -65,7 +66,68 @@ public class ElastiCacheMemcachedContainerManager {
         this.regionResolver = regionResolver;
     }
 
+    /**
+     * Attempts {@link #start} and reports the backend as unavailable instead of propagating the
+     * failure, when the cause is that no Docker daemon is reachable from Floci: Floci running
+     * inside Docker without a mounted socket, or a stopped daemon on the host. A failure raised
+     * while the daemon <em>is</em> reachable is a genuine container problem and still propagates,
+     * so nothing changes for a Floci that can start Memcached containers.
+     *
+     * @return the container handle, or {@code null} when no Docker daemon is reachable and no
+     *         container was created
+     */
+    public ElastiCacheContainerHandle tryStart(String clusterId, String image) {
+        return tryStart(clusterId, image, BACKEND_PORT);
+    }
+
+    /**
+     * As {@link #tryStart(String, String)}, with Memcached listening on {@code backendPort} inside
+     * the container: the cluster's Port, which its endpoint reports and containers dial.
+     */
+    public ElastiCacheContainerHandle tryStart(String clusterId, String image, int backendPort) {
+        try {
+            ElastiCacheContainerHandle handle = start(clusterId, image, backendPort);
+            dockerUnavailableLogged = false;
+            return handle;
+        } catch (RuntimeException e) {
+            if (isDockerReachable()) {
+                throw e;
+            }
+            ElastiCacheContainerHandle partial = activeContainers.get(clusterId);
+            if (partial != null) {
+                stop(partial);
+                throw e;
+            }
+            if (!dockerUnavailableLogged) {
+                dockerUnavailableLogged = true;
+                LOG.warnv("No Docker daemon is reachable from Floci ({0}). ElastiCache metadata "
+                        + "operations keep working and cache clusters still reach 'available', but "
+                        + "they have no backing Memcached container until a daemon becomes "
+                        + "reachable.", e.getMessage());
+            }
+            return null;
+        }
+    }
+
+    /**
+     * Probes the configured Docker endpoint, which is how a missing daemon is told apart from a
+     * container that failed for its own reasons.
+     */
+    public boolean isDockerReachable() {
+        try {
+            lifecycleManager.getDockerClient().pingCmd().exec();
+            return true;
+        } catch (Exception e) {
+            LOG.debugv("Docker daemon is not reachable: {0}", e.getMessage());
+            return false;
+        }
+    }
+
     public ElastiCacheContainerHandle start(String clusterId, String image) {
+        return start(clusterId, image, BACKEND_PORT);
+    }
+
+    private ElastiCacheContainerHandle start(String clusterId, String image, int backendPort) {
         LOG.infov("Starting Memcached container for cluster: {0}", clusterId);
 
         String containerName = ContainerStorageHelper.resourceName(config, "memcached", null, clusterId);
@@ -74,22 +136,35 @@ public class ElastiCacheMemcachedContainerManager {
         ContainerBuilder.Builder specBuilder = containerBuilder.newContainer(image)
                 .withName(containerName)
                 .withDockerNetwork(config.services().elasticache().dockerNetwork())
-                .withLogRotation();
+                .withLogRotation()
+                .withLabels(ContainerStorageHelper.resourceIdentityLabels(
+                        "elasticache", clusterId, regionResolver.getAccountId(), regionResolver.getDefaultRegion()));
+        if (backendPort != BACKEND_PORT) {
+            // The image's entrypoint runs memcached with any arguments that start with a dash.
+            specBuilder.withCmd(List.of("-p", String.valueOf(backendPort)));
+        }
 
         if (!containerDetector.isRunningInContainer()) {
-            specBuilder.withDynamicPort(BACKEND_PORT);
+            specBuilder.withDynamicPort(backendPort);
         } else {
-            specBuilder.withExposedPort(BACKEND_PORT);
+            specBuilder.withExposedPort(backendPort);
         }
 
         ContainerSpec spec = specBuilder.build();
         ContainerInfo info = lifecycleManager.createAndStart(spec);
-        EndpointInfo endpoint = info.getEndpoint(BACKEND_PORT);
+        EndpointInfo endpoint = info.getEndpoint(backendPort);
 
         LOG.infov("Memcached backend for cluster {0}: {1}", clusterId, endpoint);
 
         ElastiCacheContainerHandle handle = new ElastiCacheContainerHandle(
                 info.containerId(), clusterId, endpoint.host(), endpoint.port());
+        try {
+            handle.setNetworkIp(lifecycleManager.resolveContainerNetworkIp(
+                    info.containerId(), config.services().elasticache().dockerNetwork().orElse(null)));
+        } catch (RuntimeException e) {
+            LOG.warnv("Could not resolve network IP for Memcached container {0}: {1}",
+                    info.containerId(), e.getMessage());
+        }
         activeContainers.put(clusterId, handle);
 
         String shortId = info.containerId().length() >= 8

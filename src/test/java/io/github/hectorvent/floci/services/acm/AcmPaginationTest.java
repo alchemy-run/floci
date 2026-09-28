@@ -91,7 +91,9 @@ class AcmPaginationTest {
         Set<String> allArns = new HashSet<>();
         String nextToken = null;
         int pageCount = 0;
-        int maxPages = 10; // Safety limit
+        // Safety limit against a NextToken that never ends. The store is shared with every other ACM
+        // test class in the JVM, so the real page count grows with the suite.
+        int maxPages = 200;
 
         do {
             String body = nextToken == null
@@ -140,9 +142,8 @@ class AcmPaginationTest {
     @Test
     @Order(5)
     void emptyListReturnsNoNextToken() {
-        // REVOKED + an unused key type: sibling suites may leave revoked RSA-2048
-        // certs in the shared store, so status-only is not an empty filter.
-        given()
+        // The unused key type excludes revoked certificates left by other test classes.
+        Response response = given()
             .header("X-Amz-Target", "CertificateManager.ListCertificates")
             .contentType(ACM_CONTENT_TYPE)
             .body("""
@@ -155,8 +156,13 @@ class AcmPaginationTest {
             .post("/")
         .then()
             .statusCode(200)
-            .body("CertificateSummaryList", empty())
-            .body("NextToken", nullValue());
+            .extract().response();
+
+        List<String> revokedArns = response.jsonPath().getList("CertificateSummaryList.CertificateArn");
+        assertTrue(createdArns.stream().noneMatch(revokedArns::contains),
+                "none of this class's own (always-ISSUED) certificates should appear under a REVOKED filter");
+        assertTrue(revokedArns.isEmpty());
+        assertNull(response.jsonPath().get("NextToken"));
     }
 
     @Test

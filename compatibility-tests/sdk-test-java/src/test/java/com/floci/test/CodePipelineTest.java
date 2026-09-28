@@ -9,17 +9,26 @@ import org.junit.jupiter.api.TestMethodOrder;
 import software.amazon.awssdk.services.codepipeline.CodePipelineClient;
 import software.amazon.awssdk.services.codepipeline.model.ActionCategory;
 import software.amazon.awssdk.services.codepipeline.model.ActionDeclaration;
+import software.amazon.awssdk.services.codepipeline.model.ActionExecutionNotFoundException;
+import software.amazon.awssdk.services.codepipeline.model.ActionNotFoundException;
 import software.amazon.awssdk.services.codepipeline.model.ActionOwner;
+import software.amazon.awssdk.services.codepipeline.model.ActionRevision;
 import software.amazon.awssdk.services.codepipeline.model.ActionTypeId;
+import software.amazon.awssdk.services.codepipeline.model.ActionTypeNotFoundException;
 import software.amazon.awssdk.services.codepipeline.model.ArtifactStore;
 import software.amazon.awssdk.services.codepipeline.model.ArtifactStoreType;
+import software.amazon.awssdk.services.codepipeline.model.ConditionNotOverridableException;
 import software.amazon.awssdk.services.codepipeline.model.CreatePipelineResponse;
 import software.amazon.awssdk.services.codepipeline.model.DeleteWebhookResponse;
+import software.amazon.awssdk.services.codepipeline.model.FailureDetails;
 import software.amazon.awssdk.services.codepipeline.model.GetPipelineResponse;
+import software.amazon.awssdk.services.codepipeline.model.JobNotFoundException;
 import software.amazon.awssdk.services.codepipeline.model.ListPipelinesResponse;
 import software.amazon.awssdk.services.codepipeline.model.ListWebhooksResponse;
+import software.amazon.awssdk.services.codepipeline.model.NotLatestPipelineExecutionException;
 import software.amazon.awssdk.services.codepipeline.model.OutputArtifact;
 import software.amazon.awssdk.services.codepipeline.model.PipelineDeclaration;
+import software.amazon.awssdk.services.codepipeline.model.PipelineExecutionNotFoundException;
 import software.amazon.awssdk.services.codepipeline.model.PutWebhookResponse;
 import software.amazon.awssdk.services.codepipeline.model.StageDeclaration;
 import software.amazon.awssdk.services.codepipeline.model.UpdatePipelineResponse;
@@ -27,9 +36,11 @@ import software.amazon.awssdk.services.codepipeline.model.WebhookAuthenticationT
 import software.amazon.awssdk.services.codepipeline.model.WebhookDefinition;
 import software.amazon.awssdk.services.codepipeline.model.WebhookFilterRule;
 
+import java.time.Instant;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class CodePipelineTest {
@@ -94,6 +105,39 @@ class CodePipelineTest {
 
         DeleteWebhookResponse deleted = codepipeline.deleteWebhook(r -> r.name("sdk-webhook"));
         assertThat(deleted.sdkFields()).isEmpty();
+    }
+
+    @Test
+    @Order(3)
+    void invalidStageAndWorkerTargetsDecodeAsSdkExceptions() {
+        String missingId = "00000000-0000-0000-0000-000000000000";
+        assertThatThrownBy(() -> codepipeline.retryStageExecution(r -> r.pipelineName(PIPELINE)
+                .stageName("Release").pipelineExecutionId(missingId).retryMode("FAILED_ACTIONS")))
+                .isInstanceOf(NotLatestPipelineExecutionException.class);
+        assertThatThrownBy(() -> codepipeline.rollbackStage(r -> r.pipelineName(PIPELINE)
+                .stageName("Release").targetPipelineExecutionId(missingId)))
+                .isInstanceOf(PipelineExecutionNotFoundException.class);
+        assertThatThrownBy(() -> codepipeline.overrideStageCondition(r -> r.pipelineName(PIPELINE)
+                .stageName("Release").pipelineExecutionId(missingId).conditionType("BEFORE_ENTRY")))
+                .isInstanceOf(ConditionNotOverridableException.class);
+        assertThatThrownBy(() -> codepipeline.putActionRevision(r -> r.pipelineName(PIPELINE)
+                .stageName("Source").actionName("MissingAction").actionRevision(ActionRevision.builder()
+                        .revisionId("revision").revisionChangeId("change").created(Instant.EPOCH).build())))
+                .isInstanceOf(ActionNotFoundException.class);
+        assertThatThrownBy(() -> codepipeline.listDeployActionExecutionTargets(r -> r.pipelineName(PIPELINE)
+                .actionExecutionId(missingId))).isInstanceOf(ActionExecutionNotFoundException.class);
+        assertThatThrownBy(() -> codepipeline.getJobDetails(r -> r.jobId(missingId)))
+                .isInstanceOf(JobNotFoundException.class);
+        assertThatThrownBy(() -> codepipeline.putJobSuccessResult(r -> r.jobId(missingId)))
+                .isInstanceOf(JobNotFoundException.class);
+        assertThatThrownBy(() -> codepipeline.putJobFailureResult(r -> r.jobId(missingId)
+                .failureDetails(FailureDetails.builder().type("JobFailed").message("missing job").build())))
+                .isInstanceOf(JobNotFoundException.class);
+        assertThatThrownBy(() -> codepipeline.acknowledgeJob(r -> r.jobId(missingId).nonce(missingId)))
+                .isInstanceOf(JobNotFoundException.class);
+        assertThatThrownBy(() -> codepipeline.pollForJobs(r -> r.actionTypeId(ActionTypeId.builder()
+                .category(ActionCategory.BUILD).owner(ActionOwner.CUSTOM).provider("MissingSdkWorker")
+                .version("1").build()))).isInstanceOf(ActionTypeNotFoundException.class);
     }
 
     @Test

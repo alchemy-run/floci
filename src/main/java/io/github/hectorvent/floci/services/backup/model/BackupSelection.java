@@ -7,6 +7,7 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -36,6 +37,17 @@ public class BackupSelection {
 
     @JsonProperty("CreatorRequestId")
     private String creatorRequestId;
+
+    @JsonProperty("ListOfTags")
+    private List<Map<String, String>> listOfTags = new ArrayList<>();
+
+    @JsonProperty("Conditions")
+    private Map<String, List<Map<String, String>>> conditions;
+
+    public List<Map<String, String>> getListOfTags() { return listOfTags; }
+    public void setListOfTags(List<Map<String, String>> tags) { this.listOfTags = tags; }
+    public Map<String, List<Map<String, String>>> getConditions() { return conditions; }
+    public void setConditions(Map<String, List<Map<String, String>>> conditions) { this.conditions = conditions; }
 
     public BackupSelection() {}
 

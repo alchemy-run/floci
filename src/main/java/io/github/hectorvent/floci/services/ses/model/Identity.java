@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.ses.model;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.quarkus.runtime.annotations.RegisterForReflection;
@@ -35,14 +36,20 @@ public class Identity {
     @JsonProperty("DkimTokens")
     private List<String> dkimTokens;
 
-    @JsonProperty("NextSigningKeyLength")
-    private String nextSigningKeyLength;
+    @JsonAlias("SigningAttributesOrigin")
+    @JsonProperty("DkimSigningAttributesOrigin")
+    private String dkimSigningAttributesOrigin = "AWS_SES"; // "AWS_SES" (Easy DKIM) or "EXTERNAL" (BYODKIM)
 
-    @JsonProperty("CurrentSigningKeyLength")
-    private String currentSigningKeyLength;
+    @JsonAlias("NextSigningKeyLength")
+    @JsonProperty("DkimNextSigningKeyLength")
+    private String dkimNextSigningKeyLength = "RSA_2048_BIT";
 
-    @JsonProperty("SigningAttributesOrigin")
-    private String signingAttributesOrigin = "AWS_SES";
+    @JsonAlias("CurrentSigningKeyLength")
+    @JsonProperty("DkimCurrentSigningKeyLength")
+    private String dkimCurrentSigningKeyLength = "RSA_2048_BIT";
+
+    @JsonProperty("DkimLastKeyGenerationTimestamp")
+    private Instant dkimLastKeyGenerationTimestamp;
 
     @JsonProperty("NotificationAttributes")
     private Map<String, String> notificationAttributes = new HashMap<>();
@@ -76,10 +83,7 @@ public class Identity {
     public Identity(String identity, String identityType) {
         this.identity = identity;
         this.identityType = identityType;
-        // Email-address identities stay PENDING until confirmed (v1 VerifyEmailIdentity
-        // or a verification click). Domain identities are overwritten to PENDING by
-        // verifyDomainIdentity. Matching AWS CreateEmailIdentity / VerifyEmailIdentity.
-        this.verificationStatus = "EmailAddress".equals(identityType) ? "Pending" : "Success";
+        this.verificationStatus = "Success"; // auto-verify in emulator
         this.verificationToken = java.util.UUID.randomUUID().toString();
         this.dkimEnabled = false;
         this.dkimVerificationStatus = "NotStarted";
@@ -107,20 +111,17 @@ public class Identity {
     public List<String> getDkimTokens() { return dkimTokens; }
     public void setDkimTokens(List<String> dkimTokens) { this.dkimTokens = dkimTokens; }
 
-    public String getNextSigningKeyLength() { return nextSigningKeyLength; }
-    public void setNextSigningKeyLength(String nextSigningKeyLength) {
-        this.nextSigningKeyLength = nextSigningKeyLength;
-    }
+    public String getDkimSigningAttributesOrigin() { return dkimSigningAttributesOrigin; }
+    public void setDkimSigningAttributesOrigin(String origin) { this.dkimSigningAttributesOrigin = origin; }
 
-    public String getCurrentSigningKeyLength() { return currentSigningKeyLength; }
-    public void setCurrentSigningKeyLength(String currentSigningKeyLength) {
-        this.currentSigningKeyLength = currentSigningKeyLength;
-    }
+    public String getDkimNextSigningKeyLength() { return dkimNextSigningKeyLength; }
+    public void setDkimNextSigningKeyLength(String len) { this.dkimNextSigningKeyLength = len; }
 
-    public String getSigningAttributesOrigin() { return signingAttributesOrigin; }
-    public void setSigningAttributesOrigin(String signingAttributesOrigin) {
-        this.signingAttributesOrigin = signingAttributesOrigin;
-    }
+    public String getDkimCurrentSigningKeyLength() { return dkimCurrentSigningKeyLength; }
+    public void setDkimCurrentSigningKeyLength(String len) { this.dkimCurrentSigningKeyLength = len; }
+
+    public Instant getDkimLastKeyGenerationTimestamp() { return dkimLastKeyGenerationTimestamp; }
+    public void setDkimLastKeyGenerationTimestamp(Instant ts) { this.dkimLastKeyGenerationTimestamp = ts; }
 
     public Map<String, String> getNotificationAttributes() { return notificationAttributes; }
     public void setNotificationAttributes(Map<String, String> notificationAttributes) { this.notificationAttributes = notificationAttributes; }

@@ -1,39 +1,14 @@
 FROM registry.access.redhat.com/ubi9-minimal:9.7
 
-ARG VERSION=latest
 # Automatically set by Docker BuildKit to "amd64" or "arm64"
 ARG TARGETARCH
 
-ENV FLOCI_VERSION=${VERSION}
-ENV FLOCI_STORAGE_PERSISTENT_PATH=/app/data
-# Match docker/Dockerfile (the JVM image): without TLS the https data planes
-# (Lambda MicroVM endpoints, wss execute-api, sync-states.{region}:443) and
-# the /_floci/tls/ca endpoint silently don't exist.
-ENV FLOCI_TLS_ENABLED=true
-
-ENV AWS_DEFAULT_REGION=us-east-1
-ENV AWS_CONFIG_FILE=/etc/floci/aws/config
-
-ENV GOSU_VERSION=1.17
-ENV GOSU_AMD64_SHA256=bbc4136d03ab138b1ad66fa4fc051bafc6cc7ffae632b069a53657279a450de3
-ENV GOSU_ARM64_SHA256=c3805a85d17f4454c23d7059bcb97e1ec1af272b90126e79ed002342de08389b
+# CloudFront Functions execute in Node in both the JVM and native images.
 RUN set -eux; \
-    microdnf install -y --nodocs shadow-utils; \
     microdnf module enable -y nodejs:22; \
     microdnf install -y --nodocs --setopt=install_weak_deps=0 nodejs; \
     microdnf clean all; \
-    useradd -r -u 1001 -g root -d /app -s /sbin/nologin floci; \
-    arch="$(uname -m)"; \
-    case "$arch" in \
-        x86_64) gosuArch='amd64'; gosuSha256="$GOSU_AMD64_SHA256" ;; \
-        aarch64) gosuArch='arm64'; gosuSha256="$GOSU_ARM64_SHA256" ;; \
-        *) echo >&2 "unsupported arch: $arch"; exit 1 ;; \
-    esac; \
-    curl -fsSL -o /usr/local/bin/gosu "https://github.com/tianon/gosu/releases/download/${GOSU_VERSION}/gosu-${gosuArch}"; \
-    echo "${gosuSha256}  /usr/local/bin/gosu" | sha256sum -c -; \
-    chmod +x /usr/local/bin/gosu; \
-    gosu --version; \
-    gosu nobody true
+    echo 'floci:x:1001:0:Floci:/app:/sbin/nologin' >> /etc/passwd
 
 WORKDIR /app
 
@@ -45,16 +20,24 @@ RUN mkdir -p /etc/floci/aws \
 
 VOLUME /app/data
 
-COPY --chmod=755 --chown=1001:root native/${TARGETARCH}/ /app/
-# Graal ships `floci-<version>-runner`; the image CMD and the entrypoint's
-# empty-argv fallback expect `/app/application` (see Dockerfile.native).
-RUN set -eux; \
-    runner="$(ls -1 /app/*-runner)"; \
-    test -x "$runner"; \
-    ln -sfn "$(basename "$runner")" /app/application
-
 COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-COPY --chmod=755 docker/localstack-parity.sh /usr/local/bin/localstack-parity.sh
+COPY --chmod=755 docker/localstack-parity.sh docker/healthcheck.sh /usr/local/bin/
+
+ARG VERSION=latest
+ENV FLOCI_VERSION=${VERSION}
+ENV FLOCI_STORAGE_PERSISTENT_PATH=/app/data
+# Lambda MicroVM endpoints and AWS HTTPS callbacks require the local TLS proxy.
+ENV FLOCI_TLS_ENABLED=true
+ENV AWS_DEFAULT_REGION=us-east-1
+ENV AWS_CONFIG_FILE=/etc/floci/aws/config
+COPY --chmod=755 --chown=1001:root native/${TARGETARCH}/ /app/
+# Accept both upstream's normalized name and the fork's Graal artifact name.
+RUN set -eux; \
+    if [ ! -x /app/application ]; then \
+        runner="$(ls -1 /app/*-runner)"; \
+        test -x "$runner"; \
+        ln -sfn "$(basename "$runner")" /app/application; \
+    fi
 
 LABEL org.opencontainers.image.title="Floci" \
       org.opencontainers.image.description="Local AWS emulator — open-source alternative to LocalStack Community" \
@@ -74,9 +57,11 @@ LABEL org.opencontainers.image.title="Floci" \
       vendor="Floci"
 
 EXPOSE 4566
+EXPOSE 443
+EXPOSE 9500-9519
 
-HEALTHCHECK --interval=5s --timeout=3s --retries=5 \
-    CMD curl -f http://localhost:4566/_floci/health || exit 1
+HEALTHCHECK --interval=5s --timeout=3s --retries=5 CMD ["/usr/local/bin/healthcheck.sh"]
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-CMD ["/app/application", "-Dquarkus.http.host=0.0.0.0"]
+# A published port needs 0.0.0.0 inside the container, which Floci only accepts with explicit consent.
+CMD ["/app/application", "-Dquarkus.http.host=0.0.0.0", "-Dfloci.security.allow-unsafe-network-exposure=true"]

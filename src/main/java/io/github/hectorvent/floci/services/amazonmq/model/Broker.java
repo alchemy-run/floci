@@ -63,6 +63,41 @@ public class Broker {
     @JsonProperty("tags")
     private Map<String, String> tags;
 
+    // UpdateBroker state. Engine version, instance type, authentication strategy and
+    // configuration changes stay pending until the next RebootBroker, as on AWS.
+    @JsonProperty("authenticationStrategy")
+    private String authenticationStrategy;
+
+    @JsonProperty("pendingEngineVersion")
+    private String pendingEngineVersion;
+
+    @JsonProperty("pendingHostInstanceType")
+    private String pendingHostInstanceType;
+
+    @JsonProperty("pendingAuthenticationStrategy")
+    private String pendingAuthenticationStrategy;
+
+    @JsonProperty("configurationId")
+    private String configurationId;
+
+    @JsonProperty("configurationRevision")
+    private Integer configurationRevision;
+
+    @JsonProperty("pendingConfigurationId")
+    private String pendingConfigurationId;
+
+    @JsonProperty("pendingConfigurationRevision")
+    private Integer pendingConfigurationRevision;
+
+    @JsonProperty("maintenanceWindowStartTime")
+    private Map<String, Object> maintenanceWindowStartTime;
+
+    @JsonProperty("logs")
+    private Map<String, Object> logs;
+
+    @JsonProperty("securityGroups")
+    private List<String> securityGroups;
+
     // Internal bookkeeping. These are NOT part of the AWS response shape, but they ARE
     // persisted so the broker stays manageable after an emulator restart in persistent
     // mode (container teardown, volume cleanup, account-aware storage routing). The
@@ -134,6 +169,39 @@ public class Broker {
 
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags; }
+
+    public String getAuthenticationStrategy() { return authenticationStrategy; }
+    public void setAuthenticationStrategy(String authenticationStrategy) { this.authenticationStrategy = authenticationStrategy; }
+
+    public String getPendingEngineVersion() { return pendingEngineVersion; }
+    public void setPendingEngineVersion(String pendingEngineVersion) { this.pendingEngineVersion = pendingEngineVersion; }
+
+    public String getPendingHostInstanceType() { return pendingHostInstanceType; }
+    public void setPendingHostInstanceType(String pendingHostInstanceType) { this.pendingHostInstanceType = pendingHostInstanceType; }
+
+    public String getPendingAuthenticationStrategy() { return pendingAuthenticationStrategy; }
+    public void setPendingAuthenticationStrategy(String pendingAuthenticationStrategy) { this.pendingAuthenticationStrategy = pendingAuthenticationStrategy; }
+
+    public String getConfigurationId() { return configurationId; }
+    public void setConfigurationId(String configurationId) { this.configurationId = configurationId; }
+
+    public Integer getConfigurationRevision() { return configurationRevision; }
+    public void setConfigurationRevision(Integer configurationRevision) { this.configurationRevision = configurationRevision; }
+
+    public String getPendingConfigurationId() { return pendingConfigurationId; }
+    public void setPendingConfigurationId(String pendingConfigurationId) { this.pendingConfigurationId = pendingConfigurationId; }
+
+    public Integer getPendingConfigurationRevision() { return pendingConfigurationRevision; }
+    public void setPendingConfigurationRevision(Integer pendingConfigurationRevision) { this.pendingConfigurationRevision = pendingConfigurationRevision; }
+
+    public Map<String, Object> getMaintenanceWindowStartTime() { return maintenanceWindowStartTime; }
+    public void setMaintenanceWindowStartTime(Map<String, Object> maintenanceWindowStartTime) { this.maintenanceWindowStartTime = maintenanceWindowStartTime; }
+
+    public Map<String, Object> getLogs() { return logs; }
+    public void setLogs(Map<String, Object> logs) { this.logs = logs; }
+
+    public List<String> getSecurityGroups() { return securityGroups; }
+    public void setSecurityGroups(List<String> securityGroups) { this.securityGroups = securityGroups; }
 
     public String getContainerId() { return containerId; }
     public void setContainerId(String containerId) { this.containerId = containerId; }

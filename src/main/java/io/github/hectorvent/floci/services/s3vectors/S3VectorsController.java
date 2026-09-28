@@ -204,6 +204,24 @@ public class S3VectorsController {
     ) {}
 
     @RegisterForReflection
+    public record ListVectorsRequest(
+            String vectorBucketName,
+            String indexName,
+            String indexArn,
+            Integer maxResults,
+            String nextToken,
+            Boolean returnData,
+            Boolean returnMetadata
+    ) {}
+
+    @RegisterForReflection
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record ListVectorsResponse(
+            List<VectorGetResponseRepresentation> vectors,
+            String nextToken
+    ) {}
+
+    @RegisterForReflection
     public record DeleteVectorsRequest(
             String vectorBucketName,
             String indexName,
@@ -387,31 +405,33 @@ public class S3VectorsController {
     }
 
     @POST
+    @Path("/ListVectors")
+    public Response listVectors(@Context HttpHeaders headers, ListVectorsRequest request) {
+        String region = regionResolver.resolveRegion(headers);
+        int maxResults = request.maxResults() != null ? request.maxResults() : 0;
+        S3VectorsService.ListVectorsResult result = service.listVectors(
+                request.vectorBucketName(), request.indexName(), request.indexArn(), maxResults, request.nextToken(), region);
+
+        boolean returnData = request.returnData() != null && request.returnData();
+        boolean returnMetadata = request.returnMetadata() != null && request.returnMetadata();
+
+        List<VectorGetResponseRepresentation> reps = result.vectors().stream()
+                .map(v -> {
+                    VectorDataRepresentation data = returnData ? new VectorDataRepresentation(v.getData()) : null;
+                    Map<String, Object> metadata = returnMetadata ? v.getMetadata() : null;
+                    return new VectorGetResponseRepresentation(v.getKey(), data, metadata);
+                })
+                .toList();
+
+        return Response.ok(new ListVectorsResponse(reps, result.nextToken())).build();
+    }
+
+    @POST
     @Path("/DeleteVectors")
     public Response deleteVectors(@Context HttpHeaders headers, DeleteVectorsRequest request) {
         String region = regionResolver.resolveRegion(headers);
         service.deleteVectors(request.vectorBucketName(), request.indexName(), request.indexArn(), request.keys(), region);
         return Response.ok(objectMapper.createObjectNode()).build();
-    }
-
-    @POST
-    @Path("/ListVectors")
-    public Response listVectors(@Context HttpHeaders headers, ListVectorsRequest request) {
-        String region = regionResolver.resolveRegion(headers);
-        List<VectorData> vectors = service.listVectors(
-                request.vectorBucketName(), request.indexName(), request.indexArn(), region);
-
-        boolean returnData = request.returnData() != null && request.returnData();
-        boolean returnMetadata = request.returnMetadata() != null && request.returnMetadata();
-
-        List<VectorGetResponseRepresentation> reps = vectors.stream()
-                .map(v -> new VectorGetResponseRepresentation(
-                        v.getKey(),
-                        returnData ? new VectorDataRepresentation(v.getData()) : null,
-                        returnMetadata ? v.getMetadata() : null
-                ))
-                .toList();
-        return Response.ok(new ListVectorsResponse(reps, null)).build();
     }
 
     @POST
@@ -426,16 +446,19 @@ public class S3VectorsController {
                 request.indexName(),
                 request.indexArn(),
                 queryVector,
+                request.filter(),
                 request.topK() > 0 ? request.topK() : 10,
                 region
         );
 
         boolean returnMetadata = request.returnMetadata() != null && request.returnMetadata();
+        boolean returnDistance = request.returnDistance() != null && request.returnDistance();
 
         List<QueryResultRepresentation> reps = results.stream()
                 .map(res -> {
                     Map<String, Object> metadata = returnMetadata ? res.getVector().getMetadata() : null;
-                    return new QueryResultRepresentation(res.getVector().getKey(), res.getDistance(), metadata);
+                    Double distance = returnDistance ? res.getDistance() : null;
+                    return new QueryResultRepresentation(res.getVector().getKey(), distance, metadata);
                 })
                 .toList();
 
@@ -481,23 +504,5 @@ public class S3VectorsController {
     public record DeleteVectorBucketPolicyRequest(
             String vectorBucketName,
             String vectorBucketArn
-    ) {}
-
-    @RegisterForReflection
-    public record ListVectorsRequest(
-            String vectorBucketName,
-            String indexName,
-            String indexArn,
-            Integer maxResults,
-            String nextToken,
-            Boolean returnData,
-            Boolean returnMetadata
-    ) {}
-
-    @RegisterForReflection
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record ListVectorsResponse(
-            List<VectorGetResponseRepresentation> vectors,
-            String nextToken
     ) {}
 }

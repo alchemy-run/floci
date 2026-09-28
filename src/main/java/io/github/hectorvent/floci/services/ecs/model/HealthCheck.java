@@ -5,9 +5,10 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
 import java.util.List;
 
 /**
- * Container-level {@code healthCheck} on a task definition. Alchemy's
- * {@code Service} Phase-2 config sugar writes {@code command}, {@code interval},
- * {@code timeout}, {@code retries}, and {@code startPeriod} (seconds).
+ * The {@code healthCheck} of an ECS container definition:
+ * {@code {"command": [...], "interval": ..., "timeout": ..., "retries": ..., "startPeriod": ...}}.
+ *
+ * <p>Modelled for RegisterTaskDefinition/DescribeTaskDefinition round-trip fidelity.
  */
 @RegisterForReflection
 public record HealthCheck(
@@ -15,4 +16,6 @@ public record HealthCheck(
         Integer interval,
         Integer timeout,
         Integer retries,
-        Integer startPeriod) {}
+        Integer startPeriod
+) {
+}

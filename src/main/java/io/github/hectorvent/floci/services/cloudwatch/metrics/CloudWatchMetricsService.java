@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.cloudwatch.metrics;
 
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.Dimension;
@@ -19,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @ApplicationScoped
@@ -28,6 +30,7 @@ public class CloudWatchMetricsService {
 
     private final StorageBackend<String, MetricDatum> metricStore;
     private final StorageBackend<String, MetricAlarm> alarmStore;
+    private final Map<String, Instant> manualStateHeldUntil = new ConcurrentHashMap<>();
     private final RegionResolver regionResolver;
 
     @Inject
@@ -48,6 +51,15 @@ public class CloudWatchMetricsService {
     }
 
     public void putMetricData(String namespace, List<MetricDatum> datums, String region) {
+        putMetricDataForAccount(null, namespace, datums, region);
+    }
+
+    /**
+     * Stores the datums in {@code accountId}'s partition rather than the caller's, for writers that
+     * run outside a request, such as a metric filter publishing for a log batch a container
+     * streamed on another account's behalf. A null account is the caller's own.
+     */
+    public void putMetricDataForAccount(String accountId, String namespace, List<MetricDatum> datums, String region) {
         long nowSeconds = Instant.now().getEpochSecond();
         for (MetricDatum datum : datums) {
             datum.setNamespace(namespace);
@@ -62,13 +74,48 @@ public class CloudWatchMetricsService {
                 datum.setMaximum(datum.getValue());
             }
 
-            String dimKey = buildDimKey(datum.getDimensions());
-            String key = region + "::" + namespace + "::" + datum.getMetricName()
-                    + "::" + dimKey + "::"
-                    + String.format("%013d", datum.getTimestamp()) + "::" + UUID.randomUUID();
-            metricStore.put(key, datum);
+            storeDatum(accountId, namespace, datum, region, UUID.randomUUID().toString());
         }
         LOG.debugv("PutMetricData: {0} datums for namespace {1}", datums.size(), namespace);
+    }
+
+    /**
+     * Internal scalar publication, not an AWS PutMetricData operation. The publisher supplies a
+     * canonical account, an explicit event timestamp (including epoch zero), and a stable ID for
+     * this one contribution. Retrying a partially/ambiguously committed write replaces the same
+     * key instead of appending another sample. Distinct contributions must have distinct IDs.
+     * The caller's snapshot is never mutated or retained by the store.
+     */
+    public void publishMetricForAccount(String accountId, String namespace, MetricDatum datum,
+                                        String region, String publicationId) {
+        if (accountId == null || accountId.isBlank() || publicationId == null || publicationId.isBlank()) {
+            throw new IllegalArgumentException("Internal publication requires an explicit account and publication ID");
+        }
+        MetricDatum sample = new MetricDatum();
+        sample.setNamespace(namespace);
+        sample.setMetricName(datum.getMetricName());
+        sample.setUnit(datum.getUnit());
+        sample.setDimensions(List.copyOf(datum.getDimensions()));
+        sample.setTimestamp(datum.getTimestamp());
+        sample.setValue(datum.getValue());
+        sample.setSampleCount(1);
+        sample.setSum(datum.getValue());
+        sample.setMinimum(datum.getValue());
+        sample.setMaximum(datum.getValue());
+        storeDatum(accountId, namespace, sample, region, "publication-" + publicationId);
+    }
+
+    private void storeDatum(String accountId, String namespace, MetricDatum datum, String region, String id) {
+        String key = region + "::" + namespace + "::" + datum.getMetricName()
+                + "::" + buildDimKey(datum.getDimensions()) + "::"
+                + String.format("%013d", datum.getTimestamp()) + "::" + id;
+        if (accountId != null && metricStore instanceof AccountAwareStorageBackend<?> rawAware) {
+            @SuppressWarnings("unchecked")
+            AccountAwareStorageBackend<MetricDatum> aware = (AccountAwareStorageBackend<MetricDatum>) rawAware;
+            aware.putForAccount(accountId, key, datum);
+        } else {
+            metricStore.put(key, datum);
+        }
     }
 
     public record MetricIdentity(String namespace, String metricName, List<Dimension> dimensions) {}
@@ -132,6 +179,7 @@ public class CloudWatchMetricsService {
                                                 int periodSeconds,
                                                 List<String> statistics,
                                                 String unit, String region) {
+        if (periodSeconds < 1) throw CloudWatchMetadataService.invalid("Period must be positive");
         String dimKey = dimensions != null ? buildDimKey(dimensions) : "";
         String prefix = region + "::" + namespace + "::" + metricName + "::" + dimKey + "::";
 
@@ -221,7 +269,9 @@ public class CloudWatchMetricsService {
         return results;
     }
 
-    private double resolveStatValue(Datapoint dp, String stat) {
+    /** Shared with {@link AlarmEvaluator}, which resolves the same statistic against
+     * freshly-fetched datapoints when evaluating an alarm's threshold. */
+    public static double resolveStatValue(Datapoint dp, String stat) {
         return switch (stat) {
             case "Average" -> dp.average();
             case "Sum" -> dp.sum();
@@ -239,9 +289,23 @@ public class CloudWatchMetricsService {
         if (alarm.getAlarmArn() == null) {
             alarm.setAlarmArn(regionResolver.buildArn("cloudwatch", region, "alarm:" + alarm.getAlarmName()));
         }
+        alarmStore.get(region + "::" + alarm.getAlarmName()).ifPresent(existing -> {
+            alarm.setTags(new LinkedHashMap<>(existing.getTags()));
+            alarm.setStateValue(existing.getStateValue());
+            alarm.setStateReason(existing.getStateReason());
+            alarm.setStateReasonData(existing.getStateReasonData());
+            alarm.setStateUpdatedTimestamp(existing.getStateUpdatedTimestamp());
+        });
+        alarm.setRegion(region);
         alarm.setAlarmConfigurationUpdatedTimestamp(Instant.now().getEpochSecond());
         alarmStore.put(region + "::" + alarm.getAlarmName(), alarm);
         LOG.infov("PutMetricAlarm: {0} in {1}", alarm.getAlarmName(), region);
+    }
+
+    /** Every stored alarm, across all regions. Used by the background {@link AlarmEvaluator}
+     * tick, which has no per-request region to scope a lookup to. */
+    public List<MetricAlarm> allAlarms() {
+        return alarmStore.scan(k -> true);
     }
 
     public List<MetricAlarm> describeAlarms(List<String> alarmNames, String alarmNamePrefix, String region) {
@@ -276,6 +340,38 @@ public class CloudWatchMetricsService {
 
         alarmStore.put(key, alarm);
         LOG.infov("SetAlarmState: {0} -> {1}", alarmName, stateValue);
+    }
+
+    /**
+     * Records a SetAlarmState API call. AWS keeps the requested state until the alarm's next
+     * period evaluation, so the evaluator must not overwrite it on its (shorter) tick.
+     */
+    public void holdManualAlarmState(String alarmName, String region) {
+        String key = region + "::" + alarmName;
+        alarmStore.get(key).ifPresent(alarm -> manualStateHeldUntil.put(key,
+                Instant.now().plusSeconds(Math.max(1, alarm.getPeriod()))));
+    }
+
+    /** Whether a SetAlarmState call is still holding this alarm's state. */
+    public boolean isManualAlarmStateHeld(String alarmName, String region) {
+        String key = region + "::" + alarmName;
+        Instant until = manualStateHeldUntil.get(key);
+        if (until == null) {
+            return false;
+        }
+        if (Instant.now().isBefore(until)) {
+            return true;
+        }
+        manualStateHeldUntil.remove(key, until);
+        return false;
+    }
+
+    public void setAlarmActions(String alarmName, boolean enabled, String region) {
+        String key = region + "::" + alarmName;
+        MetricAlarm alarm = alarmStore.get(key)
+                .orElseThrow(() -> CloudWatchMetadataService.notFound(alarmName));
+        alarm.setActionsEnabled(enabled);
+        alarmStore.put(key, alarm);
     }
 
     public Map<String, String> listTagsForResource(String resourceArn, String region) {

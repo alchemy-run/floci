@@ -50,10 +50,38 @@ public class BatchController {
     }
 
     @POST
+    @Path("/v1/updatecomputeenvironment")
+    public Response updateComputeEnvironment(@Context HttpHeaders headers, String body) {
+        return handle(headers, body, (request, region) ->
+                Response.ok(service.updateComputeEnvironment(request)).build());
+    }
+
+    @POST
+    @Path("/v1/deletecomputeenvironment")
+    public Response deleteComputeEnvironment(@Context HttpHeaders headers, String body) {
+        return handle(headers, body, (request, region) ->
+                Response.ok(service.deleteComputeEnvironment(request)).build());
+    }
+
+    @POST
     @Path("/v1/createjobqueue")
     public Response createJobQueue(@Context HttpHeaders headers, String body) {
         return handle(headers, body, (request, region) ->
                 Response.ok(service.createJobQueue(request, region)).build());
+    }
+
+    @POST
+    @Path("/v1/updatejobqueue")
+    public Response updateJobQueue(@Context HttpHeaders headers, String body) {
+        return handle(headers, body, (request, region) ->
+                Response.ok(service.updateJobQueue(request)).build());
+    }
+
+    @POST
+    @Path("/v1/deletejobqueue")
+    public Response deleteJobQueue(@Context HttpHeaders headers, String body) {
+        return handle(headers, body, (request, region) ->
+                Response.ok(service.deleteJobQueue(request)).build());
     }
 
     @POST
@@ -92,48 +120,6 @@ public class BatchController {
     }
 
     @POST
-    @Path("/v1/describejobs")
-    public Response describeJobs(@Context HttpHeaders headers, String body) {
-        return handle(headers, body, (request, region) ->
-                Response.ok(service.describeJobs(request)).build());
-    }
-
-    @POST
-    @Path("/v1/listjobs")
-    public Response listJobs(@Context HttpHeaders headers, String body) {
-        return handle(headers, body, (request, region) ->
-                Response.ok(service.listJobs(request)).build());
-    }
-
-    @POST
-    @Path("/v1/updatecomputeenvironment")
-    public Response updateComputeEnvironment(@Context HttpHeaders headers, String body) {
-        return handle(headers, body, (request, region) ->
-                Response.ok(service.updateComputeEnvironment(request)).build());
-    }
-
-    @POST
-    @Path("/v1/deletecomputeenvironment")
-    public Response deleteComputeEnvironment(@Context HttpHeaders headers, String body) {
-        return handle(headers, body, (request, region) ->
-                Response.ok(service.deleteComputeEnvironment(request)).build());
-    }
-
-    @POST
-    @Path("/v1/updatejobqueue")
-    public Response updateJobQueue(@Context HttpHeaders headers, String body) {
-        return handle(headers, body, (request, region) ->
-                Response.ok(service.updateJobQueue(request)).build());
-    }
-
-    @POST
-    @Path("/v1/deletejobqueue")
-    public Response deleteJobQueue(@Context HttpHeaders headers, String body) {
-        return handle(headers, body, (request, region) ->
-                Response.ok(service.deleteJobQueue(request)).build());
-    }
-
-    @POST
     @Path("/v1/canceljob")
     public Response cancelJob(@Context HttpHeaders headers, String body) {
         return handle(headers, body, (request, region) ->
@@ -145,6 +131,20 @@ public class BatchController {
     public Response terminateJob(@Context HttpHeaders headers, String body) {
         return handle(headers, body, (request, region) ->
                 Response.ok(service.terminateJob(request)).build());
+    }
+
+    @POST
+    @Path("/v1/describejobs")
+    public Response describeJobs(@Context HttpHeaders headers, String body) {
+        return handle(headers, body, (request, region) ->
+                Response.ok(service.describeJobs(request)).build());
+    }
+
+    @POST
+    @Path("/v1/listjobs")
+    public Response listJobs(@Context HttpHeaders headers, String body) {
+        return handle(headers, body, (request, region) ->
+                Response.ok(service.listJobs(request)).build());
     }
 
     @POST

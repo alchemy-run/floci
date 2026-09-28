@@ -378,6 +378,132 @@ class S3FeaturesTest {
                 "file-1.txt", "file-2.txt", "file-3.txt", "file-4.txt", "file-5.txt");
     }
 
+    @Test
+    @Order(40)
+    @DisplayName("Bulk delete uses listed null version IDs to empty an unversioned bucket")
+    void bulkDeleteListedNullVersionsEmptiesBucket() {
+        String bucket = TestFixtures.uniqueName("sdk-null-version-cleanup");
+        s3.createBucket(CreateBucketRequest.builder().bucket(bucket).build());
+        for (String key : List.of("nested/a & b.txt", "nested/b.txt", "nested/c.txt", "x.txt", "z.txt")) {
+            s3.putObject(PutObjectRequest.builder().bucket(bucket).key(key).build(), RequestBody.fromString(key));
+        }
+        ListObjectVersionsResponse listed = s3.listObjectVersions(
+                ListObjectVersionsRequest.builder().bucket(bucket).build());
+        assertThat(listed.versions()).hasSize(5).allMatch(v -> "null".equals(v.versionId()));
+        assertBucketNotEmpty(bucket);
+
+        bulkDeleteVersionPages(bucket, 5);
+    }
+
+    @Test
+    @Order(41)
+    @DisplayName("Bulk delete resumes pagination after deleting versions and the page marker")
+    void bulkDeleteVersionPagesAndDeleteMarkersEmptiesBucket() {
+        String bucket = TestFixtures.uniqueName("sdk-version-page-cleanup");
+        s3.createBucket(CreateBucketRequest.builder().bucket(bucket).build());
+        s3.putObject(PutObjectRequest.builder().bucket(bucket).key("a/plain.txt").build(),
+                RequestBody.fromString("unversioned"));
+        s3.putBucketVersioning(PutBucketVersioningRequest.builder().bucket(bucket)
+                .versioningConfiguration(VersioningConfiguration.builder()
+                        .status(BucketVersioningStatus.ENABLED).build()).build());
+        for (int i = 0; i < 5; i++) {
+            s3.putObject(PutObjectRequest.builder().bucket(bucket).key("history/file.txt").build(),
+                    RequestBody.fromString("version-" + i));
+        }
+        s3.deleteObject(DeleteObjectRequest.builder().bucket(bucket).key("history/file.txt").build());
+        s3.putObject(PutObjectRequest.builder().bucket(bucket).key("z.txt").build(), RequestBody.fromString("last"));
+        assertBucketNotEmpty(bucket);
+
+        bulkDeleteVersionPages(bucket, 8);
+    }
+
+    @Test
+    @Order(42)
+    @DisplayName("Encryption defaults, KMS settings, blocked types and owner mismatches round-trip through the SDK")
+    void encryptionConfigurationAndExpectedOwnerRoundTrip() {
+        String bucket = TestFixtures.uniqueName("sdk-encryption-owner");
+        s3.createBucket(CreateBucketRequest.builder().bucket(bucket).build());
+        try {
+            ServerSideEncryptionRule defaults = s3.getBucketEncryption(r -> r.bucket(bucket))
+                    .serverSideEncryptionConfiguration().rules().get(0);
+            assertThat(defaults.applyServerSideEncryptionByDefault().sseAlgorithm()).isEqualTo(ServerSideEncryption.AES256);
+            assertThat(defaults.blockedEncryptionTypes().encryptionTypeAsStrings()).containsExactly("NONE");
+            String kmsKey = "arn:aws:kms:us-east-1:000000000000:key/compat-encryption";
+            for (String blocked : List.of("SSE-C", "NONE")) {
+                s3.putBucketEncryption(r -> r.bucket(bucket).serverSideEncryptionConfiguration(c -> c.rules(rule -> rule
+                        .applyServerSideEncryptionByDefault(d -> d.sseAlgorithm(ServerSideEncryption.AWS_KMS).kmsMasterKeyID(kmsKey))
+                        .bucketKeyEnabled(true)
+                        .blockedEncryptionTypes(types -> types.encryptionTypeWithStrings(blocked)))));
+                ServerSideEncryptionRule stored = s3.getBucketEncryption(r -> r.bucket(bucket))
+                        .serverSideEncryptionConfiguration().rules().get(0);
+                assertThat(stored.applyServerSideEncryptionByDefault().kmsMasterKeyID()).isEqualTo(kmsKey);
+                assertThat(stored.bucketKeyEnabled()).isTrue();
+                assertThat(stored.blockedEncryptionTypes().encryptionTypeAsStrings()).containsExactly(blocked);
+            }
+            assertThatThrownBy(() -> s3.getBucketLocation(r -> r.bucket(bucket).expectedBucketOwner("999999999999")))
+                    .isInstanceOfSatisfying(S3Exception.class, error -> {
+                        assertThat(error.statusCode()).isEqualTo(403);
+                        assertThat(error.awsErrorDetails().errorCode()).isEqualTo("AccessDenied");
+                    });
+            assertThatThrownBy(() -> s3.deleteBucketEncryption(r -> r.bucket(bucket).expectedBucketOwner("999999999999")))
+                    .isInstanceOfSatisfying(S3Exception.class, error -> assertThat(error.statusCode()).isEqualTo(403));
+            assertThat(s3.getBucketEncryption(r -> r.bucket(bucket)).serverSideEncryptionConfiguration().rules().get(0)
+                    .applyServerSideEncryptionByDefault().kmsMasterKeyID()).isEqualTo(kmsKey);
+            s3.deleteBucketEncryption(r -> r.bucket(bucket));
+            ServerSideEncryptionRule reset = s3.getBucketEncryption(r -> r.bucket(bucket))
+                    .serverSideEncryptionConfiguration().rules().get(0);
+            assertThat(reset.applyServerSideEncryptionByDefault().sseAlgorithm()).isEqualTo(ServerSideEncryption.AES256);
+            assertThat(reset.applyServerSideEncryptionByDefault().kmsMasterKeyID()).isNull();
+            assertThat(reset.bucketKeyEnabled()).isFalse();
+            assertThat(reset.blockedEncryptionTypes().encryptionTypeAsStrings()).containsExactly("NONE");
+        } finally {
+            s3.deleteBucket(DeleteBucketRequest.builder().bucket(bucket).build());
+        }
+    }
+
+    private static void bulkDeleteVersionPages(String bucket, int expectedCount) {
+        String keyMarker = null;
+        String versionMarker = null;
+        int deletedCount = 0;
+        boolean truncated = true;
+        for (int pageNumber = 0; pageNumber < expectedCount && truncated; pageNumber++) {
+            ListObjectVersionsResponse page = s3.listObjectVersions(ListObjectVersionsRequest.builder()
+                    .bucket(bucket).maxKeys(2).keyMarker(keyMarker).versionIdMarker(versionMarker).build());
+            List<ObjectIdentifier> objects = new ArrayList<>();
+            for (ObjectVersion version : page.versions()) {
+                objects.add(ObjectIdentifier.builder().key(version.key()).versionId(version.versionId()).build());
+            }
+            for (DeleteMarkerEntry marker : page.deleteMarkers()) {
+                objects.add(ObjectIdentifier.builder().key(marker.key()).versionId(marker.versionId()).build());
+            }
+            assertThat(objects).isNotEmpty();
+            DeleteObjectsResponse deleted = s3.deleteObjects(DeleteObjectsRequest.builder().bucket(bucket)
+                    .delete(Delete.builder().objects(objects).quiet(true).build()).build());
+            assertThat(deleted.errors()).isEmpty();
+            assertThat(deleted.deleted()).isEmpty();
+            deletedCount += objects.size();
+            truncated = page.isTruncated();
+            keyMarker = page.nextKeyMarker();
+            versionMarker = page.nextVersionIdMarker();
+        }
+        assertThat(truncated).isFalse();
+        assertThat(deletedCount).isEqualTo(expectedCount);
+        ListObjectVersionsResponse remaining = s3.listObjectVersions(
+                ListObjectVersionsRequest.builder().bucket(bucket).build());
+        assertThat(remaining.versions()).isEmpty();
+        assertThat(remaining.deleteMarkers()).isEmpty();
+        assertThat(s3.listObjectsV2(ListObjectsV2Request.builder().bucket(bucket).build()).contents()).isEmpty();
+        s3.deleteBucket(DeleteBucketRequest.builder().bucket(bucket).build());
+        assertThatThrownBy(() -> s3.headBucket(HeadBucketRequest.builder().bucket(bucket).build()))
+                .isInstanceOfSatisfying(S3Exception.class, error -> assertThat(error.statusCode()).isEqualTo(404));
+    }
+
+    private static void assertBucketNotEmpty(String bucket) {
+        assertThatThrownBy(() -> s3.deleteBucket(DeleteBucketRequest.builder().bucket(bucket).build()))
+                .isInstanceOfSatisfying(S3Exception.class,
+                        error -> assertThat(error.awsErrorDetails().errorCode()).isEqualTo("BucketNotEmpty"));
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────────────────

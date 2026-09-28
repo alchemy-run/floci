@@ -1,9 +1,10 @@
 package io.github.hectorvent.floci.services.lambda.microvm;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.lambda.microvm.model.MicrovmRecord;
-import com.fasterxml.jackson.core.type.TypeReference;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -27,7 +28,11 @@ public class MicrovmStore {
     }
 
     public void save(MicrovmRecord microvm) {
-        backend.put(key(microvm.getRegion(), microvm.getMicrovmId()), microvm);
+        if (backend instanceof AccountAwareStorageBackend<MicrovmRecord> aware) {
+            aware.putForAccount(microvm.getAccountId(), key(microvm.getRegion(), microvm.getMicrovmId()), microvm);
+        } else {
+            backend.put(key(microvm.getRegion(), microvm.getMicrovmId()), microvm);
+        }
     }
 
     public Optional<MicrovmRecord> get(String region, String microvmId) {
@@ -36,7 +41,7 @@ public class MicrovmStore {
 
     /** Lookup across regions by id alone (used by the endpoint proxy, which only has the hostname). */
     public Optional<MicrovmRecord> findById(String microvmId) {
-        return backend.scan(k -> k.endsWith("::" + microvmId)).stream().findFirst();
+        return listAll().stream().filter(vm -> microvmId.equals(vm.getMicrovmId())).findFirst();
     }
 
     public List<MicrovmRecord> list(String region) {
@@ -45,7 +50,8 @@ public class MicrovmStore {
     }
 
     public List<MicrovmRecord> listAll() {
-        return backend.scan(k -> true);
+        return backend instanceof AccountAwareStorageBackend<MicrovmRecord> aware
+                ? aware.scanAllAccounts() : backend.scan(k -> true);
     }
 
     public void delete(String region, String microvmId) {

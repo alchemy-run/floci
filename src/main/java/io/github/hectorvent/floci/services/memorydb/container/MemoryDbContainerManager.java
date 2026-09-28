@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.memorydb.container;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
 import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
@@ -10,8 +11,11 @@ import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager.E
 import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.core.common.docker.ContainerStorageHelper;
+import io.github.hectorvent.floci.services.elasticache.container.RespLineReader;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
 import org.jboss.logging.Logger;
 
 import java.io.Closeable;
@@ -49,6 +53,7 @@ public class MemoryDbContainerManager {
     private final EmulatorConfig config;
     private final RegionResolver regionResolver;
     private final Map<String, MemoryDbContainerHandle> activeContainers = new ConcurrentHashMap<>();
+    private volatile boolean dockerUnavailableLogged;
 
     @Inject
     public MemoryDbContainerManager(ContainerBuilder containerBuilder,
@@ -65,6 +70,49 @@ public class MemoryDbContainerManager {
         this.regionResolver = regionResolver;
     }
 
+    /**
+     * Attempts {@link #start} and reports the backend as unavailable instead of propagating the
+     * failure, when the cause is that no Docker daemon is reachable from Floci — Floci running
+     * inside Docker without a mounted socket, or a stopped daemon on the host. A failure raised
+     * while the daemon <em>is</em> reachable is a genuine container problem and still propagates,
+     * so nothing changes for a Floci that can start MemoryDB containers.
+     *
+     * @return the container handle, or {@code null} when no Docker daemon is reachable
+     */
+    public MemoryDbContainerHandle tryStart(String clusterName, String image) {
+        try {
+            MemoryDbContainerHandle handle = start(clusterName, image);
+            dockerUnavailableLogged = false;
+            return handle;
+        } catch (RuntimeException e) {
+            if (isDockerReachable()) {
+                throw e;
+            }
+            if (!dockerUnavailableLogged) {
+                dockerUnavailableLogged = true;
+                LOG.warnv("No Docker daemon is reachable from Floci ({0}). MemoryDB metadata "
+                        + "operations keep working and clusters still reach 'available', but they "
+                        + "have no backing Redis/Valkey container until a daemon becomes reachable.",
+                        e.getMessage());
+            }
+            return null;
+        }
+    }
+
+    /**
+     * Probes the configured Docker endpoint, which is how a missing daemon is told apart from a
+     * container that failed for its own reasons.
+     */
+    public boolean isDockerReachable() {
+        try {
+            lifecycleManager.getDockerClient().pingCmd().exec();
+            return true;
+        } catch (Exception e) {
+            LOG.debugv("Docker daemon is not reachable: {0}", e.getMessage());
+            return false;
+        }
+    }
+
     public MemoryDbContainerHandle start(String clusterName, String image) {
         LOG.infov("Starting MemoryDB backend container for cluster: {0}", clusterName);
 
@@ -75,7 +123,9 @@ public class MemoryDbContainerManager {
         ContainerBuilder.Builder specBuilder = containerBuilder.newContainer(image)
                 .withName(containerName)
                 .withDockerNetwork(config.services().memorydb().dockerNetwork())
-                .withLogRotation();
+                .withLogRotation()
+                .withLabels(ContainerStorageHelper.resourceIdentityLabels(
+                        "memorydb", clusterName, regionResolver.getAccountId(), resolvedRegion()));
 
         if (!containerDetector.isRunningInContainer()) {
             specBuilder.withDynamicPort(BACKEND_PORT);
@@ -99,7 +149,7 @@ public class MemoryDbContainerManager {
                 : info.containerId();
         String logGroup = "/aws/memorydb/cluster/" + clusterName + "/engine-log";
         String logStream = logStreamer.generateLogStreamName(shortId);
-        String region = regionResolver.getDefaultRegion();
+        String region = resolvedRegion();
 
         Closeable logHandle = logStreamer.attach(
                 info.containerId(), logGroup, logStream, region, "memorydb:" + clusterName);
@@ -122,7 +172,7 @@ public class MemoryDbContainerManager {
                 OutputStream out = s.getOutputStream();
                 out.write(RESP_PING);
                 out.flush();
-                String line = readAsciiLineCrLf(s.getInputStream());
+                String line = RespLineReader.readAsciiLineCrLf(s.getInputStream());
                 if (line.startsWith("+PONG")) {
                     if (attempt > 1) {
                         LOG.infov("MemoryDB backend ready for cluster {0} after {1} probe attempt(s)", clusterName, attempt);
@@ -149,20 +199,39 @@ public class MemoryDbContainerManager {
                         + " within " + BACKEND_READY_DEADLINE_MS + "ms");
     }
 
-    private static String readAsciiLineCrLf(InputStream in) throws IOException {
-        StringBuilder sb = new StringBuilder();
-        int b;
-        while ((b = in.read()) != -1) {
-            if (b == '\r') {
-                int next = in.read();
-                if (next != '\n') {
-                    throw new IOException("Expected \\n after \\r in RESP line");
-                }
-                break;
+    public byte[] captureSnapshot(MemoryDbContainerHandle handle) {
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress(handle.getHost(), handle.getPort()), BACKEND_PROBE_CONNECT_MS);
+            socket.setSoTimeout(30_000);
+            socket.getOutputStream().write("*1\r\n$4\r\nSAVE\r\n".getBytes(StandardCharsets.US_ASCII));
+            socket.getOutputStream().flush();
+            String response = RespLineReader.readAsciiLineCrLf(socket.getInputStream());
+            if (!response.equals("+OK")) {
+                throw new IOException("Backend rejected SAVE: " + response);
             }
-            sb.append((char) b);
+            try (InputStream archive = lifecycleManager.getDockerClient()
+                    .copyArchiveFromContainerCmd(handle.getContainerId(), "/data/dump.rdb").exec();
+                 TarArchiveInputStream tar = new TarArchiveInputStream(archive)) {
+                TarArchiveEntry entry;
+                while ((entry = tar.getNextEntry()) != null) {
+                    if (entry.isFile() && entry.getName().endsWith("dump.rdb") && tar.canReadEntryData(entry)) {
+                        // Storage persists the actual RDB bytes, not a successful metadata-only snapshot.
+                        if (entry.getSize() > 64L * 1024 * 1024) {
+                            throw new IOException("Snapshot exceeds the local 64 MiB capture limit");
+                        }
+                        byte[] data = tar.readNBytes((int) entry.getSize());
+                        if (data.length != entry.getSize()) {
+                            throw new IOException("Truncated RDB snapshot");
+                        }
+                        return data;
+                    }
+                }
+                throw new IOException("Backend did not provide dump.rdb");
+            }
+        } catch (IOException | RuntimeException exception) {
+            LOG.warnv(exception, "Could not capture MemoryDB snapshot for {0}", handle.getClusterName());
+            throw new AwsException("InvalidClusterStateFault", "Could not capture the cluster's RDB data.", 400);
         }
-        return sb.toString();
     }
 
     public void stop(MemoryDbContainerHandle handle) {
@@ -193,6 +262,11 @@ public class MemoryDbContainerManager {
 
     private String containerName(String clusterName) {
         return ContainerStorageHelper.resourceName(config, "memorydb", null, clusterName);
+    }
+
+    private String resolvedRegion() {
+        String region = regionResolver.getRegion();
+        return region != null ? region : regionResolver.getDefaultRegion();
     }
 
     public void stopAll() {

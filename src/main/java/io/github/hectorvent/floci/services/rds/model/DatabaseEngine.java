@@ -1,15 +1,34 @@
 package io.github.hectorvent.floci.services.rds.model;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
 import io.quarkus.runtime.annotations.RegisterForReflection;
+
+import java.util.Locale;
 
 @RegisterForReflection
 public enum DatabaseEngine {
-    POSTGRES, MYSQL, MARIADB;
+    POSTGRES, MYSQL, MARIADB, SQLSERVER;
+
+    @JsonCreator
+    public static DatabaseEngine fromJson(String value) {
+        return valueOf(value.toUpperCase(Locale.ROOT));
+    }
 
     public int defaultPort() {
         return switch (this) {
             case POSTGRES -> 5432;
             case MYSQL, MARIADB -> 3306;
+            case SQLSERVER -> 1433;
+        };
+    }
+
+    // The API reference documents 16 characters for every engine, but RDS accepts longer
+    // master usernames on PostgreSQL and MySQL. These are the limits the service enforces.
+    public int maxMasterUsernameLength() {
+        return switch (this) {
+            case POSTGRES -> 63;
+            case MYSQL -> 32;
+            case MARIADB, SQLSERVER -> 16;
         };
     }
 }

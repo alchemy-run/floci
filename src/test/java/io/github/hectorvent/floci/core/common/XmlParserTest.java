@@ -2,12 +2,93 @@ package io.github.hectorvent.floci.core.common;
 
 import org.junit.jupiter.api.Test;
 
+import javax.xml.stream.XMLStreamConstants;
+import javax.xml.stream.XMLStreamException;
+import javax.xml.stream.XMLStreamReader;
+
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class XmlParserTest {
+
+    // --- newStreamReader: the hardening this centralises ---
+
+    /**
+     * The reason three controllers stopped standing up their own XMLInputFactory. Each restated
+     * these settings, and a copy that forgot one would be an XXE hole nothing would catch.
+     */
+    @Test
+    void newStreamReaderIgnoresEntitiesDeclaredInADoctype() throws Exception {
+        // The DTD is skipped rather than rejected, so the document itself still parses. What
+        // protects us is that nothing in it takes effect: an entity it declares stays undefined,
+        // so any reference to one fails instead of expanding.
+        String declaredButUnused = """
+                <!DOCTYPE root [ <!ENTITY x "expanded"> ]>
+                <Root><Value>plain</Value></Root>
+                """;
+
+        XMLStreamReader r = XmlParser.newStreamReader(declaredButUnused);
+        StringBuilder text = new StringBuilder();
+        while (r.hasNext()) {
+            if (r.next() == XMLStreamConstants.CHARACTERS) {
+                text.append(r.getText());
+            }
+        }
+        assertEquals("plain", text.toString().trim(), "the document parses, the DTD is ignored");
+
+        String referenced = """
+                <!DOCTYPE root [ <!ENTITY x "expanded"> ]>
+                <Root><Value>&x;</Value></Root>
+                """;
+
+        XMLStreamException e = assertThrows(XMLStreamException.class, () -> {
+            XMLStreamReader r2 = XmlParser.newStreamReader(referenced);
+            while (r2.hasNext()) {
+                r2.next();
+            }
+        }, "an entity from the skipped DTD must not expand");
+        assertFailedOnUndeclaredEntity(e, "x");
+    }
+
+    @Test
+    void newStreamReaderDoesNotExpandAnExternalEntity() {
+        // Pointing at a path that does not exist: if the entity were resolved this would fail
+        // by trying to read it. Refusing the DTD outright is the behaviour we want.
+        String xml = """
+                <!DOCTYPE root [ <!ENTITY secret SYSTEM "file:///nonexistent/secret"> ]>
+                <Root><Value>&secret;</Value></Root>
+                """;
+
+        XMLStreamException e = assertThrows(XMLStreamException.class, () -> {
+            XMLStreamReader r = XmlParser.newStreamReader(xml);
+            while (r.hasNext()) {
+                r.next();
+            }
+        }, "an external entity must never be resolved");
+        assertFailedOnUndeclaredEntity(e, "secret");
+        String message = String.valueOf(e.getMessage());
+        assertFalse(message.contains("nonexistent"),
+                "must fail without reading the file at all, was: " + message);
+    }
+
+    @Test
+    void newStreamReaderIsNamespaceAwareAndReadsAttributes() throws Exception {
+        // Attributes are why a caller reaches for a raw reader instead of the helpers here.
+        String xml = "<Root xmlns=\"http://example.com/ns\"><Item id=\"7\" name=\"x\"/></Root>";
+
+        XMLStreamReader r = XmlParser.newStreamReader(xml);
+        String id = null;
+        while (r.hasNext()) {
+            if (r.next() == XMLStreamConstants.START_ELEMENT && "Item".equals(r.getLocalName())) {
+                id = r.getAttributeValue(null, "id");
+                assertEquals("http://example.com/ns", r.getNamespaceURI(),
+                        "the reader must be namespace-aware");
+            }
+        }
+        assertEquals("7", id);
+    }
 
     // --- extractGroupsMulti: nested element resilience ---
 
@@ -93,6 +174,89 @@ class XmlParserTest {
         assertEquals("test", groups.get(0).get("Name"));
         assertEquals("kept", groups.get(0).get("Value"));
         assertNull(groups.get(0).get("Nested"));
+    }
+
+    // --- extractElementTree: scoped structured parsing ---
+
+    @Test
+    void extractElementTreePreservesNestedNamespaceQualifiedBlocks() {
+        var root = XmlParser.extractElementTree("""
+                <Envelope xmlns:cf="https://cloudfront.amazonaws.com/doc/2020-05-31/">
+                  <cf:Config>
+                    <cf:First><cf:Value>one</cf:Value></cf:First>
+                    <cf:Second><cf:Value><![CDATA[two]]></cf:Value></cf:Second>
+                  </cf:Config>
+                </Envelope>
+                """, "Config");
+
+        assertNotNull(root);
+        assertEquals("Config", root.name());
+        assertEquals("one", root.child("First").child("Value").text());
+        assertEquals("two", root.child("Second").child("Value").text());
+    }
+
+    @Test
+    void extractElementTreeReturnsNullForMalformedOrMissingElements() {
+        assertNull(XmlParser.extractElementTree("<Root><Target></Root>", "Target"));
+        assertNull(XmlParser.extractElementTree("<Root/>", "Target"));
+        assertNull(XmlParser.extractElementTree(null, "Target"));
+    }
+
+    // --- extractDeleteObjectEntries: batch delete Key/VersionId pairing ---
+
+    @Test
+    void extractDeleteObjectEntriesPairsKeyWithVersionId() {
+        String xml = """
+                <Delete>
+                  <Object><Key>a.txt</Key><VersionId>v1</VersionId></Object>
+                  <Object><Key>b.txt</Key><VersionId>v2</VersionId></Object>
+                </Delete>
+                """;
+
+        List<XmlParser.KeyVersion> entries = XmlParser.extractDeleteObjectEntries(xml);
+
+        assertEquals(2, entries.size());
+        assertEquals(new XmlParser.KeyVersion("a.txt", "v1"), entries.get(0));
+        assertEquals(new XmlParser.KeyVersion("b.txt", "v2"), entries.get(1));
+    }
+
+    @Test
+    void extractDeleteObjectEntriesVersionIdIsOptional() {
+        String xml = """
+                <Delete>
+                  <Object><Key>no-version.txt</Key></Object>
+                </Delete>
+                """;
+
+        List<XmlParser.KeyVersion> entries = XmlParser.extractDeleteObjectEntries(xml);
+
+        assertEquals(1, entries.size());
+        assertEquals("no-version.txt", entries.get(0).key());
+        assertNull(entries.get(0).versionId());
+    }
+
+    @Test
+    void extractDeleteObjectEntriesMixedVersionedAndUnversioned() {
+        String xml = """
+                <Delete>
+                  <Quiet>true</Quiet>
+                  <Object><Key>versioned.txt</Key><VersionId>v1</VersionId></Object>
+                  <Object><Key>plain.txt</Key></Object>
+                </Delete>
+                """;
+
+        List<XmlParser.KeyVersion> entries = XmlParser.extractDeleteObjectEntries(xml);
+
+        assertEquals(2, entries.size());
+        assertEquals("v1", entries.get(0).versionId());
+        assertNull(entries.get(1).versionId());
+    }
+
+    @Test
+    void extractDeleteObjectEntriesEmptyWhenNoObjects() {
+        assertTrue(XmlParser.extractDeleteObjectEntries("<Delete><Quiet>true</Quiet></Delete>").isEmpty());
+        assertTrue(XmlParser.extractDeleteObjectEntries(null).isEmpty());
+        assertTrue(XmlParser.extractDeleteObjectEntries("").isEmpty());
     }
 
     // --- extractPairsPerGroup ---
@@ -212,5 +376,38 @@ class XmlParserTest {
         assertEquals(2, filters.size());
         assertTrue(filters.get(0).isEmpty());
         assertEquals("logs/", filters.get(1).get("prefix"));
+    }
+
+    // --- rootElementName: root identification and well-formedness ---
+
+    @Test
+    void rootElementNameReturnsTheRootLocalName() {
+        assertEquals("AccelerateConfiguration", XmlParser.rootElementName(
+                "<AccelerateConfiguration><Status>Enabled</Status></AccelerateConfiguration>"));
+        assertEquals("AccelerateConfiguration", XmlParser.rootElementName(
+                "<ns:AccelerateConfiguration xmlns:ns=\"urn:x\"/>"));
+        assertEquals("Wrapper", XmlParser.rootElementName(
+                "<Wrapper><AccelerateConfiguration/></Wrapper>"));
+    }
+
+    @Test
+    void rootElementNameReturnsNullForBodiesThatDoNotParse() {
+        assertNull(XmlParser.rootElementName(null));
+        assertNull(XmlParser.rootElementName(""));
+        assertNull(XmlParser.rootElementName("garbage {} not xml"));
+        assertNull(XmlParser.rootElementName("<AccelerateConfiguration><Status>Enabled"));
+        assertNull(XmlParser.rootElementName("<AccelerateConfiguration/>trailing"));
+    }
+
+    /**
+     * Asserts the parse stopped at an entity reference the document never declared. The parser
+     * translates the sentence it reports, so a JVM with a non-English default locale spells this
+     * failure differently, and on macOS that locale comes from system preferences rather than from
+     * LANG. The entity name it quotes is the part no translation touches.
+     */
+    private static void assertFailedOnUndeclaredEntity(XMLStreamException e, String entityName) {
+        String message = String.valueOf(e.getMessage());
+        assertTrue(message.contains("\"" + entityName + "\""),
+                "should fail on the undeclared entity " + entityName + ", was: " + message);
     }
 }

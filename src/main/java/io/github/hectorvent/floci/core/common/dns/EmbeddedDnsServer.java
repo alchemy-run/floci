@@ -7,6 +7,7 @@ import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.datagram.DatagramSocket;
 import io.vertx.core.datagram.DatagramSocketOptions;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -21,8 +22,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.SequencedSet;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -39,7 +43,9 @@ import java.util.regex.Pattern;
  * (floci.dns.container-fallback-servers) so public hostnames still resolve when the
  * resolv.conf resolver does not answer.
  *
- * Only starts when Floci detects it is running inside Docker. No-op on the host.
+ * Starts automatically in Docker. Source mode is opt-in via floci.dns.source-enabled:
+ * a loopback-only unprivileged socket sits behind an owned Docker DNS/HTTPS bridge.
+ * Neither mode changes host resolver settings.
  */
 @ApplicationScoped
 @Startup
@@ -66,11 +72,22 @@ public class EmbeddedDnsServer {
     // NOT cover "*.X" (e.g. "localhost.floci.io" does NOT resolve bare "*.floci.io").
     //   localhost.localstack.cloud → localhost.localstack.cloud, *.localhost.localstack.cloud
     //   localhost.floci.io         → localhost.floci.io, *.localhost.floci.io
-    static final List<String> BUILTIN_SUFFIXES = List.of(DEFAULT_SUFFIX, LOCALSTACK_SUFFIX);
+    public static final List<String> BUILTIN_SUFFIXES = List.of(DEFAULT_SUFFIX, LOCALSTACK_SUFFIX);
 
     private volatile String serverIp;
+    private volatile boolean ready;
+    private boolean sourceMode;
+    private DatagramSocket socket;
+    private SourceNetworkHelper sourceHelper;
     private final SequencedSet<String> suffixes = new LinkedHashSet<>();
+    private final Map<String, HostRoute> hostRoutes = new ConcurrentHashMap<>();
     private volatile List<String> upstreamDnsServers = List.of();
+
+    /**
+     * What containers are told for one resource endpoint hostname: the address of the container
+     * that serves it, or, with a null address, no address at all.
+     */
+    record HostRoute(String address) {}
 
     EmbeddedDnsServer(List<String> suffixes) {
         this.suffixes.addAll(BUILTIN_SUFFIXES);
@@ -78,44 +95,171 @@ public class EmbeddedDnsServer {
     }
 
     @Inject
-    public EmbeddedDnsServer(EmulatorConfig config, ContainerDetector containerDetector, Vertx vertx) {
-        if (!containerDetector.isRunningInContainer()) {
+    public EmbeddedDnsServer(EmulatorConfig config, ContainerDetector containerDetector, Vertx vertx,
+                             SourceNetworkHelper sourceHelper) {
+        sourceMode = !containerDetector.isRunningInContainer();
+        if (sourceMode && !config.dns().sourceEnabled()) {
             return;
         }
+        String bindHost = sourceMode ? "127.0.0.1" : "0.0.0.0";
+        int port = sourceMode ? config.dns().sourcePort() : DNS_PORT;
+        if (sourceMode) {
+            if (port != 0) {
+                SourceNetworkHelper.requireUnprivilegedPort(port);
+            }
+            SourceNetworkHelper.requireUnprivilegedPort(config.port());
+            if (!config.tls().enabled() || config.tls().awsHttpsPort() != 0) {
+                throw new IllegalStateException("Source-mode container DNS requires TLS on the main gateway "
+                        + "and floci.tls.aws-https-port=0; the helper owns container port 443");
+            }
+        }
         try {
-            String myIp = InetAddress.getLocalHost().getHostAddress();
+            String dockerIp = sourceMode ? null : InetAddress.getLocalHost().getHostAddress();
             upstreamDnsServers = composeUpstreams(readResolvConfNameservers(),
                     config.dns().containerFallbackServers());
+            if (sourceMode) {
+                upstreamDnsServers = upstreamDnsServers.stream().filter(ip -> !ip.equals(FALLBACK_UPSTREAM)).toList();
+            }
 
             suffixes.addAll(BUILTIN_SUFFIXES);
             config.hostname().ifPresent(suffixes::add);
             config.dns().extraSuffixes().ifPresent(suffixes::addAll);
 
-            DatagramSocket socket = vertx.createDatagramSocket(new DatagramSocketOptions().setIpV6(false));
-            socket.listen(DNS_PORT, "0.0.0.0", ar -> {
-                if (ar.succeeded()) {
-                    serverIp = myIp;
-                    LOG.infov("Embedded DNS server started on {0}:53, resolving {1} → {0}", myIp, suffixes);
-                    socket.handler(packet -> handleQuery(
-                            vertx, socket, packet.data().getBytes(),
-                            packet.sender().host(), packet.sender().port(), myIp));
-                } else {
-                    LOG.warnv("Embedded DNS server failed to bind on port 53: {0}", ar.cause().getMessage());
-                }
-            });
+            socket = vertx.createDatagramSocket(new DatagramSocketOptions().setIpV6(false));
+            socket.handler(packet -> handleQuery(
+                    vertx, socket, packet.data().getBytes(),
+                    packet.sender().host(), packet.sender().port(), serverIp));
+            var bind = socket.listen(port, bindHost);
+            if (sourceMode) {
+                bind.toCompletionStage().toCompletableFuture().get(10, java.util.concurrent.TimeUnit.SECONDS);
+                this.sourceHelper = sourceHelper;
+                serverIp = sourceHelper.start(socket.localAddress().port());
+                upstreamDnsServers = upstreamDnsServers.stream().filter(ip -> !ip.equals(serverIp)).toList();
+                sourceHelper.awaitDns(serverIp);
+                ready = true;
+                LOG.infov("Source DNS listening on 127.0.0.1:{0} behind Docker bridge {1}",
+                        socket.localAddress().port(), serverIp);
+            } else {
+                bind.onSuccess(ignored -> {
+                    serverIp = dockerIp;
+                    ready = true;
+                    LOG.infov("Embedded DNS listening on {0}:53", dockerIp);
+                }).onFailure(error -> LOG.warnv("Embedded DNS server failed to bind on port 53: {0}",
+                        error.getMessage()));
+            }
         } catch (Exception e) {
+            try {
+                stop();
+            } catch (RuntimeException cleanup) {
+                e.addSuppressed(cleanup);
+            }
+            if (sourceMode) {
+                throw new IllegalStateException("Failed to start source-mode container DNS on " + bindHost + ":" + port, e);
+            }
             LOG.warnv("Failed to initialize embedded DNS server: {0}", e.getMessage());
         }
     }
 
+    static String requireBridgeAddress(String address) {
+        if (address == null || !address.matches("(?:\\d{1,3}\\.){3}\\d{1,3}")) {
+            throw new IllegalArgumentException("Source helper address must be a container-reachable IPv4 literal");
+        }
+        String[] octets = address.split("\\.");
+        int first = Integer.parseInt(octets[0]);
+        if (first == 0 || first == 127 || first >= 224
+                || Arrays.stream(octets).anyMatch(octet -> Integer.parseInt(octet) > 255)) {
+            throw new IllegalArgumentException("Source helper address must be a non-loopback unicast IPv4 address");
+        }
+        return address;
+    }
+
+    /** Source-mode AWS names must never fall through to a public secondary resolver. */
+    public boolean isSourceMode() {
+        return sourceMode;
+    }
+
+    @PreDestroy
+    void stop() {
+        ready = false;
+        serverIp = null;
+        try {
+            if (sourceHelper != null) {
+                sourceHelper.stop();
+            }
+        } finally {
+            if (socket != null) {
+                socket.close();
+            }
+        }
+    }
+
     public Optional<String> getServerIp() {
-        return Optional.ofNullable(serverIp);
+        return ready ? Optional.ofNullable(serverIp) : Optional.empty();
+    }
+
+    /**
+     * Answers {@code hostname} with {@code address} for the containers Floci launches, ahead of
+     * every suffix rule. Used for a resource endpoint served by its own backing container, which
+     * containers then reach directly on the endpoint's port.
+     */
+    public void routeHost(String hostname, String address) {
+        String name = normalizeHost(hostname);
+        if (name == null) {
+            return;
+        }
+        hostRoutes.put(name, new HostRoute(requireRouteAddress(address)));
+    }
+
+    /**
+     * Answers {@code hostname} with no address, ahead of every suffix rule, so a container never
+     * reaches a listener that belongs to another resource under that name.
+     */
+    public void refuseHost(String hostname) {
+        String name = normalizeHost(hostname);
+        if (name != null) {
+            hostRoutes.put(name, new HostRoute(null));
+        }
+    }
+
+    /** Drops a {@link #routeHost} or {@link #refuseHost} entry; the name falls back to the suffix rules. */
+    public void releaseHost(String hostname) {
+        String name = normalizeHost(hostname);
+        if (name != null) {
+            hostRoutes.remove(name);
+        }
+    }
+
+    HostRoute hostRoute(String name) {
+        String normalized = normalizeHost(name);
+        return normalized == null ? null : hostRoutes.get(normalized);
+    }
+
+    private static String normalizeHost(String hostname) {
+        if (hostname == null) {
+            return null;
+        }
+        String name = hostname.trim().toLowerCase(Locale.ROOT);
+        if (name.endsWith(".")) {
+            name = name.substring(0, name.length() - 1);
+        }
+        return name.isEmpty() ? null : name;
+    }
+
+    private static String requireRouteAddress(String address) {
+        if (address == null || !address.matches("(?:\\d{1,3}\\.){3}\\d{1,3}")
+                || Arrays.stream(address.split("\\.")).anyMatch(octet -> Integer.parseInt(octet) > 255)) {
+            throw new IllegalArgumentException("A routed endpoint hostname needs an IPv4 address: " + address);
+        }
+        return address;
     }
 
     // ── packet handling ───────────────────────────────────────────────────────
 
     private void handleQuery(Vertx vertx, DatagramSocket socket, byte[] data,
                              String senderHost, int senderPort, String myIp) {
+        if (myIp == null) {
+            return;
+        }
         try {
             ByteBuffer buf = ByteBuffer.wrap(data);
             short txId = buf.getShort();
@@ -135,9 +279,21 @@ public class EmbeddedDnsServer {
             buf.getShort(); // qclass
             int questionEnd = buf.position();
 
-            Optional<String> resolvedAddress = qtype == 1 ? resolveARecord(qname, myIp) : Optional.empty();
+            HostRoute route = hostRoute(qname);
+            if (route != null) {
+                byte[] response = qtype == 1 && route.address() != null
+                        ? buildAResponse(data, txId, questionOffset, questionEnd, route.address())
+                        : buildEmptyResponse(data, txId, questionOffset, questionEnd);
+                socket.send(Buffer.buffer(response), senderPort, senderHost, v -> {});
+                return;
+            }
+
+            Optional<String> resolvedAddress = resolveARecord(qname, myIp);
             if (resolvedAddress.isPresent()) {
-                byte[] response = buildAResponse(data, txId, questionOffset, questionEnd, resolvedAddress.get());
+                // In particular, AAAA must not escape upstream and bypass Floci over IPv6.
+                byte[] response = qtype == 1
+                        ? buildAResponse(data, txId, questionOffset, questionEnd, resolvedAddress.get())
+                        : buildEmptyResponse(data, txId, questionOffset, questionEnd);
                 socket.send(Buffer.buffer(response), senderPort, senderHost, v -> {});
             } else {
                 forwardAsync(vertx, socket, data, senderHost, senderPort);
@@ -179,7 +335,22 @@ public class EmbeddedDnsServer {
      * through {@code AWS_ENDPOINT_URL}).
      */
     static boolean isAwsDataPlaneHost(String name) {
-        return isSyncStatesHost(name) || isAppSyncHost(name) || isExecuteApiHost(name);
+        return isSyncStatesHost(name) || isAppSyncHost(name) || isExecuteApiHost(name) || isIotHost(name);
+    }
+
+    /**
+     * IoT Core account endpoints as DescribeEndpoint returns them
+     * ({@code {prefix}-ats.iot.{region}.amazonaws.com}, {@code {prefix}.iot...},
+     * {@code {prefix}.credentials.iot...}, {@code {prefix}.jobs.iot...}) and the SDK's default
+     * data-plane host {@code data-ats.iot.{region}.amazonaws.com}, so devices and functions that
+     * connect to the advertised endpoint reach Floci's HTTPS and MQTT listeners.
+     */
+    static boolean isIotHost(String name) {
+        if (name == null || name.isEmpty()) {
+            return false;
+        }
+        return name.toLowerCase().matches(
+                "[a-z0-9-]+\\.((credentials|jobs)\\.)?iot\\.[a-z0-9-]+\\.amazonaws\\.com(\\.cn)?");
     }
 
     /**
@@ -304,6 +475,18 @@ public class EmbeddedDnsServer {
         }
 
         return resp.array();
+    }
+
+    byte[] buildEmptyResponse(byte[] query, short txId, int questionOffset, int questionEnd) {
+        ByteBuffer response = ByteBuffer.allocate(12 + questionEnd - questionOffset);
+        response.putShort(txId);
+        response.putShort((short) 0x8180);
+        response.putShort((short) 1);
+        response.putShort((short) 0);
+        response.putShort((short) 0);
+        response.putShort((short) 0);
+        response.put(query, questionOffset, questionEnd - questionOffset);
+        return response.array();
     }
 
     private void forwardAsync(Vertx vertx, DatagramSocket socket, byte[] query,

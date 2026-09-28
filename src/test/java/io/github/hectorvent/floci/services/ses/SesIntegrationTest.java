@@ -467,6 +467,85 @@ class SesIntegrationTest {
     }
 
     @Test
+    @Order(21)
+    void sendEmailV1_returnPathStoredInInspection() {
+        given().delete("/_aws/ses").then().statusCode(200);
+
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .header("Authorization", authorization("email"))
+            .formParam("Action", "VerifyEmailIdentity")
+            .formParam("EmailAddress", "sender@example.com")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .header("Authorization", "AWS4-HMAC-SHA256 Credential=AKID/20260101/us-east-1/email/aws4_request")
+            .formParam("Action", "SendEmail")
+            .formParam("Source", "sender@example.com")
+            .formParam("Destination.ToAddresses.member.1", "recipient@example.com")
+            .formParam("ReturnPath", "bounces@example.com")
+            .formParam("Message.Subject.Data", "V1 ReturnPath")
+            .formParam("Message.Body.Text.Data", "body")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+        .when()
+            .get("/_aws/ses")
+        .then()
+            .statusCode(200)
+            .body("messages[0].ReturnPath", equalTo("bounces@example.com"));
+    }
+
+    @Test
+    @Order(21)
+    void sendRawEmailV1_returnPathHeaderStoredInInspection() {
+        given().delete("/_aws/ses").then().statusCode(200);
+
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .header("Authorization", authorization("email"))
+            .formParam("Action", "VerifyEmailIdentity")
+            .formParam("EmailAddress", "sender@example.com")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        String raw = "From: sender@example.com\r\n"
+                + "To: recipient@example.com\r\n"
+                + "Return-Path: <mime-bounces@example.com>\r\n"
+                + "Subject: raw-return-path\r\n\r\nbody";
+        String rawB64 = java.util.Base64.getEncoder().encodeToString(
+                raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .header("Authorization", "AWS4-HMAC-SHA256 Credential=AKID/20260101/us-east-1/email/aws4_request")
+            .formParam("Action", "SendRawEmail")
+            .formParam("Source", "sender@example.com")
+            .formParam("Destinations.member.1", "recipient@example.com")
+            .formParam("RawMessage.Data", rawB64)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+        .when()
+            .get("/_aws/ses")
+        .then()
+            .statusCode(200)
+            .body("messages[0].ReturnPath", equalTo("mime-bounces@example.com"));
+    }
+
+    @Test
     @Order(22)
     void deleteDomainIdentity() {
         given()
@@ -539,8 +618,8 @@ class SesIntegrationTest {
 
     @Test
     @Order(26)
-    void updateAccountSendingEnabled_treatsMissingOrBlankEnabledAsFalse() {
-        // Missing Enabled parameter
+    void updateAccountSendingEnabled_missingEnabledDefaultsToFalse_blankEnabledIsMalformed() {
+        // Missing Enabled parameter defaults to false (probed against real AWS 2026-09-05)
         given()
             .contentType("application/x-www-form-urlencoded")
             .header("Authorization", authorization("email"))
@@ -560,18 +639,8 @@ class SesIntegrationTest {
             .statusCode(200)
             .body(containsString("<Enabled>false</Enabled>"));
 
-        // restore so the next assertion observes the blank-string default cleanly
-        given()
-            .contentType("application/x-www-form-urlencoded")
-            .header("Authorization", authorization("email"))
-            .formParam("Action", "UpdateAccountSendingEnabled")
-            .formParam("Enabled", "true")
-        .when()
-            .post("/")
-        .then()
-            .statusCode(200);
-
-        // Blank Enabled parameter (e.g. AWS CLI passing --enabled "") behaves the same
+        // A present-but-blank Enabled (e.g. AWS CLI passing --enabled "") is rejected,
+        // unlike the absent case (probed against real AWS 2026-09-05)
         given()
             .contentType("application/x-www-form-urlencoded")
             .header("Authorization", authorization("email"))
@@ -580,17 +649,9 @@ class SesIntegrationTest {
         .when()
             .post("/")
         .then()
-            .statusCode(200);
-
-        given()
-            .contentType("application/x-www-form-urlencoded")
-            .header("Authorization", authorization("email"))
-            .formParam("Action", "GetAccountSendingEnabled")
-        .when()
-            .post("/")
-        .then()
-            .statusCode(200)
-            .body(containsString("<Enabled>false</Enabled>"));
+            .statusCode(400)
+            .body(containsString("<Code>MalformedInput</Code>"))
+            .body(containsString("missing value for boolean type"));
 
         // restore default state for downstream tests
         given()
@@ -665,7 +726,8 @@ class SesIntegrationTest {
 
     @Test
     @Order(28)
-    void updateAccountSendingEnabled_invalidValue_returns400() {
+    void updateAccountSendingEnabled_invalidValue_returnsMalformedInput() {
+        // Probed against real AWS 2026-09-05: non-xsd boolean values are MalformedInput
         given()
             .contentType("application/x-www-form-urlencoded")
             .header("Authorization", authorization("email"))
@@ -675,6 +737,7 @@ class SesIntegrationTest {
             .post("/")
         .then()
             .statusCode(400)
-            .body(containsString("InvalidParameterValue"));
+            .body(containsString("<Code>MalformedInput</Code>"))
+            .body(containsString("boolean must follow xsd1.1 definition"));
     }
 }

@@ -13,6 +13,10 @@ import java.util.Map;
  * {@link UserPool#getVerificationMessageTemplate()} and the requested delivery
  * mediums. Renders the {@code {####}} placeholder; appends a failsafe line if
  * the template lacks the placeholder.
+ *
+ * The caller may supply the response of a CustomMessage Lambda trigger invocation,
+ * whose {@code emailSubject}/{@code emailMessage}/{@code smsMessage} take precedence
+ * over the pool's own template.
  */
 public final class CognitoMessageDispatcher {
 
@@ -35,6 +39,19 @@ public final class CognitoMessageDispatcher {
 
     public void dispatch(UserPool pool, CognitoUser user, VerificationCode.Purpose purpose,
                          String code, List<String> deliveryMediums) {
+        dispatch(pool, user, purpose, code, deliveryMediums, null);
+    }
+
+    /**
+     * Same as {@link #dispatch(UserPool, CognitoUser, VerificationCode.Purpose, String, List)},
+     * but takes the response of a CustomMessage Lambda trigger invocation (or {@code null} if
+     * none was configured or invoked). When present, its {@code emailSubject}/{@code emailMessage}
+     * (or {@code smsMessage}) take precedence over the pool's VerificationMessageTemplate, matching
+     * how real Cognito lets the trigger override the delivered message.
+     */
+    public void dispatch(UserPool pool, CognitoUser user, VerificationCode.Purpose purpose,
+                         String code, List<String> deliveryMediums,
+                         Map<String, Object> customMessageResponse) {
 
         Map<String, Object> template = pool.getVerificationMessageTemplate();
         if (template == null) template = Map.of();
@@ -45,15 +62,17 @@ public final class CognitoMessageDispatcher {
 
         for (String medium : mediums) {
             if ("EMAIL".equalsIgnoreCase(medium) && email != null) {
-                String subject = stringOr(template.get("EmailSubject"), DEFAULT_EMAIL_SUBJECT);
-                String body = renderTemplate(stringOr(template.get(emailTemplateKey()), DEFAULT_EMAIL_BODY), code);
-                // Cognito owns this FROM on AWS; SES identity checks must not
-                // block the built-in verification path.
+                String subject = stringOrNull(customMessageResponse, "emailSubject");
+                if (subject == null) subject = stringOr(template.get("EmailSubject"), DEFAULT_EMAIL_SUBJECT);
+                String rawBody = stringOrNull(customMessageResponse, "emailMessage");
+                if (rawBody == null) rawBody = stringOr(template.get(emailTemplateKey()), DEFAULT_EMAIL_BODY);
+                String body = renderTemplate(rawBody, code);
                 ses.verifyEmailIdentity(DEFAULT_FROM, DEFAULT_REGION);
                 ses.sendEmail(
                     DEFAULT_FROM,
                     List.of(email),
                     List.of(), List.of(), List.of(),
+                    null,          // returnPath
                     subject,
                     body,
                     null,          // bodyHtml
@@ -64,7 +83,9 @@ public final class CognitoMessageDispatcher {
                     DEFAULT_REGION
                 );
             } else if ("SMS".equalsIgnoreCase(medium) && phone != null) {
-                String body = renderTemplate(stringOr(resolveSmsTemplate(pool, template, purpose), DEFAULT_SMS_BODY), code);
+                String rawBody = stringOrNull(customMessageResponse, "smsMessage");
+                if (rawBody == null) rawBody = stringOr(resolveSmsTemplate(pool, template, purpose), DEFAULT_SMS_BODY);
+                String body = renderTemplate(rawBody, code);
                 sns.publish(
                     null, null,
                     phone,
@@ -89,13 +110,14 @@ public final class CognitoMessageDispatcher {
 
     /**
      * Resolves the raw SMS template from the correct AWS source for the purpose.
-     * {@code SmsAuthenticationMessage} (MFA) is a top-level UserPool attribute, NOT part of
-     * the VerificationMessageTemplate. For verification/signup codes, the template's
-     * {@code SmsMessage} takes precedence over the legacy top-level SmsVerificationMessage.
+     * {@code SmsAuthenticationMessage} is a top-level UserPool attribute, NOT part of the
+     * VerificationMessageTemplate, and per AWS covers both MFA and USER_AUTH's SMS_OTP. For
+     * verification/signup codes, the template's {@code SmsMessage} takes precedence over the
+     * legacy top-level SmsVerificationMessage.
      */
     private String resolveSmsTemplate(UserPool pool, Map<String, Object> template,
                                       VerificationCode.Purpose purpose) {
-        if (purpose == VerificationCode.Purpose.SMS_MFA) {
+        if (purpose == VerificationCode.Purpose.SMS_MFA || purpose == VerificationCode.Purpose.SMS_OTP) {
             return pool.getSmsAuthenticationMessage();
         }
         Object sms = template.get("SmsMessage");
@@ -119,6 +141,14 @@ public final class CognitoMessageDispatcher {
         if (value == null) return fallback;
         String s = value.toString();
         return s.isEmpty() ? fallback : s;
+    }
+
+    private String stringOrNull(Map<String, Object> response, String key) {
+        if (response == null) return null;
+        Object value = response.get(key);
+        if (value == null) return null;
+        String s = value.toString();
+        return s.isEmpty() ? null : s;
     }
 
     private String renderTemplate(String template, String code) {

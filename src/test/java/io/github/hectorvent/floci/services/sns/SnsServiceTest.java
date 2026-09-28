@@ -5,15 +5,25 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
+import io.github.hectorvent.floci.services.firehose.FirehoseService;
+import io.github.hectorvent.floci.services.firehose.model.Record;
 import io.github.hectorvent.floci.services.sns.model.Subscription;
 import io.github.hectorvent.floci.services.sns.model.Topic;
+import io.github.hectorvent.floci.services.sqs.model.MessageAttributeValue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 class SnsServiceTest {
 
@@ -146,6 +156,19 @@ class SnsServiceTest {
         assertThrows(AwsException.class,
             () -> snsService.subscribe("arn:aws:sns:us-east-1:000000000000:nonexistent",
                     "sqs", "http://queue", REGION, Map.of()));
+    }
+
+    @Test
+    void subscribe_lazilySeedsControlTowerAggregateSecurityTopic() {
+        String topicArn = "arn:aws:sns:us-east-1:000000000000:"
+                + "aws-controltower-AggregateSecurityNotifications";
+
+        Subscription subscription = snsService.subscribe(
+                topicArn, "lambda", "arn:aws:lambda:us-east-1:000000000000:function:forwarder",
+                REGION, Map.of());
+
+        assertEquals(topicArn, subscription.getTopicArn());
+        assertEquals(topicArn, snsService.listTopics(REGION).getFirst().getTopicArn());
     }
 
     @Test
@@ -585,5 +608,358 @@ class SnsServiceTest {
                 "event", new io.github.hectorvent.floci.services.sqs.model.MessageAttributeValue("refund", "String"));
         assertTrue(snsService.matchesFilterPolicy(sub, null, matching));
         assertFalse(snsService.matchesFilterPolicy(sub, null, nonMatching));
+    }
+
+    @Test
+    void topicExists_reportsPresenceWithoutThrowing() {
+        Topic topic = snsService.createTopic("exists-topic", null, null, REGION);
+        assertTrue(snsService.topicExists(topic.getTopicArn(), REGION));
+        assertFalse(snsService.topicExists(topic.getTopicArn(), "eu-west-1"));
+        assertFalse(snsService.topicExists(
+                "arn:aws:sns:us-east-1:000000000000:ghost-topic", REGION));
+    }
+
+
+    /**
+     * A Lambda subscription endpoint may be a qualified ARN. Taking the segment after the last
+     * colon read the alias as the function name, so a subscription to
+     * {@code ...:function:order-processor:PROD} invoked a function called {@code PROD}: the
+     * message was accepted, reported as published, and delivered nowhere.
+     */
+    @Test
+    void extractFunctionNameIgnoresTheQualifier() {
+        String base = "arn:aws:lambda:us-east-1:000000000000:function:order-processor";
+
+        assertEquals("order-processor", SnsService.extractFunctionName(base));
+        assertEquals("order-processor", SnsService.extractFunctionName(base + ":PROD"));
+        assertEquals("order-processor", SnsService.extractFunctionName(base + ":42"));
+        assertEquals("order-processor", SnsService.extractFunctionName(base + ":$LATEST"));
+    }
+
+    /** Other partitions carry the same resource grammar. */
+    @Test
+    void extractFunctionNameWorksInAnyPartition() {
+        assertEquals("order-processor", SnsService.extractFunctionName(
+                "arn:aws-us-gov:lambda:us-gov-west-1:000000000000:function:order-processor:PROD"));
+    }
+
+    /** A bare function name is a legal endpoint too and passes through unchanged. */
+    @Test
+    void extractFunctionNameLeavesABareNameAlone() {
+        assertEquals("order-processor", SnsService.extractFunctionName("order-processor"));
+        assertNull(SnsService.extractFunctionName(null));
+    }
+
+    private static Map<String, MessageAttributeValue> attr(String name, String value, String dataType) {
+        return Map.of(name, new MessageAttributeValue(value, dataType));
+    }
+
+    private static Map<String, MessageAttributeValue> stringArray(String name, String json) {
+        return attr(name, json, "String.Array");
+    }
+
+    /**
+     * A String.Array attribute carries a JSON array in its StringValue, and AWS matches a rule
+     * against each element separately. Comparing the rule against the serialized array as one
+     * opaque string makes every such subscription match nothing at all.
+     */
+    @Test
+    void filterPolicy_stringArrayAttribute_matchesAnyElement() {
+        Subscription sub = subscriptionWithPolicy("{\"updatedFields\":[\"Name\"]}", null);
+        assertTrue(snsService.matchesFilterPolicy(sub, null,
+                stringArray("updatedFields", "[\"Name\",\"stringName\"]")));
+        assertTrue(snsService.matchesFilterPolicy(sub, null,
+                stringArray("updatedFields", "[\"Name\"]")));
+        assertFalse(snsService.matchesFilterPolicy(sub, null,
+                stringArray("updatedFields", "[\"Description\",\"stringName\"]")));
+        assertFalse(snsService.matchesFilterPolicy(sub, null,
+                stringArray("updatedFields", "[]")));
+    }
+
+    /** Operator rules apply per element too. */
+    @Test
+    void filterPolicy_stringArrayAttribute_appliesOperatorsPerElement() {
+        Subscription prefix = subscriptionWithPolicy(
+                "{\"updatedFields\":[{\"prefix\":\"string\"}]}", null);
+        assertTrue(snsService.matchesFilterPolicy(prefix, null,
+                stringArray("updatedFields", "[\"Name\",\"stringName\"]")));
+        assertFalse(snsService.matchesFilterPolicy(prefix, null,
+                stringArray("updatedFields", "[\"Name\",\"Description\"]")));
+
+        Subscription numeric = subscriptionWithPolicy(
+                "{\"codes\":[{\"numeric\":[\">=\",100]}]}", null);
+        assertTrue(snsService.matchesFilterPolicy(numeric, null,
+                stringArray("codes", "[\"12\",\"150\"]")));
+        assertFalse(snsService.matchesFilterPolicy(numeric, null,
+                stringArray("codes", "[\"12\",\"99\"]")));
+    }
+
+    /**
+     * anything-but does not follow the any-element rule: AWS matches a String.Array only when
+     * NONE of its elements are listed, so a single listed element vetoes the whole attribute.
+     */
+    @Test
+    void filterPolicy_stringArrayAttribute_anythingButRequiresNoElementListed() {
+        Subscription sub = subscriptionWithPolicy(
+                "{\"updatedFields\":[{\"anything-but\":[\"Name\"]}]}", null);
+        assertTrue(snsService.matchesFilterPolicy(sub, null,
+                stringArray("updatedFields", "[\"Description\",\"stringName\"]")));
+        assertFalse(snsService.matchesFilterPolicy(sub, null,
+                stringArray("updatedFields", "[\"Description\",\"Name\"]")));
+    }
+
+    /** exists asks about the attribute, not its elements. */
+    @Test
+    void filterPolicy_stringArrayAttribute_existsIsAboutTheAttribute() {
+        Subscription present = subscriptionWithPolicy("{\"updatedFields\":[{\"exists\":true}]}", null);
+        assertTrue(snsService.matchesFilterPolicy(present, null,
+                stringArray("updatedFields", "[\"Name\"]")));
+        assertTrue(snsService.matchesFilterPolicy(present, null, stringArray("updatedFields", "[]")));
+        assertFalse(snsService.matchesFilterPolicy(present, null, Map.of()));
+
+        Subscription absent = subscriptionWithPolicy("{\"updatedFields\":[{\"exists\":false}]}", null);
+        assertFalse(snsService.matchesFilterPolicy(absent, null,
+                stringArray("updatedFields", "[\"Name\"]")));
+        assertTrue(snsService.matchesFilterPolicy(absent, null, Map.of()));
+    }
+
+    /** A String attribute keeps whole-string semantics even when its value looks like an array. */
+    @Test
+    void filterPolicy_plainStringAttribute_isNotSplit() {
+        Subscription sub = subscriptionWithPolicy("{\"updatedFields\":[\"Name\"]}", null);
+        assertFalse(snsService.matchesFilterPolicy(sub, null,
+                attr("updatedFields", "[\"Name\",\"stringName\"]", "String")));
+        assertTrue(snsService.matchesFilterPolicy(sub, null,
+                attr("updatedFields", "Name", "String")));
+    }
+
+    /** A String.Array whose value is not a JSON array falls back to whole-string matching. */
+    @Test
+    void filterPolicy_stringArrayAttribute_malformedValueFallsBackToWholeString() {
+        Subscription sub = subscriptionWithPolicy("{\"updatedFields\":[\"Name\"]}", null);
+        assertTrue(snsService.matchesFilterPolicy(sub, null, stringArray("updatedFields", "Name")));
+        assertFalse(snsService.matchesFilterPolicy(sub, null,
+                stringArray("updatedFields", "[\"Name\",")));
+        // trailing tokens make the whole value malformed, not a one-element array
+        assertFalse(snsService.matchesFilterPolicy(sub, null,
+                stringArray("updatedFields", "[\"Name\"] junk")));
+    }
+
+    /**
+     * AWS ignores Binary message attributes when applying a filter policy, so a Binary attribute
+     * counts as absent however the policy asks about it. Binary is also the only data type whose
+     * StringValue is null, which is why no rule here ever sees a value.
+     */
+    @Test
+    void filterPolicy_binaryAttribute_countsAsAbsent() {
+        Map<String, MessageAttributeValue> binary = Map.of(
+                "updatedFields", new MessageAttributeValue(new byte[] {1, 2, 3}, "Binary"));
+
+        Subscription value = subscriptionWithPolicy("{\"updatedFields\":[\"Name\"]}", null);
+        assertFalse(snsService.matchesFilterPolicy(value, null, binary));
+
+        Subscription present = subscriptionWithPolicy("{\"updatedFields\":[{\"exists\":true}]}", null);
+        assertFalse(snsService.matchesFilterPolicy(present, null, binary));
+
+        Subscription absent = subscriptionWithPolicy("{\"updatedFields\":[{\"exists\":false}]}", null);
+        assertTrue(snsService.matchesFilterPolicy(absent, null, binary));
+    }
+
+    /**
+     * $or lets one subscription watch two unrelated collections. Without it the key is looked up
+     * as an attribute literally named "$or", which never exists, so the subscription goes silent.
+     */
+    @Test
+    void filterPolicy_orOperator_messageAttributes() {
+        Subscription sub = subscriptionWithPolicy("{\"$or\":["
+                + "{\"tableName\":[\"Asset\"],\"updatedFields\":[\"Name\"]},"
+                + "{\"tableName\":[\"Location\"],\"updatedFields\":[\"stringName\"]}]}", null);
+
+        assertTrue(snsService.matchesFilterPolicy(sub, null, Map.of(
+                "tableName", new MessageAttributeValue("Asset", "String"),
+                "updatedFields", new MessageAttributeValue("[\"Name\"]", "String.Array"))));
+        assertTrue(snsService.matchesFilterPolicy(sub, null, Map.of(
+                "tableName", new MessageAttributeValue("Location", "String"),
+                "updatedFields", new MessageAttributeValue("[\"id\",\"stringName\"]", "String.Array"))));
+        // right table, wrong field
+        assertFalse(snsService.matchesFilterPolicy(sub, null, Map.of(
+                "tableName", new MessageAttributeValue("Asset", "String"),
+                "updatedFields", new MessageAttributeValue("[\"stringName\"]", "String.Array"))));
+        // clauses must not cross-pollinate: Location + Name matches neither branch
+        assertFalse(snsService.matchesFilterPolicy(sub, null, Map.of(
+                "tableName", new MessageAttributeValue("Location", "String"),
+                "updatedFields", new MessageAttributeValue("[\"Name\"]", "String.Array"))));
+    }
+
+    /** Keys beside $or still have to match, and they AND with the $or result. */
+    @Test
+    void filterPolicy_orOperator_andsWithSiblingKeys() {
+        Subscription sub = subscriptionWithPolicy("{\"env\":[\"prod\"],\"$or\":["
+                + "{\"tableName\":[\"Asset\"]},{\"tableName\":[\"Location\"]}]}", null);
+
+        assertTrue(snsService.matchesFilterPolicy(sub, null, Map.of(
+                "env", new MessageAttributeValue("prod", "String"),
+                "tableName", new MessageAttributeValue("Asset", "String"))));
+        assertFalse(snsService.matchesFilterPolicy(sub, null, Map.of(
+                "env", new MessageAttributeValue("dev", "String"),
+                "tableName", new MessageAttributeValue("Asset", "String"))));
+        assertFalse(snsService.matchesFilterPolicy(sub, null, Map.of(
+                "env", new MessageAttributeValue("prod", "String"),
+                "tableName", new MessageAttributeValue("WorkOrder", "String"))));
+    }
+
+    /**
+     * AWS only reads $or as an operator when it holds at least two objects and none of them use a
+     * reserved operator name as a field; otherwise it is an ordinary attribute name.
+     */
+    @Test
+    void filterPolicy_orOperator_invalidShapesAreOrdinaryAttributeNames() {
+        Subscription single = subscriptionWithPolicy(
+                "{\"$or\":[{\"tableName\":[\"Asset\"]}]}", null);
+        assertFalse(snsService.matchesFilterPolicy(single, null,
+                Map.of("tableName", new MessageAttributeValue("Asset", "String"))));
+
+        Subscription reserved = subscriptionWithPolicy(
+                "{\"$or\":[{\"prefix\":\"a\"},{\"tableName\":[\"Asset\"]}]}", null);
+        assertFalse(snsService.matchesFilterPolicy(reserved, null,
+                Map.of("tableName", new MessageAttributeValue("Asset", "String"))));
+
+        // a literal attribute named "$or" is matched as one
+        Subscription literal = subscriptionWithPolicy("{\"$or\":[\"yes\"]}", null);
+        assertTrue(snsService.matchesFilterPolicy(literal, null,
+                Map.of("$or", new MessageAttributeValue("yes", "String"))));
+    }
+
+    /** $or works the same way against a JSON body, including nested inside a key. */
+    @Test
+    void filterPolicy_orOperator_messageBody() {
+        Subscription sub = subscriptionWithPolicy("{\"$or\":["
+                + "{\"tableName\":[\"Asset\"],\"updatedFields\":[\"Name\"]},"
+                + "{\"tableName\":[\"Location\"],\"updatedFields\":[\"stringName\"]}]}", "MessageBody");
+        assertTrue(snsService.matchesFilterPolicy(sub,
+                body("{\"tableName\":\"Asset\",\"updatedFields\":[\"id\",\"Name\"]}"), null));
+        assertTrue(snsService.matchesFilterPolicy(sub,
+                body("{\"tableName\":\"Location\",\"updatedFields\":[\"stringName\"]}"), null));
+        assertFalse(snsService.matchesFilterPolicy(sub,
+                body("{\"tableName\":\"Location\",\"updatedFields\":[\"Name\"]}"), null));
+
+        Subscription nested = subscriptionWithPolicy(
+                "{\"detail\":{\"$or\":[{\"a\":[\"1\"]},{\"b\":[\"2\"]}]}}", "MessageBody");
+        assertTrue(snsService.matchesFilterPolicy(nested, body("{\"detail\":{\"b\":\"2\"}}"), null));
+        assertFalse(snsService.matchesFilterPolicy(nested, body("{\"detail\":{\"b\":\"3\"}}"), null));
+    }
+
+    @Test
+    void publish_deliversToFirehoseSubscription_withJsonEnvelope() throws Exception {
+        FirehoseService firehoseService = mock(FirehoseService.class);
+        RegionResolver regionResolver = new RegionResolver(REGION, ACCOUNT);
+        SnsService service = new SnsService(
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                regionResolver,
+                null,
+                null,
+                firehoseService
+        );
+
+        Topic topic = service.createTopic("firehose-topic", null, null, REGION);
+        String streamArn = "arn:aws:firehose:us-east-1:000000000000:deliverystream/test-stream";
+        service.subscribe(topic.getTopicArn(), "firehose", streamArn, REGION, Map.of());
+
+        String messageId = service.publish(topic.getTopicArn(), null, "Hello Firehose", "Test Subject", REGION);
+        assertNotNull(messageId);
+
+        ArgumentCaptor<Record> recordCaptor = ArgumentCaptor.forClass(Record.class);
+        verify(firehoseService).putRecord(eq(ACCOUNT), eq(REGION), eq("test-stream"), recordCaptor.capture());
+
+        Record captured = recordCaptor.getValue();
+        assertNotNull(captured);
+        assertNotNull(captured.getData());
+        String payload = new String(captured.getData(), StandardCharsets.UTF_8);
+
+        JsonNode json = new ObjectMapper().readTree(payload);
+        assertEquals("Notification", json.get("Type").asText());
+        assertEquals(messageId, json.get("MessageId").asText());
+        assertEquals(topic.getTopicArn(), json.get("TopicArn").asText());
+        assertEquals("Test Subject", json.get("Subject").asText());
+        assertEquals("Hello Firehose", json.get("Message").asText());
+    }
+
+    @Test
+    void publish_deliversToFirehoseSubscription_rawMessageDelivery() {
+        FirehoseService firehoseService = mock(FirehoseService.class);
+        RegionResolver regionResolver = new RegionResolver(REGION, ACCOUNT);
+        SnsService service = new SnsService(
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                regionResolver,
+                null,
+                null,
+                firehoseService
+        );
+
+        Topic topic = service.createTopic("firehose-topic-raw", null, null, REGION);
+        String streamArn = "arn:aws:firehose:us-east-1:000000000000:deliverystream/test-stream-raw";
+        service.subscribe(topic.getTopicArn(), "firehose", streamArn, REGION,
+                Map.of("RawMessageDelivery", "true"));
+
+        String message = "{\"raw\":\"payload\"}";
+        String messageId = service.publish(topic.getTopicArn(), null, message, null, REGION);
+        assertNotNull(messageId);
+
+        ArgumentCaptor<Record> recordCaptor = ArgumentCaptor.forClass(Record.class);
+        verify(firehoseService).putRecord(eq(ACCOUNT), eq(REGION), eq("test-stream-raw"), recordCaptor.capture());
+
+        Record captured = recordCaptor.getValue();
+        assertEquals(message, new String(captured.getData(), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void publish_deliversToFirehoseSubscription_bareStreamNameEndpoint() {
+        FirehoseService firehoseService = mock(FirehoseService.class);
+        RegionResolver regionResolver = new RegionResolver(REGION, ACCOUNT);
+        SnsService service = new SnsService(
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                regionResolver,
+                null,
+                null,
+                firehoseService
+        );
+
+        Topic topic = service.createTopic("firehose-bare-topic", null, null, REGION);
+        service.subscribe(topic.getTopicArn(), "firehose", "bare-stream", REGION,
+                Map.of("RawMessageDelivery", "true"));
+
+        service.publish(topic.getTopicArn(), null, "bare-msg", null, REGION);
+
+        ArgumentCaptor<Record> recordCaptor = ArgumentCaptor.forClass(Record.class);
+        verify(firehoseService).putRecord(eq(ACCOUNT), eq(REGION), eq("bare-stream"), recordCaptor.capture());
+        assertEquals("bare-msg", new String(recordCaptor.getValue().getData(), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void publish_firehoseDeliveryFailure_doesNotFailPublisher() {
+        FirehoseService firehoseService = mock(FirehoseService.class);
+        doThrow(new RuntimeException("stream not found"))
+                .when(firehoseService).putRecord(any(), any(), any(), any());
+
+        RegionResolver regionResolver = new RegionResolver(REGION, ACCOUNT);
+        SnsService service = new SnsService(
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                regionResolver,
+                null,
+                null,
+                firehoseService
+        );
+
+        Topic topic = service.createTopic("firehose-fail-topic", null, null, REGION);
+        service.subscribe(topic.getTopicArn(), "firehose",
+                "arn:aws:firehose:us-east-1:000000000000:deliverystream/failing-stream", REGION, Map.of());
+
+        // Delivery error is logged and tolerated; publisher receives message ID
+        String messageId = service.publish(topic.getTopicArn(), null, "msg", null, REGION);
+        assertNotNull(messageId);
     }
 }

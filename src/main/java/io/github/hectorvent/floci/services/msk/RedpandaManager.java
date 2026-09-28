@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.msk;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
 import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
@@ -19,6 +20,7 @@ import org.jboss.logging.Logger;
 import java.io.Closeable;
 import java.net.HttpURLConnection;
 import java.net.URI;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -31,6 +33,8 @@ public class RedpandaManager {
     private static final Logger LOG = Logger.getLogger(RedpandaManager.class);
     private static final int KAFKA_PORT = 9092;
     static final int ADMIN_PORT = 9644;
+    /** The port MSK serves its SASL/IAM listener on, used for the broker listener behind the gateway too. */
+    static final int SASL_IAM_PORT = MskIamGateway.SASL_IAM_PORT;
 
     // Redpanda's Admin API exposes readiness at /v1/status/ready. /ready always returns 404
     private static final String ADMIN_READY_PATH = "/v1/status/ready";
@@ -43,6 +47,7 @@ public class RedpandaManager {
     private final RegionResolver regionResolver;
     private final PortAllocator portAllocator;
     private final Map<String, Closeable> logStreams = new ConcurrentHashMap<>();
+    private volatile boolean dockerUnavailableLogged;
 
     @Inject
     public RedpandaManager(ContainerBuilder containerBuilder,
@@ -59,6 +64,49 @@ public class RedpandaManager {
         this.config = config;
         this.regionResolver = regionResolver;
         this.portAllocator = portAllocator;
+    }
+
+    /**
+     * Attempts {@link #startContainer} and reports the broker as unavailable instead of
+     * propagating the failure, when the cause is that no Docker daemon is reachable from Floci:
+     * Floci running inside Docker without a mounted socket, or a stopped daemon on the host. A
+     * failure raised while the daemon <em>is</em> reachable is a genuine container problem and
+     * still propagates, so nothing changes for a Floci that can start Redpanda containers.
+     *
+     * @return {@code true} when the container started, {@code false} when no Docker daemon is
+     *         reachable
+     */
+    public boolean tryStartContainer(MskCluster cluster) {
+        try {
+            startContainer(cluster);
+            dockerUnavailableLogged = false;
+            return true;
+        } catch (RuntimeException e) {
+            if (isDockerReachable()) {
+                throw e;
+            }
+            if (!dockerUnavailableLogged) {
+                dockerUnavailableLogged = true;
+                LOG.warnv("No Docker daemon is reachable from Floci ({0}). MSK metadata operations "
+                        + "keep working and clusters still reach ACTIVE, but they have no backing "
+                        + "Kafka broker until a daemon becomes reachable.", e.getMessage());
+            }
+            return false;
+        }
+    }
+
+    /**
+     * Probes the configured Docker endpoint, which is how a missing daemon is told apart from a
+     * container that failed for its own reasons.
+     */
+    public boolean isDockerReachable() {
+        try {
+            lifecycleManager.getDockerClient().pingCmd().exec();
+            return true;
+        } catch (Exception e) {
+            LOG.debugv("Docker daemon is not reachable: {0}", e.getMessage());
+            return false;
+        }
     }
 
     public void startContainer(MskCluster cluster) {
@@ -91,11 +139,21 @@ public class RedpandaManager {
             kafkaAdvertiseAddr = containerName + ":" + KAFKA_PORT;
         }
 
-        // Build command
+        // Build command. A cluster with IAM client authentication gets a second, named listener
+        // behind the SASL/IAM gateway: it advertises the broker hostname on 9098, so a client
+        // that bootstraps through the gateway is sent back through it for every broker.
+        String iamBrokerHost = cluster.getIamBrokerHost();
         List<String> cmd = new ArrayList<>(List.of(
                 "redpanda", "start", "--overprovisioned", "--smp", "1",
-                "--memory", "512M", "--reserve-memory", "0M",
-                "--advertise-kafka-addr", kafkaAdvertiseAddr));
+                "--memory", "512M", "--reserve-memory", "0M"));
+        if (iamBrokerHost == null) {
+            cmd.addAll(List.of("--advertise-kafka-addr", kafkaAdvertiseAddr));
+        } else {
+            cmd.addAll(List.of(
+                    "--kafka-addr", "internal://0.0.0.0:" + KAFKA_PORT + ",sasl_iam://0.0.0.0:" + SASL_IAM_PORT,
+                    "--advertise-kafka-addr", "internal://" + kafkaAdvertiseAddr
+                            + ",sasl_iam://" + iamBrokerHost + ":" + SASL_IAM_PORT));
+        }
 
         // Build container spec. Publish Kafka/admin ports to the host only in
         // native mode; in Docker mode producers/consumers reach the broker via
@@ -103,12 +161,22 @@ public class RedpandaManager {
         ContainerBuilder.Builder specBuilder = containerBuilder.newContainer(image)
                 .withName(containerName)
                 .withDockerNetwork(config.services().dockerNetwork())
-                .withLogRotation();
+                .withLogRotation()
+                .withLabels(ContainerStorageHelper.resourceIdentityLabels(
+                        "msk", cluster.getClusterName(),
+                        AwsArnUtils.accountOrDefault(cluster.getClusterArn(), regionResolver.getAccountId()),
+                        AwsArnUtils.regionOrDefault(cluster.getClusterArn(), regionResolver.getDefaultRegion())));
 
         if (!containerDetector.isRunningInContainer()) {
             specBuilder.withPortBinding(KAFKA_PORT, kafkaHostPort).withDynamicPort(ADMIN_PORT);
+            if (iamBrokerHost != null) {
+                specBuilder.withDynamicPort(SASL_IAM_PORT);
+            }
         } else {
             specBuilder.withExposedPort(KAFKA_PORT).withExposedPort(ADMIN_PORT);
+            if (iamBrokerHost != null) {
+                specBuilder.withExposedPort(SASL_IAM_PORT);
+            }
         }
 
         // Handle persistence mounting
@@ -118,8 +186,7 @@ public class RedpandaManager {
                     "/var/lib/redpanda/data");
         } else {
             // Legacy host-path mode: host-persistent-path is an absolute path
-            String hostDataPath = ContainerStorageHelper.hostResourcePath(config, "msk", cluster.getClusterName())
-                    .toAbsolutePath().toString();
+            String hostDataPath = legacyCompatibleHostPath(cluster).toAbsolutePath().toString();
             if (!containerDetector.isRunningInContainer()) {
                 ContainerStorageHelper.ensureHostDir(hostDataPath);
             }
@@ -146,6 +213,12 @@ public class RedpandaManager {
 
         cluster.setBootstrapBrokers(kafkaEndpoint.host() + ":" + kafkaEndpoint.port());
         LOG.infov("Redpanda container {0} started. Bootstrap: {1}", info.containerId(), cluster.getBootstrapBrokers());
+        if (iamBrokerHost != null) {
+            EndpointInfo iamEndpoint = info.getEndpoint(SASL_IAM_PORT);
+            cluster.setIamBackendAddress(iamEndpoint != null
+                    ? iamEndpoint.host() + ":" + iamEndpoint.port()
+                    : kafkaEndpoint.host() + ":" + SASL_IAM_PORT);
+        }
 
         // Attach log streaming (new feature)
         String shortId = info.containerId().length() >= 8
@@ -153,12 +226,13 @@ public class RedpandaManager {
                 : info.containerId();
         String logGroup = "/aws/msk/cluster/" + cluster.getClusterName();
         String logStream = logStreamer.generateLogStreamName(shortId);
-        String region = regionResolver.getDefaultRegion();
+        String region = AwsArnUtils.regionOrDefault(cluster.getClusterArn(), regionResolver.getDefaultRegion());
 
-        Closeable logHandle = logStreamer.attach(
-                info.containerId(), logGroup, logStream, region, "msk:" + cluster.getClusterName());
+        String account = AwsArnUtils.accountOrDefault(cluster.getClusterArn(), regionResolver.getDefaultAccountId());
+        Closeable logHandle = logStreamer.attachForAccount(
+                account, info.containerId(), logGroup, logStream, region, "msk:" + cluster.getClusterName());
         if (logHandle != null) {
-            logStreams.put(cluster.getClusterName(), logHandle);
+            logStreams.put(clusterIdentityKey(cluster), logHandle);
         }
     }
 
@@ -202,7 +276,7 @@ public class RedpandaManager {
         }
 
         // Close log stream
-        Closeable logHandle = logStreams.remove(cluster.getClusterName());
+        Closeable logHandle = logStreams.remove(clusterIdentityKey(cluster));
 
         lifecycleManager.stopAndRemove(cluster.getContainerId(), logHandle);
         LOG.infov("Redpanda container {0} stopped and removed", cluster.getContainerId());
@@ -232,5 +306,24 @@ public class RedpandaManager {
     public void removeClusterStorage(MskCluster cluster) {
         ContainerStorageHelper.removeStorage(config, lifecycleManager,
                 "msk", cluster.getVolumeId(), cluster.getClusterName());
+    }
+
+    private String clusterIdentityKey(MskCluster cluster) {
+        return cluster.getClusterArn() != null ? cluster.getClusterArn() : cluster.getClusterName();
+    }
+
+    private String clusterStorageId(MskCluster cluster) {
+        String account = AwsArnUtils.accountOrDefault(cluster.getClusterArn(), regionResolver.getDefaultAccountId());
+        String region = AwsArnUtils.regionOrDefault(cluster.getClusterArn(), regionResolver.getDefaultRegion());
+        return ContainerStorageHelper.dockerName(config,
+                "msk-" + account + "-" + region + "-" + cluster.getClusterName());
+    }
+
+    private Path legacyCompatibleHostPath(MskCluster cluster) {
+        Path scopedPath = ContainerStorageHelper.hostResourcePath(config, "msk", clusterStorageId(cluster));
+        Path legacyPath = ContainerStorageHelper.hostResourcePath(config, "msk", cluster.getClusterName());
+        return cluster.getResourceRegion() == null && Files.exists(legacyPath)
+                ? legacyPath
+                : scopedPath;
     }
 }

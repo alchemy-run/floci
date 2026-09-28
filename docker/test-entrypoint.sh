@@ -3,10 +3,8 @@
 # Run directly: sh docker/test-entrypoint.sh
 # Exit 0 on success, non-zero on first failure summary.
 #
-# These tests run the entrypoint as an unprivileged user with
-# LOCALSTACK_PARITY=false, so the root-only gosu block and the parity
-# script (installed at an absolute path inside the image) stay out of
-# the way. The root/gosu path is covered by the Docker image tests.
+# These tests run as an unprivileged user with LOCALSTACK_PARITY=false.
+# Stub id and chroot to check the root path without changing privileges.
 
 set -eu
 
@@ -26,12 +24,22 @@ assert_eq() {
 }
 
 if [ "$(id -u)" = '0' ]; then
-    echo "These tests must run as an unprivileged user (the root path re-execs via gosu)." >&2
+    echo "These tests must run as an unprivileged user (the root path re-execs via chroot)." >&2
     exit 1
 fi
 
 WORK="$(mktemp -d)"
-trap 'rm -rf "${WORK}"' EXIT INT TERM
+trap 'chmod -R u+w "${WORK}"; rm -rf "${WORK}"' EXIT
+trap 'exit 1' INT TERM
+
+# Redirect container-only paths without touching an installed application or socket.
+mkdir -p "${WORK}/app"
+sed -e "s|/app/|${WORK}/app/|g" \
+    -e "s|/var/run/docker.sock|${WORK}/docker.sock|g" \
+    "${SCRIPT}" > "${WORK}/entrypoint.sh"
+SCRIPT="${WORK}/entrypoint.sh"
+unset FLOCI_RUN_AS_ROOT
+export FLOCI_STORAGE_PERSISTENT_PATH="${WORK}/absent"
 
 # Stub java on PATH that prints the argv it was exec'd with.
 mkdir -p "${WORK}/bin"
@@ -40,6 +48,48 @@ cat > "${WORK}/bin/java" <<'EOF'
 printf '%s\n' "java $*"
 EOF
 chmod +x "${WORK}/bin/java"
+
+mkdir -p "${WORK}/root-bin"
+cat > "${WORK}/root-bin/id" <<'EOF'
+#!/bin/sh
+if [ "$1" = '-u' ]; then
+    printf '0\n'
+else
+    /usr/bin/id "$@"
+fi
+EOF
+cat > "${WORK}/root-bin/chroot" <<'EOF'
+#!/bin/sh
+printf '<%s>\n' "$@"
+EOF
+chmod +x "${WORK}/root-bin/id" "${WORK}/root-bin/chroot"
+DROP_EXPECTED="<--userspec=1001:0>
+<--groups=0>
+<--skip-chdir>
+</>
+<${SCRIPT}>
+<echo>
+<preserved>"
+
+assert_eq "root drops privileges by default" \
+    "${DROP_EXPECTED}" \
+    "$(PATH="${WORK}/root-bin:${PATH}" FLOCI_STORAGE_PERSISTENT_PATH="${WORK}/absent" LOCALSTACK_PARITY=false sh "${SCRIPT}" echo preserved)"
+
+assert_eq "false keeps the unprivileged default" \
+    "${DROP_EXPECTED}" \
+    "$(PATH="${WORK}/root-bin:${PATH}" FLOCI_RUN_AS_ROOT=false FLOCI_STORAGE_PERSISTENT_PATH="${WORK}/absent" LOCALSTACK_PARITY=false sh "${SCRIPT}" echo preserved)"
+
+assert_eq "other values keep the unprivileged default" \
+    "${DROP_EXPECTED}" \
+    "$(PATH="${WORK}/root-bin:${PATH}" FLOCI_RUN_AS_ROOT=TRUE FLOCI_STORAGE_PERSISTENT_PATH="${WORK}/absent" LOCALSTACK_PARITY=false sh "${SCRIPT}" echo preserved)"
+
+assert_eq "explicit root option preserves command arguments" \
+    "one two|three" \
+    "$(PATH="${WORK}/root-bin:${PATH}" FLOCI_RUN_AS_ROOT=true FLOCI_STORAGE_PERSISTENT_PATH="${WORK}/absent" LOCALSTACK_PARITY=false sh "${SCRIPT}" sh -c 'printf "%s|%s\n" "$1" "$2"' _ "one two" three)"
+
+assert_eq "non-root process cannot elevate with root option" \
+    "one two" \
+    "$(FLOCI_RUN_AS_ROOT=true LOCALSTACK_PARITY=false sh "${SCRIPT}" echo one two)"
 
 # --- explicit arguments are exec'd unchanged ---
 assert_eq "explicit command is exec'd unchanged" \
@@ -51,38 +101,66 @@ assert_eq "explicit java command bypasses the fallback" \
     "$(PATH="${WORK}/bin:${PATH}" LOCALSTACK_PARITY=false sh "${SCRIPT}" java -jar /custom/app.jar)"
 
 # --- empty argv falls back to the image default command ---
-# Without /app/application (JVM image layout), the fallback must exec the
-# Quarkus runner jar with the same arguments as the published image CMD.
-if [ ! -e /app/application ]; then
-    assert_eq "empty argv falls back to the JVM default command" \
-        "java -jar /app/quarkus-app/quarkus-run.jar -Dquarkus.http.host=0.0.0.0" \
-        "$(PATH="${WORK}/bin:${PATH}" LOCALSTACK_PARITY=false sh "${SCRIPT}")"
-else
-    printf '[SKIP] empty argv falls back to the JVM default command (/app/application exists on this host)\n'
-fi
+DEFAULT_ARGS='-Dquarkus.http.host=0.0.0.0 -Dfloci.security.allow-unsafe-network-exposure=true'
+assert_eq "empty argv falls back to JVM with consent before -jar" \
+    "java ${DEFAULT_ARGS} -jar ${WORK}/app/quarkus-app/quarkus-run.jar" \
+    "$(PATH="${WORK}/bin:${PATH}" LOCALSTACK_PARITY=false sh "${SCRIPT}")"
 
-# With an executable /app/application (native image layout), the fallback
-# must prefer the native binary. Only runs where /app is writable or the
-# binary already exists (always true inside the published images).
-NATIVE_TESTABLE=false
-if [ -x /app/application ]; then
-    NATIVE_TESTABLE=true
-elif mkdir -p /app 2>/dev/null && [ -w /app ]; then
-    cat > /app/application <<'EOF'
+cat > "${WORK}/app/floci-test-runner" <<'EOF'
 #!/bin/sh
-printf '%s\n' "/app/application $*"
+printf '%s\n' "$0 $*"
 EOF
-    chmod +x /app/application
-    trap 'rm -f /app/application; rm -rf "${WORK}"' EXIT INT TERM
-    NATIVE_TESTABLE=true
-fi
-if [ "${NATIVE_TESTABLE}" = 'true' ]; then
-    assert_eq "empty argv prefers the native binary when present" \
-        "/app/application -Dquarkus.http.host=0.0.0.0" \
-        "$(LOCALSTACK_PARITY=false sh "${SCRIPT}")"
+chmod +x "${WORK}/app/floci-test-runner"
+# A non-executable earlier match must not mask the executable runner.
+touch "${WORK}/app/aaa-runner"
+
+assert_eq "empty argv uses fork runner with unsafe-network consent" \
+    "${WORK}/app/floci-test-runner ${DEFAULT_ARGS}" \
+    "$(LOCALSTACK_PARITY=false sh "${SCRIPT}")"
+assert_eq "missing application rewrites to fork runner preserving consent" \
+    "${WORK}/app/floci-test-runner ${DEFAULT_ARGS}" \
+    "$(LOCALSTACK_PARITY=false sh "${SCRIPT}" "${WORK}/app/application" \
+        -Dquarkus.http.host=0.0.0.0 -Dfloci.security.allow-unsafe-network-exposure=true)"
+
+cp "${WORK}/app/floci-test-runner" "${WORK}/app/application"
+assert_eq "empty argv prefers application over fork runner with consent" \
+    "${WORK}/app/application ${DEFAULT_ARGS}" \
+    "$(LOCALSTACK_PARITY=false sh "${SCRIPT}")"
+assert_eq "explicit native command is not given extra flags" \
+    "${WORK}/app/application --custom" \
+    "$(LOCALSTACK_PARITY=false sh "${SCRIPT}" "${WORK}/app/application" --custom)"
+chmod -x "${WORK}/app/application"
+assert_eq "non-executable application falls back to fork runner" \
+    "${WORK}/app/floci-test-runner ${DEFAULT_ARGS}" \
+    "$(LOCALSTACK_PARITY=false sh "${SCRIPT}")"
+
+cat > "${WORK}/app/floci-test-runner" <<'EOF'
+#!/bin/sh
+printf '<%s>\n' "$@"
+EOF
+assert_eq "fork runner rewrite preserves argument boundaries" \
+    '<one two>
+<>
+<three>' \
+    "$(LOCALSTACK_PARITY=false sh "${SCRIPT}" "${WORK}/app/application" 'one two' '' three)"
+assert_eq "privilege drop preserves argument boundaries and working directory option" \
+    "<--userspec=1001:0>
+<--groups=0>
+<--skip-chdir>
+</>
+<${SCRIPT}>
+<echo>
+<one two>
+<>
+<three>" \
+    "$(PATH="${WORK}/root-bin:${PATH}" LOCALSTACK_PARITY=false sh "${SCRIPT}" echo 'one two' '' three)"
+
+if LOCALSTACK_PARITY=false sh "${SCRIPT}" sh -c 'exit 37'; then
+    status=0
 else
-    printf '[SKIP] empty argv prefers the native binary when present (/app not writable)\n'
+    status=$?
 fi
+assert_eq "explicit command exit status is preserved" 37 "${status}"
 
 # --- unwritable state dir prints a warning but still execs the command ---
 RO_DIR="${WORK}/ro-data"

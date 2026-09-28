@@ -33,7 +33,7 @@ import java.util.List;
  */
 @Provider
 @PreMatching
-@Priority(6)
+@Priority(11)
 public class ApiGatewayExecuteApiRoutingFilter implements ContainerRequestFilter {
 
     private static final Logger LOG = Logger.getLogger(ApiGatewayExecuteApiRoutingFilter.class);
@@ -41,14 +41,17 @@ public class ApiGatewayExecuteApiRoutingFilter implements ContainerRequestFilter
     private final ApiGatewayService apiGatewayService;
     private final ApiGatewayV2Service apiGatewayV2Service;
     private final RegionResolver regionResolver;
+    private final ApiGatewayExecuteRouteContext routeContext;
 
     @Inject
     public ApiGatewayExecuteApiRoutingFilter(ApiGatewayService apiGatewayService,
                                              ApiGatewayV2Service apiGatewayV2Service,
-                                             RegionResolver regionResolver) {
+                                             RegionResolver regionResolver,
+                                             ApiGatewayExecuteRouteContext routeContext) {
         this.apiGatewayService = apiGatewayService;
         this.apiGatewayV2Service = apiGatewayV2Service;
         this.regionResolver = regionResolver;
+        this.routeContext = routeContext;
     }
 
     @Override
@@ -75,6 +78,10 @@ public class ApiGatewayExecuteApiRoutingFilter implements ContainerRequestFilter
 
         String hostRegion = extractRegion(host);
         String preferred = hostRegion != null ? hostRegion : regionResolver.getDefaultRegion();
+        if (apiGatewayV2Service.findApiOwner(apiId).isPresent()) {
+            // The v2 filter owns stage selection, endpoint disablement, and signed-request paths.
+            return;
+        }
 
         String rewritten = rewriteToExecuteApiPath(apiId, path, preferred);
         if (rewritten == null) {
@@ -84,8 +91,9 @@ public class ApiGatewayExecuteApiRoutingFilter implements ContainerRequestFilter
         URI newUri = UriBuilder.fromUri(original)
                 .host("localhost")
                 .replacePath(rewritten)
-                .build();
+                .buildFromEncoded();
         LOG.infov("Routing execute-api Host {0}{1} -> {2}", host, path, newUri.getPath());
+        routeContext.recordSignedRequestPath(path);
         requestContext.setRequestUri(newUri);
     }
 

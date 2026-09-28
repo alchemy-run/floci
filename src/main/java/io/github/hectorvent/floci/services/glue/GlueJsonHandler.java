@@ -4,12 +4,35 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.services.glue.model.Classifier;
 import io.github.hectorvent.floci.services.glue.model.Connection;
+import io.github.hectorvent.floci.services.glue.model.ConnectionInput;
 import io.github.hectorvent.floci.services.glue.model.Crawler;
+import io.github.hectorvent.floci.services.glue.model.CreateCrawlerRequest;
+import io.github.hectorvent.floci.services.glue.model.CreateJobRequest;
+import io.github.hectorvent.floci.services.glue.model.CreateJobResponse;
+import io.github.hectorvent.floci.services.glue.model.DataCatalogEncryptionSettings;
 import io.github.hectorvent.floci.services.glue.model.Database;
+import io.github.hectorvent.floci.services.glue.model.DeleteCrawlerRequest;
+import io.github.hectorvent.floci.services.glue.model.DeleteJobRequest;
+import io.github.hectorvent.floci.services.glue.model.DeleteJobResponse;
+import io.github.hectorvent.floci.services.glue.model.GetCrawlerRequest;
+import io.github.hectorvent.floci.services.glue.model.GetCrawlerResponse;
+import io.github.hectorvent.floci.services.glue.model.GetCrawlersRequest;
+import io.github.hectorvent.floci.services.glue.model.GetCrawlersResponse;
+import io.github.hectorvent.floci.services.glue.model.GetJobRequest;
+import io.github.hectorvent.floci.services.glue.model.GetJobResponse;
+import io.github.hectorvent.floci.services.glue.model.GluePolicy;
 import io.github.hectorvent.floci.services.glue.model.Job;
+import io.github.hectorvent.floci.services.glue.model.JobRun;
 import io.github.hectorvent.floci.services.glue.model.Partition;
+import io.github.hectorvent.floci.services.glue.model.PartitionIndex;
+import io.github.hectorvent.floci.services.glue.model.Schedule;
+import io.github.hectorvent.floci.services.glue.model.SecurityConfiguration;
 import io.github.hectorvent.floci.services.glue.model.Table;
+import io.github.hectorvent.floci.services.glue.model.UpdateCrawlerRequest;
+import io.github.hectorvent.floci.services.glue.model.UpdateJobRequest;
+import io.github.hectorvent.floci.services.glue.model.UpdateJobResponse;
 import io.github.hectorvent.floci.services.glue.model.UserDefinedFunction;
 import io.github.hectorvent.floci.services.glue.schemaregistry.GlueSchemaRegistryService;
 import io.github.hectorvent.floci.services.glue.schemaregistry.model.Registry;
@@ -32,6 +55,7 @@ import java.util.Objects;
 public class GlueJsonHandler {
 
     private static final TypeReference<List<String>> STRING_LIST = new TypeReference<>() {};
+    private static final TypeReference<Map<String, String>> STRING_MAP = new TypeReference<>() {};
     private static final TypeReference<List<Map<String, Object>>> MAP_LIST = new TypeReference<>() {};
     private static final TypeReference<List<Partition>> PARTITION_LIST = new TypeReference<>() {};
 
@@ -90,6 +114,30 @@ public class GlueJsonHandler {
                 Table table = glueService.getTable(dbName, tableName);
                 yield Response.ok(Map.of("Table", table)).build();
             }
+            case "CreatePartitionIndex" -> {
+                String dbName = request.get("DatabaseName").asText();
+                String tableName = request.get("TableName").asText();
+                PartitionIndex index = mapper.treeToValue(request.get("PartitionIndex"), PartitionIndex.class);
+                glueService.createPartitionIndex(dbName, tableName, index);
+                // AWS answers with an empty body, as it does for CreateTable above.
+                yield Response.ok().build();
+            }
+            case "DeletePartitionIndex" -> {
+                String dbName = request.get("DatabaseName").asText();
+                String tableName = request.get("TableName").asText();
+                String indexName = request.get("IndexName").asText();
+                glueService.deletePartitionIndex(dbName, tableName, indexName);
+                yield Response.ok().build();
+            }
+            case "GetPartitionIndexes" -> {
+                String dbName = request.get("DatabaseName").asText();
+                String tableName = request.get("TableName").asText();
+                // The service resolves the table first, so a missing one is reported as such
+                // rather than as an empty index list.
+                yield Response.ok(Map.of(
+                        "PartitionIndexDescriptorList",
+                        glueService.getPartitionIndexes(dbName, tableName))).build();
+            }
             case "GetTables" -> {
                 String dbName = request.get("DatabaseName").asText();
                 yield Response.ok(Map.of("TableList", glueService.getTables(dbName))).build();
@@ -106,6 +154,26 @@ public class GlueJsonHandler {
                 String tableName = request.get("TableName").asText();
                 yield Response.ok(Map.of("TableVersions", glueService.getTableVersions(dbName, tableName))).build();
             }
+            case "GetTableVersion" -> {
+                String dbName = request.get("DatabaseName").asText();
+                String tableName = request.get("TableName").asText();
+                yield Response.ok(Map.of("TableVersion", glueService.getTableVersion(
+                        dbName, tableName, request.path("VersionId").asText(null)))).build();
+            }
+            case "DeleteTableVersion" -> {
+                String dbName = request.get("DatabaseName").asText();
+                String tableName = request.get("TableName").asText();
+                glueService.deleteTableVersion(dbName, tableName, request.path("VersionId").asText(null));
+                yield Response.ok().build();
+            }
+            case "BatchDeleteTableVersion" -> {
+                String dbName = request.get("DatabaseName").asText();
+                String tableName = request.get("TableName").asText();
+                List<String> versionIds = mapper.convertValue(request.get("VersionIds"), STRING_LIST);
+                yield Response.ok(Map.of("Errors", glueService.batchDeleteTableVersions(
+                        dbName, tableName, versionIds == null ? List.of() : versionIds))).build();
+            }
+            case "SearchTables" -> handleSearchTables(request);
             case "DeleteTable" -> {
                 String dbName = request.get("DatabaseName").asText();
                 String tableName = request.get("Name").asText();
@@ -170,13 +238,81 @@ public class GlueJsonHandler {
             case "QuerySchemaVersionMetadata" -> handleQuerySchemaVersionMetadata(request);
             case "TagResource" -> handleTagResource(request, region);
             case "UntagResource" -> handleUntagResource(request, region);
-            case "GetTags" -> handleGetTags(request);
-            case "CreateJob" -> handleCreateJob(request, region);
-            case "GetJob" -> handleGetJob(request);
-            case "GetJobs" -> Response.ok(Map.of("Jobs", glueService.getJobs())).build();
-            case "UpdateJob" -> handleUpdateJob(request);
+            case "GetTags" -> handleGetTags(request, region);
+            case "CreateJob" -> {
+                CreateJobRequest req = mapper.treeToValue(request, CreateJobRequest.class);
+                Job job = toDomain(req);
+                glueService.createJob(job, req.getTags(), region);
+                yield Response.ok(new CreateJobResponse(job.getName())).build();
+            }
+            case "GetJob" -> {
+                GetJobRequest req = mapper.treeToValue(request, GetJobRequest.class);
+                yield Response.ok(new GetJobResponse(glueService.getJob(req.getJobName()))).build();
+            }
+            case "GetJobs" -> {
+                Integer maxResults = readMaxResults(request);
+                String nextToken = readNextToken(request);
+                GlueService.Page<Job> page = glueService.getJobs(maxResults, nextToken);
+                yield Response.ok(pageResponse("Jobs", page.items(), page.nextToken())).build();
+            }
+            case "UpdateJob" -> {
+                UpdateJobRequest req = mapper.treeToValue(request, UpdateJobRequest.class);
+                glueService.updateJob(req.getJobName(), req.getJobUpdate());
+                yield Response.ok(new UpdateJobResponse(req.getJobName())).build();
+            }
             case "DeleteJob" -> {
-                glueService.deleteJob(request.get("JobName").asText(), region);
+                DeleteJobRequest req = mapper.treeToValue(request, DeleteJobRequest.class);
+                glueService.deleteJob(req.getJobName(), region);
+                yield Response.ok(new DeleteJobResponse(req.getJobName())).build();
+            }
+            case "CreateClassifier" -> {
+                Classifier classifier = mapper.treeToValue(request, Classifier.class);
+                glueService.createClassifier(classifier);
+                yield Response.ok().build();
+            }
+            case "GetClassifier" -> Response.ok(Map.of(
+                    "Classifier", glueService.getClassifier(request.path("Name").asText(null)))).build();
+            case "GetClassifiers" -> {
+                GlueService.Page<Classifier> page = glueService.getClassifiers(
+                        readMaxResults(request), readNextToken(request));
+                yield Response.ok(pageResponse("Classifiers", page.items(), page.nextToken())).build();
+            }
+            case "UpdateClassifier" -> {
+                Classifier classifier = mapper.treeToValue(request, Classifier.class);
+                glueService.updateClassifier(classifier);
+                yield Response.ok().build();
+            }
+            case "DeleteClassifier" -> {
+                glueService.deleteClassifier(request.path("Name").asText(null));
+                yield Response.ok().build();
+            }
+            case "CreateCrawler" -> {
+                CreateCrawlerRequest req = mapper.treeToValue(request, CreateCrawlerRequest.class);
+                Crawler crawler = toDomain(req);
+                glueService.createCrawler(crawler, req.getTags(), region);
+                yield Response.ok().build();
+            }
+            case "GetCrawler" -> {
+                GetCrawlerRequest req = mapper.treeToValue(request, GetCrawlerRequest.class);
+                yield Response.ok(new GetCrawlerResponse(glueService.getCrawler(req.getName()))).build();
+            }
+            case "GetCrawlers" -> {
+                GetCrawlersRequest req = mapper.treeToValue(request, GetCrawlersRequest.class);
+                GlueService.Page<Crawler> page = glueService.getCrawlers(req.getMaxResults(), req.getNextToken());
+                GetCrawlersResponse res = new GetCrawlersResponse();
+                res.setCrawlers(page.items());
+                res.setNextToken(page.nextToken());
+                yield Response.ok(res).build();
+            }
+            case "UpdateCrawler" -> {
+                UpdateCrawlerRequest req = mapper.treeToValue(request, UpdateCrawlerRequest.class);
+                Crawler update = toDomain(req);
+                glueService.updateCrawler(update);
+                yield Response.ok().build();
+            }
+            case "DeleteCrawler" -> {
+                DeleteCrawlerRequest req = mapper.treeToValue(request, DeleteCrawlerRequest.class);
+                glueService.deleteCrawler(req.getName(), region);
                 yield Response.ok().build();
             }
             case "StartJobRun" -> handleStartJobRun(request);
@@ -185,17 +321,6 @@ public class GlueJsonHandler {
             case "BatchStopJobRun" -> handleBatchStopJobRun(request);
             case "GetJobBookmark" -> handleGetJobBookmark(request);
             case "ResetJobBookmark" -> handleResetJobBookmark(request);
-            case "CreateCrawler" -> handleCreateCrawler(request, region);
-            case "GetCrawler" -> Response.ok(Map.of("Crawler", glueService.getCrawler(request.get("Name").asText()))).build();
-            case "GetCrawlers" -> Response.ok(Map.of("Crawlers", glueService.getCrawlers())).build();
-            case "UpdateCrawler" -> {
-                glueService.updateCrawler(mapper.treeToValue(request, Crawler.class));
-                yield Response.ok().build();
-            }
-            case "DeleteCrawler" -> {
-                glueService.deleteCrawler(request.get("Name").asText(), region);
-                yield Response.ok().build();
-            }
             case "StartCrawler" -> {
                 glueService.startCrawler(request.get("Name").asText());
                 yield Response.ok().build();
@@ -207,16 +332,67 @@ public class GlueJsonHandler {
             case "CreateConnection" -> handleCreateConnection(request, region);
             case "GetConnection" -> handleGetConnection(request);
             case "GetConnections" -> handleGetConnections(request);
-            case "UpdateConnection" -> handleUpdateConnection(request);
+            case "UpdateConnection" -> handleUpdateConnection(request, region);
             case "DeleteConnection" -> {
-                glueService.deleteConnection(request.get("ConnectionName").asText(), region);
-                yield Response.ok().build();
+                glueService.deleteConnection(request.path("ConnectionName").asText(null), region);
+                yield Response.ok(Map.of()).build();
+            }
+            case "BatchDeleteConnection" -> {
+                List<String> names = request.hasNonNull("ConnectionNameList")
+                        ? mapper.convertValue(request.get("ConnectionNameList"), STRING_LIST)
+                        : null;
+                yield Response.ok(glueService.batchDeleteConnections(names, region)).build();
+            }
+            case "TestConnection" -> handleTestConnection(request);
+            case "PutResourcePolicy" -> {
+                String hash = glueService.putResourcePolicy(
+                        request.path("PolicyInJson").asText(null),
+                        request.path("PolicyHashCondition").asText(null),
+                        request.path("PolicyExistsCondition").asText(null),
+                        request.path("EnableHybrid").asText(null));
+                yield Response.ok(Map.of("PolicyHash", hash)).build();
+            }
+            case "GetResourcePolicy" -> Response.ok(glueService.getResourcePolicy()).build();
+            case "GetResourcePolicies" -> {
+                GlueService.Page<GluePolicy> page =
+                        glueService.getResourcePolicies(readMaxResults(request), readNextToken(request));
+                yield Response.ok(pageResponse("GetResourcePoliciesResponseList", page.items(), page.nextToken())).build();
+            }
+            case "DeleteResourcePolicy" -> {
+                glueService.deleteResourcePolicy(request.path("PolicyHashCondition").asText(null));
+                yield Response.ok(Map.of()).build();
+            }
+            case "GetDataCatalogEncryptionSettings" -> Response.ok(Map.of(
+                    "DataCatalogEncryptionSettings", glueService.getDataCatalogEncryptionSettings())).build();
+            case "PutDataCatalogEncryptionSettings" -> {
+                DataCatalogEncryptionSettings settings = request.hasNonNull("DataCatalogEncryptionSettings")
+                        ? mapper.treeToValue(request.get("DataCatalogEncryptionSettings"), DataCatalogEncryptionSettings.class)
+                        : null;
+                glueService.putDataCatalogEncryptionSettings(settings);
+                yield Response.ok(Map.of()).build();
+            }
+            case "CreateSecurityConfiguration" -> {
+                SecurityConfiguration configuration = glueService.createSecurityConfiguration(
+                        request.path("Name").asText(null), request.get("EncryptionConfiguration"), region);
+                yield Response.ok(Map.of(
+                        "Name", configuration.getName(),
+                        "CreatedTimestamp", configuration.getCreatedTimeStamp().getEpochSecond())).build();
+            }
+            case "GetSecurityConfiguration" -> {
+                SecurityConfiguration configuration = glueService.getSecurityConfiguration(
+                        request.path("Name").asText(null), region);
+                yield Response.ok(Map.of("SecurityConfiguration", configuration)).build();
+            }
+            case "DeleteSecurityConfiguration" -> {
+                glueService.deleteSecurityConfiguration(request.path("Name").asText(null), region);
+                yield Response.ok(Map.of()).build();
             }
             // Read-only Glue actions for resources the emulator does not model. The AWS SDK
             // expects each to return a 200 with its result key present (empty), so we emit the
             // documented empty shape rather than an InvalidAction 400 that callers can't read.
             case "ListDataQualityRulesets" -> Response.ok(Map.of("Rulesets", List.of())).build();
-            case "GetSecurityConfigurations" -> Response.ok(Map.of("SecurityConfigurations", List.of())).build();
+            case "GetSecurityConfigurations" -> Response.ok(Map.of(
+                    "SecurityConfigurations", glueService.getSecurityConfigurations(region))).build();
             default -> throw new AwsException("InvalidAction", "Action " + action + " is not supported", 400);
         };
     }
@@ -288,6 +464,31 @@ public class GlueJsonHandler {
                 .build();
     }
 
+    private Response handleBatchDeletePartition(JsonNode request) {
+        String dbName = request.get("DatabaseName").asText();
+        String tableName = request.get("TableName").asText();
+        List<Map<String, Object>> partitionsToDelete = mapper.convertValue(request.get("PartitionsToDelete"), MAP_LIST);
+        List<List<String>> partitionValues = (partitionsToDelete == null ? List.<Map<String, Object>>of() : partitionsToDelete)
+                .stream()
+                .map(partition -> mapper.convertValue(partition.get("Values"), STRING_LIST))
+                .toList();
+        return Response.ok(Map.of(
+                "Errors", glueService.batchDeletePartitions(dbName, tableName, partitionValues))).build();
+    }
+
+    private Response handleSearchTables(JsonNode request) {
+        List<GlueService.SearchFilter> filters = request.hasNonNull("Filters")
+                ? mapper.convertValue(request.get("Filters"), new TypeReference<List<GlueService.SearchFilter>>() {})
+                : null;
+        List<GlueService.SearchSort> sortCriteria = request.hasNonNull("SortCriteria")
+                ? mapper.convertValue(request.get("SortCriteria"), new TypeReference<List<GlueService.SearchSort>>() {})
+                : null;
+        GlueService.Page<Table> page = glueService.searchTables(
+                request.path("SearchText").asText(null), filters, sortCriteria,
+                readMaxResults(request), readNextToken(request));
+        return Response.ok(pageResponse("TableList", page.items(), page.nextToken())).build();
+    }
+
     private Response handleDeletePartition(JsonNode request) {
         String dbName = request.get("DatabaseName").asText();
         String tableName = request.get("TableName").asText();
@@ -296,18 +497,7 @@ public class GlueJsonHandler {
         return Response.ok().build();
     }
 
-    private Response handleBatchDeletePartition(JsonNode request) {
-        String dbName = request.get("DatabaseName").asText();
-        String tableName = request.get("TableName").asText();
-        List<Map<String, Object>> partitionsToDelete = mapper.convertValue(request.get("PartitionsToDelete"), MAP_LIST);
-        List<List<String>> partitionValues = partitionsToDelete == null
-                ? List.of()
-                : partitionsToDelete.stream()
-                        .map(partition -> mapper.convertValue(partition.get("Values"), STRING_LIST))
-                        .toList();
-        return Response.ok(Map.of("Errors", glueService.batchDeletePartitions(dbName, tableName, partitionValues)))
-                .build();
-    }
+
 
     private Response handleUpdatePartition(JsonNode request) throws Exception {
         String dbName = request.get("DatabaseName").asText();
@@ -759,12 +949,8 @@ public class GlueJsonHandler {
         Map<String, String> tagsToAdd = request.has("TagsToAdd")
                 ? mapper.convertValue(request.get("TagsToAdd"), Map.class)
                 : null;
-        if (glueService.handlesResourceArn(arn)) {
-            glueService.tagResource(arn, tagsToAdd, region);
-        } else {
-            schemaRegistryService.tagResource(arn, tagsToAdd);
-        }
-        return Response.ok(Map.of()).build();
+        glueService.tagResource(arn, tagsToAdd, region);
+        return Response.ok().build();
     }
 
     @SuppressWarnings("unchecked")
@@ -773,41 +959,143 @@ public class GlueJsonHandler {
         List<String> tagsToRemove = request.has("TagsToRemove")
                 ? mapper.convertValue(request.get("TagsToRemove"), List.class)
                 : null;
-        if (glueService.handlesResourceArn(arn)) {
-            glueService.untagResource(arn, tagsToRemove, region);
-        } else {
-            schemaRegistryService.untagResource(arn, tagsToRemove);
-        }
+        glueService.untagResource(arn, tagsToRemove, region);
+        return Response.ok().build();
+    }
+
+    private Response handleCreateConnection(JsonNode request, String region) throws Exception {
+        ConnectionInput input = request.hasNonNull("ConnectionInput")
+                ? mapper.treeToValue(request.get("ConnectionInput"), ConnectionInput.class)
+                : null;
+        Map<String, String> tags = request.hasNonNull("Tags")
+                ? mapper.convertValue(request.get("Tags"), STRING_MAP)
+                : null;
+        String status = glueService.createConnection(input, tags, region);
+        return Response.ok(Map.of("CreateConnectionStatus", status)).build();
+    }
+
+    private Response handleGetConnection(JsonNode request) {
+        Connection connection = glueService.getConnection(
+                request.path("Name").asText(null), request.path("HidePassword").asBoolean(false));
+        return Response.ok(Map.of("Connection", connection)).build();
+    }
+
+    private Response handleGetConnections(JsonNode request) {
+        JsonNode filter = request.path("Filter");
+        List<String> matchCriteria = filter.hasNonNull("MatchCriteria")
+                ? mapper.convertValue(filter.get("MatchCriteria"), STRING_LIST)
+                : null;
+        String connectionType = filter.path("ConnectionType").asText(null);
+        Integer schemaVersion = filter.hasNonNull("ConnectionSchemaVersion")
+                ? filter.get("ConnectionSchemaVersion").asInt()
+                : null;
+        GlueService.Page<Connection> page = glueService.getConnections(
+                matchCriteria, connectionType, schemaVersion,
+                request.path("HidePassword").asBoolean(false),
+                readMaxResults(request), readNextToken(request));
+        return Response.ok(pageResponse("ConnectionList", page.items(), page.nextToken())).build();
+    }
+
+    private Response handleUpdateConnection(JsonNode request, String region) throws Exception {
+        ConnectionInput input = request.hasNonNull("ConnectionInput")
+                ? mapper.treeToValue(request.get("ConnectionInput"), ConnectionInput.class)
+                : null;
+        glueService.updateConnection(request.path("Name").asText(null), input, region);
         return Response.ok(Map.of()).build();
     }
 
-    private Response handleGetTags(JsonNode request) {
+    private Response handleTestConnection(JsonNode request) {
+        JsonNode input = request.path("TestConnectionInput");
+        Map<String, String> properties = input.hasNonNull("ConnectionProperties")
+                ? mapper.convertValue(input.get("ConnectionProperties"), STRING_MAP)
+                : null;
+        glueService.testConnection(
+                request.path("ConnectionName").asText(null),
+                input.path("ConnectionType").asText(null),
+                properties);
+        return Response.ok(Map.of()).build();
+    }
+
+    private Response handleGetTags(JsonNode request, String region) {
         String arn = request.path("ResourceArn").asText(null);
-        Map<String, String> tags = glueService.handlesResourceArn(arn)
-                ? glueService.getTags(arn)
-                : schemaRegistryService.getTags(arn);
+        Map<String, String> tags = glueService.getTags(arn, region);
         return Response.ok(Map.of("Tags", tags)).build();
     }
 
-    @SuppressWarnings("unchecked")
-    private Response handleCreateJob(JsonNode request, String region) throws Exception {
-        Job job = mapper.treeToValue(request, Job.class);
-        Map<String, String> tags = request.has("Tags")
-                ? mapper.convertValue(request.get("Tags"), Map.class)
-                : null;
-        glueService.createJob(job, tags, region);
-        return Response.ok(Map.of("Name", job.getName())).build();
+    private Job toDomain(CreateJobRequest req) {
+        Job job = new Job();
+        job.setName(req.getName());
+        job.setAllocatedCapacity(req.getAllocatedCapacity());
+        job.setCodeGenConfigurationNodes(req.getCodeGenConfigurationNodes());
+        job.setCommand(req.getCommand());
+        job.setConnections(req.getConnections());
+        job.setDefaultArguments(req.getDefaultArguments());
+        job.setDescription(req.getDescription());
+        job.setExecutionClass(req.getExecutionClass());
+        job.setExecutionProperty(req.getExecutionProperty());
+        job.setGlueVersion(req.getGlueVersion());
+        job.setJobMode(req.getJobMode());
+        job.setJobRunQueuingEnabled(req.getJobRunQueuingEnabled());
+        job.setLogUri(req.getLogUri());
+        job.setMaintenanceWindow(req.getMaintenanceWindow());
+        job.setMaxCapacity(req.getMaxCapacity());
+        job.setMaxRetries(req.getMaxRetries());
+        job.setNonOverridableArguments(req.getNonOverridableArguments());
+        job.setNotificationProperty(req.getNotificationProperty());
+        job.setNumberOfWorkers(req.getNumberOfWorkers());
+        job.setRole(req.getRole());
+        job.setSecurityConfiguration(req.getSecurityConfiguration());
+        job.setTimeout(req.getTimeout());
+        job.setWorkerType(req.getWorkerType());
+        return job;
     }
 
-    private Response handleGetJob(JsonNode request) {
-        return Response.ok(Map.of("Job", glueService.getJob(request.get("JobName").asText()))).build();
+    private Crawler toDomain(CreateCrawlerRequest req) {
+        Crawler crawler = new Crawler();
+        crawler.setName(req.getName());
+        crawler.setClassifiers(req.getClassifiers());
+        crawler.setConfiguration(req.getConfiguration());
+        crawler.setCrawlerSecurityConfiguration(req.getCrawlerSecurityConfiguration());
+        crawler.setDatabaseName(req.getDatabaseName());
+        crawler.setDescription(req.getDescription());
+        crawler.setLakeFormationConfiguration(req.getLakeFormationConfiguration());
+        crawler.setLineageConfiguration(req.getLineageConfiguration());
+        crawler.setRecrawlPolicy(req.getRecrawlPolicy());
+        crawler.setRole(req.getRole());
+        crawler.setSchemaChangePolicy(req.getSchemaChangePolicy());
+        crawler.setTablePrefix(req.getTablePrefix());
+        crawler.setTargets(req.getTargets());
+        if (req.getSchedule() != null && !req.getSchedule().isBlank()) {
+            Schedule schedule = new Schedule();
+            schedule.setScheduleExpression(req.getSchedule());
+            schedule.setState("SCHEDULED");
+            crawler.setSchedule(schedule);
+        }
+        return crawler;
     }
 
-    private Response handleUpdateJob(JsonNode request) throws Exception {
-        String name = request.get("JobName").asText();
-        Job update = mapper.treeToValue(request.get("JobUpdate"), Job.class);
-        glueService.updateJob(name, update);
-        return Response.ok(Map.of("JobName", name)).build();
+    private Crawler toDomain(UpdateCrawlerRequest req) {
+        Crawler crawler = new Crawler();
+        crawler.setName(req.getName());
+        crawler.setClassifiers(req.getClassifiers());
+        crawler.setConfiguration(req.getConfiguration());
+        crawler.setCrawlerSecurityConfiguration(req.getCrawlerSecurityConfiguration());
+        crawler.setDatabaseName(req.getDatabaseName());
+        crawler.setDescription(req.getDescription());
+        crawler.setLakeFormationConfiguration(req.getLakeFormationConfiguration());
+        crawler.setLineageConfiguration(req.getLineageConfiguration());
+        crawler.setRecrawlPolicy(req.getRecrawlPolicy());
+        crawler.setRole(req.getRole());
+        crawler.setSchemaChangePolicy(req.getSchemaChangePolicy());
+        crawler.setTablePrefix(req.getTablePrefix());
+        crawler.setTargets(req.getTargets());
+        if (req.getSchedule() != null && !req.getSchedule().isBlank()) {
+            Schedule schedule = new Schedule();
+            schedule.setScheduleExpression(req.getSchedule());
+            schedule.setState("SCHEDULED");
+            crawler.setSchedule(schedule);
+        }
+        return crawler;
     }
 
     @SuppressWarnings("unchecked")
@@ -847,41 +1135,4 @@ public class GlueJsonHandler {
                 request.path("RunId").asText(null)))).build();
     }
 
-    @SuppressWarnings("unchecked")
-    private Response handleCreateCrawler(JsonNode request, String region) throws Exception {
-        Crawler crawler = mapper.treeToValue(request, Crawler.class);
-        Map<String, String> tags = request.has("Tags")
-                ? mapper.convertValue(request.get("Tags"), Map.class)
-                : null;
-        glueService.createCrawler(crawler, tags, region);
-        return Response.ok().build();
-    }
-
-    @SuppressWarnings("unchecked")
-    private Response handleCreateConnection(JsonNode request, String region) throws Exception {
-        Connection connection = mapper.treeToValue(request.get("ConnectionInput"), Connection.class);
-        Map<String, String> tags = request.has("Tags")
-                ? mapper.convertValue(request.get("Tags"), Map.class)
-                : null;
-        glueService.createConnection(connection, tags, region);
-        return Response.ok().build();
-    }
-
-    private Response handleGetConnection(JsonNode request) {
-        boolean hidePassword = request.path("HidePassword").asBoolean(false);
-        return Response.ok(Map.of("Connection",
-                glueService.getConnection(request.get("Name").asText(), hidePassword))).build();
-    }
-
-    private Response handleGetConnections(JsonNode request) {
-        boolean hidePassword = request.path("HidePassword").asBoolean(false);
-        return Response.ok(Map.of("ConnectionList", glueService.getConnections(hidePassword))).build();
-    }
-
-    private Response handleUpdateConnection(JsonNode request) throws Exception {
-        String name = request.get("Name").asText();
-        Connection update = mapper.treeToValue(request.get("ConnectionInput"), Connection.class);
-        glueService.updateConnection(name, update);
-        return Response.ok().build();
-    }
 }

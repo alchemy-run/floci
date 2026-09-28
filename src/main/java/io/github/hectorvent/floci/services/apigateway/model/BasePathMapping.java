@@ -7,6 +7,7 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class BasePathMapping {
     private String basePath;
+    private String apiMappingId;
     private String restApiId;
     private String stage;
 
@@ -19,6 +20,9 @@ public class BasePathMapping {
         this.restApiId = restApiId;
         this.stage = stage;
     }
+
+    public String getApiMappingId() { return apiMappingId; }
+    public void setApiMappingId(String apiMappingId) { this.apiMappingId = apiMappingId; }
 
     public String getBasePath() { return basePath; }
     public void setBasePath(String basePath) { this.basePath = basePath; }

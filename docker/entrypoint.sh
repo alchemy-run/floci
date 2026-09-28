@@ -1,8 +1,10 @@
 #!/bin/sh
-# Starts as root, normalizes the bind-mounted Docker socket's group
-# ownership so the unprivileged `floci` user can reach it on any host,
-# then re-executes this script as `floci` via gosu. The second invocation
-# falls through to exec the user's command.
+# Starts as root, reads the bind-mounted Docker socket's group so the
+# unprivileged `floci` user can reach it on any host, then re-executes this
+# script as `floci` via coreutils `chroot --userspec`, which also grants that
+# group as a supplementary group. The second invocation falls through to exec
+# the user's command. No gosu, no usermod: both would cost a package layer the
+# base image does not otherwise need.
 #
 # Why: on native Linux Docker, /var/run/docker.sock is owned by
 # root:docker with mode 660 and the docker GID varies by distro. On
@@ -15,15 +17,11 @@
 set -eu
 
 if [ "$(id -u)" = '0' ]; then
+    groups='0'
     if [ -S /var/run/docker.sock ]; then
         sock_gid="$(stat -c '%g' /var/run/docker.sock)"
         if [ "$sock_gid" != '0' ]; then
-            group_name="$(getent group "$sock_gid" | cut -d: -f1)" || group_name=''
-            if [ -z "$group_name" ]; then
-                groupadd -g "$sock_gid" docker-host
-                group_name='docker-host'
-            fi
-            usermod -aG "$group_name" floci
+            groups="0,$sock_gid"
         fi
     fi
 
@@ -34,7 +32,13 @@ if [ "$(id -u)" = '0' ]; then
         chown -R floci:root /app/data 2>/dev/null || true
     fi
 
-    exec gosu floci "$0" "$@"
+    # `chroot /` changes nothing but the identity: uid 1001, primary gid 0, plus the socket's
+    # group. Supplementary groups are set by number, so the group needs no /etc/group entry.
+    # --skip-chdir keeps the working directory (/app, where relative data paths resolve); GNU
+    # chroot would otherwise chdir to the new root.
+    if [ "${FLOCI_RUN_AS_ROOT:-false}" != 'true' ]; then
+        exec chroot --userspec=1001:0 --groups="$groups" --skip-chdir / "$0" "$@"
+    fi
 fi
 
 if [ "${LOCALSTACK_PARITY:-true}" != "false" ]; then
@@ -94,12 +98,14 @@ fi
 # and exit 0 without ever starting the emulator. LocalStack's entrypoint
 # ignores its argv entirely, so this keeps drop-in parity.
 # The default matches the CMD of the image variant: native images ship
-# /app/application (or floci-*-runner), JVM images ship quarkus-run.jar.
+# /app/application (or floci-*-runner), JVM images ship /app/quarkus-app/quarkus-run.jar.
+# Both listen on 0.0.0.0 so a published port reaches Floci, which it only
+# accepts with explicit consent. The JVM reads -D options only before -jar.
 if [ $# -eq 0 ]; then
     if runner="$(resolve_native_bin)"; then
-        set -- "$runner" -Dquarkus.http.host=0.0.0.0
+        set -- "$runner" -Dquarkus.http.host=0.0.0.0 -Dfloci.security.allow-unsafe-network-exposure=true
     else
-        set -- java -jar /app/quarkus-app/quarkus-run.jar -Dquarkus.http.host=0.0.0.0
+        set -- java -Dquarkus.http.host=0.0.0.0 -Dfloci.security.allow-unsafe-network-exposure=true -jar /app/quarkus-app/quarkus-run.jar
     fi
 fi
 

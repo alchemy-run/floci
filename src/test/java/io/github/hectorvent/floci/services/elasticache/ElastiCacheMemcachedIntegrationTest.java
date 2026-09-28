@@ -1,6 +1,8 @@
 package io.github.hectorvent.floci.services.elasticache;
 
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.path.xml.XmlPath;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
@@ -31,7 +33,11 @@ class ElastiCacheMemcachedIntegrationTest {
     private static final int SOCKET_TIMEOUT_MS = 10_000;
 
     private static String clusterHost;
+    /** The cluster's host relay, which host clients connect to; the cluster reports 11211. */
     private static int clusterPort;
+
+    @Inject
+    ElastiCacheMemcachedService memcachedService;
 
     @BeforeAll
     static void requireDocker() {
@@ -52,8 +58,7 @@ class ElastiCacheMemcachedIntegrationTest {
     @Test
     @Order(1)
     void createCacheCluster() {
-        var response =
-                given()
+        XmlPath response = given()
                     .formParam("Action", "CreateCacheCluster")
                     .formParam("CacheClusterId", CLUSTER_ID)
                     .formParam("Engine", "memcached")
@@ -73,8 +78,9 @@ class ElastiCacheMemcachedIntegrationTest {
 
         clusterHost = response.getString(
                 "CreateCacheClusterResponse.CreateCacheClusterResult.CacheCluster.ConfigurationEndpoint.Address");
-        clusterPort = response.getInt(
-                "CreateCacheClusterResponse.CreateCacheClusterResult.CacheCluster.ConfigurationEndpoint.Port");
+        assertEquals(11211, response.getInt(
+                "CreateCacheClusterResponse.CreateCacheClusterResult.CacheCluster.ConfigurationEndpoint.Port"));
+        clusterPort = memcachedService.getCacheCluster(CLUSTER_ID).getProxyPort();
     }
 
     @Test

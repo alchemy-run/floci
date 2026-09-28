@@ -5,6 +5,7 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.SsrfProtection;
 import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.core.storage.StorageBackedMap;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -18,15 +19,25 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import java.nio.charset.StandardCharsets;
+import java.io.IOException;
+import java.net.InetAddress;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import io.github.hectorvent.floci.core.resource.ExplorerResource;
+import io.github.hectorvent.floci.core.resource.ResourceProvider;
+import io.github.hectorvent.floci.core.resource.SupportedResourceType;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 @ApplicationScoped
-public class ElbV2Service {
+public class ElbV2Service implements ResourceProvider {
 
     @Inject
     ElbV2DataPlane dataPlane;
@@ -109,6 +120,18 @@ public class ElbV2Service {
         }
     }
 
+    /**
+     * Drops one entry from an ARN index. The list has to be looked up rather than defaulted:
+     * {@code getOrDefault(key, List.of())} hands back an immutable list whose {@code remove}
+     * throws, which the Query path reports as an {@code InternalFailure}.
+     */
+    private static void removeFromIndex(Map<String, List<String>> index, String key, String value) {
+        List<String> entries = index.get(key);
+        if (entries != null) {
+            entries.remove(value);
+        }
+    }
+
     private <V> void persistRegion(Map<String, Map<String, V>> resources, String region) {
         Map<String, V> regionResources = resources.get(region);
         if (regionResources != null) {
@@ -156,7 +179,7 @@ public class ElbV2Service {
         }
         for (Map<String, Rule> regionRules : rules.values()) {
             for (Rule rule : regionRules.values()) {
-                listenerToRules.computeIfAbsent(rule.getListenerArn(), k -> new ArrayList<>())
+                listenerToRules.computeIfAbsent(rule.getListenerArn(), k -> new CopyOnWriteArrayList<>())
                         .add(rule.getRuleArn());
             }
         }
@@ -275,10 +298,14 @@ public class ElbV2Service {
     }
 
     public void deleteLoadBalancer(String region, String arn) {
-        Map<String, LoadBalancer> regionLbs = mutableRegion(loadBalancers, region);
+        Map<String, LoadBalancer> regionLbs = loadBalancers.get(region);
+        if (regionLbs == null) {
+            return; // AWS silently ignores non-existent LBs on delete
+        }
+        regionLbs = mutableRegion(loadBalancers, region);
         LoadBalancer lb = regionLbs.remove(arn);
         if (lb == null) {
-            return; // AWS silently ignores non-existent LBs on delete
+            return;
         }
         // cascade: listeners → rules
         List<String> listenerArns = lbToListeners.remove(arn);
@@ -304,7 +331,7 @@ public class ElbV2Service {
 
     public Map<String, String> describeLoadBalancerAttributes(String region, String arn) {
         LoadBalancer lb = requireLoadBalancer(region, arn);
-        return new LinkedHashMap<>(lb.getAttributes());
+        return ElbV2DefaultAttributes.merge(ElbV2DefaultAttributes.forLoadBalancer(lb), lb.getAttributes());
     }
 
     public void modifyLoadBalancerAttributes(String region, String arn, Map<String, String> newAttrs) {
@@ -501,7 +528,7 @@ public class ElbV2Service {
 
     public Map<String, String> describeTargetGroupAttributes(String region, String arn) {
         TargetGroup tg = requireTargetGroup(region, arn);
-        return new LinkedHashMap<>(tg.getAttributes());
+        return ElbV2DefaultAttributes.merge(ElbV2DefaultAttributes.forTargetGroup(tg), tg.getAttributes());
     }
 
     public void modifyTargetGroupAttributes(String region, String arn, Map<String, String> newAttrs) {
@@ -555,7 +582,7 @@ public class ElbV2Service {
         Map<String, Rule> regionRules = mutableRegion(rules, region);
         regionRules.put(defaultRule.getRuleArn(), defaultRule);
         rules.put(region, regionRules);
-        listenerToRules.computeIfAbsent(listenerArn, k -> new ArrayList<>()).add(defaultRule.getRuleArn());
+        listenerToRules.computeIfAbsent(listenerArn, k -> new CopyOnWriteArrayList<>()).add(defaultRule.getRuleArn());
         for (Action action : defaultRule.getActions()) {
             linkTgToLb(action, lbArn);
         }
@@ -595,13 +622,17 @@ public class ElbV2Service {
     }
 
     public void deleteListener(String region, String listenerArn) {
-        Map<String, Listener> regionListeners = mutableRegion(listeners, region);
+        Map<String, Listener> regionListeners = listeners.get(region);
+        if (regionListeners == null) {
+            return;
+        }
+        regionListeners = mutableRegion(listeners, region);
         Listener listener = regionListeners.remove(listenerArn);
         if (listener == null) {
             return;
         }
         dataPlane.stopListener(listenerArn);
-        lbToListeners.getOrDefault(listener.getLoadBalancerArn(), List.of()).remove(listenerArn);
+        removeFromIndex(lbToListeners, listener.getLoadBalancerArn(), listenerArn);
 
         Map<String, Rule> regionRules = mutableRegion(rules, region);
         List<String> ruleArns = listenerToRules.remove(listenerArn);
@@ -668,7 +699,7 @@ public class ElbV2Service {
 
     // ── Rules ─────────────────────────────────────────────────────────────────
 
-    public Rule createRule(String region, String listenerArn, List<RuleCondition> conditions,
+    public synchronized Rule createRule(String region, String listenerArn, List<RuleCondition> conditions,
                             int priority, List<Action> actions, Map<String, String> initialTags) {
         requireListener(region, listenerArn);
         if (priority < 1 || priority > 50000) {
@@ -706,7 +737,7 @@ public class ElbV2Service {
 
         regionRules.put(ruleArn, rule);
         rules.put(region, regionRules);
-        listenerToRules.computeIfAbsent(listenerArn, k -> new ArrayList<>()).add(ruleArn);
+        listenerToRules.computeIfAbsent(listenerArn, k -> new CopyOnWriteArrayList<>()).add(ruleArn);
 
         // update TG → LB index for all target group actions
         for (Action a : rule.getActions()) {
@@ -746,7 +777,7 @@ public class ElbV2Service {
         return new ArrayList<>(regionRules.values());
     }
 
-    public void deleteRule(String region, String ruleArn) {
+    public synchronized void deleteRule(String region, String ruleArn) {
         Map<String, Rule> regionRules = mutableRegion(rules, region);
         Rule rule = regionRules.get(ruleArn);
         if (rule == null) {
@@ -759,7 +790,7 @@ public class ElbV2Service {
         String listenerArn = rule.getListenerArn();
         regionRules.remove(ruleArn);
         rules.put(region, regionRules);
-        listenerToRules.getOrDefault(listenerArn, List.of()).remove(ruleArn);
+        removeFromIndex(listenerToRules, listenerArn, ruleArn);
         tags.remove(ruleArn);
         Listener listener = listeners.getOrDefault(region, Map.of()).get(listenerArn);
         if (listener != null) {
@@ -768,7 +799,7 @@ public class ElbV2Service {
         dataPlane.recompileRules(listenerArn, getListenerRules(region, listenerArn));
     }
 
-    public Rule modifyRule(String region, String ruleArn, List<RuleCondition> conditions, List<Action> actions) {
+    public synchronized Rule modifyRule(String region, String ruleArn, List<RuleCondition> conditions, List<Action> actions) {
         Rule rule = requireRule(region, ruleArn);
         String listenerArn = rule.getListenerArn();
         if (conditions != null) rule.setConditions(new ArrayList<>(conditions));
@@ -778,7 +809,7 @@ public class ElbV2Service {
         return rule;
     }
 
-    public void setRulePriorities(String region, Map<String, Integer> arnToPriority) {
+    public synchronized void setRulePriorities(String region, Map<String, Integer> arnToPriority) {
         Map<String, Rule> regionRules = rules.getOrDefault(region, Map.of());
 
         // validate all rules exist and are not default before touching anything
@@ -825,6 +856,11 @@ public class ElbV2Service {
 
     public void registerTargets(String region, String tgArn, List<TargetDescription> targets) {
         TargetGroup tg = requireTargetGroup(region, tgArn);
+        if (!"lambda".equals(tg.getTargetType())) {
+            for (TargetDescription t : targets) {
+                requireNotMetadataAddress(t.getId());
+            }
+        }
         List<TargetDescription> existing = tg.getTargets();
         for (TargetDescription t : targets) {
             // replace if same id+port already registered
@@ -833,6 +869,18 @@ public class ElbV2Service {
         }
         persistRegion(targetGroups, region);
         healthChecker.addTargets(tgArn, targets, tg);
+    }
+
+    private static void requireNotMetadataAddress(String targetId) {
+        if (!ElbV2TargetResolver.isIpLiteral(targetId)) {
+            return;
+        }
+        try {
+            SsrfProtection.rejectMetadataAddresses(InetAddress.getAllByName(targetId), targetId);
+        } catch (IOException e) {
+            throw new AwsException("InvalidTarget",
+                    "The IP address '" + targetId + "' is not a valid target", 400);
+        }
     }
 
     public void deregisterTargets(String region, String tgArn, List<TargetDescription> targets) {
@@ -1512,5 +1560,44 @@ public class ElbV2Service {
                 out.add(t.getTargetGroupArn());
             }
         }
+    }
+
+    // ─── Resource Explorer 2 ───────────────────────────────────────────────────
+
+    @Override
+    public List<ExplorerResource> getResources() {
+        List<ExplorerResource> resources = new ArrayList<>();
+        for (Map<String, LoadBalancer> regionLoadBalancers : loadBalancers.values()) {
+            for (LoadBalancer loadBalancer : regionLoadBalancers.values()) {
+                addExplorerResource(resources, loadBalancer.getLoadBalancerArn(),
+                        "elasticloadbalancing:loadbalancer", loadBalancer.getCreatedTime());
+            }
+        }
+        for (Map<String, TargetGroup> regionTargetGroups : targetGroups.values()) {
+            for (TargetGroup targetGroup : regionTargetGroups.values()) {
+                addExplorerResource(resources, targetGroup.getTargetGroupArn(),
+                        "elasticloadbalancing:targetgroup", null);
+            }
+        }
+        return resources;
+    }
+
+    @Override
+    public Set<SupportedResourceType> getSupportedResourceTypes() {
+        return Set.of(
+                new SupportedResourceType("elasticloadbalancing:loadbalancer", "elasticloadbalancing", true),
+                new SupportedResourceType("elasticloadbalancing:targetgroup", "elasticloadbalancing", true));
+    }
+
+    private void addExplorerResource(List<ExplorerResource> out, String arn, String resourceType,
+                                     Instant createdAt) {
+        if (arn == null) {
+            return;
+        }
+        AwsArnUtils.Arn parsed = AwsArnUtils.parse(arn);
+        out.add(new ExplorerResource(arn, resourceType, "elasticloadbalancing",
+                parsed.region(), parsed.accountId(),
+                createdAt != null ? createdAt : Instant.now(),
+                tags.getOrDefault(arn, Map.of())));
     }
 }

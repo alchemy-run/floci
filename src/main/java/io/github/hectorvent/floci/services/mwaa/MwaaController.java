@@ -16,6 +16,7 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -33,10 +34,12 @@ import java.util.Map;
 public class MwaaController {
 
     private final MwaaService mwaaService;
+    private final MwaaRestApiInvoker restApiInvoker;
 
     @Inject
-    public MwaaController(MwaaService mwaaService) {
+    public MwaaController(MwaaService mwaaService, MwaaRestApiInvoker restApiInvoker) {
         this.mwaaService = mwaaService;
+        this.restApiInvoker = restApiInvoker;
     }
 
     @PUT
@@ -84,5 +87,34 @@ public class MwaaController {
     @Path("/clitoken/{name}")
     public Response createCliToken(@PathParam("name") String name) {
         return Response.ok(mwaaService.createCliToken(name)).build();
+    }
+
+    @POST
+    @Path("/restapi/{name}")
+    public Response invokeRestApi(@PathParam("name") String name, Map<String, Object> request) {
+        Map<String, Object> body = request != null ? request : Map.of();
+        String path = body.get("Path") instanceof String p ? p : null;
+        String method = body.get("Method") instanceof String m ? m : null;
+        MwaaRestApiInvoker.validate(path, method);
+        Environment environment = mwaaService.getEnvironment(name);
+        MwaaRestApiInvoker.Result result = restApiInvoker.invoke(environment, mwaaService.isMockMode(),
+                path, method, body.get("QueryParameters"), body.get("Body"));
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        if (result.isClientError() || result.isServerError()) {
+            // Both modeled Airflow-error shapes are HTTP 400 in the MWAA API.
+            String type = result.isClientError() ? "RestApiClientException" : "RestApiServerException";
+            payload.put("__type", type);
+            payload.put("message", "The Airflow REST API returned HTTP " + result.restApiStatusCode() + ".");
+            payload.put("RestApiStatusCode", result.restApiStatusCode());
+            payload.put("RestApiResponse", result.restApiResponse());
+            return Response.status(400)
+                    .header("X-Amzn-Errortype", type)
+                    .entity(payload)
+                    .build();
+        }
+        payload.put("RestApiStatusCode", result.restApiStatusCode());
+        payload.put("RestApiResponse", result.restApiResponse());
+        return Response.ok(payload).build();
     }
 }

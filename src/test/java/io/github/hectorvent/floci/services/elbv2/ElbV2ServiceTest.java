@@ -6,6 +6,7 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
 import io.github.hectorvent.floci.services.ec2.model.Subnet;
@@ -25,6 +26,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.lang.reflect.Field;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -158,6 +160,51 @@ class ElbV2ServiceTest {
                 () -> service.describeRules(REGION, listenerArn, null));
         assertEquals("ListenerNotFound", error.getErrorCode());
         assertEquals(400, error.getHttpStatus());
+    }
+
+    @Test
+    void concurrentCreateRulesOnOneListenerAreAtomic() throws Exception {
+        String lbArn = service.createLoadBalancer(
+                REGION, "rules-race-lb", "internal", "application", "ipv4",
+                ALB_SUBNETS, List.of("sg-a"), Map.of()).getLoadBalancerArn();
+        String tgArn = createTargetGroup("rules-race-tg");
+        String listenerArn = service.createListener(
+                REGION, lbArn, "HTTP", 80, null, List.of(),
+                List.of(forwardAction(tgArn)), List.of(), Map.of()).getListenerArn();
+
+        int threads = 16;
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(threads);
+        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicInteger priorityInUse = new java.util.concurrent.atomic.AtomicInteger();
+        List<java.util.concurrent.Future<?>> futures = new java.util.ArrayList<>();
+        for (int i = 0; i < threads; i++) {
+            // Half the callers race for priority 10; the rest take distinct priorities.
+            int priority = i % 2 == 0 ? 10 : 100 + i;
+            futures.add(pool.submit(() -> {
+                start.await();
+                try {
+                    service.createRule(REGION, listenerArn, List.of(pathPattern("/p" + priority + "/*")),
+                            priority, List.of(forwardAction(tgArn)), Map.of());
+                } catch (AwsException e) {
+                    if (!"PriorityInUse".equals(e.getErrorCode())) {
+                        throw e;
+                    }
+                    priorityInUse.incrementAndGet();
+                }
+                return null;
+            }));
+        }
+        start.countDown();
+        for (java.util.concurrent.Future<?> future : futures) {
+            future.get(30, java.util.concurrent.TimeUnit.SECONDS);
+        }
+        pool.shutdown();
+
+        List<Rule> rules = service.describeRules(REGION, listenerArn, null);
+        assertEquals(1, rules.stream().filter(r -> "10".equals(r.getPriority())).count());
+        assertEquals(threads / 2 - 1, priorityInUse.get());
+        // default rule + one priority-10 winner + the distinct-priority rules
+        assertEquals(1 + 1 + threads / 2, rules.size());
     }
 
     @Test
@@ -431,7 +478,7 @@ class ElbV2ServiceTest {
         String lbArn = service.createLoadBalancer(
                 REGION, "immutable-region-lb", "internal", "application", "ipv4",
                 ALB_SUBNETS, List.of("sg-a"), Map.of()).getLoadBalancerArn();
-        var field = ElbV2Service.class.getDeclaredField("listeners");
+        Field field = ElbV2Service.class.getDeclaredField("listeners");
         field.setAccessible(true);
         @SuppressWarnings("unchecked")
         Map<String, Map<String, Listener>> persisted = (Map<String, Map<String, Listener>>) field.get(service);
@@ -548,6 +595,28 @@ class ElbV2ServiceTest {
     }
 
     @Test
+    void deleteListenerIsIgnoredForRegionWithNoListeners() {
+        String emptyRegion = "eu-central-1";
+
+        service.deleteListener(emptyRegion, "arn:aws:elasticloadbalancing:" + emptyRegion
+                + ":000000000000:listener/app/sample-lb/1111111111111111/2222222222222222");
+
+        assertTrue(service.describeListeners(emptyRegion, null, null).isEmpty());
+        verifyNoInteractions(dataPlane);
+    }
+
+    @Test
+    void deleteLoadBalancerIsIgnoredForRegionWithNoLoadBalancers() {
+        String emptyRegion = "eu-central-1";
+
+        service.deleteLoadBalancer(emptyRegion, "arn:aws:elasticloadbalancing:" + emptyRegion
+                + ":000000000000:loadbalancer/app/sample-lb/1111111111111111");
+
+        assertTrue(service.describeLoadBalancers(emptyRegion, null, null, null, null).isEmpty());
+        verifyNoInteractions(dataPlane);
+    }
+
+    @Test
     void describeTargetHealthReturnsUnusedForExplicitUnregisteredTarget() {
         String tgArn = createTargetGroup("sample-tg");
         TargetDescription target = new TargetDescription();
@@ -559,6 +628,33 @@ class ElbV2ServiceTest {
         assertEquals("unused", health.getState());
         assertEquals("Target.NotRegistered", health.getReason());
         assertEquals("Target is not registered to the target group", health.getDescription());
+    }
+
+    @Test
+    void registerTargetsRejectsLinkLocalAndMetadataAddresses() {
+        String tgArn = createTargetGroup("metadata-tg");
+
+        for (String address : List.of("169.254.169.254", "169.254.170.2", "fe80::1", "fd00:ec2::254")) {
+            TargetDescription target = new TargetDescription();
+            target.setId(address);
+            AwsException ex = assertThrows(AwsException.class,
+                    () -> service.registerTargets(REGION, tgArn, List.of(target)), address);
+            assertEquals("InvalidTarget", ex.getErrorCode());
+        }
+        assertTrue(service.describeTargetGroups(REGION, null, List.of(tgArn), null).getFirst().getTargets().isEmpty());
+        verify(healthChecker, never()).addTargets(eq(tgArn), anyList(), any(TargetGroup.class));
+    }
+
+    @Test
+    void registerTargetsStillAcceptsLoopbackAndPrivateAddresses() {
+        String tgArn = createTargetGroup("local-tg");
+
+        for (String address : List.of("127.0.0.1", "10.0.0.5", "172.17.0.2", "192.168.1.10")) {
+            TargetDescription target = new TargetDescription();
+            target.setId(address);
+            service.registerTargets(REGION, tgArn, List.of(target));
+        }
+        assertEquals(4, service.describeTargetGroups(REGION, null, List.of(tgArn), null).getFirst().getTargets().size());
     }
 
     private String createTargetGroup(String name) {
@@ -661,10 +757,10 @@ class ElbV2ServiceTest {
 
         @Override
         @SuppressWarnings("unchecked")
-        public <V> StorageBackend<String, V> create(String serviceName,
+        public <V> AccountAwareStorageBackend<V> create(String serviceName,
                                                      String fileName,
                                                      TypeReference<Map<String, V>> typeReference) {
-            return (StorageBackend<String, V>) stores.computeIfAbsent(fileName, ignored -> new InMemoryStorage<>());
+            return (AccountAwareStorageBackend<V>) stores.computeIfAbsent(fileName, ignored -> AccountAwareStorageBackend.inMemory("000000000000"));
         }
     }
 }

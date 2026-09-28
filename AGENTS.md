@@ -15,7 +15,7 @@ Floci acts as an open-source alternative to LocalStack Community.
 - Port: 4566
 - Stack:
   - Java 25
-  - Quarkus 3.32.3
+  - Quarkus 3.39.2
   - JUnit 5
   - RestAssured
   - Jackson
@@ -249,17 +249,22 @@ When adding functionality:
 
 ## Adding a New AWS Service
 
-1. Create a package under `services/`
-2. Add:
-   - Controller
-   - Service
-   - `model/`
-3. Register the service in `ServiceRegistry`
-4. Add config to `EmulatorConfig`
-5. Add YAML config in main and test config files
-6. Wire storage through `StorageFactory`
-7. Add tests
-8. Update documentation
+1. Create a package under `services/<svc>/` with a Controller, a Service, and `model/`
+2. Add a `<Svc>ServiceConfig` interface and its accessor on `ServicesConfig` in `EmulatorConfig`
+3. Add one `descriptor(...)` entry in `ResolvedServiceCatalog`. This is the registration point;
+   `ServiceRegistry` only reads the catalog and has no registration API
+4. Add `floci.services.<key>.enabled` to both `src/main/resources/application.yml` and
+   `src/test/resources/application.yml`
+5. JSON 1.1 only: inject the handler in `AwsJson11Controller`
+6. Obtain storage through `StorageFactory` and implement `Resettable`
+7. List any static `Random` or `SecureRandom` field under `--initialize-at-run-time` in
+   `application.yml`
+8. Add `<Svc>ServiceTest` and `<Svc>IntegrationTest`
+9. Document it: `docs/services/<svc>.md`, a `mkdocs.yml` nav entry, a Service Matrix row in
+   `docs/services/index.md`, and a row in the README category table
+10. Register the handler in `tools/docs/services.yaml`, then run `make docs-sync` and
+    `make docs-check`
+11. Add a `TestFixtures` client factory and a `<Svc>Test` in `compatibility-tests/sdk-test-java`
 
 ---
 
@@ -271,11 +276,11 @@ monolith being dismantled; new types go in per-service provisioners under
 
 1. Add the type to the existing `<Service>CfnProvisioner`, or create one:
    `@ApplicationScoped`, injecting only the service it wraps. CDI discovery via
-   `CloudFormationResourceRegistry` handles registration — no manual wiring, but a
+   `CloudFormationResourceRegistry` handles registration: no manual wiring, but a
    missing `@ApplicationScoped` silently means the type is never provisioned.
 2. `resourceTypes()` lists the `AWS::*` types; `provision(resource, props, ctx)`
    does the work, switching on `resource.getResourceType()` when it serves several.
-3. Set **both** reference mechanisms — they are separate:
+3. Set **both** reference mechanisms. They are separate:
    - `resource.setPhysicalId(...)` backs `Ref`
    - `resource.getAttributes().put(...)` backs `Fn::GetAtt`, one entry per attribute
    Omitting an attribute does not fail; `Fn::GetAtt` resolves to the literal
@@ -283,31 +288,156 @@ monolith being dismantled; new types go in per-service provisioners under
    `local/aws/cfn-resource-schemas/us-east-1/` (`readOnlyProperties`), and validate
    `required` from the same file.
 4. **`provision` serves create *and* update.** On `UpdateStack` it is re-invoked with
-   the prior physical id and attributes already populated on the resource. Branch on
-   that instead of creating unconditionally.
-5. Override `delete(...)` when the type has a backing delete; tolerate already-deleted.
-6. Tests: focused unit test mocking one service (`SqsCfnProvisionerTest` is the
+   the prior physical id and attributes already populated on the resource. Branch with
+   `ctx.isUpdate()` / `ctx.priorPhysicalId()`, not by reading the id off the resource:
+   `provision` assigns the new id as it runs, so a resource-derived check flips
+   mid-method.
+5. Override `delete(...)` when the type has a backing delete; tolerate already-deleted
+   via `CfnDeletes.safeDelete`, passing the specific "already gone" error codes. Never
+   a catch-all: a real failure such as `BucketNotEmpty` must propagate so the stack
+   reports `DELETE_FAILED`. When the delete needs a create-time attribute rather than
+   just the physical id, override `delete(StackResource, String)`.
+6. **Register in `src/test/resources/cloudformation/supported-resource-types.tsv`**
+   (`type<TAB>Owner`). `CfnResourceInventoryTest` diffs that file against the
+   CDI-resolved registry, so it also catches a missing `@ApplicationScoped`.
+7. **Add the provisioner to `CfnProvisionerFixture.inferredProvisioners()`** when it
+   takes a single service, or a fixture test naming that service silently falls through
+   to the stub arm.
+8. Tests: focused unit test mocking one service (`SqsCfnProvisioner`'s test is the
    pattern) plus an integration test asserting the **exact `Fn::GetAtt` keys**. An
    unmapped type is stubbed as `CREATE_COMPLETE` with a fake ARN, so asserting status
-   alone cannot detect a type that was never wired.
-7. Update the resource-type table in `docs/services/cloudformation.md`.
+   alone cannot detect a type that was never wired. Note the engine's constructor is
+   package-private, so tests in `provisioners/` mock it.
+9. Run `make docs-sync` and commit the result. The resource-type table in
+   `docs/services/cloudformation.md` is **generated** from the step-6 inventory; hand
+   edits fail `docs-check`. Labels, ordering and notes live in
+   `tools/docs/cfn_resource_types.yaml`.
+10. A schema `readOnlyProperties` entry you cannot set goes in
+    `src/test/resources/cloudformation/getatt-attribute-gaps.tsv` with a reason;
+    `CfnSchemaCoverageTest` requires every unset attribute to be fixed or recorded.
 
 References: `SqsCfnProvisioner` (smallest), `Ec2LaunchTemplateCfnProvisioner`
-(update-in-place and replacement).
+(update-in-place and replacement), `LogsCfnProvisioner` (reconcile-vs-replace update).
 
 ---
 
+## Sidecars
+
+A dependency too heavy for the native image (a native runtime, a large engine, another language
+ecosystem) ships as a sidecar: a stateless HTTP service in its own container that Floci starts
+lazily over the Docker socket. Sidecars live in
+[floci-io/floci-sidecars](https://github.com/floci-io/floci-sidecars), one directory per sidecar
+on the shared `sidecar-core`, and are published as `floci/floci-sidecar-<name>:<semver>` on
+Docker Hub. They implement that repository's `docs/contract.md` and carry no AWS vocabulary: the
+sidecar answers a generic question, Floci maps its service semantics onto the answer.
+
+Floci-side rules:
+
+- Never add a `sidecars/` directory to this repository, never publish a `floci/floci:<tag>-<name>`
+  suffix, and never default an image to `:latest` (`ImageCacheService` never re-pulls a cached tag).
+- The consuming service owns two config knobs, `<name>-image` (an exact version) and `<name>-url`
+  (skip container management), and a `<Name>SidecarManager` plus `<Name>SidecarClient` pair.
+  `CedarSidecarManager` is the reference: it reads the contract JSON from `/health` and fails fast
+  on a contract-major mismatch.
+- The sidecar releases before the Floci PR that needs it, as a final or an `X.Y.Z-rc.N` tag; the
+  Floci PR pins that tag. A PR that needs an unreleased sidecar cannot pass CI.
+- Tests: the client's wire contract is covered by a JDK `HttpServer` fake; one Docker-gated
+  `@QuarkusTest` runs the pinned image through the real manager under its own
+  `floci.docker.resource-namespace`. A Floci test imports only Floci classes; the sidecar's own
+  behaviour is tested in its repository.
+- A sidecar that is a stock upstream image plus a script from the classpath needs no repository
+  but still goes through a manager with the same two knobs.
+
 ## Code Style
+
+### General
 
 - Use constructor injection
 - Prefer self-explanatory code over comments
 - Avoid unnecessary comments
 - Always use braces in conditionals
 - Never leave a `catch` block empty. If an exception is intentionally tolerated, log it with enough context to diagnose it later.
+  When swallowing really is correct and logging would be noise, name the variable
+  `ignored` or `expected` and say in a comment why it is safe. A bare
+  `catch (Exception e) {}` is never acceptable.
 - Follow existing project patterns
 - Use modern Java features only when they improve clarity
 
+### Types and names
+
+- **Do not use `var`. Write the explicit type.** Floci reproduces AWS wire
+  contracts, so the concrete type at a call site is usually the thing under
+  review: whether a value is a `LinkedHashMap` or a `Map`, an AWS model type or a
+  JDK one, is exactly what a reviewer needs to see. This covers local
+  declarations, enhanced-for (`for (Tag tag : tags)`), classic for-init, and
+  try-with-resources. The one exception is a record deconstruction pattern
+  (`case Node(var left, var right) ->`), where naming the component types is pure
+  noise.
+- **Import the classes you use. Do not write fully-qualified names inline.**
+  `new ArrayList<>()`, never `new java.util.ArrayList<>()`. The only reason to
+  qualify inline is a genuine name collision inside one file: import the type used
+  more often, qualify the other, and leave a short comment naming the clash.
+  Real examples in this repo are `apigateway` versus `apigatewayv2` model types,
+  CDI `jakarta.enterprise.inject.Instance` versus the EC2 model `Instance`,
+  `jakarta.inject.Provider` versus `jakarta.ws.rs.ext.Provider`, and a service's
+  own `Record` model versus `java.lang.Record`.
+
+### Imports
+
+- No wildcard imports in `src/main`. Static wildcards stay fine in tests, where
+  `Assertions.*`, `Mockito.*` and `Matchers.*` are the established idiom.
+- Import order: non-`java`/`javax` imports alphabetically, then `java.*` and
+  `javax.*` last. This is the IntelliJ default layout and what most of the tree
+  already uses.
+
+### Conventions the codebase already follows
+
+Written down so they stay true. New code should match them without thinking.
+A handful of files predate them; a violation you find in the tree is a straggler,
+not a precedent.
+
+- 4-space indentation, K&R braces. Never indent with a tab.
+- JBoss Logging, in a field named `LOG`, using the parameterized `...v()` form.
+  No string concatenation in log calls.
+- No `printStackTrace`, anywhere. No `System.out` or `System.err` in `src/main`; the
+  one exception is the CLI entry point `io.github.hectorvent.floci.tools.ami.AmiImageTool`,
+  where stdout is the program's output. A few tests print a failure repro just before
+  failing, which is the only good reason to print from a test: an assertion message
+  usually says it better.
+- `java.time` for everything Floci owns. `Calendar` and `SimpleDateFormat` appear
+  nowhere and must not be introduced. A `Date` survives only at a third-party boundary
+  that forces one: the BouncyCastle certificate builder, the JAX-RS
+  `HttpHeaders.getDate()` override, and JDBC's `java.sql.Date` in the RDS Data mapper.
+  Convert at that boundary with `Date.from(instant)` and keep `java.time` on Floci's
+  side of it.
+- Constructor injection in `src/main`. Field injection is fine in tests, and
+  `Instance<T>` field injection is a legitimate CDI pattern.
+- `Optional` as a return type, and never as a field: there are none, keep it that way.
+  It reaches a parameter only where a Quarkus `@ConfigProperty Optional<T>` is threaded
+  through; do not introduce it as a parameter for anything else.
+- Switch expressions over switch statements. Pattern-matching `instanceof` over
+  cast-after-check.
+- `AwsException` for domain errors.
+- `final` on service fields, but not on locals or parameters.
+
+### Tests
+
+These describe `src/test`. `compatibility-tests` is a separate module with the opposite
+idiom, AssertJ and `@DisplayName` in nearly every file. Follow the module you are in.
+
+- Name test methods either as a camelCase sentence (`putAndGetFromMemory`) or as
+  `method_scenario_expectation`. Both are established. `testX` names are common in
+  older tests and are not the pattern to copy.
+- JUnit 5 assertions with Hamcrest and RestAssured matchers. AssertJ is a declared test
+  dependency, used by the Lambda launcher tests; prefer the established matchers
+  everywhere else.
+- `@DisplayName` is not used here. The method name carries the intent.
+
 ---
+
+## Documentation Style
+
+- No em-dashes anywhere, in any content. Use colons, commas, or periods.
 
 ## Logging
 
@@ -383,6 +513,11 @@ Treat release workflows as critical infrastructure.
   per-service provisioner
 - Setting a CloudFormation resource's physical id but not its `Fn::GetAtt`
   attributes (they are two separate mechanisms, and the miss is silent)
+- Hand-editing the resource-type table in `docs/services/cloudformation.md`, which is
+  generated, run `make docs-sync` instead
+- Adding a CloudFormation provisioner without a row in
+  `supported-resource-types.tsv` or an entry in `CfnProvisionerFixture`, either of
+  which leaves a type quietly served by the stub arm
 
 ---
 

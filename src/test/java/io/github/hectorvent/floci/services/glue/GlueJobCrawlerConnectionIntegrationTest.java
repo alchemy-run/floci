@@ -8,6 +8,8 @@ import org.junit.jupiter.api.Test;
 import java.util.UUID;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.notNullValue;
@@ -145,15 +147,18 @@ class GlueJobCrawlerConnectionIntegrationTest {
 
         glue("StartCrawler", "{\"Name\":\"%s\"}".formatted(name))
                 .statusCode(200);
+        awaitCrawlerReady(name);
+        // The crawler's database was never created, so the crawl itself fails.
         glue("GetCrawler", "{\"Name\":\"%s\"}".formatted(name))
                 .statusCode(200)
-                .body("Crawler.State", equalTo("RUNNING"));
+                .body("Crawler.State", equalTo("READY"))
+                .body("Crawler.LastCrawl.Status", equalTo("FAILED"))
+                .body("Crawler.LastCrawl.ErrorMessage", containsString("analytics"))
+                .body("Crawler.Schedule.ScheduleExpression", equalTo("cron(0 12 * * ? *)"));
 
         glue("StopCrawler", "{\"Name\":\"%s\"}".formatted(name))
-                .statusCode(200);
-        glue("GetCrawler", "{\"Name\":\"%s\"}".formatted(name))
-                .statusCode(200)
-                .body("Crawler.State", equalTo("READY"));
+                .statusCode(400)
+                .body("__type", equalTo("CrawlerNotRunningException"));
 
         glue("DeleteCrawler", "{\"Name\":\"%s\"}".formatted(name))
                 .statusCode(200);
@@ -247,6 +252,65 @@ class GlueJobCrawlerConnectionIntegrationTest {
 
         glue("DeleteConnection", "{\"ConnectionName\":\"%s\"}".formatted(name))
                 .statusCode(200);
+    }
+
+    @Test
+    void crawlerInfersCsvTableFromS3AndRecordsSucceededCrawl() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String bucket = "crawl-" + suffix;
+        String database = "crawl_db_" + suffix;
+        String name = "crawler-" + suffix;
+
+        given().when().put("/" + bucket).then().statusCode(200);
+        given().contentType("text/csv").body("id,amount\n1,10.5\n2,20.0\n")
+                .when().put("/" + bucket + "/data/events/part-0.csv").then().statusCode(200);
+        glue("CreateDatabase", "{\"DatabaseInput\":{\"Name\":\"%s\"}}".formatted(database))
+                .statusCode(200);
+        glue("CreateCrawler", """
+                {
+                  "Name": "%s",
+                  "Role": "arn:aws:iam::000000000000:role/GlueCrawler",
+                  "DatabaseName": "%s",
+                  "Targets": {"S3Targets":[{"Path":"s3://%s/data/"}]}
+                }
+                """.formatted(name, database, bucket))
+                .statusCode(200);
+
+        glue("StartCrawler", "{\"Name\":\"%s\"}".formatted(name)).statusCode(200);
+        awaitCrawlerReady(name);
+
+        glue("GetCrawler", "{\"Name\":\"%s\"}".formatted(name))
+                .statusCode(200)
+                .body("Crawler.State", equalTo("READY"))
+                .body("Crawler.LastCrawl.Status", equalTo("SUCCEEDED"))
+                .body("Crawler.LastCrawl.StartTime", notNullValue());
+        glue("GetTable", "{\"DatabaseName\":\"%s\",\"Name\":\"events\"}".formatted(database))
+                .statusCode(200)
+                .body("Table.Parameters.classification", equalTo("csv"))
+                .body("Table.Parameters.UPDATED_BY_CRAWLER", equalTo(name))
+                .body("Table.StorageDescriptor.Location", equalTo("s3://" + bucket + "/data/events/"))
+                .body("Table.StorageDescriptor.Columns.Name", contains("id", "amount"))
+                .body("Table.StorageDescriptor.Columns.Type", contains("bigint", "double"))
+                .body("Table.StorageDescriptor.SerdeInfo.Parameters.'field.delim'", equalTo(","));
+
+        glue("DeleteCrawler", "{\"Name\":\"%s\"}".formatted(name)).statusCode(200);
+    }
+
+    private static void awaitCrawlerReady(String name) {
+        for (int i = 0; i < 100; i++) {
+            String state = glue("GetCrawler", "{\"Name\":\"%s\"}".formatted(name))
+                    .statusCode(200).extract().path("Crawler.State");
+            if ("READY".equals(state)) {
+                return;
+            }
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+        throw new AssertionError("Crawler " + name + " did not return to READY");
     }
 
     private static io.restassured.response.ValidatableResponse glue(String action, String body) {

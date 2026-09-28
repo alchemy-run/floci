@@ -25,6 +25,44 @@ class AcmAlchemyParityTest {
     }
 
     @Test
+    void unvalidatedDnsCertificateRemainsPendingAndGetReturnsTypedError() {
+        String arn = requestCertificate("""
+            { "DomainName": "unvalidated.example.com", "ValidationMethod": "DNS" }
+            """);
+        try {
+            for (int attempt = 0; attempt < 3; attempt++) {
+                given()
+                    .header("X-Amz-Target", "CertificateManager.DescribeCertificate")
+                    .contentType(ACM_CONTENT_TYPE)
+                    .body("{\"CertificateArn\":\"" + arn + "\"}")
+                .when().post("/")
+                .then()
+                    .statusCode(200)
+                    .body("Certificate.Status", equalTo("PENDING_VALIDATION"))
+                    .body("Certificate.IssuedAt", nullValue())
+                    .body("Certificate.DomainValidationOptions.ValidationStatus",
+                            everyItem(equalTo("PENDING_VALIDATION")));
+
+                given()
+                    .header("X-Amz-Target", "CertificateManager.GetCertificate")
+                    .contentType(ACM_CONTENT_TYPE)
+                    .body("{\"CertificateArn\":\"" + arn + "\"}")
+                .when().post("/")
+                .then()
+                    .statusCode(400)
+                    .body("__type", equalTo("RequestInProgressException"))
+                    .body("Certificate", nullValue());
+            }
+        } finally {
+            given()
+                .header("X-Amz-Target", "CertificateManager.DeleteCertificate")
+                .contentType(ACM_CONTENT_TYPE)
+                .body("{\"CertificateArn\":\"" + arn + "\"}")
+            .when().post("/").then().statusCode(200);
+        }
+    }
+
+    @Test
     void requestPersistsExportOption() {
         String arn = requestCertificate("""
             {

@@ -1,7 +1,7 @@
 package io.github.hectorvent.floci.services.lambda;
 
-import io.github.hectorvent.floci.services.lambda.model.StreamingPayload;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hectorvent.floci.services.lambda.model.StreamingPayload;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
@@ -22,7 +22,7 @@ class LambdaUrlStreamingPreludeTest {
             "{\"statusCode\":201,\"headers\":{\"content-type\":\"text/html\"},\"cookies\":[\"a=1\"]}";
 
     private final LambdaUrlInvocationController controller =
-            new LambdaUrlInvocationController(null, null, new ObjectMapper());
+            new LambdaUrlInvocationController(null, null, new ObjectMapper(), null);
 
     private static byte[] framed(String metadata, String body) throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();

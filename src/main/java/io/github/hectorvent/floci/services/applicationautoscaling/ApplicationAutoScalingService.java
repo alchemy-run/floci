@@ -16,6 +16,7 @@ import io.github.hectorvent.floci.services.applicationautoscaling.model.StepScal
 import io.github.hectorvent.floci.services.applicationautoscaling.model.SuspendedState;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.TargetTrackingConfiguration;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.CloudWatchMetricsService;
+import io.github.hectorvent.floci.services.cloudwatch.metrics.model.Dimension;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricAlarm;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -34,10 +35,8 @@ import java.util.UUID;
 /**
  * Application Auto Scaling control plane.
  *
- * <p>Scalable targets and scaling policies are stored and described faithfully, but
- * policies are <strong>inert</strong>: nothing evaluates them and no capacity is ever
- * adjusted. This mirrors the existing EC2 Auto Scaling {@code PutScalingPolicy} behaviour
- * and is documented in {@code docs/services/applicationautoscaling.md}.</p>
+ * <p>Scalable targets, policies, scheduled actions, and scaling activities share
+ * the control-plane stores used by the capacity adjusters.</p>
  *
  * @see <a href="https://docs.aws.amazon.com/autoscaling/application/APIReference/Welcome.html">Application Auto Scaling API Reference</a>
  */
@@ -105,9 +104,10 @@ public class ApplicationAutoScalingService {
 
     ApplicationAutoScalingService(StorageBackend<String, ScalableTarget> targets,
                                   StorageBackend<String, ScalingPolicy> policies,
+                                  StorageBackend<String, ScalingActivity> activities,
                                   RegionResolver regionResolver,
                                   CloudWatchMetricsService cloudWatchMetricsService) {
-        this(targets, policies, new InMemoryStorage<>(), new InMemoryStorage<>(),
+        this(targets, policies, new InMemoryStorage<>(), activities,
                 regionResolver, cloudWatchMetricsService);
     }
 
@@ -519,11 +519,13 @@ public class ApplicationAutoScalingService {
             String alarmName = "TargetTracking-" + policy.getResourceId() + "-" + suffix + "-"
                     + UUID.randomUUID();
             MetricAlarm alarm = new MetricAlarm();
+            alarm.setActionsEnabled(true);
             alarm.setAlarmName(alarmName);
             alarm.setAlarmDescription("DO NOT EDIT OR DELETE. For TargetTrackingScaling policy "
                     + policy.getPolicyArn() + ".");
             alarm.setNamespace(cloudWatchNamespace(policy.getServiceNamespace()));
             alarm.setMetricName(predefinedMetricType(policy));
+            alarm.setDimensions(resolveDimensions(policy));
             alarm.setStatistic("Average");
             alarm.setPeriod(60);
             alarm.setEvaluationPeriods("AlarmHigh".equals(suffix) ? 3 : 15);
@@ -548,6 +550,22 @@ public class ApplicationAutoScalingService {
             // Alarm cleanup is best-effort: a user may have deleted them out of band.
             LOG.debugv(e, "Could not delete target-tracking alarms {0} in {1}", names, region);
         }
+    }
+
+    /**
+     * The alarm needs the same dimensions AWS attaches to the real metric, or the evaluator
+     * will never find data an operator pushes in the real ECS shape. Real AWS keys ECS
+     * service metrics by {@code ClusterName} + {@code ServiceName}; other namespaces are left
+     * without dimensions, matching their existing "stored but inert" behavior.
+     */
+    private static List<Dimension> resolveDimensions(ScalingPolicy policy) {
+        if ("ecs".equals(policy.getServiceNamespace()) && policy.getResourceId() != null) {
+            String[] parts = policy.getResourceId().split("/");
+            if (parts.length == 3 && "service".equals(parts[0])) {
+                return List.of(new Dimension("ClusterName", parts[1]), new Dimension("ServiceName", parts[2]));
+            }
+        }
+        return List.of();
     }
 
     private static String cloudWatchNamespace(String serviceNamespace) {
@@ -674,4 +692,40 @@ public class ApplicationAutoScalingService {
                                         String scalableDimension) {
         return targets.get(targetKey(region, serviceNamespace, resourceId, scalableDimension));
     }
+
+    /** Looked up by {@link ScalingPolicyAlarmActionHandler} when an alarm's AlarmActions
+     * references a scaling-policy ARN. */
+    Optional<ScalingPolicy> findPolicyByArn(String policyArn, String region) {
+        String prefix = region + "::";
+        return policies.scan(k -> k.startsWith(prefix)).stream()
+                .filter(p -> policyArn.equals(p.getPolicyArn()))
+                .findFirst();
+    }
+
+    /** Persists a policy after the control loop stamps a cooldown timestamp on it. */
+    void savePolicy(ScalingPolicy policy, String region) {
+        policies.put(policyKey(region, policy.getServiceNamespace(), policy.getResourceId(),
+                policy.getScalableDimension(), policy.getPolicyName()), policy);
+    }
+
+    /** Records that the control loop changed capacity, mirroring what AWS reports through
+     * DescribeScalingActivities. */
+    void recordScalingActivity(ScalingPolicy policy, String description, String cause, String region) {
+        ScalingActivity activity = new ScalingActivity();
+        activity.setActivityId(UUID.randomUUID().toString());
+        activity.setServiceNamespace(policy.getServiceNamespace());
+        activity.setResourceId(policy.getResourceId());
+        activity.setScalableDimension(policy.getScalableDimension());
+        activity.setDescription(description);
+        activity.setCause(cause);
+        double now = nowEpochSeconds();
+        activity.setStartTime(now);
+        activity.setEndTime(now);
+        activity.setStatusCode("Successful");
+        String key = region + "::" + policy.getServiceNamespace() + "::" + policy.getScalableDimension()
+                + "::" + policy.getResourceId() + "::" + activity.getActivityId();
+        activities.put(key, activity);
+        LOG.infov("Scaling activity for policy {0}: {1}", policy.getPolicyName(), description);
+    }
+
 }

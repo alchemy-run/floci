@@ -6,14 +6,13 @@ import java.util.List;
 import java.util.Map;
 
 @RegisterForReflection
-public class CacheBehavior {
+public class CacheBehavior implements CacheBehaviorSettings {
 
     private String pathPattern;
     private String targetOriginId;
     private String viewerProtocolPolicy = "redirect-to-https";
     private List<String> allowedMethods;
     private List<String> cachedMethods;
-    private Map<String, Object> forwardedValues;
     private String cachePolicyId;
     private String originRequestPolicyId;
     private String responseHeadersPolicyId;
@@ -22,11 +21,15 @@ public class CacheBehavior {
     private List<Map<String, String>> functionAssociations;
     private List<Map<String, Object>> lambdaFunctionAssociations;
     private boolean compress;
-    // Boxed: `null` distinguishes "not supplied" (cache-policy mode) from a
-    // legacy-mode TTL of 0, so GetDistributionConfig round-trips faithfully.
+    private boolean smoothStreaming;
     private Long defaultTTL;
     private Long minTTL;
     private Long maxTTL;
+    private Map<String, Object> forwardedValues;
+    // Private-content key group IDs whose public keys may sign requests.
+    // Explicit enablement controls signature enforcement.
+    private Boolean trustedKeyGroupsEnabled;
+    private List<String> trustedKeyGroups;
 
     public CacheBehavior() {}
 
@@ -69,6 +72,9 @@ public class CacheBehavior {
     public boolean isCompress() { return compress; }
     public void setCompress(boolean compress) { this.compress = compress; }
 
+    public boolean isSmoothStreaming() { return smoothStreaming; }
+    public void setSmoothStreaming(boolean smoothStreaming) { this.smoothStreaming = smoothStreaming; }
+
     public Map<String, Object> getForwardedValues() { return forwardedValues; }
     public void setForwardedValues(Map<String, Object> forwardedValues) { this.forwardedValues = forwardedValues; }
 
@@ -80,4 +86,16 @@ public class CacheBehavior {
 
     public Long getMaxTTL() { return maxTTL; }
     public void setMaxTTL(Long maxTTL) { this.maxTTL = maxTTL; }
+
+    public boolean isTrustedKeyGroupsEnabled() {
+        return trustedKeyGroupsEnabled != null
+                ? trustedKeyGroupsEnabled
+                : trustedKeyGroups != null && !trustedKeyGroups.isEmpty();
+    }
+    public void setTrustedKeyGroupsEnabled(boolean trustedKeyGroupsEnabled) {
+        this.trustedKeyGroupsEnabled = trustedKeyGroupsEnabled;
+    }
+
+    public List<String> getTrustedKeyGroups() { return trustedKeyGroups; }
+    public void setTrustedKeyGroups(List<String> trustedKeyGroups) { this.trustedKeyGroups = trustedKeyGroups; }
 }

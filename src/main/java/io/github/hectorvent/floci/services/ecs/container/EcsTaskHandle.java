@@ -1,26 +1,96 @@
 package io.github.hectorvent.floci.services.ecs.container;
 
 import java.io.Closeable;
-import java.util.List;
+import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
  * Holds the runtime Docker container IDs for a running ECS task.
- * Maps container name → Docker container ID and log stream handle.
+ * Maps container names to Docker IDs and Docker IDs to their log stream handles.
  */
 public class EcsTaskHandle {
 
+    /**
+     * The grace period a container gets when its definition does not ask for one.
+     *
+     * <p>ECS defaults to 30 seconds. Floci answers StopTask synchronously, and a container that
+     * ignores SIGTERM (anything running as PID 1 without a signal handler, which is most of them)
+     * would hold the caller for the whole period, so the implicit default stays short. A
+     * {@code stopTimeout} the task definition asks for is honoured as given.
+     */
+    public static final int DEFAULT_STOP_TIMEOUT_SECONDS = 5;
+
     private final String taskArn;
     private final Map<String, String> containerIds;   // containerName → dockerId
-    private final List<Closeable> logStreams;
+    private final Map<String, Closeable> logStreamsByContainerId;
+    private final String firelensVolumeName;
+    private final String networkInterfaceId;
+    private final String region;
+    /** Per-container {@code stopTimeout}, so teardown waits as long as the task definition asked. */
+    private final Map<String, Integer> stopTimeouts;
+    /**
+     * When each container finished, read during teardown. Docker forgets a container once it is
+     * removed, so the time has to be kept here for the caller that stamps the task's containers.
+     */
+    private final Map<String, Instant> finishedAt = new LinkedHashMap<>();
 
-    public EcsTaskHandle(String taskArn, Map<String, String> containerIds, List<Closeable> logStreams) {
+    public EcsTaskHandle(String taskArn, Map<String, String> containerIds,
+                         Map<String, Closeable> logStreamsByContainerId) {
+        this(taskArn, containerIds, logStreamsByContainerId, null, null, null);
+    }
+
+    public EcsTaskHandle(String taskArn, Map<String, String> containerIds,
+                         Map<String, Closeable> logStreamsByContainerId,
+                         String firelensVolumeName, String networkInterfaceId, String region) {
+        this(taskArn, containerIds, logStreamsByContainerId, firelensVolumeName,
+                networkInterfaceId, region, Map.of());
+    }
+
+    public EcsTaskHandle(String taskArn, Map<String, String> containerIds,
+                         Map<String, Closeable> logStreamsByContainerId,
+                         String firelensVolumeName, String networkInterfaceId, String region,
+                         Map<String, Integer> stopTimeouts) {
         this.taskArn = taskArn;
-        this.containerIds = containerIds;
-        this.logStreams = logStreams;
+        this.containerIds = new LinkedHashMap<>(containerIds);
+        this.logStreamsByContainerId = new LinkedHashMap<>(logStreamsByContainerId);
+        this.firelensVolumeName = firelensVolumeName;
+        this.networkInterfaceId = networkInterfaceId;
+        this.region = region;
+        this.stopTimeouts = new LinkedHashMap<>(stopTimeouts);
     }
 
     public String getTaskArn() { return taskArn; }
     public Map<String, String> getContainerIds() { return containerIds; }
-    public List<Closeable> getLogStreams() { return logStreams; }
+    public Map<String, Closeable> getLogStreamsByContainerId() { return logStreamsByContainerId; }
+    public String getFirelensVolumeName() { return firelensVolumeName; }
+    public String getNetworkInterfaceId() { return networkInterfaceId; }
+    public String getRegion() { return region; }
+
+    /** The container's {@code stopTimeout} in seconds, or {@link #DEFAULT_STOP_TIMEOUT_SECONDS}. */
+    public int stopTimeoutFor(String containerName) {
+        Integer configured = stopTimeouts.get(containerName);
+        return configured != null ? configured : DEFAULT_STOP_TIMEOUT_SECONDS;
+    }
+
+    /** Notes when a container finished. A null is ignored, so a failed read leaves no entry. */
+    public void recordFinishedAt(String containerName, Instant instant) {
+        if (instant != null) {
+            finishedAt.put(containerName, instant);
+        }
+    }
+
+    /** When each container finished, for the containers teardown could read a time for. */
+    public Map<String, Instant> getFinishedAt() {
+        return finishedAt;
+    }
+
+    /** Removes and returns the log stream that no longer needs task-level ownership. */
+    public Closeable removeLogStream(String containerId) {
+        return logStreamsByContainerId.remove(containerId);
+    }
+
+    public boolean hasOpenLogStreams() {
+        return !logStreamsByContainerId.isEmpty();
+    }
 }

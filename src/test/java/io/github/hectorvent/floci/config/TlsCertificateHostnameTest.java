@@ -1,7 +1,10 @@
 package io.github.hectorvent.floci.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hectorvent.floci.core.common.AwsRegions;
 import io.github.hectorvent.floci.services.acm.CertificateGenerator;
 import io.github.hectorvent.floci.services.acm.model.KeyAlgorithm;
+import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.asn1.x509.GeneralName;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.junit.jupiter.api.AfterEach;
@@ -13,6 +16,9 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
 import java.security.Security;
 import java.security.cert.X509Certificate;
 import java.util.*;
@@ -67,7 +73,7 @@ class TlsCertificateHostnameTest {
         new TlsConfigSource();
 
         // Assert
-        Path certFile = tempDir.resolve("tls/floci-selfsigned.crt");
+        Path certFile = tempDir.resolve("tls/floci-server.crt");
         assertTrue(Files.exists(certFile), "Certificate file should exist");
         
         X509Certificate cert = parseCertificate(certFile);
@@ -91,7 +97,7 @@ class TlsCertificateHostnameTest {
         new TlsConfigSource();
 
         // Assert
-        Path certFile = tempDir.resolve("tls/floci-selfsigned.crt");
+        Path certFile = tempDir.resolve("tls/floci-server.crt");
         X509Certificate cert = parseCertificate(certFile);
         List<String> sans = extractSansFromCertificate(cert);
         
@@ -111,7 +117,7 @@ class TlsCertificateHostnameTest {
         new TlsConfigSource();
 
         // Assert
-        Path certFile = tempDir.resolve("tls/floci-selfsigned.crt");
+        Path certFile = tempDir.resolve("tls/floci-server.crt");
         X509Certificate cert = parseCertificate(certFile);
         List<String> sans = extractSansFromCertificate(cert);
         
@@ -132,7 +138,7 @@ class TlsCertificateHostnameTest {
         new TlsConfigSource();
 
         // Assert
-        Path certFile = tempDir.resolve("tls/floci-selfsigned.crt");
+        Path certFile = tempDir.resolve("tls/floci-server.crt");
         X509Certificate cert = parseCertificate(certFile);
         List<String> sans = extractSansFromCertificate(cert);
         
@@ -154,7 +160,7 @@ class TlsCertificateHostnameTest {
 
         new TlsConfigSource();
 
-        Path certFile = tempDir.resolve("tls/floci-selfsigned.crt");
+        Path certFile = tempDir.resolve("tls/floci-server.crt");
         X509Certificate initialCert = parseCertificate(certFile);
         List<String> initialSans = extractSansFromCertificate(initialCert);
         assertTrue(initialSans.contains("host1"), "Initial certificate should contain 'host1'");
@@ -183,13 +189,13 @@ class TlsCertificateHostnameTest {
 
         Path tlsDir = tempDir.resolve("tls");
         Files.createDirectories(tlsDir);
-        Path certFile = tlsDir.resolve("floci-selfsigned.crt");
-        Path keyFile = tlsDir.resolve("floci-selfsigned.key");
-        Path metadataFile = tlsDir.resolve("floci-selfsigned.metadata.json");
+        Path certFile = tlsDir.resolve("floci-server.crt");
+        Path keyFile = tlsDir.resolve("floci-server.key");
+        Path metadataFile = tlsDir.resolve("floci-server.metadata.json");
 
         // Generate certificate without metadata
         CertificateGenerator gen = new CertificateGenerator();
-        CertificateGenerator.GeneratedCertificate generated = gen.generateCertificate(
+        CertificateGenerator.GeneratedCertificate generated = gen.generateSelfSignedCertificate(
             "localhost", 
             List.of("localhost", "127.0.0.1", "0.0.0.0", "*.localhost", "localhost.floci.io", "*.localhost.floci.io"), 
             KeyAlgorithm.RSA_2048);
@@ -224,16 +230,11 @@ class TlsCertificateHostnameTest {
         new TlsConfigSource();
 
         // Assert
-        Path certFile = tempDir.resolve("tls/floci-selfsigned.crt");
+        Path certFile = tempDir.resolve("tls/floci-server.crt");
         X509Certificate cert = parseCertificate(certFile);
         List<String> sans = extractSansFromCertificate(cert);
         
-        Set<String> expectedSans = Set.of("localhost", "127.0.0.1", "0.0.0.0", "*.localhost",
-                "localhost.floci.io", "*.localhost.floci.io", "host.docker.internal",
-                "sync-states.us-east-1.amazonaws.com", "sync-states-fips.us-east-1.amazonaws.com",
-                "*.us-east-1.amazonaws.com", "*.appsync-api.us-east-1.amazonaws.com",
-                "*.execute-api.us-east-1.amazonaws.com",
-                "*.lambda-microvm.us-east-1.localhost.floci.io");
+        Set<String> expectedSans = Set.copyOf(TlsConfigSource.DEFAULT_SAN_HOSTNAMES);
         Set<String> actualSans = new HashSet<>(sans);
         
         assertEquals(expectedSans, actualSans,
@@ -251,16 +252,11 @@ class TlsCertificateHostnameTest {
         new TlsConfigSource();
 
         // Assert
-        Path certFile = tempDir.resolve("tls/floci-selfsigned.crt");
+        Path certFile = tempDir.resolve("tls/floci-server.crt");
         X509Certificate cert = parseCertificate(certFile);
         List<String> sans = extractSansFromCertificate(cert);
         
-        Set<String> expectedSans = Set.of("localhost", "127.0.0.1", "0.0.0.0", "*.localhost",
-                "localhost.floci.io", "*.localhost.floci.io", "host.docker.internal",
-                "sync-states.us-east-1.amazonaws.com", "sync-states-fips.us-east-1.amazonaws.com",
-                "*.us-east-1.amazonaws.com", "*.appsync-api.us-east-1.amazonaws.com",
-                "*.execute-api.us-east-1.amazonaws.com",
-                "*.lambda-microvm.us-east-1.localhost.floci.io");
+        Set<String> expectedSans = Set.copyOf(TlsConfigSource.DEFAULT_SAN_HOSTNAMES);
         Set<String> actualSans = new HashSet<>(sans);
         
         assertEquals(expectedSans, actualSans,
@@ -279,7 +275,7 @@ class TlsCertificateHostnameTest {
         Path userKeyFile = tempDir.resolve("user-key.key");
         
         CertificateGenerator gen = new CertificateGenerator();
-        CertificateGenerator.GeneratedCertificate userCert = gen.generateCertificate(
+        CertificateGenerator.GeneratedCertificate userCert = gen.generateSelfSignedCertificate(
             "user-domain.com",
             List.of("user-domain.com", "*.user-domain.com"),
             KeyAlgorithm.RSA_2048);
@@ -295,7 +291,7 @@ class TlsCertificateHostnameTest {
         new TlsConfigSource();
 
         // Assert: No self-signed certificate generated
-        Path selfSignedCert = tempDir.resolve("tls/floci-selfsigned.crt");
+        Path selfSignedCert = tempDir.resolve("tls/floci-server.crt");
         assertFalse(Files.exists(selfSignedCert), 
             "Self-signed certificate should not be generated when user provides certificates");
     }
@@ -314,7 +310,7 @@ class TlsCertificateHostnameTest {
         // Assert
         Path tlsDir = tempDir.resolve("tls");
         if (Files.exists(tlsDir)) {
-            assertFalse(Files.exists(tlsDir.resolve("floci-selfsigned.crt")),
+            assertFalse(Files.exists(tlsDir.resolve("floci-server.crt")),
                 "No certificate should be created when TLS is disabled");
         }
     }
@@ -331,9 +327,9 @@ class TlsCertificateHostnameTest {
 
         new TlsConfigSource();
 
-        Path certFile = tempDir.resolve("tls/floci-selfsigned.crt");
+        Path certFile = tempDir.resolve("tls/floci-server.crt");
         long initialModifiedTime = Files.getLastModifiedTime(certFile).toMillis();
-        String initialMetadata = Files.readString(tempDir.resolve("tls/floci-selfsigned.metadata.json"));
+        String initialMetadata = Files.readString(tempDir.resolve("tls/floci-server.metadata.json"));
 
         Thread.sleep(100);
 
@@ -342,12 +338,159 @@ class TlsCertificateHostnameTest {
 
         // Assert: Certificate reused (not regenerated)
         long newModifiedTime = Files.getLastModifiedTime(certFile).toMillis();
-        String newMetadata = Files.readString(tempDir.resolve("tls/floci-selfsigned.metadata.json"));
+        String newMetadata = Files.readString(tempDir.resolve("tls/floci-server.metadata.json"));
         
         assertEquals(initialModifiedTime, newModifiedTime, 
             "Certificate should be reused when configuration unchanged");
         assertEquals(initialMetadata, newMetadata, 
             "Metadata should be unchanged");
+    }
+
+    // ==================== Local CA Tests ====================
+
+    @Test
+    void serverCertificateIsIssuedByTheLocalCa() throws Exception {
+        System.setProperty("floci.tls.enabled", "true");
+        System.setProperty("floci.tls.self-signed", "true");
+        System.setProperty("floci.storage.persistent-path", tempDir.toString());
+
+        TlsConfigSource source = new TlsConfigSource();
+
+        Path tlsDir = tempDir.resolve("tls");
+        X509Certificate ca = parseCertificate(tlsDir.resolve("floci-root-ca.crt"));
+        X509Certificate leaf = parseCertificate(tlsDir.resolve("floci-server.crt"));
+        leaf.verify(ca.getPublicKey());
+        assertEquals(ca.getSubjectX500Principal(), leaf.getIssuerX500Principal());
+        assertEquals(-1, leaf.getBasicConstraints(), "server leaf must not be a CA");
+        assertEquals(List.of("1.3.6.1.5.5.7.3.1", "1.3.6.1.5.5.7.3.2"), leaf.getExtendedKeyUsage());
+
+        assertEquals(tlsDir.resolve("floci-server.crt").toAbsolutePath().toString(),
+                source.getValue("quarkus.tls.key-store.pem.0.cert"));
+        assertEquals(tlsDir.resolve("floci-server.key").toAbsolutePath().toString(),
+                source.getValue("quarkus.tls.key-store.pem.0.key"));
+        assertNull(source.getValue("quarkus.http.ssl.certificate.files"), "legacy key no longer published");
+        assertNull(source.getValue("quarkus.http.ssl.certificate.key-files"), "legacy key no longer published");
+        assertEquals(PosixFilePermissions.fromString("rw-------"),
+                Files.getPosixFilePermissions(tlsDir.resolve("floci-server.key")));
+        assertEquals(tlsDir, TlsConfigSource.resolvedTlsDir());
+    }
+
+    @Test
+    void resolvedTlsDirFollowsEveryTlsOnBootAndIsClearedWhenTlsIsOff() throws Exception {
+        System.setProperty("floci.tls.enabled", "true");
+        System.setProperty("floci.tls.self-signed", "true");
+        System.setProperty("floci.storage.persistent-path", tempDir.toString());
+        new TlsConfigSource();
+        assertEquals(tempDir.resolve("tls"), TlsConfigSource.resolvedTlsDir());
+
+        System.setProperty("floci.tls.enabled", "false");
+        new TlsConfigSource();
+        assertNull(TlsConfigSource.resolvedTlsDir(), "TLS off: nothing was laid down");
+
+        Path userCert = tempDir.resolve("user.crt");
+        Path userKey = tempDir.resolve("user.key");
+        var user = new CertificateGenerator().generateSelfSignedCertificate("localhost", List.of("localhost"), KeyAlgorithm.RSA_2048);
+        Files.writeString(userCert, user.certificatePem());
+        Files.writeString(userKey, user.privateKeyPem());
+        System.setProperty("floci.tls.enabled", "true");
+        System.setProperty("floci.tls.cert-path", userCert.toString());
+        System.setProperty("floci.tls.key-path", userKey.toString());
+        new TlsConfigSource();
+        assertEquals(tempDir.resolve("tls"), TlsConfigSource.resolvedTlsDir(),
+                "user certificate: the container CA bundle was laid down there");
+    }
+
+    @Test
+    void legacySelfSignedLeafIsReplacedByCaIssuedOne() throws Exception {
+        System.setProperty("floci.tls.enabled", "true");
+        System.setProperty("floci.tls.self-signed", "true");
+        System.setProperty("floci.storage.persistent-path", tempDir.toString());
+        Path tlsDir = Files.createDirectories(tempDir.resolve("tls"));
+        CertificateGenerator gen = new CertificateGenerator();
+        // The exact SAN list TlsConfigSource would compute for this configuration, so only the
+        // issuer check can trigger regeneration here.
+        List<String> sans = TlsConfigSource.DEFAULT_SAN_HOSTNAMES;
+        var legacy = gen.generateSelfSignedCertificate("localhost", sans, KeyAlgorithm.RSA_2048);
+        Files.writeString(tlsDir.resolve("floci-server.crt"), legacy.certificatePem());
+        Files.writeString(tlsDir.resolve("floci-server.key"), legacy.privateKeyPem());
+        Files.writeString(tlsDir.resolve("floci-server.metadata.json"),
+                new ObjectMapper().writeValueAsString(
+                        CertificateMetadata.create(sans, "dev")));
+
+        new TlsConfigSource();
+
+        X509Certificate ca = parseCertificate(tlsDir.resolve("floci-root-ca.crt"));
+        X509Certificate leaf = parseCertificate(tlsDir.resolve("floci-server.crt"));
+        assertEquals(ca.getSubjectX500Principal(), leaf.getIssuerX500Principal());
+        assertNotEquals(legacy.certificatePem(), Files.readString(tlsDir.resolve("floci-server.crt")));
+    }
+
+    @Test
+    void expiredServerLeafIsReissued() throws Exception {
+        System.setProperty("floci.tls.enabled", "true");
+        System.setProperty("floci.tls.self-signed", "true");
+        System.setProperty("floci.storage.persistent-path", tempDir.toString());
+        Path tlsDir = Files.createDirectories(tempDir.resolve("tls"));
+        FlociCertificateAuthority ca = FlociCertificateAuthority.loadOrCreate(tlsDir);
+        CertificateGenerator gen = new CertificateGenerator();
+        List<String> sans = TlsConfigSource.DEFAULT_SAN_HOSTNAMES;
+        KeyPair keyPair = KeyPairGenerator.getInstance("RSA").generateKeyPair();
+        // Issued by the current CA with a validity that ended a day ago: only the expiry check can trigger.
+        X509Certificate expired = gen.signCertificate(new X500Name("CN=localhost"),
+                keyPair.getPublic(), X500Name.getInstance(
+                        ca.certificate().getSubjectX500Principal().getEncoded()), ca.key(), sans, false,
+                CertificateGenerator.LeafUsage.SERVER, -1);
+        Files.writeString(tlsDir.resolve("floci-server.crt"), gen.toPem(expired));
+        Files.writeString(tlsDir.resolve("floci-server.key"), gen.toPem(keyPair.getPrivate()));
+        Files.writeString(tlsDir.resolve("floci-server.metadata.json"),
+                new ObjectMapper().writeValueAsString(CertificateMetadata.create(sans, "dev")));
+        assertTrue(ca.isIssuedByUs(expired), "the expired leaf is ours, so only validity can reject it");
+
+        new TlsConfigSource();
+
+        X509Certificate leaf = parseCertificate(tlsDir.resolve("floci-server.crt"));
+        leaf.checkValidity();
+        assertNotEquals(expired.getSerialNumber(), leaf.getSerialNumber());
+        assertTrue(ca.isIssuedByUs(leaf));
+    }
+
+    @Test
+    void leafSignedByAPreviousCaIsReplacedWhenTheCaChanges() throws Exception {
+        System.setProperty("floci.tls.enabled", "true");
+        System.setProperty("floci.tls.self-signed", "true");
+        System.setProperty("floci.storage.persistent-path", tempDir.toString());
+        new TlsConfigSource();
+        Path tlsDir = tempDir.resolve("tls");
+        String firstLeaf = Files.readString(tlsDir.resolve("floci-server.crt"));
+        Files.delete(tlsDir.resolve("floci-root-ca.key"));
+
+        new TlsConfigSource();
+
+        X509Certificate ca = parseCertificate(tlsDir.resolve("floci-root-ca.crt"));
+        X509Certificate leaf = parseCertificate(tlsDir.resolve("floci-server.crt"));
+        assertNotEquals(firstLeaf, Files.readString(tlsDir.resolve("floci-server.crt")));
+        leaf.verify(ca.getPublicKey());
+    }
+
+    @Test
+    void defaultSansIncludeEcrRegionalHostnamesForAllAwsRegions() throws Exception {
+        System.setProperty("floci.tls.enabled", "true");
+        System.setProperty("floci.tls.self-signed", "true");
+        System.setProperty("floci.storage.persistent-path", tempDir.toString());
+
+        new TlsConfigSource();
+
+        Path certFile = tempDir.resolve("tls/floci-server.crt");
+        X509Certificate cert = parseCertificate(certFile);
+        List<String> sans = extractSansFromCertificate(cert);
+
+        for (String region : AwsRegions.ALL) {
+            String expectedWildcard = "*.dkr.ecr." + region + ".localhost.floci.io";
+            assertTrue(TlsConfigSource.DEFAULT_SAN_HOSTNAMES.contains(expectedWildcard),
+                    "DEFAULT_SAN_HOSTNAMES missing ECR wildcard for region " + region);
+            assertTrue(sans.contains(expectedWildcard),
+                    "Certificate SANs missing ECR wildcard for region " + region);
+        }
     }
 
     // ==================== Helper Methods ====================

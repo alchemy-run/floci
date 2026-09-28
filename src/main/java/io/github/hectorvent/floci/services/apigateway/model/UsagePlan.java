@@ -39,6 +39,7 @@ public class UsagePlan {
     public QuotaSettings getQuota() { return quota; }
     public void setQuota(QuotaSettings quota) { this.quota = quota; }
 
+
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags != null ? tags : new HashMap<>(); }
 

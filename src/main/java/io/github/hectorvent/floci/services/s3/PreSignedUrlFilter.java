@@ -1,8 +1,8 @@
 package io.github.hectorvent.floci.services.s3;
 
 import io.github.hectorvent.floci.core.common.XmlBuilder;
+import io.github.hectorvent.floci.core.common.auth.SigV4RequestValidator;
 import io.github.hectorvent.floci.services.iam.IamService;
-import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerRequestFilter;
@@ -10,32 +10,66 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.Provider;
+import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
+import java.util.stream.Collectors;
+
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Provider
 public class PreSignedUrlFilter implements ContainerRequestFilter {
 
+    private static final Logger LOG = Logger.getLogger(PreSignedUrlFilter.class);
+    private static final String LEGACY_ACCESS_KEY_ID = "test";
+    private static final String LEGACY_SECRET_KEY = "test";
+
     private final PreSignedUrlGenerator presignGenerator;
-    private final Instance<IamService> iamService;
+    private final S3Service s3Service;
+    private final IamService iamService;
 
     @Inject
-    public PreSignedUrlFilter(PreSignedUrlGenerator presignGenerator, Instance<IamService> iamService) {
+    public PreSignedUrlFilter(PreSignedUrlGenerator presignGenerator,
+                              S3Service s3Service,
+                              IamService iamService) {
         this.presignGenerator = presignGenerator;
+        this.s3Service = s3Service;
         this.iamService = iamService;
     }
 
     @Override
     public void filter(ContainerRequestContext requestContext) {
+        // A browser preflight reuses the target request's presigned URL, so its OPTIONS method
+        // must not be verified against a signature created for the follow-up PUT/GET request.
+        // The dedicated S3 OPTIONS resource performs the bucket CORS evaluation instead.
+        if (isCorsPreflight(requestContext)) {
+            return;
+        }
+
         var queryParams = requestContext.getUriInfo().getQueryParameters();
 
         // Only process if this is a pre-signed URL request
         String algorithm = queryParams.getFirst("X-Amz-Algorithm");
         if (algorithm == null) {
+            return;
+        }
+
+        if (!"AWS4-HMAC-SHA256".equals(algorithm)) {
+            requestContext.abortWith(
+                errorResponse(
+                    400,
+                    "AuthorizationQueryParametersError",
+                    "Unsupported X-Amz-Algorithm value: " + algorithm
+                )
+            );
             return;
         }
 
@@ -60,6 +94,17 @@ public class PreSignedUrlFilter implements ContainerRequestFilter {
             return;
         }
 
+        if (expires < 1 || expires > 604800) {
+            requestContext.abortWith(
+                errorResponse(
+                    400,
+                    "AuthorizationQueryParametersError",
+                    "X-Amz-Expires must be between 1 and 604800 seconds."
+                )
+            );
+            return;
+        }
+
         // Check expiration
         if (presignGenerator.isExpired(amzDate, expires)) {
             requestContext.abortWith(errorResponse(403, "AccessDenied",
@@ -67,8 +112,33 @@ public class PreSignedUrlFilter implements ContainerRequestFilter {
             return;
         }
 
-        // Optionally verify Floci's own HMAC (if validateSignatures is enabled).
-        if (presignGenerator.shouldValidateSignatures()) {
+        // Cryptographic verification follows the global validate-signatures switch: full SigV4
+        // when S3 enforce-auth is also on, Floci's own HMAC otherwise. With the switch off,
+        // enforce-auth still authorizes the request against the X-Amz-Credential identity.
+        boolean verifySigV4 = s3Service.isAuthEnforced() && presignGenerator.shouldValidateSignatures();
+        if (verifySigV4) {
+            String credential = queryParams.getFirst("X-Amz-Credential");
+            String decodedCredential = URLDecoder.decode(credential, StandardCharsets.UTF_8);
+            String[] credParts = decodedCredential.split("/");
+            if (credParts.length < 5) {
+                requestContext.abortWith(errorResponse(403, "InvalidAccessKeyId",
+                        "The AWS Access Key Id you provided does not exist in our records."));
+                return;
+            }
+
+            String accessKeyId = credParts[0];
+            String secretKey = resolveSecretKey(accessKeyId, queryParams.getFirst("X-Amz-Security-Token"));
+            if (secretKey == null) {
+                requestContext.abortWith(errorResponse(403, "InvalidAccessKeyId",
+                        "The AWS Access Key Id you provided does not exist in our records."));
+                return;
+            }
+
+            if (!verifySigV4Signature(requestContext, signature, secretKey)) {
+                requestContext.abortWith(errorResponse(403, "SignatureDoesNotMatch",
+                        "The request signature we calculated does not match the signature you provided."));
+            }
+        } else if (!s3Service.isAuthEnforced() && presignGenerator.shouldValidateSignatures()) {
             String path = requestContext.getUriInfo().getPath();
             String[] parts = path.split("/", 3);
             if (parts.length < 3) {
@@ -87,29 +157,65 @@ public class PreSignedUrlFilter implements ContainerRequestFilter {
             }
         }
 
+        if (verifySigV4) {
+            return;
+        }
         // Always enforce signed Content-Type on AWS SDK / distilled presigned
         // PUTs. validate-signatures defaults false (Floci HMAC vs real SigV4),
         // but a URL that lists content-type in X-Amz-SignedHeaders must reject
         // a mismatched Content-Type the same way real S3 does (403).
         String signedHeaders = maybeUrlDecode(queryParams.getFirst("X-Amz-SignedHeaders"));
+        String presignedAccessKeyId = presignedAccessKeyId(queryParams);
         if (S3PresignedSignature.signedHeadersInclude(signedHeaders, "content-type")
-                && !signedContentTypeMatches(requestContext, queryParams, signedHeaders, amzDate, signature)) {
+                && !presignedSignatureMatches(requestContext, queryParams, signedHeaders, amzDate, signature,
+                        presignedAccessKeyId == null ? List.of() : secretsFor(presignedAccessKeyId))) {
+            requestContext.abortWith(errorResponse(403, "SignatureDoesNotMatch",
+                    "The request signature we calculated does not match the signature you provided."));
+            return;
+        }
+        // A URL presigned by a workload holding an assumed-role session Floci minted (such as a
+        // Lambda execution role) was signed with the real session secret, so it can be checked
+        // exactly. Otherwise a holder of the URL could rewrite a signed query parameter - swap
+        // versionId to read another version, or drop it - and still be served, where real S3
+        // answers SignatureDoesNotMatch. Hand-built URLs for IAM user keys stay unverified while
+        // validate-signatures is off.
+        List<String> issuedSecret = roleSessionSecretFor(queryParams);
+        if (!issuedSecret.isEmpty()
+                && !presignedSignatureMatches(requestContext, queryParams, signedHeaders, amzDate, signature,
+                        issuedSecret)) {
             requestContext.abortWith(errorResponse(403, "SignatureDoesNotMatch",
                     "The request signature we calculated does not match the signature you provided."));
         }
     }
 
-    private boolean signedContentTypeMatches(ContainerRequestContext requestContext,
-                                             MultivaluedMap<String, String> queryParams,
-                                             String signedHeaders, String amzDate, String signature) {
+    private static String presignedAccessKeyId(MultivaluedMap<String, String> queryParams) {
+        return S3PresignedSignature.accessKeyId(maybeUrlDecode(queryParams.getFirst("X-Amz-Credential")));
+    }
+
+    /** The secret of a live assumed-role session Floci minted, matched with its session token; empty otherwise. */
+    private List<String> roleSessionSecretFor(MultivaluedMap<String, String> queryParams) {
+        String accessKeyId = presignedAccessKeyId(queryParams);
+        if (iamService == null || accessKeyId == null || LEGACY_ACCESS_KEY_ID.equals(accessKeyId)
+                || !iamService.isAssumedRoleSession(accessKeyId)) {
+            return List.of();
+        }
+        return iamService.findSecretKey(accessKeyId, queryParams.getFirst("X-Amz-Security-Token"))
+                .map(List::of)
+                .orElse(List.of());
+    }
+
+    private boolean presignedSignatureMatches(ContainerRequestContext requestContext,
+                                              MultivaluedMap<String, String> queryParams,
+                                              String signedHeaders, String amzDate, String signature,
+                                              List<String> secrets) {
         String credential = maybeUrlDecode(queryParams.getFirst("X-Amz-Credential"));
         String accessKeyId = S3PresignedSignature.accessKeyId(credential);
         String credentialScope = S3PresignedSignature.credentialScope(credential);
-        if (accessKeyId == null || credentialScope == null || amzDate == null || signature == null) {
+        if (accessKeyId == null || credentialScope == null || amzDate == null || signature == null
+                || signedHeaders == null) {
             return false;
         }
 
-        List<String> secrets = secretsFor(accessKeyId);
         if (secrets.isEmpty()) {
             return false;
         }
@@ -126,7 +232,8 @@ public class PreSignedUrlFilter implements ContainerRequestFilter {
             }
         }
         String encodedQuery = S3PresignedSignature.encodeQuery(decodedQuery);
-        URI requestUri = requestContext.getUriInfo().getRequestUri();
+        URI requestUri = requestContext.getProperty(S3VirtualHostFilter.ORIGINAL_REQUEST_URI_PROPERTY) instanceof URI uri
+                ? uri : requestContext.getUriInfo().getRequestUri();
         String encodedPath = S3PresignedSignature.encodeS3Path(requestUri.getRawPath());
         Map<String, String> requestHeaders = new LinkedHashMap<>();
         requestContext.getHeaders().forEach((name, values) -> {
@@ -181,8 +288,8 @@ public class PreSignedUrlFilter implements ContainerRequestFilter {
 
     private List<String> secretsFor(String accessKeyId) {
         List<String> secrets = new ArrayList<>();
-        if (iamService != null && !iamService.isUnsatisfied()) {
-            iamService.get().findSecretKey(accessKeyId).ifPresent(secrets::add);
+        if (iamService != null) {
+            iamService.findSecretKey(accessKeyId).ifPresent(secrets::add);
         }
         String envAccessKey = System.getenv("AWS_ACCESS_KEY_ID");
         String envSecret = System.getenv("AWS_SECRET_ACCESS_KEY");
@@ -226,7 +333,160 @@ public class PreSignedUrlFilter implements ContainerRequestFilter {
         }
     }
 
-    private Response errorResponse(int status, String code, String message) {
+    private static boolean isCorsPreflight(ContainerRequestContext requestContext) {
+        return "OPTIONS".equalsIgnoreCase(requestContext.getMethod())
+                && hasText(requestContext.getHeaderString("Origin"))
+                && hasText(requestContext.getHeaderString("Access-Control-Request-Method"));
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private boolean verifySigV4Signature(ContainerRequestContext requestContext,
+                                        String signature, String secretKey) {
+        try {
+            var queryParams = requestContext.getUriInfo().getQueryParameters();
+            String credential = queryParams.getFirst("X-Amz-Credential");
+            String amzDate = queryParams.getFirst("X-Amz-Date");
+            String signedHeaders = queryParams.getFirst("X-Amz-SignedHeaders");
+
+            String decodedCredential = URLDecoder.decode(credential, StandardCharsets.UTF_8);
+            String[] credParts = decodedCredential.split("/");
+            if (credParts.length < 5) {
+                return false;
+            }
+            String date = credParts[1];
+            String region = credParts[2];
+            String service = credParts[3];
+            String credentialScope = date + "/" + region + "/" + service + "/aws4_request";
+
+            // Build canonical headers from signed headers
+            URI requestUri = requestContext.getProperty(S3VirtualHostFilter.ORIGINAL_REQUEST_URI_PROPERTY) instanceof URI uri
+                    ? uri
+                    : requestContext.getUriInfo().getRequestUri();
+            String authority = S3VirtualHostFilter.resolveHost(requestContext.getHeaderString("Host"),
+                    requestContext.getHeaderString("X-Forwarded-Host"), requestUri);
+
+            StringBuilder canonicalHeaders = new StringBuilder();
+            for (String header : signedHeaders.split(";")) {
+                if ("host".equals(header)) {
+                    canonicalHeaders.append("host:").append(authority).append("\n");
+                } else {
+                    String canonicalValue = canonicalizeHeaderValue(requestContext.getHeaderString(header));
+                    canonicalHeaders.append(header).append(":").append(canonicalValue).append("\n");
+                }
+            }
+
+            // Canonical request
+            String path = requestUri.getRawPath();
+            String canonicalQueryString = buildCanonicalQueryString(queryParams);
+            String payloadHash = requestContext.getHeaderString("x-amz-content-sha256");
+            if (payloadHash == null) {
+                payloadHash = queryParams.getFirst("X-Amz-Content-Sha256");
+            }
+            if (payloadHash == null) {
+                payloadHash = "UNSIGNED-PAYLOAD";
+            }
+            String canonicalRequest = requestContext.getMethod() + "\n"
+                    + path + "\n"
+                    + canonicalQueryString + "\n"
+                    + canonicalHeaders + "\n"
+                    + signedHeaders + "\n"
+                    + payloadHash;
+
+            // String to sign
+            String stringToSign = "AWS4-HMAC-SHA256\n"
+                    + amzDate + "\n"
+                    + credentialScope + "\n"
+                    + SigV4RequestValidator.sha256Hex(canonicalRequest);
+
+            // Derive signing key and compute expected signature
+            byte[] signingKey = SigV4RequestValidator.deriveSigningKey(secretKey, date, region, service);
+            String expectedSignature = SigV4RequestValidator.hexEncode(
+                    SigV4RequestValidator.hmacSha256(signingKey, stringToSign));
+
+            return MessageDigest.isEqual(
+                    expectedSignature.getBytes(StandardCharsets.UTF_8),
+                    signature.getBytes(StandardCharsets.UTF_8));
+
+        } catch (Exception e) {
+            LOG.debugv("Presigned SigV4 signature verification failed: {0}", e.getMessage());
+            return false;
+        }
+    }
+
+    private String resolveSecretKey(String accessKeyId) {
+        return resolveSecretKey(accessKeyId, null);
+    }
+
+    private String resolveSecretKey(String accessKeyId, String sessionToken) {
+        if (LEGACY_ACCESS_KEY_ID.equals(accessKeyId)) {
+            return LEGACY_SECRET_KEY;
+        }
+        if (iamService != null) {
+            Optional<String> registered = iamService.findSecretKey(accessKeyId, sessionToken);
+            if (registered.isPresent()) {
+                return registered.get();
+            }
+            // Deliberately no fallback for a bare 12-digit account ID here: AccountResolver
+            // reads a 12-digit access key ID as the request's account directly, so trusting an
+            // unregistered numeric key paired with the well-known "test" secret would let any
+            // client forge a signed request for an arbitrary account under S3 auth enforcement.
+            // A launched container's owning-account placeholder credentials (see
+            // LaunchedContainerAwsEnv) are therefore not honored by this enforced path either;
+            // they only work where no signature is required (auth enforcement disabled).
+            return null;
+        }
+        return null;
+    }
+
+    /**
+     * Builds the SigV4 canonical query string from the framework's decoded query parameters:
+     * URI-encode each name and value, exclude {@code X-Amz-Signature}, and sort by encoded
+     * name and then by encoded value. Package-private for unit testing.
+     */
+    static String buildCanonicalQueryString(MultivaluedMap<String, String> decodedParams) {
+        List<String[]> encodedParams = new ArrayList<>();
+        for (var entry : decodedParams.entrySet()) {
+            if ("X-Amz-Signature".equals(entry.getKey())) {
+                continue;
+            }
+            String encodedName = awsUriEncode(entry.getKey());
+            for (String value : entry.getValue()) {
+                encodedParams.add(new String[]{encodedName, awsUriEncode(value)});
+            }
+        }
+        encodedParams.sort(Comparator.comparing((String[] p) -> p[0]).thenComparing(p -> p[1]));
+        return encodedParams.stream()
+                .map(p -> p[0] + "=" + p[1])
+                .collect(Collectors.joining("&"));
+    }
+
+    /**
+     * Canonicalizes a signed header value per SigV4: trim, then collapse sequential spaces to
+     * a single space. Package-private for unit testing.
+     */
+    static String canonicalizeHeaderValue(String value) {
+        return value == null ? "" : value.trim().replaceAll(" +", " ");
+    }
+
+    static String awsUriEncode(String value) {
+        StringBuilder encoded = new StringBuilder();
+        for (byte b : value.getBytes(StandardCharsets.UTF_8)) {
+            int c = b & 0xFF;
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+                    || (c >= '0' && c <= '9')
+                    || c == '-' || c == '_' || c == '.' || c == '~') {
+                encoded.append((char) c);
+            } else {
+                encoded.append('%').append(String.format("%02X", c));
+            }
+        }
+        return encoded.toString();
+    }
+
+    static Response errorResponse(int status, String code, String message) {
         String xml = new XmlBuilder()
                 .raw("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
                 .start("Error")

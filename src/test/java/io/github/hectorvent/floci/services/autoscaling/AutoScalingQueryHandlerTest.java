@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.autoscaling;
 
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.autoscaling.model.AsgInstance;
+import io.github.hectorvent.floci.services.autoscaling.model.AsgOptionalFields;
 import jakarta.ws.rs.core.MultivaluedHashMap;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.Test;
@@ -9,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AutoScalingQueryHandlerTest {
@@ -37,7 +39,7 @@ class AutoScalingQueryHandlerTest {
                 "EC2",
                 0,
                 List.of("Default"),
-                java.util.Map.of(), java.util.Map.of());
+                java.util.Map.of(), java.util.Map.of(), AsgOptionalFields.none());
 
         AutoScalingQueryHandler handler = new AutoScalingQueryHandler(service);
         MultivaluedHashMap<String, String> startParams = new MultivaluedHashMap<>();
@@ -103,7 +105,7 @@ class AutoScalingQueryHandlerTest {
                 0,
                 List.of("Default"),
                 java.util.Map.of(),
-                java.util.Map.of());
+                java.util.Map.of(), AsgOptionalFields.none());
         AsgInstance instance = new AsgInstance();
         instance.setInstanceId("i-original");
         instance.setAvailabilityZone("us-east-1a");
@@ -158,7 +160,7 @@ class AutoScalingQueryHandlerTest {
                 "EC2",
                 0,
                 List.of("Default"),
-                java.util.Map.of(), java.util.Map.of());
+                java.util.Map.of(), java.util.Map.of(), AsgOptionalFields.none());
         AsgInstance instance = new AsgInstance();
         instance.setInstanceId("i-current");
         instance.setAvailabilityZone("us-east-1a");
@@ -186,6 +188,141 @@ class AutoScalingQueryHandlerTest {
     }
 
     @Test
+    void setInstanceProtectionMutatesInstanceAndReturnsAwsQueryShape() {
+        AutoScalingService service = new AutoScalingService();
+        service.regionResolver = new RegionResolver(REGION, "000000000000");
+        service.createAutoScalingGroup(REGION, "protected-asg", null, "lt", null, "1", null,
+                0, 2, 1, 300, List.of("us-east-1a"), List.of(), List.of(), List.of(),
+                "EC2", 0, List.of("Default"), java.util.Map.of(), java.util.Map.of(), AsgOptionalFields.none());
+        AsgInstance instance = new AsgInstance();
+        instance.setInstanceId("i-protected");
+        instance.setLifecycleState("InService");
+        instance.setHealthStatus("Healthy");
+        service.describeAutoScalingGroups(REGION, List.of("protected-asg")).getFirst().getInstances().add(instance);
+
+        AutoScalingQueryHandler handler = new AutoScalingQueryHandler(service);
+        MultivaluedHashMap<String, String> params = new MultivaluedHashMap<>();
+        params.add("AutoScalingGroupName", "protected-asg");
+        params.add("InstanceIds.member.1", "i-protected");
+        params.add("ProtectedFromScaleIn", "true");
+
+        Response response = handler.handle("SetInstanceProtection", params, REGION);
+
+        assertEquals(200, response.getStatus());
+        assertTrue(((String) response.getEntity()).contains("<SetInstanceProtectionResponse"));
+        assertTrue(service.describeAutoScalingInstances(REGION, List.of("i-protected"))
+                .getFirst().isProtectedFromScaleIn());
+    }
+
+    @Test
+    void setInstanceHealthMutatesInstanceAndReturnsAwsQueryShape() {
+        AutoScalingService service = new AutoScalingService();
+        service.regionResolver = new RegionResolver(REGION, "000000000000");
+        service.createAutoScalingGroup(REGION, "health-asg", null, "lt", null, "1", null,
+                0, 2, 1, 300, List.of("us-east-1a"), List.of(), List.of(), List.of(),
+                "EC2", 0, List.of("Default"), java.util.Map.of(), java.util.Map.of(), AsgOptionalFields.none());
+        AsgInstance instance = new AsgInstance();
+        instance.setInstanceId("i-unhealthy");
+        instance.setLifecycleState("InService");
+        instance.setHealthStatus("Healthy");
+        service.describeAutoScalingGroups(REGION, List.of("health-asg")).getFirst().getInstances().add(instance);
+
+        AutoScalingQueryHandler handler = new AutoScalingQueryHandler(service);
+        MultivaluedHashMap<String, String> params = new MultivaluedHashMap<>();
+        params.add("InstanceId", "i-unhealthy");
+        params.add("HealthStatus", "Unhealthy");
+
+        Response response = handler.handle("SetInstanceHealth", params, REGION);
+
+        assertEquals(200, response.getStatus());
+        assertTrue(((String) response.getEntity()).contains("<SetInstanceHealthResponse"));
+        assertEquals("Unhealthy", service.describeAutoScalingInstances(REGION, List.of("i-unhealthy"))
+                .getFirst().getHealthStatus());
+    }
+
+    @Test
+    void setInstanceProtectionRejectsMissingProtectedFromScaleIn() {
+        AutoScalingService service = new AutoScalingService();
+        service.regionResolver = new RegionResolver(REGION, "000000000000");
+        service.createAutoScalingGroup(REGION, "no-protection-flag-asg", null, "lt", null, "1", null,
+                0, 2, 1, 300, List.of("us-east-1a"), List.of(), List.of(), List.of(),
+                "EC2", 0, List.of("Default"), java.util.Map.of(), java.util.Map.of(), AsgOptionalFields.none());
+        AsgInstance instance = new AsgInstance();
+        instance.setInstanceId("i-flagless");
+        instance.setLifecycleState("InService");
+        instance.setHealthStatus("Healthy");
+        service.describeAutoScalingGroups(REGION, List.of("no-protection-flag-asg")).getFirst()
+                .getInstances().add(instance);
+
+        AutoScalingQueryHandler handler = new AutoScalingQueryHandler(service);
+        MultivaluedHashMap<String, String> params = new MultivaluedHashMap<>();
+        params.add("AutoScalingGroupName", "no-protection-flag-asg");
+        params.add("InstanceIds.member.1", "i-flagless");
+        // ProtectedFromScaleIn deliberately omitted — it is a required member.
+
+        Response response = handler.handle("SetInstanceProtection", params, REGION);
+
+        assertEquals(400, response.getStatus());
+        assertTrue(((String) response.getEntity()).contains("ValidationError"));
+        assertEquals(false, service.describeAutoScalingInstances(REGION, List.of("i-flagless"))
+                .getFirst().isProtectedFromScaleIn(),
+                "a rejected request must not silently strip/apply protection");
+    }
+
+    @Test
+    void setInstanceProtectionRejectsMalformedProtectedFromScaleIn() {
+        AutoScalingService service = new AutoScalingService();
+        service.regionResolver = new RegionResolver(REGION, "000000000000");
+        service.createAutoScalingGroup(REGION, "malformed-flag-asg", null, "lt", null, "1", null,
+                0, 2, 1, 300, List.of("us-east-1a"), List.of(), List.of(), List.of(),
+                "EC2", 0, List.of("Default"), java.util.Map.of(), java.util.Map.of(), AsgOptionalFields.none());
+        AsgInstance instance = new AsgInstance();
+        instance.setInstanceId("i-malformed");
+        instance.setLifecycleState("InService");
+        instance.setHealthStatus("Healthy");
+        service.describeAutoScalingGroups(REGION, List.of("malformed-flag-asg")).getFirst()
+                .getInstances().add(instance);
+
+        AutoScalingQueryHandler handler = new AutoScalingQueryHandler(service);
+        MultivaluedHashMap<String, String> params = new MultivaluedHashMap<>();
+        params.add("AutoScalingGroupName", "malformed-flag-asg");
+        params.add("InstanceIds.member.1", "i-malformed");
+        params.add("ProtectedFromScaleIn", "yes");
+
+        Response response = handler.handle("SetInstanceProtection", params, REGION);
+
+        assertEquals(400, response.getStatus());
+        assertEquals(false, service.describeAutoScalingInstances(REGION, List.of("i-malformed"))
+                .getFirst().isProtectedFromScaleIn(),
+                "a malformed boolean must not silently coerce to false and succeed");
+    }
+
+    @Test
+    void setInstanceHealthParsesShouldRespectGracePeriodWithoutError() {
+        AutoScalingService service = new AutoScalingService();
+        service.regionResolver = new RegionResolver(REGION, "000000000000");
+        service.createAutoScalingGroup(REGION, "grace-asg", null, "lt", null, "1", null,
+                0, 2, 1, 300, List.of("us-east-1a"), List.of(), List.of(), List.of(),
+                "EC2", 0, List.of("Default"), java.util.Map.of(), java.util.Map.of(), AsgOptionalFields.none());
+        AsgInstance instance = new AsgInstance();
+        instance.setInstanceId("i-grace");
+        instance.setLifecycleState("InService");
+        instance.setHealthStatus("Healthy");
+        service.describeAutoScalingGroups(REGION, List.of("grace-asg")).getFirst().getInstances().add(instance);
+
+        AutoScalingQueryHandler handler = new AutoScalingQueryHandler(service);
+        MultivaluedHashMap<String, String> params = new MultivaluedHashMap<>();
+        params.add("InstanceId", "i-grace");
+        params.add("HealthStatus", "Unhealthy");
+        params.add("ShouldRespectGracePeriod", "true");
+
+        Response response = handler.handle("SetInstanceHealth", params, REGION);
+
+        assertEquals(200, response.getStatus());
+        assertTrue(((String) response.getEntity()).contains("<SetInstanceHealthResponse"));
+    }
+
+    @Test
     void targetTrackingScalingPolicyUsesAwsQueryXmlShape() {
         AutoScalingService service = new AutoScalingService();
         service.regionResolver = new RegionResolver(REGION, "000000000000");
@@ -207,7 +344,7 @@ class AutoScalingQueryHandlerTest {
                 "EC2",
                 0,
                 List.of("Default"),
-                java.util.Map.of(), java.util.Map.of());
+                java.util.Map.of(), java.util.Map.of(), AsgOptionalFields.none());
 
         AutoScalingQueryHandler handler = new AutoScalingQueryHandler(service);
         MultivaluedHashMap<String, String> putParams = new MultivaluedHashMap<>();
@@ -286,6 +423,64 @@ class AutoScalingQueryHandlerTest {
     }
 
     @Test
+    void overrideThatSetsOnlyInstanceRequirementsSurvivesCreateAndDescribe() {
+        AutoScalingService service = new AutoScalingService();
+        service.regionResolver = new RegionResolver(REGION, "000000000000");
+        AutoScalingQueryHandler handler = new AutoScalingQueryHandler(service);
+
+        String overrides = "MixedInstancesPolicy.LaunchTemplate.Overrides.member.";
+        MultivaluedHashMap<String, String> createParams = new MultivaluedHashMap<>();
+        createParams.add("AutoScalingGroupName", "requirements-asg");
+        createParams.add("MixedInstancesPolicy.LaunchTemplate.LaunchTemplateSpecification.LaunchTemplateId", "lt-1");
+        createParams.add(overrides + "1.InstanceRequirements.VCpuCount.Min", "2");
+        createParams.add(overrides + "1.InstanceRequirements.VCpuCount.Max", "8");
+        createParams.add(overrides + "1.InstanceRequirements.MemoryMiB.Min", "2048");
+        createParams.add(overrides + "1.InstanceRequirements.CpuManufacturers.member.1", "intel");
+        createParams.add(overrides + "2.InstanceType", "m6i.large");
+        createParams.add("MinSize", "0");
+        createParams.add("MaxSize", "3");
+        createParams.add("AvailabilityZones.member.1", "us-east-1a");
+
+        assertEquals(200, handler.handle("CreateAutoScalingGroup", createParams, REGION).getStatus());
+
+        MultivaluedHashMap<String, String> describeParams = new MultivaluedHashMap<>();
+        describeParams.add("AutoScalingGroupNames.member.1", "requirements-asg");
+        Response describeResponse = handler.handle("DescribeAutoScalingGroups", describeParams, REGION);
+
+        assertEquals(200, describeResponse.getStatus());
+        String xml = (String) describeResponse.getEntity();
+        assertTrue(xml.contains("<VCpuCount><Min>2</Min><Max>8</Max></VCpuCount>"));
+        assertTrue(xml.contains("<MemoryMiB><Min>2048</Min></MemoryMiB>"));
+        assertTrue(xml.contains("<CpuManufacturers><member>intel</member></CpuManufacturers>"));
+        assertTrue(xml.contains("<InstanceType>m6i.large</InstanceType>"));
+    }
+
+    @Test
+    void describeOmitsTheOptionalGroupFieldsTheCreateRequestNeverSet() {
+        AutoScalingService service = new AutoScalingService();
+        service.regionResolver = new RegionResolver(REGION, "000000000000");
+        AutoScalingQueryHandler handler = new AutoScalingQueryHandler(service);
+
+        MultivaluedHashMap<String, String> createParams = new MultivaluedHashMap<>();
+        createParams.add("AutoScalingGroupName", "bare-asg");
+        createParams.add("LaunchTemplate.LaunchTemplateId", "lt-1");
+        createParams.add("MinSize", "0");
+        createParams.add("MaxSize", "1");
+        createParams.add("AvailabilityZones.member.1", "us-east-1a");
+
+        assertEquals(200, handler.handle("CreateAutoScalingGroup", createParams, REGION).getStatus());
+
+        MultivaluedHashMap<String, String> describeParams = new MultivaluedHashMap<>();
+        describeParams.add("AutoScalingGroupNames.member.1", "bare-asg");
+        String xml = (String) handler.handle("DescribeAutoScalingGroups", describeParams, REGION).getEntity();
+
+        assertFalse(xml.contains("<DesiredCapacityType>"));
+        assertFalse(xml.contains("<CapacityRebalance>"));
+        assertFalse(xml.contains("<MaxInstanceLifetime>"));
+        assertFalse(xml.contains("<DefaultInstanceWarmup>"));
+    }
+
+    @Test
     void scheduledActionQueryRoundTrip() {
         AutoScalingService service = new AutoScalingService();
         service.regionResolver = new RegionResolver(REGION, "000000000000");
@@ -308,7 +503,8 @@ class AutoScalingQueryHandlerTest {
                 0,
                 List.of("Default"),
                 java.util.Map.of(),
-                java.util.Map.of());
+                java.util.Map.of(),
+                AsgOptionalFields.none());
 
         AutoScalingQueryHandler handler = new AutoScalingQueryHandler(service);
         MultivaluedHashMap<String, String> putParams = new MultivaluedHashMap<>();

@@ -21,6 +21,7 @@ public class BatchContainerProperties {
     private Map<String, Object> logConfiguration;
     private Map<String, Object> networkConfiguration;
     private Map<String, Object> ephemeralStorage;
+    private BatchRuntimePlatform runtimePlatform;
 
     public String getImage() {
         return image;
@@ -92,5 +93,13 @@ public class BatchContainerProperties {
 
     public void setEphemeralStorage(Map<String, Object> ephemeralStorage) {
         this.ephemeralStorage = ephemeralStorage;
+    }
+
+    public BatchRuntimePlatform getRuntimePlatform() {
+        return runtimePlatform;
+    }
+
+    public void setRuntimePlatform(BatchRuntimePlatform runtimePlatform) {
+        this.runtimePlatform = runtimePlatform;
     }
 }

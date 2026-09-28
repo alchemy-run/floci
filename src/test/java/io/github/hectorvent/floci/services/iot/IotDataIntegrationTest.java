@@ -205,4 +205,53 @@ class IotDataIntegrationTest {
             .body("state.desired", nullValue())
             .body("version", equalTo(3));
     }
+
+    /**
+     * A client that dials the address DescribeEndpoint advertises sends that AWS-shaped name as
+     * its Host; the data plane is served regardless of it.
+     */
+    @Test
+    void dataPlaneIsServedUnderTheDescribedAtsHostname() {
+        String address = given()
+            .queryParam("endpointType", "iot:Data-ATS")
+        .when()
+            .get("/endpoint")
+        .then()
+            .statusCode(200)
+            .extract().path("endpointAddress");
+        String signature = "AWS4-HMAC-SHA256 Credential=test/20260101/us-east-1/iotdata/aws4_request, "
+                + "SignedHeaders=host;x-amz-date, Signature=dummy";
+
+        given()
+            .header("Host", address)
+            .header("Authorization", signature)
+            .contentType("text/plain")
+            .queryParam("retain", true)
+            .body("via-described-endpoint")
+        .when()
+            .post("/topics/devices/described-endpoint/route")
+        .then()
+            .statusCode(200);
+
+        given()
+            .header("Host", address)
+            .header("Authorization", signature)
+        .when()
+            .get("/retainedMessage/devices/described-endpoint/route")
+        .then()
+            .statusCode(200)
+            .body("topic", equalTo("devices/described-endpoint/route"))
+            .body("payload", equalTo("dmlhLWRlc2NyaWJlZC1lbmRwb2ludA=="));
+
+        given()
+            .header("Host", address)
+            .header("Authorization", signature)
+            .contentType("text/plain")
+            .queryParam("retain", true)
+            .body("")
+        .when()
+            .post("/topics/devices/described-endpoint/route")
+        .then()
+            .statusCode(200);
+    }
 }

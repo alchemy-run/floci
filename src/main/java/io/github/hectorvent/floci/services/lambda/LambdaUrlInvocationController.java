@@ -1,17 +1,21 @@
 package io.github.hectorvent.floci.services.lambda;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.RequestContext;
+import io.github.hectorvent.floci.core.common.RequestHost;
 import io.github.hectorvent.floci.services.lambda.model.InvocationType;
 import io.github.hectorvent.floci.services.lambda.model.InvokeResult;
 import io.github.hectorvent.floci.services.lambda.model.LambdaAlias;
 import io.github.hectorvent.floci.services.lambda.model.LambdaFunction;
 import io.github.hectorvent.floci.services.lambda.model.LambdaUrlConfig;
 import io.github.hectorvent.floci.services.lambda.model.StreamingPayload;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.quarkus.vertx.http.runtime.CurrentVertxRequest;
+import io.vertx.ext.web.RoutingContext;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
@@ -26,15 +30,22 @@ import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.StreamingOutput;
 import jakarta.ws.rs.core.UriInfo;
 import org.jboss.logging.Logger;
 
-import jakarta.ws.rs.core.StreamingOutput;
-
+import java.net.URI;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -54,6 +65,7 @@ import java.util.concurrent.TimeoutException;
 public class LambdaUrlInvocationController {
 
     private static final Logger LOG = Logger.getLogger(LambdaUrlInvocationController.class);
+    private static final int FUNCTION_ERROR_STATUS = 502;
 
     /**
      * Function URL waits for the container off the JAX-RS worker pool so a
@@ -71,13 +83,23 @@ public class LambdaUrlInvocationController {
     private final LambdaService lambdaService;
     private final RegionResolver regionResolver;
     private final ObjectMapper objectMapper;
+    private final RequestContext requestContext;
+    private final CurrentVertxRequest currentVertxRequest;
 
     @Inject
     public LambdaUrlInvocationController(LambdaService lambdaService, RegionResolver regionResolver,
-                                         ObjectMapper objectMapper) {
+                                         ObjectMapper objectMapper, RequestContext requestContext,
+                                         CurrentVertxRequest currentVertxRequest) {
         this.lambdaService = lambdaService;
         this.regionResolver = regionResolver;
         this.objectMapper = objectMapper;
+        this.requestContext = requestContext;
+        this.currentVertxRequest = currentVertxRequest;
+    }
+
+    LambdaUrlInvocationController(LambdaService lambdaService, RegionResolver regionResolver,
+                                  ObjectMapper objectMapper, RequestContext requestContext) {
+        this(lambdaService, regionResolver, objectMapper, requestContext, null);
     }
 
     @GET
@@ -119,21 +141,32 @@ public class LambdaUrlInvocationController {
     private CompletionStage<Response> invoke(String method, String urlId, String proxy, HttpHeaders headers, UriInfo uriInfo, byte[] body) {
         Object target = lambdaService.getTargetByUrlId(urlId);
         String functionName;
+        String functionArn;
         String region;
+        String accountId;
         LambdaUrlConfig urlConfig;
 
         if (target instanceof LambdaAlias alias) {
             functionName = alias.getFunctionName();
-            region = AwsArnUtils.parse(alias.getAliasArn()).region();
+            functionArn = alias.getAliasArn();
             urlConfig = alias.getUrlConfig();
+            AwsArnUtils.Arn arn = AwsArnUtils.parse(functionArn);
+            region = arn.region();
+            accountId = arn.accountId();
         } else if (target instanceof LambdaFunction fn) {
             functionName = fn.getFunctionName();
-            region = AwsArnUtils.parse(fn.getFunctionArn()).region();
+            functionArn = fn.getFunctionArn();
             urlConfig = fn.getUrlConfig();
+            AwsArnUtils.Arn arn = AwsArnUtils.parse(functionArn);
+            region = arn.region();
+            accountId = fn.getAccountId() != null ? fn.getAccountId() : arn.accountId();
         } else {
             return CompletableFuture.completedFuture(
                     Response.status(404).entity(jsonMessage("Function URL not found")).type(MediaType.APPLICATION_JSON).build());
         }
+
+        requestContext.setAccountId(accountId);
+        requestContext.setRegion(region);
 
         String requestId = UUID.randomUUID().toString();
         String event = buildEvent(method, urlId, proxy, headers, uriInfo, body, requestId, region);
@@ -153,10 +186,10 @@ public class LambdaUrlInvocationController {
         }
 
         boolean responseStream = urlConfig != null && "RESPONSE_STREAM".equals(urlConfig.getInvokeMode());
-        byte[] eventBytes = event.getBytes();
+        byte[] eventBytes = event.getBytes(StandardCharsets.UTF_8);
         return CompletableFuture.supplyAsync(() -> {
             try {
-                InvokeResult result = lambdaService.invoke(region, functionName, eventBytes, InvocationType.RequestResponse);
+                InvokeResult result = lambdaService.invokeArn(functionArn, eventBytes, InvocationType.RequestResponse);
                 if (result.isStreaming()) {
                     return buildStreamedResponse(result, responseStream);
                 }
@@ -181,19 +214,109 @@ public class LambdaUrlInvocationController {
         return "AWS4-HMAC-SHA256".equals(amzAlgorithmQuery);
     }
 
+    /** The request path and query exactly as the client sent them, relative to the function URL. */
+    record RawTarget(String path, String query) {}
+
+    /**
+     * Reads the path and query from the request line. A pre-matching filter that rewrites the
+     * request URI (host-style routing) leaves JAX-RS holding a decoded copy that re-encodes
+     * differently, so a literal {@code +} sent as {@code %2B} would reach the function as a
+     * space. The Vert.x request is never rewritten, so it is the authoritative source.
+     */
+    private RawTarget rawTarget(String urlId, HttpHeaders headers, UriInfo uriInfo) {
+        io.vertx.core.http.HttpServerRequest vertxRequest = currentRequest();
+        String rawPath;
+        String rawQuery;
+        String host;
+        if (vertxRequest != null) {
+            rawPath = vertxRequest.path();
+            rawQuery = vertxRequest.query();
+            host = RequestHost.of(vertxRequest);
+        } else {
+            URI requestUri = uriInfo.getRequestUri();
+            rawPath = requestUri.getRawPath();
+            rawQuery = requestUri.getRawQuery();
+            host = RequestHost.of(headers != null ? headers.getHeaderString("Host") : null, requestUri);
+        }
+        return new RawTarget(functionPath(urlId, rawPath, LambdaUrlRoutingFilter.isFunctionUrlHost(host)),
+                rawQuery != null ? rawQuery : "");
+    }
+
+    private io.vertx.core.http.HttpServerRequest currentRequest() {
+        if (currentVertxRequest == null) {
+            return null;
+        }
+        try {
+            RoutingContext current = currentVertxRequest.getCurrent();
+            return current != null ? current.request() : null;
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /**
+     * The path the function sees. Host-style URLs ({@code <url-id>.lambda-url.<region>.<host>})
+     * carry it verbatim; path-style URLs ({@code /lambda-url/<url-id>/...}) carry it after the
+     * routing prefix.
+     */
+    static String functionPath(String urlId, String rawPath, boolean hostRouted) {
+        if (rawPath == null || rawPath.isEmpty()) {
+            return "/";
+        }
+        if (hostRouted) {
+            return rawPath;
+        }
+        String prefix = "/lambda-url/" + urlId;
+        if (rawPath.equals(prefix)) {
+            return "/";
+        }
+        if (rawPath.startsWith(prefix + "/")) {
+            return rawPath.substring(prefix.length());
+        }
+        return rawPath;
+    }
+
+    /** Decodes each query parameter exactly once, keeping repeated names in request order. */
+    static Map<String, List<String>> decodeQueryParameters(String rawQuery) {
+        Map<String, List<String>> params = new LinkedHashMap<>();
+        if (rawQuery == null || rawQuery.isEmpty()) {
+            return params;
+        }
+        for (String pair : rawQuery.split("&")) {
+            if (pair.isEmpty()) {
+                continue;
+            }
+            int eq = pair.indexOf('=');
+            String name = decodeQueryComponent(eq >= 0 ? pair.substring(0, eq) : pair);
+            String value = eq >= 0 ? decodeQueryComponent(pair.substring(eq + 1)) : "";
+            params.computeIfAbsent(name, k -> new ArrayList<>()).add(value);
+        }
+        return params;
+    }
+
+    private static String decodeQueryComponent(String component) {
+        try {
+            return URLDecoder.decode(component, StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            // A malformed escape is passed through rather than rejected.
+            return component;
+        }
+    }
+
     private String buildEvent(String method, String urlId, String proxy, HttpHeaders headers, UriInfo uriInfo, byte[] body, String requestId, String region) {
         ObjectNode root = objectMapper.createObjectNode();
         root.put("version", "2.0");
         root.put("routeKey", "$default");
-        String rawPath = "/" + (proxy != null ? proxy : "");
+        RawTarget target = rawTarget(urlId, headers, uriInfo);
+        String rawPath = target.path();
         root.put("rawPath", rawPath);
-        root.put("rawQueryString", uriInfo.getRequestUri().getRawQuery() != null ? uriInfo.getRequestUri().getRawQuery() : "");
+        root.put("rawQueryString", target.query());
 
         ObjectNode headersNode = root.putObject("headers");
         headers.getRequestHeaders().forEach((k, v) -> headersNode.put(k.toLowerCase(), String.join(",", v)));
 
         ObjectNode queryParams = root.putObject("queryStringParameters");
-        uriInfo.getQueryParameters().forEach((k, v) -> queryParams.put(k, String.join(",", v)));
+        decodeQueryParameters(target.query()).forEach((k, v) -> queryParams.put(k, String.join(",", v)));
 
         ObjectNode ctx = root.putObject("requestContext");
         ctx.put("accountId", regionResolver.getAccountId());
@@ -214,8 +337,13 @@ public class LambdaUrlInvocationController {
         httpNode.put("userAgent", headers.getHeaderString("user-agent"));
 
         if (body != null && body.length > 0) {
-            root.put("body", new String(body));
-            root.put("isBase64Encoded", false);
+            if (isTextMediaType(headers.getHeaderString(HttpHeaders.CONTENT_TYPE))) {
+                root.put("body", new String(body, StandardCharsets.UTF_8));
+                root.put("isBase64Encoded", false);
+            } else {
+                root.put("body", Base64.getEncoder().encodeToString(body));
+                root.put("isBase64Encoded", true);
+            }
         } else {
             root.putNull("body");
             root.put("isBase64Encoded", false);
@@ -224,7 +352,23 @@ public class LambdaUrlInvocationController {
         return root.toString();
     }
 
+    /**
+     * Mirrors how AWS decides isBase64Encoded for Function URL / API Gateway proxy
+     * integration requests: it is driven by the Content-Type header, not by whether
+     * the raw bytes happen to be valid UTF-8. Same content-type allowlist already used
+     * for the equivalent ALB-Lambda integration in ElbV2DataPlane, normalized to
+     * lowercase first since media types are case-insensitive.
+     */
+    private boolean isTextMediaType(String contentType) {
+        String normalized = contentType == null ? null : contentType.toLowerCase(Locale.ROOT);
+        return normalized == null || normalized.startsWith("text/") || normalized.contains("json")
+                || normalized.contains("xml") || normalized.contains("form");
+    }
+
     private Response buildResponse(InvokeResult result) {
+        if (result.getFunctionError() != null) {
+            return buildFunctionErrorResponse(result);
+        }
         if (result.getPayload() == null || result.getPayload().length == 0) {
             int status = result.getFunctionError() != null ? 502 : result.getStatusCode();
             return Response.status(status).build();
@@ -237,10 +381,13 @@ public class LambdaUrlInvocationController {
                 if (node.has("headers")) {
                     node.get("headers").fields().forEachRemaining(e -> builder.header(e.getKey(), e.getValue().asText()));
                 }
+                if (node.has("cookies") && node.get("cookies").isArray()) {
+                    node.get("cookies").forEach(cookie -> builder.header("Set-Cookie", cookie.asText()));
+                }
                 if (node.has("body")) {
                     String body = node.get("body").asText();
                     boolean isBase64 = node.path("isBase64Encoded").asBoolean(false);
-                    byte[] bytes = isBase64 ? Base64.getDecoder().decode(body) : body.getBytes();
+                    byte[] bytes = isBase64 ? Base64.getDecoder().decode(body) : body.getBytes(StandardCharsets.UTF_8);
                     builder.entity(bytes);
                 }
                 return builder.build();
@@ -377,6 +524,16 @@ public class LambdaUrlInvocationController {
             }
         }
         return -1;
+    }
+
+    /**
+     * Real Function URLs never surface the raw invocation error payload (stack traces,
+     * error types, internal fields) to the caller. A raw error payload has no "body"
+     * field, so, matching ApiGatewayController's Lambda proxy integration, the response
+     * carries the 502 status with no entity at all.
+     */
+    private Response buildFunctionErrorResponse(InvokeResult result) {
+        return Response.status(FUNCTION_ERROR_STATUS).build();
     }
 
     private String jsonMessage(String message) {

@@ -16,7 +16,11 @@ public class ExportExecution {
     private String createdBy;           // USER | SCHEDULE
     private long createdAt;
     private long completedAt;
-    private String statusReason;        // free-text on failure
+    private String statusReason;        // Internal failure detail; wire responses use an AWS reason code.
+    private Export export;
+
+    public Export getExport() { return export; }
+    public void setExport(Export export) { this.export = export; }
 
     public String getExecutionId() { return executionId; }
     public void setExecutionId(String v) { this.executionId = v; }

@@ -47,12 +47,81 @@ class LambdaArnUtilsTest {
             "arn:aws:lambda:us-east-1:000000000000:function:my-fn:q1:q2",
             "my-fn:bad/qualifier",
             "my:fn:extra:segments",
-            "name with spaces",
-            "name!bang",
     })
     void resolveRejectsMalformedInputs(String input) {
         AwsException ex = assertThrows(AwsException.class, () -> LambdaArnUtils.resolve(input));
         assertEquals("InvalidParameterValueException", ex.getErrorCode());
+        assertEquals(400, ex.getHttpStatus());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "name with spaces",
+            "name!bang",
+            "foo.v1",
+            "..",
+    })
+    void resolveRejectsNamesFailingTheFunctionNamePattern(String input) {
+        AwsException ex = assertThrows(AwsException.class, () -> LambdaArnUtils.resolve(input));
+        assertEquals("ValidationException", ex.getErrorCode());
+        assertEquals(400, ex.getHttpStatus());
+        assertTrue(ex.getMessage().contains("failed to satisfy constraint"));
+    }
+
+    @Test
+    void resolveRejectsNameLongerThan64Chars() {
+        String tooLong = "a".repeat(65);
+        AwsException ex = assertThrows(AwsException.class, () -> LambdaArnUtils.resolve(tooLong));
+        assertEquals("ValidationException", ex.getErrorCode());
+        assertEquals(400, ex.getHttpStatus());
+    }
+
+    @Test
+    void resolveAccepts64CharName() {
+        String maxLen = "a".repeat(64);
+        LambdaArnUtils.ResolvedFunctionRef ref = LambdaArnUtils.resolve(maxLen);
+        assertEquals(maxLen, ref.name());
+    }
+
+    @Test
+    void resolveAccepts140CharPartialArn() {
+        String name = "a".repeat(118);
+        String partialArn = "000000000000:function:" + name;
+        assertEquals(140, partialArn.length());
+
+        LambdaArnUtils.ResolvedFunctionRef ref = LambdaArnUtils.resolve(partialArn);
+        assertEquals(name, ref.name());
+    }
+
+    @Test
+    void resolveAccepts140CharFullArn() {
+        String name = "a".repeat(93);
+        String fullArn = "arn:aws:lambda:us-east-1:000000000000:function:" + name;
+        assertEquals(140, fullArn.length());
+
+        LambdaArnUtils.ResolvedFunctionRef ref = LambdaArnUtils.resolve(fullArn);
+        assertEquals(name, ref.name());
+    }
+
+    @Test
+    void resolveRejectsFullArnLongerThan140Chars() {
+        String name = "a".repeat(94);
+        String fullArn = "arn:aws:lambda:us-east-1:000000000000:function:" + name;
+        assertEquals(141, fullArn.length());
+
+        AwsException ex = assertThrows(AwsException.class, () -> LambdaArnUtils.resolve(fullArn));
+        assertEquals("ValidationException", ex.getErrorCode());
+        assertEquals(400, ex.getHttpStatus());
+    }
+
+    @Test
+    void resolveRejectsPartialArnLongerThan140Chars() {
+        String name = "a".repeat(119);
+        String partialArn = "000000000000:function:" + name;
+        assertEquals(141, partialArn.length());
+
+        AwsException ex = assertThrows(AwsException.class, () -> LambdaArnUtils.resolve(partialArn));
+        assertEquals("ValidationException", ex.getErrorCode());
         assertEquals(400, ex.getHttpStatus());
     }
 
@@ -141,5 +210,30 @@ class LambdaArnUtilsTest {
         // API Gateway v1 uses a longer URI format
         String uri = "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:000000000000:function:myFn/invocations";
         assertEquals("myFn", LambdaArnUtils.extractFunctionNameFromUri(uri));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            // Qualified targets (alias / numbered version) must preserve the :qualifier
+            // so downstream invoke resolves the configured target instead of $LATEST.
+            "arn:aws:lambda:us-east-1:000000000000:function:myFn:PROD/invocations, myFn:PROD",
+            "arn:aws:lambda:us-east-1:000000000000:function:myFn:PROD, myFn:PROD",
+            "arn:aws:lambda:us-east-1:000000000000:function:myFn:1/invocations, myFn:1",
+            "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:000000000000:function:myFn:PROD/invocations, myFn:PROD",
+            "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:000000000000:function:myFn:42/invocations, myFn:42",
+    })
+    void extractFunctionNameFromUri_preservesQualifier(String uri, String expected) {
+        assertEquals(expected, LambdaArnUtils.extractFunctionNameFromUri(uri));
+    }
+
+    @Test
+    void extractFunctionNameFromUri_qualifiedRef_resolvesToNameAndQualifier() {
+        // The extracted "myFn:PROD" must resolve into a distinct name + qualifier,
+        // which is what invoke() relies on to target the alias/version.
+        String extracted = LambdaArnUtils.extractFunctionNameFromUri(
+                "arn:aws:lambda:us-east-1:000000000000:function:myFn:PROD/invocations");
+        LambdaArnUtils.ResolvedFunctionRef ref = LambdaArnUtils.resolve(extracted);
+        assertEquals("myFn", ref.name());
+        assertEquals("PROD", ref.qualifier());
     }
 }

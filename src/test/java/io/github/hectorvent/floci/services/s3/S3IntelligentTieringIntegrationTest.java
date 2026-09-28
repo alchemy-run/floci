@@ -48,9 +48,9 @@ class S3IntelligentTieringIntegrationTest {
         given()
             .body(CONFIG)
         .when()
-            .put("/" + BUCKET + "?intelligent-tiering")
+            .put("/" + BUCKET + "?intelligent-tiering&id=archive")
         .then()
-            .statusCode(200);
+            .statusCode(204);
 
         given()
         .when()
@@ -69,7 +69,7 @@ class S3IntelligentTieringIntegrationTest {
             .get("/" + BUCKET + "?intelligent-tiering")
         .then()
             .statusCode(200)
-            .body(containsString("ListBucketIntelligentTieringConfigurationsOutput"))
+            .body(containsString("ListBucketIntelligentTieringConfigurationsResult"))
             .body(containsString("<Id>archive</Id>"));
     }
 

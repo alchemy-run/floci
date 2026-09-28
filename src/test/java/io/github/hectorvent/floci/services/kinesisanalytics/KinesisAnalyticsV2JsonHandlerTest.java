@@ -6,6 +6,7 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.kinesisanalytics.container.FlinkContainerManager;
 import jakarta.ws.rs.core.Response;
@@ -196,9 +197,10 @@ class KinesisAnalyticsV2JsonHandlerTest {
         describe.put("ApplicationName", "demo");
         ObjectNode detail = (ObjectNode) entity(handler.handle("DescribeApplication", describe, REGION))
                 .get("ApplicationDetail");
-        // No code configured, so ApplicationConfigurationDescription isn't built at all — matches how
-        // EnvironmentPropertyDescriptions is also only ever echoed when the app has code.
-        assertThat(detail.has("ApplicationConfigurationDescription"), is(false));
+        assertThat(detail.path("ApplicationConfigurationDescription")
+                .path("ApplicationSnapshotConfigurationDescription").path("SnapshotsEnabled").asBoolean(), is(true));
+        assertThat(detail.path("ApplicationConfigurationDescription")
+                .has("ApplicationCodeConfigurationDescription"), is(false));
     }
 
     @Test
@@ -413,7 +415,7 @@ class KinesisAnalyticsV2JsonHandlerTest {
     private KinesisAnalyticsV2Service mockModeService() {
         StorageFactory storageFactory = Mockito.mock(StorageFactory.class);
         when(storageFactory.create(Mockito.anyString(), Mockito.anyString(), Mockito.any()))
-                .thenReturn(new InMemoryStorage<>());
+                .thenReturn(AccountAwareStorageBackend.inMemory("000000000000"));
 
         EmulatorConfig config = Mockito.mock(EmulatorConfig.class);
         var servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);

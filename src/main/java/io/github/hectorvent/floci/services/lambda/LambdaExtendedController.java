@@ -7,7 +7,6 @@ import io.github.hectorvent.floci.services.lambda.model.InvocationType;
 import io.github.hectorvent.floci.services.lambda.model.InvokeResult;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
-import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
@@ -23,8 +22,7 @@ import java.util.LinkedHashMap;
 
 /**
  * Lambda operations that live on API-version prefixes other than 2015-03-31:
- * {@code GetAccountSettings} (2016-08-19) and {@code InvokeWithResponseStream}
- * (2021-11-15).
+ * {@code InvokeWithResponseStream} (2021-11-15).
  */
 @Path("/")
 @Produces(MediaType.APPLICATION_JSON)
@@ -39,13 +37,6 @@ public class LambdaExtendedController {
     public LambdaExtendedController(LambdaService lambdaService, RegionResolver regionResolver) {
         this.lambdaService = lambdaService;
         this.regionResolver = regionResolver;
-    }
-
-    @GET
-    @Path("/2016-08-19/account-settings")
-    public Response getAccountSettings(@Context HttpHeaders headers) {
-        String region = regionResolver.resolveRegion(headers);
-        return Response.ok(lambdaService.getAccountSettings(region)).build();
     }
 
     @POST

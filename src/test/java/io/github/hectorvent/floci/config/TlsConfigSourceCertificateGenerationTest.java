@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.config;
 
+import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -12,8 +13,12 @@ import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Integration tests for TLS certificate generation with custom hostnames.
@@ -45,6 +50,21 @@ class TlsConfigSourceCertificateGenerationTest {
         System.clearProperty("floci.storage.persistent-path");
         System.clearProperty("floci.hostname");
         System.clearProperty("floci.base-url");
+        System.clearProperty("floci.services.iot.endpoint-address");
+    }
+
+    @Test
+    void legacyCaEndpointServesRootInsteadOfServerLeaf() throws Exception {
+        new TlsConfigSource();
+        EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
+        when(config.tls().enabled()).thenReturn(true);
+        when(config.storage().persistentPath()).thenReturn(tempDir.toString());
+
+        try (Response response = new TlsCaController(config).getCaCertificate()) {
+            assertEquals(200, response.getStatus());
+            assertEquals(Files.readString(tempDir.resolve("tls/floci-root-ca.crt")), response.getEntity());
+            assertNotEquals(Files.readString(tempDir.resolve("tls/floci-server.crt")), response.getEntity());
+        }
     }
 
     /**
@@ -59,7 +79,7 @@ class TlsConfigSourceCertificateGenerationTest {
         new TlsConfigSource();
         
         // Assert
-        Path certFile = tempDir.resolve("tls/floci-selfsigned.crt");
+        Path certFile = tempDir.resolve("tls/floci-server.crt");
         assertTrue(Files.exists(certFile), "Certificate file should exist");
         
         List<String> sans = extractSansFromCertificate(certFile);
@@ -81,7 +101,7 @@ class TlsConfigSourceCertificateGenerationTest {
         new TlsConfigSource();
         
         // Assert
-        Path certFile = tempDir.resolve("tls/floci-selfsigned.crt");
+        Path certFile = tempDir.resolve("tls/floci-server.crt");
         assertTrue(Files.exists(certFile), "Certificate file should exist");
         
         List<String> sans = extractSansFromCertificate(certFile);
@@ -103,7 +123,7 @@ class TlsConfigSourceCertificateGenerationTest {
         new TlsConfigSource();
         
         // Assert
-        Path certFile = tempDir.resolve("tls/floci-selfsigned.crt");
+        Path certFile = tempDir.resolve("tls/floci-server.crt");
         assertTrue(Files.exists(certFile), "Certificate file should exist");
         
         List<String> sans = extractSansFromCertificate(certFile);
@@ -124,7 +144,7 @@ class TlsConfigSourceCertificateGenerationTest {
         new TlsConfigSource();
         
         // Assert
-        Path certFile = tempDir.resolve("tls/floci-selfsigned.crt");
+        Path certFile = tempDir.resolve("tls/floci-server.crt");
         assertTrue(Files.exists(certFile), "Certificate file should exist");
         
         List<String> sans = extractSansFromCertificate(certFile);
@@ -147,7 +167,7 @@ class TlsConfigSourceCertificateGenerationTest {
         new TlsConfigSource();
         
         // Assert
-        Path certFile = tempDir.resolve("tls/floci-selfsigned.crt");
+        Path certFile = tempDir.resolve("tls/floci-server.crt");
         assertTrue(Files.exists(certFile), "Certificate file should exist");
         
         List<String> sans = extractSansFromCertificate(certFile);
@@ -168,10 +188,16 @@ class TlsConfigSourceCertificateGenerationTest {
             "Certificate SANs should include AppSync GraphQL host *.appsync-api.us-east-1.amazonaws.com");
         assertTrue(sans.contains("*.execute-api.us-east-1.amazonaws.com"),
             "Certificate SANs should include API Gateway execute-api host *.execute-api.us-east-1.amazonaws.com");
+        assertTrue(sans.contains("*.lambda-microvm.us-east-1.localhost.floci.io"),
+            "Certificate SANs should include Lambda MicroVM endpoints");
+        assertTrue(sans.contains("*.execute-api.localhost.floci.io"),
+            "Certificate SANs should include API Gateway execution hosts");
+        assertTrue(sans.contains("*.execute-api.localhost.localstack.cloud"),
+            "Certificate SANs should include LocalStack-compatible API Gateway execution hosts");
 
-        // Should not contain any custom hostnames
-        assertEquals(13, sans.size(),
-            "Certificate SANs should contain exactly the default entries");
+        // Should be the defaults and nothing else - no custom hostnames
+        assertEquals(Set.copyOf(TlsConfigSource.DEFAULT_SAN_HOSTNAMES), Set.copyOf(sans),
+            "Certificate SANs should be exactly the default entries");
     }
 
     /**
@@ -187,7 +213,7 @@ class TlsConfigSourceCertificateGenerationTest {
         new TlsConfigSource();
         
         // Assert
-        Path certFile = tempDir.resolve("tls/floci-selfsigned.crt");
+        Path certFile = tempDir.resolve("tls/floci-server.crt");
         assertTrue(Files.exists(certFile), "Certificate file should exist");
         
         List<String> sans = extractSansFromCertificate(certFile);
@@ -209,7 +235,7 @@ class TlsConfigSourceCertificateGenerationTest {
         new TlsConfigSource();
         
         // Assert
-        Path metadataFile = tempDir.resolve("tls/floci-selfsigned.metadata.json");
+        Path metadataFile = tempDir.resolve("tls/floci-server.metadata.json");
         assertTrue(Files.exists(metadataFile), "Metadata file should exist");
         
         String json = Files.readString(metadataFile);
@@ -219,6 +245,36 @@ class TlsConfigSourceCertificateGenerationTest {
             "Metadata should include 'myhost' hostname");
         assertTrue(json.contains("localhost"), 
             "Metadata should include default 'localhost' hostname");
+    }
+
+    /**
+     * The IoT endpoint address is what devices verify on 8883 and 443, so the boot certificate
+     * covers it even when it has more labels than the wildcard SAN matches.
+     */
+    @Test
+    void testCertificateIncludesIotEndpointAddress() throws Exception {
+        System.setProperty("floci.services.iot.endpoint-address", "iot.example.localhost.floci.io:8883");
+
+        new TlsConfigSource();
+
+        List<String> sans = extractSansFromCertificate(tempDir.resolve("tls/floci-server.crt"));
+        assertTrue(sans.contains("iot.example.localhost.floci.io"), sans.toString());
+        assertFalse(sans.contains("iot.example.localhost.floci.io:8883"), "the port is not part of the name");
+        assertTrue(Files.readString(tempDir.resolve("tls/floci-server.metadata.json")).contains("iot.example.localhost.floci.io"),
+            "the metadata records it as a configured name, so a later change is detected");
+    }
+
+    @Test
+    void testIotEndpointAddressAddedAfterBootRegeneratesTheCertificate() throws Exception {
+        new TlsConfigSource();
+        Path certFile = tempDir.resolve("tls/floci-server.crt");
+        assertFalse(extractSansFromCertificate(certFile).contains("iot.example.localhost.floci.io"));
+
+        System.setProperty("floci.services.iot.endpoint-address", "iot.example.localhost.floci.io");
+        new TlsConfigSource();
+
+        assertTrue(extractSansFromCertificate(certFile).contains("iot.example.localhost.floci.io"),
+            "a changed endpoint address is a hostname configuration change");
     }
 
     // ==================== Helper Methods ====================

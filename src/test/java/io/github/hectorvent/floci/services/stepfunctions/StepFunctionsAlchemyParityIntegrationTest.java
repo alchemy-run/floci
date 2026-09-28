@@ -231,7 +231,8 @@ class StepFunctionsAlchemyParityIntegrationTest {
                             "recovered": "{% $states.errorOutput.Cause %}"
                           }
                         }
-                      ]
+                      ],
+                      "End": true
                     },
                     "Recover": {
                       "Type": "Pass",

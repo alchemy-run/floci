@@ -14,7 +14,8 @@ import io.github.hectorvent.floci.services.iam.model.IamRole;
 import io.github.hectorvent.floci.services.iam.model.IamUser;
 import io.github.hectorvent.floci.services.iam.model.LoginProfile;
 import io.github.hectorvent.floci.services.iam.model.OidcProvider;
-import io.github.hectorvent.floci.services.iam.model.SamlProvider;
+import io.github.hectorvent.floci.services.iam.model.OpenIDConnectProvider;
+import io.github.hectorvent.floci.services.iam.model.IamSamlProvider;
 import io.github.hectorvent.floci.services.iam.model.ServerCertificate;
 import io.github.hectorvent.floci.services.iam.model.ServiceSpecificCredential;
 import io.github.hectorvent.floci.services.iam.model.SigningCertificate;
@@ -56,12 +57,9 @@ public class IamExtendedService {
 
     private final IamService iamService;
     private final RegionResolver regionResolver;
-    private final StorageBackend<String, String> accountAliases;
-    private final StorageBackend<String, AccountPasswordPolicy> passwordPolicies;
-    private final StorageBackend<String, LoginProfile> loginProfiles;
     private final StorageBackend<String, VirtualMfaDevice> virtualMfaDevices;
-    private final StorageBackend<String, SamlProvider> samlProviders;
-    private final StorageBackend<String, OidcProvider> oidcProviders;
+    private final SAMLProviderService samlProviderService;
+    private final StorageBackend<String, AccountPasswordPolicy> legacyPasswordPolicies;
     private final StorageBackend<String, SshPublicKey> sshPublicKeys;
     private final StorageBackend<String, SigningCertificate> signingCertificates;
     private final StorageBackend<String, ServiceSpecificCredential> serviceCredentials;
@@ -70,15 +68,13 @@ public class IamExtendedService {
     private final StorageBackend<String, AccessAdvisorJob> accessAdvisorJobs;
 
     @Inject
-    public IamExtendedService(IamService iamService, RegionResolver regionResolver, StorageFactory storageFactory) {
+    public IamExtendedService(IamService iamService, RegionResolver regionResolver, StorageFactory storageFactory,
+                              SAMLProviderService samlProviderService) {
         this.iamService = iamService;
         this.regionResolver = regionResolver;
-        this.accountAliases = storageFactory.create("iam", "iam-account-aliases.json", new TypeReference<>() {});
-        this.passwordPolicies = storageFactory.create("iam", "iam-password-policies.json", new TypeReference<>() {});
-        this.loginProfiles = storageFactory.create("iam", "iam-login-profiles.json", new TypeReference<>() {});
+        this.samlProviderService = samlProviderService;
+        this.legacyPasswordPolicies = storageFactory.create("iam", "iam-password-policies.json", new TypeReference<>() {});
         this.virtualMfaDevices = storageFactory.create("iam", "iam-virtual-mfa.json", new TypeReference<>() {});
-        this.samlProviders = storageFactory.create("iam", "iam-saml-providers.json", new TypeReference<>() {});
-        this.oidcProviders = storageFactory.create("iam", "iam-oidc-providers.json", new TypeReference<>() {});
         this.sshPublicKeys = storageFactory.create("iam", "iam-ssh-keys.json", new TypeReference<>() {});
         this.signingCertificates = storageFactory.create("iam", "iam-signing-certs.json", new TypeReference<>() {});
         this.serviceCredentials = storageFactory.create("iam", "iam-service-credentials.json", new TypeReference<>() {});
@@ -92,45 +88,37 @@ public class IamExtendedService {
     // =========================================================================
 
     public void createAccountAlias(String alias) {
-        require(alias, "AccountAlias");
-        accountAliases.put(ACCOUNT_KEY, alias);
+        iamService.createAccountAlias(alias);
     }
 
     public void deleteAccountAlias(String alias) {
-        require(alias, "AccountAlias");
-        String existing = accountAliases.get(ACCOUNT_KEY).orElse(null);
-        if (existing == null || !existing.equals(alias)) {
-            throw new AwsException("NoSuchEntity",
-                    "The account alias " + alias + " cannot be found.", 404);
-        }
-        accountAliases.delete(ACCOUNT_KEY);
+        iamService.deleteAccountAlias(alias);
     }
 
     public Optional<String> getAccountAlias() {
-        return accountAliases.get(ACCOUNT_KEY);
+        return iamService.getAccountAlias();
     }
 
-    // =========================================================================
-    // Account password policy
-    // =========================================================================
+    public void migrateLegacyPasswordPolicy() {
+        legacyPasswordPolicies.get(ACCOUNT_KEY).ifPresent(policy -> {
+            if (iamService.getAccountPasswordPolicy().isEmpty()) {
+                iamService.updateAccountPasswordPolicy(policy);
+            }
+            legacyPasswordPolicies.delete(ACCOUNT_KEY);
+        });
+    }
 
     public AccountPasswordPolicy getAccountPasswordPolicy() {
-        return passwordPolicies.get(ACCOUNT_KEY)
-                .orElseThrow(() -> new AwsException("NoSuchEntity",
-                        "The Password Policy with domain name cannot be found.", 404));
+        return iamService.getAccountPasswordPolicy().orElseThrow(() -> new AwsException("NoSuchEntity",
+                "The account policy with name PasswordPolicy cannot be found.", 404));
     }
 
     public AccountPasswordPolicy updateAccountPasswordPolicy(AccountPasswordPolicy policy) {
-        passwordPolicies.put(ACCOUNT_KEY, policy);
-        return policy;
+        return iamService.updateAccountPasswordPolicy(policy);
     }
 
     public void deleteAccountPasswordPolicy() {
-        if (passwordPolicies.get(ACCOUNT_KEY).isEmpty()) {
-            throw new AwsException("NoSuchEntity",
-                    "The Password Policy with domain name cannot be found.", 404);
-        }
-        passwordPolicies.delete(ACCOUNT_KEY);
+        iamService.deleteAccountPasswordPolicy();
     }
 
     // =========================================================================
@@ -138,37 +126,21 @@ public class IamExtendedService {
     // =========================================================================
 
     public LoginProfile createLoginProfile(String userName, String password, boolean resetRequired) {
-        iamService.getUser(userName);
-        if (loginProfiles.get(userName).isPresent()) {
-            throw new AwsException("EntityAlreadyExists",
-                    "Login Profile for User " + userName + " already exists.", 409);
-        }
-        LoginProfile profile = new LoginProfile(userName, password, resetRequired);
-        loginProfiles.put(userName, profile);
-        return profile;
+        migrateLegacyPasswordPolicy();
+        return iamService.createLoginProfile(userName, password, resetRequired);
     }
 
     public LoginProfile getLoginProfile(String userName) {
-        iamService.getUser(userName);
-        return loginProfiles.get(userName)
-                .orElseThrow(() -> new AwsException("NoSuchEntity",
-                        "Login Profile for User " + userName + " cannot be found.", 404));
+        return iamService.getLoginProfile(userName);
     }
 
     public void updateLoginProfile(String userName, String password, Boolean resetRequired) {
-        LoginProfile profile = getLoginProfile(userName);
-        if (password != null) {
-            profile.setPassword(password);
-        }
-        if (resetRequired != null) {
-            profile.setPasswordResetRequired(resetRequired);
-        }
-        loginProfiles.put(userName, profile);
+        migrateLegacyPasswordPolicy();
+        iamService.updateLoginProfile(userName, password, resetRequired);
     }
 
     public void deleteLoginProfile(String userName) {
-        getLoginProfile(userName);
-        loginProfiles.delete(userName);
+        iamService.deleteLoginProfile(userName);
     }
 
     // =========================================================================
@@ -254,48 +226,31 @@ public class IamExtendedService {
     // SAML providers
     // =========================================================================
 
-    public SamlProvider createSamlProvider(String name, String metadata, String encryptionMode,
-                                           Map<String, String> tags) {
-        require(name, "Name");
-        require(metadata, "SAMLMetadataDocument");
-        String arn = iamArn("saml-provider/", "", name);
-        if (samlProviders.get(arn).isPresent()) {
-            throw new AwsException("EntityAlreadyExists",
-                    "SAML provider " + name + " already exists.", 409);
-        }
-        SamlProvider provider = new SamlProvider(arn, name, UUID.randomUUID().toString(),
-                metadata, encryptionMode);
+    public IamSamlProvider createSamlProvider(String name, String metadata, String encryptionMode,
+                                             Map<String, String> tags) {
+        String accountId = regionResolver.getAccountId();
+        IamSamlProvider provider = samlProviderService.create(accountId, name, metadata);
+        samlProviderService.update(accountId, provider.getArn(), null, encryptionMode);
         if (tags != null) {
-            provider.getTags().putAll(tags);
+            samlProviderService.tag(accountId, provider.getArn(), tags);
         }
-        samlProviders.put(arn, provider);
         return provider;
     }
 
-    public SamlProvider getSamlProvider(String arn) {
-        return samlProviders.get(arn)
-                .orElseThrow(() -> new AwsException("NoSuchEntity",
-                        "SAML provider " + arn + " cannot be found.", 404));
+    public IamSamlProvider getSamlProvider(String arn) {
+        return samlProviderService.getForAccount(regionResolver.getAccountId(), arn);
     }
 
-    public List<SamlProvider> listSamlProviders() {
-        return samlProviders.scan(k -> true);
+    public List<IamSamlProvider> listSamlProviders() {
+        return samlProviderService.list(regionResolver.getAccountId());
     }
 
     public void updateSamlProvider(String arn, String metadata, String encryptionMode) {
-        SamlProvider provider = getSamlProvider(arn);
-        if (metadata != null) {
-            provider.setMetadataDocument(metadata);
-        }
-        if (encryptionMode != null) {
-            provider.setAssertionEncryptionMode(encryptionMode);
-        }
-        samlProviders.put(arn, provider);
+        samlProviderService.update(regionResolver.getAccountId(), arn, metadata, encryptionMode);
     }
 
     public void deleteSamlProvider(String arn) {
-        getSamlProvider(arn);
-        samlProviders.delete(arn);
+        samlProviderService.delete(regionResolver.getAccountId(), arn);
     }
 
     public Map<String, String> listSamlProviderTags(String arn) {
@@ -303,93 +258,61 @@ public class IamExtendedService {
     }
 
     public void tagSamlProvider(String arn, Map<String, String> tags) {
-        SamlProvider provider = getSamlProvider(arn);
-        provider.getTags().putAll(tags);
-        samlProviders.put(arn, provider);
+        samlProviderService.tag(regionResolver.getAccountId(), arn, tags);
     }
 
     public void untagSamlProvider(String arn, List<String> keys) {
-        SamlProvider provider = getSamlProvider(arn);
-        keys.forEach(provider.getTags()::remove);
-        samlProviders.put(arn, provider);
+        samlProviderService.untag(regionResolver.getAccountId(), arn, keys);
     }
-
-    // =========================================================================
-    // OIDC providers
-    // =========================================================================
 
     public OidcProvider createOidcProvider(String url, List<String> clientIds,
                                            List<String> thumbprints, Map<String, String> tags) {
-        require(url, "Url");
-        String host = url.replaceFirst("^https?://", "");
-        String arn = iamArn("oidc-provider/", "", host);
-        if (oidcProviders.get(arn).isPresent()) {
-            throw new AwsException("EntityAlreadyExists",
-                    "OpenIDConnect provider " + url + " already exists.", 409);
-        }
-        OidcProvider provider = new OidcProvider(arn, host);
-        if (clientIds != null) {
-            provider.getClientIds().addAll(clientIds);
-        }
-        if (thumbprints != null) {
-            provider.getThumbprints().addAll(thumbprints);
-        }
-        if (tags != null) {
-            provider.getTags().putAll(tags);
-        }
-        oidcProviders.put(arn, provider);
-        return provider;
+        return oidcView(iamService.createOpenIDConnectProvider(url, clientIds, thumbprints, tags));
     }
 
     public OidcProvider getOidcProvider(String arn) {
-        return oidcProviders.get(arn)
-                .orElseThrow(() -> new AwsException("NoSuchEntity",
-                        "OpenIDConnect provider " + arn + " cannot be found.", 404));
+        return oidcView(iamService.getOpenIDConnectProvider(arn));
     }
 
     public List<OidcProvider> listOidcProviders() {
-        return oidcProviders.scan(k -> true);
+        return iamService.listOpenIDConnectProviders().stream().map(IamExtendedService::oidcView).toList();
+    }
+
+    private static OidcProvider oidcView(OpenIDConnectProvider provider) {
+        OidcProvider view = new OidcProvider(provider.getArn(), provider.getUrl());
+        view.setCreateDate(provider.getCreateDate());
+        view.setClientIds(provider.getClientIdList());
+        view.setThumbprints(provider.getThumbprintList());
+        view.setTags(provider.getTags());
+        return view;
     }
 
     public void addOidcClientId(String arn, String clientId) {
-        OidcProvider provider = getOidcProvider(arn);
-        if (!provider.getClientIds().contains(clientId)) {
-            provider.getClientIds().add(clientId);
-            oidcProviders.put(arn, provider);
-        }
+        iamService.addClientIdToOpenIDConnectProvider(arn, clientId);
     }
 
     public void removeOidcClientId(String arn, String clientId) {
-        OidcProvider provider = getOidcProvider(arn);
-        provider.getClientIds().remove(clientId);
-        oidcProviders.put(arn, provider);
+        iamService.removeClientIdFromOpenIDConnectProvider(arn, clientId);
     }
 
     public void updateOidcThumbprints(String arn, List<String> thumbprints) {
-        OidcProvider provider = getOidcProvider(arn);
-        provider.setThumbprints(thumbprints != null ? thumbprints : List.of());
-        oidcProviders.put(arn, provider);
+        iamService.updateOpenIDConnectProviderThumbprint(arn, thumbprints);
     }
 
     public void deleteOidcProvider(String arn) {
-        getOidcProvider(arn);
-        oidcProviders.delete(arn);
+        iamService.deleteOpenIDConnectProvider(arn);
     }
 
     public Map<String, String> listOidcProviderTags(String arn) {
-        return getOidcProvider(arn).getTags();
+        return iamService.listOpenIDConnectProviderTags(arn);
     }
 
     public void tagOidcProvider(String arn, Map<String, String> tags) {
-        OidcProvider provider = getOidcProvider(arn);
-        provider.getTags().putAll(tags);
-        oidcProviders.put(arn, provider);
+        iamService.tagOpenIDConnectProvider(arn, tags);
     }
 
     public void untagOidcProvider(String arn, List<String> keys) {
-        OidcProvider provider = getOidcProvider(arn);
-        keys.forEach(provider.getTags()::remove);
-        oidcProviders.put(arn, provider);
+        iamService.untagOpenIDConnectProvider(arn, keys);
     }
 
     // =========================================================================
@@ -600,7 +523,7 @@ public class IamExtendedService {
                 users.size(), groups.size(), roles.size(), policies.size(),
                 iamService.listInstanceProfiles("/").size(),
                 serverCertificates.scan(k -> true).size(),
-                samlProviders.scan(k -> true).size() + oidcProviders.scan(k -> true).size(),
+                listSamlProviders().size() + listOidcProviders().size(),
                 mfa, mfaInUse);
     }
 
@@ -634,7 +557,7 @@ public class IamExtendedService {
                 .append("access_key_2_active,access_key_2_last_rotated,access_key_2_last_used_date,")
                 .append("access_key_2_last_used_region,access_key_2_last_used_service\n");
         for (IamUser user : iamService.listUsers("/")) {
-            boolean hasPassword = loginProfiles.get(user.getUserName()).isPresent();
+            boolean hasPassword = iamService.hasLoginProfile(user.getUserName());
             boolean mfa = virtualMfaDevices.scan(k -> true).stream()
                     .anyMatch(d -> user.getUserName().equals(d.getUserName()));
             csv.append(user.getUserName()).append(',')

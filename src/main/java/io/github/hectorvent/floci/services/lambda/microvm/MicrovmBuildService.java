@@ -1,11 +1,13 @@
 package io.github.hectorvent.floci.services.lambda.microvm;
 
+import com.github.dockerjava.api.command.BuildImageResultCallback;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.RequestContext;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
-import com.github.dockerjava.api.command.BuildImageResultCallback;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.context.control.ActivateRequestContext;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
@@ -66,11 +68,28 @@ public class MicrovmBuildService {
 
     private final S3Service s3Service;
     private final ContainerLifecycleManager lifecycleManager;
+    private final RequestContext requestContext;
 
     @Inject
-    public MicrovmBuildService(S3Service s3Service, ContainerLifecycleManager lifecycleManager) {
+    public MicrovmBuildService(S3Service s3Service, ContainerLifecycleManager lifecycleManager,
+                               RequestContext requestContext) {
         this.s3Service = s3Service;
         this.lifecycleManager = lifecycleManager;
+        this.requestContext = requestContext;
+    }
+
+    @ActivateRequestContext
+    public String buildForAccount(String accountId, String region, String artifactUri, String imageTag) {
+        String previousAccount = requestContext.getAccountId();
+        String previousRegion = requestContext.getRegion();
+        requestContext.setAccountId(accountId);
+        requestContext.setRegion(region);
+        try {
+            return build(artifactUri, imageTag);
+        } finally {
+            requestContext.setAccountId(previousAccount);
+            requestContext.setRegion(previousRegion);
+        }
     }
 
     static String localBaseImage() {

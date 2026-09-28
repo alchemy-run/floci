@@ -63,7 +63,7 @@ public class CloudFrontEdgeRoutingFilter implements ContainerRequestFilter {
             return;
         }
         Distribution distribution = service.get().findDistributionByHost(stripPort(host));
-        if (distribution == null) {
+        if (distribution == null || !requiresEdgeExecution(distribution)) {
             return;
         }
         URI rewritten = UriBuilder.fromUri(original)
@@ -72,6 +72,28 @@ public class CloudFrontEdgeRoutingFilter implements ContainerRequestFilter {
                 .build();
         LOG.debugv("Routing CloudFront Host {0}{1} -> {2}", host, path, rewritten.getPath());
         requestContext.setRequestUri(rewritten);
+    }
+
+    private static boolean requiresEdgeExecution(Distribution distribution) {
+        if (distribution.getConfig() == null) {
+            return false;
+        }
+        if (distribution.getConfig().getDefaultCacheBehavior() != null
+                && distribution.getConfig().getDefaultCacheBehavior().getFunctionAssociations() != null
+                && !distribution.getConfig().getDefaultCacheBehavior().getFunctionAssociations().isEmpty()) {
+            return true;
+        }
+        if (distribution.getConfig().getCacheBehaviors() != null
+                && distribution.getConfig().getCacheBehaviors().stream().anyMatch(behavior ->
+                        behavior.getFunctionAssociations() != null && !behavior.getFunctionAssociations().isEmpty())) {
+            return true;
+        }
+        return distribution.getConfig().getOrigins() != null
+                && distribution.getConfig().getOrigins().stream().anyMatch(origin ->
+                        origin.getVpcOriginConfig() != null || (origin.getCustomOriginConfig() != null
+                                && origin.getDomainName() != null
+                                && (origin.getDomainName().endsWith(".amazonaws.com")
+                                        || origin.getDomainName().endsWith(".amazonaws.com.cn"))));
     }
 
     /** HTTP/1.1 {@code Host}, else the request URI authority (HTTP/2 {@code :authority}). */

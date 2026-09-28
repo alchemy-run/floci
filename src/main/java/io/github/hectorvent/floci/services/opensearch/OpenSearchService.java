@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.opensearch;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.config.TlsCertificateManager;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
@@ -11,6 +12,7 @@ import io.github.hectorvent.floci.services.opensearch.model.AdvancedSecurityOpti
 import io.github.hectorvent.floci.services.opensearch.model.ClusterConfig;
 import io.github.hectorvent.floci.services.opensearch.model.Domain;
 import io.github.hectorvent.floci.services.opensearch.model.DomainEndpointOptions;
+import io.github.hectorvent.floci.services.opensearch.model.DomainMaintenance;
 import io.github.hectorvent.floci.services.opensearch.model.EbsOptions;
 import io.github.hectorvent.floci.services.opensearch.model.EncryptionAtRestOptions;
 import io.github.hectorvent.floci.services.opensearch.model.NodeToNodeEncryptionOptions;
@@ -22,43 +24,91 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import io.github.hectorvent.floci.core.resource.ExplorerResource;
+import io.github.hectorvent.floci.core.resource.ResourceProvider;
+import io.github.hectorvent.floci.core.resource.SupportedResourceType;
 
 @ApplicationScoped
-public class OpenSearchService {
+public class OpenSearchService implements ResourceProvider {
 
     private static final Logger LOG = Logger.getLogger(OpenSearchService.class);
 
     private static final String DEFAULT_ENGINE_VERSION = OpenSearchVersions.DEFAULT_VERSION;
 
+    private static final Set<String> MAINTENANCE_ACTIONS =
+            Set.of("REBOOT_NODE", "RESTART_SEARCH_PROCESS", "RESTART_DASHBOARD");
+
     private final StorageBackend<String, Domain> domainStore;
     private final EmulatorConfig config;
     private final RegionResolver regionResolver;
     private final OpenSearchDomainManager domainManager;
+    private final TlsCertificateManager certificateManager;
     private final ScheduledExecutorService poller = Executors.newSingleThreadScheduledExecutor();
 
     @Inject
     public OpenSearchService(StorageFactory storageFactory, EmulatorConfig config,
-                             RegionResolver regionResolver, OpenSearchDomainManager domainManager) {
+                             RegionResolver regionResolver, OpenSearchDomainManager domainManager,
+                             TlsCertificateManager certificateManager) {
         this.domainStore = storageFactory.create("opensearch", "opensearch-domains.json",
                 new TypeReference<Map<String, Domain>>() {});
         this.config = config;
         this.regionResolver = regionResolver;
         this.domainManager = domainManager;
+        this.certificateManager = certificateManager;
     }
 
     OpenSearchService(StorageBackend<String, Domain> domainStore, EmulatorConfig config,
                       RegionResolver regionResolver, OpenSearchDomainManager domainManager) {
+        this(domainStore, config, regionResolver, domainManager, null);
+    }
+
+    OpenSearchService(StorageBackend<String, Domain> domainStore, EmulatorConfig config,
+                      RegionResolver regionResolver, OpenSearchDomainManager domainManager,
+                      TlsCertificateManager certificateManager) {
         this.domainStore = domainStore;
         this.config = config;
         this.regionResolver = regionResolver;
         this.domainManager = domainManager;
+        this.certificateManager = certificateManager;
+    }
+
+    /**
+     * The endpoint DescribeDomain reports: the gateway host that serves the domain's REST API
+     * (see {@link OpenSearchDataPlaneEndpoint}), or empty while no search engine backs the domain.
+     */
+    public String publicEndpoint(Domain domain) {
+        if (domain.getEndpoint() == null || domain.getEndpoint().isBlank()) {
+            return "";
+        }
+        return OpenSearchDataPlaneEndpoint.publicEndpoint(domain.getDomainName(), regionOf(domain), baseUrl());
+    }
+
+    private String regionOf(Domain domain) {
+        return domain.getArn() != null
+                ? AwsArnUtils.parse(domain.getArn()).region()
+                : regionResolver.getDefaultRegion();
+    }
+
+    private String baseUrl() {
+        return config.effectiveBaseUrl();
+    }
+
+    /** Makes the HTTPS listener's certificate cover every domain endpoint host in the region. */
+    private void ensureEndpointCertificate(String region) {
+        if (certificateManager != null) {
+            certificateManager.ensureHost(OpenSearchDataPlaneEndpoint.certificateWildcard(region, baseUrl()));
+        }
     }
 
     @PostConstruct
@@ -96,12 +146,12 @@ public class OpenSearchService {
 
     public Domain createDomain(String domainName, String engineVersion, ClusterConfig clusterConfig,
                                 EbsOptions ebsOptions, Map<String, String> tags, String region) {
-        return createDomain(domainName, engineVersion, clusterConfig, ebsOptions, tags,
+        return createDomain(domainName, engineVersion, clusterConfig, ebsOptions, tags, null,
                 DomainOptions.EMPTY, region);
     }
 
     public Domain createDomain(String domainName, String engineVersion, ClusterConfig clusterConfig,
-                                EbsOptions ebsOptions, Map<String, String> tags,
+                                EbsOptions ebsOptions, Map<String, String> tags, String accessPolicies,
                                 DomainOptions options, String region) {
         validateDomainName(domainName);
         OpenSearchVersions.validate(engineVersion);
@@ -119,6 +169,7 @@ public class OpenSearchService {
         domain.setAccountId(accountId);
         domain.setArn(AwsArnUtils.Arn.of("es", region, accountId, "domain/" + domainName).toString());
         domain.setEngineVersion(engineVersion != null ? engineVersion : DEFAULT_ENGINE_VERSION);
+        domain.setAccessPolicies(accessPolicies);
         domain.setProcessing(false);
         domain.setDeleted(false);
         domain.setEndpoint("");
@@ -140,10 +191,13 @@ public class OpenSearchService {
             domain.setProcessing(false);
         } else {
             domain.setProcessing(true);
-            domainManager.startDomain(domain);
+            if (!domainManager.tryStartDomain(domain)) {
+                domain.setProcessing(false);
+            }
         }
 
         domainStore.put(domainName, domain);
+        ensureEndpointCertificate(region);
         LOG.infov("Created OpenSearch domain: {0}", domainName);
         return domain;
     }
@@ -156,9 +210,8 @@ public class OpenSearchService {
 
     public List<Domain> describeDomains(List<String> domainNames) {
         return domainNames.stream()
-                .map(name -> domainStore.get(name)
-                        .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                                "Domain not found: " + name, 409)))
+                .distinct()
+                .flatMap(name -> domainStore.get(name).stream())
                 .toList();
     }
 
@@ -171,21 +224,23 @@ public class OpenSearchService {
     }
 
     public Domain updateDomainConfig(String domainName, String engineVersion,
-                                      ClusterConfig clusterConfig, EbsOptions ebsOptions,
-                                      String region) {
-        return updateDomainConfig(domainName, engineVersion, clusterConfig, ebsOptions,
-                DomainOptions.EMPTY, region);
+                                      ClusterConfig clusterConfig, EbsOptions ebsOptions) {
+        return updateDomainConfig(domainName, engineVersion, clusterConfig, ebsOptions, null,
+                DomainOptions.EMPTY);
     }
 
     public Domain updateDomainConfig(String domainName, String engineVersion,
                                       ClusterConfig clusterConfig, EbsOptions ebsOptions,
-                                      DomainOptions options, String region) {
+                                      String accessPolicies, DomainOptions options) {
         Domain domain = describeDomain(domainName);
         OpenSearchVersions.validate(engineVersion);
         validateOptions(options);
 
         if (engineVersion != null && !engineVersion.isBlank()) {
             domain.setEngineVersion(engineVersion);
+        }
+        if (accessPolicies != null) {
+            domain.setAccessPolicies(accessPolicies);
         }
         if (clusterConfig != null) {
             ClusterConfig existing = domain.getClusterConfig();
@@ -252,6 +307,117 @@ public class OpenSearchService {
         domain.setEngineVersion(targetVersion);
         domainStore.put(domainName, domain);
         return domain;
+    }
+
+    /**
+     * Lookup used by the operations (DescribeDomainHealth, DescribeDomainNodes,
+     * DescribeDomainChangeProgress, GetDomainMaintenanceStatus,
+     * ListDomainMaintenances) on which AWS reports a missing domain as
+     * {@code BaseException} rather than {@code ResourceNotFoundException}.
+     */
+    public Domain describeDomainOrBaseException(String domainName) {
+        return domainStore.get(domainName)
+                .orElseThrow(() -> new AwsException("BaseException",
+                        "Domain not found: " + domainName, 400));
+    }
+
+    /** A data node of a domain as reported by DescribeDomainNodes. */
+    public record DomainNode(String nodeId, String nodeType, String availabilityZone,
+                             String instanceType, String nodeStatus, String storageType,
+                             String storageVolumeType, String storageSize) {}
+
+    /** One data node per configured instance, spread over the domain's availability zones. */
+    public List<DomainNode> describeDomainNodes(String domainName) {
+        return nodesOf(describeDomainOrBaseException(domainName));
+    }
+
+    public DomainMaintenance startDomainMaintenance(String domainName, String action, String nodeId) {
+        Domain domain = describeDomain(domainName);
+        if (action == null || !MAINTENANCE_ACTIONS.contains(action)) {
+            throw new AwsException("ValidationException",
+                    "Action must be one of " + MAINTENANCE_ACTIONS + ".", 400);
+        }
+        if (nodeId != null && nodesOf(domain).stream().noneMatch(n -> n.nodeId().equals(nodeId))) {
+            throw new AwsException("ValidationException",
+                    "Node " + nodeId + " does not belong to domain " + domainName + ".", 400);
+        }
+
+        Instant now = Instant.now();
+        DomainMaintenance maintenance = new DomainMaintenance();
+        maintenance.setMaintenanceId(UUID.randomUUID().toString());
+        maintenance.setAction(action);
+        maintenance.setNodeId(nodeId);
+        maintenance.setCreatedAt(now);
+        maintenance.setStatus("COMPLETED");
+
+        boolean restartsSearchProcess = !"RESTART_DASHBOARD".equals(action);
+        if (restartsSearchProcess && !config.services().opensearch().mock()
+                && domain.getContainerId() != null) {
+            // The single backing container hosts every node, so a node reboot
+            // and a search-process restart both restart that container.
+            try {
+                if (domainManager.tryStartDomain(domain)) {
+                    domain.setProcessing(true);
+                } else {
+                    maintenance.setStatus("FAILED");
+                    maintenance.setStatusMessage("No Docker daemon is reachable to restart the domain.");
+                }
+            } catch (RuntimeException e) {
+                maintenance.setStatus("FAILED");
+                maintenance.setStatusMessage(e.getMessage());
+            }
+        }
+        maintenance.setUpdatedAt(Instant.now());
+
+        domain.getMaintenances().add(maintenance);
+        domainStore.put(domainName, domain);
+        return maintenance;
+    }
+
+    public DomainMaintenance getDomainMaintenanceStatus(String domainName, String maintenanceId) {
+        Domain domain = describeDomainOrBaseException(domainName);
+        if (maintenanceId == null || maintenanceId.isBlank()) {
+            throw new AwsException("ValidationException", "maintenanceId is required.", 400);
+        }
+        return domain.getMaintenances().stream()
+                .filter(m -> maintenanceId.equals(m.getMaintenanceId()))
+                .findFirst()
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Maintenance not found: " + maintenanceId, 409));
+    }
+
+    public List<DomainMaintenance> listDomainMaintenances(String domainName, String action, String status) {
+        Domain domain = describeDomainOrBaseException(domainName);
+        return domain.getMaintenances().stream()
+                .filter(m -> action == null || action.isBlank() || action.equals(m.getAction()))
+                .filter(m -> status == null || status.isBlank() || status.equals(m.getStatus()))
+                .toList();
+    }
+
+    private List<DomainNode> nodesOf(Domain domain) {
+        ClusterConfig cc = domain.getClusterConfig() != null ? domain.getClusterConfig() : new ClusterConfig();
+        EbsOptions ebs = domain.getEbsOptions() != null ? domain.getEbsOptions() : new EbsOptions();
+        String region = domain.getArn() != null
+                ? AwsArnUtils.parse(domain.getArn()).region()
+                : regionResolver.getDefaultRegion();
+        int zones = cc.isZoneAwarenessEnabled() ? 2 : 1;
+        String nodeStatus = domain.isProcessing() ? "NotAvailable" : "Active";
+
+        List<DomainNode> nodes = new ArrayList<>();
+        for (int i = 0; i < Math.max(cc.getInstanceCount(), 1); i++) {
+            String nodeId = UUID.nameUUIDFromBytes((domain.getArn() + "/data/" + i)
+                    .getBytes(StandardCharsets.UTF_8)).toString().replace("-", "");
+            nodes.add(new DomainNode(
+                    nodeId,
+                    "Data",
+                    region + (char) ('a' + (i % zones)),
+                    cc.getInstanceType(),
+                    nodeStatus,
+                    ebs.isEbsEnabled() ? "ebs" : "instance",
+                    ebs.isEbsEnabled() ? ebs.getVolumeType() : null,
+                    ebs.isEbsEnabled() ? String.valueOf(ebs.getVolumeSize()) : null));
+        }
+        return nodes;
     }
 
     private Domain findByArn(String arn) {
@@ -337,7 +503,11 @@ public class OpenSearchService {
     }
 
     private void startReadinessPoller() {
-        poller.scheduleWithFixedDelay(() -> {
+        poller.scheduleWithFixedDelay(this::pollReadiness, 3, 3, TimeUnit.SECONDS);
+    }
+
+    void pollReadiness() {
+        try {
             for (Domain domain : allDomains()) {
                 if (domain.isProcessing() && domainManager.isReady(domain)) {
                     domain.setProcessing(false);
@@ -346,7 +516,9 @@ public class OpenSearchService {
                             domain.getDomainName(), domain.getEndpoint());
                 }
             }
-        }, 3, 3, TimeUnit.SECONDS);
+        } catch (RuntimeException e) {
+            LOG.warn("OpenSearch readiness poll failed; will retry", e);
+        }
     }
 
     private List<Domain> allDomains() {
@@ -362,5 +534,27 @@ public class OpenSearchService {
         } else {
             domainStore.put(domain.getDomainName(), domain);
         }
+    }
+
+    @Override
+    public List<ExplorerResource> getResources() {
+        List<ExplorerResource> resources = new ArrayList<>();
+        for (Domain domain : listDomainNames(null)) {
+            if (domain.getArn() == null) {
+                continue;
+            }
+            AwsArnUtils.Arn parsed = AwsArnUtils.parse(domain.getArn());
+            resources.add(new ExplorerResource(
+                    domain.getArn(), "es:domain", "es",
+                    parsed.region(), parsed.accountId(),
+                    domain.getCreatedAt() != null ? domain.getCreatedAt() : Instant.now(),
+                    domain.getTags() != null ? domain.getTags() : Map.of()));
+        }
+        return resources;
+    }
+
+    @Override
+    public Set<SupportedResourceType> getSupportedResourceTypes() {
+        return Set.of(new SupportedResourceType("es:domain", "es", true));
     }
 }

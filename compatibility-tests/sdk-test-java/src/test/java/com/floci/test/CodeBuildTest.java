@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import software.amazon.awssdk.services.codebuild.CodeBuildClient;
 import software.amazon.awssdk.services.codebuild.model.ArtifactsType;
+import software.amazon.awssdk.services.codebuild.model.BatchDeleteBuildsResponse;
 import software.amazon.awssdk.services.codebuild.model.BatchGetProjectsResponse;
 import software.amazon.awssdk.services.codebuild.model.ComputeType;
 import software.amazon.awssdk.services.codebuild.model.CreateProjectResponse;
@@ -15,6 +16,8 @@ import software.amazon.awssdk.services.codebuild.model.CreateReportGroupResponse
 import software.amazon.awssdk.services.codebuild.model.DeleteReportGroupRequest;
 import software.amazon.awssdk.services.codebuild.model.EnvironmentType;
 import software.amazon.awssdk.services.codebuild.model.ImportSourceCredentialsResponse;
+import software.amazon.awssdk.services.codebuild.model.InvalidInputException;
+import software.amazon.awssdk.services.codebuild.model.ResourceNotFoundException;
 import software.amazon.awssdk.services.codebuild.model.ListCuratedEnvironmentImagesResponse;
 import software.amazon.awssdk.services.codebuild.model.ListProjectsResponse;
 import software.amazon.awssdk.services.codebuild.model.ListReportGroupsResponse;
@@ -38,6 +41,8 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.codebuild.model.Tag;
 import software.amazon.awssdk.services.codebuild.model.UpdateProjectResponse;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -198,6 +203,72 @@ class CodeBuildTest {
         assertThat(after.projects()).doesNotContain("sdk-test-project");
     }
 
+    @Test
+    @Order(14)
+    void resourcePolicyLifecycle() {
+        String name = "sdk-policy-project";
+        String projectArn = codebuild.createProject(r -> r.name(name)
+                .source(s -> s.type(SourceType.NO_SOURCE))
+                .artifacts(a -> a.type(ArtifactsType.NO_ARTIFACTS))
+                .environment(e -> e.type(EnvironmentType.LINUX_CONTAINER).image("aws/codebuild/standard:7.0")
+                        .computeType(ComputeType.BUILD_GENERAL1_SMALL))
+                .serviceRole("arn:aws:iam::000000000000:role/codebuild-role")).project().arn();
+        String groupArn = null;
+        try {
+            groupArn = codebuild.createReportGroup(r -> r.name("sdk-policy-reports").type(ReportType.TEST)
+                    .exportConfig(e -> e.exportConfigType(ReportExportConfigType.NO_EXPORT))).reportGroup().arn();
+            for (String arn : List.of(projectArn, groupArn)) {
+                assertThat(codebuild.getResourcePolicy(r -> r.resourceArn(arn)).policy()).isNullOrEmpty();
+                String action = arn.equals(projectArn) ? "BatchGetProjects" : "BatchGetReportGroups";
+                String policy = """
+                        {"Version":"2012-10-17","Statement":[{"Sid":"Read","Effect":"Allow",
+                        "Principal":{"AWS":"arn:aws:iam::000000000000:root"},
+                        "Action":"codebuild:%s","Resource":"%s"}]}
+                        """.formatted(action, arn);
+                assertThat(codebuild.putResourcePolicy(r -> r.resourceArn(arn).policy(policy)).resourceArn())
+                        .isEqualTo(arn);
+                assertThat(codebuild.getResourcePolicy(r -> r.resourceArn(arn)).policy()).isEqualTo(policy);
+                if (arn.equals(projectArn)) {
+                    codebuild.updateProject(r -> r.name(name).timeoutInMinutes(30));
+                    assertThat(codebuild.batchGetProjects(r -> r.names(name)).projects().get(0).timeoutInMinutes())
+                            .isEqualTo(30);
+                } else {
+                    codebuild.updateReportGroup(r -> r.arn(arn).tags(Tag.builder().key("purpose").value("policy").build()));
+                    assertThat(codebuild.batchGetReportGroups(r -> r.reportGroupArns(arn)).reportGroups().get(0).tags())
+                            .contains(Tag.builder().key("purpose").value("policy").build());
+                }
+                assertThat(codebuild.getResourcePolicy(r -> r.resourceArn(arn)).policy()).isEqualTo(policy);
+                String updated = policy.replace("\"Read\"", "\"ReadAgain\"");
+                codebuild.putResourcePolicy(r -> r.resourceArn(arn).policy(updated));
+                assertThat(codebuild.getResourcePolicy(r -> r.resourceArn(arn)).policy()).isEqualTo(updated);
+                assertThatThrownBy(() -> codebuild.putResourcePolicy(r -> r.resourceArn(arn).policy("not-json")))
+                        .isInstanceOf(InvalidInputException.class);
+                String foreignArn = arn.replace("000000000000", "111111111111");
+                assertThatThrownBy(() -> codebuild.getResourcePolicy(r -> r.resourceArn(foreignArn)))
+                        .isInstanceOf(InvalidInputException.class);
+                assertThatThrownBy(() -> codebuild.putResourcePolicy(r -> r.resourceArn(foreignArn).policy(policy)))
+                        .isInstanceOf(InvalidInputException.class);
+                assertThatThrownBy(() -> codebuild.deleteResourcePolicy(r -> r.resourceArn(foreignArn)))
+                        .isInstanceOf(InvalidInputException.class);
+                assertThat(codebuild.getResourcePolicy(r -> r.resourceArn(arn)).policy()).isEqualTo(updated);
+                codebuild.deleteResourcePolicy(r -> r.resourceArn(arn));
+                codebuild.deleteResourcePolicy(r -> r.resourceArn(arn));
+                assertThat(codebuild.getResourcePolicy(r -> r.resourceArn(arn)).policy()).isNullOrEmpty();
+                codebuild.putResourcePolicy(r -> r.resourceArn(arn).policy(policy));
+            }
+        } finally {
+            if (groupArn != null) {
+                codebuild.deleteReportGroup(DeleteReportGroupRequest.builder().arn(groupArn).deleteReports(true).build());
+                codebuild.deleteReportGroup(DeleteReportGroupRequest.builder().arn(groupArn).deleteReports(true).build());
+            }
+            codebuild.deleteProject(r -> r.name(name));
+            codebuild.deleteProject(r -> r.name(name));
+        }
+        assertThatThrownBy(() -> codebuild.getResourcePolicy(r -> r.resourceArn(projectArn)))
+                .isInstanceOf(ResourceNotFoundException.class);
+        codebuild.deleteResourcePolicy(r -> r.resourceArn(projectArn));
+    }
+
     // ---- Phase 2: Real Build Execution ----
 
     @Test
@@ -319,6 +390,19 @@ class CodeBuildTest {
     @Order(27)
     void deleteBuildProject() {
         codebuild.deleteProject(r -> r.name("build-exec-project"));
+    }
+
+    @Test
+    @Order(28)
+    void batchDeleteCompletedBuild() {
+        assertThat(buildId).isNotNull();
+        BatchDeleteBuildsResponse response = codebuild.batchDeleteBuilds(r -> r.ids(buildId));
+        assertThat(response.buildsDeleted()).containsExactly(buildId);
+        assertThat(response.buildsNotDeleted()).isEmpty();
+        assertThat(codebuild.batchGetBuilds(r -> r.ids(buildId)).buildsNotFound()).containsExactly(buildId);
+        assertThat(codebuild.listBuilds(r -> r.build()).ids()).doesNotContain(buildId);
+        assertThat(codebuild.batchDeleteBuilds(r -> r.ids(buildId)).buildsNotDeleted())
+                .extracting(failure -> failure.id()).containsExactly(buildId);
     }
 
     // ---- OS demo: list OS family + directory tree, upload to S3 ----

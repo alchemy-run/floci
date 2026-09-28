@@ -2,9 +2,17 @@ package io.github.hectorvent.floci.services.sqs;
 
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.path.xml.XmlPath;
 import org.junit.jupiter.api.*;
 
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
 import static io.restassured.RestAssured.given;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.hamcrest.Matchers.*;
 
 @QuarkusTest
@@ -678,5 +686,215 @@ class SqsIntegrationTest {
                 .formParam("QueueUrl", traceQueueUrl)
             .when().post("/");
         }
+    }
+
+
+    @Test
+    void receiveMessageWithoutWaitTimeSecondsHonoursQueueReceiveMessageWaitTimeSeconds() {
+        String longPollQueueUrl = given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateQueue")
+            .formParam("QueueName", "query-long-poll-attr-queue")
+            .formParam("Attribute.1.Name", "ReceiveMessageWaitTimeSeconds")
+            .formParam("Attribute.1.Value", "1")
+        .when().post("/").then().statusCode(200)
+            .extract().xmlPath().getString("CreateQueueResponse.CreateQueueResult.QueueUrl");
+
+        try {
+            long start = System.nanoTime();
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "ReceiveMessage")
+                .formParam("QueueUrl", longPollQueueUrl)
+            .when().post("/").then().statusCode(200)
+                .body(not(containsString("<Message>")));
+            long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+            assertTrue(elapsedMs >= 900,
+                    "Omitting WaitTimeSeconds must long poll for the queue's ReceiveMessageWaitTimeSeconds, but returned after " + elapsedMs + "ms");
+
+            start = System.nanoTime();
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "ReceiveMessage")
+                .formParam("QueueUrl", longPollQueueUrl)
+                .formParam("WaitTimeSeconds", "0")
+            .when().post("/").then().statusCode(200)
+                .body(not(containsString("<Message>")));
+            elapsedMs = (System.nanoTime() - start) / 1_000_000;
+            assertTrue(elapsedMs < 1000,
+                    "WaitTimeSeconds=0 must override the queue attribute, but returned after " + elapsedMs + "ms");
+        } finally {
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "DeleteQueue")
+                .formParam("QueueUrl", longPollQueueUrl)
+            .when().post("/");
+        }
+    }
+
+    @Test
+    void receiveMessageRejectsInvalidWaitTimeSeconds() {
+        String rangeQueueUrl = given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateQueue")
+            .formParam("QueueName", "query-wait-time-range-queue")
+        .when().post("/").then().statusCode(200)
+            .extract().xmlPath().getString("CreateQueueResponse.CreateQueueResult.QueueUrl");
+
+        try {
+            for (String invalid : new String[]{"-1", "21", "1.5", "abc"}) {
+                given()
+                    .contentType("application/x-www-form-urlencoded")
+                    .formParam("Action", "ReceiveMessage")
+                    .formParam("QueueUrl", rangeQueueUrl)
+                    .formParam("WaitTimeSeconds", invalid)
+                .when().post("/").then()
+                    .statusCode(400)
+                    .body(containsString("<Code>InvalidParameterValue</Code>"))
+                    .body(containsString("WaitTimeSeconds"));
+            }
+        } finally {
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "DeleteQueue")
+                .formParam("QueueUrl", rangeQueueUrl)
+            .when().post("/");
+        }
+    }
+
+    @Test
+    void getQueueAttributesAllReturnsTheAwsAttributeSetForAStandardQueue() {
+        String attrQueueUrl = given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateQueue")
+            .formParam("QueueName", "query-attribute-defaults-queue")
+        .when().post("/").then().statusCode(200)
+            .extract().xmlPath().getString("CreateQueueResponse.CreateQueueResult.QueueUrl");
+
+        try {
+            Map<String, String> attributes = allQueueAttributes(attrQueueUrl);
+
+            assertEquals("1048576", attributes.get("MaximumMessageSize"),
+                    "MaximumMessageSize must default to the AWS value of 1048576 bytes");
+            assertEquals("true", attributes.get("SqsManagedSseEnabled"),
+                    "A queue without a KMS key reports SSE-SQS enabled");
+            assertEquals("30", attributes.get("VisibilityTimeout"));
+            assertEquals("345600", attributes.get("MessageRetentionPeriod"));
+            assertEquals("0", attributes.get("DelaySeconds"));
+            assertEquals("0", attributes.get("ReceiveMessageWaitTimeSeconds"));
+            assertTrue(attributes.containsKey("QueueArn"));
+            assertTrue(attributes.containsKey("CreatedTimestamp"));
+            assertTrue(attributes.containsKey("LastModifiedTimestamp"));
+            assertTrue(attributes.containsKey("ApproximateNumberOfMessages"));
+            assertTrue(attributes.containsKey("ApproximateNumberOfMessagesNotVisible"));
+            assertTrue(attributes.containsKey("ApproximateNumberOfMessagesDelayed"));
+            assertFalse(attributes.containsKey("Policy"),
+                    "Policy is only returned once set");
+            assertFalse(attributes.containsKey("RedrivePolicy"),
+                    "RedrivePolicy is only returned once set");
+        } finally {
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "DeleteQueue")
+                .formParam("QueueUrl", attrQueueUrl)
+            .when().post("/");
+        }
+    }
+
+    @Test
+    void setQueueAttributesRejectsMaximumMessageSizeAboveTheAwsLimit() {
+        String limitQueueUrl = given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateQueue")
+            .formParam("QueueName", "query-max-message-size-range-queue")
+        .when().post("/").then().statusCode(200)
+            .extract().xmlPath().getString("CreateQueueResponse.CreateQueueResult.QueueUrl");
+
+        try {
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "SetQueueAttributes")
+                .formParam("QueueUrl", limitQueueUrl)
+                .formParam("Attribute.1.Name", "MaximumMessageSize")
+                .formParam("Attribute.1.Value", "1048577")
+            .when().post("/").then()
+                .statusCode(400)
+                .body(containsString("<Code>InvalidAttributeValue</Code>"));
+
+            assertEquals("1048576", allQueueAttributes(limitQueueUrl).get("MaximumMessageSize"),
+                    "A rejected SetQueueAttributes must leave the stored value untouched");
+        } finally {
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "DeleteQueue")
+                .formParam("QueueUrl", limitQueueUrl)
+            .when().post("/");
+        }
+    }
+
+    @Test
+    void redrivePolicyWithMissingDeadLetterTargetIsRejected() {
+        String redrivePolicy = "{\"deadLetterTargetArn\":\"arn:aws:sqs:us-east-1:000000000000:query-missing-dead-letter\","
+                + "\"maxReceiveCount\":3}";
+        String sourceUrl = given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateQueue")
+            .formParam("QueueName", "query-missing-dlq-source")
+        .when().post("/").then().statusCode(200)
+            .extract().xmlPath().getString("CreateQueueResponse.CreateQueueResult.QueueUrl");
+
+        try {
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "SetQueueAttributes")
+                .formParam("QueueUrl", sourceUrl)
+                .formParam("Attribute.1.Name", "RedrivePolicy")
+                .formParam("Attribute.1.Value", redrivePolicy)
+            .when().post("/").then()
+                .statusCode(400)
+                .body(containsString("<Code>InvalidParameterValue</Code>"))
+                .body(containsString("Reason: Dead letter target does not exist."));
+
+            assertFalse(allQueueAttributes(sourceUrl).containsKey("RedrivePolicy"),
+                    "A rejected SetQueueAttributes must not store the RedrivePolicy");
+
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "CreateQueue")
+                .formParam("QueueName", "query-missing-dlq-create")
+                .formParam("Attribute.1.Name", "RedrivePolicy")
+                .formParam("Attribute.1.Value", redrivePolicy)
+            .when().post("/").then()
+                .statusCode(400)
+                .body(containsString("<Code>InvalidParameterValue</Code>"))
+                .body(containsString("Dead letter target does not exist"));
+        } finally {
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "DeleteQueue")
+                .formParam("QueueUrl", sourceUrl)
+            .when().post("/");
+        }
+    }
+
+    private static Map<String, String> allQueueAttributes(String url) {
+        XmlPath xml = given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "GetQueueAttributes")
+            .formParam("QueueUrl", url)
+            .formParam("AttributeName.1", "All")
+        .when().post("/").then()
+            .statusCode(200)
+            .extract().xmlPath();
+
+        List<String> names = xml.getList(
+                "GetQueueAttributesResponse.GetQueueAttributesResult.Attribute.Name", String.class);
+        List<String> values = xml.getList(
+                "GetQueueAttributesResponse.GetQueueAttributesResult.Attribute.Value", String.class);
+        Map<String, String> attributes = new LinkedHashMap<>();
+        for (int i = 0; i < names.size(); i++) {
+            attributes.put(names.get(i), values.get(i));
+        }
+        return attributes;
     }
 }

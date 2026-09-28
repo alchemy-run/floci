@@ -9,6 +9,7 @@ import jakarta.ws.rs.core.Response;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.security.GeneralSecurityException;
 
 /**
  * Exposes Floci's self-signed CA certificate so external clients (a local
@@ -40,15 +41,15 @@ public class TlsCaController {
                 .filter(s -> !s.isBlank())
                 .map(java.nio.file.Path::of)
                 .orElseGet(() -> java.nio.file.Path.of(
-                        config.storage().persistentPath(), "tls", "floci-selfsigned.crt"));
+                        config.storage().persistentPath(), "tls", FlociCertificateAuthority.CA_CERT_NAME));
         if (!Files.isReadable(certPath)) {
             return notAvailable("CA certificate not readable at " + certPath);
         }
         try {
-            return Response.ok(Files.readString(certPath))
+            return Response.ok(ContainerCaBundle.certificatePem(Files.readString(certPath)))
                     .header("Content-Disposition", "inline; filename=\"floci-ca.pem\"")
                     .build();
-        } catch (IOException e) {
+        } catch (IOException | GeneralSecurityException e) {
             return notAvailable("Failed to read CA certificate: " + e.getMessage());
         }
     }

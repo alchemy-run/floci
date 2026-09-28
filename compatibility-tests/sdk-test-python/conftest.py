@@ -110,6 +110,12 @@ def kinesis_client(aws_config, client_config):
 
 
 @pytest.fixture
+def firehose_client(aws_config, client_config):
+    """Create Firehose client."""
+    return boto3.client("firehose", config=client_config, **aws_config)
+
+
+@pytest.fixture
 def cloudwatch_client(aws_config, client_config):
     """Create CloudWatch client."""
     return boto3.client("cloudwatch", config=client_config, **aws_config)
@@ -146,9 +152,21 @@ def cloudformation_client(aws_config, client_config):
 
 
 @pytest.fixture
+def config_client(aws_config, client_config):
+    """Create AWS Config client."""
+    return boto3.client("config", config=client_config, **aws_config)
+
+
+@pytest.fixture
 def acm_client(aws_config, client_config):
     """Create ACM client."""
     return boto3.client("acm", config=client_config, **aws_config)
+
+
+@pytest.fixture
+def route53_client(aws_config, client_config):
+    """Create Route53 client."""
+    return boto3.client("route53", config=client_config, **aws_config)
 
 
 @pytest.fixture

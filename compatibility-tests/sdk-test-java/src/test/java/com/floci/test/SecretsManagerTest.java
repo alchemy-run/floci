@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import software.amazon.awssdk.core.SdkBytes;
+import software.amazon.awssdk.services.kms.KmsClient;
+import software.amazon.awssdk.services.kms.model.CreateKeyRequest;
 import software.amazon.awssdk.services.lambda.LambdaClient;
 import software.amazon.awssdk.services.lambda.model.CreateFunctionRequest;
 import software.amazon.awssdk.services.lambda.model.DeleteFunctionRequest;
@@ -19,17 +21,24 @@ import software.amazon.awssdk.services.secretsmanager.model.BatchGetSecretValueR
 import software.amazon.awssdk.services.secretsmanager.model.BatchGetSecretValueResponse;
 import software.amazon.awssdk.services.secretsmanager.model.CreateSecretRequest;
 import software.amazon.awssdk.services.secretsmanager.model.CreateSecretResponse;
+import software.amazon.awssdk.services.secretsmanager.model.DeleteResourcePolicyRequest;
+import software.amazon.awssdk.services.secretsmanager.model.DeleteResourcePolicyResponse;
 import software.amazon.awssdk.services.secretsmanager.model.DeleteSecretRequest;
 import software.amazon.awssdk.services.secretsmanager.model.DescribeSecretRequest;
 import software.amazon.awssdk.services.secretsmanager.model.DescribeSecretResponse;
 import software.amazon.awssdk.services.secretsmanager.model.GetRandomPasswordRequest;
 import software.amazon.awssdk.services.secretsmanager.model.GetRandomPasswordResponse;
+import software.amazon.awssdk.services.secretsmanager.model.GetResourcePolicyRequest;
+import software.amazon.awssdk.services.secretsmanager.model.GetResourcePolicyResponse;
 import software.amazon.awssdk.services.secretsmanager.model.GetSecretValueRequest;
 import software.amazon.awssdk.services.secretsmanager.model.GetSecretValueResponse;
+import software.amazon.awssdk.services.secretsmanager.model.InvalidParameterException;
 import software.amazon.awssdk.services.secretsmanager.model.ListSecretVersionIdsRequest;
 import software.amazon.awssdk.services.secretsmanager.model.ListSecretVersionIdsResponse;
 import software.amazon.awssdk.services.secretsmanager.model.ListSecretsRequest;
 import software.amazon.awssdk.services.secretsmanager.model.ListSecretsResponse;
+import software.amazon.awssdk.services.secretsmanager.model.PutResourcePolicyRequest;
+import software.amazon.awssdk.services.secretsmanager.model.PutResourcePolicyResponse;
 import software.amazon.awssdk.services.secretsmanager.model.PutSecretValueRequest;
 import software.amazon.awssdk.services.secretsmanager.model.PutSecretValueResponse;
 import software.amazon.awssdk.services.secretsmanager.model.RotateSecretRequest;
@@ -270,8 +279,16 @@ class SecretsManagerTest {
     @Test
     @Order(13)
     void kmsKeyIdPreservation() {
-        String kmsKeyId = "arn:aws:kms:us-east-1:000000000000:key/my-key";
+        // The key has to exist: Secrets Manager checks it before accepting the secret, so a
+        // made-up ARN is rejected here the same way AWS rejects one.
         String kmsSecretName = "sdk-test-kms-secret-" + System.currentTimeMillis();
+        String kmsKeyId;
+        try (KmsClient kms = TestFixtures.kmsClient()) {
+            kmsKeyId = kms.createKey(CreateKeyRequest.builder()
+                            .description("sdk-test secrets manager key")
+                            .build())
+                    .keyMetadata().arn();
+        }
 
         try {
             sm.createSecret(CreateSecretRequest.builder()
@@ -297,6 +314,20 @@ class SecretsManagerTest {
 
     @Test
     @Order(14)
+    void createSecretWithAnUnknownKmsKeyIsRejected() {
+        String kmsSecretName = "sdk-test-bad-kms-secret-" + System.currentTimeMillis();
+
+        assertThatThrownBy(() -> sm.createSecret(CreateSecretRequest.builder()
+                .name(kmsSecretName)
+                .secretString("kms-value")
+                .kmsKeyId("arn:aws:kms:us-east-1:000000000000:key/does-not-exist")
+                .build()))
+                .isInstanceOf(InvalidParameterException.class)
+                .hasMessageContaining("You can't access the KMS key");
+    }
+
+    @Test
+    @Order(15)
     void createSecretDuplicateThrows400() {
         String dupName = "sdk-test-dup-secret-" + System.currentTimeMillis();
 
@@ -324,7 +355,7 @@ class SecretsManagerTest {
     }
 
     @Test
-    @Order(15)
+    @Order(16)
     void getRandomPassword() {
         GetRandomPasswordResponse response = sm.getRandomPassword(GetRandomPasswordRequest.builder()
                 .passwordLength(32L)
@@ -335,7 +366,7 @@ class SecretsManagerTest {
     }
 
     @Test
-    @Order(16)
+    @Order(17)
     void getSecretValueNonExistentThrows400() {
         assertThatThrownBy(() -> sm.getSecretValue(GetSecretValueRequest.builder()
                 .secretId("non-existent-secret-" + System.currentTimeMillis())
@@ -350,7 +381,7 @@ class SecretsManagerTest {
     // ─────────────────────────────────────────────────────────────────────────
 
     @Test
-    @Order(17)
+    @Order(18)
     @DisplayName("#340 getSecretValue resolves partial ARN (without random suffix)")
     void getSecretValueByPartialArn() {
         Assumptions.assumeTrue(secretArn != null, "CreateSecret must succeed first");
@@ -368,7 +399,7 @@ class SecretsManagerTest {
     }
 
     @Test
-    @Order(18)
+    @Order(19)
     @DisplayName("#340 getSecretValue resolves partial ARN for secret with slashes in name")
     void getSecretValueByPartialArnWithSlashesInName() {
         String slashName = "compat-340/dev/database-" + System.currentTimeMillis();
@@ -398,7 +429,7 @@ class SecretsManagerTest {
     }
 
     @Test
-    @Order(19)
+    @Order(20)
     void batchGetSecretValue() {
         String s1 = "batch-secret-1-" + System.currentTimeMillis();
         String s2 = "batch-secret-2-" + System.currentTimeMillis();
@@ -423,7 +454,7 @@ class SecretsManagerTest {
     }
 
     @Test
-    @Order(20)
+    @Order(21)
     @DisplayName("batchGetSecretValue returns partial Errors list for missing secrets without throwing")
     void batchGetSecretValuePartialErrors() {
         String exists = "batch-exists-" + UUID.randomUUID();
@@ -458,5 +489,44 @@ class SecretsManagerTest {
             } catch (Exception ignored) {
             }
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Resource policy round trip (PutResourcePolicy / GetResourcePolicy /
+    // DeleteResourcePolicy)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @Order(22)
+    @DisplayName("resource policy round trip: put returns ARN/Name, get returns the policy, delete clears it")
+    void resourcePolicyRoundTrip() {
+        Assumptions.assumeTrue(secretArn != null, "CreateSecret must succeed first");
+
+        String policy = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\","
+                + "\"Principal\":{\"AWS\":\"*\"},\"Action\":\"secretsmanager:GetSecretValue\",\"Resource\":\"*\"}]}";
+
+        PutResourcePolicyResponse put = sm.putResourcePolicy(PutResourcePolicyRequest.builder()
+                .secretId(secretArn)
+                .resourcePolicy(policy)
+                .build());
+        // The terraform provider uses this ARN as the aws_secretsmanager_secret_policy id.
+        assertThat(put.arn()).isEqualTo(secretArn);
+        assertThat(put.name()).isEqualTo(secretName);
+
+        GetResourcePolicyResponse got = sm.getResourcePolicy(GetResourcePolicyRequest.builder()
+                .secretId(secretArn)
+                .build());
+        assertThat(got.arn()).isEqualTo(secretArn);
+        assertThat(got.resourcePolicy()).isEqualTo(policy);
+
+        DeleteResourcePolicyResponse deleted = sm.deleteResourcePolicy(DeleteResourcePolicyRequest.builder()
+                .secretId(secretArn)
+                .build());
+        assertThat(deleted.arn()).isEqualTo(secretArn);
+        assertThat(deleted.name()).isEqualTo(secretName);
+
+        assertThat(sm.getResourcePolicy(GetResourcePolicyRequest.builder()
+                .secretId(secretArn)
+                .build()).resourcePolicy()).isNull();
     }
 }

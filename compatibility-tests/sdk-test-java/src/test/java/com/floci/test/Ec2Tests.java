@@ -3,10 +3,13 @@ package com.floci.test;
 import org.junit.jupiter.api.*;
 import software.amazon.awssdk.services.ec2.Ec2Client;
 import software.amazon.awssdk.services.ec2.model.*;
+import software.amazon.awssdk.services.ec2.model.Tag;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import static org.assertj.core.api.Assertions.*;
 
@@ -14,6 +17,7 @@ import static org.assertj.core.api.Assertions.*;
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class Ec2Tests {
 
+    private static final Logger LOG = Logger.getLogger(Ec2Tests.class.getName());
     private static Ec2Client ec2;
     private static String vpcId;
     private static String subnetId;
@@ -24,6 +28,7 @@ class Ec2Tests {
     private static String rtbAssocId;
     private static String allocationId;
     private static String instanceId;
+    private static String fleetInstanceId;
 
     @BeforeAll
     static void setup() {
@@ -31,9 +36,72 @@ class Ec2Tests {
         keyName = "sdk-test-key";
     }
 
+    @Test
+    @Order(0)
+    @DisplayName("DescribeVpnGateways - empty when none exist")
+    void describeVpnGatewaysEmpty() {
+        assertThat(ec2.describeVpnGateways().vpnGateways()).isEmpty();
+        assertThat(ec2.describeVpnGateways(DescribeVpnGatewaysRequest.builder()
+                .filters(Filter.builder()
+                        .name("attachment.vpc-id")
+                        .values("vpc-0123456789abcdef0")
+                        .build())
+                .build()).vpnGateways()).isEmpty();
+        assertThat(ec2.describeVpnGateways(DescribeVpnGatewaysRequest.builder()
+                .filters(Filter.builder().name("tag-value").values("TeamA").build())
+                .build()).vpnGateways()).isEmpty();
+
+        assertThatThrownBy(() -> ec2.describeVpnGateways(DescribeVpnGatewaysRequest.builder()
+                .vpnGatewayIds("vgw-0123456789abcdef0")
+                .build()))
+                .isInstanceOfSatisfying(Ec2Exception.class, error -> {
+                    assertThat(error.statusCode()).isEqualTo(400);
+                    assertThat(error.awsErrorDetails().errorCode())
+                            .isEqualTo("InvalidVpnGatewayID.NotFound");
+                    assertThat(error.awsErrorDetails().errorMessage())
+                            .isEqualTo("The vpnGateway ID 'vgw-0123456789abcdef0' does not exist");
+                    assertThat(error.requestId()).isNotBlank();
+                });
+    }
+
+    @Test
+    @Order(0)
+    @DisplayName("DescribeEgressOnlyInternetGateways - empty when none exist")
+    void describeEgressOnlyInternetGatewaysEmpty() {
+        assertThat(ec2.describeEgressOnlyInternetGateways().egressOnlyInternetGateways()).isEmpty();
+        assertThat(ec2.describeEgressOnlyInternetGateways(
+                DescribeEgressOnlyInternetGatewaysRequest.builder()
+                        .filters(Filter.builder()
+                                .name("tag:Owner")
+                                .values("TeamA")
+                                .build())
+                        .build()).egressOnlyInternetGateways()).isEmpty();
+        assertThat(ec2.describeEgressOnlyInternetGateways(
+                DescribeEgressOnlyInternetGatewaysRequest.builder()
+                        .filters(Filter.builder().name("tag-value").values("TeamA").build())
+                        .build()).egressOnlyInternetGateways()).isEmpty();
+        DescribeEgressOnlyInternetGatewaysResponse paged =
+                ec2.describeEgressOnlyInternetGateways(
+                        DescribeEgressOnlyInternetGatewaysRequest.builder().maxResults(5).build());
+        assertThat(paged.egressOnlyInternetGateways()).isEmpty();
+        assertThat(paged.nextToken()).isNull();
+
+        assertThat(ec2.describeEgressOnlyInternetGateways(
+                DescribeEgressOnlyInternetGatewaysRequest.builder()
+                        .egressOnlyInternetGatewayIds("eigw-0123456789abcdef0")
+                        .build()).egressOnlyInternetGateways()).isEmpty();
+    }
+
     @AfterAll
     static void cleanup() {
         if (ec2 != null) {
+            try {
+                if (fleetInstanceId != null) {
+                    ec2.terminateInstances(TerminateInstancesRequest.builder().instanceIds(fleetInstanceId).build());
+                }
+            } catch (Exception e) {
+                LOG.log(Level.WARNING, "Failed to terminate CreateFleet test instance " + fleetInstanceId, e);
+            }
             try {
                 if (instanceId != null) {
                     ec2.terminateInstances(TerminateInstancesRequest.builder().instanceIds(instanceId).build());
@@ -195,6 +263,67 @@ class Ec2Tests {
 
     @Test
     @Order(7)
+    @DisplayName("DescribeInstanceTypes - network compatibility metadata")
+    void describeInstanceTypeNetworkCompatibilityMetadata() {
+        DescribeInstanceTypesResponse resp = ec2.describeInstanceTypes(DescribeInstanceTypesRequest.builder()
+                .instanceTypes(InstanceType.M5_LARGE, InstanceType.fromValue("t4g.medium"))
+                .build());
+
+        assertThat(resp.instanceTypes()).hasSize(2);
+        assertThat(resp.instanceTypes()).allSatisfy(instanceType -> {
+            assertThat(instanceType.networkInfo()).isNotNull();
+            assertThat(instanceType.networkInfo().encryptionInTransitSupported()).isNotNull();
+            assertThat(instanceType.networkInfo().defaultNetworkCardIndex()).isNotNull();
+            assertThat(instanceType.networkInfo().networkCards()).isNotEmpty();
+            assertThat(instanceType.networkInfo().ipv4AddressesPerInterface()).isNotNull();
+        });
+        assertThat(resp.instanceTypes()).allMatch(instanceType ->
+                !instanceType.networkInfo().encryptionInTransitSupported());
+    }
+
+    @Test
+    @Order(7)
+    @DisplayName("DescribeInstanceTypes - network card capacity metadata")
+    void describeInstanceTypeNetworkCardCapacityMetadata() {
+        DescribeInstanceTypesResponse resp = ec2.describeInstanceTypes(DescribeInstanceTypesRequest.builder()
+                .instanceTypes(InstanceType.M5_LARGE, InstanceType.fromValue("t4g.medium"))
+                .build());
+
+        assertThat(resp.instanceTypes()).hasSize(2);
+        assertThat(resp.instanceTypes()).anySatisfy(instanceType -> {
+            assertThat(instanceType.instanceType()).isEqualTo(InstanceType.M5_LARGE);
+            assertThat(instanceType.networkInfo().defaultNetworkCardIndex()).isEqualTo(0);
+            assertThat(instanceType.networkInfo().ipv4AddressesPerInterface()).isEqualTo(10);
+            assertThat(instanceType.networkInfo().networkCards()).singleElement().satisfies(networkCard -> {
+                assertThat(networkCard.networkCardIndex()).isEqualTo(0);
+                assertThat(networkCard.maximumNetworkInterfaces()).isEqualTo(3);
+            });
+        });
+        assertThat(resp.instanceTypes()).anySatisfy(instanceType -> {
+            assertThat(instanceType.instanceTypeAsString()).isEqualTo("t4g.medium");
+            assertThat(instanceType.networkInfo().defaultNetworkCardIndex()).isEqualTo(0);
+            assertThat(instanceType.networkInfo().ipv4AddressesPerInterface()).isEqualTo(6);
+            assertThat(instanceType.networkInfo().networkCards()).singleElement().satisfies(networkCard -> {
+                assertThat(networkCard.networkCardIndex()).isEqualTo(0);
+                assertThat(networkCard.maximumNetworkInterfaces()).isEqualTo(3);
+            });
+        });
+
+        DescribeInstanceTypesResponse largerArmResponse = ec2.describeInstanceTypes(DescribeInstanceTypesRequest.builder()
+                .instanceTypes(InstanceType.fromValue("m8gd.2xlarge"))
+                .build());
+        assertThat(largerArmResponse.instanceTypes()).singleElement().satisfies(instanceType -> {
+            assertThat(instanceType.networkInfo().defaultNetworkCardIndex()).isEqualTo(0);
+            assertThat(instanceType.networkInfo().ipv4AddressesPerInterface()).isEqualTo(15);
+            assertThat(instanceType.networkInfo().networkCards()).singleElement().satisfies(networkCard -> {
+                assertThat(networkCard.networkCardIndex()).isEqualTo(0);
+                assertThat(networkCard.maximumNetworkInterfaces()).isEqualTo(4);
+            });
+        });
+    }
+
+    @Test
+    @Order(7)
     @DisplayName("DescribeInstanceTypes - processor architectures")
     void describeInstanceTypeProcessorArchitectures() {
         DescribeInstanceTypesResponse resp = ec2.describeInstanceTypes(DescribeInstanceTypesRequest.builder()
@@ -204,6 +333,74 @@ class Ec2Tests {
         assertThat(resp.instanceTypes()).hasSize(1);
         assertThat(resp.instanceTypes().get(0).processorInfo().supportedArchitecturesAsStrings())
                 .containsExactly("arm64");
+    }
+
+    /** Regression coverage for the Karpenter instance-type compatibility contract. */
+    @Test
+    @Order(7)
+    @DisplayName("DescribeInstanceTypes - supported usage classes")
+    void describeInstanceTypeSupportedUsageClasses() {
+        DescribeInstanceTypesResponse resp = ec2.describeInstanceTypes(DescribeInstanceTypesRequest.builder()
+                .instanceTypes(InstanceType.M5_LARGE, InstanceType.fromValue("t4g.medium"),
+                        InstanceType.fromValue("m6gd.large"))
+                .build());
+
+        assertThat(resp.instanceTypes()).hasSize(3);
+        assertThat(resp.instanceTypes()).allSatisfy(instanceType ->
+                assertThat(instanceType.supportedUsageClassesAsStrings())
+                        .containsExactlyInAnyOrder("on-demand", "spot"));
+    }
+
+    @Test
+    @Order(7)
+    @DisplayName("CreateFleet - dry-run and instant on-demand launch")
+    void createFleetDryRunAndLaunch() {
+        String launchTemplateId = ec2.createLaunchTemplate(CreateLaunchTemplateRequest.builder()
+                .launchTemplateName("sdk-create-fleet")
+                .launchTemplateData(RequestLaunchTemplateData.builder()
+                        .imageId("ami-0abcdef1234567890")
+                        .instanceType(InstanceType.T3_MICRO)
+                        .build())
+                .build()).launchTemplate().launchTemplateId();
+
+        FleetLaunchTemplateConfigRequest config = FleetLaunchTemplateConfigRequest.builder()
+                .launchTemplateSpecification(FleetLaunchTemplateSpecificationRequest.builder()
+                        .launchTemplateId(launchTemplateId)
+                        .version("1")
+                        .build())
+                .overrides(FleetLaunchTemplateOverridesRequest.builder()
+                        .instanceType(InstanceType.T3_MICRO)
+                        .imageId("ami-0abcdef1234567890")
+                        .build())
+                .build();
+        CreateFleetRequest request = CreateFleetRequest.builder()
+                .type(FleetType.INSTANT)
+                .launchTemplateConfigs(config)
+                .targetCapacitySpecification(TargetCapacitySpecificationRequest.builder()
+                        .totalTargetCapacity(1)
+                        .defaultTargetCapacityType(DefaultTargetCapacityType.ON_DEMAND)
+                        .build())
+                .build();
+
+        try {
+            assertThatThrownBy(() -> ec2.createFleet(request.toBuilder().dryRun(true).build()))
+                    .isInstanceOf(Ec2Exception.class)
+                    .satisfies(error -> assertThat(((Ec2Exception) error).awsErrorDetails().errorCode())
+                            .isEqualTo("DryRunOperation"));
+
+            CreateFleetResponse response = ec2.createFleet(request);
+            assertThat(response.fleetId()).startsWith("fleet-");
+            assertThat(response.instances()).hasSize(1);
+            assertThat(response.instances().get(0).instanceIds()).hasSize(1);
+            fleetInstanceId = response.instances().get(0).instanceIds().get(0);
+            assertThat(response.instances().get(0).instanceType()).isEqualTo(InstanceType.T3_MICRO);
+            assertThat(response.instances().get(0).lifecycle()).isEqualTo(InstanceLifecycle.ON_DEMAND);
+        }
+        finally {
+            ec2.deleteLaunchTemplate(DeleteLaunchTemplateRequest.builder()
+                    .launchTemplateId(launchTemplateId)
+                    .build());
+        }
     }
 
     @Test
@@ -251,12 +448,30 @@ class Ec2Tests {
                 .vpcId(vpcId)
                 .cidrBlock("10.0.1.0/24")
                 .availabilityZone("us-east-1a")
+                .tagSpecifications(
+                        TagSpecification.builder()
+                                .resourceType(ResourceType.SUBNET)
+                                .tags(Tag.builder().key("example.io:managed-by").value("sdk-test").build())
+                                .build(),
+                        TagSpecification.builder()
+                                .resourceType(ResourceType.SUBNET)
+                                .tags(
+                                        Tag.builder().key("Name").value("sdk-test-subnet").build(),
+                                        Tag.builder().key("omitted-value").build(),
+                                        Tag.builder().key("explicit-empty-value").value("").build())
+                                .build())
                 .build());
         subnetId = resp.subnet().subnetId();
 
         assertThat(subnetId).isNotNull().startsWith("subnet-");
         assertThat(resp.subnet().vpcId()).isEqualTo(vpcId);
         assertThat(resp.subnet().cidrBlock()).isEqualTo("10.0.1.0/24");
+        assertThat(resp.subnet().tags()).extracting(Tag::key, Tag::value)
+                .containsExactlyInAnyOrder(
+                        tuple("example.io:managed-by", "sdk-test"),
+                        tuple("Name", "sdk-test-subnet"),
+                        tuple("omitted-value", ""),
+                        tuple("explicit-empty-value", ""));
     }
 
     @Test
@@ -268,6 +483,21 @@ class Ec2Tests {
 
         assertThat(resp.subnets()).hasSize(1);
         assertThat(resp.subnets().get(0).subnetId()).isEqualTo(subnetId);
+        assertThat(resp.subnets().get(0).tags()).extracting(Tag::key, Tag::value)
+                .containsExactlyInAnyOrder(
+                        tuple("example.io:managed-by", "sdk-test"),
+                        tuple("Name", "sdk-test-subnet"),
+                        tuple("omitted-value", ""),
+                        tuple("explicit-empty-value", ""));
+        assertThat(ec2.describeTags(DescribeTagsRequest.builder()
+                        .filters(Filter.builder().name("resource-id").values(subnetId).build())
+                        .build()).tags())
+                .extracting(TagDescription::key, TagDescription::value)
+                .containsExactlyInAnyOrder(
+                        tuple("example.io:managed-by", "sdk-test"),
+                        tuple("Name", "sdk-test-subnet"),
+                        tuple("omitted-value", ""),
+                        tuple("explicit-empty-value", ""));
     }
 
     @Test
@@ -313,6 +543,60 @@ class Ec2Tests {
     }
 
     @Test
+    @DisplayName("ModifySecurityGroupRules - default egress description converges without replacing rules")
+    void modifyDefaultEgressDescriptionConverges() {
+        String descriptionVpcId = ec2.createVpc(r -> r.cidrBlock("10.83.0.0/16")).vpc().vpcId();
+        try {
+            String descriptionGroupId = ec2.createSecurityGroup(r -> r.vpcId(descriptionVpcId)
+                    .groupName("description-convergence").description("description convergence")).groupId();
+            try {
+                ec2.authorizeSecurityGroupIngress(r -> r.groupId(descriptionGroupId).ipPermissions(
+                        IpPermission.builder().ipProtocol("tcp").fromPort(3000).toPort(3000)
+                                .ipRanges(IpRange.builder().cidrIp("0.0.0.0/0").description("app").build()).build(),
+                        IpPermission.builder().ipProtocol("tcp").fromPort(22).toPort(22)
+                                .ipRanges(IpRange.builder().cidrIp("0.0.0.0/0").description("ssh").build()).build()));
+                List<SecurityGroupRule> original = ec2.describeSecurityGroupRules(r -> r.filters(
+                        Filter.builder().name("group-id").values(descriptionGroupId).build())).securityGroupRules();
+                SecurityGroupRule egress = original.stream().filter(SecurityGroupRule::isEgress)
+                        .findFirst().orElseThrow();
+
+                for (String description : List.of("all outbound", "all outbound", "")) {
+                    ModifySecurityGroupRulesResponse modified = ec2.modifySecurityGroupRules(r ->
+                            r.groupId(descriptionGroupId).securityGroupRules(SecurityGroupRuleUpdate.builder()
+                                    .securityGroupRuleId(egress.securityGroupRuleId())
+                                    .securityGroupRule(SecurityGroupRuleRequest.builder().ipProtocol("-1")
+                                            .cidrIpv4("0.0.0.0/0").description(description).build()).build()));
+                    assertThat(modified.returnValue()).isTrue();
+                    List<SecurityGroupRule> observed = ec2.describeSecurityGroupRules(r -> r.filters(
+                            Filter.builder().name("group-id").values(descriptionGroupId).build())).securityGroupRules();
+                    assertThat(observed).extracting(SecurityGroupRule::securityGroupRuleId)
+                            .containsExactlyInAnyOrderElementsOf(original.stream()
+                                    .map(SecurityGroupRule::securityGroupRuleId).toList());
+                    assertThat(observed.stream().filter(SecurityGroupRule::isEgress).findFirst().orElseThrow())
+                            .satisfies(rule -> {
+                                assertThat(rule.description()).isEqualTo(description);
+                                assertThat(rule.ipProtocol()).isEqualTo("-1");
+                                assertThat(rule.cidrIpv4()).isEqualTo("0.0.0.0/0");
+                                assertThat(rule.fromPort()).isNull();
+                                assertThat(rule.toPort()).isNull();
+                            });
+                    assertThat(observed.stream().filter(rule -> !rule.isEgress()).toList())
+                            .extracting(SecurityGroupRule::description).containsExactlyInAnyOrder("app", "ssh");
+                    SecurityGroup group = ec2.describeSecurityGroups(r -> r.groupIds(descriptionGroupId))
+                            .securityGroups().get(0);
+                    assertThat(group.ipPermissionsEgress()).hasSize(1);
+                    assertThat(group.ipPermissionsEgress().get(0).ipRanges().get(0).description())
+                            .isEqualTo(description);
+                }
+            } finally {
+                ec2.deleteSecurityGroup(r -> r.groupId(descriptionGroupId));
+            }
+        } finally {
+            ec2.deleteVpc(r -> r.vpcId(descriptionVpcId));
+        }
+    }
+
+    @Test
     @Order(16)
     @DisplayName("CreateKeyPair - create SSH key pair")
     void createKeyPair() {
@@ -345,6 +629,19 @@ class Ec2Tests {
                 .satisfies(e -> {
                     Ec2Exception ec2Ex = (Ec2Exception) e;
                     assertThat(ec2Ex.awsErrorDetails().errorCode()).isEqualTo("InvalidKeyPair.Duplicate");
+                });
+    }
+
+    @Test
+    @Order(18)
+    @DisplayName("CreateKeyPair - missing KeyName returns MissingParameter")
+    void createKeyPairWithoutNameIsRejected() {
+        assertThatThrownBy(() -> ec2.createKeyPair(CreateKeyPairRequest.builder().build()))
+                .isInstanceOf(Ec2Exception.class)
+                .satisfies(e -> {
+                    Ec2Exception ec2Ex = (Ec2Exception) e;
+                    assertThat(ec2Ex.awsErrorDetails().errorCode()).isEqualTo("MissingParameter");
+                    assertThat(ec2Ex.statusCode()).isEqualTo(400);
                 });
     }
 
@@ -446,7 +743,7 @@ class Ec2Tests {
     @Test
     @Order(27)
     @DisplayName("RunInstances - launch EC2 instance")
-    void runInstances() {
+    void runInstances() throws InterruptedException {
         RunInstancesResponse resp = ec2.runInstances(RunInstancesRequest.builder()
                 .imageId("ami-0abcdef1234567890")
                 .instanceType(InstanceType.T2_MICRO)
@@ -460,13 +757,48 @@ class Ec2Tests {
         Instance launched = resp.instances().get(0);
 
         assertThat(instanceId).isNotNull().startsWith("i-");
-        // Control-plane marks the instance running immediately so Alchemy
-        // waitForState does not treat a later guest-launch failure as a
-        // failed create. Real AWS returns pending; DescribeInstances is
-        // where callers wait.
-        assertThat(launched.state().name()).isEqualTo(InstanceStateName.RUNNING);
+        assertThat(launched.state().name()).isIn(InstanceStateName.PENDING, InstanceStateName.RUNNING);
+        assertThat(waitForState(instanceId, InstanceStateName.RUNNING).state().name())
+                .isEqualTo(InstanceStateName.RUNNING);
         assertThat(launched.instanceType()).isEqualTo(InstanceType.T2_MICRO);
         assertThat(launched.keyName()).isEqualTo(keyName);
+    }
+
+    @Test
+    @Order(27)
+    @DisplayName("RunInstances - requested private addresses survive the container lifecycle")
+    void requestedPrivateAddressesSurviveContainerLifecycle() throws InterruptedException {
+        for (boolean primaryInterface : List.of(false, true)) {
+            String requested = primaryInterface ? "10.0.1.78" : "10.0.1.77";
+            RunInstancesRequest.Builder launch = RunInstancesRequest.builder()
+                    .imageId("ami-0abcdef1234567890").instanceType(InstanceType.T3_MICRO).minCount(1).maxCount(1);
+            if (primaryInterface) {
+                launch.networkInterfaces(InstanceNetworkInterfaceSpecification.builder()
+                        .deviceIndex(0).subnetId(subnetId).groups(sgId).privateIpAddress(requested).build());
+            } else {
+                launch.subnetId(subnetId).securityGroupIds(sgId).privateIpAddress(requested);
+            }
+            Instance created = ec2.runInstances(launch.build()).instances().get(0);
+            String id = created.instanceId();
+            try {
+                assertThat(created.privateIpAddress()).isEqualTo(requested);
+                Instance running = waitForState(id, InstanceStateName.RUNNING);
+                assertThat(running.privateIpAddress()).isEqualTo(requested);
+                assertThat(running.networkInterfaces().get(0).privateIpAddress()).isEqualTo(requested);
+                assertThat(ec2.describeNetworkInterfaces(r -> r.networkInterfaceIds(
+                        running.networkInterfaces().get(0).networkInterfaceId()))
+                        .networkInterfaces().get(0).privateIpAddress()).isEqualTo(requested);
+                assertThatThrownBy(() -> ec2.runInstances(launch.build())).isInstanceOfSatisfying(Ec2Exception.class,
+                        error -> assertThat(error.awsErrorDetails().errorCode()).isEqualTo("InvalidIPAddress.InUse"));
+                ec2.stopInstances(r -> r.instanceIds(id));
+                assertThat(waitForState(id, InstanceStateName.STOPPED).privateIpAddress()).isEqualTo(requested);
+                ec2.startInstances(r -> r.instanceIds(id));
+                assertThat(waitForState(id, InstanceStateName.RUNNING).privateIpAddress()).isEqualTo(requested);
+            } finally {
+                ec2.terminateInstances(r -> r.instanceIds(id));
+                waitForState(id, InstanceStateName.TERMINATED);
+            }
+        }
     }
 
     @Test
@@ -676,7 +1008,9 @@ class Ec2Tests {
     @Order(46)
     @DisplayName("DeleteKeyPair - delete key pair")
     void deleteKeyPair() {
-        ec2.deleteKeyPair(DeleteKeyPairRequest.builder().keyName(keyName).build());
+        DeleteKeyPairResponse resp = ec2.deleteKeyPair(DeleteKeyPairRequest.builder().keyName(keyName).build());
+        assertThat(resp.returnValue()).isTrue();
+        assertThat(resp.keyPairId()).isNotNull().startsWith("key-");
     }
 
     @Test
@@ -701,13 +1035,29 @@ class Ec2Tests {
 
     @Test
     @Order(49)
-    @DisplayName("DescribeVpcEndpointServices - returns empty list")
+    @DisplayName("DescribeVpcEndpointServices - lists the common services with AZs")
     void describeVpcEndpointServices() {
         DescribeVpcEndpointServicesResponse resp = ec2.describeVpcEndpointServices(
                 DescribeVpcEndpointServicesRequest.builder().build());
 
-        assertThat(resp.serviceNames()).isEmpty();
-        assertThat(resp.serviceDetails()).isEmpty();
+        assertThat(resp.serviceNames()).contains("com.amazonaws.us-east-1.s3");
+        assertThat(resp.serviceDetails()).isNotEmpty();
+
+        ServiceDetail s3 = resp.serviceDetails().stream()
+                .filter(d -> d.serviceName().equals("com.amazonaws.us-east-1.s3"))
+                .findFirst()
+                .orElseThrow();
+        // S3 is the one service offering both endpoint types.
+        assertThat(s3.serviceType().stream().map(ServiceTypeDetail::serviceTypeAsString).toList())
+                .containsExactlyInAnyOrder("Gateway", "Interface");
+        assertThat(s3.availabilityZones()).isNotEmpty();
+
+        ServiceDetail ecr = resp.serviceDetails().stream()
+                .filter(d -> d.serviceName().equals("com.amazonaws.us-east-1.ecr.api"))
+                .findFirst()
+                .orElseThrow();
+        assertThat(ecr.serviceType().stream().map(ServiceTypeDetail::serviceTypeAsString).toList())
+                .containsExactly("Interface");
     }
 
     @Test

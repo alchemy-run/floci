@@ -9,6 +9,7 @@ import io.github.hectorvent.floci.services.ecs.EcsJsonHandler;
 import io.github.hectorvent.floci.services.ecs.EcsService;
 import io.github.hectorvent.floci.services.lambda.LambdaExecutorService;
 import io.github.hectorvent.floci.services.lambda.LambdaFunctionStore;
+import io.github.hectorvent.floci.services.sns.SnsJsonHandler;
 import io.github.hectorvent.floci.services.sqs.SqsJsonHandler;
 import io.github.hectorvent.floci.services.stepfunctions.model.Execution;
 import io.github.hectorvent.floci.services.stepfunctions.model.HistoryEvent;
@@ -163,17 +164,21 @@ class AslExecutorHttpInvokeTest {
             mock(LambdaFunctionStore.class),
             mock(DynamoDbService.class),
             mock(DynamoDbJsonHandler.class),
-            mock(SqsJsonHandler.class),
+            mock(SqsJsonHandler.class), mock(SnsJsonHandler.class),
             mock(io.github.hectorvent.floci.services.cloudformation.CloudFormationQueryHandler.class),
             mock(io.github.hectorvent.floci.services.ec2.Ec2Service.class),
             mock(io.github.hectorvent.floci.services.s3.S3Service.class),
             mock(EcsService.class),
             mock(EcsJsonHandler.class),
+            mock(io.github.hectorvent.floci.services.eventbridge.EventBridgeHandler.class),
+            mock(io.github.hectorvent.floci.services.scheduler.SchedulerService.class),
+            mock(io.github.hectorvent.floci.services.scheduler.SchedulerController.class),
             objectMapper,
             new JsonataEvaluator(objectMapper),
             mock(Instance.class),
             emulatorConfig,
-            vertx);
+            vertx,
+            null);
     }
 
     private void recordRequest(final RoutingContext ctx, String body) {
@@ -281,6 +286,45 @@ class AslExecutorHttpInvokeTest {
         assertEquals("application/json", request.firstHeader("Content-Type"));
         JsonNode body = objectMapper.readTree(request.body());
         assertEquals("cust-123", body.path("customerId").asText());
+        assertTrue(body.path("active").asBoolean());
+    }
+
+    @Test
+    void jsonataArgumentsSendAnExplicitNull() throws Exception {
+        // AWS keeps the null in the arguments a Task is invoked with: TestState TRACE reports
+        // afterArguments {"FunctionName":"nope","Payload":{"v":null}} for Payload {"v":"{% null %}"}.
+        Execution execution = run("""
+                {
+                  "QueryLanguage": "JSONata",
+                  "StartAt": "CallHttp",
+                  "States": {
+                    "CallHttp": {
+                      "Type": "Task",
+                      "Resource": "arn:aws:states:::http:invoke",
+                      "Arguments": {
+                        "ApiEndpoint": "%s/text",
+                        "Method": "POST",
+                        "Authentication": {
+                          "ConnectionArn": "%s"
+                        },
+                        "RequestBody": {
+                          "fromInput": "{%% $lookup($states.input, 'customerId') %%}",
+                          "active": true
+                        }
+                      },
+                      "End": true
+                    }
+                  }
+                }
+                """.formatted(baseUrl, CONNECTION_ARN), """
+                {
+                  "customerId": null
+                }
+                """);
+
+        assertEquals("SUCCEEDED", execution.getStatus(), execution.getCause());
+        JsonNode body = objectMapper.readTree(onlyRequest().body());
+        assertTrue(body.path("fromInput").isNull(), body.toString());
         assertTrue(body.path("active").asBoolean());
     }
 

@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.elbv2;
 
+import io.github.hectorvent.floci.services.ec2.Ec2Service;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -38,8 +39,8 @@ class ElbV2ListenerCertificateIntegrationTest {
                 .formParam("Name", "sni-nlb")
                 .formParam("Type", "network")
                 .formParam("Scheme", "internal")
-                .formParam("Subnets.member.1", "subnet-default-a")
-                .formParam("Subnets.member.2", "subnet-default-b")
+                .formParam("Subnets.member.1", Ec2Service.defaultSubnetId("us-east-1", "a"))
+                .formParam("Subnets.member.2", Ec2Service.defaultSubnetId("us-east-1", "b"))
                 .header("Authorization", AUTH)
             .when()
                 .post("/")
@@ -53,7 +54,7 @@ class ElbV2ListenerCertificateIntegrationTest {
                 .formParam("Name", "sni-nlb-tg")
                 .formParam("Protocol", "TCP")
                 .formParam("Port", "80")
-                .formParam("VpcId", "vpc-default")
+                .formParam("VpcId", Ec2Service.defaultVpcId("us-east-1"))
                 .formParam("TargetType", "ip")
                 .header("Authorization", AUTH)
             .when()
@@ -91,8 +92,8 @@ class ElbV2ListenerCertificateIntegrationTest {
                 .formParam("Name", "sni-alb")
                 .formParam("Type", "application")
                 .formParam("Scheme", "internal")
-                .formParam("Subnets.member.1", "subnet-default-a")
-                .formParam("Subnets.member.2", "subnet-default-b")
+                .formParam("Subnets.member.1", Ec2Service.defaultSubnetId("us-east-1", "a"))
+                .formParam("Subnets.member.2", Ec2Service.defaultSubnetId("us-east-1", "b"))
                 .header("Authorization", AUTH)
             .when()
                 .post("/")

@@ -1,11 +1,16 @@
 package io.github.hectorvent.floci.services.appsync.graphql.scalars;
 
+import graphql.language.IntValue;
+import graphql.language.StringValue;
+import graphql.schema.CoercingParseLiteralException;
 import graphql.schema.GraphQLScalarType;
 import graphql.schema.CoercingParseValueException;
 import graphql.schema.CoercingSerializeException;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigInteger;
 import java.util.List;
+import java.util.Map;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
@@ -23,6 +28,35 @@ class AppSyncScalarsTest {
                      "AWSEmail", "AWSURL", "AWSPhone", "AWSIPAddress", "AWSBoolean",
                      "AWSLong", "AWSInteger", "AWSShort", "AWSFloat",
                      "AWSBigDecimal", "AWSBigInt", "AWSByte"));
+    }
+
+    @Test
+    void invalidStringLiteralsThrowLiteralCoercionErrors() {
+        Map<GraphQLScalarType, String> invalid = Map.ofEntries(
+                Map.entry(AppSyncScalars.AWSJSON, "not json"),
+                Map.entry(AppSyncScalars.AWS_DATE_TIME, "not-a-date"),
+                Map.entry(AppSyncScalars.AWS_DATE, "not-a-date"),
+                Map.entry(AppSyncScalars.AWS_TIME, "not-a-time"),
+                Map.entry(AppSyncScalars.AWS_EMAIL, "not-an-email"),
+                Map.entry(AppSyncScalars.AWS_URL, "not a url"),
+                Map.entry(AppSyncScalars.AWS_PHONE, "12345"),
+                Map.entry(AppSyncScalars.AWS_IP_ADDRESS, "not-an-ip"),
+                Map.entry(AppSyncScalars.AWS_BIG_DECIMAL, "not-a-number"),
+                Map.entry(AppSyncScalars.AWS_BIG_INT, "not-a-number"),
+                Map.entry(AppSyncScalars.AWS_BYTE, "not base64"));
+        invalid.forEach((scalar, value) -> assertThrows(CoercingParseLiteralException.class,
+                () -> scalar.getCoercing().parseLiteral(StringValue.newStringValue(value).build()),
+                scalar.getName()));
+    }
+
+    @Test
+    void outOfRangeIntegerLiteralsThrowLiteralCoercionErrors() {
+        assertThrows(CoercingParseLiteralException.class,
+                () -> AppSyncScalars.AWS_TIMESTAMP.getCoercing()
+                        .parseLiteral(IntValue.newIntValue(BigInteger.valueOf(-1)).build()));
+        assertThrows(CoercingParseLiteralException.class,
+                () -> AppSyncScalars.AWS_SHORT.getCoercing()
+                        .parseLiteral(IntValue.newIntValue(BigInteger.valueOf(40000)).build()));
     }
 
     @Test

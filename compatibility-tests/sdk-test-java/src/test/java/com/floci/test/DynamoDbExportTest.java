@@ -104,7 +104,7 @@ class DynamoDbExportTest {
 
     @Test
     @Order(1)
-    void exportTableToPointInTime_returnsInProgressOrCompleted() {
+    void exportTableToPointInTime_returnsInProgress() {
         ExportTableToPointInTimeResponse resp = ddb.exportTableToPointInTime(
                 ExportTableToPointInTimeRequest.builder()
                         .tableArn(tableArn)
@@ -115,7 +115,7 @@ class DynamoDbExportTest {
 
         ExportDescription desc = resp.exportDescription();
         assertThat(desc.exportArn()).isNotBlank();
-        assertThat(desc.exportStatus()).isIn(ExportStatus.IN_PROGRESS, ExportStatus.COMPLETED);
+        assertThat(desc.exportStatus()).isEqualTo(ExportStatus.IN_PROGRESS);
         assertThat(desc.tableArn()).isEqualTo(tableArn);
         assertThat(desc.s3Bucket()).isEqualTo(BUCKET_NAME);
         assertThat(desc.exportFormat()).isEqualTo(ExportFormat.DYNAMODB_JSON);

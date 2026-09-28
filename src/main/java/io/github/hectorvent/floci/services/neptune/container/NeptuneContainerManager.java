@@ -46,6 +46,7 @@ public class NeptuneContainerManager {
     private final EmulatorConfig config;
     private final RegionResolver regionResolver;
     private final Map<String, NeptuneContainerHandle> activeContainers = new ConcurrentHashMap<>();
+    private volatile boolean dockerUnavailableLogged;
 
     @Inject
     public NeptuneContainerManager(ContainerBuilder containerBuilder,
@@ -62,18 +63,66 @@ public class NeptuneContainerManager {
         this.regionResolver = regionResolver;
     }
 
-    public NeptuneContainerHandle start(String clusterId, String image, NeptuneDbType dbType) {
+    /**
+     * Attempts {@link #start} and reports the backend as unavailable instead of propagating the
+     * failure, when the cause is that no Docker daemon is reachable from Floci — Floci running
+     * inside Docker without a mounted socket, or a stopped daemon on the host. A failure raised
+     * while the daemon <em>is</em> reachable is a genuine container problem and still propagates,
+     * so nothing changes for a Floci that can start Neptune containers.
+     *
+     * @return the container handle, or {@code null} when no Docker daemon is reachable
+     */
+    public NeptuneContainerHandle tryStart(String clusterId, String image, NeptuneDbType dbType,
+                                           String accountId, String region) {
+        try {
+            NeptuneContainerHandle handle = start(clusterId, image, dbType, accountId, region);
+            dockerUnavailableLogged = false;
+            return handle;
+        } catch (RuntimeException e) {
+            if (isDockerReachable()) {
+                throw e;
+            }
+            if (!dockerUnavailableLogged) {
+                dockerUnavailableLogged = true;
+                LOG.warnv("No Docker daemon is reachable from Floci ({0}). Neptune metadata "
+                        + "operations keep working and clusters still reach 'available', but they "
+                        + "have no backing graph database container until a daemon becomes "
+                        + "reachable.", e.getMessage());
+            }
+            return null;
+        }
+    }
+
+    /**
+     * Probes the configured Docker endpoint, which is how a missing daemon is told apart from a
+     * container that failed for its own reasons.
+     */
+    public boolean isDockerReachable() {
+        try {
+            lifecycleManager.getDockerClient().pingCmd().exec();
+            return true;
+        } catch (Exception e) {
+            LOG.debugv("Docker daemon is not reachable: {0}", e.getMessage());
+            return false;
+        }
+    }
+
+    public NeptuneContainerHandle start(String clusterId, String image, NeptuneDbType dbType,
+                                        String accountId, String region) {
         LOG.infov("Starting Neptune backend container ({0}) for cluster: {1}", dbType, clusterId);
 
         int backendPort = dbType.backendPort();
-        String containerName = containerName(clusterId);
+        String identity = resourceIdentity(accountId, region, clusterId);
+        String containerName = containerName(identity);
         lifecycleManager.removeIfExists(containerName);
 
         ContainerBuilder.Builder specBuilder = containerBuilder.newContainer(image)
                 .withName(containerName)
                 .withEnv(backendEnv(dbType))
                 .withDockerNetwork(config.services().neptune().dockerNetwork())
-                .withLogRotation();
+                .withLogRotation()
+                .withLabels(ContainerStorageHelper.resourceIdentityLabels(
+                        "neptune", clusterId, accountId, region));
 
         if (!containerDetector.isRunningInContainer()) {
             specBuilder.withDynamicPort(backendPort);
@@ -88,18 +137,17 @@ public class NeptuneContainerManager {
         LOG.infov("Neptune {0} backend for cluster {1}: {2}", dbType, clusterId, endpoint);
 
         NeptuneContainerHandle handle = new NeptuneContainerHandle(
-                info.containerId(), clusterId, endpoint.host(), endpoint.port());
-        activeContainers.put(clusterId, handle);
+                info.containerId(), identity, endpoint.host(), endpoint.port());
+        activeContainers.put(identity, handle);
 
         String shortId = info.containerId().length() >= 8
                 ? info.containerId().substring(0, 8)
                 : info.containerId();
-        String logGroup = "/aws/neptune/cluster/" + clusterId + "/" + dbType.name().toLowerCase() + "-log";
+        String logGroup = "/aws/neptune/cluster/" + identity + "/" + dbType.name().toLowerCase() + "-log";
         String logStream = logStreamer.generateLogStreamName(shortId);
-        String region = regionResolver.getDefaultRegion();
 
         Closeable logHandle = logStreamer.attach(
-                info.containerId(), logGroup, logStream, region, "neptune:" + clusterId);
+                info.containerId(), logGroup, logStream, region, "neptune:" + identity);
         handle.setLogStream(logHandle);
 
         waitForBackendReady(clusterId, dbType, endpoint.host(), endpoint.port());
@@ -144,6 +192,10 @@ public class NeptuneContainerManager {
             return;
         }
         lifecycleManager.removeIfExists(containerName(clusterId));
+    }
+
+    private static String resourceIdentity(String accountId, String region, String clusterId) {
+        return accountId + "-" + region + "-" + clusterId;
     }
 
     private String containerName(String clusterId) {

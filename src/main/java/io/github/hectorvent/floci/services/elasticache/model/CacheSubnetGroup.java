@@ -1,38 +1,62 @@
 package io.github.hectorvent.floci.services.elasticache.model;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 @RegisterForReflection
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class CacheSubnetGroup {
 
-    private String cacheSubnetGroupName;
+    @JsonAlias("cacheSubnetGroupName")
+    private String name;
     private String description;
-    private List<String> subnetIds = new ArrayList<>();
+    /** Taken from the subnets, which is where AWS gets it: a group cannot span VPCs. */
+    private String vpcId;
+    /** Subnet id to availability zone, in the order the subnets were given. */
+    private Map<String, String> subnetAvailabilityZones = new LinkedHashMap<>();
     private Map<String, String> tags = new LinkedHashMap<>();
 
-    public CacheSubnetGroup() {}
-
-    public CacheSubnetGroup(String cacheSubnetGroupName, String description, List<String> subnetIds, Map<String, String> tags) {
-        this.cacheSubnetGroupName = cacheSubnetGroupName;
-        this.description = description;
-        setSubnetIds(subnetIds);
-        setTags(tags);
+    public CacheSubnetGroup() {
     }
 
-    public String getCacheSubnetGroupName() { return cacheSubnetGroupName; }
-    public void setCacheSubnetGroupName(String cacheSubnetGroupName) { this.cacheSubnetGroupName = cacheSubnetGroupName; }
+    public CacheSubnetGroup(String name, String description, String vpcId,
+                            Map<String, String> subnetAvailabilityZones) {
+        this.name = name;
+        this.description = description;
+        this.vpcId = vpcId;
+        setSubnetAvailabilityZones(subnetAvailabilityZones);
+    }
+
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
 
     public String getDescription() { return description; }
     public void setDescription(String description) { this.description = description; }
 
-    public List<String> getSubnetIds() { return subnetIds; }
-    public void setSubnetIds(List<String> subnetIds) { this.subnetIds = subnetIds != null ? new ArrayList<>(subnetIds) : new ArrayList<>(); }
+    public String getVpcId() { return vpcId; }
+    public void setVpcId(String vpcId) { this.vpcId = vpcId; }
 
     public Map<String, String> getTags() { return tags; }
-    public void setTags(Map<String, String> tags) { this.tags = tags != null ? new LinkedHashMap<>(tags) : new LinkedHashMap<>(); }
+    public void setTags(Map<String, String> tags) {
+        this.tags = tags == null ? new LinkedHashMap<>() : new LinkedHashMap<>(tags);
+    }
+
+    @JsonProperty(value = "subnetIds", access = JsonProperty.Access.WRITE_ONLY)
+    public void setSubnetIds(List<String> subnetIds) {
+        if (subnetIds != null) {
+            subnetIds.forEach(id -> subnetAvailabilityZones.putIfAbsent(id, null));
+        }
+    }
+
+    public Map<String, String> getSubnetAvailabilityZones() { return subnetAvailabilityZones; }
+    public void setSubnetAvailabilityZones(Map<String, String> subnetAvailabilityZones) {
+        this.subnetAvailabilityZones = subnetAvailabilityZones == null
+                ? new LinkedHashMap<>() : new LinkedHashMap<>(subnetAvailabilityZones);
+    }
 }

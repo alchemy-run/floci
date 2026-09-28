@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,6 +31,7 @@ func TestRDSInstance(t *testing.T) {
 	svc := testutil.RDSClient()
 	instanceId := fmt.Sprintf("go-rds-%d", time.Now().UnixMilli()%100000)
 
+	var endpointAddress string
 	var proxyPort int32
 
 	t.Cleanup(func() {
@@ -55,8 +57,11 @@ func TestRDSInstance(t *testing.T) {
 		assert.Equal(t, instanceId, aws.ToString(out.DBInstance.DBInstanceIdentifier))
 		assert.Equal(t, "postgres", aws.ToString(out.DBInstance.Engine))
 
+		endpointAddress = aws.ToString(out.DBInstance.Endpoint.Address)
 		proxyPort = aws.ToInt32(out.DBInstance.Endpoint.Port)
-		assert.Greater(t, proxyPort, int32(0))
+		// As on AWS: the PostgreSQL default port, under a host name of the instance's own.
+		assert.Equal(t, int32(5432), proxyPort)
+		assert.True(t, strings.HasPrefix(endpointAddress, instanceId+"."), endpointAddress)
 	})
 
 	t.Run("DescribeDBInstance", func(t *testing.T) {
@@ -77,7 +82,7 @@ func TestRDSInstance(t *testing.T) {
 		if proxyPort == 0 {
 			t.Skip("proxy port not set — CreateDBInstance step skipped")
 		}
-		conn := awaitPostgresConn(t, testutil.ProxyHost(), int(proxyPort), rdsUsername, rdsPassword, rdsDatabase)
+		conn := awaitPostgresConn(t, endpointAddress, int(proxyPort), rdsUsername, rdsPassword, rdsDatabase)
 		defer conn.Close()
 
 		var result int
@@ -91,14 +96,14 @@ func TestRDSInstance(t *testing.T) {
 		if proxyPort == 0 {
 			t.Skip("proxy port not set — CreateDBInstance step skipped")
 		}
-		masterConn := awaitPostgresConn(t, testutil.ProxyHost(), int(proxyPort), rdsUsername, rdsPassword, rdsDatabase)
+		masterConn := awaitPostgresConn(t, endpointAddress, int(proxyPort), rdsUsername, rdsPassword, rdsDatabase)
 		defer masterConn.Close()
 
 		_, err := masterConn.ExecContext(ctx,
 			"CREATE USER rds_testuser WITH PASSWORD 'testpass' LOGIN")
 		require.NoError(t, err)
 
-		userConn, err := openPostgresConn(testutil.ProxyHost(), int(proxyPort), "rds_testuser", "testpass", rdsDatabase)
+		userConn, err := openPostgresConn(endpointAddress, int(proxyPort), "rds_testuser", "testpass", rdsDatabase)
 		require.NoError(t, err, "non-master user should connect via proxy pass-through")
 		defer userConn.Close()
 
@@ -192,8 +197,10 @@ func TestRDSCluster(t *testing.T) {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+// openPostgresConn connects over TLS, as RDS clients do: instances share the PostgreSQL port and
+// the TLS server name selects the one the endpoint names.
 func openPostgresConn(host string, port int, user, password, dbname string) (*sql.DB, error) {
-	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable connect_timeout=5",
+	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=require connect_timeout=5",
 		host, port, user, password, dbname)
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
