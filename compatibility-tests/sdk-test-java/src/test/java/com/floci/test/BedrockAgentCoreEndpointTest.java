@@ -66,7 +66,11 @@ class BedrockAgentCoreEndpointTest {
         assertThat(response.endpointName()).isEqualTo("prod");
         assertThat(response.targetVersion()).isEqualTo("1");
         assertThat(response.statusAsString()).isEqualTo("READY");
-        assertThat(response.agentRuntimeEndpointArn()).contains(":agentEndpoint/");
+        assertThat(response.agentRuntimeEndpointArn()).matches(
+                "arn:aws:bedrock-agentcore:[a-z0-9-]+:\\d{12}:runtime/" + runtimeId + "/runtime-endpoint/prod");
+        assertThat(response.agentRuntimeArn()).isEqualTo(
+                response.agentRuntimeEndpointArn().substring(0,
+                        response.agentRuntimeEndpointArn().indexOf("/runtime-endpoint/")));
     }
 
     @Test

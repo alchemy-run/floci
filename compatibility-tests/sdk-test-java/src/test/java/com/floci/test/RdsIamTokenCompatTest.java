@@ -47,11 +47,10 @@ class RdsIamTokenCompatTest {
     private static final String USERNAME = "admin";
     private static final String PASSWORD = "secret-pass-123";
     private static final String DATABASE = "appdb";
-    private static final int PROXY_PORT_MIN = 7000;
-    private static final int PROXY_PORT_MAX = 7099;
 
     private static RdsClient rds;
     private static String instanceId;
+    private static String endpointAddress;
     private static int proxyPort;
     private static boolean instanceReady;
 
@@ -70,6 +69,7 @@ class RdsIamTokenCompatTest {
                     .allocatedStorage(20)
                     .enableIAMDatabaseAuthentication(true)
                     .build());
+            endpointAddress = response.dbInstance().endpoint().address();
             proxyPort = response.dbInstance().endpoint().port();
             instanceReady = true;
         } catch (Exception e) {
@@ -99,7 +99,7 @@ class RdsIamTokenCompatTest {
 
         String token = rds.utilities().generateAuthenticationToken(
                 GenerateAuthenticationTokenRequest.builder()
-                        .hostname(TestFixtures.proxyHost())
+                        .hostname(endpointAddress)
                         .port(proxyPort)
                         .username(USERNAME)
                         .region(REGION)
@@ -122,7 +122,7 @@ class RdsIamTokenCompatTest {
 
         String token = rds.utilities().generateAuthenticationToken(
                 GenerateAuthenticationTokenRequest.builder()
-                        .hostname(TestFixtures.proxyHost())
+                        .hostname(endpointAddress)
                         .port(proxyPort)
                         .username("other-user")
                         .region(REGION)
@@ -142,7 +142,7 @@ class RdsIamTokenCompatTest {
 
         String token = rds.utilities().generateAuthenticationToken(
                 GenerateAuthenticationTokenRequest.builder()
-                        .hostname(TestFixtures.proxyHost())
+                        .hostname(endpointAddress)
                         .port(proxyPort)
                         .username(USERNAME)
                         .region(REGION)
@@ -165,7 +165,7 @@ class RdsIamTokenCompatTest {
 
         String token = rds.utilities().generateAuthenticationToken(
                 GenerateAuthenticationTokenRequest.builder()
-                        .hostname(TestFixtures.proxyHost())
+                        .hostname(endpointAddress)
                         .port(proxyPort)
                         .username(USERNAME)
                         .region(REGION)
@@ -180,7 +180,7 @@ class RdsIamTokenCompatTest {
     }
 
     private static void assumeInstanceReady() {
-        Assumptions.assumeTrue(instanceReady && proxyPort > 0,
+        Assumptions.assumeTrue(instanceReady && endpointAddress != null && proxyPort > 0,
                 "RDS instance not available in this environment");
     }
 
@@ -202,10 +202,11 @@ class RdsIamTokenCompatTest {
         Properties props = new Properties();
         props.setProperty("user", username);
         props.setProperty("password", password);
-        props.setProperty("sslmode", "disable");
+        // TLS, as RDS clients use: the server name selects this instance among those sharing the port.
+        props.setProperty("sslmode", "require");
         props.setProperty("connectTimeout", "5");
         return DriverManager.getConnection(
-                "jdbc:postgresql://" + TestFixtures.proxyHost() + ":" + proxyPort + "/" + DATABASE,
+                "jdbc:postgresql://" + endpointAddress + ":" + proxyPort + "/" + DATABASE,
                 props);
     }
 

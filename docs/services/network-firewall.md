@@ -45,6 +45,14 @@ subnets. Floci does not run a packet-inspection data plane.
 | `UpdateLoggingConfiguration` | Creates or updates the firewall's logging configuration. |
 | `DescribeLoggingConfiguration` | Returns the firewall's logging configuration. |
 | `AssociateFirewallPolicy` | Sets Firewall.FirewallPolicyArn on the stored firewall. |
+| `StartFlowCapture` | Records a flow capture against the firewall; Floci has no data plane, so it completes with no flows (the start response reports `IN_PROGRESS`). |
+| `StartFlowFlush` | Records a flow flush against the firewall; completes with no flows since Floci tracks no traffic. |
+| `DescribeFlowOperation` | Returns a stored flow capture or flush operation. |
+| `ListFlowOperations` | Lists the firewall's flow operations, filterable by type, Availability Zone and VPC endpoint. |
+| `ListFlowOperationResults` | Returns the (always empty) flows of a flow operation. |
+| `StartAnalysisReport` | Generates a report for an analysis type enabled via `UpdateFirewallAnalysisSettings`; completes immediately with no findings. |
+| `ListAnalysisReports` | Lists the firewall's analysis reports, newest first. |
+| `GetAnalysisReportResults` | Returns the (always empty) results of an analysis report. |
 <!-- floci:actions:end -->
 
 ## Limitations

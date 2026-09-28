@@ -2,7 +2,7 @@
 
 **Protocol:** Query (XML) for management API + PostgreSQL / MySQL / SQL Server wire protocol for data plane
 **Management Endpoint:** `POST http://localhost:4566/`
-**Data Endpoint:** `localhost:<proxy-port>` (TCP)
+**Data Endpoint:** `<id>.<account-region token>.<region>.rds.localhost.floci.io:<Port>` (TCP; `Port` defaults to the engine's, e.g. 5432)
 
 Floci manages real PostgreSQL, MySQL, MariaDB, and SQL Server Docker containers and proxies TCP connections to them, including IAM authentication support where the protocol supports it. SQL Server uses a transparent TCP relay for its native TDS protocol.
 
@@ -171,9 +171,9 @@ deletion protection and deletes the Secrets Manager secret RDS manages for its m
 |---|---|---|
 | `FLOCI_SERVICES_RDS_ENABLED` | `true` | Enable or disable the service |
 | `FLOCI_SERVICES_RDS_MOCK` | `false` | `true` = metadata only (no Docker container or auth proxy) |
-| `FLOCI_SERVICES_RDS_PROXY_BASE_PORT` | `7001` | First host port in the RDS proxy range |
-| `FLOCI_SERVICES_RDS_PROXY_MAX_PORT` | `7099` | Last host port in the RDS proxy range |
-| `FLOCI_SERVICES_RDS_ENDPOINT_HOST` | _(auto-detected)_ | Hostname advertised in RDS endpoints; when set in Docker, Floci advertises each proxy's published host port |
+| `FLOCI_SERVICES_RDS_PROXY_BASE_PORT` | `7001` | First port of the internal per-resource proxy range |
+| `FLOCI_SERVICES_RDS_PROXY_MAX_PORT` | `7099` | Last port of the internal per-resource proxy range |
+| `FLOCI_SERVICES_RDS_ENDPOINT_HOST` | _(unset)_ | Replaces the host name of every endpoint. All resources then share one name, so only one resource per port can be told apart |
 | `FLOCI_SERVICES_RDS_DEFAULT_POSTGRES_IMAGE` | `postgres:16-alpine` | Docker image for PostgreSQL instances |
 | `FLOCI_SERVICES_RDS_DEFAULT_MYSQL_IMAGE` | `mysql:8.0` | Docker image for MySQL instances |
 | `FLOCI_SERVICES_RDS_DEFAULT_MARIADB_IMAGE` | `mariadb:11` | Docker image for MariaDB instances |
@@ -189,10 +189,9 @@ deletion protection and deletes the Secrets Manager secret RDS manages for its m
 
 RDS requires the Docker socket and port range exposure. For private registry authentication and other Docker settings see [Docker Configuration](../configuration/docker.md).
 
-When Docker publishes RDS proxy ports dynamically, set `FLOCI_SERVICES_RDS_ENDPOINT_HOST` to the
-hostname used by clients. Floci inspects its own container through the Docker socket and returns the
-corresponding published port from `DescribeDBInstances` and `DescribeDBClusters`. Leave the setting
-unset to retain the auto-detected endpoint host and configured proxy port.
+Clients connect to the endpoint `DescribeDBInstances` and `DescribeDBClusters` return, so publish
+the listener ports your databases use (the engine defaults unless `Port` is set). The internal
+proxy range is only needed by clients that bypass the endpoint.
 
 ```yaml
 services:
@@ -200,7 +199,9 @@ services:
     image: floci/floci:latest
     ports:
       - "4566:4566"
-      - "7001-7099:7001-7099"   # RDS proxy ports
+      - "5432:5432"             # PostgreSQL endpoints
+      - "3306:3306"             # MySQL / MariaDB endpoints
+      - "7001-7099:7001-7099"   # internal per-resource proxies
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
@@ -314,8 +315,8 @@ aws rds describe-db-instances \
   --query 'DBInstances[0].Endpoint' \
   --endpoint-url $AWS_ENDPOINT_URL
 
-# Connect with psql (use the port returned above)
-psql -h localhost -p 7001 -U admin
+# Connect with psql to the address and port returned above
+psql "host=mypostgres.c1a2b3c4d5e6.us-east-1.rds.localhost.floci.io port=5432 user=admin sslmode=require"
 
 # Create a MySQL instance
 aws rds create-db-instance \
@@ -327,9 +328,26 @@ aws rds create-db-instance \
   --allocated-storage 20 \
   --endpoint-url $AWS_ENDPOINT_URL
 
-# Connect with mysql client
-mysql -h 127.0.0.1 -P 7002 -u root -psecret123
+# Connect with the mysql client (a MySQL-family instance sharing 3306 with another needs its own Port)
+mysql -h mymysql.c1a2b3c4d5e6.us-east-1.rds.localhost.floci.io -P 3306 -u root -psecret123
 ```
+
+### Connecting to an endpoint
+
+As on AWS, every DB instance and cluster gets its own host name and listens on its `Port`, so
+several of them share 5432 (or 3306, 1433). The names sit under `rds.localhost.floci.io`, which
+resolves to `127.0.0.1` on the host and to Floci inside the containers Floci starts; Floci accepts
+each connection on the shared port and hands it to the named resource:
+
+- With a single resource on a port, any connection reaches it, TLS or not.
+- With several, PostgreSQL clients must use TLS (`sslmode=require` or stricter): the TLS server
+  name selects the resource. A plaintext connection, or one to an IP address, names none of them
+  and is refused with a PostgreSQL error saying so.
+- MySQL-family clients start TLS only after the server greets them, so two MySQL or MariaDB
+  resources on one port cannot be told apart. Give each its own `Port`.
+
+If Floci cannot bind a listener port (another process holds it), the resource stays reachable
+only on its internal proxy port.
 
 ## Supported Engines
 
@@ -530,9 +548,9 @@ exercise the same connection-string settings you use in production:
 
 ```bash
 # PostgreSQL
-PGSSLROOTCERT=./data/tls/rds-ca.crt psql "host=localhost port=7001 user=admin sslmode=verify-full"
+PGSSLROOTCERT=./data/tls/rds-ca.crt psql "host=mypostgres.c1a2b3c4d5e6.us-east-1.rds.localhost.floci.io port=5432 user=admin sslmode=verify-full"
 
 # MySQL / MariaDB
-mysql -h 127.0.0.1 -P 7002 -u root -psecret123 \
+mysql -h mymysql.c1a2b3c4d5e6.us-east-1.rds.localhost.floci.io -P 3306 -u root -psecret123 \
   --ssl-mode=VERIFY_IDENTITY --ssl-ca=./data/tls/rds-ca.crt
 ```

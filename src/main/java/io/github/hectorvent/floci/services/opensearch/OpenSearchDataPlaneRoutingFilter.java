@@ -16,8 +16,8 @@ import java.util.Optional;
  * Routes a domain endpoint host ({@code <domain>.<region>.es.<suffix>}, see
  * {@link OpenSearchDataPlaneEndpoint}) to the path-style data-plane proxy
  * {@code /_floci/opensearch-domain/<region>/<domain>/<path>}. The raw client path and query are
- * carried over unchanged (and the {@code Host} header is left alone), so the proxy can rebuild
- * the exact request the client signed.
+ * carried over unchanged (and a {@code Host} header is left alone, or set from the HTTP/2
+ * authority when there is none), so the proxy can rebuild the exact request the client signed.
  */
 @Provider
 @PreMatching
@@ -40,6 +40,11 @@ public class OpenSearchDataPlaneRoutingFilter implements ContainerRequestFilter 
         }
         if (path.startsWith(OpenSearchDataPlaneController.BASE_PREFIX)) {
             return;
+        }
+        if (requestContext.getHeaderString("Host") == null) {
+            // HTTP/2 carries the host as :authority, which SigV4 signs as "host"; the rewrite
+            // below replaces the URI authority, so keep it as the Host header the proxy verifies.
+            requestContext.getHeaders().putSingle("Host", host);
         }
         String rewrittenPath = proxyPath(target.get(), path);
         URI rewritten = UriBuilder.fromUri(original)

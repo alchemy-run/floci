@@ -199,6 +199,7 @@ services:
     doc: docs/services/elasticache.md
     sources:
       - { path: src/main/java/io/github/hectorvent/floci/services/elasticache/ElastiCacheQueryHandler.java, mode: switch }
+      - { path: src/main/java/io/github/hectorvent/floci/services/elasticache/ElastiCacheServerlessQueryHandler.java, mode: switch }
   - service: emr
     doc: docs/services/emr.md
     sources:

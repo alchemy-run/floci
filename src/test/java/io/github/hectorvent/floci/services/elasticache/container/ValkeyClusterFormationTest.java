@@ -68,7 +68,8 @@ class ValkeyClusterFormationTest {
                     OutputStream out = socket.getOutputStream();
                     out.write("+OK\r\n-ERR nope\r\n:5\r\n".getBytes(StandardCharsets.UTF_8));
                     out.flush();
-                    socket.getInputStream().readNBytes(1);
+                    // Drain until the client hangs up: closing while it still writes resets the pipeline.
+                    socket.getInputStream().readAllBytes();
                 } catch (IOException ignored) {
                     // the client closing first ends the exchange; nothing to assert here
                 }
@@ -85,6 +86,62 @@ class ValkeyClusterFormationTest {
             } finally {
                 client.closeQuietly();
             }
+        }
+    }
+
+    @Test
+    void setSlotLanesSpreadAPipelineOverConnectionsAndKeepReplyOrder() throws Exception {
+        Set<Integer> connections = ConcurrentHashMap.newKeySet();
+        try (ServerSocket server = new ServerSocket(0)) {
+            Thread.ofVirtual().start(() -> {
+                while (!server.isClosed()) {
+                    try {
+                        Socket socket = server.accept();
+                        connections.add(socket.getPort());
+                        Thread.ofVirtual().start(() -> echoSlot(socket));
+                    } catch (IOException expected) {
+                        return;
+                    }
+                }
+            });
+            ValkeyClusterFormation.SetSlotLanes lanes =
+                    new ValkeyClusterFormation.SetSlotLanes("127.0.0.1", server.getLocalPort());
+            try {
+                List<String[]> commands = new ArrayList<>();
+                for (int slot = 0; slot < 100; slot++) {
+                    commands.add(new String[] {"CLUSTER", "SETSLOT", String.valueOf(slot), "NODE", "target"});
+                }
+                List<Object> replies = lanes.pipeline(commands);
+
+                assertEquals(100, replies.size());
+                for (int slot = 0; slot < 100; slot++) {
+                    if (slot == 42) {
+                        assertInstanceOf(ValkeyClusterFormation.RespError.class, replies.get(slot));
+                    } else {
+                        assertEquals((long) slot, replies.get(slot));
+                    }
+                }
+                assertTrue(connections.size() > 1, "Expected the pipeline to use several connections");
+            } finally {
+                lanes.close();
+            }
+        }
+    }
+
+    /** Answers each command with its slot argument, and slot 42 with an error. */
+    private static void echoSlot(Socket socket) {
+        try (socket) {
+            InputStream in = new BufferedInputStream(socket.getInputStream());
+            OutputStream out = socket.getOutputStream();
+            List<String> command;
+            while ((command = FakeNode.readCommand(in)) != null) {
+                String slot = command.get(2);
+                out.write(("42".equals(slot) ? "-ERR slot 42\r\n" : ":" + slot + "\r\n")
+                        .getBytes(StandardCharsets.UTF_8));
+                out.flush();
+            }
+        } catch (IOException expected) {
+            // the client disconnecting ends the session
         }
     }
 
@@ -190,7 +247,7 @@ class ValkeyClusterFormationTest {
         }
     }
 
-    /** A single-connection RESP server answering the cluster commands a reshard issues. */
+    /** A RESP server answering the cluster commands a reshard issues. */
     private static final class FakeNode {
         final FakeCluster cluster;
         final String networkIp;

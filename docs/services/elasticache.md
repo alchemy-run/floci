@@ -39,6 +39,11 @@ Floci manages real Valkey/Redis Docker containers and proxies TCP connections to
 | `AddTagsToResource` | Add resource tags |
 | `RemoveTagsFromResource` | Remove resource tags |
 | `DescribeCacheParameterGroups` | List parameter groups, including the AWS defaults |
+| `DescribeEvents` | Empty list (events are not recorded) |
+| `CreateCacheParameterGroup` | Create a cache parameter group |
+| `ModifyCacheParameterGroup` | Set parameters on a group |
+| `DescribeCacheParameters` | List the parameters set on a group |
+| `DeleteCacheParameterGroup` | Delete a cache parameter group |
 | `CreateServerlessCache` | Create a Valkey, Redis OSS or Memcached serverless cache backed by a real engine container; answers `creating` and turns `available` once the engine is ready. `SubnetIds` and `SecurityGroupIds` must exist in EC2 (defaults: the default VPC's subnets and its `default` group), `KmsKeyId` must name a usable key, and `UserGroupId` raises `UserGroupNotFound` (user groups are not emulated) |
 | `DescribeServerlessCaches` | List serverless caches with `NextToken` paging; `Endpoint` and `ReaderEndpoint` are `<name>-<6 chars>.serverless.<region code>.cache.amazonaws.com` on 6379/6380 (Memcached: 11211/11212), TLS only |
 | `ModifyServerlessCache` | Update description, usage limits, security groups, snapshot settings and the redis-to-valkey engine upgrade; answers `modifying` |
@@ -48,11 +53,6 @@ Floci manages real Valkey/Redis Docker containers and proxies TCP connections to
 | `DeleteServerlessCacheSnapshot` | Delete an `available` snapshot; a `creating` one raises `InvalidServerlessCacheSnapshotStateFault` |
 | `CopyServerlessCacheSnapshot` | Copy a snapshot, keys included |
 | `ExportServerlessCacheSnapshot` | Validates the snapshot, then refuses: snapshots are not kept as RDB files that could be written to S3 |
-| `DescribeEvents` | Empty list (events are not recorded) |
-| `CreateCacheParameterGroup` | Create a cache parameter group |
-| `ModifyCacheParameterGroup` | Set parameters on a group |
-| `DescribeCacheParameters` | List the parameters set on a group |
-| `DeleteCacheParameterGroup` | Delete a cache parameter group |
 <!-- floci:actions:end -->
 
 ### Cluster Mode

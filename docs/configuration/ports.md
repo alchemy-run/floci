@@ -11,7 +11,8 @@
 | `6379–6399` | TCP | ElastiCache Redis proxy (inside Floci) | Yes |
 | `6400–6419` | TCP | MemoryDB proxy (inside Floci) | Yes |
 | `6500–6599` | HTTPS | EKS k3s API server — bound directly by each k3s container | **No** |
-| `7001–7099` | TCP | RDS proxy (inside Floci) | Yes |
+| `5432`, `3306`, `1433` | TCP | RDS endpoints: each DB instance and cluster `Port` (engine default unless set), inside Floci | Yes |
+| `7001–7099` | TCP | RDS per-resource proxies (inside Floci) | Yes |
 | `8182–8282` | TCP | Neptune Gremlin proxy (inside Floci) | Yes |
 | `8700–8799` | HTTP | MWAA Airflow webserver proxy (inside Floci) | Yes |
 | `9400–9499` | HTTP | OpenSearch data-plane — bound directly by each OpenSearch container | **No** |
@@ -93,7 +94,7 @@ aws eks create-cluster \
 
 ## Ports 7001–7099 — RDS
 
-When you create an RDS DB instance, Floci starts a PostgreSQL or MySQL Docker container and creates a TCP proxy on the next available port in the `7001–7099` range. The proxy runs inside the Floci container, so this range must be mapped in `docker-compose.yml`.
+When you create an RDS DB instance, Floci starts a PostgreSQL or MySQL Docker container and a TCP proxy on the next available port in the `7001–7099` range. Clients use the endpoint `DescribeDBInstances` returns: a per-instance host name on the engine's port (5432, 3306, ...), which Floci serves and relays to that proxy. Map the engine ports you use in `docker-compose.yml`; the `7001–7099` range serves clients that address a proxy directly. See [RDS](../services/rds.md#connecting-to-an-endpoint).
 
 ```bash
 aws rds create-db-instance \
@@ -104,8 +105,8 @@ aws rds create-db-instance \
   --master-user-password secret \
   --endpoint-url http://localhost:4566
 
-# Connect using the proxied port (returned in DescribeDBInstances Endpoint.Port)
-psql -h localhost -p 7001 -U admin
+# Connect to the endpoint returned in DescribeDBInstances (Endpoint.Address, Endpoint.Port)
+psql "host=mydb.c1a2b3c4d5e6.us-east-1.rds.localhost.floci.io port=5432 user=admin sslmode=require"
 ```
 
 !!! note

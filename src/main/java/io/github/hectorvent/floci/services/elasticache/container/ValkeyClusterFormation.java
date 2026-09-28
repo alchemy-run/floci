@@ -15,6 +15,11 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.function.IntFunction;
 import java.util.function.Predicate;
 
 /**
@@ -41,6 +46,13 @@ public class ValkeyClusterFormation {
     private static final int SLOT_BATCH = 512;
     private static final int MIGRATE_KEY_BATCH = 100;
     private static final int MIGRATE_TIMEOUT_MS = 5_000;
+    /**
+     * Connections per primary that carry a batch's SETSLOT commands side by side. Since Valkey 8 a
+     * primary with an online replica holds each SETSLOT until the replica acknowledges it, one
+     * replication round trip per command and connection; commands on separate connections share
+     * that round trip, so a batch settles in {@code SLOT_BATCH / SETSLOT_LANES} round trips.
+     */
+    private static final int SETSLOT_LANES = 16;
 
     /**
      * One node to join into the cluster.
@@ -145,6 +157,7 @@ public class ValkeyClusterFormation {
                         Map<String, String> currentSlots, Map<String, String> desiredSlots) {
         long deadline = System.currentTimeMillis() + RESHARD_DEADLINE_MS;
         List<RespClient> clients = new ArrayList<>(members.size());
+        Map<Integer, SetSlotLanes> lanes = new LinkedHashMap<>();
         try {
             for (ShardMember member : members) {
                 clients.add(new RespClient(member.endpointHost(), member.endpointPort()));
@@ -208,8 +221,9 @@ public class ValkeyClusterFormation {
                     throw new IllegalArgumentException("No primary for node group " + move.getKey().to());
                 }
                 Integer source = move.getKey().from() == null ? null : primaryByShard.get(move.getKey().from());
-                migrateSlots(groupId, clients, nodeIds, primaries, source, target,
-                        members.get(target).networkIp(), move.getValue());
+                migrateSlots(groupId, clients, index -> lanes.computeIfAbsent(index,
+                                i -> new SetSlotLanes(members.get(i).endpointHost(), members.get(i).endpointPort())),
+                        nodeIds, primaries, source, target, members.get(target).networkIp(), move.getValue());
             }
 
             List<RespClient> remaining = new ArrayList<>();
@@ -243,6 +257,7 @@ public class ValkeyClusterFormation {
         } catch (IOException e) {
             throw new RuntimeException("Reshard of group " + groupId + " failed: " + e.getMessage(), e);
         } finally {
+            lanes.values().forEach(SetSlotLanes::close);
             clients.forEach(RespClient::closeQuietly);
         }
     }
@@ -252,10 +267,12 @@ public class ValkeyClusterFormation {
      * that holds keys has them carried across with MIGRATE while it is in the migrating state, so
      * no key is lost and clients are redirected with ASK for the duration.
      */
-    private static void migrateSlots(String groupId, List<RespClient> clients, List<String> nodeIds,
+    private static void migrateSlots(String groupId, List<RespClient> clients,
+                                     IntFunction<SetSlotLanes> lanes, List<String> nodeIds,
                                      List<Integer> primaries, Integer source, int target,
                                      String targetIp, List<Integer> slots) throws IOException {
         RespClient targetClient = clients.get(target);
+        SetSlotLanes targetLanes = lanes.apply(target);
         String targetId = nodeIds.get(target);
         for (int start = 0; start < slots.size(); start += SLOT_BATCH) {
             List<Integer> batch = slots.subList(start, Math.min(slots.size(), start + SLOT_BATCH));
@@ -264,9 +281,10 @@ public class ValkeyClusterFormation {
                 continue;
             }
             RespClient sourceClient = clients.get(source);
+            SetSlotLanes sourceLanes = lanes.apply(source);
             String sourceId = nodeIds.get(source);
-            expectOk(targetClient.pipeline(slotCommands(batch, "SETSLOT", "IMPORTING", sourceId)));
-            expectOk(sourceClient.pipeline(slotCommands(batch, "SETSLOT", "MIGRATING", targetId)));
+            expectOk(targetLanes.pipeline(slotCommands(batch, "SETSLOT", "IMPORTING", sourceId)));
+            expectOk(sourceLanes.pipeline(slotCommands(batch, "SETSLOT", "MIGRATING", targetId)));
             List<Object> counts = sourceClient.pipeline(slotCommands(batch, "COUNTKEYSINSLOT"));
             expectOk(counts);
             for (int i = 0; i < batch.size(); i++) {
@@ -274,8 +292,8 @@ public class ValkeyClusterFormation {
                     moveKeys(groupId, sourceClient, targetIp, batch.get(i));
                 }
             }
-            expectOk(targetClient.pipeline(slotCommands(batch, "SETSLOT", "NODE", targetId)));
-            for (Object reply : sourceClient.pipeline(slotCommands(batch, "SETSLOT", "NODE", targetId))) {
+            expectOk(targetLanes.pipeline(slotCommands(batch, "SETSLOT", "NODE", targetId)));
+            for (Object reply : sourceLanes.pipeline(slotCommands(batch, "SETSLOT", "NODE", targetId))) {
                 // A primary that gossip has already stripped of its last slot demotes itself to a
                 // replica of the new owner and refuses SETSLOT; the slot has moved regardless.
                 if (reply instanceof RespError e && !e.getMessage().contains("SETSLOT only with")) {
@@ -288,7 +306,7 @@ public class ValkeyClusterFormation {
                 }
                 // Only speeds up convergence: a node that has not learned the target yet refuses,
                 // and gossip of the target's bumped epoch settles it regardless.
-                for (Object reply : clients.get(primary).pipeline(slotCommands(batch, "SETSLOT", "NODE", targetId))) {
+                for (Object reply : lanes.apply(primary).pipeline(slotCommands(batch, "SETSLOT", "NODE", targetId))) {
                     if (reply instanceof RespError e) {
                         LOG.debugv("SETSLOT NODE broadcast in group {0}: {1}", groupId, e.getMessage());
                     }
@@ -490,6 +508,62 @@ public class ValkeyClusterFormation {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Interrupted while forming cluster for group " + groupId, e);
+        }
+    }
+
+    /**
+     * {@link #SETSLOT_LANES} connections to one node. A pipeline is split into contiguous runs sent
+     * concurrently, one per connection, and the replies are returned in command order.
+     */
+    static final class SetSlotLanes {
+
+        private final String host;
+        private final int port;
+        private final List<RespClient> clients = new ArrayList<>();
+        private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+
+        SetSlotLanes(String host, int port) {
+            this.host = host;
+            this.port = port;
+        }
+
+        List<Object> pipeline(List<String[]> commands) throws IOException {
+            int lanes = Math.min(SETSLOT_LANES, commands.size());
+            while (clients.size() < lanes) {
+                clients.add(new RespClient(host, port));
+            }
+            List<Future<List<Object>>> runs = new ArrayList<>(lanes);
+            for (int lane = 0; lane < lanes; lane++) {
+                RespClient client = clients.get(lane);
+                List<String[]> run = commands.subList(lane * commands.size() / lanes,
+                        (lane + 1) * commands.size() / lanes);
+                runs.add(executor.submit(() -> client.pipeline(run)));
+            }
+            List<Object> replies = new ArrayList<>(commands.size());
+            IOException failure = null;
+            for (Future<List<Object>> run : runs) {
+                try {
+                    replies.addAll(run.get());
+                } catch (ExecutionException e) {
+                    Throwable cause = e.getCause();
+                    if (failure == null) {
+                        failure = cause instanceof IOException io ? io
+                                : new IOException("SETSLOT pipeline to " + host + ":" + port + " failed", cause);
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("Interrupted during a SETSLOT pipeline to " + host + ":" + port, e);
+                }
+            }
+            if (failure != null) {
+                throw failure;
+            }
+            return replies;
+        }
+
+        void close() {
+            executor.shutdownNow();
+            clients.forEach(RespClient::closeQuietly);
         }
     }
 

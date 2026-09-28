@@ -92,14 +92,16 @@ class AccountInformationTest {
     }
 
     @Test
-    @DisplayName("signed region reads paginate and reject unsupported activation without changing access metadata")
+    @DisplayName("signed region reads paginate, opt-in regions enable and disable, and invalid requests are rejected")
     void signedRegionCatalogPaginationAndNegativeRequests() {
-        assumeFalse(TestFixtures.isRealAws(), "Asserts the emulator's supported region catalog");
+        assumeFalse(TestFixtures.isRealAws(), "Enables and disables an opt-in region on an emulator account");
         try (AccountClient owner = client(OWNER, Region.US_EAST_1)) {
             ListRegionsResponse all = owner.listRegions(request -> request.maxResults(50));
             List<String> expected = all.regions().stream().map(region -> region.regionName()).toList();
-            assertThat(expected).contains("us-east-1").doesNotHaveDuplicates().isSorted();
-            assertThat(all.regions()).allMatch(region -> "ENABLED_BY_DEFAULT".equals(region.regionOptStatusAsString()));
+            assertThat(expected).contains("us-east-1", "ap-east-1").doesNotHaveDuplicates().isSorted();
+            // A fresh account has every default region enabled and every opt-in region disabled.
+            assertThat(all.regions()).allMatch(region -> "ENABLED_BY_DEFAULT".equals(region.regionOptStatusAsString())
+                    || "DISABLED".equals(region.regionOptStatusAsString()));
             List<String> paged = new ArrayList<>();
             String next = null;
             for (int page = 0; page < 50; page++) {
@@ -113,12 +115,18 @@ class AccountInformationTest {
             }
             assertThat(next).isNull();
             assertThat(paged).containsExactlyElementsOf(expected);
-            assertThat(owner.listRegions(request -> request.regionOptStatusContainsWithStrings("DISABLED")).regions())
-                    .isEmpty();
-            assertThat(owner.listRegions(request -> request.regionOptStatusContainsWithStrings("ENABLED_BY_DEFAULT"))
-                    .regions()).hasSameSizeAs(all.regions());
+            List<String> disabled = owner.listRegions(request -> request.regionOptStatusContainsWithStrings("DISABLED"))
+                    .regions().stream().map(region -> region.regionName()).toList();
+            List<String> enabledByDefault = owner.listRegions(request -> request
+                    .regionOptStatusContainsWithStrings("ENABLED_BY_DEFAULT"))
+                    .regions().stream().map(region -> region.regionName()).toList();
+            assertThat(disabled).contains("ap-east-1").doesNotContain("us-east-1");
+            assertThat(enabledByDefault).contains("us-east-1").doesNotContain("ap-east-1");
+            assertThat(disabled.size() + enabledByDefault.size()).isEqualTo(expected.size());
             assertThat(owner.getRegionOptStatus(request -> request.regionName("us-east-1")).regionOptStatusAsString())
                     .isEqualTo("ENABLED_BY_DEFAULT");
+            assertThat(owner.getRegionOptStatus(request -> request.regionName("ap-east-1")).regionOptStatusAsString())
+                    .isEqualTo("DISABLED");
             assertThatThrownBy(() -> owner.listRegions(request -> request.maxResults(0)))
                     .isInstanceOf(ValidationException.class);
             assertThatThrownBy(() -> owner.listRegions(request -> request.maxResults(51)))
@@ -127,9 +135,9 @@ class AccountInformationTest {
                     .isInstanceOf(ValidationException.class);
             assertThatThrownBy(() -> owner.listRegions(request -> request.regionOptStatusContainsWithStrings("UNKNOWN")))
                     .isInstanceOf(ValidationException.class);
-            assertThatThrownBy(() -> owner.getRegionOptStatus(request -> request.regionName("ap-east-1")))
+            assertThatThrownBy(() -> owner.getRegionOptStatus(request -> request.regionName("xx-nowhere-1")))
                     .isInstanceOf(ValidationException.class);
-            assertThatThrownBy(() -> owner.enableRegion(request -> request.regionName("ap-east-1")))
+            assertThatThrownBy(() -> owner.enableRegion(request -> request.regionName("us-east-1")))
                     .isInstanceOf(ValidationException.class);
             assertThatThrownBy(() -> owner.disableRegion(request -> request.regionName("us-east-1")))
                     .isInstanceOf(ValidationException.class);
@@ -141,8 +149,25 @@ class AccountInformationTest {
                     .isInstanceOf(AccessDeniedException.class);
             assertThatThrownBy(() -> owner.disableRegion(request -> request.accountId(OTHER).regionName("us-east-1")))
                     .isInstanceOf(AccessDeniedException.class);
+
+            owner.enableRegion(request -> request.regionName("ap-east-1"));
+            assertThat(owner.getRegionOptStatus(request -> request.regionName("ap-east-1")).regionOptStatusAsString())
+                    .isIn("ENABLING", "ENABLED");
+            awaitRegionStatus(owner, "ap-east-1", "ENABLED");
+            owner.disableRegion(request -> request.regionName("ap-east-1"));
+            assertThat(owner.getRegionOptStatus(request -> request.regionName("ap-east-1")).regionOptStatusAsString())
+                    .isIn("DISABLING", "DISABLED");
+            awaitRegionStatus(owner, "ap-east-1", "DISABLED");
             assertThat(owner.listRegions(request -> request.maxResults(50)).regions()).isEqualTo(all.regions());
         }
+    }
+
+    private static void awaitRegionStatus(AccountClient client, String region, String status) {
+        String observed = null;
+        for (int attempt = 0; attempt < 10 && !status.equals(observed); attempt++) {
+            observed = client.getRegionOptStatus(request -> request.regionName(region)).regionOptStatusAsString();
+        }
+        assertThat(observed).isEqualTo(status);
     }
 
     @Test
