@@ -9,6 +9,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
@@ -108,7 +109,8 @@ class ServerlessCacheDataPlaneTest {
     }
 
     private int serve(Answerer answerer) throws IOException {
-        server = new ServerSocket(0);
+        // Loopback only: the client dials 127.0.0.1, where a wildcard bind can lose to another listener.
+        server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
         Thread.ofVirtual().start(() -> {
             try (Socket socket = server.accept()) {
                 answerer.answer(new BufferedInputStream(socket.getInputStream()), socket.getOutputStream());
