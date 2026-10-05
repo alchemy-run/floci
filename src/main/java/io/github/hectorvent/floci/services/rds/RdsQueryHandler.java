@@ -1079,7 +1079,19 @@ public class RdsQueryHandler {
         if (groupName == null || groupName.isBlank() || "default".equalsIgnoreCase(groupName)) {
             return fallbackSubnetGroup(instance, "default", "default subnet group");
         }
-        return service.getDbSubnetGroup(groupName);
+        try {
+            return service.getDbSubnetGroup(groupName);
+        } catch (AwsException error) {
+            if (!"DBSubnetGroupNotFoundFault".equals(error.getErrorCode())) {
+                throw error;
+            }
+            LOG.debugv("DB subnet group {0} missing for instance {1}; rendering incomplete metadata",
+                    groupName, instance.getDbInstanceIdentifier());
+            DbSubnetGroup missing = fallbackSubnetGroup(instance, groupName, "missing subnet group");
+            missing.setSubnetGroupStatus("Incomplete");
+            missing.setSubnetIds(List.of());
+            return missing;
+        }
     }
 
     private DbSubnetGroup fallbackSubnetGroup(DbInstance instance, String name, String description) {
