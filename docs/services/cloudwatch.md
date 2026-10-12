@@ -22,6 +22,7 @@ Floci supports both CloudWatch Logs and CloudWatch Metrics.
 | `PutLogEvents` | Write log events to a stream |
 | `GetLogEvents` | Read log events from a stream |
 | `FilterLogEvents` | Search log events with a filter pattern |
+| `StartLiveTail` | Stream newly ingested events using AWS EventStream |
 | `PutRetentionPolicy` | Set log retention (days) |
 | `DeleteRetentionPolicy` | Remove log retention policy |
 | `TagLogGroup` | Tag a log group |
@@ -64,6 +65,35 @@ Notes:
 - **`GetDataProtectionPolicy`** does not model data-protection policies. It returns
   HTTP 200 with the resolved `logGroupIdentifier` and no `policyDocument` — including for
   a log group that does not exist, where real AWS returns `ResourceNotFoundException`.
+
+### Live tail
+
+`StartLiveTail` accepts 1–10 log group ARNs without the trailing `:*`. Groups must
+use the `STANDARD` class and belong to the request's account and region. For a
+single group, the request can select up to 100 stream names or prefixes, but not
+both. Cross-account observability links are not supported.
+
+The response uses `application/vnd.amazon.eventstream` with CRC-protected AWS
+EventStream frames: an `initial-response`, one `sessionStart`, then a
+`sessionUpdate` every second, including empty updates. Only events ingested after
+the session starts are sent; existing events are not replayed. Lambda container
+logs use the same ingestion path as `PutLogEvents`.
+
+Each update contains at most 500 events. Higher-volume intervals use reservoir
+sampling and set `sessionMetadata.sampled` to `true`. Each session buffers up to
+10 updates, dropping the oldest when a client falls behind. Sessions expire after
+three hours with `SessionTimeoutException`. Up to 15 sessions can run per account
+and region; disconnecting releases the session within about a second.
+
+When using the AWS Java SDK with a local endpoint override, disable host-prefix
+injection with `SdkAdvancedClientOption.DISABLE_HOST_PREFIX_INJECTION`; otherwise
+the SDK prepends `stream-` to the local hostname.
+
+`logEventFilterPattern` uses the existing subscription-filter matcher: literal
+substrings, quoted phrases, and `?term` alternatives. This is not the full AWS
+filter language; JSON, space-delimited field expressions, and regular expressions
+are not parsed. For example, `error 404` matches that literal substring, not two
+independent required terms.
 
 ### Logs Insights {#logs-insights}
 

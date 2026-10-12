@@ -15,6 +15,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.StreamingOutput;
+import org.jboss.resteasy.reactive.server.spi.ServerRequestContext;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -27,11 +29,18 @@ public class CloudWatchLogsHandler {
 
     private final CloudWatchLogsService logsService;
     private final ObjectMapper objectMapper;
+    private final ServerRequestContext requestContext;
 
     @Inject
-    public CloudWatchLogsHandler(CloudWatchLogsService logsService, ObjectMapper objectMapper) {
+    public CloudWatchLogsHandler(CloudWatchLogsService logsService, ObjectMapper objectMapper,
+                                 ServerRequestContext requestContext) {
         this.logsService = logsService;
         this.objectMapper = objectMapper;
+        this.requestContext = requestContext;
+    }
+
+    CloudWatchLogsHandler(CloudWatchLogsService logsService, ObjectMapper objectMapper) {
+        this(logsService, objectMapper, null);
     }
 
     public Response handle(String action, JsonNode request, String region) {
@@ -45,6 +54,7 @@ public class CloudWatchLogsHandler {
             case "PutLogEvents" -> handlePutLogEvents(request, region);
             case "GetLogEvents" -> handleGetLogEvents(request, region);
             case "FilterLogEvents" -> handleFilterLogEvents(request, region);
+            case "StartLiveTail" -> handleStartLiveTail(request, region);
             case "PutRetentionPolicy" -> handlePutRetentionPolicy(request, region);
             case "PutLogGroupDeletionProtection" -> handlePutLogGroupDeletionProtection(request, region);
             case "DeleteRetentionPolicy" -> handleDeleteRetentionPolicy(request, region);
@@ -77,6 +87,44 @@ public class CloudWatchLogsHandler {
                     .entity(new AwsErrorResponse("UnsupportedOperation", "Operation " + action + " is not supported."))
                     .build();
         };
+    }
+
+    private Response handleStartLiveTail(JsonNode request, String region) {
+        if (request.has("logEventFilterPattern") && !request.get("logEventFilterPattern").isTextual()) {
+            throw new AwsException("InvalidParameterException", "logEventFilterPattern must be a string.", 400);
+        }
+        LiveTailSession session = logsService.prepareLiveTail(
+                liveTailStrings(request, "logGroupIdentifiers"), liveTailStrings(request, "logStreamNames"),
+                liveTailStrings(request, "logStreamNamePrefixes"),
+                request.path("logEventFilterPattern").asText(null), region);
+        var response = requestContext.serverResponse();
+        StreamingOutput body = output -> {
+            logsService.registerLiveTail(session);
+            try {
+                session.write(output, objectMapper, response::closed);
+            } finally {
+                logsService.closeLiveTail(session);
+            }
+        };
+        return Response.ok(body).type("application/vnd.amazon.eventstream").build();
+    }
+
+    private static List<String> liveTailStrings(JsonNode request, String field) {
+        if (!request.has(field)) {
+            return List.of();
+        }
+        JsonNode values = request.get(field);
+        if (!values.isArray()) {
+            throw new AwsException("InvalidParameterException", field + " must be an array of strings.", 400);
+        }
+        List<String> result = new ArrayList<>();
+        for (JsonNode value : values) {
+            if (!value.isTextual()) {
+                throw new AwsException("InvalidParameterException", field + " must contain only strings.", 400);
+            }
+            result.add(value.asText());
+        }
+        return result;
     }
 
     private Response handlePutResourcePolicy(JsonNode request, String region) {
