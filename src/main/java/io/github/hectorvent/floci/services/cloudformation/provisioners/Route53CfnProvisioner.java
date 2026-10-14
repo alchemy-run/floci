@@ -374,8 +374,10 @@ public class Route53CfnProvisioner implements CfnResourceProvisioner {
     }
 
     private ResourceRecordSet findRecord(String zoneId, String name, String type, String setIdentifier) {
+        // Route 53 lists names in canonical form (fully qualified, octal escapes).
+        String canonical = Route53Service.canonicalRecordName(name);
         for (ResourceRecordSet rrs : route53Service.listResourceRecordSets(zoneId, null, null, 0)) {
-            if (name.equals(rrs.getName()) && type.equals(rrs.getType())
+            if (canonical.equals(Route53Service.canonicalRecordName(rrs.getName())) && type.equals(rrs.getType())
                     && Objects.equals(setIdentifier, rrs.getSetIdentifier())) {
                 return rrs;
             }

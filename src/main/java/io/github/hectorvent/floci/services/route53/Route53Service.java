@@ -874,7 +874,7 @@ public class Route53Service {
      * wildcard record lists as {@code \052.example.com.}. Escapes in the input are decoded first,
      * so {@code *.example.com} and {@code \052.example.com} name the same record set.
      */
-    static String canonicalRecordName(String name) {
+    public static String canonicalRecordName(String name) {
         if (name == null || name.isEmpty()) return name;
         String qualified = normalizeName(name);
         java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
