@@ -63,6 +63,7 @@ public class DocDbProxy {
     private final ConcurrentHashMap<String, Route> routes = new ConcurrentHashMap<>();
     private volatile boolean running;
     private ServerSocket serverSocket;
+    private volatile Thread acceptThread;
 
     DocDbProxy(int port, Supplier<SSLContext> tlsContext) {
         this.port = port;
@@ -72,7 +73,7 @@ public class DocDbProxy {
     void start() throws IOException {
         serverSocket = new ServerSocket(port);
         running = true;
-        Thread.ofVirtual().name("docdb-proxy-accept-" + port).start(this::acceptLoop);
+        acceptThread = Thread.ofVirtual().name("docdb-proxy-accept-" + port).start(this::acceptLoop);
         LOG.infov("DocumentDB listener started on port {0}", String.valueOf(serverSocket.getLocalPort()));
     }
 
@@ -84,6 +85,19 @@ public class DocDbProxy {
             }
         } catch (IOException e) {
             LOG.warnv("Error closing DocumentDB listener on port {0}: {1}", String.valueOf(port), e.getMessage());
+        }
+        // Closing a socket a virtual thread is accepting on only wakes that thread; the
+        // descriptor is released when it leaves accept(). Wait for that so the port can be
+        // bound again once stop() returns.
+        Thread thread = acceptThread;
+        if (thread != null && thread != Thread.currentThread()) {
+            try {
+                if (!thread.join(java.time.Duration.ofSeconds(5))) {
+                    LOG.warnv("DocumentDB listener on port {0} did not stop within 5s", String.valueOf(port));
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
