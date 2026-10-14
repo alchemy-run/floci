@@ -251,12 +251,23 @@ final class CloudFrontOriginHttpClient implements AutoCloseable {
             }
             for (InetAddress address : addresses) {
                 boolean allowed = address.isLoopbackAddress()
-                        || (translated && (address.isSiteLocalAddress() || !SsrfProtection.isBlockedAddress(address)));
+                        || (translated && !SsrfProtection.isMetadataAddress(address)
+                                && (isPrivateAddress(address) || !SsrfProtection.isBlockedAddress(address)));
                 if (!allowed) {
                     throw new UnknownHostException("Local dev origin host resolves to a blocked address: " + targetHost);
                 }
             }
             return addresses.clone();
+        }
+
+        /**
+         * IPv4 private or IPv6 unique-local ({@code fc00::/7}). Docker Desktop's host gateway
+         * resolves {@code host.docker.internal} to both, e.g. {@code fdc4:f303:9324::254}.
+         */
+        private static boolean isPrivateAddress(InetAddress address) {
+            byte[] bytes = address.getAddress();
+            return address.isSiteLocalAddress()
+                    || (bytes.length == 16 && (Byte.toUnsignedInt(bytes[0]) & 0xfe) == 0xfc);
         }
 
         @Override

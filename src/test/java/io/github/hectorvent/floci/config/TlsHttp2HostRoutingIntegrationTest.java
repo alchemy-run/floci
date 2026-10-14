@@ -26,6 +26,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -172,9 +173,31 @@ class TlsHttp2HostRoutingIntegrationTest {
         assertTrue(response.body().contains("\"pong\":true"), response.body());
     }
 
+    @Test
+    void appSyncGraphqlEndpointIsServedUnderItsAdvertisedHost() throws Exception {
+        // Floci in Docker serves TLS on the gateway port and Lambda containers dial the advertised
+        // GraphQL host unchanged, so the leaf must cover it and routing must use :authority.
+        String graphqlUrl = given().contentType(ContentType.JSON)
+                .body("{\"name\":\"h2-appsync\",\"authenticationType\":\"AWS_IAM\"}")
+                .when().post("/v1/apis")
+                .then().statusCode(200).extract().path("graphqlApi.uris.GRAPHQL");
+        String host = URI.create(graphqlUrl).getHost();
+        assertTrue(host.endsWith(".appsync-api." + REGION + ".localhost.floci.io"), graphqlUrl);
+
+        Http2Response response = requestOverHttp2(HttpMethod.POST, host, "/graphql", "{\"query\":\"{__typename}\"}");
+        assertEquals(HttpVersion.HTTP_2, response.version());
+        assertEquals(401, response.status(), response.body());
+        assertTrue(response.body().contains("UnauthorizedException"), response.body());
+    }
+
     private record Http2Response(HttpVersion version, int status, String body) {}
 
     private Http2Response getOverHttp2(String host, String pathAndQuery) throws Exception {
+        return requestOverHttp2(HttpMethod.GET, host, pathAndQuery, null);
+    }
+
+    private Http2Response requestOverHttp2(HttpMethod method, String host, String pathAndQuery, String body)
+            throws Exception {
         HttpClient client = vertx.createHttpClient(new HttpClientOptions()
                 .setSsl(true)
                 .setUseAlpn(true)
@@ -188,12 +211,13 @@ class TlsHttp2HostRoutingIntegrationTest {
                     .setServer(SocketAddress.inetSocketAddress(sslPort, "127.0.0.1"))
                     .setHost(host)
                     .setPort(sslPort)
-                    .setMethod(HttpMethod.GET)
+                    .setMethod(method)
                     .setURI(pathAndQuery);
             return client.request(options)
-                    .compose(request -> request.send())
-                    .compose(response -> response.body().map(body ->
-                            new Http2Response(response.version(), response.statusCode(), body.toString())))
+                    .compose(request -> body == null ? request.send() : request
+                            .putHeader("content-type", "application/json").send(body))
+                    .compose(response -> response.body().map(responseBody ->
+                            new Http2Response(response.version(), response.statusCode(), responseBody.toString())))
                     .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         } finally {
             client.close();
