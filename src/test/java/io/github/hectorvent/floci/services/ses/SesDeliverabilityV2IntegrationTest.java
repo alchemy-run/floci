@@ -30,10 +30,21 @@ class SesDeliverabilityV2IntegrationTest {
     @Test
     @Order(2)
     void getMessageInsights_withoutVdm_isNotFound() {
-        given().header("Authorization", AUTH)
-                .when().get("/v2/email/insights/00000000-0000-0000-0000-000000000000")
-                .then().statusCode(404)
-                .body("__type", equalTo("NotFoundException"));
+        // Account VDM is shared across the Quarkus test process; pin DISABLED so a sibling suite
+        // that enabled VDM cannot route this request into the message-id checks.
+        given().contentType("application/json").header("Authorization", AUTH)
+                .body("{\"VdmAttributes\":{\"VdmEnabled\":\"DISABLED\"}}")
+                .when().put("/v2/email/account/vdm")
+                .then().statusCode(200);
+
+        // Without VDM, SES rejects every id before looking at it, malformed or not.
+        for (String messageId : new String[] {"not-a-message-id",
+                "0000000000000000-00000000-0000-0000-0000-000000000000-000000"}) {
+            given().header("Authorization", AUTH)
+                    .when().get("/v2/email/insights/" + messageId)
+                    .then().statusCode(404)
+                    .body("__type", equalTo("NotFoundException"));
+        }
     }
 
     @Test

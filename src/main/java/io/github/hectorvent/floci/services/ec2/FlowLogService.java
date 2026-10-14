@@ -1,16 +1,15 @@
 package io.github.hectorvent.floci.services.ec2;
 
 import com.fasterxml.jackson.core.type.TypeReference;
-import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.ec2.model.FlowLog;
 import io.github.hectorvent.floci.services.ec2.model.Instance;
-import io.github.hectorvent.floci.services.ec2.model.Tag;
 import io.github.hectorvent.floci.services.ec2.model.InstanceNetworkInterface;
 import io.github.hectorvent.floci.services.ec2.model.NetworkInterface;
 import io.github.hectorvent.floci.services.ec2.model.Reservation;
+import io.github.hectorvent.floci.services.ec2.model.Tag;
 import io.github.hectorvent.floci.services.ec2.model.VpcEndpoint;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.quarkus.runtime.ShutdownEvent;
@@ -75,22 +74,19 @@ public class FlowLogService {
     // restart in persistent/hybrid/wal modes and generation resumes)
     private final StorageBackend<String, FlowLog> flowLogs;
 
-    private final EmulatorConfig config;
     private final Ec2Service ec2Service;
     private final S3Service s3Service;
     private ScheduledExecutorService scheduler;
 
     @Inject
-    public FlowLogService(EmulatorConfig config, Ec2Service ec2Service, S3Service s3Service,
-                          StorageFactory storageFactory) {
-        this(config, ec2Service, s3Service,
+    public FlowLogService(Ec2Service ec2Service, S3Service s3Service, StorageFactory storageFactory) {
+        this(ec2Service, s3Service,
                 storageFactory.create("ec2", "ec2-flow-logs.json", new TypeReference<Map<String, FlowLog>>() {}));
     }
 
     // Package-private for hermetic tests (pass an in-memory StorageBackend directly).
-    FlowLogService(EmulatorConfig config, Ec2Service ec2Service, S3Service s3Service,
+    FlowLogService(Ec2Service ec2Service, S3Service s3Service,
                    StorageBackend<String, FlowLog> flowLogs) {
-        this.config = config;
         this.ec2Service = ec2Service;
         this.s3Service = s3Service;
         this.flowLogs = flowLogs;
@@ -126,6 +122,14 @@ public class FlowLogService {
 
     public FlowLog createFlowLog(String region, String resourceId, String resourceType,
                                  String trafficType, String logDestinationType,
+                                 String logDestination, String deliverLogsPermissionArn,
+                                 String logFormat, int maxAggregationInterval) {
+        return createFlowLog(region, resourceId, resourceType, trafficType, logDestinationType,
+                logDestination, logFormat, maxAggregationInterval, null, deliverLogsPermissionArn, List.of());
+    }
+
+    public FlowLog createFlowLog(String region, String resourceId, String resourceType,
+                                 String trafficType, String logDestinationType,
                                  String logDestination, String logFormat, int maxAggregationInterval,
                                  String logGroupName, String deliverLogsPermissionArn, List<Tag> tags) {
         FlowLog fl = new FlowLog();
@@ -145,7 +149,7 @@ public class FlowLogService {
         fl.setLogFormat(logFormat);
         fl.setMaxAggregationInterval(maxAggregationInterval);
         fl.setRegion(region);
-        fl.setAccountId(config.defaultAccountId());
+        fl.setAccountId(ec2Service.callerAccountId());
         if (tags != null && !tags.isEmpty()) {
             fl.setTags(new ArrayList<>(tags));
         }

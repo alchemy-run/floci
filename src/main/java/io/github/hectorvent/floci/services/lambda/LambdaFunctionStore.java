@@ -1,17 +1,19 @@
 package io.github.hectorvent.floci.services.lambda;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.Resettable;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.lambda.model.LambdaFunction;
-import com.fasterxml.jackson.core.type.TypeReference;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Predicate;
 
 /**
  * Wraps the storage backend for Lambda functions with region-aware key logic.
@@ -81,6 +83,22 @@ public class LambdaFunctionStore implements Resettable {
         indexFunction(fn);
     }
 
+    /**
+     * Saves into {@code accountId}'s partition rather than the ambient caller's. Async
+     * paths (CDI observers, pollers) run with no {@code RequestContext} and would
+     * otherwise write every account's function into the default account's partition.
+     */
+    public void saveForAccount(String accountId, String region, LambdaFunction fn) {
+        getForAccount(accountId, region, fn.getFunctionName(), fn.getVersion()).ifPresent(this::deindexFunction);
+
+        if (backend instanceof AccountAwareStorageBackend<LambdaFunction> aware) {
+            aware.putForAccount(accountId, regionKey(region, fn.getFunctionName(), fn.getVersion()), fn);
+        } else {
+            backend.put(regionKey(region, fn.getFunctionName(), fn.getVersion()), fn);
+        }
+        indexFunction(fn);
+    }
+
     public Optional<LambdaFunction> get(String region, String functionName) {
         return get(region, functionName, "$LATEST");
     }
@@ -90,10 +108,25 @@ public class LambdaFunctionStore implements Resettable {
     }
 
     public Optional<LambdaFunction> getForAccount(String accountId, String region, String functionName) {
+        return getForAccount(accountId, region, functionName, "$LATEST");
+    }
+
+    public Optional<LambdaFunction> getForAccount(
+            String accountId, String region, String functionName, String version) {
         if (backend instanceof AccountAwareStorageBackend<LambdaFunction> aware) {
-            return aware.getForAccount(accountId, regionKey(region, functionName, "$LATEST"));
+            return aware.getForAccountMigratingLegacy(
+                    accountId,
+                    regionKey(region, functionName, version),
+                    function -> belongsToAccount(function, accountId));
         }
-        return backend.get(regionKey(region, functionName, "$LATEST"));
+        return backend.get(regionKey(region, functionName, version));
+    }
+
+    private static boolean belongsToAccount(LambdaFunction function, String accountId) {
+        if (function.getAccountId() != null && !function.getAccountId().isBlank()) {
+            return accountId.equals(function.getAccountId());
+        }
+        return accountId.equals(AwsArnUtils.accountOrDefault(function.getFunctionArn(), ""));
     }
 
     public Optional<LambdaFunction> getByUrlId(String urlId) {
@@ -110,8 +143,26 @@ public class LambdaFunctionStore implements Resettable {
         return backend.scan(key -> key.startsWith(prefix));
     }
 
+    /**
+     * Like {@link #list(String)}, but across every account's partition. For async callers
+     * that have no {@code RequestContext} and so would otherwise see only the default
+     * account's functions.
+     */
+    public List<LambdaFunction> listAllAccounts(String region) {
+        String prefix = "lambda::" + region + "::";
+        Predicate<String> filter = key -> key.startsWith(prefix) && key.endsWith("::$LATEST");
+        if (backend instanceof AccountAwareStorageBackend<LambdaFunction> aware) {
+            return aware.scanAllAccountEntries(filter).stream()
+                    .map(AccountAwareStorageBackend.AccountEntry::value)
+                    .toList();
+        }
+        return backend.scan(filter);
+    }
+
     public List<LambdaFunction> listAll() {
-        return backend.scan(key -> true);
+        return backend instanceof AccountAwareStorageBackend<LambdaFunction> aware
+                ? aware.scanAllAccounts()
+                : backend.scan(key -> true);
     }
 
     public void delete(String region, String functionName) {
@@ -122,10 +173,12 @@ public class LambdaFunctionStore implements Resettable {
         });
     }
 
-    /** Deletes ONE published version snapshot, leaving $LATEST and siblings. */
+    /** Deletes one published version, leaving {@code $LATEST} and the other versions in place. */
     public void deleteVersion(String region, String functionName, String version) {
-        get(region, functionName, version).ifPresent(this::deindexFunction);
-        backend.delete(regionKey(region, functionName, version));
+        get(region, functionName, version).ifPresent(fn -> {
+            deindexFunction(fn);
+            backend.delete(regionKey(region, functionName, version));
+        });
     }
 
     private static String regionKey(String region, String functionName, String version) {

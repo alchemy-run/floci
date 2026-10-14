@@ -8,15 +8,29 @@ import org.junit.jupiter.api.TestMethodOrder;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 
 @QuarkusTest
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class S3ReplicationIntegrationTest {
 
     private static final String BUCKET = "replication-int-test";
+    private static final String WEST_BUCKET = "replication-int-test-west";
+    private static final String REPLICATION_XML = """
+            <ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                <Role>arn:aws:iam::000000000000:role/replication-role</Role>
+                <Rule>
+                    <ID>rule-1</ID>
+                    <Status>Enabled</Status>
+                    <Destination>
+                        <Bucket>arn:aws:s3:::replication-dest</Bucket>
+                    </Destination>
+                </Rule>
+            </ReplicationConfiguration>
+            """;
 
     @Test
-    @Order(1)
+    @Order(10)
     void createBucket() {
         given()
         .when()
@@ -25,37 +39,15 @@ class S3ReplicationIntegrationTest {
             .statusCode(200);
     }
 
-    private static final String REPLICATION_XML = """
-            <ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
-                <Role>arn:aws:iam::000000000000:role/replication-role</Role>
-                <Rule>
-                    <ID>replicate-all</ID>
-                    <Status>Enabled</Status>
-                    <Priority>1</Priority>
-                    <Filter></Filter>
-                    <DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication>
-                    <Destination><Bucket>arn:aws:s3:::replication-dest</Bucket></Destination>
-                </Rule>
-            </ReplicationConfiguration>
-            """;
-
     @Test
-    @Order(2)
-    void putAndGetReplicationRoundTripsRole() {
-        given()
-            .body(REPLICATION_XML)
-        .when()
-            .put("/" + BUCKET + "?replication")
-        .then()
-            .statusCode(200);
-
+    @Order(20)
+    void getReplicationBeforePutReturns404() {
         given()
         .when()
             .get("/" + BUCKET + "?replication")
         .then()
-            .statusCode(200)
-            .body(containsString("arn:aws:iam::000000000000:role/replication-role"))
-            .body(containsString("replicate-all"));
+            .statusCode(404)
+            .body(containsString("ReplicationConfigurationNotFoundError"));
     }
 
     /**
@@ -65,7 +57,7 @@ class S3ReplicationIntegrationTest {
      * replication configuration and returns 204.
      */
     @Test
-    @Order(3)
+    @Order(30)
     void deleteReplicationDoesNotDeleteBucket() {
         given()
         .when()
@@ -75,18 +67,7 @@ class S3ReplicationIntegrationTest {
     }
 
     @Test
-    @Order(4)
-    void getReplicationAfterDeleteReturnsNotFound() {
-        given()
-        .when()
-            .get("/" + BUCKET + "?replication")
-        .then()
-            .statusCode(404)
-            .body(containsString("ReplicationConfigurationNotFoundError"));
-    }
-
-    @Test
-    @Order(5)
+    @Order(40)
     void bucketStillExistsAfterReplicationDelete() {
         // A sub-resource-qualified DELETE must never remove the bucket itself.
         given()
@@ -97,7 +78,7 @@ class S3ReplicationIntegrationTest {
     }
 
     @Test
-    @Order(6)
+    @Order(50)
     void putVersioningAfterReplicationDeleteSucceeds() {
         given()
             .body("""
@@ -112,7 +93,111 @@ class S3ReplicationIntegrationTest {
     }
 
     @Test
-    @Order(7)
+    @Order(60)
+    void putReplicationStoresConfiguration() {
+        given()
+            .body(REPLICATION_XML)
+        .when()
+            .put("/" + BUCKET + "?replication")
+        .then()
+            .statusCode(200);
+    }
+
+    @Test
+    @Order(70)
+    void getReplicationRoundTripsStoredConfiguration() {
+        given()
+        .when()
+            .get("/" + BUCKET + "?replication")
+        .then()
+            .statusCode(200)
+            .body(containsString("<Role>arn:aws:iam::000000000000:role/replication-role</Role>"))
+            .body(containsString("<ID>rule-1</ID>"))
+            .body(containsString("<Status>Enabled</Status>"))
+            .body(containsString("<Bucket>arn:aws:s3:::replication-dest</Bucket>"));
+    }
+
+    @Test
+    @Order(80)
+    void putReplicationWithoutRoleReturnsMalformedXml() {
+        given()
+            .body("""
+                    <ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                        <Rule>
+                            <Status>Enabled</Status>
+                            <Destination>
+                                <Bucket>arn:aws:s3:::replication-dest</Bucket>
+                            </Destination>
+                        </Rule>
+                    </ReplicationConfiguration>
+                    """)
+        .when()
+            .put("/" + BUCKET + "?replication")
+        .then()
+            .statusCode(400)
+            .body(containsString("MalformedXML"));
+    }
+
+    @Test
+    @Order(90)
+    void deleteReplicationRemovesConfiguration() {
+        given()
+        .when()
+            .delete("/" + BUCKET + "?replication")
+        .then()
+            .statusCode(204);
+
+        given()
+        .when()
+            .get("/" + BUCKET + "?replication")
+        .then()
+            .statusCode(404)
+            .body(containsString("ReplicationConfigurationNotFoundError"));
+    }
+
+    /**
+     * Regression test for {@code PUT /{bucket}?replication} falling through to CreateBucket:
+     * outside us-east-1 the fall-through surfaced as {@code 409 BucketAlreadyOwnedByYou}
+     * (and in us-east-1 as a silent false success).
+     */
+    @Test
+    @Order(100)
+    void putReplicationOnNonUsEast1BucketDoesNot409() {
+        given()
+            .body("""
+                    <CreateBucketConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                        <LocationConstraint>us-west-2</LocationConstraint>
+                    </CreateBucketConfiguration>
+                    """)
+        .when()
+            .put("/" + WEST_BUCKET)
+        .then()
+            .statusCode(200);
+
+        given()
+            .body(REPLICATION_XML)
+        .when()
+            .put("/" + WEST_BUCKET + "?replication")
+        .then()
+            .statusCode(200)
+            .body(not(containsString("BucketAlreadyOwnedByYou")));
+
+        given()
+        .when()
+            .get("/" + WEST_BUCKET + "?replication")
+        .then()
+            .statusCode(200)
+            .body(containsString("<ID>rule-1</ID>"));
+
+        given()
+        .when()
+            .delete("/" + WEST_BUCKET)
+        .then()
+            .statusCode(204);
+    }
+
+    @Test
+    @Order(110)
     void unqualifiedDeleteStillRemovesBucket() {
         given()
         .when()
@@ -127,4 +212,49 @@ class S3ReplicationIntegrationTest {
             .statusCode(404)
             .body(containsString("NoSuchBucket"));
     }
+    private static final String FORK_REPLICATION_XML = """
+            <ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                <Role>arn:aws:iam::000000000000:role/replication-role</Role>
+                <Rule>
+                    <ID>replicate-all</ID>
+                    <Status>Enabled</Status>
+                    <Priority>1</Priority>
+                    <Filter></Filter>
+                    <DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication>
+                    <Destination><Bucket>arn:aws:s3:::replication-dest</Bucket></Destination>
+                </Rule>
+            </ReplicationConfiguration>
+            """;
+
+    @Test
+    @Order(25)
+    void putAndGetReplicationRoundTripsRole() {
+        given()
+            .body(FORK_REPLICATION_XML)
+        .when()
+            .put("/" + BUCKET + "?replication")
+        .then()
+            .statusCode(200);
+
+        given()
+        .when()
+            .get("/" + BUCKET + "?replication")
+        .then()
+            .statusCode(200)
+            .body(containsString("arn:aws:iam::000000000000:role/replication-role"))
+            .body(containsString("replicate-all"));
+    }
+
+    @Test
+    @Order(35)
+    void getReplicationAfterDeleteReturnsNotFound() {
+        given()
+        .when()
+            .get("/" + BUCKET + "?replication")
+        .then()
+            .statusCode(404)
+            .body(containsString("ReplicationConfigurationNotFoundError"));
+    }
+
+
 }

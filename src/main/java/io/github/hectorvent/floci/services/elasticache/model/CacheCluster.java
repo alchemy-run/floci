@@ -18,6 +18,9 @@ public class CacheCluster {
     private Endpoint configurationEndpoint;
     private Instant cacheClusterCreateTime;
     private int proxyPort;
+    private int enginePort;
+    private String region;
+    private String accountId;
     private int numCacheNodes = 1;
     private String cacheNodeType = "cache.t4g.small";
     private List<String> securityGroupIds = new ArrayList<>();
@@ -61,6 +64,16 @@ public class CacheCluster {
 
     public int getProxyPort() { return proxyPort; }
     public void setProxyPort(int proxyPort) { this.proxyPort = proxyPort; }
+
+    /** The port Memcached listens on in its container, which the endpoint reports; 0 on older records. */
+    public int getEnginePort() { return enginePort; }
+    public void setEnginePort(int enginePort) { this.enginePort = enginePort; }
+
+    public String getRegion() { return region; }
+    public void setRegion(String region) { this.region = region; }
+
+    public String getAccountId() { return accountId; }
+    public void setAccountId(String accountId) { this.accountId = accountId; }
 
     public int getNumCacheNodes() { return numCacheNodes; }
     public void setNumCacheNodes(int numCacheNodes) { this.numCacheNodes = numCacheNodes; }

@@ -89,6 +89,7 @@ When `artifacts.type=S3`, collected files are uploaded to the configured S3 buck
 | Variable | Default | Description |
 |---|---|---|
 | `FLOCI_SERVICES_CODEBUILD_ENABLED` | `true` | Enable or disable the service |
+| `FLOCI_SERVICES_CODEBUILD_HONOUR_ENVIRONMENT_TYPE` | `false` | Run `LINUX_CONTAINER` builds as `linux/amd64` and `ARM_CONTAINER` builds as `linux/arm64`. By default builds use the Docker host's native platform, since foreign-platform containers need binfmt_misc or QEMU on the host |
 
 ## CLI Examples
 

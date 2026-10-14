@@ -8,6 +8,9 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
+import java.util.List;
+import java.util.Map;
+
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
 
@@ -94,7 +97,10 @@ class CodeBuildIntegrationTest {
             .contentType(CONTENT_TYPE)
             .body("""
                 {
-                    "names": ["my-build-project", "nonexistent-project"]
+                    "names": [
+                        "arn:aws:codebuild:us-east-1:000000000000:project/my-build-project",
+                        "nonexistent-project"
+                    ]
                 }
                 """)
         .when()
@@ -296,7 +302,7 @@ class CodeBuildIntegrationTest {
 
     @Test
     @Order(13)
-    void deleteNonexistentProjectFails() {
+    void deleteNonexistentProjectIsIdempotent() {
         given()
             .header("X-Amz-Target", "CodeBuild_20161006.DeleteProject")
             .contentType(CONTENT_TYPE)
@@ -306,7 +312,119 @@ class CodeBuildIntegrationTest {
         .when()
             .post("/")
         .then()
-            .statusCode(400)
-            .body("__type", containsString("ResourceNotFoundException"));
+            .statusCode(200);
+    }
+
+    @Test
+    void batchAndReportReadWireContracts() {
+        String name = "http-codebuild-bindings";
+        given().header("X-Amz-Target", "CodeBuild_20161006.CreateProject")
+                .contentType(CONTENT_TYPE).body(Map.of("name", name,
+                        "source", Map.of("type", "NO_SOURCE"),
+                        "artifacts", Map.of("type", "NO_ARTIFACTS"),
+                        "environment", Map.of("type", "LINUX_CONTAINER", "image", "aws/codebuild/standard:7.0",
+                                "computeType", "BUILD_GENERAL1_SMALL"),
+                        "serviceRole", "arn:aws:iam::000000000000:role/codebuild-role"))
+                .post("/").then().statusCode(200);
+        String groupArn = given().header("X-Amz-Target", "CodeBuild_20161006.CreateReportGroup")
+                .contentType(CONTENT_TYPE).body(Map.of("name", name, "type", "TEST",
+                        "exportConfig", Map.of("exportConfigType", "NO_EXPORT")))
+                .post("/").then().statusCode(200).extract().path("reportGroup.arn");
+        String missingBatch = name + ":00000000-0000-0000-0000-000000000000";
+        String missingReport = groupArn.replace(":report-group/", ":report/") + ":missing";
+        try {
+            given().header("X-Amz-Target", "CodeBuild_20161006.StartBuildBatch")
+                    .contentType(CONTENT_TYPE).body(Map.of("projectName", name))
+                    .post("/").then().statusCode(400).body("__type", containsString("InvalidInputException"));
+            given().header("X-Amz-Target", "CodeBuild_20161006.ListBuildBatchesForProject")
+                    .contentType(CONTENT_TYPE).body(Map.of("projectName", name))
+                    .post("/").then().statusCode(200).body("ids", empty());
+            given().header("X-Amz-Target", "CodeBuild_20161006.BatchGetBuildBatches")
+                    .contentType(CONTENT_TYPE).body(Map.of("ids", List.of(missingBatch)))
+                    .post("/").then().statusCode(200).body("buildBatches", empty())
+                    .body("buildBatchesNotFound", contains(missingBatch));
+            given().header("X-Amz-Target", "CodeBuild_20161006.ListReportsForReportGroup")
+                    .contentType(CONTENT_TYPE).body(Map.of("reportGroupArn", groupArn))
+                    .post("/").then().statusCode(200).body("reports", empty());
+            given().header("X-Amz-Target", "CodeBuild_20161006.BatchGetReports")
+                    .contentType(CONTENT_TYPE).body(Map.of("reportArns", List.of(missingReport)))
+                    .post("/").then().statusCode(200).body("reports", empty())
+                    .body("reportsNotFound", contains(missingReport));
+            given().header("X-Amz-Target", "CodeBuild_20161006.DescribeTestCases")
+                    .contentType(CONTENT_TYPE).body(Map.of("reportArn", missingReport))
+                    .post("/").then().statusCode(400).body("__type", containsString("ResourceNotFoundException"));
+            given().header("X-Amz-Target", "CodeBuild_20161006.DescribeCodeCoverages")
+                    .contentType(CONTENT_TYPE).body(Map.of("reportArn", missingReport))
+                    .post("/").then().statusCode(400).body("__type", containsString("InvalidInputException"));
+            given().header("X-Amz-Target", "CodeBuild_20161006.GetReportGroupTrend")
+                    .contentType(CONTENT_TYPE).body(Map.of("reportGroupArn", groupArn, "trendField", "DURATION"))
+                    .post("/").then().statusCode(200).body("rawData", empty()).body("stats", nullValue());
+            given().header("X-Amz-Target", "CodeBuild_20161006.DeleteReport")
+                    .contentType(CONTENT_TYPE).body(Map.of("arn", missingReport))
+                    .post("/").then().statusCode(200);
+        } finally {
+            given().header("X-Amz-Target", "CodeBuild_20161006.DeleteProject")
+                    .contentType(CONTENT_TYPE).body(Map.of("name", name)).post("/").then().statusCode(200);
+            given().header("X-Amz-Target", "CodeBuild_20161006.DeleteReportGroup")
+                    .contentType(CONTENT_TYPE).body(Map.of("arn", groupArn)).post("/").then().statusCode(200);
+        }
+    }
+
+    @Test
+    void resourcePolicyWireLifecycleAndOwnerValidation() {
+        String projectName = "http-policy-project";
+        String arn = given()
+                .header("X-Amz-Target", "CodeBuild_20161006.CreateProject")
+                .contentType(CONTENT_TYPE)
+                .body(Map.of("name", projectName,
+                        "source", Map.of("type", "NO_SOURCE"),
+                        "artifacts", Map.of("type", "NO_ARTIFACTS"),
+                        "environment", Map.of("type", "LINUX_CONTAINER", "image", "aws/codebuild/standard:7.0",
+                                "computeType", "BUILD_GENERAL1_SMALL"),
+                        "serviceRole", "arn:aws:iam::000000000000:role/codebuild-role"))
+                .post("/").then().statusCode(200).extract().path("project.arn");
+        String policy = """
+                {"Version":"2012-10-17","Statement":[{"Effect":"Allow",
+                "Principal":{"AWS":"arn:aws:iam::000000000000:root"},
+                "Action":["codebuild:BatchGetProjects"],"Resource":"%s"}]}
+                """.formatted(arn);
+        try {
+            given().header("X-Amz-Target", "CodeBuild_20161006.GetResourcePolicy")
+                    .contentType(CONTENT_TYPE).body(Map.of("resourceArn", arn))
+                    .post("/").then().statusCode(200).body("policy", nullValue());
+            given().header("X-Amz-Target", "CodeBuild_20161006.PutResourcePolicy")
+                    .contentType(CONTENT_TYPE).body(Map.of("resourceArn", arn, "policy", policy))
+                    .post("/").then().statusCode(200).body("resourceArn", equalTo(arn));
+            given().header("X-Amz-Target", "CodeBuild_20161006.GetResourcePolicy")
+                    .contentType(CONTENT_TYPE).body(Map.of("resourceArn", arn))
+                    .post("/").then().statusCode(200).body("policy", equalTo(policy));
+
+            String foreignArn = arn.replace("000000000000", "111111111111");
+            for (String action : List.of("GetResourcePolicy", "PutResourcePolicy", "DeleteResourcePolicy")) {
+                given().header("X-Amz-Target", "CodeBuild_20161006." + action)
+                        .contentType(CONTENT_TYPE).body(Map.of("resourceArn", foreignArn, "policy", policy))
+                        .post("/").then().statusCode(400)
+                        .body("__type", containsString("InvalidInputException"));
+            }
+            given().header("X-Amz-Target", "CodeBuild_20161006.PutResourcePolicy")
+                    .contentType(CONTENT_TYPE).body(Map.of("resourceArn", arn, "policy", "not-json"))
+                    .post("/").then().statusCode(400)
+                    .body("__type", containsString("InvalidInputException"));
+            given().header("X-Amz-Target", "CodeBuild_20161006.GetResourcePolicy")
+                    .contentType(CONTENT_TYPE).body(Map.of("resourceArn", arn))
+                    .post("/").then().statusCode(200).body("policy", equalTo(policy));
+            for (int i = 0; i < 2; i++) {
+                given().header("X-Amz-Target", "CodeBuild_20161006.DeleteResourcePolicy")
+                        .contentType(CONTENT_TYPE).body(Map.of("resourceArn", arn))
+                        .post("/").then().statusCode(200);
+            }
+            given().header("X-Amz-Target", "CodeBuild_20161006.GetResourcePolicy")
+                    .contentType(CONTENT_TYPE).body(Map.of("resourceArn", arn))
+                    .post("/").then().statusCode(200).body("policy", nullValue());
+        } finally {
+            given().header("X-Amz-Target", "CodeBuild_20161006.DeleteProject")
+                    .contentType(CONTENT_TYPE).body(Map.of("name", projectName))
+                    .post("/").then().statusCode(200);
+        }
     }
 }

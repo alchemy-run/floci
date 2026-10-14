@@ -3,7 +3,7 @@
 **Protocol:** JSON 1.1
 **Endpoint:** `http://localhost:4566/`
 
-Floci emulates Amazon Athena with **real SQL execution** powered by a [floci-duck](https://hub.docker.com/r/floci/floci-duck) sidecar container running DuckDB. When a query is submitted, Floci spins up the sidecar on first use, injects `CREATE OR REPLACE VIEW` statements for each Glue-registered table pointing to S3 data, then executes the SQL and stores results as CSV in S3.
+Floci emulates Amazon Athena with **real SQL execution** powered by a [floci-duck](https://hub.docker.com/r/floci/floci-duck) sidecar container running DuckDB. When a query is submitted, Floci spins up the sidecar on first use, registers every Glue database as a DuckDB schema (`CREATE SCHEMA IF NOT EXISTS "<schema>"`) with qualified views (`"<db>"."<table>"`) pointing to S3 data, creates unqualified view aliases for the query context database in DuckDB's default `main` schema, then executes the SQL and stores results as CSV in S3.
 
 ## Supported Actions
 
@@ -18,16 +18,19 @@ Floci emulates Amazon Athena with **real SQL execution** powered by a [floci-duc
 | `GetWorkGroup` | Returns information about a workgroup |
 | `ListWorkGroups` | Lists all workgroups |
 | `CreateWorkGroup` | Creates a new workgroup |
-| `ListDataCatalogs` | - |
-| `GetDataCatalog` | - |
+| `UpdateWorkGroup` | Updates a workgroup's description, state and configuration |
+| `ListDataCatalogs` | Lists the built-in `AwsDataCatalog` plus every registered data catalog |
+| `GetDataCatalog` | Returns one data catalog, or `InvalidRequestException` when it does not exist |
+| `CreateDataCatalog` | Registers a `LAMBDA`, `GLUE`, `HIVE` or `FEDERATED` data catalog |
+| `UpdateDataCatalog` | Replaces the type, description and parameters of a data catalog |
+| `DeleteDataCatalog` | Deletes a data catalog and returns the record it removed |
+| `TagResource` | Adds tags to a workgroup or data catalog ARN |
+| `UntagResource` | Removes tags from a workgroup or data catalog ARN |
 | `ListDatabases` | - |
 | `ListTableMetadata` | - |
 | `GetTableMetadata` | - |
+| `ListTagsForResource` | Returns the tags on a workgroup or data catalog |
 | `DeleteWorkGroup` | Deletes a workgroup |
-| `UpdateWorkGroup` | Updates workgroup state, description, and configuration |
-| `CreateDataCatalog` | Creates a named data catalog |
-| `UpdateDataCatalog` | Updates a stored data catalog |
-| `DeleteDataCatalog` | Deletes a stored data catalog |
 | `GetDatabase` | Returns Glue database metadata |
 | `CreateNamedQuery` | Creates a named query (honors `ClientRequestToken`) |
 | `GetNamedQuery` | Returns a stored named query. Missing ids throw `InvalidRequestException` with `NamedQuery {id} does not exist` (distilled `NamedQueryNotFound`) |
@@ -43,23 +46,22 @@ Floci emulates Amazon Athena with **real SQL execution** powered by a [floci-duc
 | `BatchGetPreparedStatement` | Returns prepared statements by name |
 | `BatchGetQueryExecution` | Returns query executions by id |
 | `GetQueryRuntimeStatistics` | Returns a stub timeline for a query |
-| `TagResource` | Tags a workgroup or data catalog |
-| `UntagResource` | Removes tags from a workgroup or data catalog |
-| `ListTagsForResource` | Lists tags on a workgroup or data catalog |
 <!-- floci:actions:end -->
 
 ## How it works
 
 1. **Literal SELECT fast path**: `SELECT <integer>` (optional `AS alias`) completes in-process: writes a header+value CSV, caches the `ResultSet`, and marks `SUCCEEDED` without starting DuckDB. Alchemy's first `/select-one` after deploy used to 5xx while the sidecar cold-started.
 2. **Lazy sidecar start**: On the first non-literal `StartQueryExecution` call, Floci checks for a local `floci/floci-duck:latest` image and starts the container. Subsequent queries reuse the running container.
-3. **Glue DDL injection**: Floci reads every Glue database/table and generates `CREATE SCHEMA` plus `CREATE OR REPLACE VIEW` statements. Views are created as `database.table` (so `SELECT COUNT(*) FROM alchemy_athena_e2e.people` works) and also unqualified for the `QueryExecutionContext` database. CSV tables use Glue column names with `header = false` unless `skip.header.line.count` / `has_header` is set — matching Hive/Athena. Listed S3 objects under the table prefix are unioned; if none exist yet the prefix glob is used. Parquet/JSON still use `read_parquet` / `read_json_auto`.
+3. **Glue DDL injection**: Floci reads every Glue database/table and generates `CREATE SCHEMA` plus `CREATE OR REPLACE VIEW` statements. Views are created as `database.table` (so `SELECT COUNT(*) FROM alchemy_athena_e2e.people` works) and also unqualified for the `QueryExecutionContext` database. CSV tables use Glue column names with `header = false` unless `skip.header.line.count` / `has_header` is set : matching Hive/Athena. Listed S3 objects under the table prefix are unioned; if none exist yet the prefix glob is used. Parquet/JSON still use `read_parquet` / `read_json_auto`.
 4. **Query execution**: The user's SQL is wrapped in `COPY (...) TO 's3://...' (FORMAT CSV, HEADER)` and executed. Results are written directly to the output S3 path.
 5. **Results retrieval**: `GetQueryResults` reads the CSV back from S3 and returns it in the standard Athena `ResultSet` shape.
 6. **EventBridge**: every state transition (`QUEUED` → `RUNNING` → `SUCCEEDED`/`FAILED`/`CANCELLED`) is published to the default bus as `source=aws.athena`, `detail-type=Athena Query State Change`, with camelCase detail (`currentState`, `previousState`, `queryExecutionId`, `workgroupName`, `statementType`, `sequenceNumber`, `versionId`).
 
 ## Format inference
 
-The DuckDB read function is chosen from the Glue table's `StorageDescriptor`:
+**Iceberg tables are checked first**, ahead of the `StorageDescriptor` heuristic below: a table whose `Parameters.table_type` is `ICEBERG` (case-insensitive), as set by `pyiceberg`'s `GlueCatalog` and AWS's own Glue-Iceberg integration, is read via `iceberg_scan('<metadata_location>')`, using `Parameters.metadata_location` from the same Glue table. Iceberg tables never populate `InputFormat`/`SerializationLibrary` (they aren't read via a Hive input format), so without this check they always fell through to `read_csv_auto` and failed on the table's binary Parquet data files. `iceberg_scan` resolves the table through its real manifest list, so multi-snapshot tables (after updates, deletes, or repeated appends) read correctly instead of a naive glob picking up every data file ever written under the table's location. The `iceberg` DuckDB extension is installed and loaded once when the generated DDL contains at least one Iceberg table. A table flagged `ICEBERG` but missing `metadata_location` falls back to the format-sniffed heuristic below instead of emitting an unusable `iceberg_scan('')`.
+
+For every other table, the DuckDB read function is chosen from the Glue table's `StorageDescriptor`:
 
 | Condition | Read function |
 |---|---|
@@ -71,11 +73,11 @@ The DuckDB read function is chosen from the Glue table's `StorageDescriptor`:
 
 | Property | Default | Description |
 |---|---|---|
-| `FLOCI_SERVICES_ATHENA_MOCK` | `false` | Set to `true` to disable DuckDB execution — queries immediately succeed with empty results |
+| `FLOCI_SERVICES_ATHENA_MOCK` | `false` | Set to `true` to disable DuckDB execution: queries immediately succeed with empty results |
 | `FLOCI_SERVICES_DUCK_DEFAULT_IMAGE` | `floci/floci-duck:latest` | DuckDB sidecar image pulled on first use |
 | `FLOCI_SERVICES_DUCK_URL` | *(unset)* | Point to an existing floci-duck instance and skip container management |
 
-## Example — simple query
+## Example: simple query
 
 ```bash
 export AWS_ENDPOINT_URL=http://localhost:4566
@@ -93,7 +95,7 @@ aws athena get-query-execution --query-execution-id $QUERY_ID
 aws athena get-query-results --query-execution-id $QUERY_ID
 ```
 
-## Example — data lake query (S3 + Glue + Athena)
+## Example: data lake query (S3 + Glue + Athena)
 
 ```bash
 export AWS_ENDPOINT_URL=http://localhost:4566
@@ -149,12 +151,12 @@ aws athena get-query-results --query-execution-id $QUERY_ID
 
 ## Shared sidecar with S3 Select
 
-The floci-duck sidecar is shared between Athena and S3 Select. Once started by the first Athena query, it is also used by `SelectObjectContent` for CSV (with `FileHeaderInfo=USE`), JSON, and Parquet inputs. If Athena has not yet executed a query, S3 Select falls back to the built-in Java evaluator for CSV and JSON — Parquet always requires the sidecar.
+The floci-duck sidecar is shared between Athena and S3 Select. Once started by the first Athena query, it is also used by `SelectObjectContent` for CSV (with `FileHeaderInfo=USE`), JSON, and Parquet inputs. If Athena has not yet executed a query, S3 Select falls back to the built-in Java evaluator for CSV and JSON. Parquet always requires the sidecar.
 
 See [S3 Select](s3.md#s3-select) for details on execution modes and supported SQL operators.
 
 ## Mock mode
 
-Set `FLOCI_SERVICES_ATHENA_MOCK=true` to skip DuckDB entirely for Athena. In this mode queries transition to `SUCCEEDED` immediately with an empty result set — useful for unit tests that only exercise the Athena state machine, not the query results.
+Set `FLOCI_SERVICES_ATHENA_MOCK=true` to skip DuckDB entirely for Athena. In this mode queries transition to `SUCCEEDED` immediately with an empty result set, useful for unit tests that only exercise the Athena state machine, not the query results.
 
 When mock mode is enabled the sidecar does **not** start. S3 Select will use the Java evaluator for CSV and JSON. Parquet queries will fail unless `FLOCI_SERVICES_DUCK_URL` points to an already-running floci-duck instance.

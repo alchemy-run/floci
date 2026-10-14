@@ -6,6 +6,7 @@ import io.github.hectorvent.floci.services.opensearch.model.AdvancedSecurityOpti
 import io.github.hectorvent.floci.services.opensearch.model.ClusterConfig;
 import io.github.hectorvent.floci.services.opensearch.model.Domain;
 import io.github.hectorvent.floci.services.opensearch.model.DomainEndpointOptions;
+import io.github.hectorvent.floci.services.opensearch.model.DomainMaintenance;
 import io.github.hectorvent.floci.services.opensearch.model.EbsOptions;
 import io.github.hectorvent.floci.services.opensearch.model.EncryptionAtRestOptions;
 import io.github.hectorvent.floci.services.opensearch.model.NodeToNodeEncryptionOptions;
@@ -56,6 +57,7 @@ public class OpenSearchController {
             JsonNode req = objectMapper.readTree(body);
             String domainName = req.path("DomainName").asText(null);
             String engineVersion = req.path("EngineVersion").asText(null);
+            String accessPolicies = req.path("AccessPolicies").asText(null);
             ClusterConfig clusterConfig = parseClusterConfig(req.path("ClusterConfig"));
             EbsOptions ebsOptions = parseEbsOptions(req.path("EBSOptions"));
             Map<String, String> tags = parseTags(req.path("TagList"));
@@ -68,7 +70,7 @@ public class OpenSearchController {
                     parseDomainEndpointOptions(req.path("DomainEndpointOptions")));
 
             Domain domain = service.createDomain(domainName, engineVersion, clusterConfig,
-                    ebsOptions, tags, options, region);
+                    ebsOptions, tags, accessPolicies, options, region);
 
             ObjectNode response = objectMapper.createObjectNode();
             response.set("DomainStatus", toDomainStatusNode(domain));
@@ -159,10 +161,10 @@ public class OpenSearchController {
     public Response updateDomainConfig(@Context HttpHeaders headers,
                                         @PathParam("domainName") String domainName,
                                         String body) {
-        String region = regionResolver.resolveRegion(headers);
         try {
             JsonNode req = objectMapper.readTree(body);
             String engineVersion = req.path("EngineVersion").asText(null);
+            String accessPolicies = req.path("AccessPolicies").asText(null);
             ClusterConfig clusterConfig = parseClusterConfig(req.path("ClusterConfig"));
             EbsOptions ebsOptions = parseEbsOptions(req.path("EBSOptions"));
 
@@ -174,7 +176,7 @@ public class OpenSearchController {
                     parseDomainEndpointOptions(req.path("DomainEndpointOptions")));
 
             Domain domain = service.updateDomainConfig(domainName, engineVersion, clusterConfig,
-                    ebsOptions, options, region);
+                    ebsOptions, accessPolicies, options);
 
             long epochSeconds = domain.getCreatedAt() != null ? domain.getCreatedAt().getEpochSecond() : 0;
             ObjectNode response = objectMapper.createObjectNode();
@@ -374,6 +376,7 @@ public class OpenSearchController {
     @GET
     @Path("/opensearch/domain/{domainName}/progress")
     public Response describeDomainChangeProgress(@PathParam("domainName") String domainName) {
+        service.describeDomainOrBaseException(domainName);
         ObjectNode response = objectMapper.createObjectNode();
         response.putObject("ChangeProgressStatus");
         return Response.ok(response).build();
@@ -382,6 +385,7 @@ public class OpenSearchController {
     @GET
     @Path("/opensearch/domain/{domainName}/autoTunes")
     public Response describeDomainAutoTunes(@PathParam("domainName") String domainName) {
+        service.describeDomain(domainName);
         ObjectNode response = objectMapper.createObjectNode();
         response.putArray("AutoTunes");
         return Response.ok(response).build();
@@ -390,6 +394,7 @@ public class OpenSearchController {
     @GET
     @Path("/opensearch/domain/{domainName}/dryRun")
     public Response describeDryRunProgress(@PathParam("domainName") String domainName) {
+        service.describeDomain(domainName);
         ObjectNode response = objectMapper.createObjectNode();
         response.putObject("DryRunProgressStatus");
         return Response.ok(response).build();
@@ -398,14 +403,107 @@ public class OpenSearchController {
     @GET
     @Path("/opensearch/domain/{domainName}/health")
     public Response describeDomainHealth(@PathParam("domainName") String domainName) {
+        Domain domain = service.describeDomainOrBaseException(domainName);
+        ClusterConfig cc = domain.getClusterConfig() != null ? domain.getClusterConfig() : new ClusterConfig();
+        boolean active = !domain.isProcessing();
+        String zones = cc.isZoneAwarenessEnabled() ? "2" : "1";
+
         ObjectNode response = objectMapper.createObjectNode();
-        response.put("ClusterHealth", "Green");
+        response.put("DomainState", active ? "Active" : "Processing");
+        response.put("ClusterHealth", active ? "Green" : "NotAvailable");
+        response.put("AvailabilityZoneCount", zones);
+        response.put("ActiveAvailabilityZoneCount", active ? zones : "0");
+        response.put("StandByAvailabilityZoneCount", "0");
+        response.put("DataNodeCount", String.valueOf(Math.max(cc.getInstanceCount(), 1)));
+        response.put("DedicatedMaster", cc.isDedicatedMasterEnabled());
+        response.put("MasterNode", active ? "Available" : "UnAvailable");
+        return Response.ok(response).build();
+    }
+
+    @GET
+    @Path("/opensearch/domain/{domainName}/nodes")
+    public Response describeDomainNodes(@PathParam("domainName") String domainName) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode list = response.putArray("DomainNodesStatusList");
+        for (OpenSearchService.DomainNode node : service.describeDomainNodes(domainName)) {
+            ObjectNode entry = list.addObject();
+            entry.put("NodeId", node.nodeId());
+            entry.put("NodeType", node.nodeType());
+            entry.put("AvailabilityZone", node.availabilityZone());
+            entry.put("InstanceType", node.instanceType());
+            entry.put("NodeStatus", node.nodeStatus());
+            entry.put("StorageType", node.storageType());
+            if (node.storageVolumeType() != null) {
+                entry.put("StorageVolumeType", node.storageVolumeType());
+            }
+            if (node.storageSize() != null) {
+                entry.put("StorageSize", node.storageSize());
+            }
+        }
+        return Response.ok(response).build();
+    }
+
+    @GET
+    @Path("/opensearch/domain/{domainName}/scheduledActions")
+    public Response listScheduledActions(@PathParam("domainName") String domainName) {
+        service.describeDomain(domainName);
+        // Floci never schedules service software updates or blue/green actions.
+        ObjectNode response = objectMapper.createObjectNode();
+        response.putArray("ScheduledActions");
+        return Response.ok(response).build();
+    }
+
+    @POST
+    @Path("/opensearch/domain/{domainName}/domainMaintenance")
+    public Response startDomainMaintenance(@PathParam("domainName") String domainName, String body) {
+        JsonNode req = readBody(body);
+        DomainMaintenance maintenance = service.startDomainMaintenance(domainName,
+                req.path("Action").asText(null), req.path("NodeId").asText(null));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("MaintenanceId", maintenance.getMaintenanceId());
+        return Response.ok(response).build();
+    }
+
+    @GET
+    @Path("/opensearch/domain/{domainName}/domainMaintenance")
+    public Response getDomainMaintenanceStatus(@PathParam("domainName") String domainName,
+                                               @QueryParam("maintenanceId") String maintenanceId) {
+        DomainMaintenance maintenance = service.getDomainMaintenanceStatus(domainName, maintenanceId);
+        ObjectNode response = objectMapper.createObjectNode();
+        writeMaintenance(response, maintenance);
+        return Response.ok(response).build();
+    }
+
+    @GET
+    @Path("/opensearch/domain/{domainName}/domainMaintenances")
+    public Response listDomainMaintenances(@PathParam("domainName") String domainName,
+                                           @QueryParam("action") String action,
+                                           @QueryParam("status") String status,
+                                           @QueryParam("maxResults") Integer maxResults,
+                                           @QueryParam("nextToken") String nextToken) {
+        List<DomainMaintenance> all = service.listDomainMaintenances(domainName, action, status);
+        int start = parseNextToken(nextToken, all.size());
+        int pageSize = maxResults != null && maxResults > 0 ? maxResults : 100;
+        int end = Math.min(all.size(), start + pageSize);
+
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode list = response.putArray("DomainMaintenances");
+        for (DomainMaintenance maintenance : all.subList(start, end)) {
+            ObjectNode entry = list.addObject();
+            entry.put("MaintenanceId", maintenance.getMaintenanceId());
+            entry.put("DomainName", domainName);
+            writeMaintenance(entry, maintenance);
+        }
+        if (end < all.size()) {
+            response.put("NextToken", String.valueOf(end));
+        }
         return Response.ok(response).build();
     }
 
     @GET
     @Path("/opensearch/upgradeDomain/{domainName}/history")
     public Response getUpgradeHistory(@PathParam("domainName") String domainName) {
+        service.describeDomain(domainName);
         ObjectNode response = objectMapper.createObjectNode();
         response.putArray("UpgradeHistories");
         return Response.ok(response).build();
@@ -414,6 +512,7 @@ public class OpenSearchController {
     @GET
     @Path("/opensearch/upgradeDomain/{domainName}/status")
     public Response getUpgradeStatus(@PathParam("domainName") String domainName) {
+        service.describeDomain(domainName);
         ObjectNode response = objectMapper.createObjectNode();
         response.put("UpgradeStep", "UPGRADE");
         response.put("StepStatus", "SUCCEEDED");
@@ -446,6 +545,7 @@ public class OpenSearchController {
     @POST
     @Path("/opensearch/domain/{domainName}/config/cancel")
     public Response cancelDomainConfigChange(@PathParam("domainName") String domainName) {
+        service.describeDomain(domainName);
         ObjectNode response = objectMapper.createObjectNode();
         response.put("DryRun", false);
         response.putArray("CancelledChangeIds");
@@ -455,6 +555,7 @@ public class OpenSearchController {
     @POST
     @Path("/opensearch/serviceSoftwareUpdate/start")
     public Response startServiceSoftwareUpdate(String body) {
+        requireDomainFromBody(body);
         ObjectNode response = objectMapper.createObjectNode();
         ObjectNode options = response.putObject("ServiceSoftwareOptions");
         options.put("UpdateAvailable", false);
@@ -469,6 +570,7 @@ public class OpenSearchController {
     @POST
     @Path("/opensearch/serviceSoftwareUpdate/cancel")
     public Response cancelServiceSoftwareUpdate(String body) {
+        requireDomainFromBody(body);
         ObjectNode response = objectMapper.createObjectNode();
         ObjectNode options = response.putObject("ServiceSoftwareOptions");
         options.put("UpdateAvailable", false);
@@ -482,6 +584,57 @@ public class OpenSearchController {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    private JsonNode readBody(String body) {
+        if (body == null || body.isBlank()) {
+            return objectMapper.createObjectNode();
+        }
+        try {
+            return objectMapper.readTree(body);
+        } catch (IOException e) {
+            throw new AwsException("ValidationException", e.getMessage(), 400);
+        }
+    }
+
+    private Domain requireDomainFromBody(String body) {
+        String domainName = readBody(body).path("DomainName").asText(null);
+        if (domainName == null || domainName.isBlank()) {
+            throw new AwsException("ValidationException", "DomainName is required.", 400);
+        }
+        return service.describeDomain(domainName);
+    }
+
+    private void writeMaintenance(ObjectNode node, DomainMaintenance maintenance) {
+        node.put("Action", maintenance.getAction());
+        if (maintenance.getNodeId() != null) {
+            node.put("NodeId", maintenance.getNodeId());
+        }
+        node.put("Status", maintenance.getStatus());
+        if (maintenance.getStatusMessage() != null) {
+            node.put("StatusMessage", maintenance.getStatusMessage());
+        }
+        if (maintenance.getCreatedAt() != null) {
+            node.put("CreatedAt", maintenance.getCreatedAt().getEpochSecond());
+        }
+        if (maintenance.getUpdatedAt() != null) {
+            node.put("UpdatedAt", maintenance.getUpdatedAt().getEpochSecond());
+        }
+    }
+
+    private int parseNextToken(String nextToken, int size) {
+        if (nextToken == null || nextToken.isBlank()) {
+            return 0;
+        }
+        try {
+            int offset = Integer.parseInt(nextToken);
+            if (offset >= 0 && offset <= size) {
+                return offset;
+            }
+        } catch (NumberFormatException ignored) {
+            // fall through to the validation error
+        }
+        throw new AwsException("ValidationException", "Invalid NextToken: " + nextToken, 400);
+    }
+
     private ObjectNode toDomainStatusNode(Domain domain) {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("ARN", domain.getArn());
@@ -491,9 +644,13 @@ public class OpenSearchController {
         node.put("Created", !domain.isProcessing());
         node.put("Processing", domain.isProcessing());
         node.put("Deleted", domain.isDeleted());
-        node.put("Endpoint", domain.getEndpoint() != null ? domain.getEndpoint() : "");
+        node.put("Endpoint", service.publicEndpoint(domain));
+        if (domain.getAccessPolicies() != null) {
+            node.put("AccessPolicies", domain.getAccessPolicies());
+        }
         node.set("ClusterConfig", toClusterConfigNode(domain.getClusterConfig()));
         node.set("EBSOptions", toEbsOptionsNode(domain.getEbsOptions()));
+        node.putObject("CognitoOptions").put("Enabled", false);
         if (domain.getVpcOptions() != null) {
             node.set("VPCOptions", toVpcOptionsNode(domain.getVpcOptions()));
         }
@@ -519,6 +676,11 @@ public class OpenSearchController {
      * unset, rather than emitting empty objects.
      */
     private void attachDomainOptionConfigs(ObjectNode domainConfig, Domain domain, long epochSeconds) {
+        if (domain.getAccessPolicies() != null) {
+            ObjectNode section = domainConfig.putObject("AccessPolicies");
+            section.put("Options", domain.getAccessPolicies());
+            section.set("Status", configStatusNode(epochSeconds));
+        }
         if (domain.getVpcOptions() != null) {
             ObjectNode section = domainConfig.putObject("VPCOptions");
             section.set("Options", toVpcOptionsNode(domain.getVpcOptions()));

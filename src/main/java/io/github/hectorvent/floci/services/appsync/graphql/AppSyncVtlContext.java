@@ -56,7 +56,7 @@ public class AppSyncVtlContext {
         map.put("args", args);
         map.put("source", source != null ? source : Map.of());
         map.put("result", result);
-        map.put("identity", identity != null ? identity : Map.of());
+        map.put("identity", identity);
         map.put("request", request != null ? request : Map.of("headers", Map.of()));
         map.put("stash", stash != null ? stash : new HashMap<>());
         map.put("prev", prev);

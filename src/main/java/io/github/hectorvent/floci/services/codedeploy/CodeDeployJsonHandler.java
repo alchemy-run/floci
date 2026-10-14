@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.codedeploy;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
@@ -37,6 +38,10 @@ public class CodeDeployJsonHandler {
             case "DeleteApplication" -> deleteApplication(request, region);
             case "ListApplications" -> listApplications(region);
             case "BatchGetApplications" -> batchGetApplications(request, region);
+            case "RegisterApplicationRevision" -> registerApplicationRevision(request, region);
+            case "GetApplicationRevision" -> getApplicationRevision(request, region);
+            case "ListApplicationRevisions" -> listApplicationRevisions(request, region);
+            case "BatchGetApplicationRevisions" -> batchGetApplicationRevisions(request, region);
             case "CreateDeploymentGroup" -> createDeploymentGroup(request, region);
             case "GetDeploymentGroup" -> getDeploymentGroup(request, region);
             case "UpdateDeploymentGroup" -> updateDeploymentGroup(request, region);
@@ -54,11 +59,11 @@ public class CodeDeployJsonHandler {
             case "GetDeployment" -> getDeployment(request, region);
             case "ListDeployments" -> listDeployments(request, region);
             case "StopDeployment" -> stopDeployment(request, region);
-            case "ContinueDeployment" -> Response.ok(Map.of()).build();
+            case "ContinueDeployment" -> continueDeployment(request, region);
             case "BatchGetDeployments" -> batchGetDeployments(request, region);
             case "ListDeploymentTargets" -> listDeploymentTargets(request, region);
             case "BatchGetDeploymentTargets" -> batchGetDeploymentTargets(request, region);
-            case "PutLifecycleEventHookExecutionStatus" -> putLifecycleEventHookExecutionStatus(request);
+            case "PutLifecycleEventHookExecutionStatus" -> putLifecycleEventHookExecutionStatus(request, region);
             case "RegisterOnPremisesInstance" -> registerOnPremisesInstance(request, region);
             case "DeregisterOnPremisesInstance" -> deregisterOnPremisesInstance(request, region);
             case "GetOnPremisesInstance" -> getOnPremisesInstance(request, region);
@@ -106,6 +111,45 @@ public class CodeDeployJsonHandler {
         req.path("applicationNames").forEach(n -> names.add(n.asText()));
         List<Application> apps = service.batchGetApplications(region, names);
         return Response.ok(Map.of("applicationsInfo", apps)).build();
+    }
+
+    private Response registerApplicationRevision(JsonNode req, String region) {
+        service.registerApplicationRevision(region, req.path("applicationName").asText(null),
+                revision(req.get("revision")), req.path("description").asText(null));
+        return Response.ok(Map.of()).build();
+    }
+
+    private Response getApplicationRevision(JsonNode req, String region) {
+        return Response.ok(service.getApplicationRevision(region, req.path("applicationName").asText(null),
+                revision(req.get("revision")))).build();
+    }
+
+    private Response listApplicationRevisions(JsonNode req, String region) {
+        return Response.ok(service.listApplicationRevisions(region, req.path("applicationName").asText(null),
+                req.path("sortBy").asText(null), req.path("sortOrder").asText(null),
+                req.path("s3Bucket").asText(null), req.path("s3KeyPrefix").asText(null),
+                req.path("deployed").asText(null), req.path("nextToken").asText(null))).build();
+    }
+
+    private Response batchGetApplicationRevisions(JsonNode req, String region) {
+        List<Map<String, Object>> revisions = new ArrayList<>();
+        JsonNode requested = req.path("revisions");
+        if (!requested.isMissingNode() && !requested.isNull() && !requested.isArray()) {
+            throw new AwsException("InvalidRevisionException", "Revisions must be an array", 400);
+        }
+        requested.forEach(item -> revisions.add(revision(item)));
+        return Response.ok(service.batchGetApplicationRevisions(region,
+                req.path("applicationName").asText(null), revisions)).build();
+    }
+
+    private Map<String, Object> revision(JsonNode value) {
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (!value.isObject()) {
+            throw new AwsException("InvalidRevisionException", "Revision must be an object", 400);
+        }
+        return mapper.convertValue(value, new TypeReference<Map<String, Object>>() {});
     }
 
     private Response createDeploymentGroup(JsonNode req, String region) throws Exception {
@@ -217,8 +261,7 @@ public class CodeDeployJsonHandler {
         String groupName = req.path("deploymentGroupName").asText(null);
         String configName = req.has("deploymentConfigName") ? req.path("deploymentConfigName").asText() : null;
         String description = req.has("description") ? req.path("description").asText() : null;
-        Map<String, Object> revision = req.has("revision")
-                ? mapper.treeToValue(req.get("revision"), Map.class) : null;
+        Map<String, Object> revision = revision(req.get("revision"));
         String deploymentId = service.createDeployment(region, appName, groupName, configName, revision, description);
         return Response.ok(Map.of("deploymentId", deploymentId)).build();
     }
@@ -265,11 +308,17 @@ public class CodeDeployJsonHandler {
         return Response.ok(Map.of("deploymentTargets", targets)).build();
     }
 
-    private Response putLifecycleEventHookExecutionStatus(JsonNode req) {
+    private Response continueDeployment(JsonNode req, String region) {
+        service.continueDeployment(region, req.path("deploymentId").asText(null),
+                req.path("deploymentWaitType").asText(null));
+        return Response.ok(Map.of()).build();
+    }
+
+    private Response putLifecycleEventHookExecutionStatus(JsonNode req, String region) {
         String deploymentId = req.path("deploymentId").asText(null);
         String executionId = req.path("lifecycleEventHookExecutionId").asText(null);
-        String status = req.path("status").asText("Succeeded");
-        String id = service.putLifecycleEventHookExecutionStatus(deploymentId, executionId, status);
+        String status = req.path("status").asText(null);
+        String id = service.putLifecycleEventHookExecutionStatus(region, deploymentId, executionId, status);
         return Response.ok(Map.of("lifecycleEventHookExecutionId", id)).build();
     }
 
@@ -330,7 +379,7 @@ public class CodeDeployJsonHandler {
         for (String field : new String[]{"ec2TagFilters", "onPremisesInstanceTagFilters", "autoScalingGroups",
                 "deploymentStyle", "blueGreenDeploymentConfiguration", "loadBalancerInfo",
                 "ec2TagSet", "onPremisesTagSet", "alarmConfiguration", "autoRollbackConfiguration",
-                "triggerConfigurations", "ecsServices", "computePlatform",
+                "triggerConfigurations", "ecsServices",
                 "outdatedInstancesStrategy", "terminationHookEnabled"}) {
             if (req.has(field)) {
                 fields.put(field, mapper.treeToValue(req.get(field), Object.class));

@@ -5,6 +5,13 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
 
+/**
+ * A user's console (password) login profile. At most one per user, mirroring AWS: creating
+ * one when the user already has one is {@code EntityAlreadyExists}, and a user with no
+ * console password simply has no entry here. The password is stored in plain text, matching
+ * how {@link AccessKey} already stores its secret: this is an emulator, not a credential
+ * store, and AWS itself never echoes the password back on any of these actions.
+ */
 @RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class LoginProfile {

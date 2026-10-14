@@ -26,6 +26,13 @@ public class VpcEndpoint {
     private String ipAddressType;
     private String dnsRecordIpType;
     private Boolean privateDnsOnlyForInboundResolverEndpoint;
+    /**
+     * The addresses the caller pinned per subnet through {@code SubnetConfiguration}. AWS assigns
+     * each one to the endpoint's network interface in that subnet, so this is read back from the
+     * interfaces rather than from the endpoint. A subnet with no entry keeps the address floci
+     * synthesizes for it.
+     */
+    private List<VpcEndpointSubnetConfiguration> subnetConfigurations = new ArrayList<>();
     private List<Tag> tags = new ArrayList<>();
 
     public VpcEndpoint() {}
@@ -75,6 +82,11 @@ public class VpcEndpoint {
     public Boolean getPrivateDnsOnlyForInboundResolverEndpoint() { return privateDnsOnlyForInboundResolverEndpoint; }
     public void setPrivateDnsOnlyForInboundResolverEndpoint(Boolean privateDnsOnlyForInboundResolverEndpoint) {
         this.privateDnsOnlyForInboundResolverEndpoint = privateDnsOnlyForInboundResolverEndpoint;
+    }
+
+    public List<VpcEndpointSubnetConfiguration> getSubnetConfigurations() { return subnetConfigurations; }
+    public void setSubnetConfigurations(List<VpcEndpointSubnetConfiguration> subnetConfigurations) {
+        this.subnetConfigurations = subnetConfigurations;
     }
 
     public List<Tag> getTags() { return tags; }

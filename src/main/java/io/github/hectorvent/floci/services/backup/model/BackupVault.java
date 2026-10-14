@@ -6,6 +6,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @RegisterForReflection
@@ -33,6 +34,22 @@ public class BackupVault {
 
     @JsonProperty("Tags")
     private Map<String, String> tags = new HashMap<>();
+
+    @JsonProperty("AccessPolicy")
+    private String accessPolicy;
+
+    @JsonProperty("SNSTopicArn")
+    private String snsTopicArn;
+
+    @JsonProperty("BackupVaultEvents")
+    private List<String> backupVaultEvents;
+
+    public String getAccessPolicy() { return accessPolicy; }
+    public void setAccessPolicy(String accessPolicy) { this.accessPolicy = accessPolicy; }
+    public String getSnsTopicArn() { return snsTopicArn; }
+    public void setSnsTopicArn(String snsTopicArn) { this.snsTopicArn = snsTopicArn; }
+    public List<String> getBackupVaultEvents() { return backupVaultEvents; }
+    public void setBackupVaultEvents(List<String> events) { this.backupVaultEvents = events; }
 
     public BackupVault() {}
 

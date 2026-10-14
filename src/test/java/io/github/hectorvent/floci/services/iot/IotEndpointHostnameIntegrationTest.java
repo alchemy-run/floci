@@ -14,14 +14,16 @@ import static org.hamcrest.Matchers.equalTo;
 @TestProfile(IotEndpointHostnameIntegrationTest.HostnameProfile.class)
 class IotEndpointHostnameIntegrationTest {
 
+    /** The emulator's own hostname does not leak into the AWS-shaped account endpoint. */
     @Test
-    void configuredHostnameIsUsedInDescribeEndpoint() {
+    void configuredHostnameDoesNotReplaceTheAwsShapedEndpoint() {
         given()
         .when()
             .get("/endpoint")
         .then()
             .statusCode(200)
-            .body("endpointAddress", equalTo("floci:4566"));
+            .body("endpointAddress", equalTo(
+                    IotEndpoints.awsAddress("iot:Data-ATS", "000000000000", "us-east-1")));
     }
 
     public static class HostnameProfile implements QuarkusTestProfile {

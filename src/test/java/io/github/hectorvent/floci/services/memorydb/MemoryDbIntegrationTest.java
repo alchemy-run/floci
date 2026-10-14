@@ -1,8 +1,10 @@
 package io.github.hectorvent.floci.services.memorydb;
 
+import io.github.hectorvent.floci.services.memorydb.model.MemoryDbMetadata.Snapshot;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
@@ -20,10 +22,14 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.hasItems;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.startsWith;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * End-to-end MemoryDB test: JSON 1.1 control plane (CreateCluster/DescribeClusters/
@@ -48,6 +54,9 @@ class MemoryDbIntegrationTest {
 
     private static int openPort;
     private static int authPort;
+
+    @Inject
+    MemoryDbService service;
 
     @BeforeAll
     static void setup() {
@@ -88,7 +97,9 @@ class MemoryDbIntegrationTest {
                 .statusCode(200)
                 .body("Cluster.Name", equalTo(OPEN_CLUSTER))
                 .body("Cluster.Status", equalTo("available"))
-                .body("Cluster.ClusterEndpoint.Address", equalTo("localhost"))
+                .body("Cluster.TLSEnabled", equalTo(true))
+                .body("Cluster.ClusterEndpoint.Address", startsWith("clustercfg." + OPEN_CLUSTER + "."))
+                .body("Cluster.ClusterEndpoint.Address", containsString(".memorydb.us-east-1."))
                 .body("Cluster.ClusterEndpoint.Port", notNullValue())
             .extract()
                 .path("Cluster.ClusterEndpoint.Port");
@@ -122,6 +133,20 @@ class MemoryDbIntegrationTest {
 
     @Test
     @Order(4)
+    void explicitAuthIsAcceptedWhenAuthIsNotRequired() throws Exception {
+        // open-access clusters never demand AUTH, but a client that sends one anyway
+        // (common with generic Redis clients) must still get +OK and stay usable.
+        try (Socket socket = openSocket(openPort)) {
+            write(socket, respArray("AUTH", "any-password"));
+            assertEquals("+OK\r\n", readLine(socket));
+
+            write(socket, respArray("PING"));
+            assertEquals("+PONG\r\n", readLine(socket));
+        }
+    }
+
+    @Test
+    @Order(5)
     void createPasswordUserAndAcl() {
         // A password user attached to an ACL is how real MemoryDB models auth — the
         // cluster then references that ACL via ACLName.
@@ -134,18 +159,19 @@ class MemoryDbIntegrationTest {
                 .body("User.Name", equalTo(AUTH_USER))
                 .body("User.Authentication.Type", equalTo("password"));
 
-        // An ACL must include the built-in "default" user (DefaultUserRequired otherwise).
+        // A custom ACL lists only custom users: the built-in "default" user belongs to the
+        // open-access ACL alone.
         memorydb("CreateACL", "{"
                 + "\"ACLName\":\"" + AUTH_ACL + "\","
-                + "\"UserNames\":[\"default\",\"" + AUTH_USER + "\"]}")
+                + "\"UserNames\":[\"" + AUTH_USER + "\"]}")
             .then()
                 .statusCode(200)
                 .body("ACL.Name", equalTo(AUTH_ACL))
-                .body("ACL.UserNames", hasItems("default", AUTH_USER));
+                .body("ACL.UserNames", contains(AUTH_USER));
     }
 
     @Test
-    @Order(5)
+    @Order(6)
     void createClusterReferencingAcl() {
         authPort = memorydb("CreateCluster", "{"
                 + "\"ClusterName\":\"" + AUTH_CLUSTER + "\","
@@ -160,14 +186,14 @@ class MemoryDbIntegrationTest {
     }
 
     @Test
-    @Order(6)
+    @Order(7)
     void aclClusterRejectsUnauthenticatedCommand() throws Exception {
         assertEquals("-NOAUTH Authentication required.\r\n",
                 sendCommand(authPort, respArray("PING")));
     }
 
     @Test
-    @Order(7)
+    @Order(8)
     void aclUserCredentialsAllowAccess() throws Exception {
         // Exercises end-to-end that the proxy resolves auth through the ACL's user.
         try (Socket socket = openSocket(authPort)) {
@@ -180,14 +206,14 @@ class MemoryDbIntegrationTest {
     }
 
     @Test
-    @Order(8)
+    @Order(9)
     void wrongPasswordRejected() throws Exception {
         assertEquals("-ERR invalid username-password pair or user is disabled.\r\n",
                 sendCommand(authPort, respArray("AUTH", AUTH_USER, "wrong-password")));
     }
 
     @Test
-    @Order(9)
+    @Order(10)
     void deleteClusterReleasesProxyPortForReuse() {
         deleteCluster(OPEN_CLUSTER)
             .then()
@@ -198,13 +224,55 @@ class MemoryDbIntegrationTest {
                 "{\"ClusterName\":\"" + OPEN_CLUSTER + "-reused\",\"ACLName\":\"open-access\"}")
             .then()
                 .statusCode(200)
-                .body("Cluster.ClusterEndpoint.Address", equalTo("localhost"))
+                .body("Cluster.ClusterEndpoint.Address", startsWith("clustercfg." + OPEN_CLUSTER + "-reused."))
             .extract()
                 .path("Cluster.ClusterEndpoint.Port");
 
         assertEquals(openPort, reusedPort);
 
         deleteCluster(OPEN_CLUSTER + "-reused").then().statusCode(200);
+    }
+
+    @Test
+    @Order(11)
+    void snapshotsCaptureRealRdbDataAndCopiesSurviveSourceDeletion() throws Exception {
+        try (Socket socket = openSocket(authPort)) {
+            write(socket, respArray("AUTH", AUTH_USER, AUTH_PASSWORD));
+            assertEquals("+OK\r\n", readLine(socket));
+            write(socket, respArray("SET", "snapshot-key", "snapshot-value"));
+            assertEquals("+OK\r\n", readLine(socket));
+        }
+        try {
+            memorydb("CreateSnapshot", "{\"ClusterName\":\"" + AUTH_CLUSTER
+                    + "\",\"SnapshotName\":\"it-mdb-snapshot\"}")
+                    .then().statusCode(200).body("Snapshot.Status", equalTo("available"));
+            Snapshot source = service.getSnapshot("it-mdb-snapshot", "us-east-1");
+            String dump = new String(source.data(), StandardCharsets.ISO_8859_1);
+            assertTrue(dump.startsWith("REDIS"));
+            assertTrue(dump.contains("snapshot-key"));
+            assertTrue(dump.contains("snapshot-value"));
+            for (String[] scope : new String[][]{{"eu-west-1", "test"}, {"us-east-1", "222222222222"}}) {
+                given().contentType(CONTENT_TYPE)
+                        .header("Authorization", "AWS4-HMAC-SHA256 Credential=" + scope[1]
+                                + "/20260921/" + scope[0] + "/memorydb/aws4_request")
+                        .header("X-Amz-Target", "AmazonMemoryDB.CopySnapshot")
+                        .body("{\"SourceSnapshotName\":\"it-mdb-snapshot\",\"TargetSnapshotName\":\"it-mdb-copy\"}")
+                        .post("/").then().statusCode(400).body("__type", equalTo("SnapshotNotFoundFault"));
+            }
+            memorydb("CopySnapshot", "{\"SourceSnapshotName\":\"it-mdb-snapshot\","
+                    + "\"TargetSnapshotName\":\"it-mdb-copy\"}")
+                    .then().statusCode(200).body("Snapshot.Name", equalTo("it-mdb-copy"));
+            memorydb("DeleteSnapshot", "{\"SnapshotName\":\"it-mdb-snapshot\"}")
+                    .then().statusCode(200);
+            assertArrayEquals(source.data(), service.getSnapshot("it-mdb-copy", "us-east-1").data());
+            memorydb("DescribeSnapshots", "{\"SnapshotName\":\"it-mdb-copy\"}")
+                    .then().statusCode(200).body("Snapshots[0].ClusterConfiguration.Name", equalTo(AUTH_CLUSTER));
+        } finally {
+            memorydb("DeleteSnapshot", "{\"SnapshotName\":\"it-mdb-snapshot\"}");
+            memorydb("DeleteSnapshot", "{\"SnapshotName\":\"it-mdb-copy\"}");
+        }
+        memorydb("DescribeSnapshots", "{\"SnapshotName\":\"it-mdb-copy\"}")
+                .then().statusCode(400).body("__type", equalTo("SnapshotNotFoundFault"));
     }
 
     // ──────────────────────────── Helpers ────────────────────────────

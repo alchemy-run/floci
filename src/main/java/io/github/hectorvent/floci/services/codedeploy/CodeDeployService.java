@@ -10,12 +10,14 @@ import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackedMap;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.codedeploy.model.Application;
+import io.github.hectorvent.floci.services.codedeploy.model.ApplicationRevision;
 import io.github.hectorvent.floci.services.codedeploy.model.Deployment;
 import io.github.hectorvent.floci.services.codedeploy.model.DeploymentConfig;
 import io.github.hectorvent.floci.services.codedeploy.model.DeploymentGroup;
 import io.github.hectorvent.floci.services.codedeploy.model.OnPremisesInstance;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
 import io.github.hectorvent.floci.services.ecs.EcsService;
+import io.github.hectorvent.floci.services.ecs.model.CreateTaskSetRequest;
 import io.github.hectorvent.floci.services.ecs.model.TaskSet;
 import io.github.hectorvent.floci.services.elbv2.ElbV2Service;
 import io.github.hectorvent.floci.services.elbv2.model.TargetGroup;
@@ -28,15 +30,23 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
@@ -44,6 +54,10 @@ import java.util.stream.Collectors;
 public class CodeDeployService {
 
     private static final Logger LOG = Logger.getLogger(CodeDeployService.class);
+
+    // Lambda/ECS validation hooks must call PutLifecycleEventHookExecutionStatus within one hour.
+    private static final Duration DEFAULT_HOOK_CALLBACK_TIMEOUT = Duration.ofHours(1);
+    private static final Duration STOP_POLL_INTERVAL = Duration.ofMillis(200);
 
     private final LambdaService lambdaService;
     private final EcsService ecsService;
@@ -54,12 +68,22 @@ public class CodeDeployService {
     private final ObjectMapper yamlMapper;
     private final RegionResolver regionResolver;
     private final StorageFactory storageFactory;
+    private final Duration hookCallbackTimeout;
+    private final Clock clock;
 
     @Inject
     public CodeDeployService(LambdaService lambdaService, EcsService ecsService,
                              ElbV2Service elbV2Service, SsmCommandService ssmCommandService,
                              Ec2Service ec2Service, ObjectMapper mapper, RegionResolver regionResolver,
                              StorageFactory storageFactory) {
+        this(lambdaService, ecsService, elbV2Service, ssmCommandService, ec2Service, mapper,
+                regionResolver, storageFactory, DEFAULT_HOOK_CALLBACK_TIMEOUT, Clock.systemUTC());
+    }
+
+    CodeDeployService(LambdaService lambdaService, EcsService ecsService,
+                      ElbV2Service elbV2Service, SsmCommandService ssmCommandService,
+                      Ec2Service ec2Service, ObjectMapper mapper, RegionResolver regionResolver,
+                      StorageFactory storageFactory, Duration hookCallbackTimeout, Clock clock) {
         this.lambdaService = lambdaService;
         this.ecsService = ecsService;
         this.elbV2Service = elbV2Service;
@@ -69,6 +93,8 @@ public class CodeDeployService {
         this.yamlMapper = new ObjectMapper(new YAMLFactory());
         this.regionResolver = regionResolver;
         this.storageFactory = storageFactory;
+        this.hookCallbackTimeout = hookCallbackTimeout;
+        this.clock = clock;
     }
 
     // ---- Durable (persisted) ----
@@ -83,13 +109,16 @@ public class CodeDeployService {
     // key: region -> instanceName -> OnPremisesInstance
     private Map<String, Map<String, OnPremisesInstance>> onPremisesInstances = new ConcurrentHashMap<>();
 
+    // key: region -> applicationId -> registered revisions
+    private Map<String, Map<String, List<ApplicationRevision>>> applicationRevisions = new ConcurrentHashMap<>();
+
     // ---- Transient runtime state (in memory only) ----
-    // key: region -> deploymentId -> Deployment
+    // key: account/region -> deploymentId -> Deployment
     private final ConcurrentHashMap<String, ConcurrentHashMap<String, Deployment>> deployments = new ConcurrentHashMap<>();
-    // key: region -> deploymentId -> targetId -> DeploymentTarget wrapper
+    // key: account/region -> deploymentId -> targetId -> DeploymentTarget wrapper
     private final ConcurrentHashMap<String, ConcurrentHashMap<String, ConcurrentHashMap<String, Map<String, Object>>>> deploymentTargets = new ConcurrentHashMap<>();
-    // key: lifecycleEventHookExecutionId -> CompletableFuture<status>
-    private final ConcurrentHashMap<String, CompletableFuture<String>> hookFutures = new ConcurrentHashMap<>();
+    private record HookExecution(Deployment deployment, CompletableFuture<String> result) {}
+    private final ConcurrentHashMap<String, HookExecution> hookExecutions = new ConcurrentHashMap<>();
     // key: deploymentId -> stop flag
     private final ConcurrentHashMap<String, AtomicBoolean> stopFlags = new ConcurrentHashMap<>();
 
@@ -108,7 +137,10 @@ public class CodeDeployService {
                 new TypeReference<Map<String, Map<String, String>>>() {});
         this.onPremisesInstances = storageBacked("codedeploy-on-premises-instances.json",
                 new TypeReference<Map<String, Map<String, OnPremisesInstance>>>() {});
+        this.applicationRevisions = storageBacked("codedeploy-application-revisions.json",
+                new TypeReference<Map<String, Map<String, List<ApplicationRevision>>>>() {});
         normalizeRegionMaps(applications);
+        normalizeRegionMaps(applicationRevisions);
         normalizeDeploymentGroups();
         normalizeRegionMaps(deploymentConfigs);
         normalizeRegionMaps(tags);
@@ -329,6 +361,9 @@ public class CodeDeployService {
     }
 
     public Application getApplication(String region, String name) {
+        if (name == null || name.isBlank()) {
+            throw new AwsException("ApplicationNameRequiredException", "Application name is required", 400);
+        }
         Application app = applicationsFor(region).get(name);
         if (app == null) {
             throw new AwsException("ApplicationDoesNotExistException",
@@ -356,12 +391,17 @@ public class CodeDeployService {
         }
     }
 
-    public void deleteApplication(String region, String name) {
-        if (applicationsFor(region).remove(name) == null) {
-            throw new AwsException("ApplicationDoesNotExistException",
-                    "Application does not exist: " + name, 400);
-        }
+    public synchronized void deleteApplication(String region, String name) {
+        Application app = getApplication(region, name);
+        applicationsFor(region).remove(name);
         persistRegion(applications, region);
+        Map<String, List<ApplicationRevision>> revisions = applicationRevisions.get(region);
+        if (revisions != null) {
+            revisions.remove(app.getApplicationId());
+            persistRegion(applicationRevisions, region);
+        }
+        deploymentGroupsFor(region).remove(name);
+        persistRegion(deploymentGroups, region);
     }
 
     public List<String> listApplications(String region) {
@@ -387,7 +427,7 @@ public class CodeDeployService {
     public DeploymentGroup createDeploymentGroup(String region, String appName, String groupName,
                                                   String deploymentConfigName, String serviceRoleArn,
                                                   Map<String, Object> fields) {
-        getApplication(region, appName);
+        Application app = getApplication(region, appName);
         Map<String, Map<String, DeploymentGroup>> appGroups = deploymentGroupsFor(region);
         Map<String, DeploymentGroup> groupStore = appGroups.computeIfAbsent(appName, a -> new ConcurrentHashMap<>());
         if (groupStore.containsKey(groupName)) {
@@ -401,6 +441,7 @@ public class CodeDeployService {
         group.setDeploymentGroupName(groupName);
         group.setDeploymentConfigName(deploymentConfigName != null ? deploymentConfigName : "CodeDeployDefault.OneAtATime");
         group.setServiceRoleArn(serviceRoleArn);
+        group.setComputePlatform(app.getComputePlatform());
         applyGroupFields(group, fields);
         groupStore.put(groupName, group);
         persistRegion(deploymentGroups, region);
@@ -408,7 +449,7 @@ public class CodeDeployService {
     }
 
     public DeploymentGroup getDeploymentGroup(String region, String appName, String groupName) {
-        getApplication(region, appName);
+        Application app = getApplication(region, appName);
         Map<String, Map<String, DeploymentGroup>> appGroups = deploymentGroupsFor(region);
         Map<String, DeploymentGroup> groupStore = appGroups.get(appName);
         DeploymentGroup group = groupStore != null ? groupStore.get(groupName) : null;
@@ -416,6 +457,7 @@ public class CodeDeployService {
             throw new AwsException("DeploymentGroupDoesNotExistException",
                     "Deployment group does not exist: " + groupName, 400);
         }
+        group.setComputePlatform(app.getComputePlatform());
         return group;
     }
 
@@ -435,6 +477,7 @@ public class CodeDeployService {
             groupStore.remove(currentGroupName);
             group.setDeploymentGroupName(newGroupName);
             groupStore.put(newGroupName, group);
+            updateRevisionGroupName(region, appName, currentGroupName, newGroupName);
         }
         persistRegion(deploymentGroups, region);
         return group;
@@ -449,6 +492,7 @@ public class CodeDeployService {
                     "Deployment group does not exist: " + groupName, 400);
         }
         persistRegion(deploymentGroups, region);
+        updateRevisionGroupName(region, appName, groupName, null);
     }
 
     public List<String> listDeploymentGroups(String region, String appName) {
@@ -466,8 +510,8 @@ public class CodeDeployService {
             return List.of();
         }
         return names.stream()
-                .map(groupStore::get)
-                .filter(g -> g != null)
+                .filter(groupStore::containsKey)
+                .map(name -> getDeploymentGroup(region, appName, name))
                 .collect(Collectors.toList());
     }
 
@@ -525,14 +569,231 @@ public class CodeDeployService {
         return new ArrayList<>(deploymentConfigsFor(region).keySet());
     }
 
+    // ---- Application Revisions ----
+
+    private List<ApplicationRevision> revisionsFor(String region, Application app) {
+        return applicationRevisions.computeIfAbsent(region, r -> new ConcurrentHashMap<>())
+                .computeIfAbsent(app.getApplicationId(), id -> new ArrayList<>());
+    }
+
+    public synchronized void registerApplicationRevision(String region, String appName,
+                                                         Map<String, Object> revision, String description) {
+        Application app = getApplication(region, appName);
+        validateRevision(revision);
+        ApplicationRevision registered = ensureRevision(region, app, revision);
+        if (description != null) {
+            registered.getGenericRevisionInfo().put("description", description);
+        }
+        registered.getGenericRevisionInfo().put("registerTime", clock.millis() / 1000.0);
+        persistRegion(applicationRevisions, region);
+    }
+
+    private ApplicationRevision ensureRevision(String region, Application app, Map<String, Object> revision) {
+        List<ApplicationRevision> revisions = revisionsFor(region, app);
+        for (ApplicationRevision registered : revisions) {
+            if (registered.getRevisionLocation().equals(revision)) {
+                return registered;
+            }
+        }
+        ApplicationRevision registered = new ApplicationRevision();
+        registered.setRevisionLocation(mapper.convertValue(revision, new TypeReference<Map<String, Object>>() {}));
+        registered.getGenericRevisionInfo().put("registerTime", clock.millis() / 1000.0);
+        registered.getGenericRevisionInfo().put("deploymentGroups", List.of());
+        revisions.add(registered);
+        return registered;
+    }
+
+    private synchronized void recordRevisionUse(String region, String appName, String groupName,
+                                                 Map<String, Object> revision) {
+        Application app = getApplication(region, appName);
+        ApplicationRevision registered = ensureRevision(region, app, revision);
+        double now = clock.millis() / 1000.0;
+        registered.getGenericRevisionInfo().putIfAbsent("firstUsedTime", now);
+        registered.getGenericRevisionInfo().put("lastUsedTime", now);
+        for (ApplicationRevision item : revisionsFor(region, app)) {
+            Object value = item.getGenericRevisionInfo().get("deploymentGroups");
+            List<String> groups = new ArrayList<>();
+            if (value instanceof List<?> existing) {
+                for (Object name : existing) {
+                    if (name instanceof String group && !group.equals(groupName)) {
+                        groups.add(group);
+                    }
+                }
+            }
+            if (item == registered) {
+                groups.add(groupName);
+            }
+            item.getGenericRevisionInfo().put("deploymentGroups", groups);
+        }
+        persistRegion(applicationRevisions, region);
+    }
+
+    private synchronized void updateRevisionGroupName(String region, String appName, String oldName, String newName) {
+        Application app = getApplication(region, appName);
+        for (ApplicationRevision revision : revisionsFor(region, app)) {
+            Object value = revision.getGenericRevisionInfo().get("deploymentGroups");
+            if (value instanceof List<?> existing) {
+                List<String> groups = new ArrayList<>();
+                for (Object item : existing) {
+                    if (item instanceof String name) {
+                        String replacement = name.equals(oldName) ? newName : name;
+                        if (replacement != null) {
+                            groups.add(replacement);
+                        }
+                    }
+                }
+                revision.getGenericRevisionInfo().put("deploymentGroups", groups);
+            }
+        }
+        persistRegion(applicationRevisions, region);
+    }
+
+    public synchronized Map<String, Object> getApplicationRevision(String region, String appName,
+                                                                  Map<String, Object> revision) {
+        Application app = getApplication(region, appName);
+        validateRevision(revision);
+        ApplicationRevision registered = revisionsFor(region, app).stream()
+                .filter(item -> item.getRevisionLocation().equals(revision)).findFirst()
+                .orElseThrow(() -> new AwsException("RevisionDoesNotExistException", "Revision does not exist", 400));
+        return Map.of("applicationName", appName, "revision", registered.getRevisionLocation(),
+                "revisionInfo", registered.getGenericRevisionInfo());
+    }
+
+    public synchronized Map<String, Object> batchGetApplicationRevisions(String region, String appName,
+                                                                        List<Map<String, Object>> revisions) {
+        Application app = getApplication(region, appName);
+        if (revisions.isEmpty()) {
+            throw new AwsException("RevisionRequiredException", "At least one revision is required", 400);
+        }
+        if (revisions.size() > 25) {
+            throw new AwsException("BatchLimitExceededException", "At most 25 revisions may be requested", 400);
+        }
+        revisions.forEach(this::validateRevision);
+        List<ApplicationRevision> found = revisionsFor(region, app).stream()
+                .filter(item -> revisions.contains(item.getRevisionLocation())).toList();
+        return Map.of("applicationName", appName, "revisions", found);
+    }
+
+    public synchronized Map<String, Object> listApplicationRevisions(String region, String appName,
+                                                                    String sortBy, String sortOrder,
+                                                                    String bucket, String keyPrefix,
+                                                                    String deployed, String nextToken) {
+        Application app = getApplication(region, appName);
+        String sort = sortBy == null ? "registerTime" : sortBy;
+        if (!List.of("registerTime", "firstUsedTime", "lastUsedTime").contains(sort)) {
+            throw new AwsException("InvalidSortByException", "Invalid revision sort field", 400);
+        }
+        if (sortOrder != null && !List.of("ascending", "descending").contains(sortOrder)) {
+            throw new AwsException("InvalidSortOrderException", "Invalid revision sort order", 400);
+        }
+        if (deployed != null && !List.of("include", "exclude", "ignore").contains(deployed)) {
+            throw new AwsException("InvalidDeployedStateFilterException", "Invalid deployed filter", 400);
+        }
+        if (keyPrefix != null && bucket == null) {
+            throw new AwsException("BucketNameFilterRequiredException", "s3Bucket is required with s3KeyPrefix", 400);
+        }
+        if (bucket != null && (bucket.isBlank() || bucket.length() > 255)) {
+            throw new AwsException("InvalidBucketNameFilterException", "Invalid bucket filter", 400);
+        }
+        if (keyPrefix != null && keyPrefix.length() > 1024) {
+            throw new AwsException("InvalidKeyPrefixFilterException", "Invalid key prefix filter", 400);
+        }
+        Comparator<ApplicationRevision> comparator = Comparator.comparingDouble(item -> {
+            Object value = item.getGenericRevisionInfo().get(sort);
+            return value instanceof Number number ? number.doubleValue() : 0;
+        });
+        if ("descending".equals(sortOrder)) {
+            comparator = comparator.reversed();
+        }
+        List<Map<String, Object>> revisions = revisionsFor(region, app).stream()
+                .filter(item -> matchesRevisionFilter(item, bucket, keyPrefix, deployed))
+                .sorted(comparator).map(ApplicationRevision::getRevisionLocation).toList();
+        String scope = mapper.valueToTree(List.of(regionResolver.getAccountId(), region, app.getApplicationId(),
+                sort, sortOrder == null ? "ascending" : sortOrder, bucket == null ? "" : bucket,
+                keyPrefix == null ? "" : keyPrefix, deployed == null ? "ignore" : deployed)).toString();
+        int offset = 0;
+        if (nextToken != null) {
+            try {
+                String token = new String(Base64.getUrlDecoder().decode(nextToken), StandardCharsets.UTF_8);
+                if (!token.startsWith(scope + "\n")) {
+                    throw new IllegalArgumentException("Token belongs to another revision query");
+                }
+                offset = Integer.parseInt(token.substring(scope.length() + 1));
+                if (offset < 0 || offset >= revisions.size()) {
+                    throw new IllegalArgumentException("Invalid revision offset");
+                }
+            } catch (IllegalArgumentException error) {
+                throw new AwsException("InvalidNextTokenException", "Invalid revision pagination token", 400);
+            }
+        }
+        int end = Math.min(offset + 100, revisions.size());
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("revisions", revisions.subList(offset, end));
+        if (end < revisions.size()) {
+            result.put("nextToken", Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString((scope + "\n" + end).getBytes(StandardCharsets.UTF_8)));
+        }
+        return result;
+    }
+
+    private boolean matchesRevisionFilter(ApplicationRevision revision, String bucket, String keyPrefix,
+                                           String deployed) {
+        if (bucket != null) {
+            Object location = revision.getRevisionLocation().get("s3Location");
+            if (!(location instanceof Map<?, ?> s3) || !bucket.equals(s3.get("bucket"))) {
+                return false;
+            }
+            if (keyPrefix != null && (!(s3.get("key") instanceof String key) || !key.startsWith(keyPrefix))) {
+                return false;
+            }
+        }
+        Object groups = revision.getGenericRevisionInfo().get("deploymentGroups");
+        boolean isDeployed = groups instanceof List<?> list && !list.isEmpty();
+        return !"include".equals(deployed) && !"exclude".equals(deployed)
+                || "include".equals(deployed) == isDeployed;
+    }
+
+    private void validateRevision(Map<String, Object> revision) {
+        if (revision == null) {
+            throw new AwsException("RevisionRequiredException", "Revision is required", 400);
+        }
+        String revisionType = revision.get("revisionType") instanceof String value ? value : null;
+        String locationName = switch (revisionType) {
+            case "S3" -> "s3Location";
+            case "GitHub" -> "gitHubLocation";
+            case "String" -> "string";
+            case "AppSpecContent" -> "appSpecContent";
+            case null, default -> throw new AwsException("InvalidRevisionException", "Invalid revision type", 400);
+        };
+        if (!(revision.get(locationName) instanceof Map<?, ?> location)) {
+            throw new AwsException("InvalidRevisionException", "Revision location is required", 400);
+        }
+        List<String> required = switch (locationName) {
+            case "s3Location" -> List.of("bucket", "key", "bundleType");
+            case "gitHubLocation" -> List.of("repository", "commitId");
+            default -> List.of("content");
+        };
+        for (String field : required) {
+            if (!(location.get(field) instanceof String value) || value.isBlank()) {
+                throw new AwsException("InvalidRevisionException", "Revision location requires " + field, 400);
+            }
+        }
+        if ("s3Location".equals(locationName)
+                && !List.of("tar", "tgz", "zip", "YAML", "JSON").contains(location.get("bundleType"))) {
+            throw new AwsException("InvalidRevisionException", "Invalid S3 bundle type", 400);
+        }
+    }
+
     // ---- Deployments ----
 
     private Map<String, Deployment> deploymentsFor(String region) {
-        return deployments.computeIfAbsent(region, r -> new ConcurrentHashMap<>());
+        return deployments.computeIfAbsent(regionResolver.getAccountId() + "/" + region,
+                r -> new ConcurrentHashMap<>());
     }
 
     private Map<String, ConcurrentHashMap<String, Map<String, Object>>> deploymentTargetsFor(String region) {
-        return deploymentTargets.computeIfAbsent(region, r -> new ConcurrentHashMap<>());
+        return deploymentTargets.computeIfAbsent(regionResolver.getAccountId() + "/" + region,
+                r -> new ConcurrentHashMap<>());
     }
 
     private Map<String, OnPremisesInstance> onPremisesFor(String region) {
@@ -543,6 +804,7 @@ public class CodeDeployService {
                                    String configName, Map<String, Object> revision, String description) {
         Application app = getApplication(region, appName);
         DeploymentGroup group = getDeploymentGroup(region, appName, groupName);
+        validateRevision(revision);
         // Compute platform is authoritative on the Application; the deployment group may also carry it
         String computePlatform = group.getComputePlatform();
         if (computePlatform == null) {
@@ -574,6 +836,7 @@ public class CodeDeployService {
         deployment.setDescription(description);
         deployment.setCreator("user");
         deployment.setComputePlatform("Lambda");
+        recordRevisionUse(region, appName, groupName, revision);
         deploymentsFor(region).put(deploymentId, deployment);
 
         // Build initial target map
@@ -605,6 +868,12 @@ public class CodeDeployService {
     }
 
     public Deployment getDeployment(String region, String deploymentId) {
+        if (deploymentId == null || deploymentId.isBlank()) {
+            throw new AwsException("DeploymentIdRequiredException", "Deployment ID is required", 400);
+        }
+        if (!deploymentId.matches("d-[A-Z0-9]{9}")) {
+            throw new AwsException("InvalidDeploymentIdException", "Invalid deployment ID: " + deploymentId, 400);
+        }
         Deployment d = deploymentsFor(region).get(deploymentId);
         if (d == null) {
             throw new AwsException("DeploymentDoesNotExistException",
@@ -626,7 +895,7 @@ public class CodeDeployService {
         Deployment d = getDeployment(region, deploymentId);
         String status = d.getStatus();
         if ("Succeeded".equals(status) || "Failed".equals(status) || "Stopped".equals(status)) {
-            return Map.of("status", "Succeeded", "statusMessage", "Deployment is already in a terminal state.");
+            throw new AwsException("DeploymentAlreadyCompletedException", "Deployment has already completed", 400);
         }
         AtomicBoolean flag = stopFlags.get(deploymentId);
         if (flag != null) {
@@ -673,10 +942,36 @@ public class CodeDeployService {
                 .collect(Collectors.toList());
     }
 
-    public String putLifecycleEventHookExecutionStatus(String deploymentId, String executionId, String status) {
-        CompletableFuture<String> future = hookFutures.get(executionId);
-        if (future != null && !future.isDone()) {
-            future.complete(status);
+    public void continueDeployment(String region, String deploymentId, String waitType) {
+        Deployment deployment = getDeployment(region, deploymentId);
+        if (waitType != null && !List.of("READY_WAIT", "TERMINATION_WAIT").contains(waitType)) {
+            throw new AwsException("InvalidDeploymentWaitTypeException", "Invalid deployment wait type", 400);
+        }
+        if (List.of("Succeeded", "Failed", "Stopped").contains(deployment.getStatus())) {
+            throw new AwsException("DeploymentAlreadyCompletedException", "Deployment has already completed", 400);
+        }
+        // The state machines do not enter a blue/green readiness or termination wait.
+        throw new AwsException("DeploymentIsNotInReadyStateException", "Deployment is not waiting to continue", 400);
+    }
+
+    public String putLifecycleEventHookExecutionStatus(String region, String deploymentId,
+                                                       String executionId, String status) {
+        Deployment deployment = getDeployment(region, deploymentId);
+        if (!"Lambda".equals(deployment.getComputePlatform()) && !"ECS".equals(deployment.getComputePlatform())) {
+            throw new AwsException("UnsupportedActionForDeploymentTypeException",
+                    "Lifecycle hook callbacks require a Lambda or ECS deployment", 400);
+        }
+        if (!"Succeeded".equals(status) && !"Failed".equals(status)) {
+            throw new AwsException("InvalidLifecycleEventHookExecutionStatusException",
+                    "Lifecycle hook status must be Succeeded or Failed", 400);
+        }
+        HookExecution execution = executionId == null ? null : hookExecutions.get(executionId);
+        if (execution == null || execution.deployment() != deployment) {
+            throw new AwsException("InvalidLifecycleEventHookExecutionIdException",
+                    "Lifecycle hook execution does not belong to this deployment", 400);
+        }
+        if (!execution.result().complete(status)) {
+            throw new AwsException("LifecycleEventAlreadyCompletedException", "Lifecycle hook has already completed", 400);
         }
         return executionId;
     }
@@ -777,6 +1072,7 @@ public class CodeDeployService {
         deployment.setDescription(description);
         deployment.setCreator("user");
         deployment.setComputePlatform("Server");
+        recordRevisionUse(region, appName, groupName, revision);
         deploymentsFor(region).put(deploymentId, deployment);
 
         // Resolve target instances
@@ -845,8 +1141,10 @@ public class CodeDeployService {
 
             if (anyFailed) {
                 deployment.setStatus("Failed");
-                deployment.setErrorInformation(Map.of("code", "DeploymentFailed",
-                        "message", "One or more instances failed deployment"));
+                deployment.setErrorInformation(Map.of("code", "HEALTH_CONSTRAINTS",
+                        "message", "The overall deployment failed because too many individual instances failed "
+                                + "deployment, too few healthy instances are available for deployment, or some "
+                                + "instances in your deployment group are experiencing problems."));
             } else {
                 deployment.setStatus("Succeeded");
             }
@@ -915,7 +1213,7 @@ public class CodeDeployService {
                                                Map<String, Object> event) throws InterruptedException {
         for (Map<String, Object> step : hookSteps) {
             String location = (String) step.get("location");
-            int timeout = toInt(step.get("timeout"), 300);
+            int timeout = toInt(step.get("timeout"), 3600);
             String runas = (String) step.getOrDefault("runas", "root");
 
             if (location == null) {
@@ -925,8 +1223,12 @@ public class CodeDeployService {
             // Check if instance is registered with SSM
             boolean hasSsm = ssmCommandService.isInstanceRegistered(instanceId, region);
             if (!hasSsm) {
-                LOG.debugv("Instance {0} not in SSM, marking hook {1} as Succeeded", instanceId, location);
-                continue;
+                LOG.warnv("Instance {0} is not registered with SSM; cannot run hook script {1}",
+                        instanceId, location);
+                finishLifecycleEvent(event, "Failed", "UnknownError",
+                        "CodeDeploy agent was not able to receive the lifecycle event. Check the CodeDeploy agent "
+                                + "logs on your host and make sure the agent is running and can connect to the CodeDeploy server.");
+                return false;
             }
 
             try {
@@ -938,21 +1240,31 @@ public class CodeDeployService {
                         instanceId, "AWS-RunShellScript", Map.of("commands", List.of(script)),
                         timeout, region);
 
-                // Poll until done (max timeout seconds, capped at 30s for emulator)
-                long deadline = System.currentTimeMillis() + Math.min(timeout * 1000L, 30_000L);
+                long deadline = clock.millis() + timeout * 1000L;
                 String invocationStatus = "InProgress";
-                while (System.currentTimeMillis() < deadline && "InProgress".equals(invocationStatus)) {
+                while (clock.millis() < deadline && "InProgress".equals(invocationStatus)) {
                     Thread.sleep(500);
                     invocationStatus = ssmCommandService.getCommandInvocationStatus(commandId, instanceId, region);
                 }
 
-                if (!"Success".equals(invocationStatus) && !"InProgress".equals(invocationStatus)) {
-                    finishLifecycleEvent(event, "Failed");
+                if ("InProgress".equals(invocationStatus)) {
+                    LOG.warnv("Hook script {0} on instance {1} did not finish within {2}s",
+                            location, instanceId, timeout);
+                    finishLifecycleEvent(event, "Failed", "ScriptTimedOut",
+                            "Script at specified location: " + location + " failed to complete in " + timeout + " seconds");
+                    return false;
+                }
+                if (!"Success".equals(invocationStatus)) {
+                    finishLifecycleEvent(event, "Failed", "ScriptFailed",
+                            "Script at specified location: " + location + " failed with SSM command status "
+                                    + invocationStatus);
                     return false;
                 }
             } catch (Exception e) {
-                LOG.debugv("SSM execution failed for {0} on {1}: {2}", location, instanceId, e.getMessage());
-                // Graceful degradation: if SSM fails, treat as succeeded
+                LOG.warnv(e, "SSM execution failed for {0} on {1}: {2}", location, instanceId, e.getMessage());
+                finishLifecycleEvent(event, "Failed", "UnknownError",
+                        "Failed to execute script " + location + ": " + e.getMessage());
+                return false;
             }
         }
         finishLifecycleEvent(event, "Succeeded");
@@ -994,7 +1306,14 @@ public class CodeDeployService {
                         steps.forEach(s -> {
                             Map<String, Object> step = new java.util.LinkedHashMap<>();
                             if (s.has("location")) { step.put("location", s.get("location").asText()); }
-                            if (s.has("timeout")) { step.put("timeout", s.get("timeout").asInt(300)); }
+                            if (s.hasNonNull("timeout")) {
+                                JsonNode value = s.get("timeout");
+                                int timeout = value.asInt(0);
+                                if ((!value.isNumber() && !value.isTextual()) || timeout <= 0) {
+                                    throw new IllegalArgumentException("Invalid script timeout");
+                                }
+                                step.put("timeout", timeout);
+                            }
                             if (s.has("runas")) { step.put("runas", s.get("runas").asText("root")); }
                             stepList.add(step);
                         });
@@ -1199,6 +1518,7 @@ public class CodeDeployService {
         deployment.setDescription(description);
         deployment.setCreator("user");
         deployment.setComputePlatform("ECS");
+        recordRevisionUse(region, appName, groupName, revision);
         deploymentsFor(region).put(deploymentId, deployment);
 
         // Determine ECS cluster/service from deployment group
@@ -1301,8 +1621,9 @@ public class CodeDeployService {
             if (appSpec.beforeInstall != null) {
                 boolean ok = invokeHook(region, deployment, appSpec.beforeInstall,
                         "BeforeInstall", ecsTargetMap, stopFlag);
+                if (stopFlag.get()) { finishEcsStopped(deployment, ecsTargetMap); return; }
                 if (!ok) {
-                    finishEcsFailed(deployment, ecsTargetMap, "BeforeInstallHookFailed",
+                    finishEcsFailed(deployment, ecsTargetMap, "HOOK_EXECUTION_FAILURE",
                             "Hook function reported failure: BeforeInstall");
                     return;
                 }
@@ -1313,8 +1634,16 @@ public class CodeDeployService {
             // Install: create green task set
             Map<String, Object> installEvent = addLifecycleEvent(ecsTargetMap, "Install");
             try {
-                greenTaskSet = ecsService.createTaskSet(clusterName, serviceName,
-                        appSpec.taskDefinition, null, 100.0, "PERCENT", deploymentId, region);
+                CreateTaskSetRequest createTaskSet = new CreateTaskSetRequest();
+                createTaskSet.setCluster(clusterName);
+                createTaskSet.setService(serviceName);
+                createTaskSet.setTaskDefinition(appSpec.taskDefinition);
+                createTaskSet.setScaleValue(100.0);
+                // ECS reports the deployment id as the task set's externalId, and CODE_DEPLOY as
+                // its startedBy, which is how a client tells a CodeDeploy set from an external one.
+                createTaskSet.setExternalId(deploymentId);
+                createTaskSet.setStartedBy("CODE_DEPLOY");
+                greenTaskSet = ecsService.createTaskSet(createTaskSet, region);
                 appendTaskSetInfo(ecsTargetMap, greenTaskSet, greenTgArn, 0.0);
                 finishLifecycleEvent(installEvent, "Succeeded");
             } catch (Exception e) {
@@ -1328,8 +1657,9 @@ public class CodeDeployService {
             if (appSpec.afterInstall != null) {
                 boolean ok = invokeHook(region, deployment, appSpec.afterInstall,
                         "AfterInstall", ecsTargetMap, stopFlag);
+                if (stopFlag.get()) { finishEcsStopped(deployment, ecsTargetMap); return; }
                 if (!ok) {
-                    finishEcsFailed(deployment, ecsTargetMap, "AfterInstallHookFailed",
+                    finishEcsFailed(deployment, ecsTargetMap, "HOOK_EXECUTION_FAILURE",
                             "Hook function reported failure: AfterInstall");
                     return;
                 }
@@ -1340,8 +1670,9 @@ public class CodeDeployService {
             if (appSpec.beforeAllowTraffic != null) {
                 boolean ok = invokeHook(region, deployment, appSpec.beforeAllowTraffic,
                         "BeforeAllowTraffic", ecsTargetMap, stopFlag);
+                if (stopFlag.get()) { finishEcsStopped(deployment, ecsTargetMap); return; }
                 if (!ok) {
-                    finishEcsFailed(deployment, ecsTargetMap, "BeforeAllowTrafficHookFailed",
+                    finishEcsFailed(deployment, ecsTargetMap, "HOOK_EXECUTION_FAILURE",
                             "Hook function reported failure: BeforeAllowTraffic");
                     return;
                 }
@@ -1363,8 +1694,9 @@ public class CodeDeployService {
             if (appSpec.afterAllowTraffic != null) {
                 boolean ok = invokeHook(region, deployment, appSpec.afterAllowTraffic,
                         "AfterAllowTraffic", ecsTargetMap, stopFlag);
+                if (stopFlag.get()) { finishEcsStopped(deployment, ecsTargetMap); return; }
                 if (!ok) {
-                    finishEcsFailed(deployment, ecsTargetMap, "AfterAllowTrafficHookFailed",
+                    finishEcsFailed(deployment, ecsTargetMap, "HOOK_EXECUTION_FAILURE",
                             "Hook function reported failure: AfterAllowTraffic");
                     return;
                 }
@@ -1542,7 +1874,8 @@ public class CodeDeployService {
             if (appSpec.beforeAllowTraffic != null) {
                 boolean ok = invokeHook(region, deployment, appSpec.beforeAllowTraffic,
                         "BeforeAllowTraffic", lambdaTargetMap, stopFlag);
-                if (!ok) { finishFailed(deployment, lambdaTargetMap, "BeforeAllowTrafficHookFailed",
+                if (stopFlag.get()) { finishStopped(deployment, lambdaTargetMap); return; }
+                if (!ok) { finishFailed(deployment, lambdaTargetMap, "HOOK_EXECUTION_FAILURE",
                         "Hook function reported failure: BeforeAllowTraffic"); return; }
             }
 
@@ -1555,7 +1888,8 @@ public class CodeDeployService {
             if (appSpec.afterAllowTraffic != null) {
                 boolean ok = invokeHook(region, deployment, appSpec.afterAllowTraffic,
                         "AfterAllowTraffic", lambdaTargetMap, stopFlag);
-                if (!ok) { finishFailed(deployment, lambdaTargetMap, "AfterAllowTrafficHookFailed",
+                if (stopFlag.get()) { finishStopped(deployment, lambdaTargetMap); return; }
+                if (!ok) { finishFailed(deployment, lambdaTargetMap, "HOOK_EXECUTION_FAILURE",
                         "Hook function reported failure: AfterAllowTraffic"); return; }
             }
 
@@ -1636,7 +1970,7 @@ public class CodeDeployService {
                                 AtomicBoolean stopFlag) throws InterruptedException {
         String executionId = UUID.randomUUID().toString();
         CompletableFuture<String> future = new CompletableFuture<>();
-        hookFutures.put(executionId, future);
+        hookExecutions.put(executionId, new HookExecution(deployment, future));
 
         Map<String, Object> event = addLifecycleEvent(lambdaTargetMap, lifecycleEventName);
 
@@ -1644,29 +1978,62 @@ public class CodeDeployService {
             String payload = "{\"DeploymentId\":\"" + deployment.getDeploymentId()
                     + "\",\"LifecycleEventHookExecutionId\":\"" + executionId + "\"}";
 
+            String failureMessage = null;
             try {
                 InvokeResult result = lambdaService.invoke(region, hookFunctionName,
                         payload.getBytes(), InvocationType.RequestResponse);
-                if (!future.isDone()) {
-                    // Lambda didn't call PutLifecycleEventHookExecutionStatus; decide from invocation result
-                    future.complete(result.getFunctionError() == null ? "Succeeded" : "Failed");
+                if (result.getFunctionError() != null && !future.isDone()) {
+                    failureMessage = "Lambda function " + hookFunctionName
+                            + " returned a function error: " + result.getFunctionError();
+                    future.complete("Failed");
                 }
             } catch (Exception e) {
-                LOG.debugv("Hook Lambda {0} not invokable: {1}", hookFunctionName, e.getMessage());
-                future.complete("Succeeded");
+                LOG.warnv(e, "Hook Lambda {0} for lifecycle event {1} could not be invoked: {2}",
+                        hookFunctionName, lifecycleEventName, e.getMessage());
+                failureMessage = "Lambda function " + hookFunctionName + " could not be invoked: " + e.getMessage();
+                if (!future.isDone()) {
+                    future.complete("Failed");
+                }
             }
 
-            String status = "Succeeded";
-            try {
-                status = future.get(30, TimeUnit.SECONDS);
-            } catch (Exception e) {
-                status = "Succeeded";
+            String status = null;
+            long deadlineNanos = System.nanoTime() + hookCallbackTimeout.toNanos();
+            while (status == null) {
+                if (stopFlag.get()) {
+                    finishLifecycleEvent(event, "Skipped");
+                    return false;
+                }
+                long remainingNanos = deadlineNanos - System.nanoTime();
+                if (remainingNanos <= 0) {
+                    LOG.warnv("Hook {0} for lifecycle event {1} did not call PutLifecycleEventHookExecutionStatus within {2}",
+                            hookFunctionName, lifecycleEventName, hookCallbackTimeout);
+                    status = "Failed";
+                    failureMessage = "Lambda function " + hookFunctionName
+                            + " did not call PutLifecycleEventHookExecutionStatus within "
+                            + hookCallbackTimeout.toSeconds() + " seconds";
+                    break;
+                }
+                long sliceNanos = Math.min(remainingNanos, STOP_POLL_INTERVAL.toNanos());
+                try {
+                    status = future.get(sliceNanos, TimeUnit.NANOSECONDS);
+                } catch (TimeoutException e) {
+                    continue;
+                } catch (ExecutionException e) {
+                    throw new IllegalStateException(e);
+                }
             }
 
-            finishLifecycleEvent(event, status);
+            if ("Failed".equals(status)) {
+                finishLifecycleEvent(event, "Failed", "UnknownError",
+                        failureMessage != null ? failureMessage
+                                : "Lambda function " + hookFunctionName + " reported that lifecycle event "
+                                        + lifecycleEventName + " failed");
+            } else {
+                finishLifecycleEvent(event, status);
+            }
             return "Succeeded".equals(status);
         } finally {
-            hookFutures.remove(executionId);
+            future.complete("Failed");
         }
     }
 
@@ -1687,6 +2054,12 @@ public class CodeDeployService {
     private void finishLifecycleEvent(Map<String, Object> event, String status) {
         event.put("endTime", Instant.now().toEpochMilli() / 1000.0);
         event.put("status", status);
+    }
+
+    private void finishLifecycleEvent(Map<String, Object> event, String status,
+                                       String diagnosticsErrorCode, String diagnosticsMessage) {
+        finishLifecycleEvent(event, status);
+        event.put("diagnostics", Map.of("errorCode", diagnosticsErrorCode, "message", diagnosticsMessage));
     }
 
     private void updateTargetStatus(Map<String, Object> lambdaTargetMap, String status) {
@@ -1781,9 +2154,6 @@ public class CodeDeployService {
         Object ecsServices = fields.get("ecsServices");
         if (ecsServices instanceof List<?> list) {
             group.setEcsServices((List<Map<String, Object>>) list);
-        }
-        if (fields.containsKey("computePlatform")) {
-            group.setComputePlatform((String) fields.get("computePlatform"));
         }
         if (fields.containsKey("outdatedInstancesStrategy")) {
             group.setOutdatedInstancesStrategy((String) fields.get("outdatedInstancesStrategy"));

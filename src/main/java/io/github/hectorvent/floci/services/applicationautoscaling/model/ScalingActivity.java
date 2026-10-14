@@ -3,9 +3,7 @@ package io.github.hectorvent.floci.services.applicationautoscaling.model;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 /**
- * A recorded Application Auto Scaling activity. Policies are inert in Floci, so
- * {@code DescribeScalingActivities} typically returns an empty list; the shape is
- * stored so a future control loop can append rows without a schema change.
+ * One recorded scaling action, returned by {@code DescribeScalingActivities}.
  *
  * @see <a href="https://docs.aws.amazon.com/autoscaling/application/APIReference/API_ScalingActivity.html">ScalingActivity</a>
  */

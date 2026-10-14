@@ -9,8 +9,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A SES v1 receipt rule set. Floci has no inbound-mail endpoint, so rules are
- * stored and returned by the management API but never evaluate incoming mail.
+ * A SES v1 receipt rule set. Floci stores it inertly: there is no inbound-mail endpoint, so the
+ * receipt rules a set holds route no mail. The management API (rule set and rule CRUD, rule
+ * positioning, set/describe active) round-trips, which is enough to unblock tools like Terraform
+ * that declare receipt rules during bootstrap.
  */
 @RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -62,8 +64,14 @@ public class ReceiptRuleSet {
         this.active = active;
     }
 
-    public List<ReceiptRule> getRules() { return rules; }
+    public List<ReceiptRule> getRules() {
+        if (rules == null) {
+            rules = new ArrayList<>();
+        }
+        return rules;
+    }
+
     public void setRules(List<ReceiptRule> rules) {
-        this.rules = rules == null ? new ArrayList<>() : rules;
+        this.rules = rules;
     }
 }

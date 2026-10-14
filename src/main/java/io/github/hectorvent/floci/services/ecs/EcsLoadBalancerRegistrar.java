@@ -8,6 +8,7 @@ import io.github.hectorvent.floci.services.ecs.model.EcsTask;
 import io.github.hectorvent.floci.services.ecs.model.NetworkBinding;
 import io.github.hectorvent.floci.services.elbv2.ElbV2Service;
 import io.github.hectorvent.floci.services.elbv2.model.TargetDescription;
+import io.github.hectorvent.floci.services.elbv2.model.TargetHealth;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -61,6 +62,29 @@ public class EcsLoadBalancerRegistrar {
                 LOG.warnv("Could not deregister ECS target from {0}: {1}", tgArn, e.getMessage());
             }
         });
+    }
+
+    /**
+     * Whether every target the task's load-balanced containers were registered as reports
+     * {@code healthy}: ECS waits for the load balancer health check before it counts a task
+     * towards a deployment's steady state. A task with no target to register has none to wait for.
+     */
+    public boolean targetsHealthy(EcsTask task, EcsServiceModel svc, String region) {
+        boolean[] healthy = {true};
+        forEachTarget(task, svc, (tgArn, td) -> {
+            if (!healthy[0]) {
+                return;
+            }
+            try {
+                List<TargetHealth> health = elbV2Service.describeTargetHealth(region, tgArn, List.of(td));
+                healthy[0] = !health.isEmpty()
+                        && health.stream().allMatch(h -> "healthy".equals(h.getState()));
+            } catch (Exception e) {
+                LOG.debugv("Could not read ECS target health in {0}: {1}", tgArn, e.getMessage());
+                healthy[0] = false;
+            }
+        });
+        return healthy[0];
     }
 
     private void forEachTarget(EcsTask task, EcsServiceModel svc,

@@ -1,51 +1,144 @@
 package io.github.hectorvent.floci.services.eventbridge;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.batch.BatchService;
+import io.github.hectorvent.floci.services.ecs.EcsJsonHandler;
+import io.github.hectorvent.floci.services.ecs.EcsService;
+import io.github.hectorvent.floci.services.ecs.container.HostVolumePolicy;
+import io.github.hectorvent.floci.services.ecs.model.ContainerOverride;
+import io.github.hectorvent.floci.services.ecs.model.LaunchType;
+import io.github.hectorvent.floci.services.eventbridge.model.AwsVpcConfiguration;
 import io.github.hectorvent.floci.services.eventbridge.model.BatchParameters;
+import io.github.hectorvent.floci.services.eventbridge.model.EcsParameters;
 import io.github.hectorvent.floci.services.eventbridge.model.InputTransformer;
+import io.github.hectorvent.floci.services.eventbridge.model.NetworkConfiguration;
 import io.github.hectorvent.floci.services.eventbridge.model.Target;
 import io.github.hectorvent.floci.services.firehose.FirehoseService;
 import io.github.hectorvent.floci.services.firehose.model.Record;
 import io.github.hectorvent.floci.services.lambda.LambdaService;
+import io.github.hectorvent.floci.services.lambda.model.InvocationType;
 import io.github.hectorvent.floci.services.sns.SnsService;
 import io.github.hectorvent.floci.services.sqs.SqsService;
+import io.github.hectorvent.floci.services.stepfunctions.StepFunctionsService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 
-import org.mockito.ArgumentCaptor;
-
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.AdditionalMatchers.aryEq;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class EventBridgeInvokerTest {
 
     private EventBridgeInvoker invoker;
+    private LambdaService lambdaService;
     private SqsService sqsService;
     private BatchService batchService;
     private FirehoseService firehoseService;
+    private EventBridgeService eventBridgeService;
+    private EcsService ecsService;
+    private StepFunctionsService stepFunctionsService;
+    private RegionResolver regionResolver;
 
     @BeforeEach
     void setUp() {
-        LambdaService lambdaService = mock(LambdaService.class);
+        lambdaService = mock(LambdaService.class);
         sqsService = mock(SqsService.class);
         SnsService snsService = mock(SnsService.class);
         batchService = mock(BatchService.class);
         firehoseService = mock(FirehoseService.class);
+        eventBridgeService = mock(EventBridgeService.class);
+        ecsService = mock(EcsService.class);
+        stepFunctionsService = mock(StepFunctionsService.class);
+        regionResolver = mock(RegionResolver.class);
+        when(regionResolver.getAccountId()).thenReturn("000000000000");
+        when(eventBridgeService.putEvents(anyList(), anyString(), any()))
+                .thenReturn(new EventBridgeService.PutEventsResult(0, List.of()));
+        EmulatorConfig emulatorConfig =
+                mock(EmulatorConfig.class,
+                        Mockito.RETURNS_DEEP_STUBS);
         invoker = new EventBridgeInvoker(
                 lambdaService,
                 sqsService,
                 snsService,
                 batchService,
                 firehoseService,
+                eventBridgeService,
+                ecsService,
+                new EcsJsonHandler(ecsService, new ObjectMapper(),
+                        new HostVolumePolicy(emulatorConfig)),
+                stepFunctionsService,
+                regionResolver,
                 new ObjectMapper(),
-                mock(io.github.hectorvent.floci.config.EmulatorConfig.class)
+                emulatorConfig
         );
+    }
+
+    @Test
+    void invokeTarget_stateMachineTargetStartsExecutionWithDefaultEvent() {
+        String arn = "arn:aws:states:eu-west-1:111122223333:stateMachine:orders";
+        String event = "{\"detail\":{\"orderId\":\"o-42\"}}";
+        Target target = new Target("id1", arn, null, null);
+
+        invoker.invokeTarget(target, event, "us-east-1");
+
+        verify(stepFunctionsService).startExecution(arn, null, event, "eu-west-1");
+    }
+
+    @Test
+    void invokeTarget_stateMachineTargetUsesExplicitInput() {
+        String arn = "arn:aws:states:us-east-1:000000000000:stateMachine:orders";
+        Target target = new Target("id1", arn, "{\"source\":\"override\"}", null);
+
+        invoker.invokeTarget(target, "{\"ignored\":true}", "us-east-1");
+
+        verify(stepFunctionsService).startExecution(
+                arn, null, "{\"source\":\"override\"}", "us-east-1");
+    }
+
+    @Test
+    void invokeTarget_qualifiedStateMachineTargetRemainsUnsupported() {
+        String versionArn = "arn:aws:states:us-east-1:000000000000:stateMachine:orders:1";
+        String aliasArn = "arn:aws:states:us-east-1:000000000000:stateMachine:orders:PROD";
+
+        invoker.invokeTarget(new Target("version", versionArn, "{}", null), "{}", "us-east-1");
+        invoker.invokeTarget(new Target("alias", aliasArn, "{}", null), "{}", "us-east-1");
+
+        verifyNoInteractions(stepFunctionsService);
+    }
+
+    @Test
+    void invokeTarget_stateMachineStartFailureDoesNotEscapeDelivery() {
+        String arn = "arn:aws:states:us-east-1:000000000000:stateMachine:missing";
+        when(stepFunctionsService.startExecution(arn, null, "{}", "us-east-1"))
+                .thenThrow(new IllegalStateException("missing state machine"));
+
+        assertDoesNotThrow(() -> invoker.invokeTarget(
+                new Target("id1", arn, "{}", null), "{\"ignored\":true}", "us-east-1"));
+
+        verify(stepFunctionsService).startExecution(arn, null, "{}", "us-east-1");
+    }
+
+    @Test
+    void invokeTarget_lambdaTargetPreservesArnAccount() {
+        String arn = "arn:aws:lambda:ap-south-1:100000000012:function:cross-account-function";
+        Target target = new Target("id1", arn, "{\"detail\":{\"job\":\"workflow-recovery\"}}", null);
+
+        invoker.invokeTarget(target, "{\"ignored\":true}", "ap-south-1");
+
+        verify(lambdaService).invokeArn(
+                eq(arn),
+                aryEq("{\"detail\":{\"job\":\"workflow-recovery\"}}".getBytes()),
+                eq(InvocationType.Event));
     }
 
     @Test
@@ -129,6 +222,139 @@ class EventBridgeInvokerTest {
                 isNull(),
                 eq("us-west-2")
         );
+    }
+
+    @Test
+    void invokeTarget_ecsClusterTarget_runsTaskWithEcsParameters() {
+        Target target = new Target("id1",
+                "arn:aws:ecs:us-west-2:000000000000:cluster/my-cluster", null, null);
+        EcsParameters ecsParameters = new EcsParameters();
+        ecsParameters.setTaskDefinitionArn("arn:aws:ecs:us-west-2:000000000000:task-definition/my-task:3");
+        ecsParameters.setTaskCount(2);
+        ecsParameters.setLaunchType("FARGATE");
+        ecsParameters.setGroup("my-group");
+        AwsVpcConfiguration awsVpcConfiguration = new AwsVpcConfiguration();
+        awsVpcConfiguration.setSubnets(List.of("subnet-1", "subnet-2"));
+        awsVpcConfiguration.setSecurityGroups(List.of("sg-1"));
+        awsVpcConfiguration.setAssignPublicIp("ENABLED");
+        NetworkConfiguration networkConfiguration = new NetworkConfiguration();
+        networkConfiguration.setAwsvpcConfiguration(awsVpcConfiguration);
+        ecsParameters.setNetworkConfiguration(networkConfiguration);
+        target.setEcsParameters(ecsParameters);
+
+        invoker.invokeTarget(target, "{\"detail\":{}}", "us-east-1");
+
+        // Clash with eventbridge.model.NetworkConfiguration
+        ArgumentCaptor<io.github.hectorvent.floci.services.ecs.model.NetworkConfiguration> networkCaptor =
+                ArgumentCaptor.forClass(io.github.hectorvent.floci.services.ecs.model.NetworkConfiguration.class);
+        verify(ecsService).runTask(
+                eq("arn:aws:ecs:us-west-2:000000000000:cluster/my-cluster"),
+                eq("arn:aws:ecs:us-west-2:000000000000:task-definition/my-task:3"),
+                eq(2),
+                eq(LaunchType.FARGATE),
+                isNull(),
+                eq("my-group"),
+                eq(List.of()),
+                networkCaptor.capture(),
+                eq("us-west-2")
+        );
+        assertEquals(List.of("subnet-1", "subnet-2"),
+                networkCaptor.getValue().getAwsvpcConfiguration().getSubnets());
+        assertEquals(List.of("sg-1"),
+                networkCaptor.getValue().getAwsvpcConfiguration().getSecurityGroups());
+        assertEquals("ENABLED", networkCaptor.getValue().getAwsvpcConfiguration().getAssignPublicIp());
+    }
+
+    @Test
+    void invokeTarget_ecsClusterTarget_defaultsTaskCountAndGroupWhenAbsent() {
+        Target target = new Target("id1",
+                "arn:aws:ecs:us-west-2:000000000000:cluster/my-cluster", null, null);
+        EcsParameters ecsParameters = new EcsParameters();
+        ecsParameters.setTaskDefinitionArn("arn:aws:ecs:us-west-2:000000000000:task-definition/my-task:1");
+        target.setEcsParameters(ecsParameters);
+
+        invoker.invokeTarget(target, "{\"detail\":{}}", "us-east-1");
+
+        verify(ecsService).runTask(
+                eq("arn:aws:ecs:us-west-2:000000000000:cluster/my-cluster"),
+                eq("arn:aws:ecs:us-west-2:000000000000:task-definition/my-task:1"),
+                eq(1),
+                isNull(),
+                isNull(),
+                eq("eventbridge"),
+                eq(List.of()),
+                isNull(),
+                eq("us-west-2")
+        );
+    }
+
+    @Test
+    void invokeTarget_ecsClusterTargetWithInputTransformer_passesThroughContainerOverrides() {
+        Target target = new Target("id1",
+                "arn:aws:ecs:us-west-2:000000000000:cluster/my-cluster", null, null);
+        EcsParameters ecsParameters = new EcsParameters();
+        ecsParameters.setTaskDefinitionArn("arn:aws:ecs:us-west-2:000000000000:task-definition/my-task:1");
+        target.setEcsParameters(ecsParameters);
+        target.setInputTransformer(new InputTransformer(
+                Map.of("orderId", "$.detail.orderId"),
+                "{\"containerOverrides\":[{\"name\":\"app\",\"command\":[\"process\",\"<orderId>\"],"
+                        + "\"environment\":[{\"name\":\"ORDER_ID\",\"value\":\"<orderId>\"}]}]}"));
+
+        invoker.invokeTarget(target, "{\"detail\":{\"orderId\":\"o-42\"}}", "us-east-1");
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<ContainerOverride>> overridesCaptor =
+                ArgumentCaptor.forClass(List.class);
+        verify(ecsService).runTask(
+                eq("arn:aws:ecs:us-west-2:000000000000:cluster/my-cluster"),
+                eq("arn:aws:ecs:us-west-2:000000000000:task-definition/my-task:1"),
+                eq(1),
+                isNull(),
+                isNull(),
+                eq("eventbridge"),
+                overridesCaptor.capture(),
+                isNull(),
+                eq("us-west-2")
+        );
+        ContainerOverride override = overridesCaptor.getValue().get(0);
+        assertEquals("app", override.getName());
+        assertEquals(List.of("process", "o-42"), override.getCommand());
+        assertEquals("ORDER_ID", override.getEnvironment().get(0).name());
+        assertEquals("o-42", override.getEnvironment().get(0).value());
+    }
+
+    @Test
+    void invokeTarget_ecsClusterTargetWithMalformedTransformedOutput_launchesWithoutOverrides() {
+        Target target = new Target("id1",
+                "arn:aws:ecs:us-west-2:000000000000:cluster/my-cluster", null, null);
+        EcsParameters ecsParameters = new EcsParameters();
+        ecsParameters.setTaskDefinitionArn("arn:aws:ecs:us-west-2:000000000000:task-definition/my-task:1");
+        target.setEcsParameters(ecsParameters);
+        target.setInput("not-json");
+
+        assertDoesNotThrow(() -> invoker.invokeTarget(target, "{\"detail\":{}}", "us-east-1"));
+
+        verify(ecsService).runTask(
+                eq("arn:aws:ecs:us-west-2:000000000000:cluster/my-cluster"),
+                eq("arn:aws:ecs:us-west-2:000000000000:task-definition/my-task:1"),
+                eq(1),
+                isNull(),
+                isNull(),
+                eq("eventbridge"),
+                eq(List.of()),
+                isNull(),
+                eq("us-west-2")
+        );
+    }
+
+    @Test
+    void invokeTarget_ecsClusterTargetWithoutEcsParameters_skipsWithoutThrowing() {
+        Target target = new Target("id1",
+                "arn:aws:ecs:us-west-2:000000000000:cluster/my-cluster", null, null);
+
+        assertDoesNotThrow(() -> invoker.invokeTarget(target, "{\"detail\":{}}", "us-east-1"));
+
+        verify(ecsService, never()).runTask(any(), any(), anyInt(), any(), any(), any(), anyList(), any(), any());
     }
 
     @Test
@@ -235,5 +461,255 @@ class EventBridgeInvokerTest {
         String eventJson = "{\"source\":\"aws.s3\"}";
         InputTransformer transformer = new InputTransformer(Map.of(), null);
         assertEquals(eventJson, invoker.applyInputTransformer(transformer, eventJson));
+    }
+
+    @Test
+    void applyInputTransformer_valuePosition_stringIsQuoted() {
+        String event = "{\"detail\":{\"eventName\":\"site.created\"}}";
+        InputTransformer t = new InputTransformer(
+                Map.of("e", "$.detail.eventName"), "{\"e\":<e>}");
+        assertEquals("{\"e\":\"site.created\"}", invoker.applyInputTransformer(t, event));
+    }
+
+    @Test
+    void applyInputTransformer_valuePosition_objectNumberBoolAsIs() {
+        String event = "{\"detail\":{\"count\":42,\"ok\":true,\"payload\":{\"id\":\"abc\"}}}";
+        InputTransformer t = new InputTransformer(
+                Map.of("c", "$.detail.count", "o", "$.detail.ok", "p", "$.detail.payload"),
+                "{\"c\":<c>,\"o\":<o>,\"p\":<p>}");
+        assertEquals("{\"c\":42,\"o\":true,\"p\":{\"id\":\"abc\"}}", invoker.applyInputTransformer(t, event));
+    }
+
+    @Test
+    void applyInputTransformer_valuePosition_missingIsEmpty() {
+        String event = "{\"detail\":{}}";
+        InputTransformer t = new InputTransformer(
+                Map.of("e", "$.detail.nope"), "prefix:<e>:suffix");
+        assertEquals("prefix::suffix", invoker.applyInputTransformer(t, event));
+    }
+
+    @Test
+    void applyInputTransformer_insideString_interpolatesRaw() {
+        String event = "{\"detail\":{\"user\":\"alice\",\"eventName\":\"site.created\"}}";
+        InputTransformer t = new InputTransformer(
+                Map.of("user", "$.detail.user", "e", "$.detail.eventName"),
+                "\"<user> did <e>\"");
+        assertEquals("\"alice did site.created\"", invoker.applyInputTransformer(t, event));
+    }
+
+    @Test
+    void applyInputTransformer_quotedWholeToken_rawBetweenQuotes() {
+        String event = "{\"detail\":{\"eventName\":\"site.created\"}}";
+        InputTransformer t = new InputTransformer(
+                Map.of("e", "$.detail.eventName"), "{\"e\":\"<e>\"}");
+        assertEquals("{\"e\":\"site.created\"}", invoker.applyInputTransformer(t, event));
+    }
+
+    @Test
+    void applyInputTransformer_unknownVarLeftLiteral() {
+        String event = "{\"detail\":{}}";
+        InputTransformer t = new InputTransformer(Map.of(), "{\"x\":<unknown>}");
+        assertEquals("{\"x\":<unknown>}", invoker.applyInputTransformer(t, event));
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void invokeTarget_eventBusTarget_republishesEventToTargetBus() {
+        Target target = new Target("id1",
+                "arn:aws:events:eu-west-1:000000000000:event-bus/my-target-bus",
+                null, null);
+        String event = "{\"source\":\"myapp.orders\",\"detail-type\":\"Order.Created\","
+                + "\"resources\":[\"arn:aws:s3:::b\"],\"detail\":{\"orderId\":\"o-1\"}}";
+
+        invoker.invokeTarget(target, event, "eu-west-1");
+
+        ArgumentCaptor<List<Map<String, Object>>> captor = ArgumentCaptor.forClass(List.class);
+        verify(eventBridgeService).putEvents(captor.capture(), eq("eu-west-1"), isNull());
+        List<Map<String, Object>> entries = captor.getValue();
+        assertEquals(1, entries.size());
+        Map<String, Object> entry = entries.get(0);
+        assertEquals("arn:aws:events:eu-west-1:000000000000:event-bus/my-target-bus",
+                entry.get("EventBusName"));
+        assertEquals("myapp.orders", entry.get("Source"));
+        assertEquals("Order.Created", entry.get("DetailType"));
+        assertEquals("{\"orderId\":\"o-1\"}", entry.get("Detail"));
+        assertEquals("[\"arn:aws:s3:::b\"]", entry.get("Resources").toString());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void invokeTarget_eventBusTargetWithInputTransformer_usesOriginalSourceAndTransformedDetail() {
+        InputTransformer transformer = new InputTransformer(
+                Map.of("id", "$.detail.orderId"),
+                "{\"remapped\":\"<id>\"}");
+        Target target = new Target("id1",
+                "arn:aws:events:eu-west-1:000000000000:event-bus/my-target-bus",
+                null, null);
+        target.setInputTransformer(transformer);
+        String event = "{\"source\":\"myapp.orders\",\"detail-type\":\"Order.Created\","
+                + "\"detail\":{\"orderId\":\"o-1\"}}";
+
+        invoker.invokeTarget(target, event, "eu-west-1");
+
+        ArgumentCaptor<List<Map<String, Object>>> captor = ArgumentCaptor.forClass(List.class);
+        verify(eventBridgeService).putEvents(captor.capture(), eq("eu-west-1"), isNull());
+        Map<String, Object> entry = captor.getValue().get(0);
+        assertEquals("myapp.orders", entry.get("Source"));
+        assertEquals("Order.Created", entry.get("DetailType"));
+        assertEquals("{\"remapped\":\"o-1\"}", entry.get("Detail"));
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void invokeTarget_eventBusTarget_preservesOriginAccountAndRegion() {
+        Target target = new Target("id1",
+                "arn:aws:events:eu-west-1:000000000000:event-bus/my-target-bus",
+                null, null);
+        String event = "{\"source\":\"myapp.orders\",\"detail-type\":\"Order.Created\","
+                + "\"account\":\"111122223333\",\"region\":\"eu-central-1\","
+                + "\"detail\":{\"orderId\":\"o-1\"}}";
+
+        invoker.invokeTarget(target, event, "eu-west-1");
+
+        ArgumentCaptor<List<Map<String, Object>>> captor = ArgumentCaptor.forClass(List.class);
+        verify(eventBridgeService).putEvents(captor.capture(), eq("eu-west-1"), isNull());
+        Map<String, Object> entry = captor.getValue().get(0);
+        assertEquals("111122223333", entry.get("Account"));
+        assertEquals("eu-central-1", entry.get("Region"));
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void invokeTarget_eventBusTargetWithNullResources_omitsResourcesEntry() {
+        Target target = new Target("id1",
+                "arn:aws:events:eu-west-1:000000000000:event-bus/my-target-bus",
+                null, null);
+        String event = "{\"source\":\"myapp.orders\",\"detail-type\":\"Order.Created\","
+                + "\"resources\":null,\"detail\":{\"orderId\":\"o-1\"}}";
+
+        invoker.invokeTarget(target, event, "eu-west-1");
+
+        ArgumentCaptor<List<Map<String, Object>>> captor = ArgumentCaptor.forClass(List.class);
+        verify(eventBridgeService).putEvents(captor.capture(), eq("eu-west-1"), isNull());
+        Map<String, Object> entry = captor.getValue().get(0);
+        assertFalse(entry.containsKey("Resources"));
+        assertEquals("{\"orderId\":\"o-1\"}", entry.get("Detail"));
+    }
+
+    @Test
+    void invokeTarget_eventBusTargetWithNonJsonInput_dropsWithoutPublishing() {
+        Target target = new Target("id1",
+                "arn:aws:events:eu-west-1:000000000000:event-bus/my-target-bus",
+                null, null);
+        target.setInputTransformer(new InputTransformer(
+                Map.of("bucket", "$.detail.bucket.name"),
+                "bucket=<bucket>"));
+
+        invoker.invokeTarget(target, "{\"source\":\"aws.s3\"}", "eu-west-1");
+
+        verify(eventBridgeService, never()).putEvents(anyList(), anyString(), any());
+    }
+
+    @Test
+    void invokeTarget_eventBusTargetWithoutEventBridgeService_skipsWithoutThrowing() {
+        EventBridgeInvoker bare = new EventBridgeInvoker(
+                mock(LambdaService.class),
+                sqsService,
+                mock(SnsService.class),
+                new ObjectMapper(),
+                mock(EmulatorConfig.class));
+        Target target = new Target("id1",
+                "arn:aws:events:eu-west-1:000000000000:event-bus/my-target-bus",
+                null, null);
+
+        assertDoesNotThrow(() -> bare.invokeTarget(target, "{\"detail\":{}}", "eu-west-1"));
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void invokeTarget_eventBusTargetInAnotherAccount_forwardsUnderArnAccount() {
+        Target target = new Target("id1",
+                "arn:aws:events:eu-west-1:000000000002:event-bus/other-account-bus",
+                null, null);
+        String event = "{\"source\":\"myapp.orders\",\"detail-type\":\"Order.Created\","
+                + "\"detail\":{\"orderId\":\"o-1\"}}";
+
+        invoker.invokeTarget(target, event, "eu-west-1");
+
+        ArgumentCaptor<List<Map<String, Object>>> captor = ArgumentCaptor.forClass(List.class);
+        verify(eventBridgeService).putEvents(captor.capture(), eq("eu-west-1"), eq("000000000002"));
+        assertEquals("arn:aws:events:eu-west-1:000000000002:event-bus/other-account-bus",
+                captor.getValue().get(0).get("EventBusName"));
+    }
+
+    @Test
+    void invokeTarget_eventBusTargetInSameAccount_forwardsWithNullAccount() {
+        Target target = new Target("id1",
+                "arn:aws:events:eu-west-1:000000000000:event-bus/my-target-bus",
+                null, null);
+
+        invoker.invokeTarget(target, "{\"source\":\"s\",\"detail\":{}}", "eu-west-1");
+
+        verify(eventBridgeService).putEvents(anyList(), eq("eu-west-1"), isNull());
+    }
+
+    @Test
+    void invokeTarget_eventBusTargetWithAccountlessArn_forwardsWithNullAccount() {
+        Target target = new Target("id1",
+                "arn:aws:events:eu-west-1::event-bus/my-target-bus",
+                null, null);
+
+        // Distinct from the same-account case: accountId() is "" here, not null.
+        invoker.invokeTarget(target, "{\"source\":\"s\",\"detail\":{}}", "eu-west-1");
+
+        verify(eventBridgeService).putEvents(anyList(), eq("eu-west-1"), isNull());
+    }
+
+    @Test
+    void invokeTarget_eventBusTargetWithScalarJsonInput_dropsWithoutPublishing() {
+        Target target = new Target("id1",
+                "arn:aws:events:eu-west-1:000000000000:event-bus/my-target-bus",
+                "\"hello\"", null);
+
+        invoker.invokeTarget(target, "{\"source\":\"myapp.orders\",\"detail\":{}}", "eu-west-1");
+
+        verify(eventBridgeService, never()).putEvents(anyList(), anyString(), any());
+    }
+
+    @Test
+    void invokeTarget_eventBusTargetWithArrayInput_dropsWithoutPublishing() {
+        Target target = new Target("id1",
+                "arn:aws:events:eu-west-1:000000000000:event-bus/my-target-bus",
+                "[1,2]", null);
+
+        invoker.invokeTarget(target, "{\"source\":\"myapp.orders\",\"detail\":{}}", "eu-west-1");
+
+        verify(eventBridgeService, never()).putEvents(anyList(), anyString(), any());
+    }
+
+    @Test
+    void invokeTarget_eventBusTargetWithNumericInput_dropsWithoutPublishing() {
+        Target target = new Target("id1",
+                "arn:aws:events:eu-west-1:000000000000:event-bus/my-target-bus",
+                "123", null);
+
+        invoker.invokeTarget(target, "{\"source\":\"myapp.orders\",\"detail\":{}}", "eu-west-1");
+
+        verify(eventBridgeService, never()).putEvents(anyList(), anyString(), any());
+    }
+
+    @Test
+    void invokeTarget_eventBusTargetWithScalarEnvelopeDetail_dropsWithoutPublishing() {
+        Target target = new Target("id1",
+                "arn:aws:events:eu-west-1:000000000000:event-bus/my-target-bus",
+                null, null);
+        // No input override: the scalar arrives on the envelope itself, which the
+        // PutEvents handler permits today.
+        String event = "{\"source\":\"myapp.orders\",\"detail-type\":\"Order.Created\","
+                + "\"detail\":\"hello\"}";
+
+        invoker.invokeTarget(target, event, "eu-west-1");
+
+        verify(eventBridgeService, never()).putEvents(anyList(), anyString(), any());
     }
 }

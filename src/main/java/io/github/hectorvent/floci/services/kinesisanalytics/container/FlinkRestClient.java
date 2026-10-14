@@ -128,6 +128,38 @@ public class FlinkRestClient {
         }
     }
 
+    /**
+     * True once the job is {@code RUNNING} and every vertex's tasks are deployed ({@code RUNNING}, or
+     * {@code FINISHED} for bounded sources). Flink flips the job to {@code RUNNING} while tasks are
+     * still {@code DEPLOYING}/{@code INITIALIZING}, and a savepoint triggered in that window fails with
+     * "Not all required tasks are currently running".
+     */
+    public boolean jobFullyRunning(String restBase, String jobId) {
+        try {
+            HttpResponse<String> resp = http.send(
+                    HttpRequest.newBuilder(URI.create(restBase + "/jobs/" + jobId))
+                            .timeout(Duration.ofSeconds(5)).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            return resp.statusCode() == 200 && jobFullyRunning(mapper.readTree(resp.body()));
+        } catch (Exception e) {
+            LOG.debugf("Flink /jobs/%s probe on %s failed: %s", jobId, restBase, e.toString());
+            return false;
+        }
+    }
+
+    static boolean jobFullyRunning(JsonNode job) {
+        if (!"RUNNING".equals(job.path("state").asText(null))) {
+            return false;
+        }
+        for (JsonNode vertex : job.path("vertices")) {
+            String status = vertex.path("status").asText("");
+            if (!"RUNNING".equals(status) && !"FINISHED".equals(status)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /** Best-effort cancel via {@code PATCH /jobs/:id?mode=cancel}. */
     public void cancelJob(String restBase, String jobId) {
         try {
@@ -177,12 +209,7 @@ public class FlinkRestClient {
             if (resp.statusCode() != 200) {
                 return null;
             }
-            var root = mapper.readTree(resp.body());
-            String statusId = root.path("status").path("id").asText(null);
-            var operation = root.path("operation");
-            boolean failed = operation.has("failure-cause");
-            String location = operation.path("location").asText(null);
-            return new SavepointStatus(statusId, location, failed);
+            return parseSavepointStatus(mapper.readTree(resp.body()));
         } catch (Exception e) {
             LOG.debugf("Flink savepoint status probe (job %s, request %s) on %s failed: %s",
                     jobId, requestId, restBase, e.toString());
@@ -190,8 +217,26 @@ public class FlinkRestClient {
         }
     }
 
+    static SavepointStatus parseSavepointStatus(JsonNode root) {
+        String statusId = root.path("status").path("id").asText(null);
+        JsonNode operation = root.path("operation");
+        boolean failed = operation.has("failure-cause");
+        String location = operation.path("location").asText(null);
+        String failureCause = failed ? operation.path("failure-cause").path("stack-trace").asText("") : null;
+        return new SavepointStatus(statusId, location, failed, failureCause);
+    }
+
     /** {@code statusId}: Flink's async-operation status ({@code IN_PROGRESS}/{@code COMPLETED}).
      *  {@code location}: the savepoint's path once completed successfully. {@code failed}: true when
-     *  Flink reports a {@code failure-cause} (the savepoint itself failed, as opposed to still running). */
-    public record SavepointStatus(String statusId, String location, boolean failed) {}
+     *  Flink reports a {@code failure-cause} (the savepoint itself failed, as opposed to still running).
+     *  {@code failureCause}: Flink's reported stack trace when {@code failed}. */
+    public record SavepointStatus(String statusId, String location, boolean failed, String failureCause) {
+
+        /** Flink aborted the savepoint because some tasks were not (yet) running — retryable. */
+        public boolean tasksNotRunning() {
+            return failed && failureCause != null
+                    && (failureCause.contains("Not all required tasks are currently running")
+                            || failureCause.contains("NOT_ALL_REQUIRED_TASKS_RUNNING"));
+        }
+    }
 }

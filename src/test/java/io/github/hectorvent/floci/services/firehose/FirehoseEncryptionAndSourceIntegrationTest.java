@@ -63,7 +63,7 @@ class FirehoseEncryptionAndSourceIntegrationTest {
             .statusCode(200)
             .body("DeliveryStreamDescription.DeliveryStreamType", equalTo("DirectPut"))
             .body("DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration.Status", equalTo("DISABLED"))
-            .body("DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration.KeyType", nullValue())
+            .body("DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration.KeyType", equalTo("AWS_OWNED_CMK"))
             .body("DeliveryStreamDescription.Source", nullValue());
     }
 
@@ -114,7 +114,7 @@ class FirehoseEncryptionAndSourceIntegrationTest {
         .then()
             .statusCode(200)
             .body("DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration.Status", equalTo("DISABLED"))
-            .body("DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration.KeyType", nullValue());
+            .body("DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration.KeyType", equalTo("AWS_OWNED_CMK"));
     }
 
     @Test

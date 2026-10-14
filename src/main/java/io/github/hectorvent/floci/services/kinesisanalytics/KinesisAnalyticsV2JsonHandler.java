@@ -5,14 +5,20 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsErrorResponse;
+import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.services.kinesisanalytics.model.ApplicationStatus;
 import io.github.hectorvent.floci.services.kinesisanalytics.model.FlinkApplication;
 import io.github.hectorvent.floci.services.kinesisanalytics.model.Snapshot;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -51,6 +57,14 @@ public class KinesisAnalyticsV2JsonHandler {
             case "DescribeApplicationSnapshot" -> handleDescribeApplicationSnapshot(request);
             case "ListApplicationSnapshots" -> handleListApplicationSnapshots(request);
             case "DeleteApplicationSnapshot" -> handleDeleteApplicationSnapshot(request);
+            case "UpdateApplicationMaintenanceConfiguration" -> handleMaintenance(request);
+            case "AddApplicationCloudWatchLoggingOption" -> handleLoggingOption(request, false);
+            case "DeleteApplicationCloudWatchLoggingOption" -> handleLoggingOption(request, true);
+            case "ListApplicationVersions" -> handleListVersions(request);
+            case "DescribeApplicationVersion" -> handleDescribeVersion(request);
+            case "ListApplicationOperations" -> handleListOperations(request);
+            case "DescribeApplicationOperation" -> handleDescribeOperation(request);
+            case "RollbackApplication" -> handleRollback(request);
             default -> Response.status(400)
                     .entity(new AwsErrorResponse("UnsupportedOperation",
                             "Operation " + action + " is not supported."))
@@ -83,8 +97,138 @@ public class KinesisAnalyticsV2JsonHandler {
         FlinkApplication app = service.createApplication(applicationName, runtimeEnvironment,
                 serviceExecutionRole, applicationDescription, applicationMode,
                 codeBucket, codeKey, codeVersion, parallelism, parseTags(request.path("Tags")),
-                environmentProperties, snapshotsEnabled);
+                environmentProperties, snapshotsEnabled, appConfig.path("FlinkApplicationConfiguration"),
+                parseLoggingStreams(request.path("CloudWatchLoggingOptions")));
         return applicationDetailResponse(app);
+    }
+
+    private Response handleMaintenance(JsonNode request) {
+        FlinkApplication app = service.updateMaintenance(request.path("ApplicationName").asText(null),
+                request.path("ApplicationMaintenanceConfigurationUpdate")
+                        .path("ApplicationMaintenanceWindowStartTimeUpdate").asText(null));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("ApplicationARN", app.getApplicationArn());
+        response.set("ApplicationMaintenanceConfigurationDescription", maintenanceNode(app));
+        return Response.ok(response).build();
+    }
+
+    private Response handleLoggingOption(JsonNode request, boolean delete) {
+        String name = request.path("ApplicationName").asText(null);
+        Long version = optionalLong(request, "CurrentApplicationVersionId");
+        String token = request.path("ConditionalToken").asText(null);
+        FlinkApplication app = delete
+                ? service.deleteLoggingOption(name, version, token, request.path("CloudWatchLoggingOptionId").asText(null))
+                : service.addLoggingOption(name, version, token,
+                        request.path("CloudWatchLoggingOption").path("LogStreamARN").asText(null));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("ApplicationARN", app.getApplicationArn());
+        response.put("ApplicationVersionId", app.getApplicationVersionId());
+        response.set("CloudWatchLoggingOptionDescriptions", loggingOptionsNode(app));
+        List<String> ids = new ArrayList<>(app.getOperations().keySet());
+        response.put("OperationId", ids.getLast());
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeVersion(JsonNode request) {
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("ApplicationVersionDetail", applicationDetailNode(service.describeApplicationVersion(
+                request.path("ApplicationName").asText(null), optionalLong(request, "ApplicationVersionId"))));
+        return Response.ok(response).build();
+    }
+
+    private Response handleListVersions(JsonNode request) {
+        String name = request.path("ApplicationName").asText(null);
+        List<ObjectNode> versions = service.listApplicationVersions(name).stream().map(app ->
+                objectMapper.createObjectNode().put("ApplicationVersionId", app.getApplicationVersionId())
+                        .put("ApplicationStatus", app.getApplicationStatus().name())).toList();
+        return page(request, "ApplicationVersionSummaries", versions, applicationScope(name) + ":versions");
+    }
+
+    private Response handleListOperations(JsonNode request) {
+        String name = request.path("ApplicationName").asText(null);
+        String operation = request.path("Operation").asText(null);
+        String status = request.path("OperationStatus").asText(null);
+        if (status != null && !List.of("IN_PROGRESS", "CANCELLED", "SUCCESSFUL", "FAILED").contains(status)) {
+            throw new AwsException("InvalidArgumentException", "Invalid OperationStatus", 400);
+        }
+        List<ObjectNode> operations = service.listApplicationOperations(name, operation, status);
+        operations.forEach(info -> info.remove("ApplicationVersionChangeDetails"));
+        return page(request, "ApplicationOperationInfoList", operations,
+                applicationScope(name) + ":operations:" + operation + ":" + status);
+    }
+
+    private Response handleDescribeOperation(JsonNode request) {
+        ObjectNode operation = service.describeApplicationOperation(request.path("ApplicationName").asText(null),
+                request.path("OperationId").asText(null));
+        operation.remove("OperationId");
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("ApplicationOperationInfoDetails", operation);
+        return Response.ok(response).build();
+    }
+
+    private Response handleRollback(JsonNode request) {
+        service.rollbackApplication(request.path("ApplicationName").asText(null),
+                optionalLong(request, "CurrentApplicationVersionId"));
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private String applicationScope(String name) {
+        FlinkApplication app = service.describeApplication(name);
+        return app.getApplicationArn() + ":" + app.getCreateTimestamp();
+    }
+
+    private Response page(JsonNode request, String field, List<ObjectNode> values, String scope) {
+        Long requested = optionalLong(request, "Limit");
+        if (requested != null && (requested < 1 || requested > 50)) {
+            throw new AwsException("InvalidArgumentException", "Limit must be between 1 and 50", 400);
+        }
+        int limit = requested == null ? 50 : requested.intValue();
+        int start = 0;
+        if (request.has("NextToken")) {
+            try {
+                String token = new String(Base64.getUrlDecoder().decode(request.path("NextToken").asText()),
+                        StandardCharsets.UTF_8);
+                String prefix = scope + "|";
+                if (!token.startsWith(prefix)) {
+                    throw new IllegalArgumentException("Token scope mismatch");
+                }
+                start = Integer.parseInt(token.substring(prefix.length()));
+                if (start < 1 || start >= values.size()) {
+                    throw new IllegalArgumentException("Token is out of range");
+                }
+            } catch (IllegalArgumentException invalid) {
+                throw new AwsException("InvalidArgumentException", "Invalid NextToken", 400);
+            }
+        }
+        ObjectNode response = objectMapper.createObjectNode();
+        int end = Math.min(values.size(), start + limit);
+        ArrayNode array = response.putArray(field);
+        values.subList(start, end).forEach(array::add);
+        if (end < values.size()) {
+            response.put("NextToken", Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString((scope + "|" + end).getBytes(StandardCharsets.UTF_8)));
+        }
+        return Response.ok(response).build();
+    }
+
+    private static Long optionalLong(JsonNode request, String field) {
+        if (!request.hasNonNull(field)) {
+            return null;
+        }
+        JsonNode value = request.get(field);
+        if (!value.isIntegralNumber() || !value.canConvertToLong()) {
+            throw new AwsException("InvalidArgumentException", field + " must be an integer", 400);
+        }
+        return value.longValue();
+    }
+
+    private List<String> parseLoggingStreams(JsonNode options) {
+        List<String> streams = new ArrayList<>();
+        if (!options.isMissingNode() && !options.isArray()) {
+            throw new AwsException("InvalidArgumentException", "CloudWatchLoggingOptions must be an array", 400);
+        }
+        options.forEach(option -> streams.add(option.path("LogStreamARN").asText(null)));
+        return streams;
     }
 
     private Response handleCreateApplicationPresignedUrl(JsonNode request) {
@@ -132,6 +276,7 @@ public class KinesisAnalyticsV2JsonHandler {
 
     private Response handleStartApplication(JsonNode request) {
         String applicationName = request.path("ApplicationName").asText(null);
+        service.validateRestore(applicationName, request.path("RunConfiguration").path("ApplicationRestoreConfiguration"));
         service.startApplication(applicationName);
         // AWS StartApplication returns an empty body.
         return Response.ok(objectMapper.createObjectNode()).build();
@@ -146,11 +291,8 @@ public class KinesisAnalyticsV2JsonHandler {
 
     private Response handleUpdateApplication(JsonNode request) {
         String applicationName = request.path("ApplicationName").asText(null);
-        // CurrentApplicationVersionId gates the update (optimistic concurrency); the service rejects a
-        // stale or missing value.
-        Long currentVersionId = request.hasNonNull("CurrentApplicationVersionId")
-                ? request.path("CurrentApplicationVersionId").asLong()
-                : null;
+        // The service validates the version or conditional token before mutating configuration.
+        Long currentVersionId = optionalLong(request, "CurrentApplicationVersionId");
         String serviceExecutionRole = request.path("ServiceExecutionRoleUpdate").asText(null);
 
         // ApplicationConfigurationUpdate.ApplicationCodeConfigurationUpdate.CodeContentUpdate
@@ -170,8 +312,32 @@ public class KinesisAnalyticsV2JsonHandler {
         Boolean snapshotsEnabled = snapshotsEnabledUpdate.isMissingNode() || snapshotsEnabledUpdate.isNull()
                 ? null : snapshotsEnabledUpdate.asBoolean();
 
-        return applicationDetailResponse(service.updateApplication(applicationName, currentVersionId,
-                serviceExecutionRole, codeBucket, codeKey, codeVersion, parallelism, snapshotsEnabled));
+        JsonNode propertyUpdates = appCfgUpdate.path("EnvironmentPropertyUpdates");
+        if (!propertyUpdates.isMissingNode() && !propertyUpdates.path("PropertyGroups").isArray()) {
+            throw new AwsException("InvalidArgumentException", "PropertyGroups must be an array", 400);
+        }
+        Map<String, Map<String, String>> properties = propertyUpdates.isMissingNode()
+                ? null : parsePropertyGroups(propertyUpdates.path("PropertyGroups"));
+        if (request.has("CloudWatchLoggingOptionUpdates") && !request.get("CloudWatchLoggingOptionUpdates").isArray()) {
+            throw new AwsException("InvalidArgumentException", "CloudWatchLoggingOptionUpdates must be an array", 400);
+        }
+        Map<String, String> loggingUpdates = new LinkedHashMap<>();
+        for (JsonNode option : request.path("CloudWatchLoggingOptionUpdates")) {
+            String id = option.path("CloudWatchLoggingOptionId").asText(null);
+            String stream = option.path("LogStreamARNUpdate").asText(null);
+            if (id == null || stream == null || loggingUpdates.put(id, stream) != null) {
+                throw new AwsException("InvalidArgumentException", "Invalid CloudWatchLoggingOptionUpdates", 400);
+            }
+        }
+        FlinkApplication app = service.updateApplication(applicationName, currentVersionId,
+                serviceExecutionRole, codeBucket, codeKey, codeVersion, parallelism, snapshotsEnabled,
+                properties, appCfgUpdate.path("FlinkApplicationConfigurationUpdate"),
+                request.path("RuntimeEnvironmentUpdate").asText(null),
+                request.path("ConditionalToken").asText(null), loggingUpdates);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("ApplicationDetail", applicationDetailNode(app));
+        response.put("OperationId", new ArrayList<>(app.getOperations().keySet()).getLast());
+        return Response.ok(response).build();
     }
 
     private Response handleDeleteApplication(JsonNode request) {
@@ -316,29 +482,59 @@ public class KinesisAnalyticsV2JsonHandler {
         if (app.getLastUpdateTimestamp() != null) {
             detail.put("LastUpdateTimestamp", app.getLastUpdateTimestamp().toEpochMilli() / 1000.0);
         }
-        if (app.hasCode()) {
-            detail.set("ApplicationConfigurationDescription", applicationConfigurationNode(app));
+        detail.set("ApplicationConfigurationDescription", applicationConfigurationNode(app));
+        detail.set("CloudWatchLoggingOptionDescriptions", loggingOptionsNode(app));
+        if (app.getMaintenanceWindowStartTime() != null) {
+            detail.set("ApplicationMaintenanceConfigurationDescription", maintenanceNode(app));
+        }
+        if (app.getConditionalToken() != null) {
+            detail.put("ConditionalToken", app.getConditionalToken());
         }
         return detail;
+    }
+
+    private ObjectNode maintenanceNode(FlinkApplication app) {
+        String start = app.getMaintenanceWindowStartTime();
+        return objectMapper.createObjectNode().put("ApplicationMaintenanceWindowStartTime", start)
+                .put("ApplicationMaintenanceWindowEndTime", LocalTime.parse(start).plusHours(8)
+                        .format(DateTimeFormatter.ofPattern("HH:mm")));
+    }
+
+    private ArrayNode loggingOptionsNode(FlinkApplication app) {
+        ArrayNode options = objectMapper.createArrayNode();
+        app.getCloudWatchLoggingOptions().forEach((id, stream) -> options.addObject()
+                .put("CloudWatchLoggingOptionId", id).put("LogStreamARN", stream));
+        return options;
     }
 
     private ObjectNode applicationConfigurationNode(FlinkApplication app) {
         ObjectNode config = objectMapper.createObjectNode();
 
-        ObjectNode codeDesc = config.putObject("ApplicationCodeConfigurationDescription");
-        codeDesc.put("CodeContentType", "ZIPFILE");
-        ObjectNode s3Desc = codeDesc.putObject("CodeContentDescription")
-                .putObject("S3ApplicationCodeLocationDescription");
-        s3Desc.put("BucketARN", "arn:aws:s3:::" + app.getCodeS3Bucket());
-        s3Desc.put("FileKey", app.getCodeS3Key());
-        if (app.getCodeS3ObjectVersion() != null) {
-            s3Desc.put("ObjectVersion", app.getCodeS3ObjectVersion());
+        if (app.hasCode()) {
+            ObjectNode codeDesc = config.putObject("ApplicationCodeConfigurationDescription");
+            codeDesc.put("CodeContentType", "ZIPFILE");
+            ObjectNode s3Desc = codeDesc.putObject("CodeContentDescription")
+                    .putObject("S3ApplicationCodeLocationDescription");
+            s3Desc.put("BucketARN", "arn:aws:s3:::" + app.getCodeS3Bucket());
+            s3Desc.put("FileKey", app.getCodeS3Key());
+            if (app.getCodeS3ObjectVersion() != null) {
+                s3Desc.put("ObjectVersion", app.getCodeS3ObjectVersion());
+            }
         }
 
-        config.putObject("FlinkApplicationConfigurationDescription")
-                .putObject("ParallelismConfigurationDescription")
-                .put("Parallelism", app.getParallelism())
-                .put("CurrentParallelism", app.getParallelism());
+        ObjectNode flink = config.putObject("FlinkApplicationConfigurationDescription");
+        app.getFlinkConfiguration().fields().forEachRemaining(entry ->
+                flink.set(entry.getKey() + "Description", entry.getValue().deepCopy()));
+        ObjectNode parallelism = flink.has("ParallelismConfigurationDescription")
+                ? (ObjectNode) flink.get("ParallelismConfigurationDescription")
+                : flink.putObject("ParallelismConfigurationDescription");
+        if (!parallelism.has("ConfigurationType")) {
+            parallelism.put("ConfigurationType", "DEFAULT");
+        }
+        parallelism.put("Parallelism", app.getParallelism());
+        if (app.getApplicationStatus() == ApplicationStatus.RUNNING) {
+            parallelism.put("CurrentParallelism", app.getParallelism());
+        }
 
         if (!app.getEnvironmentProperties().isEmpty()) {
             ArrayNode groups = config.putObject("EnvironmentPropertyDescriptions")
@@ -362,15 +558,23 @@ public class KinesisAnalyticsV2JsonHandler {
      *  that's how a Flink app looks a group up via {@code KinesisAnalyticsRuntime.getApplicationProperties()}. */
     private Map<String, Map<String, String>> parsePropertyGroups(JsonNode propertyGroupsNode) {
         Map<String, Map<String, String>> groups = new LinkedHashMap<>();
-        if (propertyGroupsNode != null && propertyGroupsNode.isArray()) {
+        if (propertyGroupsNode != null && !propertyGroupsNode.isMissingNode()) {
+            if (!propertyGroupsNode.isArray()) {
+                throw new AwsException("InvalidArgumentException", "PropertyGroups must be an array", 400);
+            }
             for (JsonNode group : propertyGroupsNode) {
                 String groupId = group.path("PropertyGroupId").asText(null);
-                if (groupId == null) {
-                    continue;
+                if (groupId == null || groupId.isBlank() || groups.containsKey(groupId)
+                        || !group.path("PropertyMap").isObject()) {
+                    throw new AwsException("InvalidArgumentException", "Invalid or duplicate property group", 400);
                 }
                 Map<String, String> properties = new LinkedHashMap<>();
-                group.path("PropertyMap").fields().forEachRemaining(
-                        entry -> properties.put(entry.getKey(), entry.getValue().asText(null)));
+                group.path("PropertyMap").fields().forEachRemaining(entry -> {
+                    if (!entry.getValue().isTextual()) {
+                        throw new AwsException("InvalidArgumentException", "Property values must be strings", 400);
+                    }
+                    properties.put(entry.getKey(), entry.getValue().textValue());
+                });
                 groups.put(groupId, properties);
             }
         }

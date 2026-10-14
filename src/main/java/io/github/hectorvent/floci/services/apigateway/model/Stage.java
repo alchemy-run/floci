@@ -15,7 +15,58 @@ public class Stage {
     private String deploymentId;
     private String description;
     private Map<String, String> variables = new HashMap<>();
+    private Map<String, String> tags = new HashMap<>();
     private Map<String, MethodSetting> methodSettings = new HashMap<>();
+    /** Stage-level cache switch; a method's own cachingEnabled only applies when this is on. */
+    private boolean cacheClusterEnabled;
+    private String cacheClusterSize;
+    private String cacheClusterStatus = "NOT_AVAILABLE";
+    private AccessLogSettings accessLogSettings;
+    private boolean tracingEnabled;
+
+    @RegisterForReflection
+    public record AccessLogSettings(String destinationArn, String format) {}
+
+    public AccessLogSettings getAccessLogSettings() {
+        return accessLogSettings;
+    }
+
+    public void setAccessLogSettings(AccessLogSettings accessLogSettings) {
+        this.accessLogSettings = accessLogSettings;
+    }
+
+    public boolean isTracingEnabled() {
+        return tracingEnabled;
+    }
+
+    public void setTracingEnabled(boolean tracingEnabled) {
+        this.tracingEnabled = tracingEnabled;
+    }
+
+    public boolean isCacheClusterEnabled() {
+        return cacheClusterEnabled;
+    }
+
+    public void setCacheClusterEnabled(boolean cacheClusterEnabled) {
+        this.cacheClusterEnabled = cacheClusterEnabled;
+        this.cacheClusterStatus = cacheClusterEnabled ? "AVAILABLE" : "NOT_AVAILABLE";
+    }
+
+    public String getCacheClusterSize() {
+        return cacheClusterSize;
+    }
+
+    public void setCacheClusterSize(String cacheClusterSize) {
+        this.cacheClusterSize = cacheClusterSize;
+    }
+
+    public String getCacheClusterStatus() {
+        return cacheClusterStatus;
+    }
+
+    public void setCacheClusterStatus(String cacheClusterStatus) {
+        this.cacheClusterStatus = cacheClusterStatus;
+    }
     private long createdDate;
     private long lastUpdatedDate;
 
@@ -49,6 +100,14 @@ public class Stage {
 
     public void setVariables(Map<String, String> variables) {
         this.variables = variables != null ? variables : new HashMap<>();
+    }
+
+    public Map<String, String> getTags() {
+        return tags;
+    }
+
+    public void setTags(Map<String, String> tags) {
+        this.tags = tags != null ? new HashMap<>(tags) : new HashMap<>();
     }
 
     public Map<String, MethodSetting> getMethodSettings() {

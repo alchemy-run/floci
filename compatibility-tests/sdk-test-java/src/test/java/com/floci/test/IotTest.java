@@ -4,30 +4,41 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.SdkBytes;
+import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.iot.IotClient;
 import software.amazon.awssdk.services.iot.model.AttributePayload;
 import software.amazon.awssdk.services.iot.model.AttachPolicyRequest;
 import software.amazon.awssdk.services.iot.model.AttachThingPrincipalRequest;
+import software.amazon.awssdk.services.iot.model.AuthorizerConfig;
+import software.amazon.awssdk.services.iot.model.CertificateMode;
 import software.amazon.awssdk.services.iot.model.CertificateStatus;
 import software.amazon.awssdk.services.iot.model.Action;
 import software.amazon.awssdk.services.iot.model.AddThingToThingGroupRequest;
 import software.amazon.awssdk.services.iot.model.CreateKeysAndCertificateRequest;
+import software.amazon.awssdk.services.iot.model.CreateDomainConfigurationRequest;
 import software.amazon.awssdk.services.iot.model.CreateJobRequest;
 import software.amazon.awssdk.services.iot.model.CreatePolicyRequest;
 import software.amazon.awssdk.services.iot.model.CreateThingGroupRequest;
 import software.amazon.awssdk.services.iot.model.CreateThingRequest;
 import software.amazon.awssdk.services.iot.model.CreateThingTypeRequest;
 import software.amazon.awssdk.services.iot.model.CreateTopicRuleRequest;
+import software.amazon.awssdk.services.iot.model.DeleteDomainConfigurationRequest;
 import software.amazon.awssdk.services.iot.model.DeleteThingGroupRequest;
 import software.amazon.awssdk.services.iot.model.DeleteTopicRuleRequest;
 import software.amazon.awssdk.services.iot.model.DeleteThingRequest;
 import software.amazon.awssdk.services.iot.model.DeleteThingTypeRequest;
 import software.amazon.awssdk.services.iot.model.DescribeCertificateRequest;
+import software.amazon.awssdk.services.iot.model.DescribeDomainConfigurationRequest;
 import software.amazon.awssdk.services.iot.model.DescribeEndpointRequest;
 import software.amazon.awssdk.services.iot.model.DescribeJobRequest;
 import software.amazon.awssdk.services.iot.model.DescribeThingRequest;
 import software.amazon.awssdk.services.iot.model.DescribeThingTypeRequest;
+import software.amazon.awssdk.services.iot.model.DomainConfigurationStatus;
+import software.amazon.awssdk.services.iot.model.DomainConfigurationSummary;
+import software.amazon.awssdk.services.iot.model.DomainType;
 import software.amazon.awssdk.services.iot.model.DisableTopicRuleRequest;
 import software.amazon.awssdk.services.iot.model.DeprecateThingTypeRequest;
 import software.amazon.awssdk.services.iot.model.DetachPolicyRequest;
@@ -35,7 +46,9 @@ import software.amazon.awssdk.services.iot.model.DetachThingPrincipalRequest;
 import software.amazon.awssdk.services.iot.model.EnableTopicRuleRequest;
 import software.amazon.awssdk.services.iot.model.GetPolicyRequest;
 import software.amazon.awssdk.services.iot.model.GetTopicRuleRequest;
+import software.amazon.awssdk.services.iot.model.InvalidRequestException;
 import software.amazon.awssdk.services.iot.model.ListCertificatesRequest;
+import software.amazon.awssdk.services.iot.model.ListDomainConfigurationsRequest;
 import software.amazon.awssdk.services.iot.model.ListJobExecutionsForThingRequest;
 import software.amazon.awssdk.services.iot.model.ListJobsRequest;
 import software.amazon.awssdk.services.iot.model.ListPoliciesRequest;
@@ -47,6 +60,8 @@ import software.amazon.awssdk.services.iot.model.ListThingPrincipalsRequest;
 import software.amazon.awssdk.services.iot.model.ListThingTypesRequest;
 import software.amazon.awssdk.services.iot.model.ListTopicRulesRequest;
 import software.amazon.awssdk.services.iot.model.RemoveThingFromThingGroupRequest;
+import software.amazon.awssdk.services.iot.model.ServerCertificateStatus;
+import software.amazon.awssdk.services.iot.model.ServiceType;
 import software.amazon.awssdk.services.iot.model.SqsAction;
 import software.amazon.awssdk.services.iot.model.ResourceAlreadyExistsException;
 import software.amazon.awssdk.services.iot.model.ResourceNotFoundException;
@@ -55,6 +70,8 @@ import software.amazon.awssdk.services.iot.model.TagResourceRequest;
 import software.amazon.awssdk.services.iot.model.ThingGroupProperties;
 import software.amazon.awssdk.services.iot.model.ThingTypeProperties;
 import software.amazon.awssdk.services.iot.model.TopicRulePayload;
+import software.amazon.awssdk.services.iot.model.UnauthorizedException;
+import software.amazon.awssdk.services.iot.model.UpdateDomainConfigurationRequest;
 import software.amazon.awssdk.services.iot.model.UntagResourceRequest;
 import software.amazon.awssdk.services.iot.model.UpdateCertificateRequest;
 import software.amazon.awssdk.services.iot.model.UpdateThingRequest;
@@ -83,8 +100,10 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -107,6 +126,204 @@ class IotTest {
                 .build());
 
         assertThat(response.endpointAddress()).isNotBlank();
+    }
+
+    @Test
+    void describedEndpointServesSignedDataPlaneRequests() {
+        String address = iot.describeEndpoint(r -> r.endpointType("iot:Data-ATS")).endpointAddress();
+        // AWS returns a bare hostname (<prefix>-ats.iot.<region>.amazonaws.com) and the client picks
+        // the port. Floci's embedded DNS, injected into this container, resolves it to Floci.
+        URI gateway = TestFixtures.endpoint();
+        String authority = address.contains(":") || gateway.getPort() < 0 ? address : address + ":" + gateway.getPort();
+        URI endpoint = URI.create(gateway.getScheme() + "://" + authority);
+        String topic = "devices/java-iot/endpoint-route";
+        try (IotDataPlaneClient data = IotDataPlaneClient.builder()
+                .endpointOverride(endpoint).region(Region.US_EAST_1)
+                .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test")))
+                .build()) {
+            try {
+                long before = System.currentTimeMillis();
+                data.publish(r -> r.topic(topic).retain(true).payload(SdkBytes.fromUtf8String("routable-endpoint")));
+                var retained = data.getRetainedMessage(r -> r.topic(topic));
+                assertThat(retained.payload().asUtf8String()).isEqualTo("routable-endpoint");
+                assertThat(retained.lastModifiedTime()).isBetween(before, System.currentTimeMillis());
+                assertThat(data.listRetainedMessages(r -> {}).retainedTopics()).anySatisfy(message -> {
+                    assertThat(message.topic()).isEqualTo(topic);
+                    assertThat(message.lastModifiedTime()).isEqualTo(retained.lastModifiedTime());
+                });
+            } finally {
+                data.publish(r -> r.topic(topic).retain(true).payload(SdkBytes.fromByteArray(new byte[0])));
+            }
+        }
+    }
+
+    @Test
+    void missingTopicRuleUsesTheSdkUnauthorizedException() {
+        String name = "java_missing_topic_rule_wire";
+        assertThatThrownBy(() -> iot.getTopicRule(r -> r.ruleName(name)))
+                .isInstanceOfSatisfying(UnauthorizedException.class, error -> {
+                    assertThat(error.statusCode()).isEqualTo(401);
+                    assertThat(error.awsErrorDetails().errorMessage()).isEqualTo("Access to topic rule '" + name + "' was denied");
+                });
+        assertThatThrownBy(() -> iot.deleteTopicRule(r -> r.ruleName(name)))
+                .isInstanceOfSatisfying(UnauthorizedException.class, error -> {
+                    assertThat(error.statusCode()).isEqualTo(401);
+                    assertThat(error.awsErrorDetails().errorMessage()).contains("Access to topic rule");
+                });
+    }
+
+    @Test
+    void signedTopicRuleOperationsRespectAccountAndRegionOwnership() {
+        String name = "java_topic_rule_ownership";
+        TopicRulePayload payload = TopicRulePayload.builder().sql("SELECT * FROM 'devices/java-iot/ownership'")
+                .actions(Action.builder().republish(r -> r.topic("devices/java-iot/ownership-target")
+                        .roleArn("arn:aws:iam::000000000000:role/iot-rule-role")).build())
+                .build();
+        iot.createTopicRule(r -> r.ruleName(name).topicRulePayload(payload));
+        String ownedArn = iot.getTopicRule(r -> r.ruleName(name)).ruleArn();
+        try (IotClient otherAccount = IotClient.builder()
+                    .endpointOverride(TestFixtures.endpoint()).region(Region.US_EAST_1)
+                    .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create("111111111111", "test")))
+                    .build();
+             IotClient otherRegion = IotClient.builder()
+                    .endpointOverride(TestFixtures.endpoint()).region(Region.EU_WEST_1)
+                    .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test")))
+                    .build()) {
+            for (IotClient foreign : List.of(otherAccount, otherRegion)) {
+                assertThatThrownBy(() -> foreign.getTopicRule(r -> r.ruleName(name)))
+                        .isInstanceOf(UnauthorizedException.class);
+                assertThatThrownBy(() -> foreign.deleteTopicRule(r -> r.ruleName(name)))
+                        .isInstanceOf(UnauthorizedException.class);
+                assertThat(foreign.listTopicRules(r -> {}).rules()).noneMatch(rule -> name.equals(rule.ruleName()));
+                foreign.createTopicRule(r -> r.ruleName(name).topicRulePayload(payload));
+                try {
+                    assertThatThrownBy(() -> foreign.listTagsForResource(r -> r.resourceArn(ownedArn)))
+                            .isInstanceOf(ResourceNotFoundException.class);
+                    assertThatThrownBy(() -> foreign.tagResource(r -> r.resourceArn(ownedArn)
+                            .tags(Tag.builder().key("foreign").value("blocked").build())))
+                            .isInstanceOf(ResourceNotFoundException.class);
+                    assertThatThrownBy(() -> foreign.untagResource(r -> r.resourceArn(ownedArn).tagKeys("owner")))
+                            .isInstanceOf(ResourceNotFoundException.class);
+                    String foreignArn = foreign.getTopicRule(r -> r.ruleName(name)).ruleArn();
+                    assertThat(foreign.listTagsForResource(r -> r.resourceArn(foreignArn)).tags()).isEmpty();
+                } finally {
+                    foreign.deleteTopicRule(r -> r.ruleName(name));
+                }
+            }
+            assertThat(iot.getTopicRule(r -> r.ruleName(name)).ruleArn()).isEqualTo(ownedArn);
+            assertThat(iot.listTagsForResource(r -> r.resourceArn(ownedArn)).tags()).isEmpty();
+        } finally {
+            iot.deleteTopicRule(r -> r.ruleName(name));
+        }
+    }
+
+    @Test
+    void domainConfigurationLifecycle() {
+        String name = "java-iot-domain";
+        String certificateArn = "arn:aws:acm:us-east-1:000000000000:certificate/11111111-1111-1111-1111-111111111111";
+        boolean leftOver = iot.listDomainConfigurations(ListDomainConfigurationsRequest.builder().build())
+                .domainConfigurations().stream()
+                .anyMatch(summary -> name.equals(summary.domainConfigurationName()));
+        if (leftOver) {
+            iot.updateDomainConfiguration(UpdateDomainConfigurationRequest.builder()
+                    .domainConfigurationName(name)
+                    .domainConfigurationStatus(DomainConfigurationStatus.DISABLED)
+                    .build());
+            iot.deleteDomainConfiguration(DeleteDomainConfigurationRequest.builder().domainConfigurationName(name).build());
+        }
+
+        assertThatThrownBy(() -> iot.describeDomainConfiguration(DescribeDomainConfigurationRequest.builder()
+                .domainConfigurationName(name)
+                .build()))
+                .isInstanceOf(ResourceNotFoundException.class);
+
+        var managed = iot.describeDomainConfiguration(DescribeDomainConfigurationRequest.builder()
+                .domainConfigurationName("iot:Data-ATS")
+                .build());
+        assertThat(managed.domainType()).isEqualTo(DomainType.AWS_MANAGED);
+        assertThat(managed.domainConfigurationStatus()).isEqualTo(DomainConfigurationStatus.ENABLED);
+        assertThat(managed.domainName()).isNotBlank();
+
+        var created = iot.createDomainConfiguration(CreateDomainConfigurationRequest.builder()
+                .domainConfigurationName(name)
+                .domainName("iot.java.example.com")
+                .serverCertificateArns(certificateArn)
+                .serviceType(ServiceType.DATA)
+                .authorizerConfig(AuthorizerConfig.builder()
+                        .defaultAuthorizerName("java-authorizer")
+                        .allowAuthorizerOverride(true)
+                        .build())
+                .tags(Tag.builder().key("env").value("java").build())
+                .build());
+        assertThat(created.domainConfigurationName()).isEqualTo(name);
+        assertThat(created.domainConfigurationArn())
+                .startsWith("arn:aws:iot:us-east-1:000000000000:domainconfiguration/" + name + "/");
+
+        assertThatThrownBy(() -> iot.createDomainConfiguration(CreateDomainConfigurationRequest.builder()
+                .domainConfigurationName(name)
+                .domainName("iot.java.example.com")
+                .serverCertificateArns(certificateArn)
+                .build()))
+                .isInstanceOf(ResourceAlreadyExistsException.class);
+
+        var described = iot.describeDomainConfiguration(DescribeDomainConfigurationRequest.builder()
+                .domainConfigurationName(name)
+                .build());
+        assertThat(described.domainConfigurationArn()).isEqualTo(created.domainConfigurationArn());
+        assertThat(described.domainName()).isEqualTo("iot.java.example.com");
+        assertThat(described.domainConfigurationStatus()).isEqualTo(DomainConfigurationStatus.ENABLED);
+        assertThat(described.serviceType()).isEqualTo(ServiceType.DATA);
+        assertThat(described.domainType()).isEqualTo(DomainType.CUSTOMER_MANAGED);
+        assertThat(described.serverCertificates()).hasSize(1);
+        assertThat(described.serverCertificates().get(0).serverCertificateArn()).isEqualTo(certificateArn);
+        assertThat(described.serverCertificates().get(0).serverCertificateStatus()).isEqualTo(ServerCertificateStatus.VALID);
+        assertThat(described.authorizerConfig().defaultAuthorizerName()).isEqualTo("java-authorizer");
+        assertThat(described.authorizerConfig().allowAuthorizerOverride()).isTrue();
+        assertThat(described.lastStatusChangeDate()).isNotNull();
+        assertThat(described.tlsConfig().securityPolicy()).isEqualTo("IoTSecurityPolicy_TLS13_1_2_2022_10");
+
+        var enabled = iot.updateDomainConfiguration(UpdateDomainConfigurationRequest.builder()
+                .domainConfigurationName(name)
+                .domainConfigurationStatus(DomainConfigurationStatus.ENABLED)
+                .build());
+        assertThat(enabled.domainConfigurationArn()).isEqualTo(created.domainConfigurationArn());
+        assertThat(iot.describeDomainConfiguration(DescribeDomainConfigurationRequest.builder()
+                .domainConfigurationName(name)
+                .build()).domainConfigurationStatus())
+                .isEqualTo(DomainConfigurationStatus.ENABLED);
+
+        var tags = iot.listTagsForResource(ListTagsForResourceRequest.builder()
+                .resourceArn(created.domainConfigurationArn())
+                .build());
+        assertThat(tags.tags()).extracting(Tag::key).contains("env");
+
+        var listed = iot.listDomainConfigurations(ListDomainConfigurationsRequest.builder()
+                .serviceType(ServiceType.DATA)
+                .build());
+        assertThat(listed.domainConfigurations())
+                .extracting(DomainConfigurationSummary::domainConfigurationName)
+                .contains(name);
+
+        assertThatThrownBy(() -> iot.deleteDomainConfiguration(DeleteDomainConfigurationRequest.builder()
+                .domainConfigurationName(name)
+                .build()))
+                .isInstanceOf(InvalidRequestException.class);
+
+        var updated = iot.updateDomainConfiguration(UpdateDomainConfigurationRequest.builder()
+                .domainConfigurationName(name)
+                .domainConfigurationStatus(DomainConfigurationStatus.DISABLED)
+                .build());
+        assertThat(updated.domainConfigurationArn()).isEqualTo(created.domainConfigurationArn());
+        assertThat(iot.describeDomainConfiguration(DescribeDomainConfigurationRequest.builder()
+                .domainConfigurationName(name)
+                .build()).domainConfigurationStatus())
+                .isEqualTo(DomainConfigurationStatus.DISABLED);
+
+        iot.deleteDomainConfiguration(DeleteDomainConfigurationRequest.builder().domainConfigurationName(name).build());
+        assertThatThrownBy(() -> iot.describeDomainConfiguration(DescribeDomainConfigurationRequest.builder()
+                .domainConfigurationName(name)
+                .build()))
+                .isInstanceOf(ResourceNotFoundException.class);
     }
 
     @Test
@@ -242,6 +459,11 @@ class IotTest {
                 .certificateId(cert.certificateId())
                 .build());
         assertThat(described.certificateDescription().status()).isEqualTo(CertificateStatus.ACTIVE);
+        assertThat(described.certificateDescription().certificateMode()).isEqualTo(CertificateMode.DEFAULT);
+        assertThat(described.certificateDescription().validity().notAfter())
+                .isEqualTo(java.time.Instant.parse("2049-12-31T23:59:59Z"));
+        assertThat(cert.certificateId()).matches("[0-9a-f]{64}");
+        assertThat(cert.keyPair().privateKey()).startsWith("-----BEGIN RSA PRIVATE KEY-----");
 
         var certs = iot.listCertificates(ListCertificatesRequest.builder().build());
         assertThat(certs.certificates()).anyMatch(item -> cert.certificateArn().equals(item.certificateArn()));
@@ -406,18 +628,33 @@ class IotTest {
             iot.deleteThingType(DeleteThingTypeRequest.builder().thingTypeName(thingType).build());
         } catch (Exception ignored) {
         }
+        try {
+            // A type left by an earlier run inside its five-minute deletion window is reactivated instead.
+            iot.deprecateThingType(DeprecateThingTypeRequest.builder().thingTypeName(thingType).undoDeprecate(true).build());
+        } catch (Exception ignored) {
+        }
 
         var jobsEndpoint = iot.describeEndpoint(DescribeEndpointRequest.builder().endpointType("iot:Jobs").build());
         assertThat(jobsEndpoint.endpointAddress()).isNotBlank();
 
-        var createdType = iot.createThingType(CreateThingTypeRequest.builder()
-                .thingTypeName(thingType)
-                .thingTypeProperties(ThingTypeProperties.builder()
-                        .thingTypeDescription("java type")
-                        .searchableAttributes("model")
-                        .build())
-                .build());
-        assertThat(createdType.thingTypeName()).isEqualTo(thingType);
+        ThingTypeProperties initialTypeProperties = ThingTypeProperties.builder()
+                .thingTypeDescription("java type")
+                .searchableAttributes("model")
+                .build();
+        String createdTypeName;
+        try {
+            createdTypeName = iot.createThingType(CreateThingTypeRequest.builder()
+                    .thingTypeName(thingType)
+                    .thingTypeProperties(initialTypeProperties)
+                    .build()).thingTypeName();
+        } catch (ResourceAlreadyExistsException e) {
+            iot.updateThingType(UpdateThingTypeRequest.builder()
+                    .thingTypeName(thingType)
+                    .thingTypeProperties(initialTypeProperties)
+                    .build());
+            createdTypeName = thingType;
+        }
+        assertThat(createdTypeName).isEqualTo(thingType);
         var describedType = iot.describeThingType(DescribeThingTypeRequest.builder().thingTypeName(thingType).build());
         assertThat(describedType.thingTypeProperties().thingTypeDescription()).isEqualTo("java type");
         assertThat(iot.listThingTypes(ListThingTypesRequest.builder().build()).thingTypes())
@@ -485,7 +722,9 @@ class IotTest {
         iot.deleteThingGroup(DeleteThingGroupRequest.builder().thingGroupName(groupName).build());
         iot.deleteThing(DeleteThingRequest.builder().thingName(thingName).build());
         iot.deprecateThingType(DeprecateThingTypeRequest.builder().thingTypeName(thingType).build());
-        iot.deleteThingType(DeleteThingTypeRequest.builder().thingTypeName(thingType).build());
+        // A deprecated thing type can only be deleted five minutes after its deprecation.
+        assertThatThrownBy(() -> iot.deleteThingType(DeleteThingTypeRequest.builder().thingTypeName(thingType).build()))
+                .isInstanceOf(InvalidRequestException.class);
     }
 
     @Test
@@ -547,7 +786,7 @@ class IotTest {
 
     private Socket mqttConnect(String clientId) throws IOException {
         Socket socket = new Socket();
-        socket.connect(new InetSocketAddress("floci", 1883), 5_000);
+        socket.connect(new InetSocketAddress(TestFixtures.proxyHost(), 1883), 5_000);
         socket.setSoTimeout(5_000);
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         mqttUtf8(body, "MQTT");
@@ -563,7 +802,7 @@ class IotTest {
 
     private Socket mqtt5Connect(String clientId) throws IOException {
         Socket socket = new Socket();
-        socket.connect(new InetSocketAddress("floci", 1883), 5_000);
+        socket.connect(new InetSocketAddress(TestFixtures.proxyHost(), 1883), 5_000);
         socket.setSoTimeout(5_000);
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         mqttUtf8(body, "MQTT");

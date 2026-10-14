@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.eventbridge;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import io.github.hectorvent.floci.core.common.AwsException;
@@ -7,13 +8,20 @@ import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.eventbridge.model.ApiDestination;
 import io.github.hectorvent.floci.services.eventbridge.model.Connection;
+import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.services.eventbridge.model.EventBus;
+import io.github.hectorvent.floci.services.eventbridge.model.Replay;
+import io.github.hectorvent.floci.services.eventbridge.model.ReplayState;
 import io.github.hectorvent.floci.services.eventbridge.model.Rule;
 import io.github.hectorvent.floci.services.eventbridge.model.RuleState;
 import io.github.hectorvent.floci.services.eventbridge.model.Target;
 import io.github.hectorvent.floci.services.resourcegroupstagging.ResourceGroupsTaggingService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
 
 import java.util.List;
 import java.util.Map;
@@ -21,6 +29,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 
 class EventBridgeServiceTest {
@@ -30,26 +39,45 @@ class EventBridgeServiceTest {
 
     private EventBridgeService service;
     private EventBridgeInvoker invokerMock;
+    private StorageBackend<String, Replay> replayStore;
+    private ReplayDispatcher replayDispatcherMock;
 
     @BeforeEach
     void setUp() {
         invokerMock = mock(EventBridgeInvoker.class);
+        replayStore = new InMemoryStorage<>();
+        replayDispatcherMock = mock(ReplayDispatcher.class);
         service = new EventBridgeService(
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
-                new InMemoryStorage<>(),
+                replayStore,
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
                 new RegionResolver("us-east-1", "000000000000"),
                 new ObjectMapper(),
                 null,
                 invokerMock,
-                null,
+                replayDispatcherMock,
                 new ResourceGroupsTaggingService(null)
         );
+    }
+
+    @Test
+    void cancelReplayForwardsTheStoredReplayArn() {
+        Replay replay = new Replay();
+        replay.setReplayName("shared");
+        replay.setReplayArn("arn:aws:events:us-east-1:111111111111:replay/shared");
+        replay.setState(ReplayState.RUNNING);
+        replayStore.put("replay:" + REGION + ":shared", replay);
+        when(replayDispatcherMock.requestCancel(replay.getReplayArn())).thenReturn(true);
+
+        Replay cancelled = service.cancelReplay("shared", REGION);
+
+        assertEquals(ReplayState.CANCELLING, cancelled.getState());
+        verify(replayDispatcherMock).requestCancel(replay.getReplayArn());
     }
 
     // ──────────────────────────── Event Buses ────────────────────────────
@@ -81,10 +109,54 @@ class EventBridgeServiceTest {
                 service.createEventBus("", null, null, REGION));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"default", "contains/slash", "contains space", "contains*star"})
+    void createEventBusRejectsInvalidCustomNames(String name) {
+        AwsException error = assertThrows(AwsException.class, () ->
+                service.createEventBus(name, null, null, REGION));
+        assertEquals("ValidationException", error.getErrorCode());
+        assertEquals(400, error.getHttpStatus());
+    }
+
+    @Test
+    void createEventBusRejectsLongNameAndDescription() {
+        assertThrows(AwsException.class, () ->
+                service.createEventBus("n".repeat(257), null, null, REGION));
+        assertThrows(AwsException.class, () ->
+                service.createEventBus("valid-name", "d".repeat(513), null, REGION));
+    }
+
+    @Test
+    void updateEventBusRejectsLongDescription() {
+        service.createEventBus("my-bus", null, null, REGION);
+        assertThrows(AwsException.class, () ->
+                service.updateEventBus(
+                        "my-bus", "d".repeat(513), null, null, null, REGION));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "contains space", "contains*star"})
+    void updateEventBusRejectsInvalidExplicitNames(String name) {
+        AwsException error = assertThrows(AwsException.class, () ->
+                service.updateEventBus(name, "description", null, null, null, REGION));
+        assertEquals("ValidationException", error.getErrorCode());
+        assertEquals(400, error.getHttpStatus());
+    }
+
+    @Test
+    void updateEventBusRejectsLongExplicitName() {
+        AwsException error = assertThrows(AwsException.class, () ->
+                service.updateEventBus(
+                        "n".repeat(257), "description", null, null, null, REGION));
+        assertEquals("ValidationException", error.getErrorCode());
+        assertEquals(400, error.getHttpStatus());
+    }
+
     @Test
     void deleteEventBus() {
         service.createEventBus("my-bus", null, null, REGION);
         service.deleteEventBus("my-bus", REGION);
+        assertDoesNotThrow(() -> service.deleteEventBus("my-bus", REGION));
 
         assertThrows(AwsException.class, () ->
                 service.describeEventBus("my-bus", REGION));
@@ -94,6 +166,28 @@ class EventBridgeServiceTest {
     void deleteDefaultBusThrows() {
         assertThrows(AwsException.class, () ->
                 service.deleteEventBus("default", REGION));
+    }
+
+    @Test
+    void deleteMissingEventBusIsIdempotent() {
+        assertDoesNotThrow(() -> service.deleteEventBus("missing-bus", REGION));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"contains space", "contains*star"})
+    void deleteEventBusRejectsInvalidNames(String name) {
+        AwsException error = assertThrows(
+                AwsException.class, () -> service.deleteEventBus(name, REGION));
+        assertEquals("ValidationException", error.getErrorCode());
+        assertEquals(400, error.getHttpStatus());
+    }
+
+    @Test
+    void deleteEventBusRejectsLongName() {
+        AwsException error = assertThrows(
+                AwsException.class, () -> service.deleteEventBus("n".repeat(257), REGION));
+        assertEquals("ValidationException", error.getErrorCode());
+        assertEquals(400, error.getHttpStatus());
     }
 
     @Test
@@ -157,12 +251,22 @@ class EventBridgeServiceTest {
     }
 
     @Test
-    void deleteRule() {
+    void deleteRuleIsIdempotent() {
         service.putRule("my-rule", null, null, "rate(1 minute)", RuleState.ENABLED,
                 null, null, null, REGION);
         service.deleteRule("my-rule", null, REGION);
+        assertDoesNotThrow(() -> service.deleteRule("my-rule", null, REGION));
 
         assertTrue(service.listRules(null, null, REGION).isEmpty());
+    }
+
+    @Test
+    void deleteRuleForMissingCustomBusThrowsResourceNotFound() {
+        AwsException error = assertThrows(AwsException.class, () ->
+                service.deleteRule("missing-rule", "missing-bus", REGION));
+
+        assertEquals("ResourceNotFoundException", error.getErrorCode());
+        assertEquals(400, error.getHttpStatus());
     }
 
     @Test
@@ -643,9 +747,9 @@ class EventBridgeServiceTest {
         EventBridgeService.PutEventsResult result = service.putEvents(entries, "eu-west-1");
         assertEquals(0, result.failedCount());
 
-        org.mockito.ArgumentCaptor<String> json = org.mockito.ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
         verify(invokerMock).invokeTarget(eq(target), json.capture(), eq("eu-west-1"));
-        com.fasterxml.jackson.databind.JsonNode envelope = OBJECT_MAPPER.readTree(json.getValue());
+        JsonNode envelope = OBJECT_MAPPER.readTree(json.getValue());
         assertEquals("eu-west-1", envelope.path("region").asText(),
                 "envelope.region should reflect the PutEvents call's region, not the resolver default");
         assertEquals("000000000000", envelope.path("account").asText());
@@ -671,9 +775,9 @@ class EventBridgeServiceTest {
 
         service.putEvents(List.of(entry), "us-west-2");
 
-        org.mockito.ArgumentCaptor<String> json = org.mockito.ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
         verify(invokerMock).invokeTarget(eq(target), json.capture(), eq("us-west-2"));
-        com.fasterxml.jackson.databind.JsonNode envelope = OBJECT_MAPPER.readTree(json.getValue());
+        JsonNode envelope = OBJECT_MAPPER.readTree(json.getValue());
         assertEquals("ap-northeast-1", envelope.path("region").asText(),
                 "entry.Region should win over the PutEvents call region");
         assertEquals("111111111111", envelope.path("account").asText(),
@@ -698,9 +802,9 @@ class EventBridgeServiceTest {
         service.putEvents(List.of(
                 Map.of("Source", "my.app", "DetailType", "Test", "Detail", "{}")), "eu-west-1");
 
-        org.mockito.ArgumentCaptor<String> json = org.mockito.ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
         verify(invokerMock).invokeTarget(eq(target), json.capture(), eq("eu-west-1"));
-        com.fasterxml.jackson.databind.JsonNode envelope = OBJECT_MAPPER.readTree(json.getValue());
+        JsonNode envelope = OBJECT_MAPPER.readTree(json.getValue());
         assertEquals("eu-west-1", envelope.path("region").asText(),
                 "envelope and pattern matching must agree on the entry's effective region");
     }
@@ -723,7 +827,7 @@ class EventBridgeServiceTest {
         service.putEvents(List.of(
                 Map.of("Source", "my.app", "DetailType", "Test", "Detail", "{}")), "eu-west-1");
 
-        verify(invokerMock, org.mockito.Mockito.never()).invokeTarget(eq(target), any(), any());
+        verify(invokerMock, Mockito.never()).invokeTarget(eq(target), any(), any());
     }
 
     @Test
@@ -741,9 +845,9 @@ class EventBridgeServiceTest {
         service.putEvents(List.of(
                 Map.of("Source", "my.app", "DetailType", "Test", "Detail", "{}")), REGION);
 
-        org.mockito.ArgumentCaptor<String> json = org.mockito.ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
         verify(invokerMock).invokeTarget(eq(target), json.capture(), eq(REGION));
-        com.fasterxml.jackson.databind.JsonNode envelope = OBJECT_MAPPER.readTree(json.getValue());
+        JsonNode envelope = OBJECT_MAPPER.readTree(json.getValue());
         assertEquals(REGION, envelope.path("region").asText());
         assertEquals("000000000000", envelope.path("account").asText());
     }
@@ -766,12 +870,24 @@ class EventBridgeServiceTest {
     }
 
     @Test
+    void legacyConnectionAuthParametersRemainAvailableToSanitization() throws Exception {
+        Map<String, Object> legacy = Map.of(
+                "name", "legacy", "connectionState", "AUTHORIZED",
+                "authParametersJson", "{\"ApiKeyAuthParameters\":{\"ApiKeyName\":\"key\",\"ApiKeyValue\":\"secret\"}}");
+        Connection connection = OBJECT_MAPPER.readValue(OBJECT_MAPPER.writeValueAsString(legacy), Connection.class);
+
+        assertEquals("AUTHORIZED", connection.getConnectionState().name());
+        assertEquals("secret", OBJECT_MAPPER.readTree(connection.getAuthParameters())
+                .path("ApiKeyAuthParameters").path("ApiKeyValue").asText());
+    }
+
+    @Test
     void connectionAndApiDestinationLifecycle() {
         Connection created = service.createConnection(
                 "partner", "desc", "API_KEY",
                 "{\"ApiKeyAuthParameters\":{\"ApiKeyName\":\"x-api-key\",\"ApiKeyValue\":\"secret\"}}",
-                null, REGION);
-        assertEquals("AUTHORIZED", created.getConnectionState());
+                null, null, REGION);
+        assertEquals("AUTHORIZED", created.getConnectionState().name());
         assertTrue(created.getConnectionArn().contains("connection/partner/"));
         assertNotNull(created.getSecretArn());
 
@@ -779,7 +895,7 @@ class EventBridgeServiceTest {
         assertEquals("desc", described.getDescription());
         assertEquals("API_KEY", described.getAuthorizationType());
 
-        service.updateConnection("partner", "updated", null, null, null, REGION);
+        service.updateConnection("partner", "updated", null, null, null, null, REGION);
         assertEquals("updated", service.describeConnection("partner", REGION).getDescription());
 
         ApiDestination destination = service.createApiDestination(

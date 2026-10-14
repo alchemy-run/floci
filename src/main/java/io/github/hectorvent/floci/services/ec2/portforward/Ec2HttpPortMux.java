@@ -2,6 +2,8 @@ package io.github.hectorvent.floci.services.ec2.portforward;
 
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
+import com.github.dockerjava.api.command.InspectContainerResponse;
+import com.github.dockerjava.api.model.ContainerNetwork;
 import com.github.dockerjava.api.model.Frame;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
@@ -33,6 +35,8 @@ public class Ec2HttpPortMux {
 
     private static final Logger LOG = Logger.getLogger(Ec2HttpPortMux.class);
     static final String NGINX_IMAGE = "nginx:alpine";
+    /** 75 attempts, 200 ms apart: up to 15 s for nginx to come up before giving up on the mux. */
+    static final int RELOAD_ATTEMPTS = 75;
 
     private final DockerClient dockerClient;
     private final ContainerBuilder containerBuilder;
@@ -250,22 +254,32 @@ public class Ec2HttpPortMux {
         if (backend.containerName() != null && !backend.containerName().isBlank()) {
             var found = lifecycleManager.findByName(backend.containerName());
             if (found.isPresent()) {
-                String ip = inspectContainerIp(found.get().getId());
-                if (ip != null && !ip.isBlank()) {
-                    return ip;
-                }
+                return inspectContainerIp(found.get().getId());
             }
+            return null;
         }
         return backend.ip();
     }
 
-    private String inspectContainerIp(String containerId) {
+    String inspectContainerIp(String containerId) {
         if (containerId == null || containerId.isBlank()) {
             return null;
         }
         try {
-            var inspect = dockerClient.inspectContainerCmd(containerId).exec();
+            InspectContainerResponse inspect = dockerClient.inspectContainerCmd(containerId).exec();
+            String mode = inspect.getHostConfig() == null ? null : inspect.getHostConfig().getNetworkMode();
+            if (mode != null && mode.startsWith("container:")) {
+                inspect = dockerClient.inspectContainerCmd(mode.substring("container:".length())).exec();
+            }
             if (inspect.getNetworkSettings() == null || inspect.getNetworkSettings().getNetworks() == null) {
+                return null;
+            }
+            // The mux is on the default bridge, not any one guest's VPC network.
+            ContainerNetwork bridge = inspect.getNetworkSettings().getNetworks().get("bridge");
+            if (bridge != null && bridge.getIpAddress() != null && !bridge.getIpAddress().isBlank()) {
+                return bridge.getIpAddress();
+            }
+            if (mode != null && mode.startsWith("container:")) {
                 return null;
             }
             return inspect.getNetworkSettings().getNetworks().values().stream()
@@ -304,8 +318,10 @@ public class Ec2HttpPortMux {
     }
 
     private boolean reloadNginx(String containerId) throws Exception {
+        // A freshly started mux has no nginx master (and no pid file) until the image's
+        // entrypoint scripts finish, which takes well over a second on a loaded Docker VM.
         Exception last = null;
-        for (int attempt = 0; attempt < 5; attempt++) {
+        for (int attempt = 0; attempt < RELOAD_ATTEMPTS; attempt++) {
             try {
                 if (tryReloadNginx(containerId)) {
                     return true;

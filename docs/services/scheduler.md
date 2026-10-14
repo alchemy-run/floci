@@ -25,22 +25,68 @@
 When `floci.services.scheduler.invocation-enabled` is `true` (the default), a
 background dispatcher fires schedule targets on time. Supported expressions:
 
-- `at(YYYY-MM-DDTHH:mm:ss)` — one-time fire; honors `ScheduleExpressionTimezone`
+- `at(YYYY-MM-DDTHH:mm:ss)` : one-time fire; honors `ScheduleExpressionTimezone`
   (default UTC) and `ActionAfterCompletion=DELETE`.
-- `rate(N unit)` — repeating fire (`minutes`, `hours`, `days`, `weeks`).
-- `cron(minute hour day-of-month month day-of-week year)` — AWS 6-field cron;
-  honors `ScheduleExpressionTimezone`.
+- `rate(N unit)` : repeating fire (`minutes`, `hours`, `days`, `weeks`).
+- `cron(minute hour day-of-month month day-of-week year)` : AWS 6-field cron;
+  honors `ScheduleExpressionTimezone`. Day-of-week is `1-7` or `SUN-SAT`, so
+  `2` is Monday and `cron(30 2 ? * 2#1 *)` is the first Monday of the month.
 
 `State=DISABLED` schedules and schedules outside their `StartDate`/`EndDate`
 window are skipped. The dispatcher ticks every
 `floci.services.scheduler.tick-interval-seconds` (default `10`).
 
-Supported target types: SQS, Lambda, SNS, EventBridge `PutEvents`.
+Supported target types: SQS, Lambda, SNS, ECS `RunTask`, EventBridge
+`PutEvents`, and unqualified Step Functions state machine ARNs. Templated
+targets receive the schedule target's `Input`. When `Input` is absent, Floci
+delivers the default notification AWS sends: an EventBridge-style event with
+`detail-type` `Scheduled Event`, `source` `aws.scheduler`, the schedule's
+account, region, and ARN (in `resources`), the occurrence time, and `detail`
+set to the string `"{}"`. The event `id` is stable per occurrence, so retries
+and the dead-letter body carry the same event. A Step Functions target starts
+an asynchronous execution with that payload as its input. Scheduler delivery
+succeeds when `StartExecution` is accepted; a later workflow failure does not
+trigger Scheduler retries.
+
+`CreateSchedule` and `UpdateSchedule` reject a non-JSON `Input` for Lambda,
+Step Functions, and EventBridge targets with a `ValidationException`, as AWS
+does. A blank `Input`, or one with text after the JSON value such as
+`{} garbage`, is rejected the same way. SQS and SNS targets accept any text,
+and the `Input` of a universal (`aws-sdk`) target is only checked when the
+schedule is invoked.
 
 `Target.Input` substitutes the AWS Scheduler context attributes
 `<aws.scheduler.schedule-arn>`, `<aws.scheduler.scheduled-time>`,
 `<aws.scheduler.execution-id>`, and `<aws.scheduler.attempt-number>` at
 fire time (the same placeholders live EventBridge Scheduler replaces).
+
+### Retries and dead-letter queues
+
+A failed invocation is retried after a deterministic capped exponential delay
+until the target's `RetryPolicy` is exhausted. The delay starts at 60 seconds
+and is capped at 86400 seconds. Missing fields use the AWS defaults:
+`MaximumEventAgeInSeconds=86400` and `MaximumRetryAttempts=185`. Retries run
+when due, without undocumented AWS jitter. Each occurrence retries
+independently, so a failing occurrence does not delay later `rate` or `cron`
+fires. Pending retries are in memory and are dropped when the process restarts,
+or when a schedule is disabled, updated, or deleted. Targets Floci cannot
+deliver to count as failed invocations. Lambda targets are invoked
+asynchronously, so function errors are not retried by the scheduler.
+
+When an occurrence is exhausted and `DeadLetterConfig.Arn` names a standard SQS
+queue, Floci sends the fully materialized target request as a JSON body to that
+queue with the message attributes
+`ERROR_CODE`, `ERROR_MESSAGE`, `EXECUTION_ID`, `EXHAUSTED_RETRY_CONDITION`,
+`IS_PAYLOAD_TRUNCATED`, `RETRY_ATTEMPTS`, `SCHEDULED_TIME`, `SCHEDULE_ARN`, and
+`TARGET_ARN`. FIFO queues and non-SQS ARNs are logged and skipped. An `at`
+schedule with `ActionAfterCompletion=DELETE` is deleted once its occurrence is
+delivered or exhausted. The body uses the request fields of the target
+service's API: SQS `MessageBody` and `QueueUrl` (plus `MessageGroupId` for FIFO
+queues), Lambda `FunctionName`, `InvocationType`, and `Payload`, SNS `TopicArn`
+and `Message`, Step Functions `stateMachineArn` and `input`, EventBridge
+`Entries`, and ECS `cluster`, `taskDefinition`, and `count` with the configured
+launch type, group, and network configuration. Non-JSON input of a universal
+target is encoded as a JSON string field.
 
 ## Configuration
 
@@ -52,7 +98,6 @@ fire time (the same placeholders live EventBridge Scheduler replaces).
 
 ## Not Yet Supported
 
-- `RetryPolicy` and `DeadLetterConfig` on failed invocations (stored but not honored)
 - `FlexibleTimeWindow` jitter (fires deterministically at the scheduled time)
 - `NextToken`-based pagination for List operations
 

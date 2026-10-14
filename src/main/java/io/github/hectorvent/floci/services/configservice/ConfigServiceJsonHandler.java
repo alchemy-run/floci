@@ -2,21 +2,21 @@ package io.github.hectorvent.floci.services.configservice;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.services.configservice.model.AggregationAuthorization;
+import io.github.hectorvent.floci.services.configservice.model.ConfigEvaluation;
 import io.github.hectorvent.floci.services.configservice.model.ConfigRule;
-import io.github.hectorvent.floci.services.configservice.model.ConfigRuleEvaluationStatus;
-import io.github.hectorvent.floci.services.configservice.model.ConfigRuleSource;
 import io.github.hectorvent.floci.services.configservice.model.ConfigurationRecorder;
 import io.github.hectorvent.floci.services.configservice.model.ConfigurationRecorderStatus;
 import io.github.hectorvent.floci.services.configservice.model.ConformancePack;
-import io.github.hectorvent.floci.services.configservice.model.ConformancePackStatusDetail;
 import io.github.hectorvent.floci.services.configservice.model.DeliveryChannel;
+import io.github.hectorvent.floci.services.configservice.model.RetentionConfiguration;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -25,32 +25,60 @@ public class ConfigServiceJsonHandler {
 
     private final AwsConfigService service;
     private final ObjectMapper mapper;
+    private final ConfigResourceService resources;
 
     @Inject
-    public ConfigServiceJsonHandler(AwsConfigService service, ObjectMapper mapper) {
+    public ConfigServiceJsonHandler(AwsConfigService service, ObjectMapper mapper, ConfigResourceService resources) {
         this.service = service;
         this.mapper = mapper;
+        this.resources = resources;
     }
 
     public Response handle(String action, JsonNode request, String region) throws Exception {
         return switch (action) {
+            case "PutResourceConfig" -> Response.ok(resources.putResourceConfig(region, request)).build();
+            case "DeleteResourceConfig" -> Response.ok(resources.deleteResourceConfig(region, request)).build();
+            case "ListDiscoveredResources" -> Response.ok(resources.listDiscoveredResources(region, request)).build();
+            case "GetDiscoveredResourceCounts" -> Response.ok(resources.getDiscoveredResourceCounts(region, request)).build();
+            case "BatchGetResourceConfig" -> Response.ok(resources.batchGetResourceConfig(region, request)).build();
+            case "GetResourceConfigHistory" -> Response.ok(resources.getResourceConfigHistory(region, request)).build();
+            case "SelectResourceConfig" -> Response.ok(resources.selectResourceConfig(region, request)).build();
+            case "StartResourceEvaluation" -> Response.ok(resources.startResourceEvaluation(region, request)).build();
+            case "GetResourceEvaluationSummary" -> Response.ok(resources.getResourceEvaluationSummary(region, request)).build();
+            case "ListResourceEvaluations" -> Response.ok(resources.listResourceEvaluations(region, request)).build();
             case "PutConfigRule" -> putConfigRule(request, region);
             case "DeleteConfigRule" -> deleteConfigRule(request, region);
             case "DescribeConfigRules" -> describeConfigRules(request, region);
             case "DescribeComplianceByConfigRule" -> describeComplianceByConfigRule(request, region);
+            case "DescribeComplianceByResource" -> describeComplianceByResource(request, region);
             case "DescribeConfigRuleEvaluationStatus" -> describeConfigRuleEvaluationStatus(request, region);
             case "StartConfigRulesEvaluation" -> startConfigRulesEvaluation(request, region);
+            case "PutEvaluations" -> putEvaluations(request, region);
+            case "PutExternalEvaluation" -> putExternalEvaluation(request, region);
+            case "DeleteEvaluationResults" -> deleteEvaluationResults(request, region);
+            case "GetComplianceDetailsByConfigRule" -> getComplianceDetailsByConfigRule(request, region);
+            case "GetComplianceDetailsByResource" -> getComplianceDetailsByResource(request, region);
+            case "GetComplianceSummaryByConfigRule" -> getComplianceSummaryByConfigRule(region);
+            case "GetComplianceSummaryByResourceType" -> getComplianceSummaryByResourceType(request, region);
             case "PutConformancePack" -> putConformancePack(request, region);
             case "DeleteConformancePack" -> deleteConformancePack(request, region);
             case "DescribeConformancePacks" -> describeConformancePacks(request, region);
             case "DescribeConformancePackStatus" -> describeConformancePackStatus(request, region);
             case "PutConfigurationRecorder" -> putConfigurationRecorder(request, region);
             case "DescribeConfigurationRecorders" -> describeConfigurationRecorders(request, region);
+            case "DeleteConfigurationRecorder" -> deleteConfigurationRecorder(request, region);
             case "StartConfigurationRecorder" -> startConfigurationRecorder(request, region);
             case "StopConfigurationRecorder" -> stopConfigurationRecorder(request, region);
             case "DescribeConfigurationRecorderStatus" -> describeConfigurationRecorderStatus(request, region);
             case "PutDeliveryChannel" -> putDeliveryChannel(request, region);
             case "DescribeDeliveryChannels" -> describeDeliveryChannels(request, region);
+            case "DeleteDeliveryChannel" -> deleteDeliveryChannel(request, region);
+            case "PutRetentionConfiguration" -> putRetentionConfiguration(request, region);
+            case "DescribeRetentionConfigurations" -> describeRetentionConfigurations(request, region);
+            case "DeleteRetentionConfiguration" -> deleteRetentionConfiguration(request, region);
+            case "PutAggregationAuthorization" -> putAggregationAuthorization(request, region);
+            case "DescribeAggregationAuthorizations" -> describeAggregationAuthorizations(request, region);
+            case "DeleteAggregationAuthorization" -> deleteAggregationAuthorization(request, region);
             case "TagResource" -> tagResource(request);
             case "UntagResource" -> untagResource(request);
             case "ListTagsForResource" -> listTagsForResource(request);
@@ -61,14 +89,10 @@ public class ConfigServiceJsonHandler {
 
     // --- Config Rules ---
 
-    private Response putConfigRule(JsonNode req, String region) {
+    private Response putConfigRule(JsonNode req, String region) throws Exception {
         JsonNode ruleNode = req.path("ConfigRule");
-        String ruleName = ruleNode.path("ConfigRuleName").asText(null);
-        JsonNode sourceNode = ruleNode.path("Source");
-        ConfigRuleSource source = new ConfigRuleSource(
-                sourceNode.path("Owner").asText(null),
-                sourceNode.path("SourceIdentifier").asText(null));
-        service.putConfigRule(region, ruleName, source);
+        ConfigRule rule = ruleNode.isObject() ? mapper.treeToValue(ruleNode, ConfigRule.class) : null;
+        service.putConfigRule(region, rule);
         return Response.ok(mapper.createObjectNode()).build();
     }
 
@@ -79,35 +103,33 @@ public class ConfigServiceJsonHandler {
     }
 
     private Response describeConfigRules(JsonNode req, String region) {
-        List<String> ruleNames = extractStringList(req, "ConfigRuleNames");
-        List<ConfigRule> rules = service.describeConfigRules(region, ruleNames);
-        ObjectNode resp = mapper.createObjectNode();
-        resp.set("ConfigRules", mapper.valueToTree(rules));
-        return Response.ok(resp).build();
+        AwsConfigService.Paged<ConfigRule> page = service.describeConfigRulesPaged(region,
+                extractStringList(req, "ConfigRuleNames"), extractNextToken(req));
+        return Response.ok(pagedResponse("ConfigRules", page)).build();
     }
 
     private Response describeComplianceByConfigRule(JsonNode req, String region) {
-        List<String> ruleNames = extractStringList(req, "ConfigRuleNames");
-        List<ConfigRule> rules = service.describeConfigRules(region, ruleNames);
-        ObjectNode resp = mapper.createObjectNode();
-        ArrayNode arr = resp.putArray("ComplianceByConfigRules");
-        for (ConfigRule rule : rules) {
-            ObjectNode entry = mapper.createObjectNode();
-            entry.put("ConfigRuleName", rule.configRuleName());
-            ObjectNode compliance = mapper.createObjectNode();
-            compliance.put("ComplianceType", "INSUFFICIENT_DATA");
-            entry.set("Compliance", compliance);
-            arr.add(entry);
-        }
-        return Response.ok(resp).build();
+        var page = service.describeComplianceByConfigRule(region,
+                extractStringList(req, "ConfigRuleNames"),
+                extractStringList(req, "ComplianceTypes"),
+                extractNextToken(req));
+        return Response.ok(pagedResponse("ComplianceByConfigRules", page)).build();
+    }
+
+    private Response describeComplianceByResource(JsonNode req, String region) {
+        var page = service.describeComplianceByResource(region,
+                req.path("ResourceType").asText(null),
+                req.path("ResourceId").asText(null),
+                extractStringList(req, "ComplianceTypes"),
+                extractLimit(req, "Limit"), extractNextToken(req));
+        return Response.ok(pagedResponse("ComplianceByResources", page)).build();
     }
 
     private Response describeConfigRuleEvaluationStatus(JsonNode req, String region) {
-        List<String> ruleNames = extractStringList(req, "ConfigRuleNames");
-        List<ConfigRuleEvaluationStatus> statuses = service.describeConfigRuleEvaluationStatus(region, ruleNames);
-        ObjectNode resp = mapper.createObjectNode();
-        resp.set("ConfigRulesEvaluationStatus", mapper.valueToTree(statuses));
-        return Response.ok(resp).build();
+        var page = service.describeConfigRuleEvaluationStatus(region,
+                extractStringList(req, "ConfigRuleNames"),
+                extractLimit(req, "Limit"), extractNextToken(req));
+        return Response.ok(pagedResponse("ConfigRulesEvaluationStatus", page)).build();
     }
 
     private Response startConfigRulesEvaluation(JsonNode req, String region) {
@@ -116,11 +138,71 @@ public class ConfigServiceJsonHandler {
         return Response.ok(mapper.createObjectNode()).build();
     }
 
+    // --- Evaluations ---
+
+    private Response putEvaluations(JsonNode req, String region) throws Exception {
+        JsonNode evaluationsNode = req.path("Evaluations");
+        List<ConfigEvaluation> evaluations = evaluationsNode.isArray()
+                ? Arrays.asList(mapper.treeToValue(evaluationsNode, ConfigEvaluation[].class))
+                : List.of();
+        service.putEvaluations(region,
+                req.path("ResultToken").asText(null),
+                evaluations,
+                req.path("TestMode").asBoolean(false));
+        ObjectNode resp = mapper.createObjectNode();
+        resp.putArray("FailedEvaluations");
+        return Response.ok(resp).build();
+    }
+
+    private Response putExternalEvaluation(JsonNode req, String region) throws Exception {
+        JsonNode evaluationNode = req.path("ExternalEvaluation");
+        ConfigEvaluation evaluation = evaluationNode.isObject()
+                ? mapper.treeToValue(evaluationNode, ConfigEvaluation.class)
+                : null;
+        service.putExternalEvaluation(region, req.path("ConfigRuleName").asText(null), evaluation);
+        return Response.ok(mapper.createObjectNode()).build();
+    }
+
+    private Response deleteEvaluationResults(JsonNode req, String region) {
+        service.deleteEvaluationResults(region, req.path("ConfigRuleName").asText(null));
+        return Response.ok(mapper.createObjectNode()).build();
+    }
+
+    private Response getComplianceDetailsByConfigRule(JsonNode req, String region) {
+        var page = service.getComplianceDetailsByConfigRule(region,
+                req.path("ConfigRuleName").asText(null),
+                extractStringList(req, "ComplianceTypes"),
+                extractLimit(req, "Limit"), extractNextToken(req));
+        return Response.ok(pagedResponse("EvaluationResults", page)).build();
+    }
+
+    private Response getComplianceDetailsByResource(JsonNode req, String region) {
+        var page = service.getComplianceDetailsByResource(region,
+                req.path("ResourceType").asText(null),
+                req.path("ResourceId").asText(null),
+                extractStringList(req, "ComplianceTypes"),
+                extractNextToken(req));
+        return Response.ok(pagedResponse("EvaluationResults", page)).build();
+    }
+
+    private Response getComplianceSummaryByConfigRule(String region) {
+        ObjectNode resp = mapper.createObjectNode();
+        resp.set("ComplianceSummary", mapper.valueToTree(service.getComplianceSummaryByConfigRule(region)));
+        return Response.ok(resp).build();
+    }
+
+    private Response getComplianceSummaryByResourceType(JsonNode req, String region) {
+        ObjectNode resp = mapper.createObjectNode();
+        resp.set("ComplianceSummariesByResourceType", mapper.valueToTree(
+                service.getComplianceSummaryByResourceType(region, extractStringList(req, "ResourceTypes"))));
+        return Response.ok(resp).build();
+    }
+
     // --- Configuration Recorder ---
 
     private Response putConfigurationRecorder(JsonNode req, String region) throws Exception {
         ConfigurationRecorder recorder = mapper.treeToValue(req.path("ConfigurationRecorder"), ConfigurationRecorder.class);
-        service.putConfigurationRecorder(region, recorder);
+        service.putConfigurationRecorder(region, recorder, extractTags(req));
         return Response.ok(mapper.createObjectNode()).build();
     }
 
@@ -130,6 +212,11 @@ public class ConfigServiceJsonHandler {
         ObjectNode resp = mapper.createObjectNode();
         resp.set("ConfigurationRecorders", mapper.valueToTree(recorders));
         return Response.ok(resp).build();
+    }
+
+    private Response deleteConfigurationRecorder(JsonNode req, String region) {
+        service.deleteConfigurationRecorder(region, req.path("ConfigurationRecorderName").asText(null));
+        return Response.ok(mapper.createObjectNode()).build();
     }
 
     private Response startConfigurationRecorder(JsonNode req, String region) {
@@ -168,6 +255,34 @@ public class ConfigServiceJsonHandler {
         return Response.ok(resp).build();
     }
 
+    private Response deleteDeliveryChannel(JsonNode req, String region) {
+        service.deleteDeliveryChannel(region, req.path("DeliveryChannelName").asText(null));
+        return Response.ok(mapper.createObjectNode()).build();
+    }
+
+    // --- Retention Configuration ---
+
+    private Response putRetentionConfiguration(JsonNode req, String region) {
+        Integer days = req.hasNonNull("RetentionPeriodInDays") ? req.path("RetentionPeriodInDays").asInt() : null;
+        RetentionConfiguration configuration = service.putRetentionConfiguration(region, days);
+        ObjectNode resp = mapper.createObjectNode();
+        resp.set("RetentionConfiguration", mapper.valueToTree(configuration));
+        return Response.ok(resp).build();
+    }
+
+    private Response describeRetentionConfigurations(JsonNode req, String region) {
+        List<RetentionConfiguration> configurations = service.describeRetentionConfigurations(region,
+                extractStringList(req, "RetentionConfigurationNames"));
+        ObjectNode resp = mapper.createObjectNode();
+        resp.set("RetentionConfigurations", mapper.valueToTree(configurations));
+        return Response.ok(resp).build();
+    }
+
+    private Response deleteRetentionConfiguration(JsonNode req, String region) {
+        service.deleteRetentionConfiguration(region, req.path("RetentionConfigurationName").asText(null));
+        return Response.ok(mapper.createObjectNode()).build();
+    }
+
     // --- Conformance Packs ---
 
     private Response putConformancePack(JsonNode req, String region) {
@@ -187,30 +302,49 @@ public class ConfigServiceJsonHandler {
     }
 
     private Response describeConformancePacks(JsonNode req, String region) {
-        List<String> names = extractStringList(req, "ConformancePackNames");
-        List<ConformancePack> packs = service.describeConformancePacks(region, names);
-        ObjectNode resp = mapper.createObjectNode();
-        resp.set("ConformancePackDetails", mapper.valueToTree(packs));
-        return Response.ok(resp).build();
+        var page = service.describeConformancePacksPaged(region,
+                extractStringList(req, "ConformancePackNames"),
+                extractLimit(req, "Limit"), extractNextToken(req));
+        return Response.ok(pagedResponse("ConformancePackDetails", page)).build();
     }
 
     private Response describeConformancePackStatus(JsonNode req, String region) {
-        List<String> names = extractStringList(req, "ConformancePackNames");
-        List<ConformancePackStatusDetail> statuses = service.describeConformancePackStatus(region, names);
+        var page = service.describeConformancePackStatus(region,
+                extractStringList(req, "ConformancePackNames"),
+                extractLimit(req, "Limit"), extractNextToken(req));
+        return Response.ok(pagedResponse("ConformancePackStatusDetails", page)).build();
+    }
+
+    // --- Aggregation Authorizations ---
+
+    private Response putAggregationAuthorization(JsonNode req, String region) {
+        AggregationAuthorization authorization = service.putAggregationAuthorization(region,
+                req.path("AuthorizedAccountId").asText(null),
+                req.path("AuthorizedAwsRegion").asText(null),
+                extractTags(req));
         ObjectNode resp = mapper.createObjectNode();
-        resp.set("ConformancePackStatusDetails", mapper.valueToTree(statuses));
+        resp.set("AggregationAuthorization", mapper.valueToTree(authorization));
         return Response.ok(resp).build();
+    }
+
+    private Response describeAggregationAuthorizations(JsonNode req, String region) {
+        AwsConfigService.Paged<AggregationAuthorization> page = service.describeAggregationAuthorizations(region,
+                extractLimit(req, "Limit"), extractNextToken(req));
+        return Response.ok(pagedResponse("AggregationAuthorizations", page)).build();
+    }
+
+    private Response deleteAggregationAuthorization(JsonNode req, String region) {
+        service.deleteAggregationAuthorization(region,
+                req.path("AuthorizedAccountId").asText(null),
+                req.path("AuthorizedAwsRegion").asText(null));
+        return Response.ok(mapper.createObjectNode()).build();
     }
 
     // --- Tagging ---
 
     private Response tagResource(JsonNode req) {
         String arn = req.path("ResourceArn").asText(null);
-        List<Map<String, String>> tagList = new ArrayList<>();
-        req.path("Tags").forEach(t -> tagList.add(Map.of(
-                "Key", t.path("Key").asText(),
-                "Value", t.path("Value").asText())));
-        service.tagResource(arn, tagList);
+        service.tagResource(arn, extractTags(req));
         return Response.ok(mapper.createObjectNode()).build();
     }
 
@@ -232,11 +366,40 @@ public class ConfigServiceJsonHandler {
 
     // --- Helpers ---
 
+    private List<Map<String, String>> extractTags(JsonNode req) {
+        List<Map<String, String>> tagList = new ArrayList<>();
+        req.path("Tags").forEach(t -> tagList.add(Map.of(
+                "Key", t.path("Key").asText(),
+                "Value", t.path("Value").asText())));
+        return tagList;
+    }
+
     private List<String> extractStringList(JsonNode req, String fieldName) {
         List<String> result = new ArrayList<>();
         if (req.has(fieldName)) {
             req.path(fieldName).forEach(n -> result.add(n.asText()));
         }
         return result;
+    }
+
+    private Integer extractLimit(JsonNode req) {
+        return extractLimit(req, "MaxResults");
+    }
+
+    private Integer extractLimit(JsonNode req, String fieldName) {
+        return req.hasNonNull(fieldName) ? req.path(fieldName).asInt() : null;
+    }
+
+    private String extractNextToken(JsonNode req) {
+        return req.hasNonNull("NextToken") ? req.path("NextToken").asText() : null;
+    }
+
+    private ObjectNode pagedResponse(String fieldName, AwsConfigService.Paged<?> page) {
+        ObjectNode resp = mapper.createObjectNode();
+        resp.set(fieldName, mapper.valueToTree(page.items()));
+        if (page.nextToken() != null) {
+            resp.put("NextToken", page.nextToken());
+        }
+        return resp;
     }
 }

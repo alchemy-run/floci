@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.testing;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.restassured.RestAssured;
+import io.restassured.builder.ResponseBuilder;
 import io.restassured.config.EncoderConfig;
 import io.restassured.filter.Filter;
 import io.restassured.filter.FilterContext;
@@ -39,7 +40,8 @@ public class RestAssuredJsonUtils {
         RestAssured.config = RestAssured.config().encoderConfig(
                 EncoderConfig.encoderConfig()
                         .encodeContentTypeAs(CONTENT_TYPE_AWS_JSON_1_0, ContentType.JSON)
-                        .encodeContentTypeAs(CONTENT_TYPE_AWS_JSON_1_1, ContentType.JSON));
+                        .encodeContentTypeAs(CONTENT_TYPE_AWS_JSON_1_1, ContentType.JSON)
+                        .encodeContentTypeAs("application/graphql", ContentType.JSON));
 
         if (!RestAssured.filters().contains(AWS_CONTENT_TYPE_FILTER)) {
             RestAssured.filters(AWS_CONTENT_TYPE_FILTER);
@@ -83,7 +85,7 @@ class AwsContentTypeFilter implements Filter {
         Response response = ctx.next(requestSpec, responseSpec);
         String contentType = response.contentType();
         if (contentType != null && contentType.contains("x-amz-json")) {
-            return new io.restassured.builder.ResponseBuilder()
+            return new ResponseBuilder()
                     .clone(response)
                     .setContentType(contentType.replaceFirst("application/x-amz-json-[0-9.]+", "application/json"))
                     .build();

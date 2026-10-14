@@ -35,6 +35,8 @@ public class UserPool {
     private Map<String, Object> verificationMessageTemplate = new HashMap<>();
     private String smsAuthenticationMessage;
     private String mfaConfiguration = "OFF";
+    /** Null until SetUserPoolMfaConfig sets it; absent from responses while null, as AWS omits it. */
+    private Boolean softwareTokenMfaEnabled;
     private Map<String, Object> deviceConfiguration = new HashMap<>();
     private int estimatedNumberOfUsers = 0;
     private Map<String, Object> emailConfiguration = new HashMap<>();
@@ -44,6 +46,7 @@ public class UserPool {
     private Map<String, Object> userPoolAddOns = new HashMap<>();
     private Map<String, Object> usernameConfiguration = new HashMap<>();
     private Map<String, Object> accountRecoverySetting = new HashMap<>();
+    private Map<String, Object> userAttributeUpdateSettings = new HashMap<>();
     private String userPoolTier = "ESSENTIALS";
 
     private String clientIdOverride = null;
@@ -52,6 +55,8 @@ public class UserPool {
     private List<IdentityProvider> identityProviders = new ArrayList<>();
     private List<UserPoolDomain> domains = new ArrayList<>();
     private Map<String, Map<String, Object>> riskConfigurations = new HashMap<>();
+    /** Empty until SetLogDeliveryConfiguration sets it; GetLogDeliveryConfiguration always returns it. */
+    private List<Map<String, Object>> logConfigurations = new ArrayList<>();
 
     public UserPool() {
         long now = System.currentTimeMillis() / 1000L;
@@ -126,6 +131,10 @@ public class UserPool {
     public void setSmsAuthenticationMessage(String smsAuthenticationMessage) { this.smsAuthenticationMessage = smsAuthenticationMessage; }
 
     public String getMfaConfiguration() { return mfaConfiguration; }
+    public Boolean getSoftwareTokenMfaEnabled() { return softwareTokenMfaEnabled; }
+    public void setSoftwareTokenMfaEnabled(Boolean softwareTokenMfaEnabled) {
+        this.softwareTokenMfaEnabled = softwareTokenMfaEnabled;
+    }
     public void setMfaConfiguration(String mfaConfiguration) { this.mfaConfiguration = mfaConfiguration; }
 
     public Map<String, Object> getDeviceConfiguration() { return deviceConfiguration; }
@@ -154,6 +163,13 @@ public class UserPool {
 
     public Map<String, Object> getAccountRecoverySetting() { return accountRecoverySetting; }
     public void setAccountRecoverySetting(Map<String, Object> accountRecoverySetting) { this.accountRecoverySetting = accountRecoverySetting; }
+
+    public Map<String, Object> getUserAttributeUpdateSettings() { return userAttributeUpdateSettings; }
+    public void setUserAttributeUpdateSettings(Map<String, Object> userAttributeUpdateSettings) {
+        this.userAttributeUpdateSettings = userAttributeUpdateSettings == null
+                ? new HashMap<>()
+                : new HashMap<>(userAttributeUpdateSettings);
+    }
 
     public String getUserPoolTier() { return userPoolTier; }
     public void setUserPoolTier(String userPoolTier) { this.userPoolTier = userPoolTier; }
@@ -192,5 +208,10 @@ public class UserPool {
     }
     public void setRiskConfigurations(Map<String, Map<String, Object>> riskConfigurations) {
         this.riskConfigurations = riskConfigurations == null ? new HashMap<>() : riskConfigurations;
+    }
+
+    public List<Map<String, Object>> getLogConfigurations() { return logConfigurations; }
+    public void setLogConfigurations(List<Map<String, Object>> logConfigurations) {
+        this.logConfigurations = logConfigurations;
     }
 }

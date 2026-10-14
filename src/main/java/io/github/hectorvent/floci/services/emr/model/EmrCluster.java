@@ -52,6 +52,10 @@ public class EmrCluster {
     private List<EmrStep> steps = new ArrayList<>();
     private List<EmrInstanceGroup> instanceGroups = new ArrayList<>();
     private List<EmrInstanceFleet> instanceFleets = new ArrayList<>();
+    private List<EmrBootstrapAction> bootstrapActions = new ArrayList<>();
+    // Idle timeout in seconds of the attached auto-termination policy; null when none is attached.
+    private Long autoTerminationIdleTimeout;
+    private EmrManagedScalingPolicy managedScalingPolicy;
 
     public EmrCluster() {}
 
@@ -177,4 +181,19 @@ public class EmrCluster {
 
     public List<EmrInstanceFleet> getInstanceFleets() { return instanceFleets; }
     public void setInstanceFleets(List<EmrInstanceFleet> instanceFleets) { this.instanceFleets = instanceFleets; }
+
+    public List<EmrBootstrapAction> getBootstrapActions() { return bootstrapActions; }
+    public void setBootstrapActions(List<EmrBootstrapAction> bootstrapActions) {
+        this.bootstrapActions = bootstrapActions;
+    }
+
+    public Long getAutoTerminationIdleTimeout() { return autoTerminationIdleTimeout; }
+    public void setAutoTerminationIdleTimeout(Long autoTerminationIdleTimeout) {
+        this.autoTerminationIdleTimeout = autoTerminationIdleTimeout;
+    }
+
+    public EmrManagedScalingPolicy getManagedScalingPolicy() { return managedScalingPolicy; }
+    public void setManagedScalingPolicy(EmrManagedScalingPolicy managedScalingPolicy) {
+        this.managedScalingPolicy = managedScalingPolicy;
+    }
 }

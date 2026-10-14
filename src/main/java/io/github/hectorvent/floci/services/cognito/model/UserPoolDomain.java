@@ -1,22 +1,27 @@
 package io.github.hectorvent.floci.services.cognito.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
-import java.util.HashMap;
 import java.util.Map;
 
 @RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class UserPoolDomain {
-    private String userPoolId;
     private String domain;
-    private String status = "ACTIVE";
-    private String cloudFrontDistribution;
+    private String userPoolId;
     private String awsAccountId;
-    private Integer managedLoginVersion = 2;
-    private Map<String, Object> customDomainConfig = new HashMap<>();
-    private boolean custom;
+    private String status = "ACTIVE";
+    private String version;
+    private String s3Bucket;
+    private String cloudFrontDistribution;
+    private Integer managedLoginVersion;
+
+    // Custom-domain-only fields (null for an Amazon Cognito prefix domain).
+    private String certificateArn;
+    private String securityPolicy;
+
     private long creationDate;
     private long lastModifiedDate;
 
@@ -26,35 +31,45 @@ public class UserPoolDomain {
         this.lastModifiedDate = now;
     }
 
-    public String getUserPoolId() { return userPoolId; }
-    public void setUserPoolId(String userPoolId) { this.userPoolId = userPoolId; }
-
     public String getDomain() { return domain; }
     public void setDomain(String domain) { this.domain = domain; }
 
-    public String getStatus() { return status; }
-    public void setStatus(String status) { this.status = status; }
-
-    public String getCloudFrontDistribution() { return cloudFrontDistribution; }
-    public void setCloudFrontDistribution(String cloudFrontDistribution) {
-        this.cloudFrontDistribution = cloudFrontDistribution;
-    }
+    public String getUserPoolId() { return userPoolId; }
+    public void setUserPoolId(String userPoolId) { this.userPoolId = userPoolId; }
 
     public String getAwsAccountId() { return awsAccountId; }
     public void setAwsAccountId(String awsAccountId) { this.awsAccountId = awsAccountId; }
 
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
+
+    public String getVersion() { return version; }
+    public void setVersion(String version) { this.version = version; }
+
+    public String getS3Bucket() { return s3Bucket; }
+    public void setS3Bucket(String s3Bucket) { this.s3Bucket = s3Bucket; }
+
+    public String getCloudFrontDistribution() { return cloudFrontDistribution; }
+    public void setCloudFrontDistribution(String cloudFrontDistribution) { this.cloudFrontDistribution = cloudFrontDistribution; }
+
     public Integer getManagedLoginVersion() { return managedLoginVersion; }
-    public void setManagedLoginVersion(Integer managedLoginVersion) {
-        this.managedLoginVersion = managedLoginVersion;
+    public void setManagedLoginVersion(Integer managedLoginVersion) { this.managedLoginVersion = managedLoginVersion; }
+
+    @JsonProperty("customDomainConfig")
+    public void restoreCustomDomainConfig(Map<String, Object> config) {
+        if (config != null) {
+            certificateArn = (String) config.get("CertificateArn");
+            securityPolicy = (String) config.get("SecurityPolicy");
+        }
     }
 
-    public Map<String, Object> getCustomDomainConfig() { return customDomainConfig; }
-    public void setCustomDomainConfig(Map<String, Object> customDomainConfig) {
-        this.customDomainConfig = customDomainConfig == null ? new HashMap<>() : new HashMap<>(customDomainConfig);
-    }
+    public String getCertificateArn() { return certificateArn; }
+    public void setCertificateArn(String certificateArn) { this.certificateArn = certificateArn; }
 
-    public boolean isCustom() { return custom; }
-    public void setCustom(boolean custom) { this.custom = custom; }
+    public String getSecurityPolicy() { return securityPolicy; }
+    public void setSecurityPolicy(String securityPolicy) { this.securityPolicy = securityPolicy; }
+
+    public boolean isCustomDomain() { return certificateArn != null; }
 
     public long getCreationDate() { return creationDate; }
     public void setCreationDate(long creationDate) { this.creationDate = creationDate; }

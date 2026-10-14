@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.CloudWatchMetricsService;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.CloudWatchMetricsService.MetricIdentity;
+import io.github.hectorvent.floci.services.firehose.FirehoseService;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
@@ -18,9 +19,14 @@ import org.junit.jupiter.api.TestMethodOrder;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasKey;
+import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -82,6 +88,9 @@ class SesEventPublishingV2IntegrationTest {
 
     @Inject
     CloudWatchMetricsService metricsService;
+
+    @Inject
+    FirehoseService firehoseService;
 
     @BeforeAll
     static void configureRestAssured() {
@@ -191,6 +200,11 @@ class SesEventPublishingV2IntegrationTest {
                 .filter(e -> "Delivery".equals(e.path("eventType").asText()))
                 .findFirst().orElseThrow();
         assertEquals(SENDER, delivery.path("mail").path("source").asText());
+        // The event reports the sending account (resolved per request; the default account here) in
+        // both sendingAccountId and the source ARN.
+        assertEquals("000000000000", delivery.path("mail").path("sendingAccountId").asText());
+        assertEquals("arn:aws:ses:us-east-1:000000000000:identity/" + SENDER,
+                delivery.path("mail").path("sourceArn").asText());
         assertEquals("success@simulator.amazonses.com",
                 delivery.path("delivery").path("recipients").get(0).asText());
         assertEquals(CS, delivery.path("mail").path("tags").path("ses:configuration-set").get(0).asText());
@@ -526,6 +540,11 @@ class SesEventPublishingV2IntegrationTest {
                     .findFirst().orElseThrow();
             assertEquals(suppressed,
                     bounce.path("bounce").path("bouncedRecipients").get(0).path("emailAddress").asText());
+            // Probed 2026-09-21: an account-suppressed recipient carries the suppression subtype
+            // and SES's own diagnostic text, not the simulator's SMTP response.
+            assertEquals("OnAccountSuppressionList", bounce.path("bounce").path("bounceSubType").asText());
+            assertTrue(bounce.path("bounce").path("bouncedRecipients").get(0).path("diagnosticCode").asText()
+                    .startsWith("Amazon SES did not send the message to this address"));
         } finally {
             // Always run cleanup so the suppression list doesn't leak into subsequent tests.
             given()
@@ -546,8 +565,8 @@ class SesEventPublishingV2IntegrationTest {
                 .header("X-Amz-Target", "Firehose_20150804.CreateDeliveryStream")
                 .body("""
                     {"DeliveryStreamName": "%s",
-                     "S3DestinationConfiguration": {"BucketARN": "arn:aws:s3:::%s"}}
-                    """.formatted(FIREHOSE_STREAM, FIREHOSE_BUCKET))
+                     "S3DestinationConfiguration": {"BucketARN": "arn:aws:s3:::%s", "Prefix": "%s/"}}
+                    """.formatted(FIREHOSE_STREAM, FIREHOSE_BUCKET, FIREHOSE_STREAM))
         .when()
                 .post("/")
         .then()
@@ -629,6 +648,7 @@ class SesEventPublishingV2IntegrationTest {
                     .findFirst().orElseThrow();
             assertEquals(suppressed,
                     complaint.path("complaint").path("complainedRecipients").get(0).path("emailAddress").asText());
+            assertEquals("OnAccountSuppressionList", complaint.path("complaint").path("complaintSubType").asText());
         } finally {
             given()
                     .header("Authorization", SES_AUTH)
@@ -639,22 +659,26 @@ class SesEventPublishingV2IntegrationTest {
 
     @Test
     @Order(15)
-    void firehose_fiveSends_triggerAutoFlushAndWriteNdjsonToS3() throws Exception {
-        for (int i = 0; i < 5; i++) {
-            sendEmailToConfigSet(CS_FIREHOSE, "recipient" + i + "@example.com", "fh-evt-" + i);
-        }
+    void firehose_sendEventsAreDeliveredAsNdjsonToS3() throws Exception {
+        sendEmailToConfigSet(CS_FIREHOSE, "recipient0@example.com", "fh-evt-0");
+        sendEmailToConfigSet(CS_FIREHOSE, "recipient1@example.com", "fh-evt-1");
+
+        // Small events stay buffered until the stream's size (SizeInMBs) or
+        // interval (IntervalInSeconds) trigger fires; force the flush so the
+        // assertion is deterministic (same mechanism the scheduled flusher uses).
+        firehoseService.flush(FIREHOSE_STREAM);
 
         List<S3Object> objects = s3Service.listObjects(FIREHOSE_BUCKET, FIREHOSE_STREAM + "/", null, 100);
         assertEquals(1, objects.size(),
-                "expected exactly one flushed S3 object after 5 putRecord calls (DEFAULT_FLUSH_COUNT)");
+                "expected exactly one flushed S3 object containing the buffered events");
 
         S3Object obj = s3Service.getObject(FIREHOSE_BUCKET, objects.get(0).getKey());
         String body = new String(obj.getData(), StandardCharsets.UTF_8);
         String[] lines = body.split("\\R");
-        assertEquals(5, lines.length, "flushed object should contain 5 NDJSON records");
+        assertEquals(2, lines.length, "flushed object should contain one NDJSON record per send");
 
-        for (int i = 0; i < 5; i++) {
-            JsonNode event = MAPPER.readTree(lines[i]);
+        for (String line : lines) {
+            JsonNode event = MAPPER.readTree(line);
             assertEquals("Send", event.path("eventType").asText());
             assertEquals(SENDER, event.path("mail").path("source").asText());
             assertEquals(CS_FIREHOSE,
@@ -676,8 +700,8 @@ class SesEventPublishingV2IntegrationTest {
                 .header("X-Amz-Target", "Firehose_20150804.CreateDeliveryStream")
                 .body("""
                     {"DeliveryStreamName": "%s",
-                     "S3DestinationConfiguration": {"BucketARN": "arn:aws:s3:::%s"}}
-                    """.formatted(streamDisabled, FIREHOSE_BUCKET))
+                     "S3DestinationConfiguration": {"BucketARN": "arn:aws:s3:::%s", "Prefix": "%s/"}}
+                    """.formatted(streamDisabled, FIREHOSE_BUCKET, streamDisabled))
         .when()
                 .post("/")
         .then()
@@ -1574,6 +1598,226 @@ class SesEventPublishingV2IntegrationTest {
                 .statusCode(200);
     }
 
+    @Test
+    @Order(32)
+    void suppressionListSimulator_publishesAGeneralBounceNotAReject() throws Exception {
+        drainQueue();
+        sendEmail("suppressionlist@simulator.amazonses.com");
+
+        List<JsonNode> events = receiveSesEvents(2);
+        assertEquals(2, events.size(), "expected Send and Bounce events");
+        assertTrue(events.stream().noneMatch(e -> "Reject".equals(e.path("eventType").asText())));
+        JsonNode bounce = events.stream()
+                .filter(e -> "Bounce".equals(e.path("eventType").asText()))
+                .findFirst().orElseThrow();
+        // Probed 2026-09-21: an ordinary hard bounce whose diagnostic names the suppression.
+        assertEquals("General", bounce.path("bounce").path("bounceSubType").asText());
+        JsonNode recipient = bounce.path("bounce").path("bouncedRecipients").get(0);
+        assertEquals("suppressionlist@simulator.amazonses.com", recipient.path("emailAddress").asText());
+        assertEquals("5.1.1", recipient.path("status").asText());
+        assertTrue(recipient.path("diagnosticCode").asText().contains("suppressed address: suppressionlist@"));
+    }
+
+    @Test
+    @Order(33)
+    void simulatorAndSuppressedBounces_arePublishedAsSeparateEvents() throws Exception {
+        String suppressed = "split-suppressed-" + System.nanoTime() + "@example.com";
+        given().contentType("application/json").header("Authorization", SES_AUTH)
+                .body("{\"EmailAddress\":\"" + suppressed + "\",\"Reason\":\"BOUNCE\"}")
+        .when().put("/v2/email/suppression/addresses").then().statusCode(200);
+        try {
+            drainQueue();
+            given().contentType("application/json").header("Authorization", SES_AUTH)
+                    .body("""
+                        {
+                          "FromEmailAddress": "%s",
+                          "Destination": {"ToAddresses": ["bounce@simulator.amazonses.com", "%s"]},
+                          "ConfigurationSetName": "%s",
+                          "Content": {"Simple": {"Subject": {"Data": "split"},
+                                                 "Body": {"Text": {"Data": "hi"}}}}
+                        }
+                        """.formatted(SENDER, suppressed, CS))
+            .when().post("/v2/email/outbound-emails").then().statusCode(200);
+
+            List<JsonNode> events = receiveSesEvents(3);
+            assertEquals(3, events.size(), "expected Send plus one Bounce per cause");
+            List<JsonNode> bounces = events.stream()
+                    .filter(e -> "Bounce".equals(e.path("eventType").asText())).toList();
+            assertEquals(2, bounces.size());
+            for (JsonNode bounce : bounces) {
+                JsonNode recipients = bounce.path("bounce").path("bouncedRecipients");
+                assertEquals(1, recipients.size(), "each Bounce lists only its own cause's recipients");
+                String subtype = bounce.path("bounce").path("bounceSubType").asText();
+                String address = recipients.get(0).path("emailAddress").asText();
+                assertEquals(address.equals(suppressed) ? "OnAccountSuppressionList" : "General", subtype);
+                assertEquals(2, bounce.path("mail").path("destination").size(),
+                        "mail.destination carries the full envelope on every event");
+            }
+        } finally {
+            given().header("Authorization", SES_AUTH)
+            .when().delete("/v2/email/suppression/addresses/" + suppressed);
+        }
+    }
+
+    @Test
+    @Order(34)
+    void eicarAttachment_isAcceptedThenRejected() throws Exception {
+        // The signature comes from the scanner itself so it never appears in test source.
+        String encoded = Base64.getEncoder().encodeToString(
+                SesContentScan.signature().getBytes(StandardCharsets.US_ASCII));
+        String mime = "From: " + SENDER + "\r\nTo: success@simulator.amazonses.com\r\nSubject: scan\r\n"
+                + "X-SES-MESSAGE-TAGS: probe=leak\r\n"
+                + "MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b\"\r\n\r\n"
+                + "--b\r\nContent-Type: text/plain\r\n\r\nsee attachment\r\n"
+                + "--b\r\nContent-Type: application/octet-stream\r\nContent-Transfer-Encoding: base64\r\n\r\n"
+                + encoded + "\r\n--b--\r\n";
+        String rawB64 = Base64.getEncoder().encodeToString(
+                mime.getBytes(StandardCharsets.UTF_8));
+        drainQueue();
+        String messageId = given().contentType("application/json").header("Authorization", SES_AUTH)
+                .body("""
+                    {"FromEmailAddress": "%s",
+                     "Destination": {"ToAddresses": ["success@simulator.amazonses.com"]},
+                     "ConfigurationSetName": "%s",
+                     "Content": {"Raw": {"Data": "%s"}}}
+                    """.formatted(SENDER, CS, rawB64))
+        .when().post("/v2/email/outbound-emails").then().statusCode(200)
+                .extract().jsonPath().getString("MessageId");
+
+        List<JsonNode> events = receiveSesEvents(2);
+        assertEquals(2, events.size(), "expected Send and Reject, and no Delivery");
+        assertTrue(events.stream().anyMatch(e -> "Send".equals(e.path("eventType").asText())));
+        JsonNode reject = events.stream()
+                .filter(e -> "Reject".equals(e.path("eventType").asText()))
+                .findFirst().orElseThrow();
+        assertEquals("Bad content", reject.path("reject").path("reason").asText());
+        // Nothing read off the message is published: not the subject the parser found, not the tags
+        // from its X-SES-MESSAGE-TAGS header, not the recipient lists from its To and Cc headers.
+        // Only the From the request supplied stays, and mail.destination carries the envelope.
+        for (JsonNode event : events) {
+            JsonNode mail = event.path("mail");
+            String type = event.path("eventType").asText();
+            assertTrue(mail.path("commonHeaders").path("subject").isMissingNode(),
+                    type + " must not carry the subject read off the message");
+            assertTrue(mail.path("tags").path("probe").isMissingNode(),
+                    type + " must not carry the raw header tag");
+            assertEquals(0, mail.path("commonHeaders").path("to").size(),
+                    type + " must not carry the recipients read off the message");
+            for (JsonNode header : mail.path("headers")) {
+                assertEquals("From", header.path("name").asText(),
+                        type + " must not carry header " + header.path("name").asText());
+            }
+            assertEquals("success@simulator.amazonses.com", mail.path("destination").path(0).asText());
+        }
+
+        // The request's own tags, validated by the controller, stay on both events.
+        drainQueue();
+        given().contentType("application/json").header("Authorization", SES_AUTH)
+                .body("""
+                    {"FromEmailAddress": "%s",
+                     "Destination": {"ToAddresses": ["success@simulator.amazonses.com"]},
+                     "ConfigurationSetName": "%s",
+                     "EmailTags": [{"Name": "kept", "Value": "yes"}],
+                     "Content": {"Raw": {"Data": "%s"}}}
+                    """.formatted(SENDER, CS, rawB64))
+        .when().post("/v2/email/outbound-emails").then().statusCode(200);
+        List<JsonNode> tagged = receiveSesEvents(2);
+        assertEquals(2, tagged.size(), "expected Send and Reject");
+        for (JsonNode event : tagged) {
+            assertEquals("yes", event.path("mail").path("tags").path("kept").path(0).asText(),
+                    event.path("eventType").asText() + " must keep the request tag");
+            assertTrue(event.path("mail").path("tags").path("probe").isMissingNode());
+        }
+
+        // The stored record keeps the marker and its envelope but no copy of the content, so it
+        // is listed in neither the raw shape (no RawData) nor the Simple one (no Subject or Body).
+        given().header("Authorization", SES_AUTH)
+        .when().get("/_aws/ses?id=" + messageId).then().statusCode(200)
+                .body("messages[0].RejectReason", equalTo("Bad content"))
+                .body("messages[0]", hasKey("Destination"))
+                .body("messages[0]", not(hasKey("RawData")))
+                .body("messages[0]", not(hasKey("Subject")))
+                .body("messages[0]", not(hasKey("Body")));
+    }
+
+    @Test
+    @Order(35)
+    void eicarInSimpleBody_isAcceptedThenRejectedAndStoredWithoutTheBody() throws Exception {
+        drainQueue();
+        String messageId = given().contentType("application/json").header("Authorization", SES_AUTH)
+                .body("""
+                    {"FromEmailAddress": "%s",
+                     "Destination": {"ToAddresses": ["success@simulator.amazonses.com"]},
+                     "ConfigurationSetName": "%s",
+                     "Content": {"Simple": {"Subject": {"Data": "scan"},
+                                            "Body": {"Text": {"Data": "%s"},
+                                                     "Html": {"Data": "<p>clean</p>"}}}}}
+                    """.formatted(SENDER, CS, SesContentScan.signature().replace("\\", "\\\\")))
+        .when().post("/v2/email/outbound-emails").then().statusCode(200)
+                .extract().jsonPath().getString("MessageId");
+
+        List<JsonNode> events = receiveSesEvents(2);
+        assertEquals(2, events.size(), "expected Send and Reject, and no Delivery");
+        assertTrue(events.stream().anyMatch(e -> "Reject".equals(e.path("eventType").asText())));
+        assertTrue(events.stream().noneMatch(e -> "Delivery".equals(e.path("eventType").asText())));
+
+        given().header("Authorization", SES_AUTH)
+        .when().get("/_aws/ses?id=" + messageId).then().statusCode(200)
+                .body("messages[0].RejectReason", equalTo("Bad content"))
+                .body("messages[0]", hasKey("Destination"))
+                .body("messages[0]", not(hasKey("Subject")))
+                .body("messages[0]", not(hasKey("Body")));
+    }
+
+    @Test
+    @Order(36)
+    void eicarInSimpleSubjectOrHeader_isRejectedLikeARawSend() throws Exception {
+        // A raw send is scanned as a whole, header block included, so the simple path has to
+        // cover the subject and the caller's header names and values as well or the two paths
+        // disagree; and the stored record keeps none of them.
+        String signature = SesContentScan.signature().replace("\\", "\\\\");
+        for (String content : new String[] {
+                "\"Subject\": {\"Data\": \"" + signature + "\"}, \"Body\": {\"Text\": {\"Data\": \"clean\"}}",
+                "\"Subject\": {\"Data\": \"clean\"}, \"Body\": {\"Text\": {\"Data\": \"clean\"}}, "
+                        + "\"Headers\": [{\"Name\": \"X-Probe\", \"Value\": \"" + signature + "\"}]",
+                "\"Subject\": {\"Data\": \"clean\"}, \"Body\": {\"Text\": {\"Data\": \"clean\"}}, "
+                        + "\"Headers\": [{\"Name\": \"" + signature + "\", \"Value\": \"x\"}]"}) {
+            drainQueue();
+            String messageId = given().contentType("application/json").header("Authorization", SES_AUTH)
+                    .body("""
+                        {"FromEmailAddress": "%s",
+                         "Destination": {"ToAddresses": ["success@simulator.amazonses.com"]},
+                         "ConfigurationSetName": "%s",
+                         "Content": {"Simple": {%s}}}
+                        """.formatted(SENDER, CS, content))
+            .when().post("/v2/email/outbound-emails").then().statusCode(200)
+                    .extract().jsonPath().getString("MessageId");
+
+            List<JsonNode> events = receiveSesEvents(2);
+            assertTrue(events.stream().anyMatch(e -> "Reject".equals(e.path("eventType").asText())),
+                    "expected a Reject for: " + content.substring(0, 30));
+            assertTrue(events.stream().noneMatch(e -> "Delivery".equals(e.path("eventType").asText())));
+            // Neither the Send nor the Reject event carries the scanned subject or headers.
+            for (JsonNode event : events) {
+                JsonNode mail = event.path("mail");
+                assertTrue(mail.path("commonHeaders").path("subject").isMissingNode(),
+                        event.path("eventType").asText() + " must not carry the subject");
+                for (JsonNode header : mail.path("headers")) {
+                    String name = header.path("name").asText();
+                    assertTrue(name.equals("From") || name.equals("To") || name.equals("Cc"),
+                            event.path("eventType").asText() + " must not carry header " + name);
+                }
+            }
+
+            given().header("Authorization", SES_AUTH)
+            .when().get("/_aws/ses?id=" + messageId).then().statusCode(200)
+                    .body("messages[0].RejectReason", equalTo("Bad content"))
+                    .body("messages[0]", not(hasKey("Subject")))
+                    .body("messages[0]", not(hasKey("Body")))
+                    .body("messages[0]", not(hasKey("Headers")));
+        }
+    }
+
     private void sendEmail(String to) {
         given()
                 .contentType("application/json")
@@ -1672,5 +1916,78 @@ class SesEventPublishingV2IntegrationTest {
                 .post("/")
         .then()
                 .statusCode(200);
+    }
+
+    @Test
+    @Order(30)
+    void v1SendRawEmail_xSesControlHeaders_selectConfigurationSetAndSupplyTags() throws Exception {
+        drainQueue();
+        // Neither ConfigurationSetName nor Tags is sent as a request field: AWS reads both from the
+        // message itself on a raw send, so the events only reach the topic if the headers are honoured.
+        String raw = "From: " + SENDER + "\r\n"
+                + "To: success@simulator.amazonses.com\r\n"
+                + "Subject: header-driven\r\n"
+                + "X-SES-CONFIGURATION-SET: " + CS + "\r\n"
+                + "X-SES-MESSAGE-TAGS: campaign=headercampaign, env=headerenv\r\n"
+                + "\r\nbody";
+        String rawB64 = java.util.Base64.getEncoder().encodeToString(
+                raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        given()
+                .contentType("application/x-www-form-urlencoded")
+                .header("Authorization", SES_AUTH)
+                .body("Action=SendRawEmail"
+                        + "&Source=" + java.net.URLEncoder.encode(SENDER, java.nio.charset.StandardCharsets.UTF_8)
+                        + "&RawMessage.Data=" + java.net.URLEncoder.encode(rawB64, java.nio.charset.StandardCharsets.UTF_8)
+                        + "&Version=2010-12-01")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(200);
+
+        List<JsonNode> events = receiveSesEvents(2);
+        JsonNode send = events.stream()
+                .filter(e -> "Send".equals(e.path("eventType").asText()))
+                .findFirst().orElseThrow();
+        JsonNode tags = send.path("mail").path("tags");
+        assertEquals(CS, tags.path("ses:configuration-set").get(0).asText());
+        assertEquals("headercampaign", tags.path("campaign").get(0).asText());
+        assertEquals("headerenv", tags.path("env").get(0).asText());
+    }
+
+    @Test
+    @Order(31)
+    void v1SendRawEmail_requestTagsReplaceTheHeaderTagsEntirely() throws Exception {
+        drainQueue();
+        String raw = "From: " + SENDER + "\r\n"
+                + "To: success@simulator.amazonses.com\r\n"
+                + "Subject: header-vs-request\r\n"
+                + "X-SES-MESSAGE-TAGS: campaign=fromheader, only=inheader\r\n"
+                + "\r\nbody";
+        String rawB64 = java.util.Base64.getEncoder().encodeToString(
+                raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        given()
+                .contentType("application/x-www-form-urlencoded")
+                .header("Authorization", SES_AUTH)
+                .body("Action=SendRawEmail"
+                        + "&Source=" + java.net.URLEncoder.encode(SENDER, java.nio.charset.StandardCharsets.UTF_8)
+                        + "&RawMessage.Data=" + java.net.URLEncoder.encode(rawB64, java.nio.charset.StandardCharsets.UTF_8)
+                        + "&Tags.member.1.Name=campaign&Tags.member.1.Value=fromrequest"
+                        + "&ConfigurationSetName=" + CS
+                        + "&Version=2010-12-01")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(200);
+
+        List<JsonNode> events = receiveSesEvents(2);
+        JsonNode send = events.stream()
+                .filter(e -> "Send".equals(e.path("eventType").asText()))
+                .findFirst().orElseThrow();
+        JsonNode tags = send.path("mail").path("tags");
+        assertEquals("fromrequest", tags.path("campaign").get(0).asText());
+        // AWS uses only the API parameter's tags when both are given and does not join the two
+        // sets, so a header-only tag is dropped rather than merged in.
+        assertTrue(tags.path("only").isMissingNode() || tags.path("only").isEmpty(),
+                "header tags must be discarded entirely when the request supplies tags: " + tags);
     }
 }

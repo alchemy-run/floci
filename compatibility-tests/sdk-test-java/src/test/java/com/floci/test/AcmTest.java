@@ -9,11 +9,22 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import software.amazon.awssdk.core.SdkBytes;
+import software.amazon.awssdk.core.retry.backoff.FixedDelayBackoffStrategy;
+import software.amazon.awssdk.core.waiters.WaiterResponse;
 import software.amazon.awssdk.services.acm.AcmClient;
 import software.amazon.awssdk.services.acm.model.*;
+import software.amazon.awssdk.services.route53.Route53Client;
+import software.amazon.awssdk.services.route53.model.Change;
+import software.amazon.awssdk.services.route53.model.ChangeAction;
+import software.amazon.awssdk.services.route53.model.ResourceRecordSet;
 
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -117,18 +128,105 @@ class AcmTest {
     }
 
     @Test
+    @Order(2)
+    @DisplayName("CertificateValidated waiter completes for an issued certificate")
+    void testCertificateValidatedWaiterCompletes() {
+        Assumptions.assumeTrue(requestedCertArn != null, "RequestCertificate must succeed first");
+        Assumptions.assumeFalse(TestFixtures.isRealAws(), "real ACM waits for DNS validation");
+
+        CertificateDetail pending = acm.describeCertificate(b -> b.certificateArn(requestedCertArn)).certificate();
+        assertThat(pending.status()).isEqualTo(CertificateStatus.PENDING_VALIDATION);
+        try (Route53Client dns = TestFixtures.route53Client()) {
+            String zoneId = dns.createHostedZone(b -> b.name(pending.domainName())
+                    .callerReference(TestFixtures.uniqueName("acm-validation"))).hostedZone().id();
+            List<ResourceRecordSet> records = pending.domainValidationOptions().stream()
+                    .map(DomainValidation::resourceRecord)
+                    .map(record -> ResourceRecordSet.builder().name(record.name()).type(record.typeAsString())
+                            .ttl(60L).resourceRecords(value -> value.value(record.value())).build())
+                    .toList();
+            boolean published = false;
+            try {
+                dns.changeResourceRecordSets(b -> b.hostedZoneId(zoneId).changeBatch(batch -> batch.changes(
+                        records.stream().map(record -> Change.builder().action(ChangeAction.UPSERT)
+                                .resourceRecordSet(record).build()).toList())));
+                published = true;
+                WaiterResponse<DescribeCertificateResponse> waited = acm.waiter().waitUntilCertificateValidated(
+                        b -> b.certificateArn(requestedCertArn),
+                        o -> o.maxAttempts(3).backoffStrategy(FixedDelayBackoffStrategy.create(Duration.ofSeconds(1))));
+
+                CertificateDetail detail = waited.matched().response().orElseThrow().certificate();
+                assertThat(detail.status()).isEqualTo(CertificateStatus.ISSUED);
+                assertThat(detail.domainValidationOptions()).isNotEmpty();
+                assertThat(detail.domainValidationOptions())
+                        .allSatisfy(v -> assertThat(v.validationStatus()).isEqualTo(DomainStatus.SUCCESS));
+                assertThat(acm.getCertificate(b -> b.certificateArn(requestedCertArn)).certificate())
+                        .contains("BEGIN CERTIFICATE");
+            } finally {
+                if (published) {
+                    dns.changeResourceRecordSets(b -> b.hostedZoneId(zoneId).changeBatch(batch -> batch.changes(
+                            records.stream().map(record -> Change.builder().action(ChangeAction.DELETE)
+                                    .resourceRecordSet(record).build()).toList())));
+                }
+                dns.deleteHostedZone(b -> b.id(zoneId));
+            }
+        }
+        assertThat(acm.describeCertificate(b -> b.certificateArn(requestedCertArn)).certificate().status())
+                .isEqualTo(CertificateStatus.ISSUED);
+    }
+
+    @Test
+    @Order(2)
+    @DisplayName("Unvalidated DNS requests remain pending and return a typed retrieval error")
+    void unvalidatedDnsCertificateReturnsRequestInProgress() {
+        String arn = acm.requestCertificate(b -> b
+                .domainName(TestFixtures.uniqueName("unvalidated") + ".example.com")
+                .validationMethod(ValidationMethod.DNS)).certificateArn();
+        arnsToCleanup.add(arn);
+        for (int attempt = 0; attempt < 3; attempt++) {
+            CertificateDetail detail = acm.describeCertificate(b -> b.certificateArn(arn)).certificate();
+            assertThat(detail.status()).isEqualTo(CertificateStatus.PENDING_VALIDATION);
+            assertThat(detail.issuedAt()).isNull();
+            assertThat(detail.domainValidationOptions())
+                    .allSatisfy(v -> assertThat(v.validationStatus()).isEqualTo(DomainStatus.PENDING_VALIDATION));
+            assertThatThrownBy(() -> acm.getCertificate(b -> b.certificateArn(arn)))
+                    .isInstanceOf(RequestInProgressException.class);
+        }
+        assertThat(acm.listCertificates(b -> b.certificateStatuses(CertificateStatus.PENDING_VALIDATION))
+                .certificateSummaryList()).anyMatch(summary -> arn.equals(summary.certificateArn()));
+    }
+
+    @Test
     @Order(3)
-    @DisplayName("Get a certificate rejects a pending request")
-    void testGetCertificate() {
+    @DisplayName("Get a certificate whose chain validates it")
+    void testGetCertificate() throws Exception {
         Assumptions.assumeTrue(requestedCertArn != null, "RequestCertificate must succeed first");
 
-        // Real ACM: GetCertificate on a certificate still pending validation
-        // fails with RequestInProgressException. The Java SDK's exception
-        // message carries the error MESSAGE ("The certificate request is in
-        // progress. ..."), not the error code.
-        assertThatThrownBy(() -> acm.getCertificate(b -> b
-                .certificateArn(requestedCertArn)))
-                .hasMessageContaining("in progress");
+        if (acm.describeCertificate(b -> b.certificateArn(requestedCertArn))
+                .certificate().status() == CertificateStatus.PENDING_VALIDATION) {
+            assertThatThrownBy(() -> acm.getCertificate(b -> b.certificateArn(requestedCertArn)))
+                    .hasMessageContaining("in progress");
+            return;
+        }
+
+        GetCertificateResponse response = acm.getCertificate(b -> b
+                .certificateArn(requestedCertArn));
+
+        assertThat(response.certificate()).isNotNull();
+        assertThat(response.certificate()).contains("BEGIN CERTIFICATE");
+        assertThat(response.certificateChain()).isNotNull();
+
+        // Certificate and CertificateChain form a chain of trust: the first chain entry is the
+        // issuing CA, so a client that pins the chain can validate the leaf.
+        CertificateFactory factory = CertificateFactory.getInstance("X.509");
+        X509Certificate leaf = (X509Certificate) factory.generateCertificate(
+                new ByteArrayInputStream(response.certificate().getBytes(StandardCharsets.US_ASCII)));
+        List<X509Certificate> chain = factory.generateCertificates(
+                        new ByteArrayInputStream(response.certificateChain().getBytes(StandardCharsets.US_ASCII)))
+                .stream().map(X509Certificate.class::cast).toList();
+        assertThat(chain).isNotEmpty();
+        assertThat(leaf.getIssuerX500Principal()).isEqualTo(chain.get(0).getSubjectX500Principal());
+        assertThat(leaf.getBasicConstraints()).isEqualTo(-1);
+        leaf.verify(chain.get(0).getPublicKey());
     }
 
     @Test

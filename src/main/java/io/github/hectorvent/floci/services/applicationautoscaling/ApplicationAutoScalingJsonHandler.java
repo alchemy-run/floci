@@ -206,6 +206,7 @@ public class ApplicationAutoScalingJsonHandler {
                 text(request, "ResourceId"),
                 text(request, "ScalableDimension"),
                 region);
+
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode array = response.putArray("ScalingActivities");
         found.forEach(a -> array.add(scalingActivityJson(a)));

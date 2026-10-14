@@ -229,8 +229,8 @@ class AppSyncIntegrationTest {
             .post("/v1/apis/" + apiId + "/apikeys")
         .then()
             .statusCode(200)
-            .body("apiKey.id", startsWith("da2-"))
-            .body("apiKey.apiKey", startsWith("da2-"))
+            .body("apiKey.id", matchesPattern("da2-[a-z0-9]{26}"))
+            .body("apiKey", not(hasKey("apiKey")))
             .body("apiKey.description", equalTo("test-key"))
             .extract().path("apiKey.id");
     }
@@ -2569,7 +2569,6 @@ class AppSyncIntegrationTest {
     @Order(250)
     void executeGraphql_fieldErrorAndUnauthorized() {
         given()
-            .header("Authorization", AUTH)
             .header("x-api-key", keyId)
             .contentType("application/json")
             .body("""
@@ -2582,7 +2581,6 @@ class AppSyncIntegrationTest {
             .body("errors", hasSize(greaterThanOrEqualTo(1)));
 
         given()
-            .header("Authorization", AUTH)
             .contentType("application/json")
             .body("""
                 {"query": "query { hello }"}
@@ -2591,7 +2589,7 @@ class AppSyncIntegrationTest {
             .post("/v1/apis/" + apiId + "/graphql")
         .then()
             .statusCode(401)
-            .body("__type", equalTo("UnauthorizedException"));
+            .body("errors[0].errorType", equalTo("UnauthorizedException"));
     }
 
     @Test
@@ -2599,7 +2597,6 @@ class AppSyncIntegrationTest {
     void executeGraphql_hostHeaderRoutesToDataPlane() {
         given()
             .header("Host", apiId + ".appsync-api.us-east-1.amazonaws.com")
-            .header("Authorization", AUTH)
             .header("x-api-key", keyId)
             .contentType("application/json")
             .body("""
@@ -2615,6 +2612,7 @@ class AppSyncIntegrationTest {
     // ── Phase 2: Domain Names ────────────────────────────────────────────────
 
     private static String domainName;
+    private static String domainTarget;
 
     @Test
     @Order(300)
@@ -2635,9 +2633,10 @@ class AppSyncIntegrationTest {
             .statusCode(200)
             .body("domainNameConfig.domainName", equalTo("api.example.com"))
             .body("domainNameConfig.description", equalTo("Test domain"))
-            .body("domainNameConfig.appsyncDomainName", containsString(".appsync-api."))
-            .body("domainNameConfig.hostedZoneId", notNullValue())
+            .body("domainNameConfig.appsyncDomainName", matchesPattern("d[a-z0-9]{13}\\.cloudfront\\.net"))
+            .body("domainNameConfig.hostedZoneId", equalTo("Z2FDTNDATAQYW2"))
             .extract().path("domainNameConfig.domainName");
+        domainTarget = appsyncTarget();
     }
 
     @Test
@@ -2649,7 +2648,20 @@ class AppSyncIntegrationTest {
             .get("/v1/domainnames/" + domainName)
         .then()
             .statusCode(200)
-            .body("domainNameConfig.domainName", equalTo("api.example.com"));
+            .body("domainNameConfig.domainName", equalTo("api.example.com"))
+            .body("domainNameConfig.appsyncDomainName", equalTo(domainTarget))
+            .body("domainNameConfig.hostedZoneId", equalTo("Z2FDTNDATAQYW2"));
+    }
+
+    /** The CloudFront target persisted for the test domain, as ListDomainNames reports it. */
+    private static String appsyncTarget() {
+        return given()
+            .header("Authorization", AUTH)
+        .when()
+            .get("/v1/domainnames")
+        .then()
+            .statusCode(200)
+            .extract().path("domainNameConfigs.find { it.domainName == 'api.example.com' }.appsyncDomainName");
     }
 
     @Test

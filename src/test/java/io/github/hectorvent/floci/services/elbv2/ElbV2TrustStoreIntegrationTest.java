@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.elbv2;
 
+import io.github.hectorvent.floci.services.ec2.Ec2Service;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.RestAssured;
 import io.restassured.config.EncoderConfig;
@@ -145,8 +146,8 @@ class ElbV2TrustStoreIntegrationTest {
                 .formParam("Name", "capacity-reset-lb")
                 .formParam("Type", "application")
                 .formParam("Scheme", "internal")
-                .formParam("Subnets.member.1", "subnet-default-a")
-                .formParam("Subnets.member.2", "subnet-default-b")
+                .formParam("Subnets.member.1", Ec2Service.defaultSubnetId("us-east-1", "a"))
+                .formParam("Subnets.member.2", Ec2Service.defaultSubnetId("us-east-1", "b"))
                 .header("Authorization", AUTH)
             .when()
                 .post("/")

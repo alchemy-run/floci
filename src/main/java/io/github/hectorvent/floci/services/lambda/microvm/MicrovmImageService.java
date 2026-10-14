@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.lambda.microvm;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.lambda.microvm.model.MicrovmImageRecord;
 import io.github.hectorvent.floci.services.lambda.microvm.model.MicrovmImageVersionRecord;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -78,17 +79,20 @@ public class MicrovmImageService {
 
     public Map<String, Object> createImage(String region, String accountId, Map<String, Object> request) {
         String name = requireString(request, "name");
+        if (!name.matches("[a-zA-Z0-9-_]{1,64}")) {
+            throw new AwsException("ValidationException", "name must match [a-zA-Z0-9-_]{1,64}", 400);
+        }
+        validateBuildRequest(request);
         MicrovmImageRecord existing = imageStore.get(region, name).orElse(null);
         if (existing != null) {
-            throw new AwsException("ConflictException",
-                    "MicroVM image already exists: " + name, 409);
+            return updateImage(region, name, request);
         }
 
         MicrovmImageRecord image = new MicrovmImageRecord();
         image.setRegion(region);
         image.setAccountId(accountId);
         image.setName(name);
-        image.setImageArn("arn:aws:lambda:" + region + ":" + accountId + ":microvm-image/" + name);
+        image.setImageArn("arn:aws:lambda:" + region + ":" + accountId + ":microvm-image:" + name);
         image.setState("CREATING");
         image.setCreatedAt(System.currentTimeMillis());
         Map<String, String> tags = stringMap(request.get("tags"));
@@ -98,22 +102,27 @@ public class MicrovmImageService {
 
         MicrovmImageVersionRecord version = newVersion(image, request);
         imageStore.save(image);
-        scheduleBuild(region, name, version.getImageVersion(), false);
+        scheduleBuild(accountId, region, name, version.getImageVersion(), false);
         return imageDetailResponse(image, version);
     }
 
     public Map<String, Object> updateImage(String region, String imageIdentifier, Map<String, Object> request) {
+        validateBuildRequest(request);
         MicrovmImageRecord image = requireImage(region, imageIdentifier);
         image.setState("UPDATING");
         image.setUpdatedAt(System.currentTimeMillis());
         MicrovmImageVersionRecord version = newVersion(image, request);
         imageStore.save(image);
-        scheduleBuild(region, image.getName(), version.getImageVersion(), true);
+        scheduleBuild(image.getAccountId(), region, image.getName(), version.getImageVersion(), true);
         return imageDetailResponse(image, version);
     }
 
     public Map<String, Object> getImage(String region, String imageIdentifier) {
         return imageSummary(requireImage(region, imageIdentifier), true);
+    }
+
+    public List<MicrovmImageRecord> listImageRecords(String region) {
+        return imageStore.list(region);
     }
 
     public Map<String, Object> listImages(String region, String nameFilter) {
@@ -138,11 +147,8 @@ public class MicrovmImageService {
                 })
                 .count();
         if (active > 0) {
-            // The Alchemy provider retries the delete on this exact message
-            // while its terminated MicroVMs drain.
             throw new AwsException("ValidationException",
-                    "Cannot delete MicroVM image " + image.getName() + ": it has "
-                            + active + " running MicroVMs", 400);
+                    "Cannot delete microvm image with running microvms.", 400);
         }
         for (MicrovmImageVersionRecord version : image.getVersions().values()) {
             if (version.getDockerImageTag() != null) {
@@ -228,7 +234,7 @@ public class MicrovmImageService {
 
     /** True when the ARN addresses a MicroVM image (vs a Lambda function etc.). */
     public boolean isMicrovmImageArn(String arn) {
-        return arn != null && arn.contains(":microvm-image/");
+        return arn != null && (arn.contains(":microvm-image/") || arn.contains(":microvm-image:"));
     }
 
     public Map<String, String> listTags(String region, String imageArn) {
@@ -268,7 +274,7 @@ public class MicrovmImageService {
 
     private MicrovmImageVersionRecord newVersion(MicrovmImageRecord image, Map<String, Object> request) {
         MicrovmImageVersionRecord version = new MicrovmImageVersionRecord();
-        version.setImageVersion(String.valueOf(image.getNextVersionNumber()));
+        version.setImageVersion(image.getNextVersionNumber() + ".0");
         image.setNextVersionNumber(image.getNextVersionNumber() + 1);
         version.setState("PENDING");
         version.setStatus("INACTIVE");
@@ -278,7 +284,7 @@ public class MicrovmImageService {
         version.setArchitecture(hostArchitecture());
         // Required members of MicrovmImageBuildSummary; fixed locally.
         version.setChipset("GRAVITON");
-        version.setChipsetGeneration("g4");
+        version.setChipsetGeneration("4");
 
         Map<String, Object> config = new LinkedHashMap<>();
         for (String key : List.of("baseImageArn", "baseImageVersion", "buildRoleArn", "description",
@@ -294,17 +300,21 @@ public class MicrovmImageService {
             throw new AwsException("ValidationException",
                     "baseImageArn, buildRoleArn and codeArtifact are required", 400);
         }
+        config.putIfAbsent("baseImageVersion", "1.0");
+        config.putIfAbsent("resources", List.of(Map.of("minimumMemoryInMiB", 2048)));
+        config.putIfAbsent("egressNetworkConnectors", List.of("arn:aws:lambda:" + image.getRegion()
+                + ":aws:network-connector:aws-network-connector:INTERNET_EGRESS"));
         version.setConfig(config);
         image.getVersions().put(version.getImageVersion(), version);
         return version;
     }
 
-    private void scheduleBuild(String region, String imageName, String imageVersion, boolean isUpdate) {
-        buildPool.submit(() -> runBuild(region, imageName, imageVersion, isUpdate));
+    private void scheduleBuild(String accountId, String region, String imageName, String imageVersion, boolean isUpdate) {
+        buildPool.submit(() -> runBuild(accountId, region, imageName, imageVersion, isUpdate));
     }
 
-    private void runBuild(String region, String imageName, String imageVersion, boolean isUpdate) {
-        MicrovmImageRecord image = imageStore.get(region, imageName).orElse(null);
+    private void runBuild(String accountId, String region, String imageName, String imageVersion, boolean isUpdate) {
+        MicrovmImageRecord image = imageStore.getForAccount(accountId, region, imageName).orElse(null);
         if (image == null) {
             return; // deleted while queued
         }
@@ -317,12 +327,12 @@ public class MicrovmImageService {
         imageStore.save(image);
 
         String artifactUri = artifactUri(version);
-        String tag = dockerTag(region, imageName, imageVersion);
+        String tag = dockerTag(region, imageName, imageVersion) + "-" + accountId;
         try {
             // `build` returns the tag the runnable image lives under — the
             // generated tag for a Floci-side build, or the caller's own
             // reference for a pre-built `docker://` artifact.
-            version.setDockerImageTag(buildService.build(artifactUri, tag));
+            version.setDockerImageTag(buildService.buildForAccount(accountId, region, artifactUri, tag));
             version.setState("SUCCESSFUL");
             version.setStatus("ACTIVE");
             version.setBuildState("SUCCESSFUL");
@@ -341,6 +351,20 @@ public class MicrovmImageService {
         recomputeLatestVersions(image);
         image.setUpdatedAt(System.currentTimeMillis());
         imageStore.save(image);
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        buildPool.shutdownNow();
+    }
+
+    private static void validateBuildRequest(Map<String, Object> request) {
+        requireString(request, "baseImageArn");
+        requireString(request, "buildRoleArn");
+        if (!(request.get("codeArtifact") instanceof Map<?, ?> artifact)
+                || !(artifact.get("uri") instanceof String uri) || uri.isBlank()) {
+            throw new AwsException("ValidationException", "codeArtifact.uri is required", 400);
+        }
     }
 
     private static void recomputeLatestVersions(MicrovmImageRecord image) {

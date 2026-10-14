@@ -13,6 +13,7 @@ public class DbCluster {
 
     private String dbClusterIdentifier;
     private DatabaseEngine engine;
+    private String engineIdentifier;
     private String engineVersion;
     private String masterUsername;
     private String masterPassword;
@@ -22,6 +23,11 @@ public class DbCluster {
     private DbEndpoint readerEndpoint;
     private boolean iamDatabaseAuthenticationEnabled;
     private List<String> dbClusterMembers = new ArrayList<>();
+    // The member that holds the writer role. Null on a cluster persisted before the role was
+    // modelled, in which case the first member is the writer, as it always was reported.
+    private String clusterWriterIdentifier;
+    // Set while the cluster is the primary or a secondary of a global cluster.
+    private String globalClusterIdentifier;
     private String parameterGroupName;
     private String dbSubnetGroupName;
     private String vpcId;
@@ -30,12 +36,32 @@ public class DbCluster {
     private Map<String, String> subnetAvailabilityZones = new LinkedHashMap<>();
     private String dbClusterResourceId;
     private String dbClusterArn;
+    private String masterUserSecretArn;
+    private String masterUserSecretStatus;
+    private String masterUserSecretKmsKeyId;
     private Instant createdAt;
     private int proxyPort;
     private Map<String, String> tags = new LinkedHashMap<>();
+    private String engineMode;
+    private boolean storageEncrypted;
+    // The listener port clients connect to. 0 on a record persisted before it was modelled,
+    // which reads as the engine default.
+    private int port;
+    private List<String> vpcSecurityGroupIds = new ArrayList<>();
+    private List<String> enabledCloudwatchLogsExports = new ArrayList<>();
+    private boolean deletionProtection;
+    private String networkType;
+    // AWS keeps one day of automated backups when CreateDBCluster omits it.
+    private int backupRetentionPeriod = 1;
 
     private String dockerVolumeName;
     private String volumeId;
+    private String containerStorageResourceId;
+
+    // Aurora Serverless v2 scaling (ACUs). Null when the cluster is not Serverless v2.
+    private Double serverlessV2MinCapacity;
+    private Double serverlessV2MaxCapacity;
+    private Integer serverlessV2SecondsUntilAutoPause;
 
     // Transient — not persisted
     private transient String containerId;
@@ -71,6 +97,9 @@ public class DbCluster {
     public DatabaseEngine getEngine() { return engine; }
     public void setEngine(DatabaseEngine engine) { this.engine = engine; }
 
+    public String getEngineIdentifier() { return engineIdentifier; }
+    public void setEngineIdentifier(String engineIdentifier) { this.engineIdentifier = engineIdentifier; }
+
     public String getEngineVersion() { return engineVersion; }
     public void setEngineVersion(String engineVersion) { this.engineVersion = engineVersion; }
 
@@ -100,6 +129,20 @@ public class DbCluster {
     public List<String> getDbClusterMembers() { return dbClusterMembers; }
     public void setDbClusterMembers(List<String> dbClusterMembers) { this.dbClusterMembers = dbClusterMembers; }
 
+    public String getClusterWriterIdentifier() { return clusterWriterIdentifier; }
+    public void setClusterWriterIdentifier(String clusterWriterIdentifier) { this.clusterWriterIdentifier = clusterWriterIdentifier; }
+
+    /** The member DescribeDBClusters reports as the writer; null only when there are no members. */
+    public String resolveWriterIdentifier() {
+        if (clusterWriterIdentifier != null && dbClusterMembers.contains(clusterWriterIdentifier)) {
+            return clusterWriterIdentifier;
+        }
+        return dbClusterMembers.isEmpty() ? null : dbClusterMembers.get(0);
+    }
+
+    public String getGlobalClusterIdentifier() { return globalClusterIdentifier; }
+    public void setGlobalClusterIdentifier(String globalClusterIdentifier) { this.globalClusterIdentifier = globalClusterIdentifier; }
+
     public String getParameterGroupName() { return parameterGroupName; }
     public void setParameterGroupName(String parameterGroupName) { this.parameterGroupName = parameterGroupName; }
 
@@ -128,6 +171,17 @@ public class DbCluster {
     public String getDbClusterArn() { return dbClusterArn; }
     public void setDbClusterArn(String dbClusterArn) { this.dbClusterArn = dbClusterArn; }
 
+    public String getMasterUserSecretArn() { return masterUserSecretArn; }
+    public void setMasterUserSecretArn(String masterUserSecretArn) { this.masterUserSecretArn = masterUserSecretArn; }
+
+    public String getMasterUserSecretStatus() { return masterUserSecretStatus; }
+    public void setMasterUserSecretStatus(String masterUserSecretStatus) { this.masterUserSecretStatus = masterUserSecretStatus; }
+
+    public String getMasterUserSecretKmsKeyId() { return masterUserSecretKmsKeyId; }
+    public void setMasterUserSecretKmsKeyId(String masterUserSecretKmsKeyId) {
+        this.masterUserSecretKmsKeyId = masterUserSecretKmsKeyId;
+    }
+
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
 
@@ -137,11 +191,45 @@ public class DbCluster {
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags != null ? new LinkedHashMap<>(tags) : new LinkedHashMap<>(); }
 
+    public String getEngineMode() { return engineMode; }
+    public void setEngineMode(String engineMode) { this.engineMode = engineMode; }
+
+    public boolean isStorageEncrypted() { return storageEncrypted; }
+    public void setStorageEncrypted(boolean storageEncrypted) { this.storageEncrypted = storageEncrypted; }
+
+    public int getPort() { return port; }
+    public void setPort(int port) { this.port = port; }
+
+    public List<String> getVpcSecurityGroupIds() { return vpcSecurityGroupIds; }
+    public void setVpcSecurityGroupIds(List<String> vpcSecurityGroupIds) {
+        this.vpcSecurityGroupIds = vpcSecurityGroupIds != null ? new ArrayList<>(vpcSecurityGroupIds) : new ArrayList<>();
+    }
+
+    public List<String> getEnabledCloudwatchLogsExports() { return enabledCloudwatchLogsExports; }
+    public void setEnabledCloudwatchLogsExports(List<String> enabledCloudwatchLogsExports) {
+        this.enabledCloudwatchLogsExports = enabledCloudwatchLogsExports != null
+                ? new ArrayList<>(enabledCloudwatchLogsExports) : new ArrayList<>();
+    }
+
+    public boolean isDeletionProtection() { return deletionProtection; }
+    public void setDeletionProtection(boolean deletionProtection) { this.deletionProtection = deletionProtection; }
+
+    public String getNetworkType() { return networkType; }
+    public void setNetworkType(String networkType) { this.networkType = networkType; }
+
+    public int getBackupRetentionPeriod() { return backupRetentionPeriod; }
+    public void setBackupRetentionPeriod(int backupRetentionPeriod) { this.backupRetentionPeriod = backupRetentionPeriod; }
+
     public String getDockerVolumeName() { return dockerVolumeName; }
     public void setDockerVolumeName(String dockerVolumeName) { this.dockerVolumeName = dockerVolumeName; }
 
     public String getVolumeId() { return volumeId; }
     public void setVolumeId(String volumeId) { this.volumeId = volumeId; }
+
+    public String getContainerStorageResourceId() { return containerStorageResourceId; }
+    public void setContainerStorageResourceId(String containerStorageResourceId) {
+        this.containerStorageResourceId = containerStorageResourceId;
+    }
 
     public String getContainerId() { return containerId; }
     public void setContainerId(String containerId) { this.containerId = containerId; }
@@ -151,4 +239,15 @@ public class DbCluster {
 
     public int getContainerPort() { return containerPort; }
     public void setContainerPort(int containerPort) { this.containerPort = containerPort; }
+
+    public Double getServerlessV2MinCapacity() { return serverlessV2MinCapacity; }
+    public void setServerlessV2MinCapacity(Double serverlessV2MinCapacity) { this.serverlessV2MinCapacity = serverlessV2MinCapacity; }
+
+    public Double getServerlessV2MaxCapacity() { return serverlessV2MaxCapacity; }
+    public void setServerlessV2MaxCapacity(Double serverlessV2MaxCapacity) { this.serverlessV2MaxCapacity = serverlessV2MaxCapacity; }
+
+    public Integer getServerlessV2SecondsUntilAutoPause() { return serverlessV2SecondsUntilAutoPause; }
+    public void setServerlessV2SecondsUntilAutoPause(Integer serverlessV2SecondsUntilAutoPause) {
+        this.serverlessV2SecondsUntilAutoPause = serverlessV2SecondsUntilAutoPause;
+    }
 }

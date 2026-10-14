@@ -42,13 +42,29 @@ public class Action {
     private String oidcTokenEndpoint;
     private String oidcUserInfoEndpoint;
     private String oidcClientId;
+    /**
+     * Stored so a modify can keep it, never reported. Describe* on real AWS omits the secret,
+     * which is why Terraform's provider carries it forward from local state instead of reading
+     * it back.
+     */
     private String oidcClientSecret;
-    private String oidcScope;
+    /** Set by a modify that asked to keep the stored secret. Never reported. */
+    private boolean oidcUseExistingClientSecret;
     private String oidcSessionCookieName;
+    private String oidcScope;
     private Long oidcSessionTimeout;
     private String oidcOnUnauthenticatedRequest;
-    private Boolean oidcUseExistingClientSecret;
     private Map<String, String> oidcAuthenticationRequestExtraParams = new LinkedHashMap<>();
+
+    // authenticate-cognito
+    private String cognitoUserPoolArn;
+    private String cognitoUserPoolClientId;
+    private String cognitoUserPoolDomain;
+    private String cognitoSessionCookieName;
+    private String cognitoScope;
+    private Long cognitoSessionTimeout;
+    private String cognitoOnUnauthenticatedRequest;
+    private Map<String, String> cognitoAuthenticationRequestExtraParams = new LinkedHashMap<>();
 
     public Action() {}
 
@@ -116,7 +132,9 @@ public class Action {
     public void setOidcTokenEndpoint(String oidcTokenEndpoint) { this.oidcTokenEndpoint = oidcTokenEndpoint; }
 
     public String getOidcUserInfoEndpoint() { return oidcUserInfoEndpoint; }
-    public void setOidcUserInfoEndpoint(String oidcUserInfoEndpoint) { this.oidcUserInfoEndpoint = oidcUserInfoEndpoint; }
+    public void setOidcUserInfoEndpoint(String oidcUserInfoEndpoint) {
+        this.oidcUserInfoEndpoint = oidcUserInfoEndpoint;
+    }
 
     public String getOidcClientId() { return oidcClientId; }
     public void setOidcClientId(String oidcClientId) { this.oidcClientId = oidcClientId; }
@@ -124,11 +142,18 @@ public class Action {
     public String getOidcClientSecret() { return oidcClientSecret; }
     public void setOidcClientSecret(String oidcClientSecret) { this.oidcClientSecret = oidcClientSecret; }
 
-    public String getOidcScope() { return oidcScope; }
-    public void setOidcScope(String oidcScope) { this.oidcScope = oidcScope; }
+    public boolean isOidcUseExistingClientSecret() { return oidcUseExistingClientSecret; }
+    public void setOidcUseExistingClientSecret(boolean oidcUseExistingClientSecret) {
+        this.oidcUseExistingClientSecret = oidcUseExistingClientSecret;
+    }
 
     public String getOidcSessionCookieName() { return oidcSessionCookieName; }
-    public void setOidcSessionCookieName(String oidcSessionCookieName) { this.oidcSessionCookieName = oidcSessionCookieName; }
+    public void setOidcSessionCookieName(String oidcSessionCookieName) {
+        this.oidcSessionCookieName = oidcSessionCookieName;
+    }
+
+    public String getOidcScope() { return oidcScope; }
+    public void setOidcScope(String oidcScope) { this.oidcScope = oidcScope; }
 
     public Long getOidcSessionTimeout() { return oidcSessionTimeout; }
     public void setOidcSessionTimeout(Long oidcSessionTimeout) { this.oidcSessionTimeout = oidcSessionTimeout; }
@@ -138,18 +163,51 @@ public class Action {
         this.oidcOnUnauthenticatedRequest = oidcOnUnauthenticatedRequest;
     }
 
-    public Boolean getOidcUseExistingClientSecret() { return oidcUseExistingClientSecret; }
-    public void setOidcUseExistingClientSecret(Boolean oidcUseExistingClientSecret) {
-        this.oidcUseExistingClientSecret = oidcUseExistingClientSecret;
-    }
-
     public Map<String, String> getOidcAuthenticationRequestExtraParams() {
         return oidcAuthenticationRequestExtraParams;
     }
-    public void setOidcAuthenticationRequestExtraParams(Map<String, String> oidcAuthenticationRequestExtraParams) {
-        this.oidcAuthenticationRequestExtraParams = oidcAuthenticationRequestExtraParams != null
-                ? oidcAuthenticationRequestExtraParams
-                : new LinkedHashMap<>();
+
+    public void setOidcAuthenticationRequestExtraParams(Map<String, String> params) {
+        this.oidcAuthenticationRequestExtraParams = params;
+    }
+
+    public String getCognitoUserPoolArn() { return cognitoUserPoolArn; }
+    public void setCognitoUserPoolArn(String cognitoUserPoolArn) { this.cognitoUserPoolArn = cognitoUserPoolArn; }
+
+    public String getCognitoUserPoolClientId() { return cognitoUserPoolClientId; }
+    public void setCognitoUserPoolClientId(String cognitoUserPoolClientId) {
+        this.cognitoUserPoolClientId = cognitoUserPoolClientId;
+    }
+
+    public String getCognitoUserPoolDomain() { return cognitoUserPoolDomain; }
+    public void setCognitoUserPoolDomain(String cognitoUserPoolDomain) {
+        this.cognitoUserPoolDomain = cognitoUserPoolDomain;
+    }
+
+    public String getCognitoSessionCookieName() { return cognitoSessionCookieName; }
+    public void setCognitoSessionCookieName(String cognitoSessionCookieName) {
+        this.cognitoSessionCookieName = cognitoSessionCookieName;
+    }
+
+    public String getCognitoScope() { return cognitoScope; }
+    public void setCognitoScope(String cognitoScope) { this.cognitoScope = cognitoScope; }
+
+    public Long getCognitoSessionTimeout() { return cognitoSessionTimeout; }
+    public void setCognitoSessionTimeout(Long cognitoSessionTimeout) {
+        this.cognitoSessionTimeout = cognitoSessionTimeout;
+    }
+
+    public String getCognitoOnUnauthenticatedRequest() { return cognitoOnUnauthenticatedRequest; }
+    public void setCognitoOnUnauthenticatedRequest(String cognitoOnUnauthenticatedRequest) {
+        this.cognitoOnUnauthenticatedRequest = cognitoOnUnauthenticatedRequest;
+    }
+
+    public Map<String, String> getCognitoAuthenticationRequestExtraParams() {
+        return cognitoAuthenticationRequestExtraParams;
+    }
+
+    public void setCognitoAuthenticationRequestExtraParams(Map<String, String> params) {
+        this.cognitoAuthenticationRequestExtraParams = params;
     }
 
     @RegisterForReflection

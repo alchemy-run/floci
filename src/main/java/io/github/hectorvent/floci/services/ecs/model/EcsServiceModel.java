@@ -23,15 +23,52 @@ public class EcsServiceModel {
     private Instant createdAt;
     /** When the current deployment began: service creation, or the last task-definition change. */
     private Instant lastDeploymentAt;
+    /** Current deployment identifier ("ecs-svc/<hex>"). Rolls on a task-definition change or forceNewDeployment. */
+    private String deploymentId;
+    /** The deploymentId last observed to reach steady state; guards against re-emitting COMPLETED. */
+    private String lastCompletedDeploymentId;
+    /** The task definition of {@link #lastCompletedDeploymentId}, which a circuit-breaker rollback returns to. */
+    private String lastCompletedTaskDefinition;
+    /** Consecutive (or, with {@code resetOnHealthyTask=false}, cumulative) task failures of the current deployment. */
+    private int deploymentFailedTasks;
+    /** {@code FAILED} once the deployment circuit breaker trips on the current deployment; null while derived. */
+    private String deploymentRolloutState;
+    /** The current deployment's rolloutStateReason when it is not the derived in-progress/completed text. */
+    private String deploymentRolloutStateReason;
+    /** Superseded deployments the circuit breaker failed, still reported as ACTIVE until the PRIMARY completes. */
+    private List<Deployment> failedDeployments = new ArrayList<>();
+    /** Scheduler events recorded for the service, newest first. */
+    private List<ServiceEvent> events = new ArrayList<>();
     private String namespace;
     private String deploymentController;
+    private String schedulingStrategy;
+    private String availabilityZoneRebalancing;
     private Map<String, String> tags = new HashMap<>();
     private List<EcsLoadBalancer> loadBalancers = new ArrayList<>();
     private NetworkConfiguration networkConfiguration;
-    private DeploymentConfiguration deploymentConfiguration;
-    private Integer healthCheckGracePeriodSeconds;
+    /**
+     * The Service Connect configuration given on CreateService or UpdateService, kept raw.
+     * DescribeServices reports it on each deployments[] entry, which is where AWS's model puts
+     * it; the Service shape itself has no member for it.
+     */
+    private Map<String, Object> serviceConnectConfiguration;
+    private String platformVersion;
+    private String platformFamily;
     private List<CapacityProviderStrategyItem> capacityProviderStrategy;
-    private List<ServiceRegistry> serviceRegistries;
+    private boolean enableExecuteCommand;
+    private boolean enableECSManagedTags;
+    private String propagateTags;
+    private Integer healthCheckGracePeriodSeconds;
+    private String roleArn;
+    /**
+     * {@code deploymentConfiguration}, kept raw. The reconciler reads its
+     * {@code deploymentCircuitBreaker}; the rolling-update percentages are reported but not enforced.
+     */
+    private Map<String, Object> deploymentConfiguration;
+    /** {@code serviceRegistries}, kept raw: Cloud Map registration is not emulated. */
+    private List<Map<String, Object>> serviceRegistries;
+    /** Members Floci does not act on, kept verbatim so DescribeServices round-trips. */
+    private Map<String, Object> unparsed;
 
     public String getServiceArn() { return serviceArn; }
     public void setServiceArn(String serviceArn) { this.serviceArn = serviceArn; }
@@ -65,11 +102,55 @@ public class EcsServiceModel {
     public Instant getLastDeploymentAt() { return lastDeploymentAt; }
     public void setLastDeploymentAt(Instant lastDeploymentAt) { this.lastDeploymentAt = lastDeploymentAt; }
 
+    public String getDeploymentId() { return deploymentId; }
+    public void setDeploymentId(String deploymentId) { this.deploymentId = deploymentId; }
+
+    public String getLastCompletedDeploymentId() { return lastCompletedDeploymentId; }
+    public void setLastCompletedDeploymentId(String lastCompletedDeploymentId) {
+        this.lastCompletedDeploymentId = lastCompletedDeploymentId;
+    }
+
+    public String getLastCompletedTaskDefinition() { return lastCompletedTaskDefinition; }
+    public void setLastCompletedTaskDefinition(String lastCompletedTaskDefinition) {
+        this.lastCompletedTaskDefinition = lastCompletedTaskDefinition;
+    }
+
+    public int getDeploymentFailedTasks() { return deploymentFailedTasks; }
+    public void setDeploymentFailedTasks(int deploymentFailedTasks) { this.deploymentFailedTasks = deploymentFailedTasks; }
+
+    public String getDeploymentRolloutState() { return deploymentRolloutState; }
+    public void setDeploymentRolloutState(String deploymentRolloutState) {
+        this.deploymentRolloutState = deploymentRolloutState;
+    }
+
+    public String getDeploymentRolloutStateReason() { return deploymentRolloutStateReason; }
+    public void setDeploymentRolloutStateReason(String deploymentRolloutStateReason) {
+        this.deploymentRolloutStateReason = deploymentRolloutStateReason;
+    }
+
+    public List<Deployment> getFailedDeployments() { return failedDeployments; }
+    public void setFailedDeployments(List<Deployment> failedDeployments) {
+        this.failedDeployments = failedDeployments != null ? failedDeployments : new ArrayList<>();
+    }
+
+    public List<ServiceEvent> getEvents() { return events; }
+    public void setEvents(List<ServiceEvent> events) {
+        this.events = events != null ? events : new ArrayList<>();
+    }
+
     public String getNamespace() { return namespace; }
     public void setNamespace(String namespace) { this.namespace = namespace; }
 
     public String getDeploymentController() { return deploymentController; }
     public void setDeploymentController(String deploymentController) { this.deploymentController = deploymentController; }
+
+    public String getSchedulingStrategy() { return schedulingStrategy; }
+    public void setSchedulingStrategy(String schedulingStrategy) { this.schedulingStrategy = schedulingStrategy; }
+
+    public String getAvailabilityZoneRebalancing() { return availabilityZoneRebalancing; }
+    public void setAvailabilityZoneRebalancing(String availabilityZoneRebalancing) {
+        this.availabilityZoneRebalancing = availabilityZoneRebalancing;
+    }
 
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags; }
@@ -84,23 +165,53 @@ public class EcsServiceModel {
         this.networkConfiguration = networkConfiguration;
     }
 
-    public DeploymentConfiguration getDeploymentConfiguration() { return deploymentConfiguration; }
-    public void setDeploymentConfiguration(DeploymentConfiguration deploymentConfiguration) {
-        this.deploymentConfiguration = deploymentConfiguration;
+    public Map<String, Object> getServiceConnectConfiguration() { return serviceConnectConfiguration; }
+    public void setServiceConnectConfiguration(Map<String, Object> serviceConnectConfiguration) {
+        this.serviceConnectConfiguration = serviceConnectConfiguration;
     }
 
-    public Integer getHealthCheckGracePeriodSeconds() { return healthCheckGracePeriodSeconds; }
-    public void setHealthCheckGracePeriodSeconds(Integer healthCheckGracePeriodSeconds) {
-        this.healthCheckGracePeriodSeconds = healthCheckGracePeriodSeconds;
-    }
+    public String getPlatformVersion() { return platformVersion; }
+    public void setPlatformVersion(String platformVersion) { this.platformVersion = platformVersion; }
+
+    public String getPlatformFamily() { return platformFamily; }
+    public void setPlatformFamily(String platformFamily) { this.platformFamily = platformFamily; }
 
     public List<CapacityProviderStrategyItem> getCapacityProviderStrategy() { return capacityProviderStrategy; }
     public void setCapacityProviderStrategy(List<CapacityProviderStrategyItem> capacityProviderStrategy) {
         this.capacityProviderStrategy = capacityProviderStrategy;
     }
 
-    public List<ServiceRegistry> getServiceRegistries() { return serviceRegistries; }
-    public void setServiceRegistries(List<ServiceRegistry> serviceRegistries) {
+    public boolean isEnableExecuteCommand() { return enableExecuteCommand; }
+    public void setEnableExecuteCommand(boolean enableExecuteCommand) {
+        this.enableExecuteCommand = enableExecuteCommand;
+    }
+
+    public boolean isEnableECSManagedTags() { return enableECSManagedTags; }
+    public void setEnableECSManagedTags(boolean enableECSManagedTags) {
+        this.enableECSManagedTags = enableECSManagedTags;
+    }
+
+    public String getPropagateTags() { return propagateTags; }
+    public void setPropagateTags(String propagateTags) { this.propagateTags = propagateTags; }
+
+    public Integer getHealthCheckGracePeriodSeconds() { return healthCheckGracePeriodSeconds; }
+    public void setHealthCheckGracePeriodSeconds(Integer healthCheckGracePeriodSeconds) {
+        this.healthCheckGracePeriodSeconds = healthCheckGracePeriodSeconds;
+    }
+
+    public String getRoleArn() { return roleArn; }
+    public void setRoleArn(String roleArn) { this.roleArn = roleArn; }
+
+    public Map<String, Object> getDeploymentConfiguration() { return deploymentConfiguration; }
+    public void setDeploymentConfiguration(Map<String, Object> deploymentConfiguration) {
+        this.deploymentConfiguration = deploymentConfiguration;
+    }
+
+    public List<Map<String, Object>> getServiceRegistries() { return serviceRegistries; }
+    public void setServiceRegistries(List<Map<String, Object>> serviceRegistries) {
         this.serviceRegistries = serviceRegistries;
     }
+
+    public Map<String, Object> getUnparsed() { return unparsed; }
+    public void setUnparsed(Map<String, Object> unparsed) { this.unparsed = unparsed; }
 }

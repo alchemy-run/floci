@@ -20,6 +20,9 @@ public class ChangeSet {
     private String templateBody;
     private Map<String, String> parameters;
     private List<String> capabilities;
+    private Map<String, String> tags;
+    public Map<String, String> getTags() { return tags; }
+    public void setTags(Map<String, String> tags) { this.tags = tags; }
     private String changeSetType; // CREATE or UPDATE
     private Instant creationTime = Instant.now();
 

@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.S3DestinationValidation;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.bcmdataexports.model.DataQuery;
@@ -44,14 +46,8 @@ public class BcmDataExportsService {
 
     private static final Pattern EXPORT_NAME_PATTERN = Pattern.compile("[A-Za-z0-9_-]+");
     private static final Set<String> ALLOWED_FREQUENCY = Set.of("SYNCHRONOUS");
-    /**
-     * Floci only emits Parquet at the moment. Real AWS also accepts
-     * {@code TEXT_OR_CSV} / {@code GZIP} but Floci's emission engine writes
-     * Parquet unconditionally; accepting other formats would let a definition
-     * persist that no consumer can read. Restrict until CSV/GZIP support lands.
-     */
-    private static final Set<String> ALLOWED_FORMAT = Set.of("PARQUET");
-    private static final Set<String> ALLOWED_COMPRESSION = Set.of("PARQUET");
+    private static final Set<String> ALLOWED_FORMAT = Set.of("PARQUET", "TEXT_OR_CSV");
+    private static final Set<String> ALLOWED_COMPRESSION = Set.of("PARQUET", "GZIP");
     private static final Set<String> ALLOWED_OVERWRITE = Set.of("CREATE_NEW_REPORT", "OVERWRITE_REPORT");
     private static final Set<String> ALLOWED_OUTPUT_TYPE = Set.of("CUSTOM");
 
@@ -156,9 +152,7 @@ public class BcmDataExportsService {
         incoming.setExportStatus(existing.getExportStatus() == null ? "HEALTHY" : existing.getExportStatus());
         incoming.setOwnerAccountId(existing.getOwnerAccountId() != null
                 ? existing.getOwnerAccountId() : regionResolver.getAccountId());
-        if (incoming.getResourceTags() == null || incoming.getResourceTags().isEmpty()) {
-            incoming.setResourceTags(existing.getResourceTags());
-        }
+        incoming.setResourceTags(existing.getResourceTags());
         exportStore.put(key, incoming);
         LOG.infov("Updated BCM export: {0}", exportArn);
         return incoming;
@@ -199,6 +193,7 @@ public class BcmDataExportsService {
     public ExportExecution getExecution(String exportArn, String executionId) {
         requireNonEmpty(exportArn, "ExportArn");
         requireNonEmpty(executionId, "ExecutionId");
+        getExport(exportArn);
         return executionStore.get(executionKey(exportArn, executionId))
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException",
                         "Execution " + executionId + " not found.", 400));
@@ -216,6 +211,13 @@ public class BcmDataExportsService {
         ExportExecution exec = new ExportExecution();
         exec.setExecutionId(UUID.randomUUID().toString());
         exec.setExportArn(exportArn);
+        if (exportStore instanceof AccountAwareStorageBackend<?> aware) {
+            @SuppressWarnings("unchecked")
+            AccountAwareStorageBackend<Export> typed = (AccountAwareStorageBackend<Export>) aware;
+            exec.setExport(typed.getForAccount(accountId, exportKey(exportArn)).orElse(null));
+        } else {
+            exec.setExport(exportStore.get(exportKey(exportArn)).orElse(null));
+        }
         exec.setExportStatus("INITIATION_IN_PROCESS");
         exec.setCreatedBy(createdBy);
         exec.setCreatedAt(System.currentTimeMillis());
@@ -243,8 +245,20 @@ public class BcmDataExportsService {
     public void completeExecution(String accountId, ExportExecution exec, boolean success, String reason) {
         exec.setExportStatus(success ? "DELIVERY_SUCCESS" : "DELIVERY_FAILURE");
         exec.setCompletedAt(System.currentTimeMillis());
-        if (reason != null) {
-            exec.setStatusReason(reason);
+        exec.setStatusReason(reason);
+        String exportKey = exportKey(exec.getExportArn());
+        if (exportStore instanceof AccountAwareStorageBackend<?> aware) {
+            @SuppressWarnings("unchecked")
+            AccountAwareStorageBackend<Export> typed = (AccountAwareStorageBackend<Export>) aware;
+            typed.getForAccount(accountId, exportKey).ifPresent(export -> {
+                export.setExportStatus(success ? "HEALTHY" : "UNHEALTHY");
+                typed.putForAccount(accountId, exportKey, export);
+            });
+        } else {
+            exportStore.get(exportKey).ifPresent(export -> {
+                export.setExportStatus(success ? "HEALTHY" : "UNHEALTHY");
+                exportStore.put(exportKey, export);
+            });
         }
         String key = executionKey(exec.getExportArn(), exec.getExecutionId());
         if (executionStore instanceof io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend<?> aware) {
@@ -255,6 +269,27 @@ public class BcmDataExportsService {
         } else {
             executionStore.put(key, exec);
         }
+    }
+
+    public Map<String, String> listTagsForResource(String exportArn) {
+        Export export = getExport(exportArn);
+        return export.getResourceTags() == null ? Map.of() : Map.copyOf(export.getResourceTags());
+    }
+
+    public void tagResource(String exportArn, Map<String, String> tags) {
+        Export export = getExport(exportArn);
+        Map<String, String> merged = new HashMap<>(listTagsForResource(exportArn));
+        merged.putAll(tags);
+        export.setResourceTags(merged);
+        exportStore.put(exportKey(exportArn), export);
+    }
+
+    public void untagResource(String exportArn, List<String> tagKeys) {
+        Export export = getExport(exportArn);
+        Map<String, String> remaining = new HashMap<>(listTagsForResource(exportArn));
+        tagKeys.forEach(remaining::remove);
+        export.setResourceTags(remaining);
+        exportStore.put(exportKey(exportArn), export);
     }
 
     private Export findByName(String name) {
@@ -295,12 +330,12 @@ public class BcmDataExportsService {
         }
         DestinationConfiguration.S3Destination s3 = dest.getS3Destination();
         requireNonEmpty(s3.getS3Bucket(), "S3Destination.S3Bucket");
-        requireValidBucketName(s3.getS3Bucket(), "S3Destination.S3Bucket");
+        S3DestinationValidation.requireValidBucketName(s3.getS3Bucket(), "S3Destination.S3Bucket");
         requireNonEmpty(s3.getS3Region(), "S3Destination.S3Region");
         if (s3.getS3Prefix() == null) {
             s3.setS3Prefix("");
         } else if (!s3.getS3Prefix().isEmpty()) {
-            requireSafeKeySegment(s3.getS3Prefix(), "S3Destination.S3Prefix");
+            S3DestinationValidation.requireSafeKeySegment(s3.getS3Prefix(), "S3Destination.S3Prefix");
         }
         DestinationConfiguration.S3OutputConfigurations out = s3.getS3OutputConfigurations();
         if (out != null) {
@@ -311,6 +346,11 @@ public class BcmDataExportsService {
             if (out.getCompression() != null && !ALLOWED_COMPRESSION.contains(out.getCompression())) {
                 throw new AwsException("ValidationException",
                         "S3OutputConfigurations.Compression must be one of " + ALLOWED_COMPRESSION, 400);
+            }
+            if (out.getFormat() != null && out.getCompression() != null
+                    && "PARQUET".equals(out.getFormat()) != "PARQUET".equals(out.getCompression())) {
+                throw new AwsException("ValidationException",
+                        "PARQUET format requires PARQUET compression; TEXT_OR_CSV requires GZIP.", 400);
             }
             if (out.getOverwrite() != null && !ALLOWED_OVERWRITE.contains(out.getOverwrite())) {
                 throw new AwsException("ValidationException",
@@ -353,40 +393,4 @@ public class BcmDataExportsService {
         }
     }
 
-    private static void requireValidBucketName(String bucket, String field) {
-        if (bucket.length() < 3 || bucket.length() > 63) {
-            throw new AwsException("ValidationException",
-                    field + " must be between 3 and 63 characters.", 400);
-        }
-        for (int i = 0; i < bucket.length(); i++) {
-            char c = bucket.charAt(i);
-            boolean valid = (c >= 'a' && c <= 'z')
-                    || (c >= '0' && c <= '9')
-                    || c == '-' || c == '.';
-            if (!valid) {
-                throw new AwsException("ValidationException",
-                        field + " contains invalid characters.", 400);
-            }
-        }
-        if (bucket.startsWith("-") || bucket.endsWith("-")
-                || bucket.startsWith(".") || bucket.endsWith(".")
-                || bucket.contains("..")) {
-            throw new AwsException("ValidationException",
-                    field + " is not a valid S3 bucket name.", 400);
-        }
-    }
-
-    private static void requireSafeKeySegment(String value, String field) {
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            boolean ok = (c >= 'A' && c <= 'Z')
-                    || (c >= 'a' && c <= 'z')
-                    || (c >= '0' && c <= '9')
-                    || c == '-' || c == '_' || c == '.' || c == '/';
-            if (!ok) {
-                throw new AwsException("ValidationException",
-                        field + " contains characters not permitted in an S3 key segment.", 400);
-            }
-        }
-    }
 }

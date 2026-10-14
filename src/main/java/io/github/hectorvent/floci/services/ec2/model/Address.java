@@ -20,6 +20,11 @@ public class Address {
     private String publicIpv4Pool = "amazon";
     private String networkBorderGroup;
     private String region;
+    /**
+     * The address AllocateAddress invented for this allocation, kept so disassociation can
+     * restore it after association re-points the EIP at a reachable address.
+     */
+    private String allocatedPublicIp;
     private List<Tag> tags = new ArrayList<>();
 
     public Address() {}
@@ -50,6 +55,8 @@ public class Address {
 
     public String getNetworkBorderGroup() { return networkBorderGroup; }
     public void setNetworkBorderGroup(String networkBorderGroup) { this.networkBorderGroup = networkBorderGroup; }
+    public String getAllocatedPublicIp() { return allocatedPublicIp; }
+    public void setAllocatedPublicIp(String allocatedPublicIp) { this.allocatedPublicIp = allocatedPublicIp; }
 
     public String getRegion() { return region; }
     public void setRegion(String region) { this.region = region; }

@@ -1,76 +1,56 @@
 package io.github.hectorvent.floci.services.ses.model;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A SES v2 tenant — a named isolation container for identities, configuration
- * sets, and templates.
+ * A SES v2 tenant (multi-tenancy). Created by {@code CreateTenant} and returned by
+ * {@code GetTenant}/{@code ListTenants}. {@code sendingStatus} is the AWS {@code SendingStatus} enum
+ * (ENABLED / REINSTATED / DISABLED); a freshly created tenant is ENABLED.
  */
 @RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
-@JsonInclude(JsonInclude.Include.NON_NULL)
-public class Tenant {
+public record Tenant(String tenantName,
+                     String tenantId,
+                     String tenantArn,
+                     Instant createdTimestamp,
+                     List<Tag> tags,
+                     String sendingStatus,
+                     TenantSuppressionAttributes suppressionAttributes) {
 
-    @JsonProperty("TenantName")
-    private String tenantName;
-
-    @JsonProperty("TenantId")
-    private String tenantId;
-
-    @JsonProperty("TenantArn")
-    private String tenantArn;
-
-    @JsonProperty("CreatedTimestamp")
-    private Instant createdTimestamp;
-
-    @JsonProperty("SendingStatus")
-    private String sendingStatus = "ENABLED";
-
-    @JsonProperty("SuppressedReasons")
-    private List<String> suppressedReasons;
-
-    @JsonProperty("SuppressionScope")
-    private String suppressionScope;
-
-    @JsonProperty("Tags")
-    private List<Tag> tags = new ArrayList<>();
-
-    public Tenant() {}
-
-    public String getTenantName() { return tenantName; }
-    public void setTenantName(String tenantName) { this.tenantName = tenantName; }
-
-    public String getTenantId() { return tenantId; }
-    public void setTenantId(String tenantId) { this.tenantId = tenantId; }
-
-    public String getTenantArn() { return tenantArn; }
-    public void setTenantArn(String tenantArn) { this.tenantArn = tenantArn; }
-
-    public Instant getCreatedTimestamp() { return createdTimestamp; }
-    public void setCreatedTimestamp(Instant createdTimestamp) {
-        this.createdTimestamp = createdTimestamp;
+    @JsonCreator
+    public static Tenant fromJson(
+            @JsonProperty("tenantName") @JsonAlias("TenantName") String name,
+            @JsonProperty("tenantId") @JsonAlias("TenantId") String id,
+            @JsonProperty("tenantArn") @JsonAlias("TenantArn") String arn,
+            @JsonProperty("createdTimestamp") @JsonAlias("CreatedTimestamp") Instant created,
+            @JsonProperty("tags") @JsonAlias("Tags") List<Tag> tags,
+            @JsonProperty("sendingStatus") @JsonAlias("SendingStatus") String sending,
+            @JsonProperty("suppressionAttributes") TenantSuppressionAttributes suppression,
+            @JsonProperty("SuppressedReasons") List<String> legacyReasons,
+            @JsonProperty("SuppressionScope") String legacyScope) {
+        TenantSuppressionAttributes attributes = suppression;
+        if (attributes == null && legacyReasons != null && legacyScope != null) {
+            attributes = new TenantSuppressionAttributes(legacyReasons, legacyScope);
+        }
+        return new Tenant(name, id, arn, created, tags == null ? List.of() : tags,
+                sending == null ? "ENABLED" : sending, attributes);
     }
 
-    public String getSendingStatus() { return sendingStatus; }
-    public void setSendingStatus(String sendingStatus) { this.sendingStatus = sendingStatus; }
-
-    public List<String> getSuppressedReasons() { return suppressedReasons; }
-    public void setSuppressedReasons(List<String> suppressedReasons) {
-        this.suppressedReasons = suppressedReasons;
+    /** Copy with different tags (records are immutable; the store is replace-only). */
+    public Tenant withTags(List<Tag> newTags) {
+        return new Tenant(tenantName, tenantId, tenantArn, createdTimestamp, newTags, sendingStatus,
+                suppressionAttributes);
     }
 
-    public String getSuppressionScope() { return suppressionScope; }
-    public void setSuppressionScope(String suppressionScope) { this.suppressionScope = suppressionScope; }
-
-    public List<Tag> getTags() { return tags; }
-    public void setTags(List<Tag> tags) {
-        this.tags = tags == null ? new ArrayList<>() : tags;
+    /** Copy with different suppression attributes (records are immutable; the store is replace-only). */
+    public Tenant withSuppressionAttributes(TenantSuppressionAttributes attrs) {
+        return new Tenant(tenantName, tenantId, tenantArn, createdTimestamp, tags, sendingStatus, attrs);
     }
 }

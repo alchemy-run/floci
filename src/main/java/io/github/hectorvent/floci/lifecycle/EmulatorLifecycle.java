@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.lifecycle;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.ContainerTeardown;
+import io.github.hectorvent.floci.core.common.ContainerTeardowns;
 import io.github.hectorvent.floci.core.common.ServiceRegistry;
 import io.github.hectorvent.floci.core.storage.PersistentPathValidator;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -12,6 +13,9 @@ import io.github.hectorvent.floci.services.ecr.registry.EcrRegistryManager;
 import io.github.hectorvent.floci.services.floci.ui.FlociUiManager;
 import io.github.hectorvent.floci.services.amazonmq.container.RabbitMqManager;
 import io.github.hectorvent.floci.services.kinesisanalytics.container.FlinkContainerManager;
+import io.github.hectorvent.floci.services.iam.IamService;
+import io.github.hectorvent.floci.services.elasticache.ElastiCacheMemcachedService;
+import io.github.hectorvent.floci.services.elasticache.ElastiCacheService;
 import io.github.hectorvent.floci.services.elasticache.container.ElastiCacheContainerManager;
 import io.github.hectorvent.floci.services.elasticache.container.ElastiCacheMemcachedContainerManager;
 import io.github.hectorvent.floci.services.elasticache.proxy.ElastiCacheProxyManager;
@@ -23,12 +27,15 @@ import io.github.hectorvent.floci.services.neptune.container.NeptuneContainerMan
 import io.github.hectorvent.floci.services.neptune.proxy.NeptuneProxyManager;
 import io.github.hectorvent.floci.services.pipes.PipesService;
 import io.github.hectorvent.floci.services.appsync.graphql.SchemaCreationWorker;
+import io.github.hectorvent.floci.services.elb.ElbClassicService;
 import io.github.hectorvent.floci.services.elbv2.ElbV2Service;
 import io.github.hectorvent.floci.services.rds.RdsService;
+import io.github.hectorvent.floci.services.stepfunctions.StepFunctionsService;
 import io.github.hectorvent.floci.services.memorydb.container.MemoryDbContainerManager;
 import io.github.hectorvent.floci.services.memorydb.proxy.MemoryDbProxyManager;
 import io.github.hectorvent.floci.services.rds.container.RdsContainerManager;
 import io.github.hectorvent.floci.services.rds.proxy.RdsProxyManager;
+import io.github.hectorvent.floci.services.timestreaminfluxdb.TimestreamInfluxDbService;
 import io.quarkus.runtime.Quarkus;
 import io.quarkus.runtime.ShutdownDelayInitiatedEvent;
 import io.quarkus.runtime.ShutdownEvent;
@@ -37,6 +44,7 @@ import io.quarkus.vertx.http.HttpServerStart;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.enterprise.event.ObservesAsync;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -48,7 +56,6 @@ import java.util.Optional;
 public class EmulatorLifecycle {
 
     private static final Logger LOG = Logger.getLogger(EmulatorLifecycle.class);
-    private static final int HTTP_PORT = 4566;
     private static final int TLS_HTTP_BACKEND_PORT = 4510;
 
     @ConfigProperty(name = "quarkus.application.version", defaultValue = "")
@@ -65,6 +72,9 @@ public class EmulatorLifecycle {
     private final StorageFactory storageFactory;
     private final ServiceRegistry serviceRegistry;
     private final EmulatorConfig config;
+    private final IamService iamService;
+    private final ElastiCacheService elastiCacheService;
+    private final ElastiCacheMemcachedService elastiCacheMemcachedService;
     private final ElastiCacheContainerManager elastiCacheContainerManager;
     private final ElastiCacheMemcachedContainerManager elastiCacheMemcachedContainerManager;
     private final ElastiCacheProxyManager elastiCacheProxyManager;
@@ -78,7 +88,9 @@ public class EmulatorLifecycle {
     private final RabbitMqManager rabbitMqManager;
     private final FlinkContainerManager flinkContainerManager;
     private final RdsService rdsService;
+    private final TimestreamInfluxDbService timestreamInfluxDbService;
     private final ElbV2Service elbV2Service;
+    private final ElbClassicService elbClassicService;
     private final InitializationHooksRunner initializationHooksRunner;
     private final SqsEventSourcePoller sqsPoller;
     private final KinesisEventSourcePoller kinesisPoller;
@@ -89,12 +101,16 @@ public class EmulatorLifecycle {
     private final FlociUiManager flociUiManager;
     private final InitLifecycleState initLifecycleState;
     private final SchemaCreationWorker schemaCreationWorker;
-    private final jakarta.enterprise.inject.Instance<ContainerTeardown> containerTeardowns;
+    private final StepFunctionsService stepFunctionsService;
+    private final Instance<ContainerTeardown> containerTeardowns;
     private final PersistentPathValidator persistentPathValidator;
 
     @Inject
     public EmulatorLifecycle(StorageFactory storageFactory, ServiceRegistry serviceRegistry,
                              EmulatorConfig config,
+                             IamService iamService,
+                             ElastiCacheService elastiCacheService,
+                             ElastiCacheMemcachedService elastiCacheMemcachedService,
                              ElastiCacheContainerManager elastiCacheContainerManager,
                              ElastiCacheMemcachedContainerManager elastiCacheMemcachedContainerManager,
                              ElastiCacheProxyManager elastiCacheProxyManager,
@@ -108,7 +124,9 @@ public class EmulatorLifecycle {
                              RabbitMqManager rabbitMqManager,
                              FlinkContainerManager flinkContainerManager,
                              RdsService rdsService,
+                             TimestreamInfluxDbService timestreamInfluxDbService,
                              ElbV2Service elbV2Service,
+                             ElbClassicService elbClassicService,
                              InitializationHooksRunner initializationHooksRunner,
                              SqsEventSourcePoller sqsPoller,
                              KinesisEventSourcePoller kinesisPoller,
@@ -119,11 +137,15 @@ public class EmulatorLifecycle {
                              FlociUiManager flociUiManager,
                              InitLifecycleState initLifecycleState,
                              SchemaCreationWorker schemaCreationWorker,
-                             jakarta.enterprise.inject.Instance<ContainerTeardown> containerTeardowns,
+                             StepFunctionsService stepFunctionsService,
+                             Instance<ContainerTeardown> containerTeardowns,
                              PersistentPathValidator persistentPathValidator) {
         this.storageFactory = storageFactory;
         this.serviceRegistry = serviceRegistry;
         this.config = config;
+        this.iamService = iamService;
+        this.elastiCacheService = elastiCacheService;
+        this.elastiCacheMemcachedService = elastiCacheMemcachedService;
         this.elastiCacheContainerManager = elastiCacheContainerManager;
         this.elastiCacheMemcachedContainerManager = elastiCacheMemcachedContainerManager;
         this.elastiCacheProxyManager = elastiCacheProxyManager;
@@ -137,7 +159,9 @@ public class EmulatorLifecycle {
         this.rabbitMqManager = rabbitMqManager;
         this.flinkContainerManager = flinkContainerManager;
         this.rdsService = rdsService;
+        this.timestreamInfluxDbService = timestreamInfluxDbService;
         this.elbV2Service = elbV2Service;
+        this.elbClassicService = elbClassicService;
         this.initializationHooksRunner = initializationHooksRunner;
         this.sqsPoller = sqsPoller;
         this.kinesisPoller = kinesisPoller;
@@ -148,6 +172,7 @@ public class EmulatorLifecycle {
         this.flociUiManager = flociUiManager;
         this.initLifecycleState = initLifecycleState;
         this.schemaCreationWorker = schemaCreationWorker;
+        this.stepFunctionsService = stepFunctionsService;
         this.containerTeardowns = containerTeardowns;
         this.persistentPathValidator = persistentPathValidator;
     }
@@ -158,6 +183,11 @@ public class EmulatorLifecycle {
         LOG.infof("Region:    %s  Account: %s", config.defaultRegion(), config.defaultAccountId());
         LOG.infov("Storage:   {0}  Path: {1}", config.storage().mode(), config.storage().persistentPath());
         LOG.infov("TLS:       {0}", config.tls().enabled() ? "enabled (HTTPS + HTTP dual mode)" : "disabled (HTTP only)");
+        // Surfaced in the banner because a mistyped flag name (issue #3931) silently leaves
+        // enforcement off, and nothing else in the logs reveals that policies are not evaluated.
+        LOG.infov("IAM:       {0}", config.services().iam().enforcementEnabled()
+                ? "policy enforcement enabled"
+                : "policy enforcement disabled (set FLOCI_SERVICES_IAM_ENFORCEMENT_ENABLED=true to enforce)");
 
         // BOOT hooks run before service initialization — scripts cannot use AWS APIs yet.
         try {
@@ -174,18 +204,44 @@ public class EmulatorLifecycle {
 
         serviceRegistry.logEnabledServices();
         storageFactory.loadAll();
+        int sweptSessions = iamService.sweepOrphanedLambdaExecutionRoleSessions();
+        if (sweptSessions > 0) {
+            LOG.infov("Removed {0} orphaned Lambda execution-role session(s)", sweptSessions);
+        }
+        int sweptEc2Sessions = iamService.sweepOrphanedEc2InstanceSessions();
+        if (sweptEc2Sessions > 0) {
+            LOG.infov("Removed {0} orphaned EC2 instance session(s)", sweptEc2Sessions);
+        }
         schemaCreationWorker.recoverOrphans();
+        schemaCreationWorker.rehydrateSchemas();
+        stepFunctionsService.abortAbandonedExecutions();
 
         sqsPoller.startPersistedPollers();
         kinesisPoller.startPersistedPollers();
         dynamodbStreamsPoller.startPersistedPollers();
         pipesService.startPersistedPollers();
         rdsService.restorePersistedRuntime();
+        if (config.services().timestreamInfluxdb().enabled()) {
+            timestreamInfluxDbService.restorePersistedRuntime();
+        }
+        if (config.services().elasticache().enabled()) {
+            elastiCacheService.restorePersistedRuntime().exceptionally(ex -> {
+                LOG.warnv("ElastiCache replication group restore failed: {0}", ex.getMessage());
+                return null;
+            });
+            elastiCacheMemcachedService.restorePersistedRuntime().exceptionally(ex -> {
+                LOG.warnv("ElastiCache Memcached restore failed: {0}", ex.getMessage());
+                return null;
+            });
+        }
         if (config.services().elbv2().enabled()) {
             elbV2Service.restorePersistedRuntime();
         }
+        if (config.services().elb().enabled()) {
+            elbClassicService.restorePersistedRuntime();
+        }
 
-        if (config.services().ec2().enabled() && !config.services().ec2().mock()) {
+        if (isMetadataServerNeeded()) {
             ec2MetadataServer.start().exceptionally(ex -> {
                 LOG.warnv("EC2 IMDS server failed to start: {0}", ex.getMessage());
                 return null;
@@ -202,7 +258,11 @@ public class EmulatorLifecycle {
     }
 
     void onHttpStart(@ObservesAsync HttpServerStart event) {
-        int expectedPort = config.tls().enabled() ? TLS_HTTP_BACKEND_PORT : HTTP_PORT;
+        // Non-TLS: Quarkus listens on floci.port (quarkus.http.port: ${floci.port} in
+        // application.yml). TLS mode: TlsConfigSource pins the HTTP backend to 4510 and the
+        // public port is served by TlsProxyServer. Comparing against a hardcoded 4566 here
+        // made start/ready hooks never run when FLOCI_PORT was non-default (#2437).
+        int expectedPort = config.tls().enabled() ? TLS_HTTP_BACKEND_PORT : config.port();
         if (event.options().getPort() != expectedPort) {
             return;
         }
@@ -268,37 +328,52 @@ public class EmulatorLifecycle {
         // SIGTERM grace window and trigger SIGKILL; if the flush ran last it would be skipped and
         // in-memory (hybrid) data would be lost on an otherwise-graceful shutdown. shutdownAll()
         // still runs at the end to stop the flush schedulers and capture any shutdown-time writes.
-        storageFactory.flushAll();
-        if (config.services().ec2().enabled() && !config.services().ec2().mock()) {
-            ec2MetadataServer.stop();
-        }
-        elastiCacheProxyManager.stopAll();
-        rdsProxyManager.stopAll();
-        memoryDbProxyManager.stopAll();
-        neptuneProxyManager.stopAll();
-        elastiCacheContainerManager.stopAll();
-        elastiCacheMemcachedContainerManager.stopAll();
-        rdsContainerManager.stopAll();
-        memoryDbContainerManager.stopAll();
-        docDbContainerManager.stopAll();
-        neptuneContainerManager.stopAll();
-        rabbitMqManager.stopAll();
-        flinkContainerManager.stopAll();
-        ecrRegistryManager.shutdown();
-        flociUiManager.shutdown();
+        runCleanup("storage flush", storageFactory::flushAll);
+        runCleanup("EC2 metadata server", () -> {
+            if (isMetadataServerNeeded()) {
+                ec2MetadataServer.stop();
+            }
+        });
+        runCleanup("ElastiCache proxy", elastiCacheProxyManager::stopAll);
+        runCleanup("RDS proxy", rdsProxyManager::stopAll);
+        runCleanup("MemoryDB proxy", memoryDbProxyManager::stopAll);
+        runCleanup("Neptune proxy", neptuneProxyManager::stopAll);
+        runCleanup("ElastiCache container", elastiCacheContainerManager::stopAll);
+        runCleanup("ElastiCache Memcached container", elastiCacheMemcachedContainerManager::stopAll);
+        runCleanup("RDS container", rdsContainerManager::stopAll);
+        runCleanup("MemoryDB container", memoryDbContainerManager::stopAll);
+        runCleanup("DocDB container", docDbContainerManager::stopAll);
+        runCleanup("Neptune container", neptuneContainerManager::stopAll);
+        runCleanup("RabbitMQ", rabbitMqManager::stopAll);
+        runCleanup("Flink", flinkContainerManager::stopAll);
+        runCleanup("ECR registry", ecrRegistryManager::shutdown);
+        runCleanup("Floci UI", flociUiManager::shutdown);
         // Centralized teardown for process-bound containers (Lambda warm pool, ECS tasks,
         // EC2 instances, in-flight build/job containers). Runs before shutdownAll() so any
         // state written while stopping is captured by the final flush.
-        for (ContainerTeardown teardown : containerTeardowns) {
-            try {
-                teardown.stopManagedContainers();
-            } catch (Exception e) {
-                LOG.warnv("Container teardown failed for {0}: {1}",
-                        teardown.getClass().getSimpleName(), e.getMessage());
-            }
-        }
-        storageFactory.shutdownAll();
+        ContainerTeardowns.stopAll(containerTeardowns, LOG);
+        runCleanup("storage shutdown", storageFactory::shutdownAll);
 
         LOG.info("=== AWS Local Emulator Stopped ===");
+    }
+
+    private void runCleanup(String resource, Runnable cleanup) {
+        try {
+            cleanup.run();
+        } catch (RuntimeException e) {
+            LOG.warnv(e, "Shutdown cleanup failed for {0}; continuing with the remaining steps", resource);
+        }
+    }
+
+    private boolean isMetadataServerNeeded() {
+        if (config == null || config.services() == null) {
+            return false;
+        }
+        EmulatorConfig.Ec2ServiceConfig ec2 = config.services().ec2();
+        if (ec2 != null && ec2.enabled() && !ec2.mock()) {
+            return true;
+        }
+        EmulatorConfig.EksServiceConfig eks = config.services().eks();
+        return eks != null && eks.enabled() && !eks.mock() && eks.imds();
     }
 }

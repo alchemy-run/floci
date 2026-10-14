@@ -8,8 +8,16 @@ import software.amazon.awssdk.services.opensearch.OpenSearchClient;
 import software.amazon.awssdk.services.opensearch.model.*;
 import software.amazon.awssdk.services.opensearch.model.Tag;
 
-import java.net.HttpURLConnection;
+import software.amazon.awssdk.auth.signer.Aws4Signer;
+import software.amazon.awssdk.auth.signer.params.Aws4SignerParams;
+import software.amazon.awssdk.http.SdkHttpFullRequest;
+import software.amazon.awssdk.http.SdkHttpMethod;
+
 import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
 
@@ -165,15 +173,35 @@ class OpenSearchTest {
 
         assertThat(ready).as("Domain did not become ready in time").isTrue();
 
+        // Like AWS, the endpoint is a bare host name: the client picks the scheme, and the REST API
+        // answers only SigV4 requests signed for "es" unless the access policy opens it to anyone.
+        assertThat(domainEndpoint).doesNotContain("://");
+        URI health = URI.create(TestFixtures.endpoint().getScheme() + "://" + domainEndpoint + "/_cluster/health");
         try {
-            HttpURLConnection conn = (HttpURLConnection)
-                    URI.create(domainEndpoint + "/_cluster/health").toURL().openConnection();
-            conn.setConnectTimeout(5000);
-            conn.setReadTimeout(5000);
-            int code = conn.getResponseCode();
-            assertThat(code).isEqualTo(200);
-        } catch (Exception e) {
+            HttpClient http = TestFixtures.emulatorHttpClient();
+            HttpResponse<String> unsigned = http.send(HttpRequest.newBuilder(health)
+                    .timeout(Duration.ofSeconds(10)).GET().build(), HttpResponse.BodyHandlers.ofString());
+            assertThat(unsigned.statusCode()).isEqualTo(403);
+
+            SdkHttpFullRequest signed = Aws4Signer.create().sign(
+                    SdkHttpFullRequest.builder().uri(health).method(SdkHttpMethod.GET).build(),
+                    Aws4SignerParams.builder()
+                            .awsCredentials(AwsBasicCredentials.create("test", "test"))
+                            .signingRegion(Region.US_EAST_1).signingName("es").build());
+            HttpRequest.Builder request = HttpRequest.newBuilder(health).timeout(Duration.ofSeconds(10)).GET();
+            signed.headers().forEach((name, values) -> {
+                if (!name.equalsIgnoreCase("Host")) {
+                    values.forEach(value -> request.header(name, value));
+                }
+            });
+            HttpResponse<String> response = http.send(request.build(), HttpResponse.BodyHandlers.ofString());
+            assertThat(response.statusCode()).as(response.body()).isEqualTo(200);
+            assertThat(response.body()).contains("\"cluster_name\"");
+        } catch (java.io.IOException e) {
             fail("OpenSearch endpoint " + domainEndpoint + " not reachable: " + e.getMessage());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            fail("Interrupted probing OpenSearch endpoint " + domainEndpoint);
         }
     }
 

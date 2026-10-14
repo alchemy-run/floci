@@ -4,11 +4,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
+import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.RequestScopes;
 import io.github.hectorvent.floci.services.ecs.EcsService;
 import io.github.hectorvent.floci.services.ecs.model.LaunchType;
 import io.github.hectorvent.floci.services.eventbridge.EventBridgeService;
 import io.github.hectorvent.floci.services.lambda.LambdaService;
 import io.github.hectorvent.floci.services.lambda.model.InvocationType;
+import io.github.hectorvent.floci.services.scheduler.model.AwsVpcConfiguration;
 import io.github.hectorvent.floci.services.scheduler.model.EventBridgeParameters;
 import io.github.hectorvent.floci.services.scheduler.model.EcsParameters;
 import io.github.hectorvent.floci.services.scheduler.model.Schedule;
@@ -17,20 +20,25 @@ import io.github.hectorvent.floci.services.sns.SnsMessageAttributes;
 import io.github.hectorvent.floci.services.sns.SnsService;
 import io.github.hectorvent.floci.services.sqs.SqsService;
 import io.github.hectorvent.floci.services.sqs.model.MessageAttributeValue;
+import io.github.hectorvent.floci.services.stepfunctions.StepFunctionsService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
+import java.util.Base64;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 /**
  * Delivers an EventBridge Scheduler target invocation to the underlying service.
- * Supports templated SQS, Lambda, SNS, and EventBridge PutEvents targets, plus
+ * Supports templated SQS, Lambda, SNS, Step Functions, and EventBridge PutEvents targets, plus
  * universal targets ({@code arn:aws:scheduler:::aws-sdk:<service>:<action>}) for
  * {@code sns:publish} and {@code sqs:sendMessage}. Substitutes the
  * {@code <aws.scheduler.*>} context attributes AWS documents on
@@ -46,6 +54,7 @@ public class ScheduleInvoker {
     private final SnsService snsService;
     private final EventBridgeService eventBridgeService;
     private final EcsService ecsService;
+    private final StepFunctionsService stepFunctionsService;
     private final ObjectMapper objectMapper;
     private final String baseUrl;
 
@@ -55,6 +64,7 @@ public class ScheduleInvoker {
                            SnsService snsService,
                            EventBridgeService eventBridgeService,
                            EcsService ecsService,
+                           StepFunctionsService stepFunctionsService,
                            ObjectMapper objectMapper,
                            EmulatorConfig config) {
         this.sqsService = sqsService;
@@ -62,37 +72,49 @@ public class ScheduleInvoker {
         this.snsService = snsService;
         this.eventBridgeService = eventBridgeService;
         this.ecsService = ecsService;
+        this.stepFunctionsService = stepFunctionsService;
         this.objectMapper = objectMapper;
         this.baseUrl = config.baseUrl();
     }
 
-    public void invoke(Target target, String region) {
-        deliver(target, region, target != null && target.getInput() != null ? target.getInput() : "{}");
+    public String invoke(Target target, String region) {
+        return deliver(target, region, target != null && target.getInput() != null ? target.getInput() : "{}");
     }
 
     /**
      * Fire {@code schedule}'s target, substituting AWS Scheduler context
      * attributes into {@code Target.Input} the way live EventBridge Scheduler does.
      */
-    public void invoke(Schedule schedule, Instant scheduledTime) {
-        if (schedule == null || schedule.getTarget() == null) {
-            return;
+    public String invoke(Schedule schedule, Instant scheduledTime) {
+        return invoke(schedule, scheduledTime, 1);
+    }
+
+    public String invoke(Schedule schedule, Instant scheduledTime, int attemptNumber) {
+        return invoke(schedule, scheduledTime, attemptNumber, UUID.randomUUID().toString());
+    }
+
+    public String invoke(Schedule schedule, Instant scheduledTime, int attemptNumber, String executionId) {
+        if (schedule == null || schedule.getTarget() == null || schedule.getTarget().getArn() == null) {
+            return "{}";
         }
-        String region = extractRegion(schedule.getArn(), "us-east-1");
-        String payload = substituteContextAttributes(
-                schedule.getTarget().getInput() != null ? schedule.getTarget().getInput() : "{}",
-                schedule,
-                scheduledTime != null ? scheduledTime : Instant.now(),
-                1);
-        deliver(schedule.getTarget(), region, payload);
+        String region = regionOf(schedule);
+        String payload = occurrencePayload(schedule,
+                scheduledTime != null ? scheduledTime : Instant.now(), attemptNumber, executionId);
+        return deliver(schedule.getTarget(), region, payload);
     }
 
     static String substituteContextAttributes(String input, Schedule schedule,
                                               Instant scheduledTime, int attemptNumber) {
+        return substituteContextAttributes(input, schedule, scheduledTime, attemptNumber,
+                UUID.randomUUID().toString());
+    }
+
+    private static String substituteContextAttributes(String input, Schedule schedule,
+                                                      Instant scheduledTime, int attemptNumber,
+                                                      String executionId) {
         if (input == null || input.isEmpty() || !input.contains("<aws.scheduler.")) {
             return input;
         }
-        String executionId = UUID.randomUUID().toString();
         String scheduled = DateTimeFormatter.ISO_INSTANT.format(scheduledTime);
         return input
                 .replace("<aws.scheduler.schedule-arn>", schedule.getArn() != null ? schedule.getArn() : "")
@@ -101,44 +123,234 @@ public class ScheduleInvoker {
                 .replace("<aws.scheduler.attempt-number>", Integer.toString(attemptNumber));
     }
 
-    private void deliver(Target target, String region, String payload) {
+    private String deliver(Target target, String region, String payload) {
         if (target == null || target.getArn() == null) {
-            return;
+            return "{}";
         }
         String arn = target.getArn();
-
-        // Universal targets (arn:aws:scheduler:::aws-sdk:<service>:<action>) carry the
-        // real resource identifiers inside Input, not in the target ARN. Detect and
-        // dispatch them before the ARN-substring routing below, which would otherwise
-        // mis-match (e.g. "aws-sdk:sns:publish" contains ":sns:").
-        int sdkIdx = arn.indexOf(":aws-sdk:");
-        if (sdkIdx >= 0) {
-            invokeUniversalTarget(arn.substring(sdkIdx + ":aws-sdk:".length()), payload, region);
-            return;
+        if (isUniversalTarget(arn)) {
+            invokeUniversalTarget(arn.substring(arn.indexOf(":aws-sdk:") + ":aws-sdk:".length()),
+                    payload, region);
+            return validJsonOrString(payload);
         }
 
+        TargetKind kind = TargetKind.of(target);
         String targetRegion = extractRegion(arn, region);
-        if (arn.contains(":sqs:")) {
-            String queueUrl = AwsArnUtils.arnToQueueUrl(arn, baseUrl);
-            String messageGroupId = target.getSqsParameters() != null
-                    ? target.getSqsParameters().getMessageGroupId() : null;
-            sqsService.sendMessage(queueUrl, payload, 0, messageGroupId, null, targetRegion);
-            LOG.debugv("Scheduler delivered to SQS: {0}", arn);
-        } else if (arn.contains(":lambda:") || arn.contains(":function:")) {
-            String fnName = arn.substring(arn.lastIndexOf(':') + 1);
-            lambdaService.invoke(targetRegion, fnName, payload.getBytes(), InvocationType.Event);
-            LOG.debugv("Scheduler delivered to Lambda: {0}", arn);
-        } else if (arn.contains(":sns:")) {
-            snsService.publish(arn, null, payload, "Scheduler", targetRegion);
-            LOG.debugv("Scheduler delivered to SNS: {0}", arn);
-        } else if (arn.contains(":ecs:") && target.getEcsParameters() != null) {
-            deliverToEcsRunTask(target, targetRegion);
-            LOG.debugv("Scheduler delivered to ECS RunTask: {0}", arn);
-        } else if (isEventBridgePutEventsArn(arn)) {
-            deliverToEventBridge(target, payload, targetRegion);
-            LOG.debugv("Scheduler delivered to EventBridge: {0}", arn);
-        } else {
-            LOG.warnv("Scheduler: unsupported target ARN type: {0}", arn);
+        switch (kind) {
+            case SQS -> {
+                String queueUrl = AwsArnUtils.arnToQueueUrl(arn, baseUrl);
+                String messageGroupId = target.getSqsParameters() != null
+                        ? target.getSqsParameters().getMessageGroupId() : null;
+                sqsService.sendMessage(queueUrl, payload, 0, messageGroupId, null, targetRegion);
+                LOG.debugv("Scheduler delivered to SQS: {0}", arn);
+            }
+            case LAMBDA -> {
+                lambdaService.invokeArn(arn, payload.getBytes(), InvocationType.Event);
+                LOG.debugv("Scheduler delivered to Lambda: {0}", arn);
+            }
+            case SNS -> {
+                snsService.publish(arn, null, payload, "Scheduler", targetRegion);
+                LOG.debugv("Scheduler delivered to SNS: {0}", arn);
+            }
+            case ECS_RUN_TASK -> {
+                deliverToEcsRunTask(target, targetRegion);
+                LOG.debugv("Scheduler delivered to ECS RunTask: {0}", arn);
+            }
+            case STEP_FUNCTIONS -> {
+                String targetAccount = AwsArnUtils.parse(arn).accountId();
+                RequestScopes.runAs(targetAccount,
+                        () -> stepFunctionsService.startExecution(arn, null, payload, targetRegion));
+                LOG.debugv("Scheduler started Step Functions execution: {0}", arn);
+            }
+            case EVENT_BRIDGE -> {
+                deliverToEventBridge(target, payload, targetRegion);
+                LOG.debugv("Scheduler delivered to EventBridge: {0}", arn);
+            }
+            case UNSUPPORTED ->
+                    throw new UnsupportedOperationException("Scheduler: unsupported target ARN type: " + arn);
+        }
+        return templatedTargetRequest(target, kind, payload);
+    }
+
+    /** Returns the JSON request sent to the target service, for invocation diagnostics and DLQs. */
+    public String materializeRequest(Target target, String region) {
+        return materializeRequest(target, region, target != null && target.getInput() != null
+                ? target.getInput() : "{}");
+    }
+
+    public String materializeRequest(Schedule schedule, Instant scheduledTime) {
+        return materializeRequest(schedule, scheduledTime, 1, UUID.randomUUID().toString());
+    }
+
+    public String materializeRequest(Schedule schedule, Instant scheduledTime,
+                                     int attemptNumber, String executionId) {
+        if (schedule == null || schedule.getTarget() == null || schedule.getTarget().getArn() == null) {
+            return "{}";
+        }
+        String payload = occurrencePayload(schedule,
+                scheduledTime != null ? scheduledTime : Instant.now(), attemptNumber, executionId);
+        return materializeRequest(schedule.getTarget(), extractRegion(schedule.getArn(), "us-east-1"), payload);
+    }
+
+    private String materializeRequest(Target target, String region, String payload) {
+        if (target == null || target.getArn() == null) {
+            return "{}";
+        }
+        String arn = target.getArn();
+        int sdkIdx = arn.indexOf(":aws-sdk:");
+        if (sdkIdx >= 0) {
+            return validJsonOrString(payload);
+        }
+        return templatedTargetRequest(target, TargetKind.of(target), payload);
+    }
+
+    /** The templated target types Floci delivers to, in the order their ARNs are recognised. */
+    private enum TargetKind {
+        SQS, LAMBDA, SNS, ECS_RUN_TASK, STEP_FUNCTIONS, EVENT_BRIDGE, UNSUPPORTED;
+
+        static TargetKind of(Target target) {
+            String arn = target.getArn();
+            if (arn.contains(":sqs:")) {
+                return SQS;
+            }
+            if (arn.contains(":lambda:") || arn.contains(":function:")) {
+                return LAMBDA;
+            }
+            if (arn.contains(":sns:")) {
+                return SNS;
+            }
+            if (arn.contains(":ecs:") && target.getEcsParameters() != null) {
+                return ECS_RUN_TASK;
+            }
+            if (isStateMachineArn(arn)) {
+                return STEP_FUNCTIONS;
+            }
+            if (isEventBridgePutEventsArn(arn)) {
+                return EVENT_BRIDGE;
+            }
+            return UNSUPPORTED;
+        }
+    }
+
+    /**
+     * Universal targets (arn:aws:scheduler:::aws-sdk:&lt;service&gt;:&lt;action&gt;) carry the real
+     * resource identifiers inside Input, not in the target ARN. They are detected before the
+     * ARN-substring routing of {@link TargetKind}, which would otherwise mis-match (e.g.
+     * "aws-sdk:sns:publish" contains ":sns:").
+     */
+    private static boolean isUniversalTarget(String arn) {
+        return arn.contains(":aws-sdk:");
+    }
+
+    private String templatedTargetRequest(Target target, TargetKind kind, String payload) {
+        String arn = target.getArn();
+        Map<String, Object> request = new LinkedHashMap<>();
+        switch (kind) {
+            case SQS -> {
+                request.put("MessageBody", payload);
+                request.put("QueueUrl", AwsArnUtils.arnToQueueUrl(arn, baseUrl));
+                if (target.getSqsParameters() != null
+                        && target.getSqsParameters().getMessageGroupId() != null) {
+                    request.put("MessageGroupId", target.getSqsParameters().getMessageGroupId());
+                }
+            }
+            case LAMBDA -> {
+                request.put("FunctionName", arn);
+                request.put("InvocationType", InvocationType.Event.name());
+                request.put("Payload", payload);
+            }
+            case SNS -> {
+                request.put("TopicArn", arn);
+                request.put("Message", payload);
+            }
+            case ECS_RUN_TASK -> request.putAll(ecsRunTaskRequest(target));
+            case STEP_FUNCTIONS -> {
+                request.put("stateMachineArn", arn);
+                request.put("input", payload);
+            }
+            case EVENT_BRIDGE -> request.put("Entries", List.of(eventBridgeEntry(target, payload)));
+            case UNSUPPORTED -> {
+                return validJsonOrString(payload);
+            }
+        }
+        return writeJson(request);
+    }
+
+    private static Map<String, Object> ecsRunTaskRequest(Target target) {
+        EcsParameters ecs = target.getEcsParameters();
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("cluster", target.getArn());
+        request.put("taskDefinition", ecs.getTaskDefinitionArn());
+        request.put("count", ecs.getTaskCount() != null ? ecs.getTaskCount() : 1);
+        putIfPresent(request, "launchType", ecs.getLaunchType());
+        putIfPresent(request, "group", ecs.getGroup());
+        if (ecs.getNetworkConfiguration() != null && ecs.getNetworkConfiguration().getAwsvpcConfiguration() != null) {
+            AwsVpcConfiguration vpc = ecs.getNetworkConfiguration().getAwsvpcConfiguration();
+            Map<String, Object> awsvpc = new LinkedHashMap<>();
+            putIfPresent(awsvpc, "subnets", vpc.getSubnets());
+            putIfPresent(awsvpc, "securityGroups", vpc.getSecurityGroups());
+            putIfPresent(awsvpc, "assignPublicIp", vpc.getAssignPublicIp());
+            request.put("networkConfiguration", Map.of("awsvpcConfiguration", awsvpc));
+        }
+        return request;
+    }
+
+    private static void putIfPresent(Map<String, Object> map, String key, Object value) {
+        if (value != null) {
+            map.put(key, value);
+        }
+    }
+
+    /**
+     * The payload a templated target receives: the target's {@code Input}, or Scheduler's default
+     * notification when no {@code Input} was configured (API reference, {@code Target.Input}).
+     */
+    private String occurrencePayload(Schedule schedule, Instant scheduledAt,
+                                     int attemptNumber, String executionId) {
+        Target target = schedule.getTarget();
+        String input = target.getInput();
+        if (input == null) {
+            input = target.getArn() != null && isUniversalTarget(target.getArn())
+                    ? "{}" : defaultScheduledEvent(schedule, scheduledAt);
+        }
+        return substituteContextAttributes(input, schedule, scheduledAt, attemptNumber, executionId);
+    }
+
+    /**
+     * Scheduler's default notification: an EventBridge-style {@code Scheduled Event} whose
+     * {@code resources} names the schedule and whose {@code detail} is the string "{}". The event
+     * id is stable per occurrence so retries and the dead-letter body carry the same event.
+     */
+    private String defaultScheduledEvent(Schedule schedule, Instant scheduledAt) {
+        AwsArnUtils.Arn scheduleArn = AwsArnUtils.parse(schedule.getArn());
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("version", "0");
+        event.put("id", UUID.nameUUIDFromBytes(
+                (schedule.getArn() + "@" + scheduledAt).getBytes(StandardCharsets.UTF_8)).toString());
+        event.put("detail-type", "Scheduled Event");
+        event.put("source", "aws.scheduler");
+        event.put("account", scheduleArn.accountId());
+        event.put("time", scheduledAt.truncatedTo(ChronoUnit.SECONDS).toString());
+        event.put("region", scheduleArn.region());
+        event.put("resources", List.of(schedule.getArn()));
+        event.put("detail", "{}");
+        return writeJson(event);
+    }
+
+    private String validJsonOrString(String payload) {
+        try {
+            objectMapper.readTree(payload);
+            return payload;
+        } catch (Exception e) {
+            return writeJson(Map.of("Input", payload));
+        }
+    }
+
+    private String writeJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            return "{}";
         }
     }
 
@@ -173,7 +385,8 @@ public class ScheduleInvoker {
         if (source == null || source.getAwsvpcConfiguration() == null) {
             return null;
         }
-        io.github.hectorvent.floci.services.scheduler.model.AwsVpcConfiguration sourceVpc = source.getAwsvpcConfiguration();
+        AwsVpcConfiguration sourceVpc = source.getAwsvpcConfiguration();
+        // The ECS model's AwsVpcConfiguration clashes with the scheduler model's, which is imported.
         io.github.hectorvent.floci.services.ecs.model.AwsVpcConfiguration targetVpc =
                 new io.github.hectorvent.floci.services.ecs.model.AwsVpcConfiguration();
         targetVpc.setSubnets(sourceVpc.getSubnets());
@@ -189,16 +402,16 @@ public class ScheduleInvoker {
     /**
      * Dispatches an EventBridge Scheduler universal target ({@code aws-sdk:<service>:<action>}),
      * reading the call parameters from the target's {@code Input} payload. Supports the
-     * common {@code sns:publish} and {@code sqs:sendMessage} actions; other actions are
-     * logged as unsupported.
+     * common {@code sns:publish} and {@code sqs:sendMessage} actions; other actions fail
+     * as unsupported.
      */
     private void invokeUniversalTarget(String serviceAction, String input, String region) {
         JsonNode params;
         try {
             params = objectMapper.readTree(input == null || input.isBlank() ? "{}" : input);
         } catch (Exception e) {
-            LOG.warnv("Scheduler: universal target {0} has unparseable Input: {1}", serviceAction, e.getMessage());
-            return;
+            throw new AwsException("InvalidParameterValue",
+                    "Universal target Input is not valid JSON", 400);
         }
         switch (serviceAction) {
             case "sns:publish" -> {
@@ -219,11 +432,46 @@ public class ScheduleInvoker {
                 String body = text(params, "MessageBody");
                 String messageGroupId = text(params, "MessageGroupId");
                 String messageDeduplicationId = text(params, "MessageDeduplicationId");
-                sqsService.sendMessage(queueUrl, body, 0, messageGroupId, messageDeduplicationId, region);
+                Map<String, MessageAttributeValue> messageAttributes =
+                        parseUniversalSqsMessageAttributes(params.path("MessageAttributes"));
+                sqsService.sendMessage(queueUrl, body, 0, messageGroupId, messageDeduplicationId,
+                        messageAttributes, region);
                 LOG.debugv("Scheduler delivered to SQS (universal target): {0}", queueUrl);
             }
-            default -> LOG.warnv("Scheduler: unsupported universal target action: {0}", serviceAction);
+            default -> throw new UnsupportedOperationException(
+                    "Scheduler: unsupported universal target action: " + serviceAction);
         }
+    }
+
+    private static Map<String, MessageAttributeValue> parseUniversalSqsMessageAttributes(JsonNode attrsNode) {
+        Map<String, MessageAttributeValue> attributes = new HashMap<>();
+        if (attrsNode == null || !attrsNode.isObject()) {
+            return attributes;
+        }
+        attrsNode.fields().forEachRemaining(entry -> {
+            JsonNode valueNode = entry.getValue();
+            String dataType = valueNode.path("DataType").asText(null);
+            String stringValue = valueNode.path("StringValue").asText(null);
+            String binaryValueBase64 = valueNode.path("BinaryValue").asText(null);
+            if (dataType == null) {
+                return;
+            }
+            if (binaryValueBase64 != null) {
+                byte[] binaryValue;
+                try {
+                    binaryValue = Base64.getDecoder().decode(binaryValueBase64);
+                } catch (IllegalArgumentException e) {
+                    throw new AwsException("InvalidParameterValue",
+                            "Invalid binary value for message attribute '" + entry.getKey()
+                                    + "': not valid base64.", 400);
+                }
+                attributes.put(entry.getKey(), new MessageAttributeValue(binaryValue, dataType));
+            } else if (stringValue != null) {
+                attributes.put(entry.getKey(), new MessageAttributeValue(
+                        stringValue, dataType));
+            }
+        });
+        return attributes;
     }
 
     private static String text(JsonNode node, String field) {
@@ -231,11 +479,25 @@ public class ScheduleInvoker {
         return value != null && !value.isNull() ? value.asText() : null;
     }
 
-    private boolean isEventBridgePutEventsArn(String arn) {
+    private static boolean isEventBridgePutEventsArn(String arn) {
         return arn.contains(":events:") && arn.contains(":event-bus/");
     }
 
+    private static boolean isStateMachineArn(String arn) {
+        if (!AwsArnUtils.isArnFor(arn, "states")) {
+            return false;
+        }
+        String resource = AwsArnUtils.parse(arn).resource();
+        String prefix = "stateMachine:";
+        return resource.startsWith(prefix) && resource.indexOf(':', prefix.length()) < 0;
+    }
+
     private void deliverToEventBridge(Target target, String payload, String region) {
+        eventBridgeService.putEvents(List.of(eventBridgeEntry(target, payload)), region);
+    }
+
+    /** One PutEvents entry for an event-bus target, as delivered and as reported in diagnostics. */
+    private Map<String, Object> eventBridgeEntry(Target target, String payload) {
         String busArn = target.getArn();
         String busName = busArn.substring(busArn.indexOf(":event-bus/") + ":event-bus/".length());
 
@@ -248,12 +510,12 @@ public class ScheduleInvoker {
         String detailType = ebp != null && ebp.getDetailType() != null && !ebp.getDetailType().isBlank()
                 ? ebp.getDetailType() : "Scheduled Event";
 
-        Map<String, Object> entry = new HashMap<>();
+        Map<String, Object> entry = new LinkedHashMap<>();
         entry.put("EventBusName", busName);
         entry.put("Source", source);
         entry.put("DetailType", detailType);
         entry.put("Detail", asDetail(payload));
-        eventBridgeService.putEvents(List.of(entry), region);
+        return entry;
     }
 
     private String asDetail(String payload) {
@@ -271,5 +533,10 @@ public class ScheduleInvoker {
 
     private static String extractRegion(String arn, String defaultRegion) {
         return AwsArnUtils.regionOrDefault(arn, defaultRegion);
+    }
+
+    /** The region a schedule lives in, taken from its ARN. */
+    static String regionOf(Schedule schedule) {
+        return AwsArnUtils.regionOrDefault(schedule.getArn(), "us-east-1");
     }
 }

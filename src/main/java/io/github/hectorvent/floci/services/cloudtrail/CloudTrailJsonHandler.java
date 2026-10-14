@@ -2,8 +2,10 @@ package io.github.hectorvent.floci.services.cloudtrail;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.services.cloudtrail.model.AdvancedEventSelector;
 import io.github.hectorvent.floci.services.cloudtrail.model.DataResource;
 import io.github.hectorvent.floci.services.cloudtrail.model.EventSelector;
 import io.github.hectorvent.floci.services.cloudtrail.model.Trail;
@@ -12,24 +14,37 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @ApplicationScoped
 public class CloudTrailJsonHandler {
 
     private final CloudTrailService service;
     private final ObjectMapper mapper;
+    private final CloudTrailEventService events;
+    private final CloudTrailLakeService lake;
 
     @Inject
-    public CloudTrailJsonHandler(CloudTrailService service, ObjectMapper mapper) {
+    public CloudTrailJsonHandler(CloudTrailService service, ObjectMapper mapper,
+                                CloudTrailEventService events, CloudTrailLakeService lake) {
         this.service = service;
         this.mapper = mapper;
+        this.events = events;
+        this.lake = lake;
     }
 
     public Response handle(String action, JsonNode request, String region) throws Exception {
+        if (request == null || !request.isObject()) {
+            throw new AwsException("InvalidParameterException", "Request must be a JSON object.", 400);
+        }
         return switch (action) {
             case "CreateTrail" -> createTrail(request, region);
             case "DescribeTrails" -> describeTrails(request, region);
+            case "GetTrail" -> getTrail(request, region);
+            case "GetInsightSelectors" -> getInsightSelectors(request, region);
+            case "PutInsightSelectors" -> putInsightSelectors(request, region);
             case "DeleteTrail" -> deleteTrail(request, region);
             case "UpdateTrail" -> updateTrail(request, region);
             case "PutEventSelectors" -> putEventSelectors(request, region);
@@ -38,6 +53,15 @@ public class CloudTrailJsonHandler {
             case "StopLogging" -> stopLogging(request, region);
             case "GetTrailStatus" -> getTrailStatus(request, region);
             case "LookupEvents" -> lookupEvents(request, region);
+            case "ListTrails" -> listTrails(request, region);
+            case "ListPublicKeys" -> listPublicKeys(request);
+            case "CreateEventDataStore", "GetEventDataStore", "ListEventDataStores", "UpdateEventDataStore",
+                 "DeleteEventDataStore", "RestoreEventDataStore", "StartEventDataStoreIngestion",
+                 "StopEventDataStoreIngestion", "StartQuery", "DescribeQuery", "GetQueryResults", "ListQueries",
+                 "CancelQuery", "GenerateQuery" -> Response.ok(lake.handle(action, request, region)).build();
+            case "AddTags" -> addTags(request, region);
+            case "RemoveTags" -> removeTags(request, region);
+            case "ListTags" -> listTags(request, region);
             default -> throw new AwsException(
                     "InvalidAction", "Could not find operation " + action, 400);
         };
@@ -54,8 +78,10 @@ public class CloudTrailJsonHandler {
         boolean enableLogFileValidation = req.path("EnableLogFileValidation").asBoolean(false);
         boolean isOrganizationTrail = req.path("IsOrganizationTrail").asBoolean(false);
 
+        Map<String, String> tags = parseTagsList(req.path("TagsList"));
+
         Trail trail = service.createTrail(region, name, s3BucketName, s3KeyPrefix, snsTopicArn,
-                includeGlobal, isMultiRegion, enableLogFileValidation, isOrganizationTrail);
+                includeGlobal, isMultiRegion, enableLogFileValidation, isOrganizationTrail, tags);
 
         ObjectNode resp = mapper.createObjectNode();
         resp.put("Name", trail.name());
@@ -121,30 +147,93 @@ public class CloudTrailJsonHandler {
         return Response.ok(resp).build();
     }
 
+    private Response getTrail(JsonNode req, String region) {
+        ObjectNode response = mapper.createObjectNode();
+        response.set("Trail", mapper.valueToTree(service.describeTrail(region, req.path("Name").asText(null))));
+        return Response.ok(response).build();
+    }
+
+    private Response getInsightSelectors(JsonNode req, String region) {
+        String name = req.path("TrailName").asText(null);
+        return insightResponse(service.describeTrail(region, name), service.getInsightSelectors(region, name));
+    }
+
+    private Response putInsightSelectors(JsonNode req, String region) {
+        String name = req.path("TrailName").asText(null);
+        JsonNode selectors = req.get("InsightSelectors");
+        if (selectors == null || !selectors.isArray()) {
+            throw new AwsException("InvalidInsightSelectorsException", "InsightSelectors must be an array.", 400);
+        }
+        List<String> types = new ArrayList<>();
+        for (JsonNode selector : selectors) {
+            types.add(selector.path("InsightType").asText(null));
+        }
+        List<String> stored = service.putInsightSelectors(region, name, types);
+        return insightResponse(service.describeTrail(region, name), stored);
+    }
+
+    private Response insightResponse(Trail trail, List<String> selectors) {
+        ObjectNode response = mapper.createObjectNode();
+        response.put("TrailARN", trail.trailArn());
+        ArrayNode values = response.putArray("InsightSelectors");
+        for (String selector : selectors) {
+            values.addObject().put("InsightType", selector);
+        }
+        return Response.ok(response).build();
+    }
+
     private Response putEventSelectors(JsonNode req, String region) {
         String trailName = req.path("TrailName").asText(null);
-        List<EventSelector> selectors = parseEventSelectors(req.path("EventSelectors"));
-        List<EventSelector> stored = service.putEventSelectors(region, trailName, selectors);
+        boolean hasBasic = req.has("EventSelectors") && req.path("EventSelectors").isArray()
+                && !req.path("EventSelectors").isEmpty();
+        boolean hasAdvanced = req.has("AdvancedEventSelectors") && req.path("AdvancedEventSelectors").isArray()
+                && !req.path("AdvancedEventSelectors").isEmpty();
+        if (hasBasic && hasAdvanced) {
+            throw new AwsException("InvalidEventSelectorsException",
+                    "EventSelectors and AdvancedEventSelectors are mutually exclusive on a single trail.", 400);
+        }
 
         ObjectNode resp = mapper.createObjectNode();
-        Trail trail = firstTrail(service.describeTrails(region, List.of(trailName)));
+        Trail trail = trailName != null ? firstTrail(service.describeTrails(region, List.of(trailName))) : null;
         if (trail != null) {
             resp.put("TrailARN", trail.trailArn());
         }
-        resp.set("EventSelectors", mapper.valueToTree(stored));
+
+        if (hasAdvanced) {
+            List<AdvancedEventSelector> advanced =
+                    CloudTrailSelectorJson.parseAdvancedEventSelectors(req.path("AdvancedEventSelectors"));
+            List<AdvancedEventSelector> stored = service.putAdvancedEventSelectors(region, trailName, advanced);
+            resp.set("AdvancedEventSelectors", mapper.valueToTree(stored));
+        } else {
+            List<EventSelector> selectors = parseEventSelectors(req.path("EventSelectors"));
+            List<EventSelector> stored = service.putEventSelectors(region, trailName, selectors);
+            resp.set("EventSelectors", mapper.valueToTree(stored));
+        }
         return Response.ok(resp).build();
     }
 
     private Response getEventSelectors(JsonNode req, String region) {
         String trailName = req.path("TrailName").asText(null);
-        List<EventSelector> selectors = service.getEventSelectors(region, trailName);
+        List<AdvancedEventSelector> advancedSelectors = service.getAdvancedEventSelectors(region, trailName);
 
         ObjectNode resp = mapper.createObjectNode();
-        Trail trail = firstTrail(service.describeTrails(region, List.of(trailName)));
+        Trail trail = trailName != null ? firstTrail(service.describeTrails(region, List.of(trailName))) : null;
         if (trail != null) {
             resp.put("TrailARN", trail.trailArn());
         }
-        resp.set("EventSelectors", mapper.valueToTree(selectors));
+        if (!advancedSelectors.isEmpty()) {
+            resp.set("AdvancedEventSelectors", mapper.valueToTree(advancedSelectors));
+        } else {
+            List<EventSelector> selectors = service.getEventSelectors(region, trailName);
+            resp.set("EventSelectors", mapper.valueToTree(selectors));
+        }
+        return Response.ok(resp).build();
+    }
+
+    private Response listTrails(JsonNode req, String region) {
+        List<CloudTrailService.TrailInfo> trails = service.listTrails(region);
+        ObjectNode resp = mapper.createObjectNode();
+        resp.set("Trails", mapper.valueToTree(trails));
         return Response.ok(resp).build();
     }
 
@@ -168,7 +257,12 @@ public class CloudTrailJsonHandler {
         resp.put("IsLogging", status.logging());
         if (status.startLoggingTime() != null) {
             resp.put("StartLoggingTime", status.startLoggingTime() / 1000.0);
-            resp.put("LatestDeliveryTime", status.startLoggingTime() / 1000.0);
+        }
+        if (status.latestDeliveryTime() != null) {
+            resp.put("LatestDeliveryTime", status.latestDeliveryTime() / 1000.0);
+        }
+        if (status.latestDeliveryError() != null) {
+            resp.put("LatestDeliveryError", status.latestDeliveryError());
         }
         if (status.stopLoggingTime() != null) {
             resp.put("StopLoggingTime", status.stopLoggingTime() / 1000.0);
@@ -177,12 +271,76 @@ public class CloudTrailJsonHandler {
     }
 
     private Response lookupEvents(JsonNode req, String region) {
+        return Response.ok(events.lookup(req, region)).build();
+    }
+
+    private Response listPublicKeys(JsonNode req) {
+        CloudTrailPages.validateTimeRange(req);
+        if (req.has("NextToken")) {
+            throw new AwsException("InvalidNextTokenException", "No digest key page exists for this token.", 400);
+        }
+        // No digest signer exists, so there are no public keys to advertise.
+        ObjectNode response = mapper.createObjectNode();
+        response.putArray("PublicKeyList");
+        return Response.ok(response).build();
+    }
+
+    private Response addTags(JsonNode req, String region) {
+        String resourceId = req.path("ResourceId").asText(null);
+        if (isEventDataStore(resourceId)) {
+            lake.updateTags(resourceId, region, parseTagsList(req.path("TagsList")), List.of());
+        } else {
+            service.addTags(resourceId, parseTagsList(req.path("TagsList")));
+        }
+        return Response.ok(mapper.createObjectNode()).build();
+    }
+
+    private Response removeTags(JsonNode req, String region) {
+        String resourceId = req.path("ResourceId").asText(null);
+        List<String> keys = new ArrayList<>(parseTagsList(req.path("TagsList")).keySet());
+        if (isEventDataStore(resourceId)) {
+            lake.updateTags(resourceId, region, Map.of(), keys);
+        } else {
+            service.removeTags(resourceId, keys);
+        }
+        return Response.ok(mapper.createObjectNode()).build();
+    }
+
+    private static boolean isEventDataStore(String arn) {
+        return arn != null && arn.contains(":eventdatastore/");
+    }
+
+    private Response listTags(JsonNode req, String region) {
+        List<String> resourceIdList = extractStringList(req, "ResourceIdList");
         ObjectNode resp = mapper.createObjectNode();
-        resp.putArray("Events");
+        ArrayNode resourceTagList = resp.putArray("ResourceTagList");
+        for (String resourceId : resourceIdList) {
+            Map<String, String> tags = isEventDataStore(resourceId)
+                    ? lake.tags(resourceId, region) : service.listTags(resourceId);
+            ObjectNode entry = resourceTagList.addObject();
+            entry.put("ResourceId", resourceId);
+            ArrayNode tagsList = entry.putArray("TagsList");
+            tags.forEach((k, v) -> {
+                ObjectNode tag = tagsList.addObject().put("Key", k);
+                if (v != null) {
+                    tag.put("Value", v);
+                }
+            });
+        }
         return Response.ok(resp).build();
     }
 
     // --- Helpers ---
+
+    private Map<String, String> parseTagsList(JsonNode tagsNode) {
+        Map<String, String> tags = new LinkedHashMap<>();
+        if (tagsNode != null && tagsNode.isArray()) {
+            tagsNode.forEach(t -> {
+                tags.put(t.path("Key").asText(), t.path("Value").asText(null));
+            });
+        }
+        return tags;
+    }
 
     private List<EventSelector> parseEventSelectors(JsonNode selectorsNode) {
         List<EventSelector> result = new ArrayList<>();

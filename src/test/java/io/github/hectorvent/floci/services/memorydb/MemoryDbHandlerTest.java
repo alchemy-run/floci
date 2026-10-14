@@ -90,6 +90,47 @@ class MemoryDbHandlerTest {
     }
 
     @Test
+    void createClusterEnablesTlsUnlessTheRequestDisablesIt() throws Exception {
+        handler.handle("CreateCluster", objectMapper.readTree(
+                "{\"ClusterName\":\"tls-default\",\"ACLName\":\"app-acl\"}"), "us-east-1");
+        handler.handle("CreateCluster", objectMapper.readTree(
+                "{\"ClusterName\":\"tls-off\",\"ACLName\":\"open-access\",\"TLSEnabled\":false}"), "us-east-1");
+
+        ArgumentCaptor<Cluster> captor = ArgumentCaptor.forClass(Cluster.class);
+        verify(service, org.mockito.Mockito.times(2)).createCluster(captor.capture(), eq("us-east-1"));
+        assertEquals(true, captor.getAllValues().get(0).isTlsEnabled());
+        assertEquals(false, captor.getAllValues().get(1).isTlsEnabled());
+    }
+
+    @Test
+    void createClusterRecordsAndReportsSecurityGroups() throws Exception {
+        Response response = handler.handle("CreateCluster", objectMapper.readTree(
+                "{\"ClusterName\":\"sg\",\"ACLName\":\"app-acl\",\"SecurityGroupIds\":[\"sg-1\"]}"), "us-east-1");
+
+        JsonNode cluster = objectMapper.valueToTree(response.getEntity()).path("Cluster");
+        assertEquals("sg-1", cluster.path("SecurityGroups").get(0).path("SecurityGroupId").asText());
+        assertEquals("active", cluster.path("SecurityGroups").get(0).path("Status").asText());
+    }
+
+    @Test
+    void updateAclPassesTheMembershipDelta() throws Exception {
+        Acl updated = new Acl();
+        updated.setName("app-acl");
+        updated.setStatus("active");
+        updated.setUserNames(List.of("new-user"));
+        when(service.updateAcl(any(), any(), any(), any())).thenReturn(updated);
+
+        Response response = handler.handle("UpdateACL", objectMapper.readTree(
+                "{\"ACLName\":\"app-acl\",\"UserNamesToAdd\":[\"new-user\"],\"UserNamesToRemove\":[\"old-user\"]}"),
+                "us-east-1");
+
+        assertEquals(200, response.getStatus());
+        verify(service).updateAcl("app-acl", List.of("new-user"), List.of("old-user"), "us-east-1");
+        JsonNode body = objectMapper.valueToTree(response.getEntity());
+        assertEquals("new-user", body.path("ACL").path("UserNames").get(0).asText());
+    }
+
+    @Test
     void unknownOperationReturns400() throws Exception {
         JsonNode request = objectMapper.readTree("{}");
         Response response = handler.handle("Bogus", request, "us-east-1");

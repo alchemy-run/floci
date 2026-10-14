@@ -66,7 +66,7 @@ class CognitoAlchemyParityIntegrationTest {
         JsonNode createdDomain = cognitoJson("CreateUserPoolDomain", """
                 { "UserPoolId": "%s", "Domain": "%s", "ManagedLoginVersion": 2 }
                 """.formatted(poolId, domain));
-        assertTrue(createdDomain.path("CloudFrontDomain").asText().endsWith(".cloudfront.net"));
+        assertTrue(createdDomain.path("CloudFrontDomain").isMissingNode());
 
         JsonNode describedDomain = cognitoJson("DescribeUserPoolDomain", """
                 { "Domain": "%s" }

@@ -31,7 +31,7 @@ import java.util.regex.Pattern;
  */
 @Provider
 @PreMatching
-@Priority(1)
+@Priority(12)
 @ApplicationScoped
 public class WebSocketConnectionsFilter implements ContainerRequestFilter {
 

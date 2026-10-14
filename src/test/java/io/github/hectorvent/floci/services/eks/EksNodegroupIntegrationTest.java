@@ -6,10 +6,14 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
+import java.time.Duration;
+
 import static io.restassured.RestAssured.given;
+import static org.awaitility.Awaitility.await;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.notNullValue;
 
 /**
@@ -77,6 +81,63 @@ class EksNodegroupIntegrationTest {
 
     @Test
     @Order(5)
+    void updateNodegroupConfigRoutesToEksAndSettles() {
+        String updateId = given().contentType(JSON)
+                .body("{\"scalingConfig\":{\"maxSize\":4,\"desiredSize\":3},"
+                        + "\"labels\":{\"addOrUpdateLabels\":{\"tier\":\"web\"}},"
+                        + "\"clientRequestToken\":\"scale-1\"}")
+                .when().post("/clusters/" + CLUSTER + "/node-groups/ng1/update-config")
+                .then().statusCode(200)
+                .body("update.type", equalTo("ConfigUpdate"))
+                .body("update.status", equalTo("InProgress"))
+                .body("update.params.find { it.type == 'DesiredSize' }.value", equalTo("3"))
+                .body("update.params.find { it.type == 'LabelsToAdd' }.value", equalTo("{\"tier\":\"web\"}"))
+                .body("update.createdAt", instanceOf(Number.class))
+                .extract().path("update.id");
+
+        given().when().get("/clusters/" + CLUSTER + "/node-groups/ng1")
+                .then().statusCode(200)
+                .body("nodegroup.status", equalTo("UPDATING"))
+                .body("nodegroup.scalingConfig.minSize", equalTo(1))
+                .body("nodegroup.scalingConfig.maxSize", equalTo(4))
+                .body("nodegroup.scalingConfig.desiredSize", equalTo(3))
+                .body("nodegroup.labels.tier", equalTo("web"));
+        given().queryParam("nodegroupName", "ng1")
+                .when().get("/clusters/" + CLUSTER + "/updates/" + updateId)
+                .then().statusCode(200).body("update.id", equalTo(updateId));
+
+        await().atMost(Duration.ofSeconds(15)).pollInterval(Duration.ofMillis(500)).untilAsserted(() ->
+                given().queryParam("nodegroupName", "ng1")
+                        .when().get("/clusters/" + CLUSTER + "/updates/" + updateId)
+                        .then().statusCode(200).body("update.status", equalTo("Successful")));
+        given().when().get("/clusters/" + CLUSTER + "/node-groups/ng1")
+                .then().statusCode(200).body("nodegroup.status", equalTo("ACTIVE"));
+        given().queryParam("nodegroupName", "ng1")
+                .when().get("/clusters/" + CLUSTER + "/updates")
+                .then().statusCode(200).body("updateIds", hasItem(updateId));
+    }
+
+    @Test
+    @Order(6)
+    void updateNodegroupVersionRoutesToEks() {
+        String updateId = given().contentType(JSON).body("{}")
+                .when().post("/clusters/" + CLUSTER + "/node-groups/ng1/update-version")
+                .then().statusCode(200)
+                .body("update.type", equalTo("VersionUpdate"))
+                .body("update.status", equalTo("InProgress"))
+                .body("update.params.find { it.type == 'Version' }.value", equalTo("1.29"))
+                .extract().path("update.id");
+        await().atMost(Duration.ofSeconds(15)).pollInterval(Duration.ofMillis(500)).untilAsserted(() ->
+                given().queryParam("nodegroupName", "ng1")
+                        .when().get("/clusters/" + CLUSTER + "/updates/" + updateId)
+                        .then().statusCode(200).body("update.status", equalTo("Successful")));
+        given().contentType(JSON).body("{\"version\":\"1.30\"}")
+                .when().post("/clusters/" + CLUSTER + "/node-groups/ng1/update-version")
+                .then().statusCode(400).body("__type", equalTo("InvalidParameterException"));
+    }
+
+    @Test
+    @Order(7)
     void deleteNodeGroup() {
         given().contentType(JSON)
                 .when().delete("/clusters/" + CLUSTER + "/node-groups/ng1")

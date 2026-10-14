@@ -21,10 +21,14 @@ import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
 import org.jboss.logging.Logger;
 
+import java.io.IOException;
+import java.net.ConnectException;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.time.Duration;
 import java.util.Set;
 
@@ -47,8 +51,14 @@ public class MicrovmEndpointProxyController {
 
     private static final Logger LOG = Logger.getLogger(MicrovmEndpointProxyController.class);
     private static final Duration FORWARD_TIMEOUT = Duration.ofSeconds(60);
-    /** How long to retry connection refusals while a fresh VM's server binds its port. */
+    /** How long to retry connection refusals to a VM whose server has already answered. */
     private static final Duration CONNECT_RETRY_WINDOW = Duration.ofSeconds(5);
+    /**
+     * How long to wait for a freshly started VM's server to answer its first request. AWS
+     * restores a MicroVM from a snapshot taken after the server was listening; Floci boots the
+     * container from scratch, so the server is still starting when the VM first reports RUNNING.
+     */
+    static final Duration BOOT_RETRY_WINDOW = Duration.ofSeconds(30);
     private static final Duration CONNECT_RETRY_INTERVAL = Duration.ofMillis(200);
 
     /** Hop-by-hop / transport headers never forwarded in either direction. */
@@ -130,8 +140,7 @@ public class MicrovmEndpointProxyController {
         // the idle policy opted in — mirror it so suspension is transparent.
         if ("SUSPENDED".equals(vm.getState()) && autoResumeEnabled(vm)) {
             LOG.infov("Auto-resuming suspended MicroVM {0} on request", microvmId);
-            runtimeService.resumeMicrovm(vm.getRegion(), microvmId);
-            vm = runtimeService.requireMicrovm(vm.getRegion(), microvmId);
+            runtimeService.resumeMicrovm(vm);
         }
 
         if (!"RUNNING".equals(vm.getState())) {
@@ -167,15 +176,19 @@ public class MicrovmEndpointProxyController {
         });
 
         // RunMicrovm reports RUNNING as soon as the container process starts;
-        // the in-VM server may still be binding its port for the first ~seconds.
-        // Retry connection-level failures briefly so the first proxied request
-        // after boot doesn't 502 on a race the caller cannot see.
-        long deadline = System.nanoTime() + CONNECT_RETRY_WINDOW.toNanos();
+        // the in-VM server may still be starting. Until it has answered once,
+        // the port is either refused or (behind Docker's userland port proxy)
+        // accepted and closed with no bytes, so retry both until the boot
+        // window closes. After that only connection refusals are retried.
+        boolean booting = !runtimeService.hasServed(vm);
+        long deadline = System.nanoTime()
+                + (booting ? BOOT_RETRY_WINDOW : CONNECT_RETRY_WINDOW).toNanos();
         Exception failure;
         while (true) {
             try {
                 HttpResponse<byte[]> response = httpClient.send(
                         builder.build(), HttpResponse.BodyHandlers.ofByteArray());
+                runtimeService.markServed(vm);
                 Response.ResponseBuilder out = Response.status(response.statusCode());
                 response.headers().map().forEach((name, values) -> {
                     if (!SKIPPED_HEADERS.contains(name.toLowerCase()) && !name.startsWith(":")) {
@@ -183,18 +196,21 @@ public class MicrovmEndpointProxyController {
                     }
                 });
                 return out.entity(response.body()).build();
-            } catch (java.net.ConnectException | java.net.http.HttpConnectTimeoutException e) {
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
                 failure = e;
-                if (System.nanoTime() >= deadline) break;
+                break;
+            } catch (Exception e) {
+                failure = e;
+                if (!isRetryable(e, booting) || System.nanoTime() >= deadline) {
+                    break;
+                }
                 try {
                     Thread.sleep(CONNECT_RETRY_INTERVAL.toMillis());
                 } catch (InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
                     break;
                 }
-            } catch (Exception e) {
-                failure = e;
-                break;
             }
         }
         // Some transport exceptions (interrupts, wrapped socket errors) carry a
@@ -208,6 +224,22 @@ public class MicrovmEndpointProxyController {
                 .entity("{\"message\":\"MicroVM endpoint unreachable: "
                         + message.replace("\"", "'") + "\"}")
                 .build();
+    }
+
+    /**
+     * A refused or timed-out connection never reached the server, so it is always safe to retry.
+     * Any other transport failure (such as a connection closed before a single response byte)
+     * is retried only while the VM is booting and its server has never answered: once it has,
+     * such a failure could follow a request the server already acted on.
+     */
+    static boolean isRetryable(Exception failure, boolean booting) {
+        if (failure instanceof ConnectException || failure instanceof HttpConnectTimeoutException) {
+            return true;
+        }
+        if (failure instanceof HttpTimeoutException) {
+            return false;
+        }
+        return booting && failure instanceof IOException;
     }
 
     private static boolean autoResumeEnabled(MicrovmRecord vm) {

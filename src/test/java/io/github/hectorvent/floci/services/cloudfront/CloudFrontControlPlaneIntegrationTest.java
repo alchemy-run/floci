@@ -48,7 +48,15 @@ class CloudFrontControlPlaneIntegrationTest {
                     <PublicKeyConfig xmlns="http://cloudfront.amazonaws.com/doc/2020-05-31/">
                       <CallerReference>list-envelope-pk</CallerReference>
                       <Name>list-envelope-pk</Name>
-                      <EncodedKey>-----BEGIN PUBLIC KEY-----MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A-----END PUBLIC KEY-----</EncodedKey>
+                      <EncodedKey>-----BEGIN PUBLIC KEY-----
+                    MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAszJ2TaOPEcCKrPMYEIGj
+                    rVIC/NVJceYyxdH9yhV10nt3uw38kbWM1vcUI/BUIx2O8aapYU6Fk448L/hYW1Wx
+                    6lILFLzsDnoZ6KS22T8qMtS0k+JlNuXssdBxhs7KwMI4l2ZL+4w1fbr0j4rs2A4k
+                    g6PAln7mj8xnszxwugiiLtZ4yR4LwuECXu58ftgNHIGWDVvO8YDihGsUso1cMP3y
+                    LI5BvHBIVAdTqRiNRwMifq5HPxAuyIROEET4zAHDsAb5VOxCayMfg+GNUsmt4huD
+                    wBrNUXPSAT7gn/F2vLBXE650Uf3XqXOoDSfOXEa1RITfLTz+ouo6sEbnyDHH91G1
+                    twIDAQAB
+                    -----END PUBLIC KEY-----</EncodedKey>
                     </PublicKeyConfig>
                     """)
         .when()

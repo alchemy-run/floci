@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.cur;
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.S3DestinationValidation;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.cur.model.ReportDefinition;
@@ -13,6 +14,7 @@ import org.jboss.logging.Logger;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -42,15 +44,8 @@ public class CurService {
             java.util.regex.Pattern.compile("[A-Za-z0-9_-]+");
 
     private static final Set<String> ALLOWED_TIME_UNITS = Set.of("HOURLY", "DAILY", "MONTHLY");
-    /**
-     * Floci only emits Parquet at the moment. Real CUR also accepts
-     * {@code textORcsv} but Floci's emission engine writes Parquet
-     * unconditionally, so accepting {@code textORcsv} would let a definition
-     * persist that no consumer can read. Reject it explicitly until CSV
-     * support lands in a follow-up PR.
-     */
-    private static final Set<String> ALLOWED_FORMATS = Set.of("Parquet");
-    private static final Set<String> ALLOWED_COMPRESSIONS = Set.of("Parquet");
+    private static final Set<String> ALLOWED_FORMATS = Set.of("Parquet", "textORcsv");
+    private static final Set<String> ALLOWED_COMPRESSIONS = Set.of("Parquet", "GZIP", "ZIP");
     private static final Set<String> ALLOWED_VERSIONING = Set.of("CREATE_NEW_REPORT", "OVERWRITE_REPORT");
     private static final Set<String> ALLOWED_ARTIFACTS = Set.of("REDSHIFT", "QUICKSIGHT", "ATHENA");
     private static final Set<String> ALLOWED_SCHEMA_ELEMENTS = Set.of("RESOURCES", "SPLIT_COST_ALLOCATION_DATA", "MANUAL_DISCOUNT_COMPATIBILITY");
@@ -110,6 +105,7 @@ public class CurService {
                 "ReportNotFoundException",
                 "Report " + reportName + " not found.", 400));
 
+        incoming.setTags(existing.getTags());
         incoming.setCreatedDate(existing.getCreatedDate());
         incoming.setLastUpdatedDate(Instant.now());
         incoming.setReportStatus(existing.getReportStatus() == null ? "PENDING" : existing.getReportStatus());
@@ -146,7 +142,7 @@ public class CurService {
         } else {
             all = store.scan(key -> true);
         }
-        Map<String, List<ReportDefinition>> result = new java.util.LinkedHashMap<>();
+        Map<String, List<ReportDefinition>> result = new LinkedHashMap<>();
         for (ReportDefinition def : all) {
             String accountId = def.getOwnerAccountId();
             if (accountId == null || accountId.isEmpty()) {
@@ -223,6 +219,33 @@ public class CurService {
         return existing;
     }
 
+    public Map<String, String> listTagsForResource(String reportName, String region) {
+        ReportDefinition definition = requireReport(reportName, region);
+        return definition.getTags() == null ? Map.of() : Map.copyOf(definition.getTags());
+    }
+
+    public void tagResource(String reportName, String region, Map<String, String> tags) {
+        ReportDefinition definition = requireReport(reportName, region);
+        Map<String, String> merged = new LinkedHashMap<>(listTagsForResource(reportName, region));
+        merged.putAll(tags);
+        definition.setTags(merged);
+        store.put(compositeKey(region, reportName), definition);
+    }
+
+    public void untagResource(String reportName, String region, List<String> tagKeys) {
+        ReportDefinition definition = requireReport(reportName, region);
+        Map<String, String> remaining = new LinkedHashMap<>(listTagsForResource(reportName, region));
+        tagKeys.forEach(remaining::remove);
+        definition.setTags(remaining);
+        store.put(compositeKey(region, reportName), definition);
+    }
+
+    private ReportDefinition requireReport(String reportName, String region) {
+        requireNonEmpty(reportName, "ReportName");
+        return store.get(compositeKey(region, reportName)).orElseThrow(() -> new AwsException(
+                "ResourceNotFoundException", "Report " + reportName + " not found.", 400));
+    }
+
     private long countForCurrentAccount() {
         return store.keys().size();
     }
@@ -243,10 +266,14 @@ public class CurService {
         requireOneOf(d.getTimeUnit(), ALLOWED_TIME_UNITS, "TimeUnit");
         requireOneOf(d.getFormat(), ALLOWED_FORMATS, "Format");
         requireOneOf(d.getCompression(), ALLOWED_COMPRESSIONS, "Compression");
+        if ("Parquet".equals(d.getFormat()) != "Parquet".equals(d.getCompression())) {
+            throw new AwsException("ValidationException",
+                    "Parquet format requires Parquet compression; textORcsv requires GZIP or ZIP.", 400);
+        }
         requireNonEmpty(d.getS3Bucket(), "S3Bucket");
-        requireValidBucketName(d.getS3Bucket(), "S3Bucket");
+        S3DestinationValidation.requireValidBucketName(d.getS3Bucket(), "S3Bucket");
         if (d.getS3Prefix() != null) {
-            requireSafeKeySegment(d.getS3Prefix(), "S3Prefix");
+            S3DestinationValidation.requireSafeKeySegment(d.getS3Prefix(), "S3Prefix");
         }
         if (d.getS3Prefix() == null) {
             d.setS3Prefix("");
@@ -293,40 +320,4 @@ public class CurService {
         }
     }
 
-    private static void requireValidBucketName(String bucket, String field) {
-        if (bucket.length() < 3 || bucket.length() > 63) {
-            throw new AwsException("ValidationException",
-                    field + " must be between 3 and 63 characters.", 400);
-        }
-        for (int i = 0; i < bucket.length(); i++) {
-            char c = bucket.charAt(i);
-            boolean valid = (c >= 'a' && c <= 'z')
-                    || (c >= '0' && c <= '9')
-                    || c == '-' || c == '.';
-            if (!valid) {
-                throw new AwsException("ValidationException",
-                        field + " contains invalid characters.", 400);
-            }
-        }
-        if (bucket.startsWith("-") || bucket.endsWith("-")
-                || bucket.startsWith(".") || bucket.endsWith(".")
-                || bucket.contains("..")) {
-            throw new AwsException("ValidationException",
-                    field + " is not a valid S3 bucket name.", 400);
-        }
-    }
-
-    private static void requireSafeKeySegment(String value, String field) {
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            boolean ok = (c >= 'A' && c <= 'Z')
-                    || (c >= 'a' && c <= 'z')
-                    || (c >= '0' && c <= '9')
-                    || c == '-' || c == '_' || c == '.' || c == '/';
-            if (!ok) {
-                throw new AwsException("ValidationException",
-                        field + " contains characters not permitted in an S3 key segment.", 400);
-            }
-        }
-    }
 }

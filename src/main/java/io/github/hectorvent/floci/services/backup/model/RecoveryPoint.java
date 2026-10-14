@@ -5,6 +5,8 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
+import java.util.Map;
+
 @RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -57,6 +59,12 @@ public class RecoveryPoint {
 
     @JsonProperty("LastRestoreTime")
     private Long lastRestoreTime;
+
+    @JsonProperty("RestoreMetadata")
+    private Map<String, String> restoreMetadata;
+
+    public Map<String, String> getRestoreMetadata() { return restoreMetadata; }
+    public void setRestoreMetadata(Map<String, String> metadata) { this.restoreMetadata = metadata; }
 
     public RecoveryPoint() {}
 

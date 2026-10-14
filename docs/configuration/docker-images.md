@@ -4,36 +4,39 @@ Floci publishes images to [Docker Hub (`floci/floci`)](https://hub.docker.com/r/
 
 Every image tag combines two independent choices: **what's inside** (variant) and **how stable it is** (channel).
 
-## Axis 1 — Variant (what's inside)
+## Axis 1: Variant (what's inside)
 
 | Variant | Contents | When to use |
 |---|---|---|
-| **Standard** | Floci native binary only | General use — CI, local dev, Testcontainers **(recommended)** |
+| **Standard** | Floci native binary only | General use: CI, local dev, Testcontainers **(recommended)** |
+| **Baseline** | Floci native binary compiled for ARMv8.0 (`armv8-a`) | ARM64 hosts without LSE, including Raspberry Pi 4-class CPUs |
 | **Compat** | Floci + Python 3 + AWS CLI + boto3 | Workflows that need AWS tooling available inside the container |
 
-The compat image is built on top of the standard image — startup time and memory footprint are identical. Only the image size increases.
+The compat image runs the same native binary as the standard image, so startup time and memory footprint are identical. Only the image size increases. The baseline image is different: it is an ARM64-only release artifact compiled for the ARMv8.0 ISA floor and is not published on nightly channels.
 
-## Axis 2 — Channel (how stable)
+The standard image is built on Red Hat UBI 9 micro. Besides Floci it contains only bash and coreutils. There is no package manager, curl, grep or sed inside. Pick the compat image when you need tools inside the container.
+
+## Axis 2: Channel (how stable)
 
 | Channel | Source | Published |
 |---|---|---|
-| **Release** | Tagged version (e.g. `1.5.11`) | On every release |
-| **Nightly** | Tip of `main` | Every night at 22:00 CT |
+| **Release** | Tagged version (e.g. `x.y.z`) | 1st and 3rd Tuesday of each month |
+| **Nightly** | Tip of `main` | Every night at 23:00 CT |
 
-Release images are stable and recommended for most use cases. Nightly images track active development and may include unreleased changes.
+Release images are stable and recommended for most use cases. Between trains, `nightly` carries every merged fix from the following morning. Nightly images track active development and may include unreleased changes.
 
 ## Full Tag Matrix
 
 Combining both axes gives the complete set of published tags:
 
-|  | Standard | Compat |
-|---|---|---|
-| **Release (latest)** | `latest` ✅ | `latest-compat` |
-| **Release (pinned)** | `x.y.z` | `x.y.z-compat` |
-| **Nightly (floating)** | `nightly` | `nightly-compat` |
-| **Nightly (dated)** | `nightly-mmddyyyy` | `nightly-mmddyyyy-compat` |
+|  | Standard | Baseline (ARM64 only) | Compat |
+|---|---|---|---|
+| **Release (latest)** | `latest` ✅ | `latest-baseline` | `latest-compat` |
+| **Release (pinned)** | `x.y.z` | `x.y.z-baseline` | `x.y.z-compat` |
+| **Nightly (floating)** | `nightly` | Not published | `nightly-compat` |
+| **Nightly (dated)** | `nightly-mmddyyyy` | Not published | `nightly-mmddyyyy-compat` |
 
-Dated nightly tags (e.g. `nightly-05022026`) are fixed and never move — use them for reproducible builds from `main`.
+Dated nightly tags (e.g. `nightly-05022026`) name one night's build of `main`. A same-day rerun of the nightly workflow republishes that day's tag, so for a build you can rely on not changing, pin a release version.
 
 !!! warning
     Nightly images may include unreleased or experimental changes. Use release tags in production-like environments.
@@ -41,22 +44,50 @@ Dated nightly tags (e.g. `nightly-05022026`) are fixed and never move — use th
 ## Quick Reference
 
 ```yaml title="docker-compose.yml"
-# Standard release — recommended
+# Standard release : recommended
 image: floci/floci:latest
 
-# Compat release — includes AWS CLI and boto3
+# Compat release : includes AWS CLI and boto3
 image: floci/floci:latest-compat
 
-# Pinned release — reproducible builds
-image: floci/floci:1.5.11
+# ARM64 baseline release : Raspberry Pi 4 / pre-LSE AArch64 cores
+image: floci/floci:latest-baseline
 
-# Nightly — track main
+# Pinned release : reproducible builds
+image: floci/floci:x.y.z
+
+# Nightly : track main
 image: floci/floci:nightly
 ```
 
 ## Multi-Architecture
 
-All images are published as multi-arch manifests supporting `linux/amd64` and `linux/arm64`. Docker selects the correct variant automatically.
+Standard and compat images are published as multi-arch manifests supporting `linux/amd64` and `linux/arm64`. Baseline images are intentionally `linux/arm64` only.
+
+## Raspberry Pi 4 and older ARM64 CPUs
+
+If the standard ARM64 image exits with `CPU features [FP, ASIMD, CRC32, LSE] not supported`, use the `-baseline` release tag. The baseline image is compiled with GraalVM `-march=armv8-a`, so it does not require LSE. For example, use `floci/floci:latest-baseline` or pin `floci/floci:x.y.z-baseline`.
+
+The baseline variant currently covers the Docker image only. The standalone `floci-linux-arm64` binary remains tracked in [#1114](https://github.com/floci-io/floci/issues/1114).
+
+## Alchemy Fork Releases
+
+The tables above describe upstream `floci/floci` images, not this fork's releases.
+The [Alchemy release workflow](https://github.com/alchemy-run/floci/blob/main/.github/workflows/alchemy-release.yml)
+publishes `ghcr.io/alchemy-run/floci` when a tag shaped `x.y.z-alchemy.N` is pushed.
+For a release tag represented below by `<tag>`:
+
+| Image reference | Contents |
+|---|---|
+| `ghcr.io/alchemy-run/floci:<tag>` | Native image, the default pinned by `@alchemy.run/floci` |
+| `ghcr.io/alchemy-run/floci:<tag>-jvm` | JVM image |
+| `ghcr.io/alchemy-run/floci:<tag>-compat` | Native image with AWS CLI and boto3 |
+
+For example, a tag named `1.6.0-alchemy.1` produces the JVM reference
+`ghcr.io/alchemy-run/floci:1.6.0-alchemy.1-jvm`. This naming example does not
+imply that the release exists. Manual workflow runs retain the timestamped
+build references described below rather than creating release aliases.
+Anonymous pulls require the GHCR package to have public visibility.
 
 ## Reusable Image Publishing
 
@@ -119,13 +150,13 @@ ghcr.io/example/floci@sha256:...
 
 ## What's in the Compat Image
 
-The compat image installs the following on top of the standard image:
+The compat image adds the following to the standard image contents:
 
 - Python 3 + pip
 - [AWS CLI](https://pypi.org/project/awscli/) (via pip)
 - [boto3](https://pypi.org/project/boto3/) (via pip)
 
-The AWS CLI is pre-configured to talk to the local Floci endpoint — no `--endpoint-url` flag is needed in hook scripts:
+The AWS CLI is pre-configured to talk to the local Floci endpoint, so no `--endpoint-url` flag is needed in hook scripts:
 
 ```sh
 #!/bin/sh

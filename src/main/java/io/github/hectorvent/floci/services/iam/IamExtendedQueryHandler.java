@@ -11,10 +11,9 @@ import io.github.hectorvent.floci.services.iam.model.IamPolicy;
 import io.github.hectorvent.floci.services.iam.model.IamRole;
 import io.github.hectorvent.floci.services.iam.model.IamUser;
 import io.github.hectorvent.floci.services.iam.model.InstanceProfile;
-import io.github.hectorvent.floci.services.iam.model.LoginProfile;
 import io.github.hectorvent.floci.services.iam.model.OidcProvider;
 import io.github.hectorvent.floci.services.iam.model.PolicyVersion;
-import io.github.hectorvent.floci.services.iam.model.SamlProvider;
+import io.github.hectorvent.floci.services.iam.model.IamSamlProvider;
 import io.github.hectorvent.floci.services.iam.model.ServerCertificate;
 import io.github.hectorvent.floci.services.iam.model.ServiceSpecificCredential;
 import io.github.hectorvent.floci.services.iam.model.SigningCertificate;
@@ -55,17 +54,8 @@ public class IamExtendedQueryHandler {
 
     public Optional<Response> handle(String action, MultivaluedMap<String, String> params) {
         try {
+            extra.migrateLegacyPasswordPolicy();
             return Optional.ofNullable(switch (action) {
-                case "CreateAccountAlias" -> handleCreateAccountAlias(params);
-                case "DeleteAccountAlias" -> handleDeleteAccountAlias(params);
-                case "ListAccountAliases" -> handleListAccountAliases();
-                case "GetAccountPasswordPolicy" -> handleGetAccountPasswordPolicy();
-                case "UpdateAccountPasswordPolicy" -> handleUpdateAccountPasswordPolicy(params);
-                case "DeleteAccountPasswordPolicy" -> handleDeleteAccountPasswordPolicy();
-                case "CreateLoginProfile" -> handleCreateLoginProfile(params);
-                case "GetLoginProfile" -> handleGetLoginProfile(params);
-                case "UpdateLoginProfile" -> handleUpdateLoginProfile(params);
-                case "DeleteLoginProfile" -> handleDeleteLoginProfile(params);
                 case "CreateVirtualMFADevice" -> handleCreateVirtualMfaDevice(params);
                 case "ListVirtualMFADevices" -> handleListVirtualMfaDevices(params);
                 case "GetMFADevice" -> handleGetMfaDevice(params);
@@ -84,16 +74,6 @@ public class IamExtendedQueryHandler {
                 case "ListSAMLProviderTags" -> handleListSamlProviderTags(params);
                 case "TagSAMLProvider" -> handleTagSamlProvider(params);
                 case "UntagSAMLProvider" -> handleUntagSamlProvider(params);
-                case "CreateOpenIDConnectProvider" -> handleCreateOidcProvider(params);
-                case "GetOpenIDConnectProvider" -> handleGetOidcProvider(params);
-                case "DeleteOpenIDConnectProvider" -> handleDeleteOidcProvider(params);
-                case "ListOpenIDConnectProviders" -> handleListOidcProviders();
-                case "AddClientIDToOpenIDConnectProvider" -> handleAddOidcClientId(params);
-                case "RemoveClientIDFromOpenIDConnectProvider" -> handleRemoveOidcClientId(params);
-                case "UpdateOpenIDConnectProviderThumbprint" -> handleUpdateOidcThumbprints(params);
-                case "ListOpenIDConnectProviderTags" -> handleListOidcProviderTags(params);
-                case "TagOpenIDConnectProvider" -> handleTagOidcProvider(params);
-                case "UntagOpenIDConnectProvider" -> handleUntagOidcProvider(params);
                 case "UploadSSHPublicKey" -> handleUploadSshPublicKey(params);
                 case "GetSSHPublicKey" -> handleGetSshPublicKey(params);
                 case "ListSSHPublicKeys" -> handleListSshPublicKeys(params);
@@ -126,9 +106,6 @@ public class IamExtendedQueryHandler {
                 case "GetContextKeysForPrincipalPolicy" -> handleGetContextKeysForPrincipalPolicy(params);
                 case "SimulateCustomPolicy" -> handleSimulateCustomPolicy(params);
                 case "GetAccessKeyLastUsed" -> handleGetAccessKeyLastUsed(params);
-                case "TagInstanceProfile" -> handleTagInstanceProfile(params);
-                case "UntagInstanceProfile" -> handleUntagInstanceProfile(params);
-                case "ListInstanceProfileTags" -> handleListInstanceProfileTags(params);
                 default -> null;
             });
         } catch (AwsException e) {
@@ -180,32 +157,6 @@ public class IamExtendedQueryHandler {
     private Response handleDeleteAccountPasswordPolicy() {
         extra.deleteAccountPasswordPolicy();
         return okNoResult("DeleteAccountPasswordPolicy");
-    }
-
-    private Response handleCreateLoginProfile(MultivaluedMap<String, String> params) {
-        LoginProfile profile = extra.createLoginProfile(
-                params.getFirst("UserName"),
-                params.getFirst("Password"),
-                getBoolean(params, "PasswordResetRequired"));
-        return ok("CreateLoginProfile", loginProfileXml(profile));
-    }
-
-    private Response handleGetLoginProfile(MultivaluedMap<String, String> params) {
-        return ok("GetLoginProfile", loginProfileXml(extra.getLoginProfile(params.getFirst("UserName"))));
-    }
-
-    private Response handleUpdateLoginProfile(MultivaluedMap<String, String> params) {
-        extra.updateLoginProfile(
-                params.getFirst("UserName"),
-                params.getFirst("Password"),
-                params.containsKey("PasswordResetRequired")
-                        ? getBoolean(params, "PasswordResetRequired") : null);
-        return okNoResult("UpdateLoginProfile");
-    }
-
-    private Response handleDeleteLoginProfile(MultivaluedMap<String, String> params) {
-        extra.deleteLoginProfile(params.getFirst("UserName"));
-        return okNoResult("DeleteLoginProfile");
     }
 
     private Response handleCreateVirtualMfaDevice(MultivaluedMap<String, String> params) {
@@ -282,7 +233,7 @@ public class IamExtendedQueryHandler {
     }
 
     private Response handleCreateSamlProvider(MultivaluedMap<String, String> params) {
-        SamlProvider provider = extra.createSamlProvider(
+        IamSamlProvider provider = extra.createSamlProvider(
                 params.getFirst("Name"),
                 params.getFirst("SAMLMetadataDocument"),
                 params.getFirst("AssertionEncryptionMode"),
@@ -295,8 +246,10 @@ public class IamExtendedQueryHandler {
     }
 
     private Response handleGetSamlProvider(MultivaluedMap<String, String> params) {
-        SamlProvider provider = extra.getSamlProvider(params.getFirst("SAMLProviderArn"));
+        IamSamlProvider provider = extra.getSamlProvider(params.getFirst("SAMLProviderArn"));
         String result = new XmlBuilder()
+                .elem("SAMLProviderArn", provider.getArn())
+                .elem("ValidUntil", iso(provider.getCreateDate().plusSeconds(31536000)))
                 .elem("SAMLProviderUUID", provider.getUuid())
                 .elem("SAMLMetadataDocument", provider.getMetadataDocument())
                 .elem("CreateDate", iso(provider.getCreateDate()))
@@ -321,7 +274,7 @@ public class IamExtendedQueryHandler {
 
     private Response handleListSamlProviders() {
         var xml = new XmlBuilder().start("SAMLProviderList");
-        for (SamlProvider provider : extra.listSamlProviders()) {
+        for (IamSamlProvider provider : extra.listSamlProviders()) {
             xml.start("member")
                     .elem("Arn", provider.getArn())
                     .elem("CreateDate", iso(provider.getCreateDate()))
@@ -577,28 +530,13 @@ public class IamExtendedQueryHandler {
 
     private Response handleGetAccountSummary() {
         IamExtendedService.AccountCounts counts = extra.accountCounts();
-        var xml = new XmlBuilder().start("SummaryMap");
-        summary(xml, "Users", counts.users());
-        summary(xml, "UsersQuota", 5000);
-        summary(xml, "Groups", counts.groups());
-        summary(xml, "GroupsQuota", 300);
-        summary(xml, "Roles", counts.roles());
-        summary(xml, "RolesQuota", 1000);
-        summary(xml, "Policies", counts.policies());
-        summary(xml, "PoliciesQuota", 1500);
-        summary(xml, "InstanceProfiles", counts.instanceProfiles());
-        summary(xml, "InstanceProfilesQuota", 1000);
-        summary(xml, "ServerCertificates", counts.serverCertificates());
-        summary(xml, "ServerCertificatesQuota", 20);
-        summary(xml, "Providers", counts.providers());
-        summary(xml, "MFADevices", counts.mfaDevices());
-        summary(xml, "MFADevicesInUse", counts.mfaInUse());
-        summary(xml, "AccountMFAEnabled", 0);
-        summary(xml, "AccountAccessKeysPresent", 1);
-        summary(xml, "AccountPasswordPresent", 0);
-        summary(xml, "VersionsPerPolicyQuota", 5);
-        summary(xml, "PolicyVersionsInUseQuota", 10000);
-        summary(xml, "GlobalEndpointTokenVersion", 2);
+        Map<String, Long> values = iamService.getAccountSummary();
+        values.put("ServerCertificates", (long) counts.serverCertificates());
+        values.put("Providers", (long) counts.providers());
+        values.put("MFADevices", (long) counts.mfaDevices());
+        values.put("MFADevicesInUse", (long) counts.mfaInUse());
+        XmlBuilder xml = new XmlBuilder().start("SummaryMap");
+        values.forEach((key, value) -> xml.start("entry").elem("key", key).elem("value", value).end("entry"));
         xml.end("SummaryMap");
         return ok("GetAccountSummary", xml.build());
     }
@@ -813,7 +751,7 @@ public class IamExtendedQueryHandler {
         if (resources.isEmpty()) {
             resources = List.of("*");
         }
-        Map<String, String> context = extractContextEntries(params);
+        Map<String, List<String>> context = extractContextEntries(params);
         XmlBuilder results = new XmlBuilder().start("EvaluationResults");
         for (String action : actions) {
             for (String resource : resources) {
@@ -843,21 +781,6 @@ public class IamExtendedQueryHandler {
         return ok("GetAccessKeyLastUsed", xml.build());
     }
 
-    private Response handleTagInstanceProfile(MultivaluedMap<String, String> params) {
-        iamService.tagInstanceProfile(params.getFirst("InstanceProfileName"), extractTags(params));
-        return okNoResult("TagInstanceProfile");
-    }
-
-    private Response handleUntagInstanceProfile(MultivaluedMap<String, String> params) {
-        iamService.untagInstanceProfile(params.getFirst("InstanceProfileName"), extractTagKeys(params));
-        return okNoResult("UntagInstanceProfile");
-    }
-
-    private Response handleListInstanceProfileTags(MultivaluedMap<String, String> params) {
-        return ok("ListInstanceProfileTags",
-                tagsResult(iamService.listInstanceProfileTags(params.getFirst("InstanceProfileName"))));
-    }
-
     // =========================================================================
     // XML helpers
     // =========================================================================
@@ -872,8 +795,7 @@ public class IamExtendedQueryHandler {
 
     private static String passwordPolicyXml(AccountPasswordPolicy policy) {
         var xml = new XmlBuilder()
-                .elem("MinimumPasswordLength", policy.getMinimumPasswordLength() == null
-                        ? null : String.valueOf(policy.getMinimumPasswordLength()))
+                .elem("MinimumPasswordLength", policy.getMinimumPasswordLength())
                 .elem("RequireSymbols", policy.isRequireSymbols())
                 .elem("RequireNumbers", policy.isRequireNumbers())
                 .elem("RequireUppercaseCharacters", policy.isRequireUppercaseCharacters())
@@ -887,14 +809,6 @@ public class IamExtendedQueryHandler {
             xml.elem("PasswordReusePrevention", policy.getPasswordReusePrevention().longValue());
         }
         return xml.elem("HardExpiry", policy.isHardExpiry()).build();
-    }
-
-    private static String loginProfileXml(LoginProfile profile) {
-        return new XmlBuilder().start("LoginProfile")
-                .elem("UserName", profile.getUserName())
-                .elem("CreateDate", iso(profile.getCreateDate()))
-                .elem("PasswordResetRequired", profile.isPasswordResetRequired())
-                .end("LoginProfile").build();
     }
 
     private String virtualMfaXml(VirtualMfaDevice device, boolean includeSecrets) {
@@ -1039,16 +953,17 @@ public class IamExtendedQueryHandler {
         return values;
     }
 
-    private static Map<String, String> extractContextEntries(MultivaluedMap<String, String> params) {
-        Map<String, String> context = new HashMap<>();
+    private static Map<String, List<String>> extractContextEntries(MultivaluedMap<String, String> params) {
+        Map<String, List<String>> context = new HashMap<>();
         for (int i = 1; ; i++) {
             String name = params.getFirst("ContextEntries.member." + i + ".ContextKeyName");
             if (name == null) {
                 break;
             }
-            String value = params.getFirst("ContextEntries.member." + i + ".ContextKeyValues.member.1");
-            if (value != null) {
-                context.put(name, value);
+            List<String> values = extractIndexed(params,
+                    "ContextEntries.member." + i + ".ContextKeyValues.member");
+            if (!values.isEmpty()) {
+                context.put(name, values);
             }
         }
         return context;

@@ -8,6 +8,7 @@ import jakarta.inject.Inject;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * {@link TagHandler} implementation for AppConfig.
@@ -88,6 +89,13 @@ public class AppConfigTagHandler implements TagHandler {
 
     private record ResourceRef(String type, String id) {}
 
+    // The AppConfig resource types AWS documents as taggable that are NOT nested under
+    // application/... (see e.g. the Tags property on AWS::AppConfig::DeploymentStrategy,
+    // AWS::AppConfig::Extension, and AWS::AppConfig::ExtensionAssociation) - every other
+    // taggable type (application, environment, configurationprofile) already nests under
+    // application/ and is handled by the branch below.
+    private static final Set<String> TOP_LEVEL_TYPES = Set.of("deploymentstrategy", "extension", "extensionassociation");
+
     private static ResourceRef parseArn(String arn) {
         String resource;
         try {
@@ -96,6 +104,9 @@ public class AppConfigTagHandler implements TagHandler {
             throw new AwsException("BadRequestException", "Invalid resource ARN: " + arn, 400);
         }
         String[] parts = resource.split("/");
+        if (parts.length == 2 && TOP_LEVEL_TYPES.contains(parts[0])) {
+            return new ResourceRef(parts[0], parts[1]);
+        }
         if (parts.length >= 2 && "application".equals(parts[0])) {
             if (parts.length == 2) return new ResourceRef("application", parts[1]);
             if (parts.length == 4) return new ResourceRef(parts[2], parts[3]);

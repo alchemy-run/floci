@@ -299,7 +299,6 @@ class Ec2ReplaceRouteIntegrationTest {
             .body("Response.Errors.Error.Code", equalTo("InvalidParameterCombination"));
     }
 
-    /** IPv6 destinations are first-class: create then replace without DestinationCidrBlock. */
     @Test
     @Order(7)
     void replaceRouteCanTargetAnIpv6Destination() {
@@ -325,6 +324,21 @@ class Ec2ReplaceRouteIntegrationTest {
         .then()
             .statusCode(200)
             .body("ReplaceRouteResponse.return", equalTo("true"));
+    }
+
+    @Test
+    @Order(7)
+    void replaceRouteWithoutADestinationIsRejected() {
+        given()
+            .formParam("Action", "ReplaceRoute")
+            .formParam("RouteTableId", routeTableId)
+            .formParam("GatewayId", INTERNET_GATEWAY)
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("Response.Errors.Error.Code", equalTo("MissingParameter"));
     }
 
     @Test

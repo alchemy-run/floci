@@ -43,6 +43,19 @@ class BuildspecParser {
         }
         try {
             JsonNode root = YAML.readTree(content);
+            if (root == null || !root.isObject() || !"0.2".equals(root.path("version").asText())) {
+                throw new AwsException("InvalidInputException", "Only buildspec version 0.2 is supported", 400);
+            }
+            for (String field : List.of("batch", "reports", "run-as", "proxy", "cache")) {
+                if (root.hasNonNull(field)) {
+                    throw CodeBuildService.unsupportedExecution("Buildspec " + field);
+                }
+            }
+            for (String field : List.of("shell", "exported-variables", "git-credential-helper")) {
+                if (root.path("env").hasNonNull(field)) {
+                    throw CodeBuildService.unsupportedExecution("Buildspec env." + field);
+                }
+            }
 
             JsonNode envNode = root.path("env");
             Map<String, String> envVars = parseStringMap(envNode.path("variables"));
@@ -70,8 +83,23 @@ class BuildspecParser {
         if (phaseNode.isMissingNode() || phaseNode.isNull()) {
             return List.of();
         }
+        for (String field : List.of("finally", "run-as", "on-failure", "runtime-versions")) {
+            if (phaseNode.hasNonNull(field)) {
+                throw CodeBuildService.unsupportedExecution("Buildspec phase " + field);
+            }
+        }
+        JsonNode commands = phaseNode.path("commands");
+        if (commands.isMissingNode()) {
+            return List.of();
+        }
+        if (!commands.isArray()) {
+            throw new AwsException("InvalidInputException", "Phase commands must be an array of strings", 400);
+        }
         List<String> result = new ArrayList<>();
-        for (JsonNode cmd : phaseNode.path("commands")) {
+        for (JsonNode cmd : commands) {
+            if (!cmd.isTextual()) {
+                throw new AwsException("InvalidInputException", "Each phase command must be a string", 400);
+            }
             result.add(cmd.asText());
         }
         return result;

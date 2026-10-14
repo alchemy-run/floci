@@ -4,6 +4,10 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.resource.ExplorerResource;
+import io.github.hectorvent.floci.core.resource.ResourceProvider;
+import io.github.hectorvent.floci.core.resource.SupportedResourceType;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.ecr.model.AuthorizationData;
@@ -37,10 +41,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 @ApplicationScoped
-public class EcrService {
+public class EcrService implements ResourceProvider {
 
     private static final Logger LOG = Logger.getLogger(EcrService.class);
     // AWS's LIVE validation (taken verbatim from a real CreateRepository
@@ -104,25 +109,43 @@ public class EcrService {
     }
 
     /**
-     * Recreates {@link Repository} metadata entries for any internal-namespaced
-     * repos found in the registry catalog that are missing from local storage.
-     * Internal names are of the form {@code <account>/<region>/<repoName>}.
+     * Recreates {@link Repository} metadata entries for registry namespaces found in the catalog.
+     * Namespaces created by Floci are {@code <account>/<region>/<repoName>}; pre-proxy registry
+     * namespaces are recovered for the default account and region without moving image storage.
      */
     void reconcileFromCatalog(List<String> catalog) {
         if (catalog == null || catalog.isEmpty()) {
             return;
         }
         int recreated = 0;
-        for (String internal : catalog) {
-            String[] parts = internal.split("/", 3);
-            if (parts.length < 3) {
+        for (String registryRepositoryName : catalog) {
+            String defaultAccount = regionResolver.getAccountId();
+            String defaultRegion = regionResolver.getDefaultRegion();
+            String legacyKey = key(defaultRegion, defaultAccount, registryRepositoryName);
+            var legacyRepository = repoStore.get(legacyKey);
+            if (legacyRepository.isPresent()) {
+                Repository repo = legacyRepository.get();
+                repo.setRepositoryUri(registryManager.getRepositoryUri(
+                        defaultAccount, defaultRegion, repo.getRepositoryName()));
+                repo.setRegistryRepositoryName(registryRepositoryName);
+                repoStore.put(legacyKey, repo);
                 continue;
             }
-            String account = parts[0];
-            String region = parts[1];
-            String repoName = parts[2];
+            String[] parts = registryRepositoryName.split("/", 3);
+            boolean namespaced = parts.length == 3 && parts[0].matches("[0-9]{12}")
+                    && parts[1].matches("[a-z0-9-]+");
+            String account = namespaced ? parts[0] : defaultAccount;
+            String region = namespaced ? parts[1] : defaultRegion;
+            String repoName = namespaced ? parts[2] : registryRepositoryName;
             String key = key(region, account, repoName);
-            if (repoStore.get(key).isPresent()) {
+            var existing = repoStore.get(key);
+            if (existing.isPresent()) {
+                Repository repo = existing.get();
+                repo.setRepositoryUri(registryManager.getRepositoryUri(account, region, repoName));
+                if (!namespaced) {
+                    repo.setRegistryRepositoryName(registryRepositoryName);
+                }
+                repoStore.put(key, repo);
                 continue;
             }
             Repository repo = new Repository();
@@ -130,6 +153,9 @@ public class EcrService {
             repo.setRegistryId(account);
             repo.setRepositoryArn(AwsArnUtils.Arn.of("ecr", region, account, "repository/" + repoName).toString());
             repo.setRepositoryUri(registryManager.getRepositoryUri(account, region, repoName));
+            if (!namespaced) {
+                repo.setRegistryRepositoryName(registryRepositoryName);
+            }
             repo.setCreatedAt(Instant.now());
             repoStore.put(key, repo);
             recreated++;
@@ -152,7 +178,12 @@ public class EcrService {
                                        Map<String, String> tags,
                                        String region) {
         validateRepoName(repositoryName);
-        registryManager.ensureStarted();
+        // Repository records are pure metadata: the ARN and the URI are derived from the
+        // configured account, region and registry port, none of which need Docker. Start
+        // the backing registry opportunistically so the URI reflects an already-adopted
+        // container's published port, but never fail CreateRepository when no Docker
+        // daemon is reachable, the registry is retried on the next image operation.
+        registryManager.tryEnsureStarted();
         String account = effectiveAccount(registryId);
         String key = key(region, account, repositoryName);
         if (repoStore.get(key).isPresent()) {
@@ -202,9 +233,10 @@ public class EcrService {
             // created under the SigV4 account id (Alchemy testing).
             List<Repository> scoped = repoStore.scan(k -> k.startsWith(prefix));
             if (!scoped.isEmpty()) {
-                return scoped;
+                return scoped.stream().map(repo -> refreshRepositoryUri(repo, region)).toList();
             }
-            return repoStore.scan(k -> k.startsWith(region + "::"));
+            return repoStore.scan(k -> k.startsWith(region + "::")).stream()
+                    .map(repo -> refreshRepositoryUri(repo, region)).toList();
         }
 
         List<Repository> out = new ArrayList<>();
@@ -214,7 +246,7 @@ public class EcrService {
             if (repo == null) {
                 throw notFound(name, account);
             }
-            out.add(repo);
+            out.add(refreshRepositoryUri(repo, region));
         }
         return out;
     }
@@ -231,21 +263,45 @@ public class EcrService {
         String key = key(region, account, repositoryName);
         Repository repo = repoStore.get(key).orElseThrow(() -> notFound(repositoryName, account));
 
-        // Check whether the registry has any tagged images for this repo. If
-        // ensureStarted() can't talk to docker (no daemon), assume the repo is
-        // empty — this allows control-plane unit tests to delete without docker.
-        List<String> tags = listTagsBestEffort(account, region, repositoryName);
+        // Check whether the registry has any tagged images for this repo.
+        // A test double with no HTTP client means no backing registry exists,
+        // so there is nothing to clean up. Any failure against a real client
+        // aborts the delete: an unreachable registry cannot prove the repo
+        // empty (non-force must not bypass RepositoryNotEmptyException) and
+        // force must not orphan pullable images behind deleted metadata.
+        List<String> tags;
+        boolean registryAvailable = true;
+        if (registryManager.httpClient() == null) {
+            // Test double without an HTTP layer (Mockito default): no backing
+            // registry exists, so there is nothing to clean up.
+            tags = List.of();
+            registryAvailable = false;
+        } else try {
+            tags = listTagsOrThrow(account, region, repositoryName);
+        } catch (Exception e) {
+            if (isRegistryUnreachable(e)) {
+                throw new AwsException("ServerException",
+                        "Backing registry unreachable for repository '" + repositoryName
+                                + "': retry after the registry recovers (" + e.getMessage() + ")",
+                        500);
+            }
+            throw new AwsException("ServerException",
+                    "Failed to clean up the backing registry for repository '" + repositoryName + "': "
+                            + e.getMessage(),
+                    500);
+        }
         if (!tags.isEmpty() && !force) {
             throw new AwsException("RepositoryNotEmptyException",
                     "The repository with name '" + repositoryName
                             + "' in registry with id '" + account + "' cannot be deleted because it still contains images",
                     400);
         }
-
-        if (force && !tags.isEmpty()) {
-            // Phase 5 will issue real DELETE /v2/<name>/manifests/<digest> calls.
-            LOG.infov("Force-deleting ECR repository {0} containing {1} tag(s) (manifest deletion deferred)",
-                    repositoryName, tags.size());
+        if (force && registryAvailable) {
+            // Single cleanup mechanism (#2982): remove the repository storage
+            // directories inside the registry container. Routed through
+            // resolveRegistryRepoName so content pushed under the bare name
+            // via hostname-style URIs is removed too (issue #2444).
+            deleteRepositoryStorageResolved(account, region, repositoryName);
         }
 
         repoStore.delete(key);
@@ -253,6 +309,9 @@ public class EcrService {
         String metaPrefix = key + "::";
         for (ImageMetadata meta : imageMetaStore.scan(k -> k.startsWith(metaPrefix))) {
             imageMetaStore.delete(metaPrefix + meta.getDigest());
+        }
+        if (!hasRepositories()) {
+            registryManager.pruneStorage();
         }
         LOG.infov("Deleted ECR repository {0}/{1}/{2}", region, account, repositoryName);
         return repo;
@@ -263,7 +322,7 @@ public class EcrService {
     // ============================================================
 
     public AuthorizationData getAuthorizationToken() {
-        registryManager.ensureStarted();
+        requireRegistry();
         String token = Base64.getEncoder()
                 .encodeToString(("AWS:" + AUTH_PASSWORD).getBytes(StandardCharsets.UTF_8));
         Instant expires = Instant.now().plusSeconds(12 * 60 * 60);
@@ -277,7 +336,7 @@ public class EcrService {
 
     public List<ImageIdentifier> listImages(String repositoryName, String registryId, String region) {
         Repository repo = requireRepo(repositoryName, registryId, region);
-        registryManager.ensureStarted();
+        requireRegistry();
         try {
             RegistryHttpClient http = registryManager.httpClient();
             List<String> names = registryLookupNames(repo, region, repositoryName);
@@ -301,7 +360,7 @@ public class EcrService {
                                                 String registryId,
                                                 String region) {
         Repository repo = requireRepo(repositoryName, registryId, region);
-        registryManager.ensureStarted();
+        requireRegistry();
         RegistryHttpClient http = registryManager.httpClient();
         List<String> names = registryLookupNames(repo, region, repositoryName);
 
@@ -400,7 +459,7 @@ public class EcrService {
                                               String registryId,
                                               String region) {
         Repository repo = requireRepo(repositoryName, registryId, region);
-        registryManager.ensureStarted();
+        requireRegistry();
         RegistryHttpClient http = registryManager.httpClient();
         List<String> names = registryLookupNames(repo, region, repositoryName);
 
@@ -450,7 +509,7 @@ public class EcrService {
                                                     String registryId,
                                                     String region) {
         Repository repo = requireRepo(repositoryName, registryId, region);
-        registryManager.ensureStarted();
+        requireRegistry();
         RegistryHttpClient http = registryManager.httpClient();
         List<String> names = registryLookupNames(repo, region, repositoryName);
 
@@ -503,6 +562,23 @@ public class EcrService {
         repo.setImageTagMutability(mutability);
         repoStore.put(key(region, repo.getRegistryId(), repositoryName), repo);
         return repo;
+    }
+
+    /** Returns whether the repository rejects a second manifest write for an existing tag. */
+    public boolean isImageTagImmutable(String repositoryName, String registryId, String region) {
+        String account = effectiveAccount(registryId);
+        return repoStore.get(key(region, account, repositoryName))
+                .map(Repository::getImageTagMutability)
+                .filter("IMMUTABLE"::equals)
+                .isPresent();
+    }
+
+    /** Returns the physical registry namespace selected for an ECR repository. */
+    public String registryRepositoryName(String repositoryName, String registryId, String region) {
+        String account = effectiveAccount(registryId);
+        return repoStore.get(key(region, account, repositoryName))
+                .map(repo -> registryRepositoryName(repo, region))
+                .orElseGet(() -> registryManager.internalRepoName(account, region, repositoryName));
     }
 
     public void tagResource(String repoName, String registryId, Map<String, String> tags, String region) {
@@ -572,6 +648,29 @@ public class EcrService {
         repo.setRepositoryPolicyText(null);
         repoStore.put(key(region, repo.getRegistryId(), repoName), repo);
         return repo;
+    }
+
+    @Override
+    public List<ExplorerResource> getResources() {
+        List<ExplorerResource> resources = new ArrayList<>();
+        for (Repository repo : repoStore.scan(k -> true)) {
+            String arn = repo.getRepositoryArn();
+            if (arn == null) {
+                continue;
+            }
+            AwsArnUtils.Arn parsed = AwsArnUtils.parse(arn);
+            resources.add(new ExplorerResource(
+                    arn, "ecr:repository", "ecr",
+                    parsed.region(), parsed.accountId(),
+                    repo.getCreatedAt() != null ? repo.getCreatedAt() : Instant.now(),
+                    repo.getTags() != null ? repo.getTags() : Map.of()));
+        }
+        return resources;
+    }
+
+    @Override
+    public Set<SupportedResourceType> getSupportedResourceTypes() {
+        return Set.of(new SupportedResourceType("ecr:repository", "ecr", true));
     }
 
     // ============================================================
@@ -734,12 +833,10 @@ public class EcrService {
         }
         // Alchemy bindings assert the URL is HTTPS (AWS always returns a
         // pre-signed https:// URL). The backing registry may be plain HTTP.
-        String httpsBase = "https://localhost:" + registryManager.effectivePort();
-        String registryName = firstRegistryNameWithBlob(repo, region, repositoryName, layerDigest);
-        if (registryName == null) {
-            registryName = registryManager.internalRepoName(repo.getRegistryId(), region, repositoryName);
-        }
-        String path = "/v2/" + registryName + "/blobs/" + layerDigest;
+        String repositoryUri = registryManager.getRepositoryUri(repo.getRegistryId(), region, repositoryName);
+        int repositoryPath = repositoryUri.indexOf('/');
+        String httpsBase = "https://" + repositoryUri.substring(0, repositoryPath);
+        String path = "/v2/" + repositoryUri.substring(repositoryPath + 1) + "/blobs/" + layerDigest;
         return new DownloadUrl(httpsBase + path, layerDigest);
     }
 
@@ -830,7 +927,7 @@ public class EcrService {
         if (repo == null) {
             throw notFound(name, account);
         }
-        return repo;
+        return refreshRepositoryUri(repo, region);
     }
 
     private Repository findByNameInRegion(String region, String name) {
@@ -843,19 +940,155 @@ public class EcrService {
     }
 
 
-    private List<String> listTagsBestEffort(String account, String region, String repoName) {
+    /**
+     * Gate for the ECR data plane, which cannot be emulated without the backing
+     * registry container. Surfaces ECR's modelled {@code ServerException} instead of
+     * letting the Docker client's {@code SocketException} escape as an InternalFailure.
+     */
+    private void requireRegistry() {
+        if (!registryManager.tryEnsureStarted()) {
+            throw new AwsException("ServerException",
+                    "The ECR backing registry is unavailable because no Docker daemon is reachable "
+                            + "from Floci. Repository metadata operations are supported; image push, "
+                            + "pull and image queries require Docker.", 500);
+        }
+    }
+
+    private Repository refreshRepositoryUri(Repository repo, String region) {
+        repo.setRepositoryUri(registryManager.getRepositoryUri(repo.getRegistryId(), region, repo.getRepositoryName()));
+        repoStore.put(key(region, repo.getRegistryId(), repo.getRepositoryName()), repo);
+        return repo;
+    }
+
+    private String registryRepositoryName(Repository repo, String region) {
+        String registryRepositoryName = repo.getRegistryRepositoryName();
+        if (registryRepositoryName != null && !registryRepositoryName.isBlank()) {
+            return registryRepositoryName;
+        }
+        return registryManager.internalRepoName(repo.getRegistryId(), region, repo.getRepositoryName());
+    }
+
+    private List<String> listTagsBestEffort(Repository repo, String region) {
         try {
-            RegistryHttpClient http = registryManager.httpClient();
-            List<String> names = new ArrayList<>();
-            names.add(registryManager.internalRepoName(account, region, repoName));
-            if (!names.contains(repoName)) {
-                names.add(repoName);
-            }
-            return listTagsFromRegistry(http, names);
+            return registryManager.httpClient()
+                    .listTags(resolveRegistryRepoName(repo.getRegistryId(), region, repo.getRepositoryName()));
         } catch (Exception e) {
-            LOG.debugv("Could not list tags for {0} (registry not available): {1}", repoName, e.getMessage());
+            LOG.debugv("Could not list tags for {0} (registry not available): {1}",
+                    repo.getRepositoryName(), e.getMessage());
             return List.of();
         }
+    }
+
+    /**
+     * Deletes registry storage for the repository under the name it was
+     * actually pushed as. Hostname-style pushes land under the bare name,
+     * which {@code internalRepoName} alone never addresses (issue #2444).
+     */
+    private void deleteRepositoryStorageResolved(String account, String region, String repositoryName) {
+        String internal = resolveRegistryRepoName(account, region, repositoryName);
+        try {
+            registryManager.deleteRepositoryStorageByInternalName(internal);
+        } catch (Exception e) {
+            throw registryFailure(repositoryName, e);
+        }
+    }
+
+    private boolean hasRepositories() {
+        if (repoStore instanceof AccountAwareStorageBackend<?> accountAware) {
+            return !accountAware.scanAllAccounts().isEmpty();
+        }
+        return !repoStore.scan(k -> true).isEmpty();
+    }
+
+    private AwsException registryFailure(String repositoryName, Exception cause) {
+        LOG.warnv("Could not delete ECR repository {0} from the backing registry: {1}",
+                repositoryName, cause.getMessage());
+        return new AwsException("ServerException",
+                "Could not delete images from repository '" + repositoryName + "'", 500);
+    }
+
+    /**
+     * Lists tags and propagates registry failures. Used by force-delete to
+     * distinguish "registry unreachable" (skip cleanup) from "registry
+     * available but listing failed" (abort deletion).
+     */
+    private List<String> listTagsOrThrow(String account, String region, String repoName) throws Exception {
+        return registryManager.httpClient()
+                .listTagsStrict(resolveRegistryRepoNameStrict(account, region, repoName));
+    }
+
+    /**
+     * Resolves the repository name as stored in the backing registry.
+     * Hostname-style URIs ({@code <account>.dkr.ecr.<region>.localhost:<port>/<repo>})
+     * reach the raw registry, so docker pushes land under the bare repo name,
+     * while path-style URIs land under {@code <account>/<region>/<repo>}.
+     * Resolution uses catalog membership (not tag listing) so untagged,
+     * digest-only repositories resolve correctly. The namespaced form wins
+     * when both exist.
+     *
+     * <p>Ambiguity guard: a bare-name entry can only be claimed when no
+     * <em>other</em> account/region has metadata for the same repository name.
+     * Otherwise the bare entry's owning scope is unknown and resolving to it
+     * would let one scope read or delete another scope's images, so the call
+     * falls back to the (empty) namespaced form.
+     */
+    private String resolveRegistryRepoName(String account, String region, String repoName) {
+        try {
+            return resolveRegistryRepoNameStrict(account, region, repoName);
+        } catch (Exception e) {
+            LOG.debugv("Registry lookup failed while resolving {0}: {1}", repoName, e.getMessage());
+            return registryManager.internalRepoName(account, region, repoName);
+        }
+    }
+
+    private String resolveRegistryRepoNameStrict(String account, String region, String repoName) throws Exception {
+        String internal = registryManager.internalRepoName(account, region, repoName);
+        List<String> catalog = registryManager.httpClient().catalogStrict();
+        if (catalog.contains(internal)) {
+            return internal;
+        }
+        if (catalog.contains(repoName)) {
+            String currentKey = region + "::" + account + "::" + repoName;
+            boolean otherScopeClaimsIt = hasOtherScopeClaim(repoName, currentKey);
+            if (!otherScopeClaimsIt) {
+                return repoName;
+            }
+            LOG.warnv("Bare registry entry {0} claimed by another account/region; "
+                    + "resolving {0} to its namespaced form", repoName, internal);
+        }
+        return internal;
+    }
+
+    private boolean hasOtherScopeClaim(String repoName, String currentKey) {
+        String suffix = "::" + repoName;
+        if (repoStore instanceof AccountAwareStorageBackend<?> aware) {
+            @SuppressWarnings("unchecked")
+            AccountAwareStorageBackend<Repository> typed = (AccountAwareStorageBackend<Repository>) aware;
+            return typed.scanAllAccountEntries(k -> k.endsWith(suffix) && !k.equals(currentKey))
+                    .stream().findAny().isPresent();
+        }
+        return repoStore.keys().stream()
+                .anyMatch(k -> k.endsWith(suffix) && !k.equals(currentKey));
+    }
+
+    private static boolean isRegistryUnreachable(Throwable e) {
+        // Only genuine connectivity failures qualify. An NPE or an "is null"
+        // message means a bug or an answered error body, those must abort
+        // the delete, never masquerade as an outage.
+        Throwable t = e;
+        while (t != null) {
+            if (t instanceof java.net.ConnectException || t instanceof java.net.UnknownHostException
+                    || t instanceof java.net.SocketTimeoutException) {
+                return true;
+            }
+            String msg = t.getMessage();
+            if (msg != null && (msg.contains("Connection refused") || msg.contains("Connection reset")
+                    || msg.contains("Failed to connect") || msg.contains("Connection timed out"))) {
+                return true;
+            }
+            t = t.getCause();
+        }
+        return false;
     }
 
     private static String key(String region, String account, String repoName) {
@@ -1039,21 +1272,6 @@ public class EcrService {
         }
     }
 
-    private String firstRegistryNameWithBlob(Repository repo, String region, String repositoryName, String digest) {
-        try {
-            registryManager.ensureStarted();
-            RegistryHttpClient http = registryManager.httpClient();
-            for (String name : registryLookupNames(repo, region, repositoryName)) {
-                if (http.headBlob(name, digest) != null) {
-                    return name;
-                }
-            }
-            return null;
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
     private void pushBlobBestEffort(Repository repo, String region, String repositoryName,
                                     String digest, byte[] data) {
         try {
@@ -1083,11 +1301,7 @@ public class EcrService {
      * {@code /v2/<account>/<region>/<repoName>/...}. Control-plane reads try both.
      */
     private List<String> registryLookupNames(Repository repo, String region, String repositoryName) {
-        String internal = registryManager.internalRepoName(repo.getRegistryId(), region, repositoryName);
-        if (internal.equals(repositoryName)) {
-            return List.of(internal);
-        }
-        return List.of(internal, repositoryName);
+        return List.of(resolveRegistryRepoName(repo.getRegistryId(), region, repositoryName));
     }
 
     private List<String> listTagsFromRegistry(RegistryHttpClient http, List<String> names) {

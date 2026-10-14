@@ -8,16 +8,20 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -245,5 +249,99 @@ class HttpProxyInvokerTest {
         assertNotNull(q);
         assertTrue(q.contains("page=2"));
         assertTrue(q.contains("user=u-42"));
+    }
+
+    @Test
+    void rejectsLinkLocalMetadataTarget() {
+        Integration integration = httpProxyIntegration("http://169.254.169.254/latest/meta-data/", null);
+        RequestContext ctx = ctxFor("GET", "/wallet/x", "x", Map.of(), Map.of(), null, Map.of());
+
+        ProxyResult result = new HttpProxyInvoker().invoke(integration, ctx);
+
+        assertEquals(502, result.statusCode());
+        assertTrue(new String(result.body(), StandardCharsets.UTF_8).contains("link-local or metadata address"),
+                "the target must be rejected before any connection is attempted");
+    }
+
+    @Test
+    void rejectsLinkLocalMetadataTargetWhenHostHeaderIsOverridden() {
+        Integration integration = httpProxyIntegration("http://169.254.169.254/latest/meta-data/",
+                Map.of("overwrite:header.Host", "lb.localhost.test"));
+        RequestContext ctx = ctxFor("GET", "/wallet/x", "x", Map.of(), Map.of(), null, Map.of());
+
+        ProxyResult result = new HttpProxyInvoker().invoke(integration, ctx);
+
+        assertEquals(502, result.statusCode());
+        assertTrue(new String(result.body(), StandardCharsets.UTF_8).contains("link-local or metadata address"),
+                "the target must be rejected before any connection is attempted");
+    }
+
+    @Test
+    void rejectsAwsIpv6MetadataTarget() {
+        Integration integration = httpProxyIntegration("http://[fd00:ec2::254]/latest/meta-data/", null);
+        RequestContext ctx = ctxFor("GET", "/wallet/x", "x", Map.of(), Map.of(), null, Map.of());
+
+        ProxyResult result = new HttpProxyInvoker().invoke(integration, ctx);
+
+        assertEquals(502, result.statusCode());
+        assertTrue(new String(result.body(), StandardCharsets.UTF_8).contains("link-local or metadata address"),
+                "the target must be rejected before any connection is attempted");
+    }
+
+    @Test
+    void stillReachesLoopbackBackend() {
+        Integration integration = httpProxyIntegration("http://127.0.0.1:" + backendPort + "/ok", null);
+        RequestContext ctx = ctxFor("GET", "/wallet/x", "x", Map.of(), Map.of(), null, Map.of());
+
+        ProxyResult result = new HttpProxyInvoker().invoke(integration, ctx);
+
+        assertEquals(200, result.statusCode());
+        assertNotNull(received.get(), "loopback backends must stay reachable");
+    }
+
+    @Test
+    void connectsToTheAddressItCheckedInsteadOfResolvingTheNameAgain() throws Exception {
+        AtomicInteger lookups = new AtomicInteger();
+        HttpProxyInvoker invoker = new HttpProxyInvoker(host -> {
+            if (lookups.incrementAndGet() == 1) {
+                return new InetAddress[] {InetAddress.getByName("127.0.0.1")};
+            }
+            return new InetAddress[] {InetAddress.getByName("169.254.169.254")};
+        });
+        Integration integration = httpProxyIntegration("http://rebind.example.test:" + backendPort + "/ok", null);
+        RequestContext ctx = ctxFor("GET", "/wallet/x", "x", Map.of(), Map.of(), null, Map.of());
+
+        ProxyResult result = invoker.invoke(integration, ctx);
+
+        assertEquals(200, result.statusCode());
+        assertEquals(1, lookups.get(), "the name must be resolved once, then the checked address used");
+        assertEquals("rebind.example.test:" + backendPort, received.get().headers().getFirst("Host"));
+    }
+
+    @Test
+    void rejectsANameThatResolvesToAMetadataAddress() {
+        HttpProxyInvoker invoker = new HttpProxyInvoker(
+                host -> new InetAddress[] {InetAddress.getByAddress(new byte[] {(byte) 169, (byte) 254, (byte) 169, (byte) 254})});
+        Integration integration = httpProxyIntegration("http://metadata.example.test/latest/", null);
+        RequestContext ctx = ctxFor("GET", "/wallet/x", "x", Map.of(), Map.of(), null, Map.of());
+
+        ProxyResult result = invoker.invoke(integration, ctx);
+
+        assertEquals(502, result.statusCode());
+        assertTrue(new String(result.body(), StandardCharsets.UTF_8).contains("link-local or metadata address"));
+    }
+
+    @Test
+    void headRequestToANamedHostDoesNotWaitForABody() {
+        HttpProxyInvoker invoker = new HttpProxyInvoker(
+                host -> new InetAddress[] {InetAddress.getByAddress(new byte[] {127, 0, 0, 1})});
+        Integration integration = httpProxyIntegration("http://named.example.test:" + backendPort + "/ok", null);
+        RequestContext ctx = ctxFor("HEAD", "/wallet/x", "x", Map.of(), Map.of(), null, Map.of());
+
+        ProxyResult result = assertTimeoutPreemptively(
+                Duration.ofSeconds(5), () -> invoker.invoke(integration, ctx));
+
+        assertEquals(200, result.statusCode());
+        assertEquals(0, result.body().length);
     }
 }

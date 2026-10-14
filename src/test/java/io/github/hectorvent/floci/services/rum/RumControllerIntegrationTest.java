@@ -11,10 +11,12 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -295,6 +297,217 @@ class RumControllerIntegrationTest {
                 .then()
                 .statusCode(400)
                 .body("__type", equalTo("ValidationException"));
+    }
+
+    @Test
+    void appMonitorTagsAreServedThroughTheSharedTagsRoutes() {
+        String authorization = auth("000000000110", EAST);
+        create(authorization, "{\"Name\":\"tagged-monitor\",\"Domain\":\"example.com\",\"Tags\":{\"Owner\":\"floci\"}}");
+        String arn = "arn:aws:rum:" + EAST + ":000000000110:appmonitor/tagged-monitor";
+
+        given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("{\"Tags\":{\"phase\":\"two\"}}")
+                .when()
+                .post("/tags/" + arn)
+                .then()
+                .statusCode(200);
+
+        given()
+                .header("Authorization", authorization)
+                .when()
+                .get("/tags/" + arn)
+                .then()
+                .statusCode(200)
+                .body("Tags.Owner", equalTo("floci"))
+                .body("Tags.phase", equalTo("two"));
+
+        given()
+                .header("Authorization", authorization)
+                .queryParam("tagKeys", "phase")
+                .when()
+                .delete("/tags/" + arn)
+                .then()
+                .statusCode(200);
+
+        get(authorization, "tagged-monitor")
+                .then()
+                .body("AppMonitor.Tags.Owner", equalTo("floci"))
+                .body("AppMonitor.Tags.phase", nullValue());
+
+        given()
+                .header("Authorization", authorization)
+                .when()
+                .get("/tags/arn:aws:rum:" + EAST + ":000000000110:appmonitor/missing-monitor")
+                .then()
+                .statusCode(404)
+                .body("__type", equalTo("ResourceNotFoundException"))
+                .body("resourceName", equalTo("missing-monitor"));
+    }
+
+    @Test
+    void putRumEventsDataPlaneFeedsGetAppMonitorData() {
+        String authorization = auth("000000000111", EAST);
+        String id = create(authorization, "{\"Name\":\"telemetry-monitor\",\"Domain\":\"example.com\"}");
+        long now = System.currentTimeMillis();
+
+        given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("""
+                        {
+                          "BatchId":"%s",
+                          "AppMonitorDetails":{"name":"telemetry-monitor","id":"%s"},
+                          "UserDetails":{"userId":"%s","sessionId":"%s"},
+                          "RumEvents":[{"id":"%s","timestamp":%d,"type":"com.amazon.rum.session_start_event","details":"{}"}]
+                        }
+                        """.formatted(UUID.randomUUID(), id, UUID.randomUUID(), UUID.randomUUID(),
+                        UUID.randomUUID(), now / 1000))
+                .when()
+                .post("/appmonitors/" + id + "/")
+                .then()
+                .statusCode(200);
+
+        Response data = given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("{\"TimeRange\":{\"After\":%d}}".formatted(now - 60_000))
+                .when()
+                .post("/appmonitor/telemetry-monitor/data")
+                .then()
+                .statusCode(200)
+                .extract().response();
+        List<String> events = data.path("Events");
+        assertEquals(1, events.size());
+        assertTrue(events.getFirst().contains("\"event_type\":\"com.amazon.rum.session_start_event\""));
+
+        given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("""
+                        {"BatchId":"%s","AppMonitorDetails":{},"UserDetails":{},"RumEvents":[]}
+                        """.formatted(UUID.randomUUID()))
+                .when()
+                .post("/appmonitors/" + UUID.randomUUID() + "/")
+                .then()
+                .statusCode(404)
+                .body("__type", equalTo("ResourceNotFoundException"));
+    }
+
+    @Test
+    void metricsDestinationDefinitionAndPolicyRoutes() {
+        String authorization = auth("000000000112", EAST);
+        create(authorization, "{\"Name\":\"config-monitor\",\"Domain\":\"example.com\"}");
+
+        given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("{\"Destination\":\"CloudWatch\"}")
+                .when()
+                .post("/rummetrics/config-monitor/metricsdestination")
+                .then()
+                .statusCode(200);
+
+        given()
+                .header("Authorization", authorization)
+                .when()
+                .get("/rummetrics/config-monitor/metricsdestination")
+                .then()
+                .statusCode(200)
+                .body("Destinations[0].Destination", equalTo("CloudWatch"));
+
+        String definitionId = given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("""
+                        {"Destination":"CloudWatch","MetricDefinitions":[
+                          {"Name":"SessionCount","EventPattern":"{\\"event_type\\":[\\"com.amazon.rum.session_start_event\\"]}"}
+                        ]}
+                        """)
+                .when()
+                .post("/rummetrics/config-monitor/metrics")
+                .then()
+                .statusCode(200)
+                .body("Errors.size()", equalTo(0))
+                .body("MetricDefinitions[0].Name", equalTo("SessionCount"))
+                .extract().path("MetricDefinitions[0].MetricDefinitionId");
+
+        given()
+                .header("Authorization", authorization)
+                .queryParam("destination", "CloudWatch")
+                .when()
+                .get("/rummetrics/config-monitor/metrics")
+                .then()
+                .statusCode(200)
+                .body("MetricDefinitions[0].MetricDefinitionId", equalTo(definitionId));
+
+        given()
+                .header("Authorization", authorization)
+                .queryParam("destination", "CloudWatch")
+                .queryParam("metricDefinitionIds", definitionId)
+                .when()
+                .delete("/rummetrics/config-monitor/metrics")
+                .then()
+                .statusCode(200)
+                .body("MetricDefinitionIds[0]", equalTo(definitionId));
+
+        given()
+                .header("Authorization", authorization)
+                .queryParam("destination", "CloudWatch")
+                .when()
+                .delete("/rummetrics/config-monitor/metricsdestination")
+                .then()
+                .statusCode(200);
+
+        String policy = "{\\\"Version\\\":\\\"2012-10-17\\\",\\\"Statement\\\":[{\\\"Effect\\\":\\\"Allow\\\","
+                + "\\\"Principal\\\":{\\\"AWS\\\":\\\"arn:aws:iam::000000000112:root\\\"},"
+                + "\\\"Action\\\":\\\"rum:PutRumEvents\\\","
+                + "\\\"Resource\\\":\\\"arn:aws:rum:us-east-1:000000000112:appmonitor/config-monitor\\\"}]}";
+        String revision = given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("{\"PolicyDocument\":\"" + policy + "\"}")
+                .when()
+                .put("/appmonitor/config-monitor/policy")
+                .then()
+                .statusCode(200)
+                .body("PolicyRevisionId", notNullValue())
+                .extract().path("PolicyRevisionId");
+
+        given()
+                .header("Authorization", authorization)
+                .when()
+                .get("/appmonitor/config-monitor/policy")
+                .then()
+                .statusCode(200)
+                .body("PolicyRevisionId", equalTo(revision));
+
+        given()
+                .header("Authorization", authorization)
+                .queryParam("policyRevisionId", "stale")
+                .when()
+                .delete("/appmonitor/config-monitor/policy")
+                .then()
+                .statusCode(400)
+                .body("__type", equalTo("InvalidPolicyRevisionIdException"));
+
+        given()
+                .header("Authorization", authorization)
+                .queryParam("policyRevisionId", revision)
+                .when()
+                .delete("/appmonitor/config-monitor/policy")
+                .then()
+                .statusCode(200)
+                .body("PolicyRevisionId", equalTo(revision));
+
+        given()
+                .header("Authorization", authorization)
+                .when()
+                .get("/appmonitor/config-monitor/policy")
+                .then()
+                .statusCode(404)
+                .body("__type", equalTo("PolicyNotFoundException"));
     }
 
     private static String auth(String accountId, String region) {

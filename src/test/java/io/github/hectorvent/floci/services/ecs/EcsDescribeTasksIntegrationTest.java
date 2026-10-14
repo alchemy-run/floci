@@ -70,6 +70,31 @@ class EcsDescribeTasksIntegrationTest {
     }
 
     @Test
+    void listStoppedTasksFiltersByStartedByWithoutIncludingRunningOrForeignTasks() {
+        String cluster = "task-stopped-started-cluster";
+        String family = "task-stopped-started-td";
+        seed(cluster, family);
+        String request = "{\"cluster\":\"" + cluster + "\",\"taskDefinition\":\"" + family;
+        String stopped = call("RunTask", request + "\",\"startedBy\":\"batch-a\"}")
+                .path("tasks[0].taskArn");
+        String running = call("RunTask", request + "\",\"startedBy\":\"batch-a\"}")
+                .path("tasks[0].taskArn");
+        String other = call("RunTask", request + "\",\"startedBy\":\"batch-b\"}")
+                .path("tasks[0].taskArn");
+        for (String task : new String[]{stopped, other}) {
+            call("StopTask", "{\"cluster\":\"" + cluster + "\",\"task\":\"" + task + "\"}");
+        }
+
+        call("ListTasks", "{\"cluster\":\"" + cluster
+                + "\",\"startedBy\":\"batch-a\",\"desiredStatus\":\"STOPPED\"}")
+                .then()
+                .body("taskArns", hasSize(1))
+                .body("taskArns", hasItem(stopped))
+                .body("taskArns", not(hasItem(running)))
+                .body("taskArns", not(hasItem(other)));
+    }
+
+    @Test
     void standaloneRunTaskProtectionIsTaskNotValid() {
         seed("task-prot-cluster", "task-prot-td");
         String taskArn = call("RunTask", "{\"cluster\":\"task-prot-cluster\","

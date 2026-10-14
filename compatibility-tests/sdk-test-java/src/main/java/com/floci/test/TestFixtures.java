@@ -3,10 +3,15 @@ package com.floci.test;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.account.AccountClient;
+import software.amazon.awssdk.services.accessanalyzer.AccessAnalyzerClient;
 import software.amazon.awssdk.services.cloudformation.CloudFormationClient;
+import software.amazon.awssdk.services.cloudhsmv2.CloudHsmV2Client;
+import software.amazon.awssdk.services.cloudfront.CloudFrontClient;
 import software.amazon.awssdk.services.cloudtrail.CloudTrailClient;
 import software.amazon.awssdk.services.cloudwatch.CloudWatchClient;
 import software.amazon.awssdk.services.cloudwatchlogs.CloudWatchLogsClient;
+import software.amazon.awssdk.services.codeartifact.CodeartifactClient;
 import software.amazon.awssdk.services.cognitoidentityprovider.CognitoIdentityProviderClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.core.client.config.SdkAdvancedClientOption;
@@ -22,9 +27,40 @@ import software.amazon.awssdk.http.Protocol;
 import software.amazon.awssdk.services.kms.KmsClient;
 import software.amazon.awssdk.services.lambda.LambdaClient;
 import software.amazon.awssdk.services.opensearch.OpenSearchClient;
+import software.amazon.awssdk.services.oam.OamClient;
 import software.amazon.awssdk.services.neptune.NeptuneClient;
 import software.amazon.awssdk.services.rds.RdsClient;
+import software.amazon.awssdk.services.redshift.RedshiftClient;
+import software.amazon.awssdk.services.redshiftdata.RedshiftDataClient;
+import software.amazon.awssdk.services.guardduty.GuardDutyClient;
+import software.amazon.awssdk.services.fis.FisClient;
+import software.amazon.awssdk.services.organizations.OrganizationsClient;
+import software.amazon.awssdk.services.sso.SsoClient;
+import software.amazon.awssdk.services.ssoadmin.SsoAdminClient;
+import software.amazon.awssdk.services.ssooidc.SsoOidcClient;
+import software.amazon.awssdk.services.identitystore.IdentitystoreClient;
+import software.amazon.awssdk.services.budgets.BudgetsClient;
+import software.amazon.awssdk.services.bcmpricingcalculator.BcmPricingCalculatorClient;
+import software.amazon.awssdk.services.timestreaminfluxdb.TimestreamInfluxDbClient;
+import software.amazon.awssdk.services.macie2.Macie2Client;
+import software.amazon.awssdk.services.controlcatalog.ControlCatalogClient;
+import software.amazon.awssdk.services.marketplacecatalog.MarketplaceCatalogClient;
+import software.amazon.awssdk.services.marketplaceagreement.MarketplaceAgreementClient;
+import software.amazon.awssdk.services.marketplaceentitlement.MarketplaceEntitlementClient;
+import software.amazon.awssdk.services.verifiedpermissions.VerifiedPermissionsClient;
+import software.amazon.awssdk.services.marketplacedeployment.MarketplaceDeploymentClient;
+import software.amazon.awssdk.services.marketplacereporting.MarketplaceReportingClient;
+import software.amazon.awssdk.services.marketplacemetering.MarketplaceMeteringClient;
+import software.amazon.awssdk.services.marketplacediscovery.MarketplaceDiscoveryClient;
+import software.amazon.awssdk.services.inspector2.Inspector2Client;
+import software.amazon.awssdk.services.securityhub.SecurityHubClient;
+import software.amazon.awssdk.services.databasemigration.DatabaseMigrationClient;
+import software.amazon.awssdk.services.detective.DetectiveClient;
+import software.amazon.awssdk.services.globalaccelerator.GlobalAcceleratorClient;
 import software.amazon.awssdk.services.rum.RumClient;
+import software.amazon.awssdk.services.resourceexplorer2.ResourceExplorer2Client;
+import software.amazon.awssdk.services.ram.RamClient;
+import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.endpoints.Endpoint;
 import software.amazon.awssdk.services.s3control.S3ControlClient;
@@ -33,6 +69,8 @@ import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 import software.amazon.awssdk.services.ses.SesClient;
 import software.amazon.awssdk.services.sesv2.SesV2Client;
 import software.amazon.awssdk.services.sfn.SfnClient;
+import software.amazon.awssdk.services.signin.SigninClient;
+import software.amazon.awssdk.services.swf.SwfClient;
 import software.amazon.awssdk.services.sns.SnsClient;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.ssm.SsmClient;
@@ -52,10 +90,18 @@ import software.amazon.awssdk.services.apigatewayv2.ApiGatewayV2Client;
 import software.amazon.awssdk.services.elasticache.ElastiCacheClient;
 import software.amazon.awssdk.services.elasticbeanstalk.ElasticBeanstalkClient;
 import software.amazon.awssdk.services.acm.AcmClient;
+import software.amazon.awssdk.services.amp.AmpClient;
+import software.amazon.awssdk.services.efs.EfsClient;
 import software.amazon.awssdk.services.ec2.Ec2Client;
 import software.amazon.awssdk.services.ecr.EcrClient;
+import software.amazon.awssdk.services.bedrock.BedrockClient;
+import software.amazon.awssdk.services.bedrockagentcore.BedrockAgentCoreClient;
+import software.amazon.awssdk.services.bedrockagentcorecontrol.BedrockAgentCoreControlClient;
+import software.amazon.awssdk.services.bedrockruntime.BedrockRuntimeAsyncClient;
 import software.amazon.awssdk.services.pipes.PipesClient;
 import software.amazon.awssdk.services.codebuild.CodeBuildClient;
+import software.amazon.awssdk.services.sagemaker.SageMakerClient;
+import software.amazon.awssdk.services.sagemakerruntime.SageMakerRuntimeClient;
 import software.amazon.awssdk.services.codedeploy.CodeDeployClient;
 import software.amazon.awssdk.services.codepipeline.CodePipelineClient;
 import software.amazon.awssdk.services.ecs.EcsClient;
@@ -66,6 +112,8 @@ import software.amazon.awssdk.services.iotjobsdataplane.IotJobsDataPlaneClient;
 import software.amazon.awssdk.services.scheduler.SchedulerClient;
 import software.amazon.awssdk.services.appconfig.AppConfigClient;
 import software.amazon.awssdk.services.appconfigdata.AppConfigDataClient;
+import software.amazon.awssdk.services.appintegrations.AppIntegrationsClient;
+import software.amazon.awssdk.services.datasync.DataSyncClient;
 import software.amazon.awssdk.services.autoscaling.AutoScalingClient;
 import software.amazon.awssdk.services.backup.BackupClient;
 import software.amazon.awssdk.services.elasticloadbalancingv2.ElasticLoadBalancingV2Client;
@@ -82,6 +130,7 @@ import software.amazon.awssdk.services.route53.model.RRType;
 import software.amazon.awssdk.services.route53.model.ResourceRecord;
 import software.amazon.awssdk.services.route53.model.ResourceRecordSet;
 import software.amazon.awssdk.services.s3vectors.S3VectorsClient;
+import software.amazon.awssdk.services.s3tables.S3TablesClient;
 
 import software.amazon.awssdk.core.SdkBytes;
 import software.amazon.awssdk.services.lambda.model.CreateFunctionRequest;
@@ -97,6 +146,14 @@ import software.amazon.awssdk.services.sesv2.model.GetEmailIdentityRequest;
 
 import java.io.ByteArrayOutputStream;
 import java.net.URI;
+import java.net.http.HttpClient;
+import java.security.GeneralSecurityException;
+import java.security.SecureRandom;
+import java.security.cert.X509Certificate;
+
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
@@ -154,6 +211,32 @@ public final class TestFixtures {
      */
     public static URI endpoint() {
         return ENDPOINT;
+    }
+
+    /**
+     * HTTP client for emulator-only browser flows. Floci uses a local test CA when TLS is enabled,
+     * so these direct browser requests trust the emulator certificate instead of the JVM truststore.
+     */
+    public static HttpClient emulatorHttpClient() {
+        try {
+            X509TrustManager trustAll = new X509TrustManager() {
+                @Override
+                public void checkClientTrusted(X509Certificate[] chain, String authType) {}
+
+                @Override
+                public void checkServerTrusted(X509Certificate[] chain, String authType) {}
+
+                @Override
+                public X509Certificate[] getAcceptedIssuers() {
+                    return new X509Certificate[0];
+                }
+            };
+            SSLContext sslContext = SSLContext.getInstance("TLS");
+            sslContext.init(null, new TrustManager[] {trustAll}, new SecureRandom());
+            return HttpClient.newBuilder().sslContext(sslContext).build();
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException("Unable to configure emulator HTTP client", e);
+        }
     }
 
     /**
@@ -243,6 +326,206 @@ public final class TestFixtures {
     // AWS Client Factories
     // ============================================
 
+        public static CloudHsmV2Client cloudHsmV2Client() {
+        return CloudHsmV2Client.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static OrganizationsClient organizationsClient() {
+        return organizationsClient("test");
+    }
+
+    public static OrganizationsClient organizationsClient(String accountId) {
+        return OrganizationsClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create(accountId, "test")))
+                .build();
+    }
+
+    public static AccountClient accountClient() {
+        return AccountClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static AccessAnalyzerClient accessAnalyzerClient() {
+        return AccessAnalyzerClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static SsoAdminClient ssoAdminClient() {
+        return SsoAdminClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static SsoAdminClient ssoAdminClient(String accountId) {
+        return SsoAdminClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create(accountId, "test")))
+                .build();
+    }
+
+    public static SsoOidcClient ssoOidcClient() {
+        return SsoOidcClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static SsoClient ssoPortalClient() {
+        return SsoClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static IdentitystoreClient identityStoreClient() {
+        return IdentitystoreClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static BudgetsClient budgetsClient() {
+        return BudgetsClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static BudgetsClient budgetsClient(String accountId) {
+        return BudgetsClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create(accountId, "test")))
+                .build();
+    }
+
+    public static Macie2Client macie2Client() {
+        return macie2Client("test");
+    }
+
+    public static Macie2Client macie2Client(String accountId) {
+        return Macie2Client.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create(accountId, "test")))
+                .build();
+    }
+
+    public static ControlCatalogClient controlCatalogClient() {
+        return ControlCatalogClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static MarketplaceCatalogClient marketplaceCatalogClient() {
+        return MarketplaceCatalogClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static MarketplaceAgreementClient marketplaceAgreementClient() {
+        return MarketplaceAgreementClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static MarketplaceEntitlementClient marketplaceEntitlementClient() {
+        return MarketplaceEntitlementClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static VerifiedPermissionsClient verifiedPermissionsClient() {
+        return VerifiedPermissionsClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static MarketplaceDeploymentClient marketplaceDeploymentClient() {
+        return MarketplaceDeploymentClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static MarketplaceReportingClient marketplaceReportingClient() {
+        return MarketplaceReportingClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static MarketplaceMeteringClient marketplaceMeteringClient() {
+        return MarketplaceMeteringClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static MarketplaceDiscoveryClient marketplaceDiscoveryClient() {
+        return MarketplaceDiscoveryClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static DetectiveClient detectiveClient(String accountId) {
+        return DetectiveClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create(accountId, "test")))
+                .build();
+    }
+
+    public static Inspector2Client inspector2Client(String accountId) {
+        return Inspector2Client.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create(accountId, "test")))
+                .build();
+    }
+
+    public static SecurityHubClient securityHubClient(String accountId) {
+        return SecurityHubClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create(accountId, "test")))
+                .build();
+    }
+
     public static SsmClient ssmClient() {
         return SsmClient.builder()
                 .endpointOverride(ENDPOINT)
@@ -267,12 +550,33 @@ public final class TestFixtures {
                 .build();
     }
 
+    public static SigninClient signinClient() {
+        return SigninClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
     public static S3Client s3Client() {
         return S3Client.builder()
                 .endpointOverride(ENDPOINT)
                 .region(REGION)
                 .credentialsProvider(CREDENTIALS)
                 .forcePathStyle(true)
+                .build();
+    }
+
+    /** Async client with the Java-based multipart support enabled (5 MiB threshold and parts), for the transfer manager. */
+    public static S3AsyncClient s3MultipartAsyncClient() {
+        long fiveMiB = 5L * 1024 * 1024;
+        return S3AsyncClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .forcePathStyle(true)
+                .multipartEnabled(true)
+                .multipartConfiguration(b -> b.thresholdInBytes(fiveMiB).minimumPartSizeInBytes(fiveMiB))
                 .build();
     }
 
@@ -367,10 +671,14 @@ public final class TestFixtures {
     }
 
     public static IamClient iamClient() {
+        return iamClient("test");
+    }
+
+    public static IamClient iamClient(String accountId) {
         return IamClient.builder()
                 .endpointOverride(ENDPOINT)
                 .region(REGION)
-                .credentialsProvider(CREDENTIALS)
+                .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create(accountId, "test")))
                 .build();
     }
 
@@ -463,15 +771,27 @@ public final class TestFixtures {
     }
 
     public static KmsClient kmsClient() {
+        return kmsClient(REGION);
+    }
+
+    public static KmsClient kmsClient(Region region) {
         return KmsClient.builder()
                 .endpointOverride(ENDPOINT)
-                .region(REGION)
+                .region(region)
                 .credentialsProvider(CREDENTIALS)
                 .build();
     }
 
     public static SecretsManagerClient secretsManagerClient() {
         return SecretsManagerClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static AmpClient ampClient() {
+        return AmpClient.builder()
                 .endpointOverride(ENDPOINT)
                 .region(REGION)
                 .credentialsProvider(CREDENTIALS)
@@ -522,6 +842,14 @@ public final class TestFixtures {
 
     public static CloudFormationClient cloudFormationClient() {
         return CloudFormationClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static CloudFrontClient cloudFrontClient() {
+        return CloudFrontClient.builder()
                 .endpointOverride(ENDPOINT)
                 .region(REGION)
                 .credentialsProvider(CREDENTIALS)
@@ -580,6 +908,22 @@ public final class TestFixtures {
                 .build();
     }
 
+    public static SwfClient swfClient() {
+        return swfClient(REGION);
+    }
+
+    /**
+     * SWF names are unique per region, so cross-region tests need two clients pointed at the
+     * same emulator with different regions.
+     */
+    public static SwfClient swfClient(Region region) {
+        return SwfClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(region)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
     public static SesClient sesClient() {
         return SesClient.builder()
                 .endpointOverride(ENDPOINT)
@@ -597,10 +941,15 @@ public final class TestFixtures {
     }
 
     public static Route53Client route53Client() {
+        return route53Client("test");
+    }
+
+    public static Route53Client route53Client(String accessKeyId) {
         return Route53Client.builder()
                 .endpointOverride(ENDPOINT)
                 .region(REGION)
-                .credentialsProvider(CREDENTIALS)
+                .credentialsProvider(StaticCredentialsProvider.create(
+                        AwsBasicCredentials.create(accessKeyId, "test")))
                 .build();
     }
 
@@ -658,6 +1007,65 @@ public final class TestFixtures {
         throw new IllegalStateException("SES identity was not verified after publishing DKIM records for " + domain);
     }
 
+    /**
+     * Issues a DNS-validated ACM certificate the way AWS does: publishes each validation CNAME in
+     * a public hosted zone, waits for ISSUED, then removes the records and the zone. ACM keeps
+     * the certificate issued once validation succeeded.
+     */
+    public static void validateAcmCertificateViaRoute53(AcmClient acm, String certificateArn) {
+        software.amazon.awssdk.services.acm.model.CertificateDetail pending =
+                acm.describeCertificate(b -> b.certificateArn(certificateArn)).certificate();
+        List<ResourceRecordSet> records = pending.domainValidationOptions().stream()
+                .map(software.amazon.awssdk.services.acm.model.DomainValidation::resourceRecord)
+                .map(record -> ResourceRecordSet.builder()
+                        .name(record.name())
+                        .type(record.typeAsString())
+                        .ttl(60L)
+                        .resourceRecords(ResourceRecord.builder().value(record.value()).build())
+                        .build())
+                .toList();
+        String zoneName = pending.domainName().startsWith("*.")
+                ? pending.domainName().substring(2) : pending.domainName();
+
+        try (Route53Client route53 = route53Client()) {
+            String zoneId = stripHostedZonePrefix(route53.createHostedZone(CreateHostedZoneRequest.builder()
+                    .name(zoneName)
+                    .callerReference(uniqueName("acm-validation-zone"))
+                    .build()).hostedZone().id());
+            try {
+                changeRecords(route53, zoneId, records, ChangeAction.UPSERT);
+                try {
+                    for (int i = 0; i < 10; i++) {
+                        if (acm.describeCertificate(b -> b.certificateArn(certificateArn)).certificate().status()
+                                == software.amazon.awssdk.services.acm.model.CertificateStatus.ISSUED) {
+                            return;
+                        }
+                        Thread.sleep(100L);
+                    }
+                    throw new IllegalStateException("ACM certificate " + certificateArn
+                            + " was not issued after publishing its validation records");
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("Interrupted while waiting for ACM validation", e);
+                } finally {
+                    changeRecords(route53, zoneId, records, ChangeAction.DELETE);
+                }
+            } finally {
+                route53.deleteHostedZone(b -> b.id(zoneId));
+            }
+        }
+    }
+
+    private static void changeRecords(Route53Client route53, String zoneId, List<ResourceRecordSet> records,
+                                      ChangeAction action) {
+        route53.changeResourceRecordSets(ChangeResourceRecordSetsRequest.builder()
+                .hostedZoneId(zoneId)
+                .changeBatch(ChangeBatch.builder().changes(records.stream()
+                        .map(record -> Change.builder().action(action).resourceRecordSet(record).build())
+                        .toList()).build())
+                .build());
+    }
+
     private static String stripHostedZonePrefix(String hostedZoneId) {
         String prefix = "/hostedzone/";
         return hostedZoneId != null && hostedZoneId.startsWith(prefix)
@@ -673,8 +1081,56 @@ public final class TestFixtures {
                 .build();
     }
 
+    public static DatabaseMigrationClient databaseMigrationClient() {
+        return DatabaseMigrationClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
     public static RumClient rumClient() {
         return RumClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static FisClient fisClient() {
+        return FisClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static GuardDutyClient guardDutyClient() {
+        return guardDutyClient("test");
+    }
+
+    public static GuardDutyClient guardDutyClient(String accountId) {
+        return GuardDutyClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create(accountId, "test")))
+                .build();
+    }
+
+    public static RamClient ramClient() {
+        return ramClient("test");
+    }
+
+    public static RamClient ramClient(String accountId) {
+        return RamClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create(accountId, "test")))
+                .build();
+    }
+
+    public static CodeartifactClient codeArtifactClient() {
+        return CodeartifactClient.builder()
                 .endpointOverride(ENDPOINT)
                 .region(REGION)
                 .credentialsProvider(CREDENTIALS)
@@ -730,10 +1186,15 @@ public final class TestFixtures {
     }
 
     public static Ec2Client ec2Client() {
+        return ec2Client("test");
+    }
+
+    public static Ec2Client ec2Client(String accessKeyId) {
         return Ec2Client.builder()
                 .endpointOverride(ENDPOINT)
                 .region(REGION)
-                .credentialsProvider(CREDENTIALS)
+                .credentialsProvider(StaticCredentialsProvider.create(
+                        AwsBasicCredentials.create(accessKeyId, "test")))
                 .build();
     }
 
@@ -801,11 +1262,53 @@ public final class TestFixtures {
                 .build();
     }
 
+    public static AppIntegrationsClient appIntegrationsClient() {
+        return AppIntegrationsClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
     public static PipesClient pipesClient() {
         return PipesClient.builder()
                 .endpointOverride(ENDPOINT)
                 .region(REGION)
                 .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static BedrockClient bedrockClient() {
+        return BedrockClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static BedrockAgentCoreControlClient bedrockAgentCoreControlClient() {
+        return BedrockAgentCoreControlClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static BedrockAgentCoreClient bedrockAgentCoreClient() {
+        return BedrockAgentCoreClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static BedrockRuntimeAsyncClient bedrockRuntimeAsyncClient() {
+        return BedrockRuntimeAsyncClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .httpClientBuilder(NettyNioAsyncHttpClient.builder()
+                        .protocol(Protocol.HTTP1_1))
                 .build();
     }
 
@@ -849,6 +1352,22 @@ public final class TestFixtures {
                 .build();
     }
 
+    public static SageMakerClient sageMakerClient() {
+        return SageMakerClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static SageMakerRuntimeClient sageMakerRuntimeClient() {
+        return SageMakerRuntimeClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
     public static CodeDeployClient codeDeployClient() {
         return CodeDeployClient.builder()
                 .endpointOverride(ENDPOINT)
@@ -873,6 +1392,47 @@ public final class TestFixtures {
                 .build();
     }
 
+    public static OamClient oamClient() {
+        return OamClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static BcmPricingCalculatorClient bcmPricingCalculatorClient() {
+        return BcmPricingCalculatorClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static TimestreamInfluxDbClient timestreamInfluxDbClient() {
+        return TimestreamInfluxDbClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static ResourceExplorer2Client resourceExplorer2Client() {
+        return resourceExplorer2Client(REGION);
+    }
+
+    /**
+     * Resource Explorer 2 client bound to an explicit region. The emulator auto-provisions an
+     * index only in the default region, so CreateIndex/DeleteIndex tests use a different region
+     * to exercise a real create against a region that starts with no index.
+     */
+    public static ResourceExplorer2Client resourceExplorer2Client(Region region) {
+        var builder = ResourceExplorer2Client.builder().region(region);
+        if (!isRealAws()) {
+            builder.endpointOverride(ENDPOINT).credentialsProvider(CREDENTIALS);
+        }
+        return builder.build();
+    }
+
     public static AppSyncClient appSyncClient() {
         return AppSyncClient.builder()
                 .endpointOverride(ENDPOINT)
@@ -891,6 +1451,54 @@ public final class TestFixtures {
 
     public static S3VectorsClient s3vectorsClient() {
         return S3VectorsClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static S3TablesClient s3tablesClient() {
+        return S3TablesClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static GlobalAcceleratorClient globalAcceleratorClient() {
+        return GlobalAcceleratorClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static EfsClient efsClient() {
+        return EfsClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static RedshiftClient redshiftClient() {
+        return RedshiftClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static RedshiftDataClient redshiftDataClient() {
+        return RedshiftDataClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static DataSyncClient dataSyncClient() {
+        return DataSyncClient.builder()
                 .endpointOverride(ENDPOINT)
                 .region(REGION)
                 .credentialsProvider(CREDENTIALS)
