@@ -1612,6 +1612,48 @@ class Ec2IntegrationTest {
     }
 
     @Test
+    @Order(35)
+    void modifySecurityGroupRulesUpdatesDescription() {
+        // AWS SDKs send SecurityGroupRule.N.SecurityGroupRule.Description. The request replaces
+        // the whole rule, so target the all-traffic egress rule to change only its description.
+        String ruleId = given()
+            .formParam("Action", "DescribeSecurityGroupRules")
+            .formParam("Filter.1.Name", "group-id")
+            .formParam("Filter.1.Value.1", securityGroupId)
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .extract().xmlPath()
+            .getString("DescribeSecurityGroupRulesResponse.securityGroupRuleSet.item"
+                + ".find { it.isEgress == 'true' && it.ipProtocol == '-1' }.securityGroupRuleId");
+
+        given()
+            .formParam("Action", "ModifySecurityGroupRules")
+            .formParam("GroupId", securityGroupId)
+            .formParam("SecurityGroupRule.1.SecurityGroupRuleId", ruleId)
+            .formParam("SecurityGroupRule.1.SecurityGroupRule.IpProtocol", "-1")
+            .formParam("SecurityGroupRule.1.SecurityGroupRule.CidrIpv4", "0.0.0.0/0")
+            .formParam("SecurityGroupRule.1.SecurityGroupRule.Description", "all outbound")
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .formParam("Action", "DescribeSecurityGroupRules")
+            .formParam("SecurityGroupRuleId.1", ruleId)
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body(containsString("<description>all outbound</description>"));
+    }
+
+    @Test
     @Order(36)
     void describeSecurityGroupRulesDefaultVpcEgressVisible() {
         // Issue #1093: default VPC security group must also have its egress rule visible

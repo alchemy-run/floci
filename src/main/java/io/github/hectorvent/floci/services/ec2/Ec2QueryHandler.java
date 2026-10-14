@@ -3324,9 +3324,14 @@ public class Ec2QueryHandler {
             }
             Map<String, String> update = new LinkedHashMap<>();
             update.put("SecurityGroupRuleId", ruleId);
+            // AWS wire name: SecurityGroupRuleUpdate.SecurityGroupRule (a SecurityGroupRuleRequest);
+            // older clients send SecurityGroupRuleRequest.
             for (String field : List.of("Description", "IpProtocol", "FromPort", "ToPort",
                     "CidrIpv4", "CidrIpv6", "PrefixListId", "ReferencedGroupId")) {
                 String value = p.getFirst("SecurityGroupRule." + i + ".SecurityGroupRule." + field);
+                if (value == null) {
+                    value = p.getFirst("SecurityGroupRule." + i + ".SecurityGroupRuleRequest." + field);
+                }
                 if (value != null) {
                     update.put(field, value);
                 }
