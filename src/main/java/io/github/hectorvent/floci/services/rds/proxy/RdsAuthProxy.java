@@ -37,6 +37,7 @@ public class RdsAuthProxy {
 
     private volatile boolean running;
     private ServerSocket serverSocket;
+    private volatile Thread acceptThread;
     private volatile int port;
 
     public RdsAuthProxy(String instanceId, String backendHost, int backendPort,
@@ -96,7 +97,7 @@ public class RdsAuthProxy {
         serverSocket.bind(new InetSocketAddress(proxyPort));
         port = serverSocket.getLocalPort();
         running = true;
-        Thread.ofVirtual().name("rds-proxy-accept-" + instanceId).start(this::acceptLoop);
+        acceptThread = Thread.ofVirtual().name("rds-proxy-accept-" + instanceId).start(this::acceptLoop);
         LOG.infov("RDS proxy started for instance {0} on port {1} → {2}:{3}",
                 instanceId, String.valueOf(proxyPort), backendHost, String.valueOf(backendPort));
     }
@@ -140,6 +141,19 @@ public class RdsAuthProxy {
             LOG.warnv(e, "Error closing RDS proxy server socket for instance {0}", instanceId);
             throw new RuntimeException(
                     "Failed to stop RDS proxy for instance " + instanceId, e);
+        }
+        // Closing a socket a virtual thread is accepting on only wakes that thread; the
+        // descriptor is released when it leaves accept(). Wait for that so the port can be
+        // bound again (e.g. by the restarted proxy after a rename) once stop() returns.
+        Thread thread = acceptThread;
+        if (thread != null && thread != Thread.currentThread()) {
+            try {
+                if (!thread.join(java.time.Duration.ofSeconds(5))) {
+                    LOG.warnv("RDS proxy for instance {0} did not stop within 5s", instanceId);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
