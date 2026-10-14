@@ -36,9 +36,7 @@ class RedshiftProxyIntegrationTest {
     }
 
     private static String jdbcUrl(Cluster c) {
-        // Use 127.0.0.1 explicitly instead of c.getEndpoint().getAddress() to avoid UnknownHostException
-        // in CI environments where floci.emulator.hostname is set to host.docker.internal.
-        return "jdbc:postgresql://127.0.0.1:" + c.getEndpoint().getPort() + "/dev";
+        return RedshiftEndpoints.jdbcUrl(c.getEndpoint().getAddress(), c.getEndpoint().getPort(), "dev");
     }
 
     private static Connection waitForConnection(Cluster cluster, String username, String password) throws SQLException {

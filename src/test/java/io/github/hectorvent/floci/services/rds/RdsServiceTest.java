@@ -45,6 +45,7 @@ import io.github.hectorvent.floci.services.rds.model.LogExportChanges;
 import io.github.hectorvent.floci.services.rds.model.OptionGroup;
 import io.github.hectorvent.floci.services.rds.model.OptionGroupOption;
 import io.github.hectorvent.floci.services.rds.model.RdsEvent;
+import io.github.hectorvent.floci.services.rds.model.PointInTimeRestoreRequest;
 import io.github.hectorvent.floci.services.rds.model.ReadReplicaRequest;
 import io.github.hectorvent.floci.services.rds.proxy.RdsAuthProxy;
 import io.github.hectorvent.floci.services.rds.proxy.RdsProxyManager;
@@ -4073,6 +4074,18 @@ class RdsServiceTest {
     }
 
     @Test
+    void proxyLookupsReportAwsValidationAndNotFoundErrors() {
+        AwsException empty = assertThrows(AwsException.class,
+                () -> rdsService.describeDbProxyTargetGroups(""));
+        assertEquals("ValidationError", empty.getErrorCode());
+        assertTrue(empty.getMessage().contains("Value '' at 'dBProxyName' failed to satisfy constraint"));
+        AwsException missing = assertThrows(AwsException.class,
+                () -> rdsService.describeDbProxyTargetGroups("no-such-proxy"));
+        assertEquals("DBProxyNotFoundFault", missing.getErrorCode());
+        assertEquals("DBProxy 'no-such-proxy' not found.", missing.getMessage());
+    }
+
+    @Test
     void proxyEndpointsValidateParentPlacementIdentityAndDefaultProtection() {
         stubProxyEndpointSecurityGroups();
         assertEquals("DBProxyNotFoundFault", assertThrows(AwsException.class,
@@ -7703,6 +7716,101 @@ class RdsServiceTest {
         return rdsService.createDbInstance(id, "postgres", "16.3",
                 "admin", "password", "appdb", "db.t3.medium",
                 50, false, null, null, null, null, false);
+    }
+
+    private static PointInTimeRestoreRequest pitr(String target, String source, Instant restoreTime,
+                                                  boolean useLatest) {
+        return new PointInTimeRestoreRequest(target, source, null, restoreTime, useLatest, null, null, null,
+                null, null, null, null, null, null, null, null, null, Map.of());
+    }
+
+    @Test
+    void pointInTimeRestoreCopiesTheSourceIntoANewStandaloneInstance() {
+        when(containerManager.tryStart(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenAnswer(invocation -> new RdsContainerHandle(
+                        "cont-" + invocation.getArgument(1), invocation.getArgument(1), "localhost", 5432));
+        DbInstance source = createPostgresSource("pitr-src");
+        assertNotNull(rdsService.latestRestorableTime(source));
+        when(containerManager.createPostgresSnapshot("cont-pitr-src", "admin")).thenReturn("DUMP");
+
+        DbInstance restored = rdsService.restoreDbInstanceToPointInTime(
+                pitr("pitr-restored", "pitr-src", null, true), null);
+
+        assertEquals("pitr-restored", restored.getDbInstanceIdentifier());
+        assertNotEquals(source.getDbiResourceId(), restored.getDbiResourceId());
+        assertEquals("db.t3.medium", restored.getDbInstanceClass());
+        assertEquals(50, restored.getAllocatedStorage());
+        assertEquals("appdb", restored.getDbName());
+        assertEquals(source.getBackupRetentionPeriod(), restored.getBackupRetentionPeriod());
+        assertEquals(source.getEndpoint().port(), restored.getEndpoint().port());
+        assertFalse(restored.hasReadReplicaSource());
+        verify(containerManager).restorePostgresSnapshot("cont-pitr-restored", "admin", "DUMP");
+    }
+
+    @Test
+    void pointInTimeRestoreValidatesItsRequestLikeAws() {
+        createPostgresSource("pitr-src");
+        assertEquals("InvalidParameterCombination", assertThrows(AwsException.class, () ->
+                rdsService.restoreDbInstanceToPointInTime(
+                        pitr("t1", "pitr-src", Instant.now(), true), null)).getErrorCode());
+        assertEquals("InvalidParameterCombination", assertThrows(AwsException.class, () ->
+                rdsService.restoreDbInstanceToPointInTime(pitr("t1", "pitr-src", null, false), null)).getErrorCode());
+        assertEquals("DBInstanceNotFound", assertThrows(AwsException.class, () ->
+                rdsService.restoreDbInstanceToPointInTime(pitr("t1", "missing", null, true), null)).getErrorCode());
+        assertEquals("DBInstanceAlreadyExists", assertThrows(AwsException.class, () ->
+                rdsService.restoreDbInstanceToPointInTime(pitr("pitr-src", "pitr-src", null, true), null))
+                .getErrorCode());
+        assertEquals("InvalidRestoreFault", assertThrows(AwsException.class, () ->
+                rdsService.restoreDbInstanceToPointInTime(
+                        pitr("t1", "pitr-src", Instant.now().plusSeconds(3600), false), null)).getErrorCode());
+
+        createInstanceWith("no-backups", new DbInstanceSettings(null, null, 0, null, null, null, null, null,
+                null, null, null, null, null, null, null));
+        assertNull(rdsService.latestRestorableTime(rdsService.getDbInstance("no-backups")));
+        assertEquals("PointInTimeRestoreNotEnabled", assertThrows(AwsException.class, () ->
+                rdsService.restoreDbInstanceToPointInTime(pitr("t1", "no-backups", null, true), null))
+                .getErrorCode());
+    }
+
+    @Test
+    void renameMovesTheIdentifierArnAndEndpointButKeepsTheServerAndItsContainer() {
+        DbInstance original = createPostgresSource("before-rename");
+        String originalArn = original.getDbInstanceArn();
+        String dbiResourceId = original.getDbiResourceId();
+
+        DbInstance renamed = rdsService.renameDbInstance("before-rename", "after-rename", null);
+
+        assertEquals("after-rename", renamed.getDbInstanceIdentifier());
+        assertEquals("arn:aws:rds:us-east-1:123456789012:db:after-rename", renamed.getDbInstanceArn());
+        assertTrue(renamed.getEndpoint().address().startsWith("after-rename."), renamed.getEndpoint().address());
+        assertEquals(dbiResourceId, rdsService.getDbInstance("after-rename").getDbiResourceId());
+        assertEquals("DBInstanceNotFound", assertThrows(AwsException.class,
+                () -> rdsService.getDbInstance("before-rename")).getErrorCode());
+        createPostgresSource("taken");
+        assertEquals("DBInstanceAlreadyExists", assertThrows(AwsException.class,
+                () -> rdsService.validateDbInstanceRename("after-rename", "taken", null)).getErrorCode());
+        assertEquals("InvalidParameterValue", assertThrows(AwsException.class,
+                () -> rdsService.validateDbInstanceRename("after-rename", "bad--name", null)).getErrorCode());
+
+        // The running container moves to the new ARN, freeing the old one for a new instance.
+        verify(containerManager).renameRuntime(originalArn, renamed.getDbInstanceArn());
+        rdsService.deleteDbInstance("after-rename", null);
+        ArgumentCaptor<RdsContainerHandle> stopped = ArgumentCaptor.forClass(RdsContainerHandle.class);
+        verify(containerManager).stop(stopped.capture());
+        assertEquals(renamed.getDbInstanceArn(), stopped.getValue().getRuntimeId());
+        assertEquals("cont-id", stopped.getValue().getContainerId());
+    }
+
+    @Test
+    void creatingIsReportedToTheFirstPollThatAsksAfterTheCreatingPeriod() {
+        DbInstance created = createPostgresSource("polled-late");
+        Instant late = Instant.now().plus(RdsInstanceLifecycle.CREATING_PERIOD).plusSeconds(5);
+        assertEquals("creating", RdsInstanceLifecycle.reportedStatus(created, "available", late));
+
+        rdsService.noteCreatingReported(rdsService.getDbInstance("polled-late"));
+
+        assertEquals("available", RdsInstanceLifecycle.reportedStatus(
+                rdsService.getDbInstance("polled-late"), "available", late));
     }
 
     private static ReadReplicaRequest replicaRequest(String id, String source) {

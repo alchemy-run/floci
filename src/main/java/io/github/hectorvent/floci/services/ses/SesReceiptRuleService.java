@@ -67,6 +67,14 @@ public class SesReceiptRuleService {
     private static final Pattern IPV4_OCTETS = Pattern.compile(
             "^((25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)\\.){3}(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)$");
     private static final int MAX_FILTERS = 100;
+    // Recipient forms real SES accepts (probed in us-west-2, 2026-10): a domain, optionally with a
+    // leading dot for its subdomains, whose labels are letters, digits, '_' or inner '-' and whose
+    // last label is not all digits, with at least two labels unless it has the leading dot; or an
+    // address with one '@', an atext/dot local part and a domain of letters, digits and '-' labels
+    // (a single label is accepted there). Anything else is "Invalid recipient: <value>".
+    private static final Pattern RECIPIENT_DOMAIN_LABEL = Pattern.compile("^[A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?$");
+    private static final Pattern RECIPIENT_LOCAL_PART = Pattern.compile("^[A-Za-z0-9!#$%&'*+/=?^_`{|}~.-]+$");
+    private static final Pattern RECIPIENT_ADDRESS_LABEL = Pattern.compile("^[A-Za-z0-9-]+$");
 
     private final StorageBackend<String, ReceiptRuleSet> receiptRuleSetStore;
     private final StorageBackend<String, ReceiptFilter> receiptFilterStore;
@@ -196,6 +204,7 @@ public class SesReceiptRuleService {
         collectRuleShapeViolations(rule, violations);
         throwViolations(violations);
         requireValidRuleName(rule.getName());
+        requireValidRecipients(rule);
         synchronized (receiptRuleSetLock) {
             ReceiptRuleSet ruleSet = requireRuleSet(ruleSetName, region);
             List<ReceiptRule> rules = new ArrayList<>(ruleSet.getRules());
@@ -232,6 +241,7 @@ public class SesReceiptRuleService {
         collectRuleShapeViolations(rule, violations);
         throwViolations(violations);
         requireValidRuleName(rule.getName());
+        requireValidRecipients(rule);
         synchronized (receiptRuleSetLock) {
             ReceiptRuleSet ruleSet = requireRuleSet(ruleSetName, region);
             List<ReceiptRule> rules = new ArrayList<>(ruleSet.getRules());
@@ -628,6 +638,47 @@ public class SesReceiptRuleService {
                 }
             }
         }
+    }
+
+    private static void requireValidRecipients(ReceiptRule rule) {
+        for (String recipient : rule.getRecipients()) {
+            if (!isValidRecipient(recipient)) {
+                throw new AwsException("InvalidParameterValue", "Invalid recipient: " + recipient, 400);
+            }
+        }
+    }
+
+    static boolean isValidRecipient(String recipient) {
+        if (recipient == null || recipient.isEmpty()) {
+            return false;
+        }
+        int at = recipient.indexOf('@');
+        if (at < 0) {
+            boolean subdomains = recipient.startsWith(".");
+            String domain = subdomains ? recipient.substring(1) : recipient;
+            String[] labels = domain.split("\\.", -1);
+            if (labels.length < (subdomains ? 1 : 2)) {
+                return false;
+            }
+            for (String label : labels) {
+                if (!RECIPIENT_DOMAIN_LABEL.matcher(label).matches()) {
+                    return false;
+                }
+            }
+            return !labels[labels.length - 1].chars().allMatch(Character::isDigit);
+        }
+        if (at != recipient.lastIndexOf('@') || at == 0 || at == recipient.length() - 1) {
+            return false;
+        }
+        if (!RECIPIENT_LOCAL_PART.matcher(recipient.substring(0, at)).matches()) {
+            return false;
+        }
+        for (String label : recipient.substring(at + 1).split("\\.", -1)) {
+            if (!RECIPIENT_ADDRESS_LABEL.matcher(label).matches()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static void applyRuleDefaults(ReceiptRule rule) {

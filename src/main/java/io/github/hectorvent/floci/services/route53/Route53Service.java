@@ -253,10 +253,10 @@ public class Route53Service {
 
     public DnsAnswer testDnsAnswer(String hostedZoneId, String recordName, String recordType) {
         HostedZone zone = getHostedZone(hostedZoneId);
-        String name = normalizeName(recordName);
+        String name = canonicalRecordName(recordName);
         List<ResourceRecordSet> records = recordStore.get(zone.getId()).orElse(List.of());
         ResourceRecordSet match = records.stream()
-                .filter(r -> r.getName().equals(name) && r.getType().equals(recordType))
+                .filter(r -> canonicalRecordName(r.getName()).equals(name) && r.getType().equals(recordType))
                 .findFirst()
                 .orElse(null);
         if (match == null) {
@@ -554,10 +554,12 @@ public class Route53Service {
         String id = zone.getId();
         List<ResourceRecordSet> current = new ArrayList<>(
                 recordStore.get(id).orElse(new ArrayList<>()));
+        current.forEach(r -> r.setName(canonicalRecordName(r.getName())));
 
         for (Map<String, Object> change : changes) {
             String action = (String) change.get("action");
             ResourceRecordSet rrs = (ResourceRecordSet) change.get("rrs");
+            rrs.setName(canonicalRecordName(rrs.getName()));
             validateChange(action, rrs, current, zone.getName());
             applyChange(action, rrs, current);
         }
@@ -573,6 +575,7 @@ public class Route53Service {
         HostedZone zone = getHostedZone(zoneId);
         List<ResourceRecordSet> records = new ArrayList<>(
                 recordStore.get(zone.getId()).orElse(List.of()));
+        records.forEach(r -> r.setName(canonicalRecordName(r.getName())));
 
         records.sort((a, b) -> {
             int cmp = a.getName().compareTo(b.getName());
@@ -581,7 +584,7 @@ public class Route53Service {
         });
 
         if (startName != null && !startName.isEmpty()) {
-            String normalizedStart = normalizeName(startName);
+            String normalizedStart = canonicalRecordName(startName);
             final String finalStartType = startType;
             records = records.stream()
                     .filter(r -> {
@@ -863,6 +866,49 @@ public class Route53Service {
     private static String normalizeName(String name) {
         if (name == null || name.isEmpty()) return name;
         return name.endsWith(".") ? name : name + ".";
+    }
+
+    /**
+     * The form Route 53 stores and returns a record name in: fully qualified, with every byte
+     * other than letters, digits, '-', '_' and '.' written as a three-digit octal escape, so a
+     * wildcard record lists as {@code \052.example.com.}. Escapes in the input are decoded first,
+     * so {@code *.example.com} and {@code \052.example.com} name the same record set.
+     */
+    static String canonicalRecordName(String name) {
+        if (name == null || name.isEmpty()) return name;
+        String qualified = normalizeName(name);
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        for (int i = 0; i < qualified.length(); i++) {
+            char c = qualified.charAt(i);
+            if (c == '\\' && i + 3 < qualified.length()
+                    && isOctalDigit(qualified.charAt(i + 1))
+                    && isOctalDigit(qualified.charAt(i + 2))
+                    && isOctalDigit(qualified.charAt(i + 3))) {
+                bytes.write(Integer.parseInt(qualified.substring(i + 1, i + 4), 8) & 0xff);
+                i += 3;
+            } else {
+                int codePoint = qualified.codePointAt(i);
+                byte[] encoded = new String(Character.toChars(codePoint))
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                bytes.write(encoded, 0, encoded.length);
+                i += Character.charCount(codePoint) - 1;
+            }
+        }
+        StringBuilder out = new StringBuilder(qualified.length());
+        for (byte b : bytes.toByteArray()) {
+            int v = b & 0xff;
+            if ((v >= 'a' && v <= 'z') || (v >= 'A' && v <= 'Z') || (v >= '0' && v <= '9')
+                    || v == '-' || v == '_' || v == '.') {
+                out.append((char) v);
+            } else {
+                out.append('\\').append(String.format("%03o", v));
+            }
+        }
+        return out.toString();
+    }
+
+    private static boolean isOctalDigit(char c) {
+        return c >= '0' && c <= '7';
     }
 
     static String normalizeZoneId(String id) {

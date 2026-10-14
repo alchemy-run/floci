@@ -88,13 +88,11 @@ class RedshiftInterceptorIntegrationTest {
     }
 
     private static String jdbcUrl(Cluster cluster) {
-        // Use 127.0.0.1 explicitly instead of c.getEndpoint().getAddress() to avoid UnknownHostException
-        // in CI environments where floci.emulator.hostname is set to host.docker.internal.
-        return "jdbc:postgresql://127.0.0.1:" + cluster.getEndpoint().getPort() + "/dev";
+        return RedshiftEndpoints.jdbcUrl(cluster.getEndpoint().getAddress(), cluster.getEndpoint().getPort(), "dev");
     }
 
     private static String namedPreparedJdbcUrl(Cluster cluster) {
-        return jdbcUrl(cluster) + "?prepareThreshold=1";
+        return jdbcUrl(cluster) + "&prepareThreshold=1";
     }
 
     /**
@@ -104,7 +102,7 @@ class RedshiftInterceptorIntegrationTest {
      * Extended even for a plain {@link java.sql.Statement}.
      */
     private static String simpleQueryJdbcUrl(Cluster cluster) {
-        return jdbcUrl(cluster) + "?preferQueryMode=simple";
+        return jdbcUrl(cluster) + "&preferQueryMode=simple";
     }
 
     private static Connection waitForConnection(Cluster cluster, String username, String password) throws SQLException {

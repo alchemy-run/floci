@@ -99,6 +99,31 @@ class Route53ServiceTest {
     }
 
     @Test
+    void wildcardNamesAreListedAsOctalEscapesAndMatchEitherSpelling() {
+        Route53Service service = newService();
+        String zoneId = service.createHostedZone("example.com.", "ref-wildcard", null, null).zone().getId();
+
+        service.changeResourceRecordSets(zoneId,
+                List.of(change("CREATE", aRecord("*.example.com", 60, "1.2.3.4"))), null);
+        List<ResourceRecordSet> listed = service.listResourceRecordSets(zoneId, null, null, 0).stream()
+                .filter(r -> "A".equals(r.getType())).toList();
+        assertEquals(List.of("\\052.example.com."), listed.stream().map(ResourceRecordSet::getName).toList());
+
+        // The escaped spelling names the same record set: UPSERT replaces it, DELETE finds it.
+        service.changeResourceRecordSets(zoneId,
+                List.of(change("UPSERT", aRecord("\\052.example.com.", 60, "5.6.7.8"))), null);
+        assertEquals(1, service.listResourceRecordSets(zoneId, "*.example.com", "A", 0).stream()
+                .filter(r -> "A".equals(r.getType())).count());
+        service.changeResourceRecordSets(zoneId,
+                List.of(change("DELETE", aRecord("*.example.com.", 60, "5.6.7.8"))), null);
+        assertTrue(service.listResourceRecordSets(zoneId, null, null, 0).stream()
+                .noneMatch(r -> "A".equals(r.getType())));
+
+        assertEquals("a-b_c.example.com.", Route53Service.canonicalRecordName("a-b_c.example.com"));
+        assertEquals("\\100.example.com.", Route53Service.canonicalRecordName("@.example.com."));
+    }
+
+    @Test
     void deleteFailsWithNotFoundMessageWhenNoRecordWithMatchingNameAndTypeExists() {
         Route53Service service = newService();
         String zoneId = service.createHostedZone("example.com.", "ref-missing", null, null).zone().getId();

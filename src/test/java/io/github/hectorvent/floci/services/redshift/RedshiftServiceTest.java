@@ -46,6 +46,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -479,34 +480,67 @@ class RedshiftServiceTest {
     }
 
     @Test
-    void createClusterListensOnTheDefaultPortAndFallsBackWhenItIsTaken() {
+    void everyClusterAdvertisesItsOwnHostOnTheClusterPort() {
         when(redshiftConfig.defaultPort()).thenReturn(5439);
+        when(redshiftConfig.endpointHost()).thenReturn(Optional.empty());
+        when(config.hostname()).thenReturn(Optional.empty());
         when(clusterBackend.get(anyString())).thenReturn(Optional.empty());
         when(cm.start(any(), any(), any(), any()))
                 .thenReturn(new RedshiftContainerHandle("cid", "c", "172.17.0.9", 32800));
+        when(proxyManager.advertise(anyString(), anyString(), eq(5439))).thenReturn(true);
 
         Cluster first = service.createCluster("first", "ra3.large", "admin", "Secret123");
         Cluster second = service.createCluster("second", "ra3.large", "admin", "Secret123");
 
+        // As on AWS, both endpoints report 5439; each name is routed to its own proxy.
         assertEquals(5439, first.getEndpoint().getPort());
-        assertEquals(5439, first.getProxyPort());
-        assertTrue(second.getEndpoint().getPort() >= 7100 && second.getEndpoint().getPort() <= 7199);
+        assertEquals(5439, second.getEndpoint().getPort());
+        assertEquals(5439, first.getPort());
+        assertTrue(first.getProxyPort() >= 7100 && first.getProxyPort() <= 7199);
+        assertTrue(second.getProxyPort() >= 7100 && second.getProxyPort() <= 7199);
+        assertNotEquals(first.getProxyPort(), second.getProxyPort());
+        verify(proxyManager).advertise("111111111111:first", first.getEndpoint().getAddress(), 5439);
+        verify(proxyManager).advertise("111111111111:second", second.getEndpoint().getAddress(), 5439);
+        verify(proxyManager).startProxy(eq("111111111111:first"), eq(first.getProxyPort()), any(), anyInt(),
+                any(), any(), any(), any(), any(), any());
     }
 
     @Test
-    void createClusterFallsBackToTheProxyRangeWhenThePreferredPortCannotBeBound() {
+    void createClusterAdvertisesTheProxyPortWhenTheClusterPortCannotBeBound() {
         when(redshiftConfig.defaultPort()).thenReturn(5439);
         when(clusterBackend.get("c1")).thenReturn(Optional.empty());
         when(cm.start(any(), any(), any(), any()))
                 .thenReturn(new RedshiftContainerHandle("cid", "c1", "172.17.0.9", 32800));
-        doThrow(new RuntimeException("Address already in use")).when(proxyManager).startProxy(
-                eq("111111111111:c1"), eq(5439), any(), anyInt(), any(), any(), any(), any(), any(), any());
+        when(proxyManager.advertise(eq("111111111111:c1"), any(), eq(5439))).thenReturn(false);
 
         Cluster cluster = service.createCluster("c1", "ra3.large", "admin", "Secret123");
 
         assertEquals("available", cluster.getClusterStatus());
         assertTrue(cluster.getEndpoint().getPort() >= 7100 && cluster.getEndpoint().getPort() <= 7199);
         assertEquals(cluster.getEndpoint().getPort(), cluster.getProxyPort());
+    }
+
+    @Test
+    void rebootKeepsAdvertisingTheClusterPort() {
+        Cluster cluster = new Cluster();
+        cluster.setClusterIdentifier("c1");
+        cluster.setMasterUsername("admin");
+        cluster.setMasterPassword("Secret123");
+        cluster.setPort(5439);
+        cluster.setProxyPort(7107);
+        cluster.setEndpoint(new Endpoint("c1.example.redshift.localhost.floci.io", 5439));
+        when(clusterBackend.get("c1")).thenReturn(Optional.of(cluster));
+        when(cm.start(eq("111111111111"), eq("c1"), eq("admin"), eq("Secret123")))
+                .thenReturn(new RedshiftContainerHandle("cid", "c1", "172.17.0.11", 32820));
+        when(proxyManager.advertise("111111111111:c1", "c1.example.redshift.localhost.floci.io", 5439))
+                .thenReturn(true);
+
+        Cluster rebooted = service.rebootCluster("c1");
+
+        assertEquals(5439, rebooted.getEndpoint().getPort());
+        assertEquals(7107, rebooted.getProxyPort());
+        verify(proxyManager).startProxy(eq("111111111111:c1"), eq(7107), any(), anyInt(),
+                eq("c1.example.redshift.localhost.floci.io"), any(), any(), any(), any(), any());
     }
 
     @Test

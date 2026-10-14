@@ -57,6 +57,8 @@ public class CloudControlService {
     private final ObjectMapper mapper;
     @Inject
     SsmResourceBackend ssmBackend;
+    @Inject
+    SsmDocumentResource ssmDocuments;
     private final Map<String, ReentrantLock> operationLocks = new ConcurrentHashMap<>();
     private final AccountAwareStorageBackend<PersistedRequest> requestStore;
     private final AccountAwareStorageBackend<PersistedCreatedResource> createdStore;
@@ -245,6 +247,9 @@ public class CloudControlService {
                         identifier = props.path("Name").asText("cloudcontrol-" + token);
                         ssmBackend.write(identifier, props, false, region);
                         attributes = Map.of();
+                    } else if (SsmDocumentResource.TYPE.equals(typeName)) {
+                        identifier = ssmDocuments.create(props, region);
+                        attributes = Map.of();
                     } else {
                         StackResource resource = provisioner.provisionStandalone(typeName, props, region, accountId);
                         if (resource == null || resource.getPhysicalId() == null
@@ -273,7 +278,7 @@ public class CloudControlService {
 
     public ProgressEvent updateResource(String region, String accountId, String typeName,
                                         String identifier, String patchDocument) {
-        if (!"AWS::SSM::Parameter".equals(typeName)) {
+        if (!"AWS::SSM::Parameter".equals(typeName) && !SsmDocumentResource.TYPE.equals(typeName)) {
             throw new AwsException("UnsupportedActionException", "UpdateResource is not supported for " + typeName, 400);
         }
         JsonNode patch;
@@ -290,9 +295,16 @@ public class CloudControlService {
         persistRequest(new PersistedRequest(pending, region, desired.toString(), System.currentTimeMillis()));
         record(pending);
         try {
-            ObjectNode actual = RequestScopes.callAs(accountId, () -> ssmBackend.write(identifier, desired, true, region));
+            String actual;
+            if (SsmDocumentResource.TYPE.equals(typeName)) {
+                RequestScopes.runAs(accountId, () -> ssmDocuments.update(identifier, observed, desired, region));
+                actual = getResource(region, accountId, typeName, identifier).properties();
+            } else {
+                actual = RequestScopes.callAs(accountId, () -> ssmBackend.write(identifier, desired, true, region))
+                        .toString();
+            }
             return record(new ProgressEvent(typeName, identifier, token, "UPDATE", "SUCCESS", null,
-                    actual.toString(), accountId));
+                    actual, accountId));
         } catch (AwsException e) {
             return record(pending.failed(e));
         }
@@ -369,6 +381,7 @@ public class CloudControlService {
         try {
             RequestScopes.runAs(accountId, () -> {
                 if ("AWS::SSM::Parameter".equals(typeName)) ssmBackend.delete(identifier, region);
+                else if (SsmDocumentResource.TYPE.equals(typeName)) ssmDocuments.delete(identifier, region);
                 // The CloudFormation VPC provisioner leaves VPCs to stack teardown; Cloud Control
                 // deletes the VPC itself, surfacing DependencyViolation like AWS does.
                 else if ("AWS::EC2::VPC".equals(typeName)) ec2Service.deleteVpc(region, identifier);
@@ -500,9 +513,11 @@ public class CloudControlService {
 
         ProgressEvent failed(AwsException error) {
             String code = switch (error.getErrorCode()) {
-                case "ParameterAlreadyExists" -> "AlreadyExists";
-                case "ParameterNotFound", "ResourceNotFoundException" -> "NotFound";
-                case "ValidationException", "InvalidRequestException", "ParameterPatternMismatchException" -> "InvalidRequest";
+                case "ParameterAlreadyExists", "DocumentAlreadyExists" -> "AlreadyExists";
+                case "ParameterNotFound", "ResourceNotFoundException", "InvalidDocument" -> "NotFound";
+                case "NotUpdatableException" -> "NotUpdatable";
+                case "ValidationException", "InvalidRequestException", "ParameterPatternMismatchException",
+                     "DuplicateDocumentContent", "InvalidDocumentContent" -> "InvalidRequest";
                 default -> "GeneralServiceException";
             };
             return new ProgressEvent(typeName, identifier, requestToken, operation, "FAILED", error.getMessage(),
@@ -529,6 +544,8 @@ public class CloudControlService {
     private List<ResourceDescription> resourcesForType(String region, String typeName) {
         return switch (typeName) {
             case "AWS::SSM::Parameter" -> ssmBackend.list(region).stream()
+                    .map(model -> new ResourceDescription(model.path("Name").asText(), model.toString())).toList();
+            case SsmDocumentResource.TYPE -> ssmDocuments.list(region).stream()
                     .map(model -> new ResourceDescription(model.path("Name").asText(), model.toString())).toList();
             case "AWS::S3::Bucket" -> s3Buckets();
             case "AWS::EC2::InternetGateway" -> ec2Service.describeInternetGateways(region, List.of(), Map.of()).stream()

@@ -167,27 +167,27 @@ class RedshiftIntegrationsIntegrationTest {
                 .extract().body().asString();
         String arn = arnOf(createResponse);
         String landingTable = "floci_zetl_" + arn.substring(arn.lastIndexOf(':') + 1).replace('-', '_');
-        int port = clusterPort("zero-etl-cluster");
+        String url = clusterJdbcUrl("zero-etl-cluster");
 
         Awaitility.await()
                 .atMost(Duration.ofSeconds(30))
                 .pollInterval(Duration.ofMillis(500))
                 .ignoreExceptions()
                 .untilAsserted(() -> assertTrue(
-                        landingTableHasBackfilledRow(port, landingTable, "pre-existing-1")));
+                        landingTableHasBackfilledRow(url, landingTable, "pre-existing-1")));
     }
 
-    private static int clusterPort(String clusterIdentifier) {
+    private static String clusterJdbcUrl(String clusterIdentifier) {
         String xml = query("Action", "DescribeClusters", "ClusterIdentifier", clusterIdentifier)
                 .then().statusCode(200).extract().body().asString();
-        Matcher matcher = Pattern.compile("<Endpoint>.*?<Port>(\\d+)</Port>", Pattern.DOTALL).matcher(xml);
-        assertTrue(matcher.find(), "DescribeClusters returned no endpoint port: " + xml);
-        return Integer.parseInt(matcher.group(1));
+        Matcher matcher = Pattern.compile("<Endpoint>.*?<Address>([^<]+)</Address>.*?<Port>(\\d+)</Port>",
+                Pattern.DOTALL).matcher(xml);
+        assertTrue(matcher.find(), "DescribeClusters returned no endpoint: " + xml);
+        return RedshiftEndpoints.jdbcUrl(matcher.group(1), Integer.parseInt(matcher.group(2)), "dev");
     }
 
-    private static boolean landingTableHasBackfilledRow(int port, String landingTable, String itemId)
+    private static boolean landingTableHasBackfilledRow(String url, String landingTable, String itemId)
             throws SQLException {
-        String url = "jdbc:postgresql://127.0.0.1:" + port + "/dev";
         try (Connection connection = DriverManager.getConnection(url, "admin", "password123");
              Statement statement = connection.createStatement();
              ResultSet rows = statement.executeQuery("SELECT new_image_json FROM " + landingTable

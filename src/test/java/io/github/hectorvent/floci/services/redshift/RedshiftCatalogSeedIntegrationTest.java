@@ -58,7 +58,7 @@ class RedshiftCatalogSeedIntegrationTest {
     }
 
     private static String jdbcUrl(Cluster cluster) {
-        return "jdbc:postgresql://127.0.0.1:" + cluster.getEndpoint().getPort() + "/dev";
+        return RedshiftEndpoints.jdbcUrl(cluster.getEndpoint().getAddress(), cluster.getEndpoint().getPort(), "dev");
     }
 
     private static Connection waitForConnection(Cluster cluster, String username, String password) throws SQLException {
@@ -234,7 +234,8 @@ class RedshiftCatalogSeedIntegrationTest {
             stmt.execute("CREATE DATABASE test_clone_db");
         }
 
-        String cloneDbUrl = "jdbc:postgresql://127.0.0.1:" + cluster.getEndpoint().getPort() + "/test_clone_db";
+        String cloneDbUrl = RedshiftEndpoints.jdbcUrl(
+                cluster.getEndpoint().getAddress(), cluster.getEndpoint().getPort(), "test_clone_db");
         try (Connection cloneConn = DriverManager.getConnection(cloneDbUrl, "admin", "Secret123");
              Statement cloneStmt = cloneConn.createStatement()) {
             try (ResultSet rs = cloneStmt.executeQuery("SELECT count(*) FROM pg_table_def")) {

@@ -17,7 +17,7 @@ RDS Data API (`rds-data`) is documented separately because it uses REST JSON rou
 | `DescribeDBInstances` | List instances and their connection info : the list form includes DocumentDB and Neptune instances and takes an `engine` filter |
 | `DescribeDBEngineVersions` | - |
 | `DeleteDBInstance` | Stop and remove an instance |
-| `ModifyDBInstance` | Update instance settings |
+| `ModifyDBInstance` | Update instance settings; `NewDBInstanceIdentifier` renames the instance (identifier, ARN and endpoint host) at once, whatever `ApplyImmediately` says |
 | `RebootDBInstance` | Restart a database instance |
 | `StopDBInstance` | Stop a standalone instance temporarily: an optional `DBSnapshotIdentifier` first, then its container goes away while the record, endpoint and volume stay |
 | `StartDBInstance` | Start a stopped instance on the volume it kept, same endpoint |
@@ -62,6 +62,7 @@ RDS Data API (`rds-data`) is documented separately because it uses REST JSON rou
 | `CopyDBSnapshot` | Copy an available DB snapshot, optionally copying tags or overriding the option group and KMS key |
 | `ModifyDBSnapshot` | Change the engine version or option group of an available manual DB snapshot |
 | `RestoreDBInstanceFromDBSnapshot` | Create a new DB instance from a snapshot |
+| `RestoreDBInstanceToPointInTime` | Create a new DB instance from a source instance's automated backups (PostgreSQL data is copied from the source as of the request; `LatestRestorableTime` is reported while backups are on) |
 | `DescribeDBSnapshots` | List instance snapshots |
 | `DescribeDBSnapshotAttributes` | Return a snapshot's `restore` attribute (accounts authorized to copy/restore it) |
 | `ModifyDBSnapshotAttribute` | Add or remove accounts authorized to copy/restore a snapshot |
@@ -130,7 +131,8 @@ gp3 has a fixed 3000 IOPS and 125 MiBps; at or above it the baseline is 12000 IO
 and both can be provisioned higher, with throughput at most a quarter of the IOPS. Storage cannot
 shrink and must grow by at least 10%, and a `MaxAllocatedStorage` equal to the allocation turns
 autoscaling off. Floci completes each operation at once but reports `creating` for a second
-after `CreateDBInstance`, and `modifying` (one second) then `storage-optimization` (two seconds)
+after `CreateDBInstance` (and to the first `DescribeDBInstances` naming the instance, however late
+it comes, as a client polling a real creation always sees it), and `modifying` (one second) then `storage-optimization` (two seconds)
 after a storage change, during which a further storage change is refused. The periods are
 configurable below. `DeleteDBInstance` refuses an instance with
 deletion protection and deletes the Secrets Manager secret RDS manages for its master password.

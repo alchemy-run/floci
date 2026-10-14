@@ -339,6 +339,70 @@ class CloudControlIntegrationTest {
     }
 
     @Test
+    void ssmDocumentLifecycleTagsAndNewVersionUpdates() throws Exception {
+        String name = "cloudcontrol-command-document";
+        String type = "AWS::SSM::Document";
+        var identity = java.util.Map.of("TypeName", type, "Identifier", name);
+        var content = java.util.Map.of("schemaVersion", "2.2", "description", "cc",
+                "mainSteps", java.util.List.of(java.util.Map.of("action", "aws:runShellScript", "name", "echo",
+                        "inputs", java.util.Map.of("runCommand", java.util.List.of("echo hello")))));
+        JsonNode created = jsonCall("CloudApiService.CreateResource", java.util.Map.of("TypeName", type,
+                "DesiredState", MAPPER.writeValueAsString(java.util.Map.of("Name", name, "DocumentType", "Command",
+                        "DocumentFormat", "JSON", "UpdateMethod", "NewVersion", "Content", content,
+                        "Tags", java.util.List.of(java.util.Map.of("Key", "owner", "Value", "alchemy"))))));
+        assertEquals(name, awaitIdentifier(created.path("ProgressEvent").path("RequestToken").asText(),
+                "application/x-amz-json-1.0", ACCOUNT_A_AUTH));
+        try {
+            JsonNode model = MAPPER.readTree(jsonCall("CloudApiService.GetResource", identity)
+                    .path("ResourceDescription").path("Properties").asText());
+            assertEquals("Command", model.path("DocumentType").asText());
+            assertEquals("JSON", model.path("DocumentFormat").asText());
+            assertTrue(model.path("Content").isTextual());
+            assertEquals(MAPPER.valueToTree(content), MAPPER.readTree(model.path("Content").asText()));
+            assertTrue(model.path("UpdateMethod").isMissingNode());
+            assertEquals("alchemy", model.path("Tags").path(0).path("Value").asText());
+            JsonNode listed = jsonCall("CloudApiService.ListResources", java.util.Map.of("TypeName", type));
+            assertTrue(listed.path("ResourceDescriptions").valueStream()
+                    .anyMatch(r -> name.equals(r.path("Identifier").asText())));
+
+            // Tags-only change leaves the document version alone.
+            JsonNode tagged = jsonCall("CloudApiService.UpdateResource", java.util.Map.of("TypeName", type,
+                    "Identifier", name, "PatchDocument",
+                    "[{\"op\":\"replace\",\"path\":\"/Tags\",\"value\":[{\"Key\":\"owner\",\"Value\":\"platform\"}]}]"));
+            assertEquals("SUCCESS", tagged.path("ProgressEvent").path("OperationStatus").asText());
+            assertEquals("1", jsonCall("AmazonSSM.GetDocument", java.util.Map.of("Name", name))
+                    .path("DocumentVersion").asText());
+            assertEquals("platform", jsonCall("AmazonSSM.ListTagsForResource", java.util.Map.of(
+                    "ResourceType", "Document", "ResourceId", name)).path("TagList").path(0).path("Value").asText());
+
+            // Resending the same content is an UpdateDocument with duplicate content, as on AWS.
+            JsonNode duplicate = jsonCall("CloudApiService.UpdateResource", java.util.Map.of("TypeName", type,
+                    "Identifier", name, "PatchDocument", MAPPER.writeValueAsString(java.util.List.of(
+                            java.util.Map.of("op", "replace", "path", "/Content", "value", content),
+                            java.util.Map.of("op", "add", "path", "/UpdateMethod", "value", "NewVersion")))));
+            assertEquals("FAILED", duplicate.path("ProgressEvent").path("OperationStatus").asText());
+
+            var changed = new java.util.HashMap<String, Object>(content);
+            changed.put("description", "changed");
+            JsonNode updated = jsonCall("CloudApiService.UpdateResource", java.util.Map.of("TypeName", type,
+                    "Identifier", name, "PatchDocument", MAPPER.writeValueAsString(java.util.List.of(
+                            java.util.Map.of("op", "replace", "path", "/Content", "value", changed),
+                            java.util.Map.of("op", "add", "path", "/UpdateMethod", "value", "NewVersion")))));
+            assertEquals("SUCCESS", updated.path("ProgressEvent").path("OperationStatus").asText());
+            JsonNode document = jsonCall("AmazonSSM.GetDocument", java.util.Map.of("Name", name));
+            assertEquals("2", document.path("DocumentVersion").asText());
+            assertEquals("changed", MAPPER.readTree(document.path("Content").asText()).path("description").asText());
+
+            assertEquals("SUCCESS", jsonCall("CloudApiService.DeleteResource", identity)
+                    .path("ProgressEvent").path("OperationStatus").asText());
+            jsonRequest("CloudApiService.GetResource", identity).then().statusCode(404)
+                    .body("__type", containsString("ResourceNotFoundException"));
+        } finally {
+            jsonRequest("AmazonSSM.DeleteDocument", java.util.Map.of("Name", name));
+        }
+    }
+
+    @Test
     void cloudControlDiscoversAndLosesExternallyManagedParameters() throws Exception {
         String name = "/cloudcontrol/external-parameter";
         jsonCall("AmazonSSM.PutParameter", java.util.Map.of("Name", name, "Type", "String", "Value", "external"));

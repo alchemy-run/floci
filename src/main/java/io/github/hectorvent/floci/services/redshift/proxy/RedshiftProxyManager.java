@@ -1,8 +1,10 @@
 package io.github.hectorvent.floci.services.redshift.proxy;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.dns.ContainerEndpoints;
 import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.rds.proxy.PasswordValidator;
+import io.github.hectorvent.floci.services.rds.proxy.RdsProxyManager;
 import io.github.hectorvent.floci.services.rds.proxy.RdsProxyTlsCertificates;
 import io.github.hectorvent.floci.services.rds.proxy.RdsSigV4Validator;
 import io.github.hectorvent.floci.services.s3.S3Service;
@@ -39,15 +41,75 @@ public class RedshiftProxyManager {
      * caller leaves the port reserved rather than handing it out to another cluster.
      */
     private final ConcurrentHashMap<String, RedshiftAuthProxy> unclosableProxies = new ConcurrentHashMap<>();
+    /**
+     * Owns the shared PostgreSQL endpoint listeners (with RDS), which route each connection on a
+     * cluster's advertised port to its proxy by TLS server name. Null when endpoints are not routed.
+     */
+    private final RdsProxyManager endpointRouter;
+    private final ContainerEndpoints containerEndpoints;
+    /** The advertised port each cluster's endpoint is routed on. */
+    private final ConcurrentHashMap<String, Integer> advertisedPorts = new ConcurrentHashMap<>();
+
+    public RedshiftProxyManager(RdsSigV4Validator sigV4Validator, RdsProxyTlsCertificates tlsCertificates,
+                                S3Service s3Service, IamService iamService, EmulatorConfig config) {
+        this(sigV4Validator, tlsCertificates, s3Service, iamService, config, null, null);
+    }
 
     @Inject
     public RedshiftProxyManager(RdsSigV4Validator sigV4Validator, RdsProxyTlsCertificates tlsCertificates,
-                                S3Service s3Service, IamService iamService, EmulatorConfig config) {
+                                S3Service s3Service, IamService iamService, EmulatorConfig config,
+                                RdsProxyManager endpointRouter, ContainerEndpoints containerEndpoints) {
         this.sigV4Validator = sigV4Validator;
         this.tlsCertificates = tlsCertificates;
         this.s3Service = s3Service;
         this.iamService = iamService;
         this.config = config;
+        this.endpointRouter = endpointRouter;
+        this.containerEndpoints = containerEndpoints;
+    }
+
+    /**
+     * Serves the cluster's proxy on its advertised endpoint: {@code hostname} on {@code port},
+     * which any number of clusters (and RDS PostgreSQL endpoints) share. Containers Floci launches
+     * reach the port at Floci's address too.
+     *
+     * @return false when no proxy runs under {@code relayKey} or the port cannot be bound here
+     */
+    public synchronized boolean advertise(String relayKey, String hostname, int port) {
+        RedshiftAuthProxy proxy = proxies.get(relayKey);
+        if (proxy == null || port <= 0) {
+            return false;
+        }
+        withdraw(relayKey);
+        if (port == proxy.getPort()) {
+            return true;
+        }
+        if (endpointRouter == null) {
+            return false;
+        }
+        tlsCertificates.ensureHost(hostname);
+        if (!endpointRouter.routePostgresEndpoint(routeKey(relayKey), List.of(hostname), port, proxy.getPort())) {
+            return false;
+        }
+        advertisedPorts.put(relayKey, port);
+        if (containerEndpoints != null) {
+            containerEndpoints.publishHostPort(port);
+        }
+        return true;
+    }
+
+    private void withdraw(String relayKey) {
+        Integer port = advertisedPorts.remove(relayKey);
+        if (endpointRouter != null) {
+            endpointRouter.unroutePostgresEndpoint(routeKey(relayKey));
+        }
+        if (port != null && containerEndpoints != null) {
+            containerEndpoints.withdrawHostPort(port);
+        }
+    }
+
+    private static String routeKey(String relayKey) {
+        return "redshift:" + relayKey;
     }
 
     public synchronized void startProxy(String relayKey, int proxyPort,
@@ -115,6 +177,7 @@ public class RedshiftProxyManager {
     }
 
     public synchronized void stopProxy(String relayKey) {
+        withdraw(relayKey);
         // Retry any listener a previous failed start/replace could not close. If it still
         // cannot be closed this throws, and the entry stays for the next retry.
         RedshiftAuthProxy unclosable = unclosableProxies.get(relayKey);
@@ -132,6 +195,7 @@ public class RedshiftProxyManager {
     }
 
     public synchronized void stopAll() {
+        List.copyOf(advertisedPorts.keySet()).forEach(this::withdraw);
         proxies.forEach((relayKey, proxy) -> {
             try {
                 proxy.stop();

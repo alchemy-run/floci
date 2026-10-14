@@ -46,6 +46,12 @@ public class SsmDocument {
     @JsonProperty("Versions")
     private Map<String, String> versions = new LinkedHashMap<>();
 
+    @JsonProperty("TargetType")
+    private String targetType;
+
+    @JsonProperty("Tags")
+    private Map<String, String> tags = new LinkedHashMap<>();
+
     public SsmDocument() {}
 
     public SsmDocument(String name, String content, String documentType) {
@@ -88,6 +94,20 @@ public class SsmDocument {
 
     public List<String> getPlatformTypes() { return platformTypes; }
     public void setPlatformTypes(List<String> platformTypes) { this.platformTypes = platformTypes; }
+
+    public String getTargetType() { return targetType; }
+    public void setTargetType(String targetType) { this.targetType = targetType; }
+
+    public Map<String, String> getTags() {
+        if (tags == null) {
+            tags = new LinkedHashMap<>();
+        }
+        return tags;
+    }
+
+    public void setTags(Map<String, String> tags) {
+        this.tags = tags != null ? new LinkedHashMap<>(tags) : new LinkedHashMap<>();
+    }
 
     public Map<String, String> getVersions() {
         if (versions == null) {

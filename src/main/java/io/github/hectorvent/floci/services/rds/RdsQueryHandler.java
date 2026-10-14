@@ -34,6 +34,7 @@ import io.github.hectorvent.floci.services.rds.model.LogExportChanges;
 import io.github.hectorvent.floci.services.rds.model.OptionGroup;
 import io.github.hectorvent.floci.services.rds.model.OptionGroupOption;
 import io.github.hectorvent.floci.services.rds.model.RdsEvent;
+import io.github.hectorvent.floci.services.rds.model.PointInTimeRestoreRequest;
 import io.github.hectorvent.floci.services.rds.model.ReadReplicaRequest;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -128,6 +129,7 @@ public class RdsQueryHandler {
                 case "CopyDBSnapshot" -> handleCopyDbSnapshot(params, region);
                 case "ModifyDBSnapshot" -> handleModifyDbSnapshot(params, region);
                 case "RestoreDBInstanceFromDBSnapshot" -> handleRestoreDbInstanceFromDbSnapshot(params, region);
+                case "RestoreDBInstanceToPointInTime" -> handleRestoreDbInstanceToPointInTime(params, region);
                 case "DescribeDBSnapshots" -> handleDescribeDbSnapshots(params, region);
                 case "DescribeDBSnapshotAttributes" -> handleDescribeDbSnapshotAttributes(params, region);
                 case "ModifyDBSnapshotAttribute" -> handleModifyDbSnapshotAttribute(params, region);
@@ -267,6 +269,10 @@ public class RdsQueryHandler {
                         "DBInstance " + identifier + " not found.", 404);
             }
             List<String> engines = engineFilter(params);
+            // A request naming instances (by identifier or filter) is a client polling them; a
+            // bare listing is not, and must not consume another client's creating observation.
+            boolean namesInstances = filterId != null && !filterId.isBlank()
+                    || !extractRdsFilterValues(params, "dbi-resource-id").isEmpty();
             XmlBuilder xml = new XmlBuilder().start("DBInstances");
             for (DbInstance i : result) {
                 DbInstance reconciled = service.refreshDbInstanceRuntimeHealth(i);
@@ -275,6 +281,9 @@ public class RdsQueryHandler {
                 }
                 if (engines.isEmpty() || engines.contains(instanceEngine(reconciled))) {
                     xml.start("DBInstance").raw(dbInstanceInnerXml(reconciled)).end("DBInstance");
+                    if (namesInstances) {
+                        service.noteCreatingReported(reconciled);
+                    }
                 }
             }
             boolean listForm = (identifier == null || identifier.isBlank())
@@ -504,12 +513,21 @@ public class RdsQueryHandler {
             if (dbPortNumber != null) {
                 service.validateDbInstancePortChange(id, dbPortNumber, region);
             }
+            // The rename is applied at once whatever ApplyImmediately says; deferring it to the
+            // maintenance window is not modelled.
+            String newId = params.getFirst("NewDBInstanceIdentifier");
+            if (newId != null && !newId.isBlank()) {
+                service.validateDbInstanceRename(id, newId, region);
+            }
             DbInstance instance = service.modifyDbInstance(
                     id, newPassword, iamEnabled, dbSubnetGroupName,
                     vpcSecurityGroupIds, optionGroupName, region, autoMinorVersionUpgrade,
                     settings, publiclyAccessible, modification);
             if (dbPortNumber != null) {
                 instance = service.modifyDbInstancePort(id, dbPortNumber, region);
+            }
+            if (newId != null && !newId.isBlank()) {
+                instance = service.renameDbInstance(id, newId, region);
             }
             String result = dbInstanceXml(instance);
             return Response.ok(AwsQueryResponse.envelope("ModifyDBInstance", AwsNamespaces.RDS, result)).build();
@@ -1653,6 +1671,35 @@ public class RdsQueryHandler {
         }
     }
 
+    private Response handleRestoreDbInstanceToPointInTime(MultivaluedMap<String, String> params, String region) {
+        try {
+            PointInTimeRestoreRequest request = new PointInTimeRestoreRequest(
+                    params.getFirst("TargetDBInstanceIdentifier"),
+                    params.getFirst("SourceDBInstanceIdentifier"),
+                    params.getFirst("SourceDbiResourceId"),
+                    parseOptionalInstant(params.getFirst("RestoreTime")),
+                    "true".equalsIgnoreCase(params.getFirst("UseLatestRestorableTime")),
+                    params.getFirst("DBInstanceClass"),
+                    params.getFirst("AvailabilityZone"),
+                    parseOptionalBoolean(params, "MultiAZ"),
+                    parseOptionalBoolean(params, "PubliclyAccessible"),
+                    parseOptionalBoolean(params, "AutoMinorVersionUpgrade"),
+                    params.getFirst("DBSubnetGroupName"),
+                    hasMemberKeys(params, "VpcSecurityGroupIds") ? vpcSecurityGroupIds(params) : null,
+                    params.getFirst("DBParameterGroupName"),
+                    params.getFirst("OptionGroupName"),
+                    parseOptionalBoolean(params, "EnableIAMDatabaseAuthentication"),
+                    optionalInt(params.getFirst("AllocatedStorage")),
+                    instanceSettings(params),
+                    parseTags(params));
+            DbInstance instance = service.restoreDbInstanceToPointInTime(request, region);
+            return Response.ok(AwsQueryResponse.envelope(
+                    "RestoreDBInstanceToPointInTime", AwsNamespaces.RDS, dbInstanceXml(instance))).build();
+        } catch (AwsException e) {
+            return AwsQueryResponse.error(e.getErrorCode(), e.getMessage(), AwsNamespaces.RDS, e.getHttpStatus());
+        }
+    }
+
     private Response handleDescribeDbSnapshots(MultivaluedMap<String, String> params, String region) {
         String snapshotId = params.getFirst("DBSnapshotIdentifier");
         String instanceId = params.getFirst("DBInstanceIdentifier");
@@ -2552,8 +2599,12 @@ public class RdsQueryHandler {
                    ? i.getPreferredBackupWindow() : DbInstanceSettings.DEFAULT_BACKUP_WINDOW)
            .elem("BackupRetentionPeriod", i.getBackupRetentionPeriod())
            .elem("StorageEncrypted", i.isStorageEncrypted())
-           .elem("CopyTagsToSnapshot", i.isCopyTagsToSnapshot())
-           .raw(vpcSecurityGroupsXml(i))
+           .elem("CopyTagsToSnapshot", i.isCopyTagsToSnapshot());
+        Instant latestRestorable = service.latestRestorableTime(i);
+        if (latestRestorable != null) {
+            xml.elem("LatestRestorableTime", latestRestorable.toString());
+        }
+        xml.raw(vpcSecurityGroupsXml(i))
            .raw(dbParameterGroupsXml(i))
            .raw(optionGroupMembershipsXml(i))
            .raw(dbSubnetGroupXml(dbSubnetGroupForInstance(i)))

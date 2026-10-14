@@ -21,8 +21,31 @@ class RdsInstanceLifecycleTest {
         RdsInstanceLifecycle.beginCreating(instance, MONDAY_NOON);
 
         assertEquals("creating", RdsInstanceLifecycle.reportedStatus(instance, "available", MONDAY_NOON));
+        instance.setTransitionalStatusReported(true);
         assertEquals("available", RdsInstanceLifecycle.reportedStatus(
                 instance, "available", MONDAY_NOON.plus(RdsInstanceLifecycle.CREATING_PERIOD)));
+    }
+
+    @Test
+    void aNewInstanceKeepsReportingCreatingUntilAPollHasSeenIt() {
+        DbInstance instance = available();
+        RdsInstanceLifecycle.beginCreating(instance, MONDAY_NOON);
+        Instant late = MONDAY_NOON.plus(RdsInstanceLifecycle.CREATING_PERIOD).plusSeconds(5);
+
+        // A client whose first poll comes after the period still sees the creation, as on AWS.
+        assertEquals("creating", RdsInstanceLifecycle.reportedStatus(instance, "available", late));
+        instance.setTransitionalStatusReported(true);
+        assertEquals("available", RdsInstanceLifecycle.reportedStatus(instance, "available", late));
+
+        DbInstance forgotten = available();
+        RdsInstanceLifecycle.beginCreating(forgotten, MONDAY_NOON);
+        assertEquals("available", RdsInstanceLifecycle.reportedStatus(forgotten, "available",
+                MONDAY_NOON.plus(RdsInstanceLifecycle.UNREPORTED_CREATING_LIMIT).plusSeconds(2)));
+
+        DbInstance instant = available();
+        RdsInstanceLifecycle.beginCreating(instant, MONDAY_NOON,
+                RdsInstanceLifecycle.Periods.ofMillis(0, 0, 0));
+        assertEquals("available", RdsInstanceLifecycle.reportedStatus(instant, "available", MONDAY_NOON));
     }
 
     @Test

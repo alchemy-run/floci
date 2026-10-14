@@ -72,10 +72,14 @@ public class DbInstance {
     // "storage-optimization" until storageOptimizationUntil.
     private String transitionalStatus;
     private Instant transitionalStatusUntil;
+    /** Whether a DescribeDBInstances aimed at this instance has reported its "creating" status. */
+    private boolean transitionalStatusReported;
     private Instant storageOptimizationUntil;
     private Map<String, String> subnetAvailabilityZones = new LinkedHashMap<>();
     private String dbiResourceId;
     private String dbInstanceArn;
+    /** The runtime identity the backing container is tracked under when it is not the ARN. */
+    private String containerRuntimeId;
     private String masterUserSecretArn;
     private String masterUserSecretStatus;
     private String masterUserSecretKmsKeyId;
@@ -348,6 +352,14 @@ public class DbInstance {
 
     public String getTransitionalStatus() { return transitionalStatus; }
     public void setTransitionalStatus(String transitionalStatus) { this.transitionalStatus = transitionalStatus; }
+
+    public String getContainerRuntimeId() { return containerRuntimeId; }
+    public void setContainerRuntimeId(String containerRuntimeId) { this.containerRuntimeId = containerRuntimeId; }
+
+    public boolean isTransitionalStatusReported() { return transitionalStatusReported; }
+    public void setTransitionalStatusReported(boolean transitionalStatusReported) {
+        this.transitionalStatusReported = transitionalStatusReported;
+    }
 
     public Instant getTransitionalStatusUntil() { return transitionalStatusUntil; }
     public void setTransitionalStatusUntil(Instant transitionalStatusUntil) {

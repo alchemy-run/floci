@@ -83,8 +83,24 @@ class CodeBuildRunnerTest {
     }
 
     @Test
+    void curatedImagesUseTheirOwnPlatformSoACachedCopyIsNotRepulled() {
+        assertEquals("linux/amd64", CodeBuildRunner.curatedImagePlatform(RESOLVED_IMAGE));
+        assertEquals("linux/arm64", CodeBuildRunner.curatedImagePlatform(
+                "public.ecr.aws/codebuild/amazonlinux-aarch64-standard:3.0"));
+        assertNull(CodeBuildRunner.curatedImagePlatform("public.ecr.aws/codebuild/standard:7.0"));
+        assertNull(CodeBuildRunner.curatedImagePlatform("example.com/x86_64-tools:1"));
+
+        Harness harness = new Harness(false);
+        harness.run();
+        assertEquals("SUCCEEDED", harness.build.getBuildStatus());
+        verify(harness.lifecycle).create(harness.spec, "linux/amd64");
+        verify(harness.lifecycle, never()).create(harness.spec);
+    }
+
+    @Test
     void usesHostPlatformUnlessEnvironmentTypeIsHonoured() {
         Harness harness = new Harness(false);
+        harness.build.getEnvironment().setImage("alpine:3.21");
         harness.run();
         assertEquals("SUCCEEDED", harness.build.getBuildStatus());
         verify(harness.lifecycle).create(harness.spec);

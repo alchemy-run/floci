@@ -171,14 +171,16 @@ public class RedshiftService {
                 // their stored port so the endpoint is stable across restarts.
                 int proxyPort = cluster.getProxyPort() > 0 ? cluster.getProxyPort() : allocateProxyPort();
                 usedPorts.add(proxyPort);
-                Endpoint endpoint = storedEndpoint(cluster, proxyPort);
+                String host = storedEndpointHost(cluster);
                 cluster.setProxyPort(proxyPort);
+                String key = relayKey(entry.accountId(), cluster.getClusterIdentifier());
                 proxyManager.startProxy(
-                        relayKey(entry.accountId(), cluster.getClusterIdentifier()), proxyPort,
-                        handle.getHost(), handle.getPort(), endpoint.getAddress(),
+                        key, proxyPort,
+                        handle.getHost(), handle.getPort(), host,
                         cluster.getMasterUsername(), password, dbNameOf(cluster),
                         passwordValidatorFor(entry.accountId(), cluster.getClusterIdentifier()),
                         cluster.getIamRoleArns());
+                Endpoint endpoint = new Endpoint(host, advertisedPort(key, host, clusterPort(cluster), proxyPort));
                 cluster.setContainerHost(handle.getHost());
                 cluster.setContainerPort(handle.getPort());
                 cluster.setEndpoint(endpoint);
@@ -271,9 +273,11 @@ public class RedshiftService {
             RedshiftContainerHandle handle = containerManager.start(accountId, identifier, username, password);
             containerManager.ensureDatabase(accountId, identifier, username, dbName);
             String host = endpointHost(identifier);
-            proxyPort = startProxyPreferringPort(accountId, identifier, preferredPort, handle, host,
+            proxyPort = startProxy(accountId, identifier, handle, host,
                     username, password, dbName, cluster.getIamRoleArns());
-            Endpoint endpoint = new Endpoint(host, proxyPort);
+            cluster.setPort(preferredPort);
+            Endpoint endpoint = new Endpoint(host,
+                    advertisedPort(relayKey(accountId, identifier), host, preferredPort, proxyPort));
             cluster.setProxyPort(proxyPort);
             cluster.setContainerHost(handle.getHost());
             cluster.setContainerPort(handle.getPort());
@@ -1086,11 +1090,12 @@ public class RedshiftService {
                 proxyPort = allocateProxyPort();
             }
             usedPorts.add(proxyPort);
-            Endpoint endpoint = storedEndpoint(cluster, proxyPort);
+            String host = storedEndpointHost(cluster);
             cluster.setProxyPort(proxyPort);
             proxyManager.startProxy(key, proxyPort, handle.getHost(), handle.getPort(),
-                    endpoint.getAddress(), cluster.getMasterUsername(), password, dbName,
+                    host, cluster.getMasterUsername(), password, dbName,
                     passwordValidatorFor(accountId, clusterIdentifier), cluster.getIamRoleArns());
+            Endpoint endpoint = new Endpoint(host, advertisedPort(key, host, clusterPort(cluster), proxyPort));
             cluster.setContainerHost(handle.getHost());
             cluster.setContainerPort(handle.getPort());
             cluster.setEndpoint(endpoint);
@@ -1380,9 +1385,11 @@ public class RedshiftService {
             String host = endpointHost(clusterIdentifier);
             // AWS restores onto the source cluster's port by default.
             int preferredPort = snapshot.getPort() > 0 ? snapshot.getPort() : defaultClusterPort();
-            proxyPort = startProxyPreferringPort(accountId, clusterIdentifier, preferredPort, handle, host,
+            proxyPort = startProxy(accountId, clusterIdentifier, handle, host,
                     username, password, dbName, cluster.getIamRoleArns());
-            Endpoint endpoint = new Endpoint(host, proxyPort);
+            cluster.setPort(preferredPort);
+            Endpoint endpoint = new Endpoint(host,
+                    advertisedPort(relayKey(accountId, clusterIdentifier), host, preferredPort, proxyPort));
             cluster.setProxyPort(proxyPort);
             cluster.setContainerHost(handle.getHost());
             cluster.setContainerPort(handle.getPort());
@@ -2020,40 +2027,22 @@ public class RedshiftService {
     }
 
     /** Keeps a cluster's advertised host stable across reboot and restart recovery. */
-    private Endpoint storedEndpoint(Cluster cluster, int proxyPort) {
+    private String storedEndpointHost(Cluster cluster) {
         Endpoint current = cluster.getEndpoint();
-        String host = current != null && current.getAddress() != null && !current.getAddress().isBlank()
+        return current != null && current.getAddress() != null && !current.getAddress().isBlank()
                 ? current.getAddress()
                 : endpointHost(cluster.getClusterIdentifier());
-        return new Endpoint(host, proxyPort);
     }
 
-    /**
-     * Starts the cluster's auth proxy on the port the cluster was created with (5439 unless
-     * CreateCluster set Port), as AWS does. Every AWS cluster has its own host, but here all
-     * clusters share Floci's address, so when that port is already held by another cluster or
-     * cannot be bound the proxy falls back to the configured proxy port range and the endpoint
-     * reports the port actually listening. Returns the bound port; on failure the claimed
-     * port is released (or deliberately leaked if its listener could not be closed).
-     */
-    private int startProxyPreferringPort(String accountId, String identifier, int preferredPort,
-                                         RedshiftContainerHandle handle, String advertisedHost,
-                                         String username, String password, String dbName,
-                                         List<String> iamRoleArns) {
-        if (preferredPort > 0 && usedPorts.add(preferredPort)) {
-            try {
-                proxyManager.startProxy(relayKey(accountId, identifier), preferredPort,
-                        handle.getHost(), handle.getPort(), advertisedHost, username, password, dbName,
-                        passwordValidatorFor(accountId, identifier), iamRoleArns);
-                return preferredPort;
-            } catch (RuntimeException e) {
-                LOG.infov("Redshift cluster {0} cannot listen on port {1} ({2}); using the proxy port range",
-                        identifier, preferredPort, e.getMessage());
-                if (!stopProxyAndReleasePortSafely(identifier, preferredPort)) {
-                    throw e;
-                }
-            }
-        }
+    /** The port a cluster's endpoint advertises: the one it was created with. */
+    private int clusterPort(Cluster cluster) {
+        return cluster.getPort() > 0 ? cluster.getPort() : defaultClusterPort();
+    }
+
+    /** Starts the cluster's auth proxy on a port of the proxy range and returns that port. */
+    private int startProxy(String accountId, String identifier, RedshiftContainerHandle handle,
+                           String advertisedHost, String username, String password, String dbName,
+                           List<String> iamRoleArns) {
         int port = allocateProxyPort();
         try {
             proxyManager.startProxy(relayKey(accountId, identifier), port,
@@ -2064,6 +2053,22 @@ public class RedshiftService {
             stopProxyAndReleasePortSafely(identifier, port);
             throw e;
         }
+    }
+
+    /**
+     * Serves the cluster's endpoint on its {@code Port} (5439 unless CreateCluster set one), as
+     * AWS does. Every cluster has a host name of its own, so any number of clusters share that
+     * port: a shared listener hands each connection to the cluster its TLS server name selects
+     * (or to the only cluster on the port). Returns the port the endpoint advertises, which is the
+     * proxy's own port only when the cluster's port cannot be bound on this host.
+     */
+    private int advertisedPort(String relayKey, String host, int clusterPort, int proxyPort) {
+        if (clusterPort > 0 && proxyManager.advertise(relayKey, host, clusterPort)) {
+            return clusterPort;
+        }
+        LOG.infov("Redshift cluster {0} cannot be served on port {1}; its endpoint uses proxy port {2}",
+                relayKey, String.valueOf(clusterPort), String.valueOf(proxyPort));
+        return proxyPort;
     }
 
     private int defaultClusterPort() {

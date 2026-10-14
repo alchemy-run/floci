@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.cloudformation;
 
 import io.github.hectorvent.floci.core.common.XmlParser;
+import io.github.hectorvent.floci.services.redshift.RedshiftEndpoints;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.specification.RequestSpecification;
@@ -215,9 +216,9 @@ class RedshiftClusterCfnIntegrationTest {
                     .atMost(Duration.ofSeconds(30))
                     .pollInterval(Duration.ofMillis(500))
                     .ignoreExceptions()
-                    .until(() -> DriverManager.getConnection("jdbc:postgresql://" + host + ":" + port + "/dev", username, password), Objects::nonNull);
+                    .until(() -> DriverManager.getConnection(RedshiftEndpoints.jdbcUrl(host, port, "dev"), username, password), Objects::nonNull);
         } catch (ConditionTimeoutException e) {
-            return DriverManager.getConnection("jdbc:postgresql://" + host + ":" + port + "/dev", username, password);
+            return DriverManager.getConnection(RedshiftEndpoints.jdbcUrl(host, port, "dev"), username, password);
         }
     }
 

@@ -34,6 +34,12 @@ final class RdsInstanceLifecycle {
     static final Duration CREATING_PERIOD = Duration.ofSeconds(1);
     static final Duration MODIFYING_PERIOD = Duration.ofSeconds(1);
     static final Duration STORAGE_OPTIMIZATION_PERIOD = Duration.ofSeconds(2);
+    /**
+     * How long a new instance keeps reporting "creating" while no DescribeDBInstances has shown it
+     * yet. AWS reports it for minutes, so a client that polls once right after CreateDBInstance
+     * always sees it; Floci's short period alone can elapse before a busy client's first poll.
+     */
+    static final Duration UNREPORTED_CREATING_LIMIT = Duration.ofMinutes(10);
 
     /** How long each transitional status is reported; configured by {@code floci.services.rds.*-status-millis}. */
     record Periods(Duration creating, Duration modifying, Duration storageOptimization) {
@@ -59,6 +65,9 @@ final class RdsInstanceLifecycle {
                 && now.isBefore(instance.getTransitionalStatusUntil())) {
             return instance.getTransitionalStatus();
         }
+        if (creatingUnreported(instance, now)) {
+            return CREATING;
+        }
         if (storageOptimizing(instance, now)) {
             return STORAGE_OPTIMIZATION;
         }
@@ -72,6 +81,16 @@ final class RdsInstanceLifecycle {
     static void beginCreating(DbInstance instance, Instant now, Periods periods) {
         instance.setTransitionalStatus(CREATING);
         instance.setTransitionalStatusUntil(now.plus(periods.creating()));
+        // A zero period turns the creating status off altogether.
+        instance.setTransitionalStatusReported(periods.creating().isZero());
+    }
+
+    /** A new instance no DescribeDBInstances has reported as creating yet. */
+    static boolean creatingUnreported(DbInstance instance, Instant now) {
+        return CREATING.equals(instance.getTransitionalStatus())
+                && !instance.isTransitionalStatusReported()
+                && instance.getTransitionalStatusUntil() != null
+                && now.isBefore(instance.getTransitionalStatusUntil().plus(UNREPORTED_CREATING_LIMIT));
     }
 
     static void beginStorageModification(DbInstance instance, Instant now) {
@@ -86,6 +105,7 @@ final class RdsInstanceLifecycle {
     }
 
     static void clearTransitions(DbInstance instance) {
+        instance.setTransitionalStatusReported(false);
         instance.setTransitionalStatus(null);
         instance.setTransitionalStatusUntil(null);
         instance.setStorageOptimizationUntil(null);

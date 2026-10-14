@@ -583,6 +583,47 @@ class RdsContainerManagerTest {
     }
 
     @Test
+    void renamedRuntimeKeepsItsContainerAndStorageAndFreesTheOldIdentity() {
+        EmulatorConfig config = config(Path.of("data"));
+        when(config.storage().mode()).thenReturn("memory");
+        ContainerDetector containerDetector = mock(ContainerDetector.class);
+        ContainerLifecycleManager lifecycleManager = mock(ContainerLifecycleManager.class);
+        stubStarts(lifecycleManager,
+                new ContainerLifecycleManager.ContainerInfo(
+                        "container-a", Map.of(3306,
+                        new ContainerLifecycleManager.EndpointInfo("db1", 3306))),
+                new ContainerLifecycleManager.ContainerInfo(
+                        "container-b", Map.of(3306,
+                        new ContainerLifecycleManager.EndpointInfo("db1", 3307))));
+        ContainerLogStreamer logStreamer = mock(ContainerLogStreamer.class);
+        lenient().when(logStreamer.generateLogStreamName(any())).thenReturn("log-stream");
+        RdsContainerManager manager = new RdsContainerManager(
+                new ContainerBuilder(config, mock(DockerHostResolver.class),
+                        mock(EmbeddedDnsServer.class)),
+                lifecycleManager, logStreamer, containerDetector, config,
+                new RegionResolver("us-east-1", "000000000000"),
+                mock(ServiceConfigAccess.class));
+        String oldRuntime = "arn:aws:rds:us-east-1:111111111111:db:db1";
+        String newRuntime = "arn:aws:rds:us-east-1:111111111111:db:db1-renamed";
+        String volume = "floci-rds-volume-a";
+
+        manager.start(oldRuntime, "db1", "db1", volume, DatabaseEngine.MYSQL,
+                "mysql:8.0", "root", "password", "db");
+        manager.renameRuntime(oldRuntime, newRuntime);
+
+        assertNull(manager.getActiveHandle(oldRuntime));
+        RdsContainerHandle moved = manager.getActiveHandle(newRuntime);
+        assertEquals("container-a", moved.getContainerId());
+        // The old identity is free for a new instance; the moved storage is still owned.
+        manager.start(oldRuntime, "db1", "db1-new", "floci-rds-volume-b", DatabaseEngine.MYSQL,
+                "mysql:8.0", "root", "password", "db");
+        assertThrows(IllegalStateException.class, () -> manager.removeVolume(newRuntime, "db1", volume));
+        manager.stop(moved);
+        manager.removeVolume(newRuntime, "db1", volume);
+        verify(lifecycleManager).removeVolumeStrict(volume);
+    }
+
+    @Test
     void tryStartReportsUnavailableInsteadOfThrowingWhenNoDockerDaemonIsReachable() {
         // Floci running inside Docker without a mounted daemon socket: the RDS control plane must
         // keep working, so the failure is reported rather than propagated.

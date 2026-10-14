@@ -76,7 +76,7 @@ class RedshiftInterceptorIamRoleEnforcedIntegrationTest {
     }
 
     private static Connection waitForConnection(Cluster cluster) throws SQLException {
-        String url = "jdbc:postgresql://127.0.0.1:" + cluster.getEndpoint().getPort() + "/dev";
+        String url = RedshiftEndpoints.jdbcUrl(cluster.getEndpoint().getAddress(), cluster.getEndpoint().getPort(), "dev");
         return Awaitility.await()
                 .atMost(Duration.ofSeconds(30))
                 .pollInterval(Duration.ofMillis(500))

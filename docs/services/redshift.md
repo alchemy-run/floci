@@ -6,7 +6,7 @@
 
 Floci emulates Amazon Redshift by managing a real [PostgreSQL](https://www.postgresql.org/) Docker container per cluster behind a Redshift-shaped control plane. Each cluster sits behind a lightweight auth proxy on the Floci host, so the endpoint is reachable from outside Docker and the master password is validated at the proxy, a `ModifyCluster` password change takes effect for new connections immediately. Redshift speaks the PostgreSQL wire protocol, so the cluster endpoint returned by `DescribeClusters` works with any standard PostgreSQL driver (`psql`, JDBC, `psycopg`, …).
 
-> **Always read the host and port from `DescribeClusters`** rather than assuming a fixed port. The endpoint host keeps the AWS shape `<cluster>.<id>.<region>.redshift.localhost.floci.io` (the embedded DNS resolves it to Floci inside containers, public DNS resolves it to loopback on the host). The proxy listens on the cluster's `Port` (`5439` unless `CreateCluster` sets one); all clusters share Floci's address, so when another cluster already holds that port the proxy falls back to the proxy port range and `Clusters[0].Endpoint.Port` reports the port actually listening.
+> **Always read the host and port from `DescribeClusters`** rather than assuming a fixed port. The endpoint host keeps the AWS shape `<cluster>.<id>.<region>.redshift.localhost.floci.io` (the embedded DNS resolves it to Floci inside containers, public DNS resolves it to loopback on the host). As on AWS, `Endpoint.Port` is the cluster's `Port` (`5439` unless `CreateCluster` sets one), and any number of clusters share it: each cluster's auth proxy runs on a port of the proxy range, and one listener on the cluster port (shared with RDS PostgreSQL endpoints) hands each connection to the cluster it names. With one cluster on the port any connection reaches it; with several, clients must use TLS (`sslmode=require` or stricter) so the endpoint's host name selects the cluster, and a plaintext connection is refused with a PostgreSQL error. Containers Floci launches reach the endpoint on the same host name and port. Only when Floci cannot bind the cluster port on this host does `Endpoint.Port` report the proxy's own port instead.
 >
 > `CreateCluster` `DBName` (default `dev`) is created in the backing PostgreSQL server and is the database a connection uses when it names none.
 
@@ -126,7 +126,6 @@ For `AWS::Redshift::ClusterParameterGroup`, `Parameters` is applied via `ModifyC
 
 ### Gaps and Limitations
 
-- `Port` is ignored: Floci assigns the dynamic host proxy port returned in `Endpoint.Port`.
 - `DBName` other than `dev` is ignored: the emulated PostgreSQL container database is always `dev`.
 - `NumberOfNodes` is not stored on cluster create: every emulated cluster is backed by a single PostgreSQL container.
 - `ManageMasterPassword` creates a Redshift-owned Secrets Manager secret. The secret contains the
@@ -141,7 +140,7 @@ For `AWS::Redshift::ClusterParameterGroup`, `Parameters` is applied via `ModifyC
 |----------|---------|-------------|
 | `FLOCI_SERVICES_REDSHIFT_ENABLED` | `true` | Enable or disable Redshift |
 | `FLOCI_SERVICES_REDSHIFT_IMAGE_VERSION` | `postgres:15-alpine` | PostgreSQL Docker image backing each cluster |
-| `FLOCI_SERVICES_REDSHIFT_DEFAULT_PORT` | `5439` | Port a cluster listens on when `CreateCluster` omits `Port` (falls back to the proxy range when taken) |
+| `FLOCI_SERVICES_REDSHIFT_DEFAULT_PORT` | `5439` | Port a cluster's endpoint listens on when `CreateCluster` omits `Port` |
 | `FLOCI_SERVICES_REDSHIFT_PROXY_BASE_PORT` | `7100` | Lowest host port the per-cluster auth proxies bind |
 | `FLOCI_SERVICES_REDSHIFT_PROXY_MAX_PORT` | `7199` | Highest host port the per-cluster auth proxies bind |
 | `FLOCI_SERVICES_REDSHIFT_ENDPOINT_HOST` | _(unset)_ | Hostname advertised in `DescribeClusters`; unset uses `<cluster>.<id>.<region>.redshift.<domain>` where `<domain>` is `localhost.floci.io` unless `FLOCI_HOSTNAME` sets another name |
@@ -149,7 +148,7 @@ For `AWS::Redshift::ClusterParameterGroup`, `Parameters` is applied via `ModifyC
 | `FLOCI_SERVICES_REDSHIFT_PROXY_BACKEND_CONNECT_TIMEOUT_MILLIS` | `5000` | Max time the proxy waits for the backend TCP connect |
 | `FLOCI_SERVICES_REDSHIFT_PROXY_MAX_CONNECTIONS` | `100` | Max concurrent connections per proxy before new ones are refused |
 
-Redshift needs the Docker socket so it can launch PostgreSQL containers. Each cluster's container is published on a dynamically assigned host port, returned by `DescribeClusters`.
+Redshift needs the Docker socket so it can launch PostgreSQL containers. Clients connect to the cluster's `Port` (5439 by default), so publish it when Floci runs in Docker.
 
 ### Docker Compose
 
@@ -159,6 +158,7 @@ services:
     image: floci/floci:latest
     ports:
       - "4566:4566"
+      - "5439:5439"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
 ```
@@ -206,8 +206,8 @@ aws redshift delete-cluster \
 ```python
 import psycopg
 
-# Read host and port from DescribeClusters: the host port is dynamic.
-host, port = "localhost", 32768  # e.g. Clusters[0].Endpoint.Address / .Port
+# Read host and port from DescribeClusters.
+host, port = "my-warehouse.0123456789ab.us-east-1.redshift.localhost.floci.io", 5439  # Clusters[0].Endpoint
 with psycopg.connect(f"host={host} port={port} dbname=dev user=admin password=Secret123") as conn:
     conn.execute("CREATE TABLE people (name text)")
     conn.execute("INSERT INTO people VALUES ('Alice')")

@@ -381,6 +381,35 @@ public class RdsContainerManager {
         }
     }
 
+    /**
+     * Re-keys a running backend from one runtime identity to another, as a DB instance rename
+     * changes the ARN it is tracked under. The container, its storage and their ownership move
+     * as they are, so the old identity is free for a new resource straight away.
+     */
+    public synchronized void renameRuntime(String from, String to) {
+        if (from == null || to == null || from.equals(to)) {
+            return;
+        }
+        if (claimedRuntimes.contains(to) || activeContainers.containsKey(to)) {
+            throw new IllegalStateException("RDS runtime " + to + " already has an active container");
+        }
+        RdsContainerHandle handle = activeContainers.remove(from);
+        if (handle != null) {
+            RdsContainerHandle moved = new RdsContainerHandle(handle.getContainerId(), to,
+                    handle.getInstanceId(), handle.getHost(), handle.getPort(),
+                    handle.getStorageKey(), handle.getContainerKey());
+            moved.setLogStream(handle.getLogStream());
+            activeContainers.put(to, moved);
+        }
+        if (claimedRuntimes.remove(from)) {
+            claimedRuntimes.add(to);
+        }
+        if (cleanupPending.remove(from)) {
+            cleanupPending.add(to);
+        }
+        activeStorageOwners.replaceAll((key, owner) -> from.equals(owner) ? to : owner);
+    }
+
     /** Returns whether a backing RDS container still exists and is running. */
     public boolean isContainerRunning(String containerId) {
         return containerId != null

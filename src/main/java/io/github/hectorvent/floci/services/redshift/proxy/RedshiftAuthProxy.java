@@ -46,6 +46,7 @@ public class RedshiftAuthProxy {
 
     private volatile boolean running;
     private ServerSocket serverSocket;
+    private volatile int port;
 
     public RedshiftAuthProxy(String clusterKey, String backendHost, int backendPort,
                              String masterUsername, String masterPassword, String dbName,
@@ -89,6 +90,7 @@ public class RedshiftAuthProxy {
 
     public void start(int proxyPort) throws IOException {
         serverSocket = bindListener(proxyPort);
+        port = proxyPort;
         running = true;
         Thread.ofVirtual().name("redshift-proxy-accept-" + clusterKey).start(this::acceptLoop);
         LOG.infov("Redshift proxy started for cluster {0} on port {1} -> {2}:{3}",
@@ -134,6 +136,11 @@ public class RedshiftAuthProxy {
         } catch (IOException e) {
             LOG.debugv(e, "Error closing a discarded Redshift proxy listener socket");
         }
+    }
+
+    /** The port this proxy listens on. */
+    public int getPort() {
+        return port;
     }
 
     /** Swap the master-password snapshot after a rotation; new connections authenticate against it. */

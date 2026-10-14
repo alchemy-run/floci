@@ -49,6 +49,7 @@ Route53 management-plane emulation. Supports hosted zones, resource record sets,
 - `DeleteHostedZone` fails with `HostedZoneNotEmpty` if the zone contains records other than the apex SOA and NS.
 - `ChangeResourceRecordSets` validates all changes atomically before applying any.
 - Supported change actions: `CREATE`, `UPSERT`, `DELETE`.
+- Record names are stored and returned the way Route 53 returns them: fully qualified, with every character other than letters, digits, `-`, `_` and `.` as a three-digit octal escape, so a wildcard record lists as `\052.example.com.`. Either spelling (`*.example.com` or `\052.example.com`) names the same record set in changes and in `StartRecordName`.
 - Hosted zone IDs are returned with the `/hostedzone/` prefix in XML responses (e.g. `/hostedzone/Z1PA6795UKMFR9`). The AWS SDK strips this prefix client-side.
 - Health check IDs are plain UUIDs without a prefix.
 - Tags are supported for both `hostedzone` and `healthcheck` resource types.

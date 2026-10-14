@@ -668,6 +668,12 @@ public class SsmService implements ResourceProvider {
     }
 
     public synchronized SsmDocument createDocument(String name, String content, String documentType, String region) {
+        return createDocument(name, content, documentType, null, null, Map.of(), region);
+    }
+
+    public synchronized SsmDocument createDocument(String name, String content, String documentType,
+                                                   String documentFormat, String targetType,
+                                                   Map<String, String> tags, String region) {
         String storageKey = regionKey(region, name);
         if (documentStore.get(storageKey).isPresent()) {
             throw new AwsException("DocumentAlreadyExists",
@@ -675,6 +681,30 @@ public class SsmService implements ResourceProvider {
         }
         SsmDocument document = new SsmDocument(name, content, documentType);
         document.setOwner(regionResolver.getAccountId());
+        if (documentFormat != null && !documentFormat.isBlank()) {
+            document.setDocumentFormat(documentFormat);
+        }
+        document.setTargetType(targetType);
+        document.setTags(tags);
+        documentStore.put(storageKey, document);
+        return document;
+    }
+
+    /** Adds and removes a document's tags (AddTagsToResource/RemoveTagsFromResource with ResourceType=Document). */
+    public synchronized SsmDocument tagDocument(String name, Map<String, String> tagsToAdd,
+                                                List<String> tagKeysToRemove, String region) {
+        String storageKey = regionKey(region, name);
+        SsmDocument document = documentStore.get(storageKey)
+                .orElseThrow(() -> new AwsException("InvalidResourceId",
+                        "Resource " + name + " not found.", 400));
+        Map<String, String> tags = new LinkedHashMap<>(document.getTags());
+        if (tagKeysToRemove != null) {
+            tagKeysToRemove.forEach(tags::remove);
+        }
+        if (tagsToAdd != null) {
+            tags.putAll(tagsToAdd);
+        }
+        document.setTags(tags);
         documentStore.put(storageKey, document);
         return document;
     }

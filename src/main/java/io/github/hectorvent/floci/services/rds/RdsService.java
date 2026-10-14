@@ -54,6 +54,7 @@ import io.github.hectorvent.floci.services.rds.model.GlobalCluster;
 import io.github.hectorvent.floci.services.rds.model.GlobalClusterMember;
 import io.github.hectorvent.floci.services.rds.model.OptionGroup;
 import io.github.hectorvent.floci.services.rds.model.OptionGroupOption;
+import io.github.hectorvent.floci.services.rds.model.PointInTimeRestoreRequest;
 import io.github.hectorvent.floci.services.rds.model.RdsEvent;
 import io.github.hectorvent.floci.services.rds.model.ReadReplicaRequest;
 import io.github.hectorvent.floci.services.rds.proxy.RdsProxyManager;
@@ -201,6 +202,9 @@ public class RdsService implements Resettable, ResourceProvider {
     private static final Pattern SAFE_IMAGE_TAG_PATTERN = Pattern.compile("[A-Za-z0-9._-]+");
     private static final int SERVERLESS_V2_DEFAULT_AUTO_PAUSE_SECONDS = 300;
     private static final int SERVERLESS_V2_MAX_AUTO_PAUSE_SECONDS = 86_400;
+    /** A DB instance identifier: 1-63 letters, digits or hyphens, starting with a letter, no "--", no trailing hyphen. */
+    private static final Pattern DB_INSTANCE_IDENTIFIER_PATTERN =
+            Pattern.compile("^[A-Za-z](?!.*--)[A-Za-z0-9-]{0,62}(?<!-)$");
     private static final Pattern DB_PROXY_NAME_PATTERN =
             Pattern.compile("[a-zA-Z](?:-?[a-zA-Z0-9]+)*");
     /**
@@ -1174,6 +1178,286 @@ public class RdsService implements Resettable, ResourceProvider {
         }
 
         return instance;
+    }
+
+    /**
+     * RestoreDBInstanceToPointInTime: a new instance from the source's automated backups. The
+     * request's members win; the rest come from the source as AWS documents (its class, port,
+     * storage, subnet and security groups, backup settings and encryption). Floci keeps no write
+     * history, so the restored database holds the source's data as of the restore request, which
+     * is the latest restorable time; an earlier RestoreTime inside the window restores the same.
+     */
+    public DbInstance restoreDbInstanceToPointInTime(PointInTimeRestoreRequest request, String region) {
+        String effectiveRegion = effectiveRegion(region);
+        String accountId = currentAccountId();
+        String id = request.targetDbInstanceIdentifier();
+        if (id == null || id.isBlank()) {
+            throw new AwsException("InvalidParameterValue", "TargetDBInstanceIdentifier is required.", 400);
+        }
+        if (request.restoreTime() != null && request.useLatestRestorableTime()) {
+            throw new AwsException("InvalidParameterCombination",
+                    "Cannot specify both RestoreTime and UseLatestRestorableTime.", 400);
+        }
+        if (request.restoreTime() == null && !request.useLatestRestorableTime()) {
+            throw new AwsException("InvalidParameterCombination",
+                    "Either RestoreTime or UseLatestRestorableTime must be specified.", 400);
+        }
+        DbInstance source = resolvePointInTimeRestoreSource(request, accountId, effectiveRegion);
+        String sourceId = source.getDbInstanceIdentifier();
+        if (findInstanceForScope(accountId, effectiveRegion, id) != null) {
+            throw new AwsException("DBInstanceAlreadyExists", "DB instance " + id + " already exists.", 400);
+        }
+        if (source.getBackupRetentionPeriod() <= 0) {
+            throw new AwsException("PointInTimeRestoreNotEnabled",
+                    "SourceDBInstanceIdentifier refers to a DB instance with BackupRetentionPeriod equal to 0.",
+                    400);
+        }
+        if (source.getDbClusterIdentifier() != null && !source.getDbClusterIdentifier().isBlank()) {
+            throw new AwsException("InvalidParameterCombination",
+                    "DB instance " + sourceId + " belongs to DB cluster " + source.getDbClusterIdentifier()
+                    + ". Use RestoreDBClusterToPointInTime instead.", 400);
+        }
+        Instant latest = latestRestorableTime(source);
+        if (request.restoreTime() != null && latest != null
+                && (request.restoreTime().isBefore(source.getCreatedAt()) || request.restoreTime().isAfter(latest))) {
+            throw new AwsException("InvalidRestoreFault",
+                    "The restore time " + request.restoreTime() + " is outside the restorable window of DB instance "
+                    + sourceId + " (" + source.getCreatedAt() + " to " + latest + ").", 400);
+        }
+        boolean mock = config.services().rds().mock();
+        if (!mock && source.getEngine() != DatabaseEngine.POSTGRES) {
+            // CreateDBSnapshot draws the same line: the data copy is pg_dumpall based.
+            throw new AwsException("InvalidDBInstanceState",
+                    "Operation RestoreDBInstanceToPointInTime is not supported for engine "
+                    + source.getEngine() + ".", 400);
+        }
+        if (!mock && (source.getStatus() != DbInstanceStatus.AVAILABLE || source.getContainerId() == null)) {
+            throw new AwsException("InvalidDBInstanceState",
+                    "DB instance " + sourceId + " is not in available state.", 400);
+        }
+
+        DbInstanceSettings requested = request.settings() != null ? request.settings() : DbInstanceSettings.defaults();
+        int allocatedStorage = request.allocatedStorage() != null
+                ? request.allocatedStorage() : source.getAllocatedStorage();
+        String storageType = firstNonBlank(requested.storageType(), source.getStorageType());
+        Integer iops = requested.iops();
+        Integer throughput = requested.storageThroughput();
+        // Asking for the source's own storage performance is inheriting it, so it is not
+        // validated as an explicit IOPS or throughput request on a size that cannot take one.
+        if (allocatedStorage == source.getAllocatedStorage()
+                && Objects.equals(storageType, source.getStorageType())
+                && (iops == null || iops.equals(source.getIops()))
+                && (throughput == null || throughput.equals(source.getStorageThroughput()))) {
+            boolean provisionedIops = RdsInstanceStorage.IO1.equals(storageType)
+                    || RdsInstanceStorage.IO2.equals(storageType);
+            iops = provisionedIops ? source.getIops() : null;
+            throughput = null;
+        }
+        DbInstanceSettings settings = new DbInstanceSettings(
+                source.isStorageEncrypted() ? Boolean.TRUE : null,
+                source.isStorageEncrypted() ? source.getKmsKeyId() : null,
+                requested.backupRetentionPeriod() != null
+                        ? requested.backupRetentionPeriod() : source.getBackupRetentionPeriod(),
+                firstNonBlank(requested.preferredBackupWindow(), source.getPreferredBackupWindow()),
+                firstNonBlank(requested.preferredMaintenanceWindow(), source.getPreferredMaintenanceWindow()),
+                requested.copyTagsToSnapshot(),
+                requested.monitoringInterval(), requested.monitoringRoleArn(),
+                requested.performanceInsightsEnabled(), requested.performanceInsightsRetentionPeriod(),
+                requested.engineLifecycleSupport(), requested.enabledCloudwatchLogsExports(), null,
+                requested.maxAllocatedStorage(),
+                requested.port() != null ? requested.port() : instanceListenerPort(source),
+                storageType, iops, throughput,
+                requested.deletionProtection(),
+                firstNonBlank(requested.networkType(), source.getNetworkType()));
+
+        String engineParam = source.getEngineIdentifier() != null
+                ? source.getEngineIdentifier() : source.getEngine().name().toLowerCase(Locale.ROOT);
+        DbInstance restored = createDbInstance(id, engineParam, source.getEngineVersion(),
+                source.getMasterUsername(), source.getMasterPassword(), source.getDbName(),
+                firstNonBlank(request.dbInstanceClass(), source.getDbInstanceClass()), allocatedStorage,
+                request.iamDatabaseAuthenticationEnabled() != null
+                        ? request.iamDatabaseAuthenticationEnabled()
+                        : source.isIamDatabaseAuthenticationEnabled(),
+                request.dbParameterGroupName(),
+                firstNonBlank(request.dbSubnetGroupName(), source.getDbSubnetGroupName()), null,
+                request.availabilityZone(), Boolean.TRUE.equals(request.multiAz()), false, null,
+                request.tags() != null ? request.tags() : Map.of(),
+                request.vpcSecurityGroupIds() != null ? request.vpcSecurityGroupIds() : source.getVpcSecurityGroupIds(),
+                request.optionGroupName(), effectiveRegion,
+                request.autoMinorVersionUpgrade() != null
+                        ? request.autoMinorVersionUpgrade() : source.isAutoMinorVersionUpgrade(),
+                settings, request.publiclyAccessible());
+
+        if (!mock && restored.getContainerId() != null) {
+            try {
+                String sqlDump = containerManager.createPostgresSnapshot(
+                        source.getContainerId(), source.getMasterUsername());
+                containerManager.restorePostgresSnapshot(
+                        restored.getContainerId(), restored.getMasterUsername(), sqlDump);
+            } catch (Exception e) {
+                try {
+                    deleteDbInstance(id, effectiveRegion);
+                } catch (RuntimeException cleanupError) {
+                    e.addSuppressed(cleanupError);
+                }
+                AwsException failure = new AwsException("InvalidDBInstanceState",
+                        "Failed to restore DB instance " + id + " from " + sourceId + ": " + e.getMessage(), 400);
+                failure.initCause(e);
+                throw failure;
+            }
+        }
+        LOG.infov("DB instance {0} restored from DB instance {1} to {2}", id, sourceId,
+                request.useLatestRestorableTime() ? "its latest restorable time" : request.restoreTime());
+        return restored;
+    }
+
+    private DbInstance resolvePointInTimeRestoreSource(PointInTimeRestoreRequest request,
+                                                       String accountId, String region) {
+        String sourceRef = request.sourceDbInstanceIdentifier();
+        if (sourceRef != null && !sourceRef.isBlank()) {
+            String sourceId = sourceRef;
+            String sourceRegion = region;
+            if (sourceRef.startsWith("arn:")) {
+                sourceRegion = regionFromArn(sourceRef);
+                sourceId = sourceRef.substring(sourceRef.lastIndexOf(':') + 1);
+            }
+            DbInstance source = findInstanceForScope(accountId, sourceRegion, sourceId);
+            if (source == null) {
+                throw new AwsException("DBInstanceNotFound", "DBInstance " + sourceRef + " not found.", 404);
+            }
+            return source;
+        }
+        String resourceId = request.sourceDbiResourceId();
+        if (resourceId != null && !resourceId.isBlank()) {
+            return listDbInstancesByDbiResourceIds(List.of(resourceId), region).stream().findFirst()
+                    .orElseThrow(() -> new AwsException("DBInstanceNotFound",
+                            "DBInstance with DbiResourceId " + resourceId + " not found.", 404));
+        }
+        throw new AwsException("InvalidParameterCombination",
+                "One of SourceDBInstanceIdentifier, SourceDbiResourceId or "
+                + "SourceDBInstanceAutomatedBackupsArn must be specified.", 400);
+    }
+
+    /**
+     * The latest time an instance can be restored to, reported once automated backups are on.
+     * Floci restores from the live database, so that is the current time.
+     */
+    public Instant latestRestorableTime(DbInstance instance) {
+        if (instance == null || instance.getBackupRetentionPeriod() <= 0 || instance.getCreatedAt() == null
+                || (instance.getDbClusterIdentifier() != null && !instance.getDbClusterIdentifier().isBlank())) {
+            return null;
+        }
+        Instant now = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+        return now.isBefore(instance.getCreatedAt()) ? instance.getCreatedAt() : now;
+    }
+
+    /**
+     * ModifyDBInstance NewDBInstanceIdentifier: the instance takes the new identifier, ARN and
+     * endpoint host name. Its DbiResourceId, data, storage and tags are unchanged, and its
+     * container keeps running under the identity it was started with.
+     */
+    public synchronized DbInstance renameDbInstance(String id, String newId, String region) {
+        String effectiveRegion = effectiveRegion(region);
+        String accountId = currentAccountId();
+        DbInstance instance = getDbInstance(id, effectiveRegion);
+        if (newId == null || newId.isBlank() || newId.equals(id)) {
+            return instance;
+        }
+        validateDbInstanceRename(id, newId, effectiveRegion);
+        boolean mock = config.services().rds().mock();
+        String oldArn = instance.getDbInstanceArn();
+        if (!mock) {
+            proxyManager.stopProxy(rdsResourceRelayKey(oldArn, id));
+        }
+
+        DbInstance source = instance.getReadReplicaSourceDbInstanceIdentifier() != null
+                ? findLinkedInstance(accountId, instance, instance.getReadReplicaSourceDbInstanceIdentifier()) : null;
+        String linkFromSource = source != null ? replicationLinkName(source, instance) : null;
+        List<DbInstance> replicas = new ArrayList<>();
+        for (String replicaRef : instance.getReadReplicaDbInstanceIdentifiers()) {
+            DbInstance replica = findLinkedInstance(accountId, instance, replicaRef);
+            if (replica != null) {
+                replicas.add(replica);
+            }
+        }
+
+        String runtimeId = instanceRuntimeId(instance);
+        String newArn = regionResolver.buildArn("rds", effectiveRegion, "db:" + newId);
+        instance.setContainerStorageResourceId(resolvedInstanceStorageResourceId(instance));
+        instance.setDockerVolumeName(resolvedInstanceDockerVolumeName(instance));
+        instance.setContainerRuntimeId(null);
+        if (!mock) {
+            try {
+                // Track the backend under the new ARN so the old one is free for a new instance.
+                containerManager.renameRuntime(runtimeId, newArn);
+            } catch (IllegalStateException e) {
+                instance.setContainerRuntimeId(runtimeId);
+                LOG.warnv("DB instance {0} keeps its container under {1}: {2}", newId, runtimeId, e.getMessage());
+            }
+        }
+        instance.setDbInstanceIdentifier(newId);
+        instance.setDbInstanceArn(newArn);
+        assignInstanceEndpoint(instance);
+        deleteInstanceForScope(accountId, effectiveRegion, id);
+        putInstanceForScope(accountId, effectiveRegion, newId, instance);
+
+        if (source != null) {
+            List<String> links = source.getReadReplicaDbInstanceIdentifiers();
+            int index = links.indexOf(linkFromSource);
+            String renamed = replicationLinkName(source, instance);
+            if (index >= 0) {
+                links.set(index, renamed);
+            } else {
+                links.add(renamed);
+            }
+            putInstanceForScope(accountIdFromArn(source.getDbInstanceArn()),
+                    regionFromArn(source.getDbInstanceArn()), source.getDbInstanceIdentifier(), source);
+        }
+        for (DbInstance replica : replicas) {
+            replica.setReadReplicaSourceDbInstanceIdentifier(replicationLinkName(replica, instance));
+            putInstanceForScope(accountIdFromArn(replica.getDbInstanceArn()),
+                    regionFromArn(replica.getDbInstanceArn()), replica.getDbInstanceIdentifier(), replica);
+        }
+
+        if (!mock && hasBackend(instance.getContainerHost(), instance.getContainerPort())) {
+            String effectiveMasterUser = instance.getMasterUsername() != null
+                    ? instance.getMasterUsername() : "root";
+            String instanceRegion = regionFromArn(instance.getDbInstanceArn());
+            proxyManager.startProxy(rdsResourceRelayKey(instance.getDbInstanceArn(), newId),
+                    instance.getEngine(), instance.isIamDatabaseAuthenticationEnabled(),
+                    instance.getProxyPort(), instance.getContainerHost(), instance.getContainerPort(),
+                    instance.getEndpoint().address(), effectiveMasterUser, instance.getMasterPassword(),
+                    instance.getDbName(),
+                    (user, pw) -> validateDbPasswordForScope(accountId, instanceRegion, newId, user, pw));
+            advertiseInstance(instance);
+        }
+        recordInstanceEvent(instance, "Renamed instance from " + id + " to " + newId, "notification");
+        LOG.infov("DB instance {0} renamed to {1}", id, newId);
+        return instance;
+    }
+
+    /** Checks a NewDBInstanceIdentifier before any part of the modification is applied. */
+    public synchronized void validateDbInstanceRename(String id, String newId, String region) {
+        String effectiveRegion = effectiveRegion(region);
+        String accountId = currentAccountId();
+        DbInstance instance = getDbInstance(id, effectiveRegion);
+        if (newId == null || newId.isBlank() || newId.equals(id)) {
+            return;
+        }
+        if (!DB_INSTANCE_IDENTIFIER_PATTERN.matcher(newId).matches()) {
+            throw new AwsException("InvalidParameterValue",
+                    "The parameter NewDBInstanceIdentifier is not a valid identifier. Identifiers must begin "
+                    + "with a letter; must contain only ASCII letters, digits, and hyphens; and must not end "
+                    + "with a hyphen or contain two consecutive hyphens.", 400);
+        }
+        if (findInstanceForScope(accountId, effectiveRegion, newId) != null
+                || provisioningIds.contains("instance:" + accountId + ":" + dbResourceKey(effectiveRegion, newId))) {
+            throw new AwsException("DBInstanceAlreadyExists", "DB instance " + newId + " already exists.", 400);
+        }
+        if (instance.getStatus() != DbInstanceStatus.AVAILABLE) {
+            throw new AwsException("InvalidDBInstanceState",
+                    "DB instance " + id + " is not in available state.", 400);
+        }
     }
 
     // ── Read replicas ─────────────────────────────────────────────────────────
@@ -2438,6 +2722,26 @@ public class RdsService implements Resettable, ResourceProvider {
      * AWS does not keep reporting an instance as available after its database process is gone.
      * Queued modifications whose maintenance window has started are applied first.
      */
+    /**
+     * Records that a DescribeDBInstances naming this instance reported it as creating, so later
+     * calls report it available once the creating period has passed.
+     */
+    public synchronized void noteCreatingReported(DbInstance reported) {
+        if (reported == null || reported.getDbInstanceArn() == null
+                || !RdsInstanceLifecycle.creatingUnreported(reported, Instant.now())) {
+            return;
+        }
+        String accountId = accountIdFromArn(reported.getDbInstanceArn());
+        String region = regionFromArn(reported.getDbInstanceArn());
+        DbInstance stored = findInstanceForScope(accountId, region, reported.getDbInstanceIdentifier());
+        if (stored == null || !reported.getDbInstanceArn().equals(stored.getDbInstanceArn())) {
+            return;
+        }
+        reported.setTransitionalStatusReported(true);
+        stored.setTransitionalStatusReported(true);
+        putInstanceForScope(accountId, region, stored.getDbInstanceIdentifier(), stored);
+    }
+
     public synchronized DbInstance refreshDbInstanceRuntimeHealth(DbInstance instance) {
         instance = settlePendingModifications(instance);
         if (instance == null
@@ -3146,7 +3450,7 @@ public class RdsService implements Resettable, ResourceProvider {
         RdsContainerHandle handle;
         try {
             handle = containerManager.tryStart(
-                    instance.getDbInstanceArn(), id, storageResourceId,
+                    instanceRuntimeId(instance), id, storageResourceId,
                     dockerVolumeName, instance.getEngine(), image, instance.getMasterUsername(),
                     instance.getMasterPassword(), instance.getDbName());
         } catch (RuntimeException | Error e) {
@@ -3407,7 +3711,7 @@ public class RdsService implements Resettable, ResourceProvider {
                 String storageResourceId = resolvedInstanceStorageResourceId(instance);
                 String dockerVolumeName = resolvedInstanceDockerVolumeName(instance);
                 RdsContainerHandle handle = containerManager.tryStart(
-                        instance.getDbInstanceArn(), id, storageResourceId,
+                        instanceRuntimeId(instance), id, storageResourceId,
                         dockerVolumeName, instance.getEngine(), image, instance.getMasterUsername(),
                         instance.getMasterPassword(), instance.getDbName());
                 instance.setContainerStorageResourceId(storageResourceId);
@@ -3496,7 +3800,7 @@ public class RdsService implements Resettable, ResourceProvider {
         } else {
             String image = imageForEngine(instance.getEngine(), instance.getEngineVersion());
             started = containerManager.tryStart(
-                    instance.getDbInstanceArn(), id, resolvedInstanceStorageResourceId(instance),
+                    instanceRuntimeId(instance), id, resolvedInstanceStorageResourceId(instance),
                     resolvedInstanceDockerVolumeName(instance), instance.getEngine(), image,
                     instance.getMasterUsername(), instance.getMasterPassword(), instance.getDbName());
             if (started == null) {
@@ -3647,14 +3951,14 @@ public class RdsService implements Resettable, ResourceProvider {
             // mock mode, and an instance with no container and no reachable daemon has nothing
             // Docker could clean up, so its delete stays pure metadata.
             if (!mock && backendCleanupPossible(
-                    instance.getContainerId(), instance.getDbInstanceArn())) {
+                    instance.getContainerId(), instanceRuntimeId(instance))) {
                 if (instance.getContainerId() != null) {
                     containerManager.stop(buildHandle(instance));
                 } else {
-                    containerManager.stopByRuntimeId(instance.getDbInstanceArn());
+                    containerManager.stopByRuntimeId(instanceRuntimeId(instance));
                 }
                 containerManager.removeVolume(
-                        instance.getDbInstanceArn(),
+                        instanceRuntimeId(instance),
                         resolvedInstanceStorageResourceId(instance),
                         resolvedInstanceDockerVolumeName(instance));
             }
@@ -5518,12 +5822,16 @@ public class RdsService implements Resettable, ResourceProvider {
     }
 
     public DbProxy getDbProxy(String name, String region) {
-        if (name == null || name.isBlank()) {
-            throw new AwsException("InvalidParameterValue", "DBProxyName is required.", 400);
+        if (name == null || name.isEmpty()) {
+            // AWS validates the member before looking the proxy up.
+            throw new AwsException("ValidationError", "2 validation errors detected: Value '' at 'dBProxyName' "
+                    + "failed to satisfy constraint: Member must have length greater than or equal to 1; "
+                    + "Value '' at 'dBProxyName' failed to satisfy constraint: Member must satisfy regular "
+                    + "expression pattern: [a-zA-Z](?:-?[a-zA-Z0-9]+)*", 400);
         }
         String effectiveRegion = effectiveRegion(region);
         return findDbProxy(name, effectiveRegion).orElseThrow(() ->
-                new AwsException("DBProxyNotFoundFault", "DB proxy " + name + " not found.", 404));
+                new AwsException("DBProxyNotFoundFault", "DBProxy '" + name + "' not found.", 404));
     }
 
     public Collection<DbProxy> listDbProxies(String filterName) {
@@ -8096,7 +8404,7 @@ public class RdsService implements Resettable, ResourceProvider {
                 } else {
                     String image = imageForEngine(instance.getEngine(), instance.getEngineVersion());
                     restoredHandle = containerManager.tryStart(
-                            instance.getDbInstanceArn(), instance.getDbInstanceIdentifier(),
+                            instanceRuntimeId(instance), instance.getDbInstanceIdentifier(),
                             instance.getContainerStorageResourceId(),
                             instance.getDockerVolumeName(), instance.getEngine(), image,
                             instance.getMasterUsername(), instance.getMasterPassword(), instance.getDbName());
@@ -8135,7 +8443,7 @@ public class RdsService implements Resettable, ResourceProvider {
                 }
                 RdsContainerHandle cleanupHandle = restoredHandle != null
                         ? restoredHandle
-                        : containerManager.getActiveHandle(instance.getDbInstanceArn());
+                        : containerManager.getActiveHandle(instanceRuntimeId(instance));
                 boolean containerCleaned = stopRestoredContainer(cleanupHandle, e, "instance",
                         instance.getDbInstanceIdentifier());
                 if (portReserved) {
@@ -9340,9 +9648,17 @@ public class RdsService implements Resettable, ResourceProvider {
         return value == null || value.isBlank() ? fallback : value;
     }
 
+    /**
+     * The identity the instance's container and storage are tracked under: its ARN, unless a
+     * rename could not move the container to the new one.
+     */
+    private static String instanceRuntimeId(DbInstance instance) {
+        return firstNonBlank(instance.getContainerRuntimeId(), instance.getDbInstanceArn());
+    }
+
     private RdsContainerHandle buildHandle(DbInstance instance) {
         return new RdsContainerHandle(
-                instance.getContainerId(), instance.getDbInstanceArn(),
+                instance.getContainerId(), instanceRuntimeId(instance),
                 instance.getDbInstanceIdentifier(),
                 instance.getContainerHost(), instance.getContainerPort());
     }

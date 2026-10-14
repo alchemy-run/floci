@@ -56,6 +56,23 @@ public class RdsProxyManager {
         return router.register(relayKey, port, hostnames, proxy.getPort(), proxy.getEngine());
     }
 
+    /**
+     * Routes another service's PostgreSQL-protocol endpoint (a Redshift cluster) through the same
+     * shared listeners: {@code hostnames} on {@code port} go to the listener on {@code targetPort}.
+     *
+     * @return false when the port could not be bound on this host
+     */
+    public synchronized boolean routePostgresEndpoint(String key, List<String> hostnames, int port, int targetPort) {
+        for (String hostname : hostnames) {
+            tlsCertificates.ensureHost(hostname);
+        }
+        return router.register(key, port, hostnames, targetPort, DatabaseEngine.POSTGRES);
+    }
+
+    public synchronized void unroutePostgresEndpoint(String key) {
+        router.unregister(key);
+    }
+
     public synchronized void startProxy(String instanceId, DatabaseEngine engine, boolean iamEnabled,
                                         int proxyPort, String backendHost, int backendPort,
                                         String advertisedHost,

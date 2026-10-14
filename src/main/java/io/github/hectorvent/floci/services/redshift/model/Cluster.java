@@ -79,6 +79,13 @@ public class Cluster {
     public int getProxyPort() { return proxyPort; }
     public void setProxyPort(int proxyPort) { this.proxyPort = proxyPort; }
 
+    // Port the cluster was created with (CreateCluster Port, 5439 by default). Its endpoint
+    // advertises this port; 0 for a cluster persisted before it was recorded.
+    private int port = 0;
+
+    public int getPort() { return port; }
+    public void setPort(int port) { this.port = port; }
+
     private Map<String, String> tags = new LinkedHashMap<>();
 
     public Map<String, String> getTags() { return tags; }

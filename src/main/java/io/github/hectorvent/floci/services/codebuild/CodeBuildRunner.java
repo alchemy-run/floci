@@ -156,6 +156,25 @@ public class CodeBuildRunner implements ContainerTeardown {
         }
     }
 
+    /**
+     * The platform of an AWS curated build image, which is fixed by its name. Pinning it lets a
+     * locally cached curated image be used as is; checking it against the daemon's own platform
+     * never matches an x86_64 image on an arm64 host, so every build re-queried the registry and
+     * blocked on a full multi-gigabyte download whenever AWS republished the tag.
+     */
+    static String curatedImagePlatform(String resolvedImage) {
+        if (resolvedImage == null || !resolvedImage.startsWith("public.ecr.aws/codebuild/")) {
+            return null;
+        }
+        if (resolvedImage.contains("x86_64")) {
+            return "linux/amd64";
+        }
+        if (resolvedImage.contains("aarch64")) {
+            return "linux/arm64";
+        }
+        return null;
+    }
+
     static String resolveBuildImage(String image) {
         if (image == null || image.isBlank()) {
             throw new AwsException("InvalidInputException", "environment.image is required", 400);
@@ -264,6 +283,8 @@ public class CodeBuildRunner implements ContainerTeardown {
                 String environmentType = build.getEnvironment() != null ? build.getEnvironment().getType() : null;
                 String platform = "ARM_CONTAINER".equals(environmentType) ? "linux/arm64" : "linux/amd64";
                 containerId = lifecycleManager.create(spec, platform);
+            } else if (curatedImagePlatform(resolvedImage) != null) {
+                containerId = lifecycleManager.create(spec, curatedImagePlatform(resolvedImage));
             } else {
                 containerId = lifecycleManager.create(spec);
             }

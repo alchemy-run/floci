@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.redshift.proxy;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.rds.proxy.PasswordValidator;
+import io.github.hectorvent.floci.services.rds.proxy.RdsProxyManager;
 import io.github.hectorvent.floci.services.rds.proxy.RdsProxyTlsCertificates;
 import io.github.hectorvent.floci.services.rds.proxy.RdsSigV4Validator;
 import io.github.hectorvent.floci.services.s3.S3Service;
@@ -12,6 +13,7 @@ import java.io.IOException;
 import java.lang.reflect.Field;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
+import java.net.Socket;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -80,6 +82,49 @@ class RedshiftProxyManagerTest {
 
         assertFalse(registry(manager).containsKey(KEY));
         assertPortAvailable(port);
+    }
+
+    @Test
+    void clustersShareTheirAdvertisedPortThroughTheSharedEndpointRouter() throws Exception {
+        EmulatorConfig config = testConfig();
+        EmulatorConfig.RdsServiceConfig rdsConfig = mock(EmulatorConfig.RdsServiceConfig.class);
+        when(rdsConfig.proxyHandshakeTimeoutMillis()).thenReturn(5000);
+        when(rdsConfig.proxyBackendConnectTimeoutMillis()).thenReturn(5000);
+        when(rdsConfig.proxyMaxConnections()).thenReturn(100);
+        when(config.services().rds()).thenReturn(rdsConfig);
+        RdsProxyTlsCertificates certificates = mock(RdsProxyTlsCertificates.class);
+        RdsProxyManager router = new RdsProxyManager(mock(RdsSigV4Validator.class), certificates, config);
+        RedshiftProxyManager manager = new RedshiftProxyManager(mock(RdsSigV4Validator.class), certificates,
+                mock(S3Service.class), mock(IamService.class), config, router, null);
+        int clusterPort = availablePort();
+        try {
+            start(manager, KEY, availablePort());
+            start(manager, SECOND_KEY, availablePort());
+
+            assertTrue(manager.advertise(KEY, "c1.example.redshift.localhost.floci.io", clusterPort));
+            assertTrue(manager.advertise(SECOND_KEY, "c2.example.redshift.localhost.floci.io", clusterPort));
+            assertPortUnavailable(clusterPort);
+
+            // A plaintext startup names neither cluster, so the shared listener refuses it.
+            try (Socket client = new Socket("127.0.0.1", clusterPort)) {
+                client.setSoTimeout(5000);
+                java.io.DataOutputStream out = new java.io.DataOutputStream(client.getOutputStream());
+                byte[] params = "user\0admin\0\0".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                out.writeInt(8 + params.length);
+                out.writeInt(196608);
+                out.write(params);
+                out.flush();
+                assertEquals('E', client.getInputStream().read());
+            }
+
+            manager.stopProxy(KEY);
+            assertPortUnavailable(clusterPort);
+            manager.stopProxy(SECOND_KEY);
+            assertPortAvailable(clusterPort);
+        } finally {
+            manager.stopAll();
+            router.stopAll();
+        }
     }
 
     @Test

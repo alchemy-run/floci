@@ -29,7 +29,11 @@ Cloud Control.
 - **`ListResources` / `GetResource` type coverage**: the read side lists
   `AWS::S3::Bucket`, `AWS::EC2::VPC`, `AWS::EC2::Subnet`, `AWS::EC2::SecurityGroup`,
   `AWS::EC2::Instance`, `AWS::EC2::LaunchTemplate`, `AWS::IAM::Role`, `AWS::IAM::User`,
-  and `AWS::IAM::InstanceProfile`. `CreateResource` accepts any type the underlying
+  `AWS::IAM::InstanceProfile`, `AWS::SSM::Parameter`, and `AWS::SSM::Document`.
+  `UpdateResource` applies a JSON Patch to `AWS::SSM::Parameter` and `AWS::SSM::Document`;
+  a document `Content` change needs `UpdateMethod: NewVersion` to become a new default
+  version (otherwise the document is replaced under its name), and resending the stored
+  content fails with SSM's `DuplicateDocumentContent`, as on AWS. `CreateResource` accepts any type the underlying
   CloudFormation resource provisioner supports (the same set stacks can provision),
   which is broader than the read side. A resource created through Cloud Control but
   outside the read-side type list is still readable via `GetResource`, from
