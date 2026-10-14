@@ -521,6 +521,7 @@ public class LambdaDurableService {
             }
             case DurableOperation.TYPE_WAIT -> {
                 long waitSeconds = Math.max(0, update.path("WaitOptions").path("WaitSeconds").asLong(0));
+                op.setWaitSeconds(waitSeconds);
                 op.setScheduledEndTimestampMillis(now + waitSeconds * 1000L);
                 armWaitTimer(execution.getExecutionArn(), op.getId(), waitSeconds * 1000L);
             }
@@ -529,6 +530,9 @@ public class LambdaDurableService {
                 op.setCallbackId(callbackId);
                 callbackIndex.put(callbackId, execution.getExecutionArn());
                 long timeoutSeconds = update.path("CallbackOptions").path("TimeoutSeconds").asLong(0);
+                long heartbeatSeconds = update.path("CallbackOptions").path("HeartbeatTimeoutSeconds").asLong(0);
+                op.setCallbackTimeoutSeconds(timeoutSeconds > 0 ? timeoutSeconds : null);
+                op.setCallbackHeartbeatTimeoutSeconds(heartbeatSeconds > 0 ? heartbeatSeconds : null);
                 if (timeoutSeconds > 0) {
                     op.setScheduledEndTimestampMillis(now + timeoutSeconds * 1000L);
                     armCallbackTimeout(execution.getExecutionArn(), op.getId(), timeoutSeconds * 1000L);
@@ -1048,40 +1052,45 @@ public class LambdaDurableService {
         return response;
     }
 
+    /**
+     * Builds the execution's event history. Every event carries its
+     * {@code <EventType>Details} object (as on AWS); {@code IncludeExecutionData}
+     * only controls whether input/result/error payloads are present in it.
+     */
     public ObjectNode getExecutionHistory(String executionArn, boolean includeExecutionData, boolean reverseOrder) {
         DurableExecution execution;
         synchronized (lock(executionArn)) {
             execution = requireExecution(executionArn);
         }
         List<ObjectNode> events = new ArrayList<>();
+        ObjectNode executionEnded = null;
         for (DurableOperation op : execution.getOperations()) {
-            ObjectNode started = historyEvent(op, eventType(op.getType(), "Started"),
-                    op.getStartTimestampMillis());
-            if (DurableOperation.TYPE_EXECUTION.equals(op.getType()) && includeExecutionData
-                    && op.getInputPayload() != null) {
-                ObjectNode details = started.putObject("ExecutionStartedDetails");
-                details.putObject("Input").put("Payload", op.getInputPayload());
-                details.put("ExecutionTimeout", 0);
-            }
+            String startType = eventType(op.getType(), "Started");
+            ObjectNode started = historyEvent(op, startType, op.getStartTimestampMillis());
+            started.set(startType + "Details", startedDetails(op, includeExecutionData));
             events.add(started);
 
+            if (DurableOperation.TYPE_EXECUTION.equals(op.getType())) {
+                // The execution's terminal event follows its own status and always closes the history.
+                String endType = executionTerminalEventType(execution);
+                if (endType != null && execution.getEndTimestampMillis() != null) {
+                    executionEnded = historyEvent(op, endType, execution.getEndTimestampMillis());
+                    executionEnded.set(endType + "Details",
+                            executionTerminalDetails(execution, includeExecutionData));
+                }
+                continue;
+            }
             String endType = terminalEventType(op);
             if (endType != null && op.getEndTimestampMillis() != null) {
                 ObjectNode ended = historyEvent(op, endType, op.getEndTimestampMillis());
-                if (includeExecutionData) {
-                    if (op.getResult() != null) {
-                        ended.putObject(endType + "Details").putObject("Result")
-                                .put("Payload", op.getResult());
-                    } else if (op.getError() != null) {
-                        ended.putObject(endType + "Details").set("Error",
-                                objectMapper.createObjectNode().set("Payload",
-                                        objectMapper.valueToTree(op.getError())));
-                    }
-                }
+                ended.set(endType + "Details", terminalDetails(op, endType, includeExecutionData));
                 events.add(ended);
             }
         }
         events.sort(Comparator.comparingDouble(e -> e.get("EventTimestamp").asDouble()));
+        if (executionEnded != null) {
+            events.add(executionEnded);
+        }
         if (reverseOrder) {
             java.util.Collections.reverse(events);
         }
@@ -1093,6 +1102,111 @@ public class LambdaDurableService {
             array.add(event);
         }
         return response;
+    }
+
+    private ObjectNode startedDetails(DurableOperation op, boolean includeData) {
+        ObjectNode details = objectMapper.createObjectNode();
+        switch (op.getType()) {
+            case DurableOperation.TYPE_EXECUTION -> {
+                details.set("Input", eventPayload(op.getInputPayload(), includeData));
+                // Floci does not model DurableConfig.ExecutionTimeout.
+                details.put("ExecutionTimeout", 0);
+            }
+            case DurableOperation.TYPE_WAIT -> {
+                long seconds = op.getWaitSeconds() != null
+                        ? op.getWaitSeconds()
+                        : op.getScheduledEndTimestampMillis() != null
+                                ? Math.max(0, (op.getScheduledEndTimestampMillis() - op.getStartTimestampMillis()) / 1000)
+                                : 0;
+                details.put("Duration", seconds);
+                long scheduledEnd = op.getScheduledEndTimestampMillis() != null
+                        ? op.getScheduledEndTimestampMillis()
+                        : op.getStartTimestampMillis() + seconds * 1000L;
+                details.put("ScheduledEndTimestamp", toEpochSeconds(scheduledEnd));
+            }
+            case DurableOperation.TYPE_CALLBACK -> {
+                details.put("CallbackId", op.getCallbackId() != null ? op.getCallbackId() : "");
+                if (op.getCallbackHeartbeatTimeoutSeconds() != null) {
+                    details.put("HeartbeatTimeout", op.getCallbackHeartbeatTimeoutSeconds());
+                }
+                if (op.getCallbackTimeoutSeconds() != null) {
+                    details.put("Timeout", op.getCallbackTimeoutSeconds());
+                }
+            }
+            case DurableOperation.TYPE_CHAINED_INVOKE -> {
+                details.put("FunctionName", op.getChainedFunctionName() != null ? op.getChainedFunctionName() : "");
+                if (op.getInputPayload() != null) {
+                    details.set("Input", eventPayload(op.getInputPayload(), includeData));
+                }
+                if (op.getChainedChildExecutionArn() != null) {
+                    details.put("DurableExecutionArn", op.getChainedChildExecutionArn());
+                }
+            }
+            default -> {
+                // StepStartedDetails / ContextStartedDetails have no members.
+            }
+        }
+        return details;
+    }
+
+    private ObjectNode terminalDetails(DurableOperation op, String eventType, boolean includeData) {
+        ObjectNode details = objectMapper.createObjectNode();
+        switch (eventType) {
+            case "WaitSucceeded" -> {
+                if (op.getWaitSeconds() != null) {
+                    details.put("Duration", op.getWaitSeconds());
+                }
+            }
+            case "WaitCancelled" -> {
+                if (op.getError() != null) {
+                    details.set("Error", eventError(op.getError(), includeData));
+                }
+            }
+            default -> {
+                if (eventType.endsWith("Succeeded")) {
+                    details.set("Result", eventPayload(op.getResult(), includeData));
+                } else {
+                    details.set("Error", eventError(op.getError(), includeData));
+                }
+            }
+        }
+        if (DurableOperation.TYPE_STEP.equals(op.getType())) {
+            ObjectNode retry = details.putObject("RetryDetails");
+            if (op.getAttempt() != null) {
+                retry.put("CurrentAttempt", op.getAttempt());
+            }
+        }
+        return details;
+    }
+
+    private ObjectNode executionTerminalDetails(DurableExecution execution, boolean includeData) {
+        ObjectNode details = objectMapper.createObjectNode();
+        if (DurableExecution.STATUS_SUCCEEDED.equals(execution.getStatus())) {
+            details.set("Result", eventPayload(execution.getResult(), includeData));
+        } else {
+            details.set("Error", eventError(execution.getError(), includeData));
+        }
+        return details;
+    }
+
+    /** {@code EventInput} / {@code EventResult}: the payload only when execution data is requested. */
+    private ObjectNode eventPayload(String payload, boolean includeData) {
+        ObjectNode node = objectMapper.createObjectNode();
+        if (includeData && payload != null) {
+            node.put("Payload", payload);
+            node.put("Truncated", false);
+        }
+        return node;
+    }
+
+    /** {@code EventError}: the ErrorObject only when execution data is requested. */
+    private ObjectNode eventError(Map<String, Object> error, boolean includeData) {
+        ObjectNode node = objectMapper.createObjectNode();
+        if (includeData && error != null) {
+            node.set("Payload", objectMapper.valueToTree(error));
+            node.put("Truncated", false);
+        }
+        return node;
     }
 
     private ObjectNode historyEvent(DurableOperation op, String eventType, long timestampMillis) {
@@ -1124,12 +1238,34 @@ public class LambdaDurableService {
         };
     }
 
+    /** Terminal event of a non-EXECUTION operation, limited to the AWS EventType enum. */
     private String terminalEventType(DurableOperation op) {
+        String type = op.getType();
         return switch (op.getStatus()) {
-            case DurableOperation.STATUS_SUCCEEDED -> eventType(op.getType(), "Succeeded");
-            case DurableOperation.STATUS_FAILED -> eventType(op.getType(), "Failed");
-            case DurableOperation.STATUS_CANCELLED -> eventType(op.getType(), "Cancelled");
-            case DurableOperation.STATUS_TIMED_OUT -> eventType(op.getType(), "TimedOut");
+            case DurableOperation.STATUS_SUCCEEDED -> eventType(type, "Succeeded");
+            case DurableOperation.STATUS_FAILED -> DurableOperation.TYPE_WAIT.equals(type)
+                    ? null
+                    : eventType(type, "Failed");
+            case DurableOperation.STATUS_TIMED_OUT -> DurableOperation.TYPE_CALLBACK.equals(type)
+                    || DurableOperation.TYPE_CHAINED_INVOKE.equals(type)
+                    ? eventType(type, "TimedOut")
+                    : null;
+            case DurableOperation.STATUS_CANCELLED -> switch (type) {
+                case DurableOperation.TYPE_WAIT -> "WaitCancelled";
+                case DurableOperation.TYPE_CHAINED_INVOKE -> "ChainedInvokeStopped";
+                default -> null;
+            };
+            default -> null;
+        };
+    }
+
+    /** The EXECUTION operation's terminal event follows the execution's own status. */
+    private String executionTerminalEventType(DurableExecution execution) {
+        return switch (execution.getStatus()) {
+            case DurableExecution.STATUS_SUCCEEDED -> "ExecutionSucceeded";
+            case DurableExecution.STATUS_FAILED -> "ExecutionFailed";
+            case DurableExecution.STATUS_TIMED_OUT -> "ExecutionTimedOut";
+            case DurableExecution.STATUS_STOPPED -> "ExecutionStopped";
             default -> null;
         };
     }

@@ -464,7 +464,179 @@ class LambdaDurableServiceTest {
         assertEquals(DurableExecution.STATUS_SUCCEEDED, store.get(arn).orElseThrow().getStatus());
     }
 
+    @Test
+    void historyAlwaysCarriesEventDetailsAndGatesPayloadsOnIncludeExecutionData() {
+        invoker.enqueue(event -> {
+            String arn = event.get("DurableExecutionArn").asText();
+            String token = event.get("CheckpointToken").asText();
+            service.checkpoint(arn, checkpointBody(token,
+                    update("step-1", "STEP", "START", u -> u.put("Name", "greet").put("SubType", "Step")),
+                    update("step-1", "STEP", "SUCCEED",
+                            u -> u.put("Name", "greet").put("SubType", "Step").put("Payload", "\"hello\"")),
+                    update("wait-1", "WAIT", "START", u -> {
+                        u.put("Name", "nap").put("SubType", "Wait");
+                        u.putObject("WaitOptions").put("WaitSeconds", 3);
+                    })));
+            return invocationEnvelope("PENDING", null);
+        });
+        String arn = service.startExecution(REGION, FUNCTION, null, "history-1",
+                "{\"name\":\"sam\"}".getBytes(StandardCharsets.UTF_8)).getExecutionArn();
+        invoker.enqueue(event -> invocationEnvelope("SUCCEEDED", "\"done\""));
+        scheduler.fireNext();
+
+        JsonNode events = service.getExecutionHistory(arn, false, false).get("Events");
+        assertEquals(List.of("ExecutionStarted", "StepStarted", "StepSucceeded", "WaitStarted",
+                "WaitSucceeded", "ExecutionSucceeded"), eventTypes(events));
+        for (JsonNode event : events) {
+            assertTrue(event.has(event.get("EventType").asText() + "Details"),
+                    "every event carries its details object: " + event);
+        }
+
+        JsonNode executionStarted = event(events, "ExecutionStarted").get("ExecutionStartedDetails");
+        assertTrue(executionStarted.get("Input").isObject());
+        assertTrue(executionStarted.has("ExecutionTimeout"));
+        assertTrue(!executionStarted.get("Input").has("Payload"), "payload gated on IncludeExecutionData");
+
+        JsonNode stepSucceeded = event(events, "StepSucceeded");
+        assertEquals("greet", stepSucceeded.get("Name").asText());
+        JsonNode stepDetails = stepSucceeded.get("StepSucceededDetails");
+        assertTrue(stepDetails.get("Result").isObject());
+        assertTrue(!stepDetails.get("Result").has("Payload"), "payload gated on IncludeExecutionData");
+        assertEquals(1, stepDetails.get("RetryDetails").get("CurrentAttempt").asInt());
+
+        JsonNode waitStarted = event(events, "WaitStarted").get("WaitStartedDetails");
+        assertEquals(3, waitStarted.get("Duration").asInt());
+        assertTrue(waitStarted.get("ScheduledEndTimestamp").asDouble() > 0);
+        assertEquals(3, event(events, "WaitSucceeded").get("WaitSucceededDetails").get("Duration").asInt());
+        assertTrue(!event(events, "ExecutionSucceeded").get("ExecutionSucceededDetails")
+                .get("Result").has("Payload"));
+
+        JsonNode withData = service.getExecutionHistory(arn, true, false).get("Events");
+        assertEquals("{\"name\":\"sam\"}", event(withData, "ExecutionStarted")
+                .get("ExecutionStartedDetails").get("Input").get("Payload").asText());
+        JsonNode stepResult = event(withData, "StepSucceeded").get("StepSucceededDetails").get("Result");
+        assertEquals("\"hello\"", stepResult.get("Payload").asText());
+        assertEquals(false, stepResult.get("Truncated").asBoolean());
+        assertEquals("\"done\"", event(withData, "ExecutionSucceeded")
+                .get("ExecutionSucceededDetails").get("Result").get("Payload").asText());
+    }
+
+    @Test
+    void callbackSuccessResumesWaitingExecutionAndIsVisibleInHistory() {
+        String[] callbackId = new String[1];
+        invoker.enqueue(event -> {
+            String arn = event.get("DurableExecutionArn").asText();
+            String token = event.get("CheckpointToken").asText();
+            service.checkpoint(arn, checkpointBody(token,
+                    update("step-1", "STEP", "START", u -> u.put("Name", "requested")),
+                    update("step-1", "STEP", "SUCCEED", u -> u.put("Name", "requested").put("Payload", "null")),
+                    update("ctx-1", "CONTEXT", "START",
+                            u -> u.put("Name", "approval").put("SubType", "WaitForCallback"))));
+            ObjectNode response = service.checkpoint(arn, checkpointBody(token,
+                    update("cb-1", "CALLBACK", "START", u -> {
+                        u.put("ParentId", "ctx-1").put("SubType", "Callback");
+                        u.putObject("CallbackOptions").put("TimeoutSeconds", 300).put("HeartbeatTimeoutSeconds", 60);
+                    })));
+            callbackId[0] = findOperation(response.get("NewExecutionState").get("Operations"), "cb-1")
+                    .get("CallbackDetails").get("CallbackId").asText();
+            return invocationEnvelope("PENDING", null);
+        });
+        String arn = service.startExecution(REGION, FUNCTION, null, "approve-1",
+                "{}".getBytes(StandardCharsets.UTF_8)).getExecutionArn();
+        assertEquals(1, invoker.invocationCount());
+
+        // An outside caller finds the pending callback from the history alone.
+        JsonNode events = service.getExecutionHistory(arn, false, false).get("Events");
+        JsonNode callbackStarted = event(events, "CallbackStarted");
+        assertEquals("ctx-1", callbackStarted.get("ParentId").asText());
+        JsonNode startedDetails = callbackStarted.get("CallbackStartedDetails");
+        assertEquals(callbackId[0], startedDetails.get("CallbackId").asText());
+        assertEquals(300, startedDetails.get("Timeout").asInt());
+        assertEquals(60, startedDetails.get("HeartbeatTimeout").asInt());
+        assertEquals("WaitForCallback", event(events, "ContextStarted").get("SubType").asText());
+
+        invoker.enqueue(event -> {
+            List<String> updatedIds = new ArrayList<>();
+            event.get("UpdatedOperationIds").forEach(n -> updatedIds.add(n.asText()));
+            assertTrue(updatedIds.contains("cb-1"), "resume carries the completed callback id");
+            JsonNode callback = findOperation(event.get("InitialExecutionState").get("Operations"), "cb-1");
+            assertEquals("SUCCEEDED", callback.get("Status").asText());
+            assertEquals("\"agent\"", callback.get("CallbackDetails").get("Result").asText());
+            return invocationEnvelope("SUCCEEDED", "\"approved by agent\"");
+        });
+        service.callbackSucceed(callbackId[0], "\"agent\"".getBytes(StandardCharsets.UTF_8));
+
+        assertEquals(2, invoker.invocationCount());
+        assertEquals(DurableExecution.STATUS_SUCCEEDED, store.get(arn).orElseThrow().getStatus());
+        JsonNode after = service.getExecutionHistory(arn, true, false).get("Events");
+        assertEquals("\"agent\"", event(after, "CallbackSucceeded")
+                .get("CallbackSucceededDetails").get("Result").get("Payload").asText());
+        assertEquals("ExecutionSucceeded", after.get(after.size() - 1).get("EventType").asText());
+    }
+
+    @Test
+    void callbackFailureResumesWaitingExecutionWithTheError() {
+        String[] callbackId = new String[1];
+        invoker.enqueue(event -> {
+            String arn = event.get("DurableExecutionArn").asText();
+            String token = event.get("CheckpointToken").asText();
+            ObjectNode response = service.checkpoint(arn, checkpointBody(token,
+                    update("cb-1", "CALLBACK", "START", u -> u.put("Name", "approval"))));
+            callbackId[0] = findOperation(response.get("NewExecutionState").get("Operations"), "cb-1")
+                    .get("CallbackDetails").get("CallbackId").asText();
+            return invocationEnvelope("PENDING", null);
+        });
+        String arn = service.startExecution(REGION, FUNCTION, null, "interrupt-1",
+                "{}".getBytes(StandardCharsets.UTF_8)).getExecutionArn();
+
+        invoker.enqueue(event -> {
+            JsonNode callback = findOperation(event.get("InitialExecutionState").get("Operations"), "cb-1");
+            assertEquals("FAILED", callback.get("Status").asText());
+            assertEquals("Interrupted", callback.get("CallbackDetails").get("Error").get("ErrorType").asText());
+            return invocationEnvelope("SUCCEEDED", "null");
+        });
+        ObjectNode error = mapper.createObjectNode().put("ErrorType", "Interrupted").put("ErrorMessage", "Interrupted");
+        service.callbackFail(callbackId[0], error);
+
+        assertEquals(DurableExecution.STATUS_SUCCEEDED, store.get(arn).orElseThrow().getStatus());
+        JsonNode events = service.getExecutionHistory(arn, false, false).get("Events");
+        JsonNode failed = event(events, "CallbackFailed").get("CallbackFailedDetails");
+        assertTrue(failed.get("Error").isObject() && !failed.get("Error").has("Payload"));
+        JsonNode withData = service.getExecutionHistory(arn, true, false).get("Events");
+        assertEquals("Interrupted", event(withData, "CallbackFailed").get("CallbackFailedDetails")
+                .get("Error").get("Payload").get("ErrorType").asText());
+    }
+
+    @Test
+    void stoppedExecutionHistoryEndsWithExecutionStopped() {
+        invoker.enqueue(event -> invocationEnvelope("PENDING", null));
+        String arn = service.startExecution(REGION, FUNCTION, null, "stop-1",
+                "{}".getBytes(StandardCharsets.UTF_8)).getExecutionArn();
+        service.stopExecution(arn, null);
+
+        JsonNode events = service.getExecutionHistory(arn, true, false).get("Events");
+        assertEquals(List.of("ExecutionStarted", "ExecutionStopped"), eventTypes(events));
+        assertEquals("ExecutionStopped", event(events, "ExecutionStopped").get("ExecutionStoppedDetails")
+                .get("Error").get("Payload").get("ErrorType").asText());
+    }
+
     // ──────────────────────────── helpers ────────────────────────────
+
+    private List<String> eventTypes(JsonNode events) {
+        List<String> types = new ArrayList<>();
+        events.forEach(e -> types.add(e.get("EventType").asText()));
+        return types;
+    }
+
+    private JsonNode event(JsonNode events, String eventType) {
+        for (JsonNode event : events) {
+            if (eventType.equals(event.get("EventType").asText())) {
+                return event;
+            }
+        }
+        assertNull(eventType, "event " + eventType + " not found in " + events);
+        return null;
+    }
 
     private ObjectNode checkpointBody(String token, ObjectNode... updates) {
         ObjectNode body = mapper.createObjectNode();
