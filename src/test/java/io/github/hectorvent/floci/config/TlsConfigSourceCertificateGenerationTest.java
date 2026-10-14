@@ -188,6 +188,10 @@ class TlsConfigSourceCertificateGenerationTest {
             "Certificate SANs should include AppSync GraphQL host *.appsync-api.us-east-1.amazonaws.com");
         assertTrue(sans.contains("*.execute-api.us-east-1.amazonaws.com"),
             "Certificate SANs should include API Gateway execute-api host *.execute-api.us-east-1.amazonaws.com");
+        for (String region : List.of("us-east-1", "us-west-2", "eu-west-1")) {
+            assertTrue(sans.contains("*.appsync-api." + region + ".localhost.floci.io"),
+                "Certificate SANs should include the advertised AppSync GraphQL host in " + region);
+        }
         assertTrue(sans.contains("*.lambda-microvm.us-east-1.localhost.floci.io"),
             "Certificate SANs should include Lambda MicroVM endpoints");
         assertTrue(sans.contains("*.execute-api.localhost.floci.io"),

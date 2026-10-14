@@ -122,6 +122,42 @@ class CloudFrontOriginHttpClientTest {
     }
 
     @Test
+    void localDevTransportAcceptsDockerDesktopHostGatewayWithIpv6UniqueLocalAddress() throws Exception {
+        // Floci in Docker translates a loopback origin to host.docker.internal, which Docker
+        // Desktop's host-gateway maps to an IPv4 private and an IPv6 unique-local address.
+        AtomicInteger hits = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            hits.incrementAndGet();
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        server.start();
+        int port = server.getAddress().getPort();
+        try (CloudFrontOriginHttpClient local = CloudFrontOriginHttpClient.forLocalDevOrigin(
+                resolver(InetAddress.getByName("127.0.0.1"), InetAddress.getByName("fdc4:f303:9324::254")),
+                "localhost:" + port, "host.docker.internal")) {
+            assertEquals(204, local.send(request("http://host.docker.internal:" + port + "/"),
+                    HttpResponse.BodyHandlers.ofByteArray()).statusCode());
+            assertEquals(1, hits.get());
+        } finally {
+            server.stop(0);
+        }
+        try (CloudFrontOriginHttpClient local = CloudFrontOriginHttpClient.forLocalDevOrigin(
+                resolver(InetAddress.getByName("192.168.65.254"), InetAddress.getByName("fd00:ec2::254")),
+                "localhost:5173", "host.docker.internal")) {
+            assertThrows(UnknownHostException.class, () -> local.send(
+                    request("http://host.docker.internal:5173/"), HttpResponse.BodyHandlers.ofByteArray()));
+        }
+        try (CloudFrontOriginHttpClient local = CloudFrontOriginHttpClient.forLocalDevOrigin(
+                resolver(InetAddress.getByName("127.0.0.1"), InetAddress.getByName("fdc4:f303:9324::254")),
+                "localhost:5173", "localhost")) {
+            assertThrows(UnknownHostException.class, () -> local.send(
+                    request("http://localhost:5173/"), HttpResponse.BodyHandlers.ofByteArray()));
+        }
+    }
+
+    @Test
     void localDevTransportDoesNotFollowRedirects() throws Exception {
         AtomicInteger redirectedHits = new AtomicInteger();
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);

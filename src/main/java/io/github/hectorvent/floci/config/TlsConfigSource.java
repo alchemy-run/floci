@@ -83,6 +83,8 @@ public class TlsConfigSource implements ConfigSource {
                 "*.lambda-microvm.us-east-1.localhost.floci.io"));
         for (String region : AwsRegions.ALL) {
             sans.add("*.dkr.ecr." + region + ".localhost.floci.io");
+            // AppSync advertises https://{apiId}.appsync-api.{region}.localhost.floci.io (AppSyncService).
+            sans.add("*.appsync-api." + region + ".localhost.floci.io");
         }
         return List.copyOf(sans);
     }

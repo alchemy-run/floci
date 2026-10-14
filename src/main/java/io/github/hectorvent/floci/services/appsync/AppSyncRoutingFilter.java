@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.appsync;
 
+import io.github.hectorvent.floci.services.apigateway.ApiGatewayExecuteApiRoutingFilter;
 import jakarta.annotation.Priority;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerRequestFilter;
@@ -23,12 +24,13 @@ public class AppSyncRoutingFilter implements ContainerRequestFilter {
 
     @Override
     public void filter(ContainerRequestContext requestContext) throws IOException {
-        String host = requestContext.getHeaderString("Host");
+        URI original = requestContext.getUriInfo().getRequestUri();
+        // HTTP/2 carries the host in :authority, not a Host header.
+        String host = ApiGatewayExecuteApiRoutingFilter.resolveHost(requestContext.getHeaderString("Host"), original);
         String apiId = extractApiId(host);
         if (apiId == null) {
             return;
         }
-        URI original = requestContext.getUriInfo().getRequestUri();
         String path = original.getRawPath();
         if (alreadyPathStyle(path)) {
             return;
