@@ -51,11 +51,16 @@ public class DurableOperation {
     private Integer attempt;
     private Long nextAttemptTimestampMillis;
 
-    /** WAIT only. */
+    /** WAIT (wait end) and CALLBACK (timeout deadline). */
     private Long scheduledEndTimestampMillis;
+    /** WAIT only: {@code WaitOptions.WaitSeconds}. */
+    private Long waitSeconds;
 
     /** CALLBACK only. */
     private String callbackId;
+    /** CALLBACK only: {@code CallbackOptions.TimeoutSeconds} / {@code HeartbeatTimeoutSeconds}. */
+    private Long callbackTimeoutSeconds;
+    private Long callbackHeartbeatTimeoutSeconds;
 
     /**
      * CHAINED_INVOKE only: the FunctionName (name, name:qualifier, or ARN)
@@ -107,8 +112,19 @@ public class DurableOperation {
     public Long getScheduledEndTimestampMillis() { return scheduledEndTimestampMillis; }
     public void setScheduledEndTimestampMillis(Long scheduledEndTimestampMillis) { this.scheduledEndTimestampMillis = scheduledEndTimestampMillis; }
 
+    public Long getWaitSeconds() { return waitSeconds; }
+    public void setWaitSeconds(Long waitSeconds) { this.waitSeconds = waitSeconds; }
+
     public String getCallbackId() { return callbackId; }
     public void setCallbackId(String callbackId) { this.callbackId = callbackId; }
+
+    public Long getCallbackTimeoutSeconds() { return callbackTimeoutSeconds; }
+    public void setCallbackTimeoutSeconds(Long callbackTimeoutSeconds) { this.callbackTimeoutSeconds = callbackTimeoutSeconds; }
+
+    public Long getCallbackHeartbeatTimeoutSeconds() { return callbackHeartbeatTimeoutSeconds; }
+    public void setCallbackHeartbeatTimeoutSeconds(Long callbackHeartbeatTimeoutSeconds) {
+        this.callbackHeartbeatTimeoutSeconds = callbackHeartbeatTimeoutSeconds;
+    }
 
     public String getChainedFunctionName() { return chainedFunctionName; }
     public void setChainedFunctionName(String chainedFunctionName) { this.chainedFunctionName = chainedFunctionName; }
