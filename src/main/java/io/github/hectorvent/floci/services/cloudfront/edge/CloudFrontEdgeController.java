@@ -508,7 +508,7 @@ public class CloudFrontEdgeController {
             outboundHeaders.put("cookie", cookie);
         }
         if (CloudFrontRequestRouter.isS3Origin(origin) && List.of("GET", "HEAD", "OPTIONS").contains(method)) {
-            return servingController.serveEdgeS3Origin(distribution, resolved, uri, method, outboundHeaders);
+            return buffered(servingController.serveEdgeS3Origin(distribution, resolved, uri, method, outboundHeaders));
         }
         if (origin.getCustomHeaders() != null) {
             for (Map<String, String> header : origin.getCustomHeaders()) {
