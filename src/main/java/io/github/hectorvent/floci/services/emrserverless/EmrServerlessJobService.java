@@ -61,7 +61,8 @@ public class EmrServerlessJobService implements ContainerTeardown, Resettable {
                                   EmulatorConfig config,
                                   @ConfigProperty(name = "floci.services.emrserverless.job-timeout-seconds",
                                           defaultValue = "300") int timeoutSeconds) {
-        this.jobs = storageFactory.create("emrserverless", "emr-serverless-job-runs.json",
+        // Upstream's EmrServerlessJobRunService owns emr-serverless-job-runs.json with its own record type.
+        this.jobs = storageFactory.create("emrserverless", "emr-serverless-legacy-job-runs.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.runner = runner;
         this.mapper = mapper;
