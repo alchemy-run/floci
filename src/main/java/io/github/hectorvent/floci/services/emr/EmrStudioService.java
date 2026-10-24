@@ -289,9 +289,9 @@ public class EmrStudioService {
                     ((ObjectNode) entry).put("Resource", role.getArn());
                 }
             }
-            if (policies.evaluateResourcePolicy(List.of(document.toString()), "elasticmapreduce.amazonaws.com",
+            if (policies.evaluateServicePrincipal(List.of(document.toString()), "elasticmapreduce.amazonaws.com",
                     "sts:AssumeRole", role.getArn(), Map.of("aws:SourceAccount", List.of(regionResolver.getAccountId())))
-                    != IamPolicyEvaluator.ResourcePolicyDecision.ALLOW) {
+                    != IamPolicyEvaluator.Decision.ALLOW) {
                 throw invalid("Amazon EMR does not have permissions to assume role.");
             }
         } catch (JsonProcessingException | IllegalArgumentException e) {
