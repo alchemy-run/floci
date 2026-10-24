@@ -64,6 +64,12 @@ import java.util.function.UnaryOperator;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import io.github.hectorvent.floci.core.common.RequestContext;
+import io.quarkus.arc.Arc;
+import io.quarkus.arc.ManagedContext;
+import io.github.hectorvent.floci.services.cloudformation.model.StackDriftDetection;
+import io.github.hectorvent.floci.services.cloudformation.model.StackDriftDetection.ResourceDrift;
+import io.github.hectorvent.floci.services.cloudformation.model.StackDriftDetection.PropertyDifference;
 
 /**
  * CloudFormation stack lifecycle management — Create, Update, Delete stacks via ChangeSets.
@@ -4507,6 +4513,11 @@ public class CloudFormationService implements ResourceProvider {
         String resolvedBody = resolveTemplateBody(templateBody, templateUrl);
         if (resolvedBody != null) {
             requireValidTemplate(resolvedBody);
+            JsonNode resources = readTemplate(resolvedBody).path("Resources");
+            if (!resources.isObject() || resources.isEmpty()) {
+                throw new AwsException("ValidationError",
+                        "Template format error: At least one Resources member must be defined.", 400);
+            }
         }
     }
 
@@ -5129,5 +5140,154 @@ public class CloudFormationService implements ResourceProvider {
     @Override
     public Set<SupportedResourceType> getSupportedResourceTypes() {
         return Set.of(new SupportedResourceType("cloudformation:stack", "cloudformation", true));
+    }
+
+    public void signalResource(String stackName, String logicalId, String uniqueId, String status, String region) {
+        Stack stack = getStackOrThrow(stackName, region);
+        if (logicalId == null || !stack.getResources().containsKey(logicalId)) {
+            throw new AwsException("ValidationError", "Resource " + logicalId + " does not exist in stack " + stackName, 400);
+        }
+        if (uniqueId == null || uniqueId.isBlank() || !("SUCCESS".equals(status) || "FAILURE".equals(status))) {
+            throw new AwsException("ValidationError", "UniqueId and a SUCCESS or FAILURE Status are required.", 400);
+        }
+        synchronized (stack) {
+            stack.getResourceSignals().computeIfAbsent(logicalId, ignored -> new LinkedHashMap<>()).put(uniqueId, status);
+            persistStack(stack);
+        }
+    }
+
+    public StackDriftDetection detectStackDrift(String stackName, List<String> logicalIds, String region) {
+        Stack stack = getStackOrThrow(stackName, region);
+        if (!stack.getResources().keySet().containsAll(logicalIds)) {
+            throw new AwsException("ValidationError", "A LogicalResourceId does not exist in the stack.", 400);
+        }
+        List<ResourceDrift> results = new ArrayList<>();
+        Instant timestamp = now();
+        String failure = null;
+        SsmResourceBackend backend = new SsmResourceBackend(ssmService, objectMapper);
+        for (StackResource resource : stack.getResources().values()) {
+            if (!logicalIds.isEmpty() && !logicalIds.contains(resource.getLogicalId())) continue;
+            String status = "NOT_CHECKED";
+            JsonNode expected = resource.getExpectedProperties();
+            JsonNode actual = null;
+            List<PropertyDifference> differences = new ArrayList<>();
+            if (SsmResourceBackend.TYPE.equals(resource.getResourceType())) {
+                try {
+                    if (expected == null) expected = expectedProperties(stack, resource, region);
+                    actual = backend.read(resource.getPhysicalId(), region);
+                    if (actual == null) status = "DELETED";
+                    else {
+                        compareProperties("", expected, actual, differences);
+                        status = differences.isEmpty() ? "IN_SYNC" : "MODIFIED";
+                    }
+                } catch (Exception e) {
+                    failure = e.getMessage();
+                }
+            }
+            results.add(new ResourceDrift(resource.getLogicalId(), resource.getPhysicalId(), resource.getResourceType(),
+                    status, expected == null ? null : expected.toString(), actual == null ? null : actual.toString(),
+                    timestamp, differences));
+        }
+        int drifted = (int) results.stream().filter(r -> Set.of("MODIFIED", "DELETED").contains(r.status())).count();
+        boolean checked = results.stream().anyMatch(r -> !"NOT_CHECKED".equals(r.status()));
+        StackDriftDetection detection = new StackDriftDetection(UUID.randomUUID().toString(), stack.getStackId(),
+                failure == null ? "DETECTION_COMPLETE" : "DETECTION_FAILED",
+                drifted > 0 ? "DRIFTED" : failure != null || !checked ? "UNKNOWN" : "IN_SYNC",
+                drifted, timestamp, failure, List.copyOf(results));
+        synchronized (stack) {
+            stack.getDriftDetections().put(detection.detectionId(), detection);
+            persistStack(stack);
+        }
+        return detection;
+    }
+
+    private JsonNode expectedProperties(Stack stack, StackResource resource, String region) throws Exception {
+        JsonNode template = parseTemplate(stack.getTemplateBody());
+        Map<String, String> ids = new LinkedHashMap<>();
+        Map<String, Map<String, String>> attributes = new LinkedHashMap<>();
+        stack.getResources().forEach((id, value) -> {
+            ids.put(id, value.getPhysicalId());
+            attributes.put(id, value.getAttributes());
+        });
+        Map<String, JsonNode> mappings = new LinkedHashMap<>();
+        template.path("Mappings").fields().forEachRemaining(entry -> mappings.put(entry.getKey(), entry.getValue()));
+        Map<String, String> parameters = stack.getResolvedParameters().isEmpty()
+                ? stack.getParameters() : stack.getResolvedParameters();
+        CloudFormationTemplateEngine engine = new CloudFormationTemplateEngine(ownerAccount(stack), region,
+                stack.getStackName(), stack.getStackId(), parameters, ids, attributes,
+                resolveConditions(template, parameters, stack, region, ownerAccount(stack)), mappings, objectMapper,
+                name -> exports.get(accountExportKey(ownerAccount(stack), exportKey(region, name))), value -> value);
+        return engine.resolveNode(template.path("Resources").path(resource.getLogicalId()).path("Properties"));
+    }
+
+    private void compareProperties(String path, JsonNode expected, JsonNode actual, List<PropertyDifference> differences) {
+        if (expected != null && expected.isObject() && actual != null && actual.isObject()) {
+            expected.fields().forEachRemaining(entry -> compareProperties(path + "/"
+                            + entry.getKey().replace("~", "~0").replace("/", "~1"), entry.getValue(),
+                    actual.get(entry.getKey()), differences));
+            if (!path.isEmpty()) {
+                actual.fields().forEachRemaining(entry -> {
+                    if (!expected.has(entry.getKey())) {
+                        differences.add(new PropertyDifference(path + "/"
+                                + entry.getKey().replace("~", "~0").replace("/", "~1"), "null",
+                                entry.getValue().toString(), "ADD"));
+                    }
+                });
+            }
+        } else if (!Objects.equals(expected, actual)) {
+            differences.add(new PropertyDifference(path, expected == null ? "null" : expected.toString(),
+                    actual == null ? "null" : actual.toString(), actual == null ? "REMOVE" : "NOT_EQUAL"));
+        }
+    }
+
+    public StackDriftDetection describeStackDriftDetection(String detectionId, String region) {
+        if (detectionId != null) {
+            for (Stack stack : listStacks(region)) {
+                StackDriftDetection detection = stack.getDriftDetections().get(detectionId);
+                if (detection != null) return detection;
+            }
+        }
+        throw new AwsException("ValidationError", "Stack drift detection " + detectionId + " does not exist.", 400);
+    }
+
+    public List<ResourceDrift> describeStackResourceDrifts(String stackName, List<String> statuses, String region) {
+        Stack stack = getStackOrThrow(stackName, region);
+        Map<String, ResourceDrift> latest = new LinkedHashMap<>();
+        synchronized (stack) {
+            for (StackDriftDetection detection : stack.getDriftDetections().values()) {
+                for (ResourceDrift resource : detection.resources()) latest.put(resource.logicalId(), resource);
+            }
+        }
+        return latest.values().stream().filter(r -> statuses.isEmpty() || statuses.contains(r.status())).toList();
+    }
+
+    /**
+     * Runs {@code body} under a synthetic CDI request scope whose account is {@code accountId}, so
+     * that account-aware storage in the downstream services namespaces provisioned resources under
+     * the intended account. Mirrors the pattern used by other background workers.
+     */
+    private void runUnderAccount(String accountId, Runnable body) {
+        ManagedContext requestContext = Arc.container().requestContext();
+        boolean alreadyActive = requestContext.isActive();
+        if (!alreadyActive) {
+            requestContext.activate();
+        }
+        // Background workers normally have no active scope, so a fresh one is activated and
+        // terminated below. But if we ran inside an already-active scope, restore its previous
+        // account afterwards so we never leave the overridden account ID behind on a reused thread.
+        RequestContext ctx = Arc.container().instance(RequestContext.class).get();
+        String previousAccountId = alreadyActive ? ctx.getAccountId() : null;
+        try {
+            if (accountId != null) {
+                ctx.setAccountId(accountId);
+            }
+            body.run();
+        } finally {
+            if (!alreadyActive) {
+                requestContext.terminate();
+            } else {
+                ctx.setAccountId(previousAccountId);
+            }
+        }
     }
 }
