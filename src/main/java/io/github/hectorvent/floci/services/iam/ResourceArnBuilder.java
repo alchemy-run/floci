@@ -116,7 +116,26 @@ public class ResourceArnBuilder {
 
     public List<String> buildResources(String credentialScope, ContainerRequestContext ctx,
                                        String region, String accountId) {
-        return buildResources(credentialScope, ctx, region, accountId, AwsRegions.partitionFor(region));
+        if (credentialScope == null) {
+            return List.of("*");
+        }
+        String path = ctx.getUriInfo().getPath();
+        return switch (credentialScope) {
+            case "s3"             -> List.of(buildS3Arn(path));
+            case "lambda"         -> List.of(buildLambdaArn(path, region, accountId));
+            case "sqs"            -> List.of(buildSqsArn(ctx, region, accountId));
+            case "sns"            -> List.of(buildSnsArn(ctx, region, accountId));
+            case "dynamodb"       -> buildDynamoDbArns(ctx, region, accountId);
+            case "kinesis"        -> List.of(buildKinesisArn(ctx, region, accountId));
+            case "secretsmanager" -> List.of(buildSecretsManagerArn(ctx, region, accountId));
+            case "ssm"            -> List.of(buildSsmArn(ctx, region, accountId));
+            case "kms"            -> List.of(buildKmsArn(path, region, accountId));
+            case "ses"            -> List.of(buildSesIdentityArn(ctx, region, accountId));
+            case "emr-serverless" -> List.of(buildEmrServerlessArn(ctx, path, region, accountId));
+            case "guardduty"      -> List.of(buildGuardDutyArn(ctx, path, region, accountId));
+            case "inspector2"     -> List.of(buildInspector2Arn(ctx, path, region, accountId));
+            default               -> List.of("*");
+        };
     }
 
     /**
