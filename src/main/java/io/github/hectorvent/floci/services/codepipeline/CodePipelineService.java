@@ -254,7 +254,7 @@ public class CodePipelineService {
                     completeJob(request, region, account, true);
             case "PutJobFailureResult", "PutThirdPartyJobFailureResult" ->
                     completeJob(request, region, account, false);
-            case "PutActionRevision" -> putActionRevision(request);
+            case "PutActionRevision" -> putActionRevision(request, region, account);
             case "PutWebhook" -> putWebhook(request, region, account);
             case "DeleteWebhook" -> deleteWebhook(request, region, account);
             case "ListWebhooks" -> listWebhooks(request, region, account);
@@ -1443,12 +1443,6 @@ public class CodePipelineService {
         return mapper.createObjectNode();
     }
 
-    private ObjectNode putActionRevision(JsonNode request) {
-        ObjectNode response = mapper.createObjectNode();
-        response.put("newRevision", true);
-        response.put("pipelineExecutionId", UUID.randomUUID().toString());
-        return response;
-    }
 
     private ObjectNode putWebhook(JsonNode request, String region, String account) {
         JsonNode webhook = request.path("webhook");
@@ -3391,5 +3385,38 @@ public class CodePipelineService {
 
     private static String storedArtifactId(CodePipelineExecution execution, String artifactName) {
         return execution.getPipelineName() + "::" + execution.getPipelineExecutionId() + "::" + artifactName;
+    }
+
+    private ObjectNode putActionRevision(JsonNode request, String region, String account) {
+        CodePipelinePipeline pipeline = requirePipeline(account, region, text(request, "pipelineName"));
+        String stageName = text(request, "stageName");
+        String actionName = text(request, "actionName");
+        JsonNode action = requireAction(pipeline, stageName, actionName);
+        if (!"Source".equals(action.path("actionTypeId").path("category").asText())) {
+            throw new AwsException("ValidationException", "Action revisions require a source action", 400);
+        }
+        JsonNode revision = request.path("actionRevision");
+        String revisionId = text(revision, "revisionId");
+        text(revision, "revisionChangeId");
+        if (!revision.path("created").isNumber()) {
+            throw new AwsException("ValidationException", "actionRevision.created must be a timestamp", 400);
+        }
+        String id = sourcePollCursorId(pipeline.getName(), stageName, actionName);
+        return sourcePollLocks.withLock(pipelineLockKey(account, region, pipeline.getName()), () -> {
+            Optional<CodePipelineStoredItem> previous = itemStore.getForAccount(
+                    account, itemKey(region, "action-revision", id));
+            if (previous.isPresent()
+                    && revisionId.equals(previous.get().getData().path("revision").path("revisionId").asText())) {
+                return mapper.createObjectNode().put("newRevision", false)
+                        .put("pipelineExecutionId", previous.get().getData().path("pipelineExecutionId").asText());
+            }
+            ObjectNode started = startPipelineExecution(mapper.createObjectNode().put("name", pipeline.getName()),
+                    region, account, "PutActionRevision", revisionId);
+            ObjectNode data = mapper.createObjectNode();
+            data.set("revision", revision.deepCopy());
+            data.put("pipelineExecutionId", started.path("pipelineExecutionId").asText());
+            storeItem(account, region, "action-revision", id, "ACTIVE", data);
+            return started.put("newRevision", true);
+        });
     }
 }
