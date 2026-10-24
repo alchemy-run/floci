@@ -3,7 +3,6 @@ package io.github.hectorvent.floci.services.cloudwatch.logs;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
@@ -71,7 +70,7 @@ public class CloudWatchLogsCrossAccountService {
         destination.setDestinationName(destinationName);
         destination.setTargetArn(targetArn);
         destination.setRoleArn(roleArn);
-        destination.setArn(AwsArnUtils.Arn.of("logs", region, regionResolver.getAccountId(), "destination:" + destinationName).toString());
+        destination.setArn("arn:aws:logs:" + region + ":" + regionResolver.getAccountId() + ":destination:" + destinationName);
         if (destination.getCreationTime() == 0) {
             destination.setCreationTime(System.currentTimeMillis());
         }
@@ -323,10 +322,6 @@ public class CloudWatchLogsCrossAccountService {
             throw invalid(field + " must be a valid ARN.");
         }
     }
-    private static String destinationKey(String region, String name) { return region + "::" + name; }
-    private static String policyKey(String region, String type, String name) { return region + "::" + type + "::" + name; }
-    private static AwsException invalid(String message) { return new AwsException("InvalidParameterException", message, 400); }
-
     public List<LogDestination> describeDestinations(String prefix, String region) {
         String keyPrefix = region + "::destination::";
         return destinations.scan(key -> key.startsWith(keyPrefix)).stream()
@@ -342,4 +337,8 @@ public class CloudWatchLogsCrossAccountService {
         }
         destinations.delete(key);
     }
+
+    private static String destinationKey(String region, String name) { return region + "::destination::" + name; }
+    private static String policyKey(String region, String type, String name) { return region + "::" + type + "::" + name; }
+    private static AwsException invalid(String message) { return new AwsException("InvalidParameterException", message, 400); }
 }

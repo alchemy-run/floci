@@ -9,6 +9,7 @@ import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.Encoded;
 import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
 import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
@@ -25,7 +26,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import jakarta.ws.rs.POST;
 
 @Path("/")
 @Produces(MediaType.APPLICATION_JSON)
@@ -156,8 +156,11 @@ public class S3TablesController {
     @GET
     @Path("/get-table")
     public Response getTable(@Context HttpHeaders headers, @QueryParam("tableBucketARN") String tableBucketArn,
-                             @QueryParam("namespace") String namespace, @QueryParam("name") String name) {
-        return Response.ok(tableRepresentation(service.getTable(decode(tableBucketArn), namespace, name, region(headers)))).build();
+                             @QueryParam("namespace") String namespace, @QueryParam("name") String name,
+                             @QueryParam("tableArn") String tableArn) {
+        S3Table table = tableArn == null ? service.getTable(decode(tableBucketArn), namespace, name, region(headers))
+                : service.getTableByArn(decode(tableArn), region(headers));
+        return Response.ok(tableRepresentation(table)).build();
     }
 
     @GET
@@ -172,8 +175,9 @@ public class S3TablesController {
     @DELETE
     @Path("/tables/{tableBucketARN}/{namespace}/{name}")
     public Response deleteTable(@Context HttpHeaders headers, @Encoded @PathParam("tableBucketARN") String tableBucketArn,
-                                @PathParam("namespace") String namespace, @PathParam("name") String name) {
-        service.deleteTable(decode(tableBucketArn), namespace, name, region(headers));
+                                @PathParam("namespace") String namespace, @PathParam("name") String name,
+                                @QueryParam("versionToken") String versionToken) {
+        service.deleteTable(decode(tableBucketArn), namespace, name, versionToken, region(headers));
         return Response.noContent().build();
     }
 
@@ -254,6 +258,39 @@ public class S3TablesController {
                 "configuration", service.getTableMaintenanceConfigurations(arn, namespace, name, region(headers)))).build();
     }
 
+    @GET
+    @Path("/tables/{tableBucketARN}/{namespace}/{name}/maintenance-job-status")
+    public Response getTableMaintenanceJobStatus(@Context HttpHeaders headers,
+                                                 @Encoded @PathParam("tableBucketARN") String tableBucketArn,
+                                                 @PathParam("namespace") String namespace, @PathParam("name") String name) {
+        String arn = decode(tableBucketArn);
+        String region = region(headers);
+        return Response.ok(Map.of("tableARN", service.getTable(arn, namespace, name, region).getArn(),
+                "status", service.getTableMaintenanceJobStatus(arn, namespace, name, region))).build();
+    }
+
+    @GET
+    @Path("/tag/{resourceArn}")
+    public Response listTagsForResource(@Context HttpHeaders headers, @Encoded @PathParam("resourceArn") String resourceArn) {
+        return Response.ok(Map.of("tags", service.listTagsForResource(decode(resourceArn), region(headers)))).build();
+    }
+
+    @POST
+    @Path("/tag/{resourceArn}")
+    public Response tagResource(@Context HttpHeaders headers, @Encoded @PathParam("resourceArn") String resourceArn,
+                                Map<String, Object> request) {
+        service.tagResource(decode(resourceArn), stringMap(request.get("tags")), region(headers));
+        return Response.ok().build();
+    }
+
+    @DELETE
+    @Path("/tag/{resourceArn}")
+    public Response untagResource(@Context HttpHeaders headers, @Encoded @PathParam("resourceArn") String resourceArn,
+                                  @QueryParam("tagKeys") List<String> tagKeys) {
+        service.untagResource(decode(resourceArn), tagKeys, region(headers));
+        return Response.noContent().build();
+    }
+
     private Map<String, Object> bucketRepresentation(TableBucket bucket) {
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("arn", bucket.getArn());
@@ -270,6 +307,8 @@ public class S3TablesController {
         response.put("namespace", List.of(namespace.getName()));
         response.put("tableBucketARN", tableBucketArn);
         response.put("createdAt", namespace.getCreatedAt());
+        response.put("ownerAccountId", tableBucketArn.split(":", 6)[4]);
+        response.put("createdBy", tableBucketArn.split(":", 6)[4]);
         return response;
     }
 
@@ -281,7 +320,9 @@ public class S3TablesController {
         response.put("namespace", List.of(table.getNamespace()));
         response.put("versionToken", table.getVersionToken());
         putIfNotNull(response, "metadataLocation", table.getMetadataLocation());
+        response.put("warehouseLocation", table.getWarehouseLocation());
         response.put("createdAt", table.getCreatedAt());
+        response.put("createdBy", table.getOwnerAccountId());
         response.put("modifiedAt", table.getModifiedAt());
         response.put("ownerAccountId", table.getOwnerAccountId());
         response.put("format", table.getFormat());
@@ -290,6 +331,7 @@ public class S3TablesController {
 
     private Map<String, Object> metadataLocationRepresentation(S3Table table) {
         Map<String, Object> response = new LinkedHashMap<>();
+        response.put("warehouseLocation", table.getWarehouseLocation());
         putIfNotNull(response, "metadataLocation", table.getMetadataLocation());
         response.put("versionToken", table.getVersionToken());
         return response;
@@ -322,57 +364,5 @@ public class S3TablesController {
         List<String> result = new ArrayList<>();
         list.forEach(entry -> result.add(String.valueOf(entry)));
         return result;
-    }
-
-    @GET
-    @Path("/get-table")
-    public Response getTable(@Context HttpHeaders headers, @QueryParam("tableBucketARN") String tableBucketArn,
-                             @QueryParam("namespace") String namespace, @QueryParam("name") String name,
-                             @QueryParam("tableArn") String tableArn) {
-        S3Table table = tableArn == null ? service.getTable(decode(tableBucketArn), namespace, name, region(headers))
-                : service.getTableByArn(decode(tableArn), region(headers));
-        return Response.ok(tableRepresentation(table)).build();
-    }
-
-    @DELETE
-    @Path("/tables/{tableBucketARN}/{namespace}/{name}")
-    public Response deleteTable(@Context HttpHeaders headers, @Encoded @PathParam("tableBucketARN") String tableBucketArn,
-                                @PathParam("namespace") String namespace, @PathParam("name") String name,
-                                @QueryParam("versionToken") String versionToken) {
-        service.deleteTable(decode(tableBucketArn), namespace, name, versionToken, region(headers));
-        return Response.noContent().build();
-    }
-
-    @GET
-    @Path("/tables/{tableBucketARN}/{namespace}/{name}/maintenance-job-status")
-    public Response getTableMaintenanceJobStatus(@Context HttpHeaders headers,
-                                                 @Encoded @PathParam("tableBucketARN") String tableBucketArn,
-                                                 @PathParam("namespace") String namespace, @PathParam("name") String name) {
-        String arn = decode(tableBucketArn);
-        String region = region(headers);
-        return Response.ok(Map.of("tableARN", service.getTable(arn, namespace, name, region).getArn(),
-                "status", service.getTableMaintenanceJobStatus(arn, namespace, name, region))).build();
-    }
-
-    @GET
-    @Path("/tag/{resourceArn}")
-    public Response listTagsForResource(@Context HttpHeaders headers, @Encoded @PathParam("resourceArn") String resourceArn) {
-        return Response.ok(Map.of("tags", service.listTagsForResource(decode(resourceArn), region(headers)))).build();
-    }
-
-    @POST
-    @Path("/tag/{resourceArn}")
-    public Response tagResource(@Context HttpHeaders headers, @Encoded @PathParam("resourceArn") String resourceArn,
-                                Map<String, Object> request) {
-        service.tagResource(decode(resourceArn), stringMap(request.get("tags")), region(headers));
-        return Response.ok().build();
-    }
-
-    @DELETE
-    @Path("/tag/{resourceArn}")
-    public Response untagResource(@Context HttpHeaders headers, @Encoded @PathParam("resourceArn") String resourceArn,
-                                  @QueryParam("tagKeys") List<String> tagKeys) {
-        service.untagResource(decode(resourceArn), tagKeys, region(headers));
-        return Response.noContent().build();
     }
 }

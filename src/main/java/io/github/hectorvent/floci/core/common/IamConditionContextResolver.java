@@ -188,7 +188,7 @@ public class IamConditionContextResolver {
                 conditions.put("aws:TagKeys", keys);
             }
         }
-        String group = direct ? logsService.get().resolveTagTarget(body.path("resourceArn").asText(), region).name()
+        String group = direct ? logGroupNameFromArn(body.path("resourceArn").asText())
                 : body.path("logGroupName").asText();
         Map<String, String> tags;
         try {
@@ -934,5 +934,18 @@ public class IamConditionContextResolver {
             }
         }
         return null;
+    }
+
+    /** {@code arn:aws:logs:REGION:ACCOUNT:log-group:NAME[:*]} → NAME. */
+    private static String logGroupNameFromArn(String arn) {
+        if (arn == null) {
+            return "";
+        }
+        int marker = arn.indexOf(":log-group:");
+        if (marker < 0) {
+            return arn;
+        }
+        String name = arn.substring(marker + ":log-group:".length());
+        return name.endsWith(":*") ? name.substring(0, name.length() - 2) : name;
     }
 }

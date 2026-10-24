@@ -91,14 +91,4 @@ public class CodeArtifactDomain {
     public void setPolicyRevision(String policyRevision) {
         this.policyRevision = policyRevision;
     }
-
-    private Map<String, Long> authorizationTokens = new LinkedHashMap<>();
-
-    public Map<String, Long> getAuthorizationTokens() {
-        return Collections.unmodifiableMap(authorizationTokens);
-    }
-
-    public void setAuthorizationTokens(Map<String, Long> authorizationTokens) {
-        this.authorizationTokens = authorizationTokens;
-    }
 }

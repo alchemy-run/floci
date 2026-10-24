@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
@@ -18,24 +17,24 @@ import io.github.hectorvent.floci.services.budgets.model.BudgetRecord;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
-import java.util.Locale;
 
 @ApplicationScoped
 public class BudgetsService implements Resettable {
     private static final Pattern ACCOUNT_ID = Pattern.compile("\\d{12}");
     private static final Pattern ACTION_ID = Pattern.compile("^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$");
-    private static final Pattern IAM_POLICY_ARN = Pattern.compile("^arn:" + AwsArnUtils.PARTITION_REGEX + ":iam::(?:\\d{12}|aws):policy/.+$");
+    private static final Pattern IAM_POLICY_ARN = Pattern.compile("^arn:aws(?:-eusc|-cn|-us-gov|-iso|-iso-[a-z])?:iam::(?:\\d{12}|aws):policy/.+$");
     private static final Pattern SCP_POLICY_ID = Pattern.compile("^p-[0-9a-zA-Z_]{8,128}$");
     private static final Pattern SCP_TARGET_ID = Pattern.compile("^(?:ou-[0-9a-z]{4,32}-[a-z0-9]{8,32}|\\d{12})$");
     private static final Pattern SSM_INSTANCE_ID = Pattern.compile("^(?:i-(?:\\w{8}|\\w{17})|[a-zA-Z](?:[\\w-]{0,61}\\w)?)$");
@@ -343,6 +342,7 @@ public class BudgetsService implements Resettable {
         JsonNode tags = request.get("ResourceTags");
         validateTags(tags);
         record.setResourceTags(tags == null ? null : tags.deepCopy());
+        addActionHistory(record, "CREATE_ACTION", "STANDBY", "Budget action created.", action);
         actions.putForAccount(accountId, actionKey(budgetName, actionId), record);
         return record;
     }
@@ -373,11 +373,59 @@ public class BudgetsService implements Resettable {
                 text(request, "NextToken"), 100, "InvalidNextTokenException");
     }
 
-    public PaginatedResult<JsonNode> describeBudgetActionHistories(JsonNode request) {
+    public synchronized PaginatedResult<JsonNode> describeBudgetActionHistories(JsonNode request) {
         BudgetActionRecord record = requireAction(requireAccount(request), requireBudgetName(request), requireActionId(request));
+        JsonNode period = request.get("TimePeriod");
+        if (period != null && !period.isObject()) {
+            throw invalid("TimePeriod must be an object.");
+        }
+        double start = historyTimeBound(period, "Start", Double.NEGATIVE_INFINITY);
+        double end = historyTimeBound(period, "End", Double.POSITIVE_INFINITY);
+        if (start >= end) {
+            throw invalid("TimePeriod Start must be before End.");
+        }
+        String scope = record.getAccountId() + "::" + record.getBudgetName() + "::" + record.getActionId()
+                + "::" + start + "::" + end + "::";
+        List<HistoryEntry> entries = new ArrayList<>();
         List<JsonNode> histories = record.getHistories();
-        return Pagination.paginate(histories, JsonNode::toString, readMaxResults(request, 100, 100),
-                text(request, "NextToken"), 100, "InvalidNextTokenException");
+        for (int index = 0; index < histories.size(); index++) {
+            JsonNode history = histories.get(index);
+            double timestamp = history.path("Timestamp").asDouble();
+            if (timestamp >= start && timestamp < end) {
+                // Append positions distinguish identical events recorded in the same second.
+                entries.add(new HistoryEntry(scope + String.format(Locale.ROOT, "%010d", index), history));
+            }
+        }
+        String token = text(request, "NextToken");
+        if (request.has("NextToken")) {
+            String cursor;
+            try {
+                if (token == null || token.isEmpty()) {
+                    throw new IllegalArgumentException("Empty token");
+                }
+                cursor = new String(Base64.getUrlDecoder().decode(token), StandardCharsets.UTF_8);
+            } catch (IllegalArgumentException e) {
+                throw new AwsException("InvalidNextTokenException", "The pagination token is invalid.", 400);
+            }
+            if (entries.stream().noneMatch(entry -> entry.cursor().equals(cursor))) {
+                throw new AwsException("InvalidNextTokenException", "The pagination token is invalid.", 400);
+            }
+        }
+        PaginatedResult<HistoryEntry> page = Pagination.paginate(entries, HistoryEntry::cursor,
+                readMaxResults(request, 100, 100), token, 100, "InvalidNextTokenException");
+        return new PaginatedResult<>(page.items().stream().<JsonNode>map(entry -> entry.history().deepCopy()).toList(),
+                page.nextToken());
+    }
+
+    private static double historyTimeBound(JsonNode period, String field, double defaultValue) {
+        if (period == null || !period.has(field)) {
+            return defaultValue;
+        }
+        JsonNode value = period.get(field);
+        if (!value.isNumber() || !Double.isFinite(value.asDouble())) {
+            throw invalid("TimePeriod " + field + " must be an epoch timestamp.");
+        }
+        return value.asDouble();
     }
 
     public synchronized ObjectNode updateBudgetAction(JsonNode request) {
@@ -393,9 +441,11 @@ public class BudgetsService implements Resettable {
                 updated.set(field, request.get(field).deepCopy());
             }
         }
-        record.setAction(updated);
-        addActionHistory(record, "UPDATE_ACTION", updated.path("Status").asText(), "Budget action updated.", updated);
-        actions.putForAccount(accountId, actionKey(budgetName, actionId), record);
+        if (!oldAction.equals(updated)) {
+            record.setAction(updated);
+            addActionHistory(record, "UPDATE_ACTION", updated.path("Status").asText(), "Budget action updated.", updated);
+            actions.putForAccount(accountId, actionKey(budgetName, actionId), record);
+        }
         ObjectNode result = objectMapper.createObjectNode();
         result.put("AccountId", accountId);
         result.put("BudgetName", budgetName);
@@ -428,10 +478,12 @@ public class BudgetsService implements Resettable {
             case "RESET_BUDGET_ACTION" -> "STANDBY";
             default -> "EXECUTION_SUCCESS";
         };
-        action.put("Status", status);
-        record.setAction(action);
-        addActionHistory(record, "EXECUTE_ACTION", status, "Budget action execution completed.", action);
-        actions.putForAccount(accountId, actionKey(budgetName, actionId), record);
+        if (!status.equals(action.path("Status").asText())) {
+            action.put("Status", status);
+            record.setAction(action);
+            addActionHistory(record, "EXECUTE_ACTION", status, "Budget action execution completed: " + executionType + ".", action);
+            actions.putForAccount(accountId, actionKey(budgetName, actionId), record);
+        }
         return record;
     }
 
@@ -671,7 +723,7 @@ public class BudgetsService implements Resettable {
         if (create || request.has("ExecutionRoleArn")) {
             String arn = text(request, "ExecutionRoleArn");
             String account = requireAccount(request);
-            if (arn == null || !arn.matches("^arn:" + AwsArnUtils.PARTITION_REGEX + ":iam::" + account + ":role/.+$")) {
+            if (arn == null || !arn.matches("^arn:aws(?:-eusc|-cn|-us-gov|-iso|-iso-[a-z])?:iam::" + account + ":role/.+$")) {
                 throw invalid("ExecutionRoleArn is invalid or belongs to another account.");
             }
         }
@@ -847,7 +899,7 @@ public class BudgetsService implements Resettable {
         if (node == null || node.isNull()) {
             return defaultValue;
         }
-        if (!node.canConvertToInt() || node.asInt() < 1 || node.asInt() > maximum) {
+        if (!node.isIntegralNumber() || !node.canConvertToInt() || node.asInt() < 1 || node.asInt() > maximum) {
             throw invalid("MaxResults must be between 1 and " + maximum + ".");
         }
         return node.asInt();
@@ -945,6 +997,5 @@ public class BudgetsService implements Resettable {
 
     private enum SubscriberMutation { CREATE, UPDATE, DELETE }
     private record ResourceRef(String accountId, String budgetName, String actionId) {}
-
-
+    private record HistoryEntry(String cursor, JsonNode history) {}
 }

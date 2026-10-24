@@ -4,9 +4,12 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.RequestContext;
+import io.github.hectorvent.floci.core.common.RequestScopes;
+import io.github.hectorvent.floci.core.common.Resettable;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.datasync.model.DataSyncAgent;
@@ -14,43 +17,39 @@ import io.github.hectorvent.floci.services.datasync.model.DataSyncLocation;
 import io.github.hectorvent.floci.services.datasync.model.DataSyncLocationType;
 import io.github.hectorvent.floci.services.datasync.model.DataSyncTaggable;
 import io.github.hectorvent.floci.services.datasync.model.DataSyncTask;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
-import org.jboss.logging.Logger;
-
-import java.security.SecureRandom;
-import java.time.Instant;
-import java.time.format.DateTimeParseException;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Set;
-import java.util.function.Function;
-import io.github.hectorvent.floci.core.common.RequestContext;
-import io.github.hectorvent.floci.core.common.RequestScopes;
-import io.github.hectorvent.floci.core.common.Resettable;
-import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.s3.model.CopyObjectOptions;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
 import jakarta.annotation.PreDestroy;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import org.jboss.logging.Logger;
+
 import java.io.IOException;
 import java.io.InputStream;
+import java.security.SecureRandom;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.FutureTask;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 
 /**
- * AWS DataSync management plane.
+ * AWS DataSync management and local S3 transfer execution.
  *
  * <p>Agents report {@code ONLINE} and tasks {@code AVAILABLE} from the moment they are
  * created, so SDK and Terraform waiters finish on their first poll. Every
@@ -61,7 +60,7 @@ import java.util.regex.Pattern;
  * back.
  */
 @ApplicationScoped
-public class DataSyncService {
+public class DataSyncService implements Resettable {
 
     private static final Logger LOG = Logger.getLogger(DataSyncService.class);
 
@@ -88,20 +87,49 @@ public class DataSyncService {
 
     private final StorageBackend<String, DataSyncAgent> agents;
     private final StorageBackend<String, DataSyncLocation> locations;
-    private final StorageBackend<String, DataSyncTask> tasks;
+    private final AccountAwareStorageBackend<DataSyncTask> tasks;
+    private final AccountAwareStorageBackend<ObjectNode> executions;
     private final RegionResolver regionResolver;
     private final ObjectMapper mapper;
+    private final S3Service s3;
+    private final ExecutorService executor;
+    private final RequestContext requestContext;
+    private final Map<String, FutureTask<Void>> workers = new HashMap<>();
+    private boolean stopping;
 
     @Inject
-    public DataSyncService(StorageFactory storageFactory, RegionResolver regionResolver, ObjectMapper mapper) {
+    public DataSyncService(StorageFactory storageFactory, RegionResolver regionResolver, ObjectMapper mapper,
+                           S3Service s3, RequestContext requestContext) {
+        this(storageFactory, regionResolver, mapper, s3, Executors.newVirtualThreadPerTaskExecutor(), requestContext);
+    }
+
+    DataSyncService(StorageFactory storageFactory, RegionResolver regionResolver, ObjectMapper mapper,
+                    S3Service s3, ExecutorService executor, RequestContext requestContext) {
         this.agents = storageFactory.create("datasync", "datasync-agents.json",
                 new TypeReference<Map<String, DataSyncAgent>>() {});
         this.locations = storageFactory.create("datasync", "datasync-locations.json",
                 new TypeReference<Map<String, DataSyncLocation>>() {});
         this.tasks = storageFactory.create("datasync", "datasync-tasks.json",
                 new TypeReference<Map<String, DataSyncTask>>() {});
+        this.executions = storageFactory.create("datasync", "datasync-executions.json",
+                new TypeReference<Map<String, ObjectNode>>() {});
         this.regionResolver = regionResolver;
         this.mapper = mapper;
+        this.s3 = s3;
+        this.executor = executor;
+        this.requestContext = requestContext;
+        for (AccountAwareStorageBackend.AccountEntry<ObjectNode> entry : executions.scanAllAccountEntries(key -> true)) {
+            if (!terminal(entry.value())) {
+                failExecution(entry.value(), "Interrupted", "The emulator stopped before the transfer completed.");
+                executions.putForAccount(entry.accountId(), entry.key(), entry.value());
+            }
+        }
+        for (AccountAwareStorageBackend.AccountEntry<DataSyncTask> entry : tasks.scanAllAccountEntries(key -> true)) {
+            if ("RUNNING".equals(entry.value().getStatus())) {
+                entry.value().setStatus(TASK_STATUS_AVAILABLE);
+                tasks.putForAccount(entry.accountId(), entry.key(), entry.value());
+            }
+        }
     }
 
     /** A page of list results plus the token that resumes after it, or {@code null} at the end. */
@@ -275,13 +303,14 @@ public class DataSyncService {
         return task;
     }
 
-    public DataSyncTask getTask(String taskArn) {
+    public synchronized DataSyncTask getTask(String taskArn) {
         requireArn(taskArn, "TaskArn");
+        requireScope(taskArn, regionResolver.getRegion(), "Task");
         return tasks.get(taskArn).orElseThrow(() -> new AwsException("InvalidRequestException",
                 "Task " + taskArn + " is not found.", 400));
     }
 
-    public DataSyncTask updateTask(JsonNode request) {
+    public synchronized DataSyncTask updateTask(JsonNode request) {
         String taskArn = requiredText(request, "TaskArn", "UpdateTask");
         DataSyncTask task = getTask(taskArn);
 
@@ -315,15 +344,23 @@ public class DataSyncService {
         return task;
     }
 
-    public void deleteTask(String taskArn) {
+    public synchronized void deleteTask(String taskArn) {
         getTask(taskArn);
+        for (ObjectNode execution : executions.scan(key -> key.startsWith(taskArn + "/execution/"))) {
+            String arn = execution.path("TaskExecutionArn").asText();
+            FutureTask<Void> worker = workers.remove(arn);
+            if (worker != null) {
+                worker.cancel(true);
+            }
+            executions.delete(arn);
+        }
         tasks.delete(taskArn);
         LOG.infov("Deleted DataSync task: {0}", taskArn);
     }
 
     public Page<DataSyncTask> listTasks(JsonNode filters, String nextToken, int maxResults) {
         List<DataSyncTask> all = new ArrayList<>();
-        for (DataSyncTask task : tasks.scan(key -> true)) {
+        for (DataSyncTask task : tasks.scan(key -> scopeMatches(key, regionResolver.getRegion()))) {
             if (matchesTaskFilters(task, filters)) {
                 all.add(task);
             }
@@ -332,443 +369,7 @@ public class DataSyncService {
         return paginate(all, DataSyncTask::getTaskArn, nextToken, maxResults);
     }
 
-    // ---- Tags ----
-
-    public Map<String, String> listTagsForResource(String resourceArn) {
-        return new LinkedHashMap<>(findTaggable(resourceArn).getTags());
-    }
-
-    public void tagResource(String resourceArn, Map<String, String> tags) {
-        DataSyncTaggable resource = findTaggable(resourceArn);
-        resource.getTags().putAll(tags);
-        persist(resourceArn, resource);
-    }
-
-    public void untagResource(String resourceArn, List<String> tagKeys) {
-        DataSyncTaggable resource = findTaggable(resourceArn);
-        tagKeys.forEach(resource.getTags()::remove);
-        persist(resourceArn, resource);
-    }
-
-    private DataSyncTaggable findTaggable(String resourceArn) {
-        requireArn(resourceArn, "ResourceArn");
-        return agents.get(resourceArn).<DataSyncTaggable>map(agent -> agent)
-                .or(() -> locations.get(resourceArn).map(location -> location))
-                .or(() -> tasks.get(resourceArn).map(task -> task))
-                .orElseThrow(() -> new AwsException("InvalidRequestException",
-                        "Resource " + resourceArn + " is not found.", 400));
-    }
-
-    private void persist(String resourceArn, DataSyncTaggable resource) {
-        if (resource instanceof DataSyncAgent agent) {
-            agents.put(resourceArn, agent);
-        } else if (resource instanceof DataSyncLocation location) {
-            locations.put(resourceArn, location);
-        } else {
-            tasks.put(resourceArn, (DataSyncTask) resource);
-        }
-    }
-
-    // ---- Location derivation ----
-
-    private void applyLocationDefaults(DataSyncLocationType type, ObjectNode configuration, String region) {
-        switch (type) {
-            case AZURE_BLOB -> {
-                defaultText(configuration, "BlobType", "BLOCK");
-                defaultText(configuration, "AccessTier", "HOT");
-            }
-            case EFS -> defaultText(configuration, "InTransitEncryption", "NONE");
-            case FSX_ONTAP -> {
-                String svmArn = configuration.path("StorageVirtualMachineArn").asText("");
-                String fileSystemId = fsxFileSystemId(svmArn);
-                if (!fileSystemId.isEmpty()) {
-                    configuration.put("FsxFilesystemArn", AwsArnUtils.Arn.of("fsx", arnRegion(svmArn, region),
-                            arnAccountId(svmArn), "file-system/" + fileSystemId).toString());
-                }
-            }
-            case HDFS -> {
-                if (!configuration.hasNonNull("BlockSize")) {
-                    configuration.put("BlockSize", 134217728);
-                }
-                if (!configuration.hasNonNull("ReplicationFactor")) {
-                    configuration.put("ReplicationFactor", 3);
-                }
-                ObjectNode qop = objectMember(configuration, "QopConfiguration");
-                defaultText(qop, "RpcProtection", "PRIVACY");
-                defaultText(qop, "DataTransferProtection", "PRIVACY");
-            }
-            case NFS -> defaultMountOptions(configuration);
-            case OBJECT_STORAGE -> {
-                defaultText(configuration, "ServerProtocol", "HTTPS");
-                if (!configuration.hasNonNull("ServerPort")) {
-                    configuration.put("ServerPort",
-                            "HTTP".equals(configuration.path("ServerProtocol").asText()) ? 80 : 443);
-                }
-            }
-            case S3 -> defaultText(configuration, "S3StorageClass", "STANDARD");
-            case SMB -> {
-                defaultText(configuration, "AuthenticationType", "NTLM");
-                defaultMountOptions(configuration);
-            }
-            default -> {
-                // FSx Lustre, FSx Windows and FSx OpenZFS carry no server-side defaults.
-            }
-        }
-    }
-
-    private void defaultMountOptions(ObjectNode configuration) {
-        defaultText(objectMember(configuration, "MountOptions"), "Version", "AUTOMATIC");
-    }
-
-    private static ObjectNode objectMember(ObjectNode parent, String member) {
-        return parent.get(member) instanceof ObjectNode existing ? existing : parent.putObject(member);
-    }
-
-    private static void defaultText(ObjectNode node, String member, String value) {
-        if (!node.hasNonNull(member) || node.get(member).asText().isEmpty()) {
-            node.put(member, value);
-        }
-    }
-
-    private void stripCredentials(ObjectNode configuration) {
-        CREDENTIAL_MEMBERS.forEach(configuration::remove);
-        JsonNode protocol = configuration.get("Protocol");
-        if (protocol instanceof ObjectNode protocolNode && protocolNode.get("SMB") instanceof ObjectNode smb) {
-            smb.remove("Password");
-        }
-    }
-
-    String buildLocationUri(DataSyncLocationType type, JsonNode configuration, String region) {
-        return switch (type) {
-            case AZURE_BLOB -> {
-                String authority = configuration.path("ContainerUrl").asText("")
-                        .replaceFirst("^https?://", "");
-                yield "azure-blob://" + trimTrailingSlashes(authority) + subdirectory(configuration);
-            }
-            case EFS -> fileSystemUri(type, configuration.path("EfsFilesystemArn").asText(""), region, configuration);
-            case FSX_LUSTRE, FSX_OPEN_ZFS, FSX_WINDOWS ->
-                    fileSystemUri(type, configuration.path("FsxFilesystemArn").asText(""), region, configuration);
-            case FSX_ONTAP -> {
-                String svmArn = configuration.path("StorageVirtualMachineArn").asText("");
-                yield "fsxn://" + arnRegion(svmArn, region) + "." + fsxFileSystemId(svmArn) + "."
-                        + fsxStorageVirtualMachineId(svmArn) + subdirectory(configuration);
-            }
-            case HDFS -> {
-                JsonNode nameNode = configuration.path("NameNodes").path(0);
-                int port = nameNode.path("Port").asInt(0);
-                yield "hdfs://" + nameNode.path("Hostname").asText("")
-                        + (port > 0 ? ":" + port : "") + subdirectory(configuration);
-            }
-            case NFS -> "nfs://" + configuration.path("ServerHostname").asText("") + subdirectory(configuration);
-            case SMB -> "smb://" + configuration.path("ServerHostname").asText("") + subdirectory(configuration);
-            case OBJECT_STORAGE -> "object-storage://" + configuration.path("ServerHostname").asText("")
-                    + "/" + configuration.path("BucketName").asText("") + subdirectory(configuration);
-            case S3 -> {
-                String subdirectory = subdirectory(configuration);
-                yield "s3://" + s3BucketName(configuration.path("S3BucketArn").asText(""))
-                        + ("/".equals(subdirectory) ? "" : subdirectory);
-            }
-        };
-    }
-
-    private String fileSystemUri(DataSyncLocationType type, String fileSystemArn, String region,
-                                 JsonNode configuration) {
-        String fileSystemId = arnResource(fileSystemArn);
-        int slash = fileSystemId.lastIndexOf('/');
-        if (slash >= 0) {
-            fileSystemId = fileSystemId.substring(slash + 1);
-        }
-        return type.uriScheme() + "://" + arnRegion(fileSystemArn, region) + "." + fileSystemId
-                + subdirectory(configuration);
-    }
-
-    private static String subdirectory(JsonNode configuration) {
-        String subdirectory = configuration.path("Subdirectory").asText("").trim();
-        while (subdirectory.endsWith("/")) {
-            subdirectory = subdirectory.substring(0, subdirectory.length() - 1);
-        }
-        if (subdirectory.isEmpty()) {
-            return "/";
-        }
-        return subdirectory.startsWith("/") ? subdirectory : "/" + subdirectory;
-    }
-
-    private static String trimTrailingSlashes(String value) {
-        String trimmed = value;
-        while (trimmed.endsWith("/")) {
-            trimmed = trimmed.substring(0, trimmed.length() - 1);
-        }
-        return trimmed;
-    }
-
-    private static String s3BucketName(String bucketArn) {
-        String resource = arnResource(bucketArn);
-        return resource.isEmpty() ? bucketArn : resource;
-    }
-
-    private static String fsxFileSystemId(String storageVirtualMachineArn) {
-        String[] segments = arnResource(storageVirtualMachineArn).split("/");
-        return segments.length > 1 ? segments[1] : "";
-    }
-
-    private static String fsxStorageVirtualMachineId(String storageVirtualMachineArn) {
-        String[] segments = arnResource(storageVirtualMachineArn).split("/");
-        return segments.length > 2 ? segments[2] : "";
-    }
-
-    private static String arnRegion(String arn, String fallback) {
-        String[] segments = arn.split(":", 6);
-        return segments.length > 3 && !segments[3].isEmpty() ? segments[3] : fallback;
-    }
-
-    private String arnAccountId(String arn) {
-        String[] segments = arn.split(":", 6);
-        return segments.length > 4 && !segments[4].isEmpty() ? segments[4] : regionResolver.getAccountId();
-    }
-
-    private static String arnResource(String arn) {
-        String[] segments = arn.split(":", 6);
-        return segments.length > 5 ? segments[5] : "";
-    }
-
-    // ---- Filters ----
-
-    private boolean matchesLocationFilters(DataSyncLocation location, JsonNode filters) {
-        if (filters == null || !filters.isArray()) {
-            return true;
-        }
-        for (JsonNode filter : filters) {
-            String name = filter.path("Name").asText("");
-            List<String> values = stringList(filter.path("Values"));
-            String operator = filter.path("Operator").asText("Equals");
-            boolean matched = switch (name) {
-                case "LocationUri" -> matchesString(location.getLocationUri(), values, operator);
-                case "LocationType" -> matchesString(location.getLocationType().operationSuffix(), values, operator)
-                        || matchesString(location.getLocationType().uriScheme(), values, operator);
-                case "CreationTime" -> matchesInstant(location.getCreationTime(), values, operator);
-                default -> throw new AwsException("InvalidRequestException",
-                        "Unsupported ListLocations filter name: " + name, 400);
-            };
-            if (!matched) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private boolean matchesTaskFilters(DataSyncTask task, JsonNode filters) {
-        if (filters == null || !filters.isArray()) {
-            return true;
-        }
-        for (JsonNode filter : filters) {
-            String name = filter.path("Name").asText("");
-            List<String> values = stringList(filter.path("Values"));
-            String operator = filter.path("Operator").asText("Equals");
-            boolean matched = switch (name) {
-                case "LocationId" -> matchesString(task.getSourceLocationArn(), values, operator)
-                        || matchesString(task.getDestinationLocationArn(), values, operator);
-                case "CreationTime" -> matchesInstant(task.getCreationTime(), values, operator);
-                default -> throw new AwsException("InvalidRequestException",
-                        "Unsupported ListTasks filter name: " + name, 400);
-            };
-            if (!matched) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static boolean matchesString(String attribute, List<String> values, String operator) {
-        String actual = attribute != null ? attribute : "";
-        return switch (operator) {
-            case "Equals", "In" -> values.stream().anyMatch(actual::equalsIgnoreCase);
-            case "NotEquals" -> values.stream().noneMatch(actual::equalsIgnoreCase);
-            case "Contains" -> values.stream()
-                    .anyMatch(value -> actual.toLowerCase(Locale.ROOT).contains(value.toLowerCase(Locale.ROOT)));
-            case "NotContains" -> values.stream()
-                    .noneMatch(value -> actual.toLowerCase(Locale.ROOT).contains(value.toLowerCase(Locale.ROOT)));
-            case "BeginsWith" -> values.stream()
-                    .anyMatch(value -> actual.toLowerCase(Locale.ROOT).startsWith(value.toLowerCase(Locale.ROOT)));
-            default -> throw new AwsException("InvalidRequestException",
-                    "Unsupported filter operator for a string attribute: " + operator, 400);
-        };
-    }
-
-    private static boolean matchesInstant(Instant attribute, List<String> values, String operator) {
-        Instant actual = attribute != null ? attribute : Instant.EPOCH;
-        return switch (operator) {
-            case "Equals", "In" -> values.stream().anyMatch(value -> actual.equals(parseInstant(value)));
-            case "NotEquals" -> values.stream().noneMatch(value -> actual.equals(parseInstant(value)));
-            case "LessThan" -> values.stream().allMatch(value -> actual.isBefore(parseInstant(value)));
-            case "LessThanOrEqual" -> values.stream().allMatch(value -> !actual.isAfter(parseInstant(value)));
-            case "GreaterThan" -> values.stream().allMatch(value -> actual.isAfter(parseInstant(value)));
-            case "GreaterThanOrEqual" -> values.stream().allMatch(value -> !actual.isBefore(parseInstant(value)));
-            default -> throw new AwsException("InvalidRequestException",
-                    "Unsupported filter operator for CreationTime: " + operator, 400);
-        };
-    }
-
-    private static Instant parseInstant(String value) {
-        try {
-            return Instant.parse(value);
-        } catch (DateTimeParseException notIso) {
-            try {
-                return Instant.ofEpochMilli((long) (Double.parseDouble(value) * 1000));
-            } catch (NumberFormatException notEpoch) {
-                throw new AwsException("InvalidRequestException",
-                        "CreationTime filter value is neither an ISO-8601 instant nor an epoch timestamp: "
-                                + value, 400);
-            }
-        }
-    }
-
-    // ---- Helpers ----
-
-    private JsonNode mergedOptions(JsonNode requested, String taskMode) {
-        ObjectNode options = mapper.createObjectNode();
-        options.put("VerifyMode", defaultVerifyMode(taskMode));
-        options.put("OverwriteMode", "ALWAYS");
-        options.put("Atime", "BEST_EFFORT");
-        options.put("Mtime", "PRESERVE");
-        options.put("Uid", "INT_VALUE");
-        options.put("Gid", "INT_VALUE");
-        options.put("PreserveDeletedFiles", "PRESERVE");
-        options.put("PreserveDevices", "NONE");
-        options.put("PosixPermissions", "PRESERVE");
-        options.put("BytesPerSecond", -1L);
-        options.put("TaskQueueing", "ENABLED");
-        options.put("LogLevel", "OFF");
-        options.put("TransferMode", "CHANGED");
-        options.put("SecurityDescriptorCopyFlags", "OWNER_DACL");
-        options.put("ObjectTags", "PRESERVE");
-        if (requested != null && requested.isObject()) {
-            requested.properties().forEach(member -> options.set(member.getKey(), member.getValue().deepCopy()));
-        }
-        requireSupportedVerifyMode(options.path("VerifyMode").asText(), taskMode);
-        return options;
-    }
-
-    private static String requestedTaskMode(JsonNode request) {
-        String taskMode = request.path("TaskMode").asText(DEFAULT_TASK_MODE);
-        if (!TASK_MODES.contains(taskMode)) {
-            throw new AwsException("InvalidRequestException",
-                    "TaskMode " + taskMode + " is not a supported task mode. Supported modes are "
-                            + DEFAULT_TASK_MODE + " and " + TASK_MODE_ENHANCED + ".", 400);
-        }
-        return taskMode;
-    }
-
-    /**
-     * The mode a stored task was created with. {@code UpdateTaskRequest} carries no
-     * {@code TaskMode}, so a task keeps the mode it was created with for life.
-     */
-    private static String taskModeOf(DataSyncTask task) {
-        return task.getTaskMode() != null ? task.getTaskMode() : DEFAULT_TASK_MODE;
-    }
-
-    private static String defaultVerifyMode(String taskMode) {
-        return TASK_MODE_ENHANCED.equals(taskMode)
-                ? VERIFY_MODE_ONLY_FILES_TRANSFERRED
-                : VERIFY_MODE_POINT_IN_TIME_CONSISTENT;
-    }
-
-    private static void requireSupportedVerifyMode(String verifyMode, String taskMode) {
-        if (TASK_MODE_ENHANCED.equals(taskMode) && VERIFY_MODE_POINT_IN_TIME_CONSISTENT.equals(verifyMode)) {
-            throw new AwsException("InvalidRequestException",
-                    "VerifyMode " + VERIFY_MODE_POINT_IN_TIME_CONSISTENT + " is not supported for "
-                            + TASK_MODE_ENHANCED + " mode tasks.", 400);
-        }
-    }
-
-    private JsonNode filterList(JsonNode requested) {
-        return requested != null && requested.isArray() ? requested.deepCopy() : mapper.createArrayNode();
-    }
-
-    private static JsonNode copyOrNull(JsonNode requested) {
-        return requested != null && !requested.isNull() ? requested.deepCopy() : null;
-    }
-
-    private static <T> Page<T> paginate(List<T> all, Function<T, String> identity,
-                                        String nextToken, int maxResults) {
-        int start = 0;
-        if (nextToken != null && !nextToken.isEmpty()) {
-            for (int i = 0; i < all.size(); i++) {
-                if (identity.apply(all.get(i)).equals(nextToken)) {
-                    start = i + 1;
-                    break;
-                }
-            }
-        }
-        int limit = maxResults > 0 ? maxResults : DEFAULT_MAX_RESULTS;
-        int end = Math.min(start + limit, all.size());
-        List<T> page = new ArrayList<>(all.subList(Math.min(start, all.size()), end));
-        String token = end < all.size() && !page.isEmpty() ? identity.apply(page.get(page.size() - 1)) : null;
-        return new Page<>(page, token);
-    }
-
-    public static Map<String, String> tagsOf(JsonNode tagList) {
-        Map<String, String> tags = new LinkedHashMap<>();
-        if (tagList != null && tagList.isArray()) {
-            for (JsonNode tag : tagList) {
-                String key = tag.path("Key").asText("");
-                if (!key.isEmpty()) {
-                    tags.put(key, tag.path("Value").asText(""));
-                }
-            }
-        }
-        return tags;
-    }
-
-    public static List<String> stringList(JsonNode arrayNode) {
-        List<String> values = new ArrayList<>();
-        if (arrayNode != null && arrayNode.isArray()) {
-            arrayNode.forEach(element -> values.add(element.asText("")));
-        }
-        return values;
-    }
-
-    private static boolean hasValue(JsonNode request, String member) {
-        JsonNode value = request.get(member);
-        return value != null && !value.isNull() && !(value.isTextual() && value.asText().isEmpty());
-    }
-
-    private static String requiredText(JsonNode request, String member, String operation) {
-        if (!hasValue(request, member)) {
-            throw new AwsException("InvalidRequestException", member + " is required for " + operation + ".", 400);
-        }
-        return request.get(member).asText();
-    }
-
-    private static String optionalText(JsonNode request, String member) {
-        return request.hasNonNull(member) ? request.get(member).asText() : null;
-    }
-
-    private static void requireArn(String arn, String member) {
-        if (arn == null || arn.isBlank()) {
-            throw new AwsException("InvalidRequestException", member + " is required.", 400);
-        }
-    }
-
-    private static String randomResourceId() {
-        StringBuilder id = new StringBuilder(RESOURCE_ID_LENGTH);
-        for (int i = 0; i < RESOURCE_ID_LENGTH; i++) {
-            id.append(HEX_ALPHABET.charAt(RANDOM.nextInt(HEX_ALPHABET.length())));
-        }
-        return id.toString();
-    }
-
-    private final AccountAwareStorageBackend<ObjectNode> executions;
-
-    private final S3Service s3;
-
-    private final ExecutorService executor;
-
-    private final RequestContext requestContext;
-
-    private final Map<String, FutureTask<Void>> workers = new HashMap<>();
-
-    private boolean stopping;
-
+    // ---- Executions ----
 
     public synchronized ObjectNode startTaskExecution(JsonNode request, String region) {
         if (stopping) {
@@ -1298,4 +899,454 @@ public class DataSyncService {
         executor.shutdownNow();
     }
 
+    // ---- Tags ----
+
+    public synchronized Map<String, String> listTagsForResource(String resourceArn) {
+        requireArn(resourceArn, "ResourceArn");
+        if (resourceArn.contains("/execution/")) {
+            return tagsOf(execution(resourceArn, regionResolver.getRegion()).path("Tags"));
+        }
+        return new LinkedHashMap<>(findTaggable(resourceArn).getTags());
+    }
+
+    public synchronized void tagResource(String resourceArn, Map<String, String> tags) {
+        requireArn(resourceArn, "ResourceArn");
+        if (resourceArn.contains("/execution/")) {
+            Map<String, String> merged = listTagsForResource(resourceArn);
+            merged.putAll(tags);
+            saveExecutionTags(resourceArn, merged);
+            return;
+        }
+        DataSyncTaggable resource = findTaggable(resourceArn);
+        resource.getTags().putAll(tags);
+        persist(resourceArn, resource);
+    }
+
+    public synchronized void untagResource(String resourceArn, List<String> tagKeys) {
+        requireArn(resourceArn, "ResourceArn");
+        if (resourceArn.contains("/execution/")) {
+            Map<String, String> tags = listTagsForResource(resourceArn);
+            tagKeys.forEach(tags::remove);
+            saveExecutionTags(resourceArn, tags);
+            return;
+        }
+        DataSyncTaggable resource = findTaggable(resourceArn);
+        tagKeys.forEach(resource.getTags()::remove);
+        persist(resourceArn, resource);
+    }
+
+    private void saveExecutionTags(String arn, Map<String, String> tags) {
+        ObjectNode execution = execution(arn, regionResolver.getRegion());
+        execution.putArray("Tags");
+        tags.forEach((key, value) -> execution.withArray("Tags").addObject().put("Key", key).put("Value", value));
+        executions.put(arn, execution);
+    }
+
+    private DataSyncTaggable findTaggable(String resourceArn) {
+        requireArn(resourceArn, "ResourceArn");
+        requireScope(resourceArn, regionResolver.getRegion(), "Resource");
+        return agents.get(resourceArn).<DataSyncTaggable>map(agent -> agent)
+                .or(() -> locations.get(resourceArn).map(location -> location))
+                .or(() -> tasks.get(resourceArn).map(task -> task))
+                .orElseThrow(() -> new AwsException("InvalidRequestException",
+                        "Resource " + resourceArn + " is not found.", 400));
+    }
+
+    private void persist(String resourceArn, DataSyncTaggable resource) {
+        if (resource instanceof DataSyncAgent agent) {
+            agents.put(resourceArn, agent);
+        } else if (resource instanceof DataSyncLocation location) {
+            locations.put(resourceArn, location);
+        } else {
+            tasks.put(resourceArn, (DataSyncTask) resource);
+        }
+    }
+
+    // ---- Location derivation ----
+
+    private void applyLocationDefaults(DataSyncLocationType type, ObjectNode configuration, String region) {
+        switch (type) {
+            case AZURE_BLOB -> {
+                defaultText(configuration, "BlobType", "BLOCK");
+                defaultText(configuration, "AccessTier", "HOT");
+            }
+            case EFS -> defaultText(configuration, "InTransitEncryption", "NONE");
+            case FSX_ONTAP -> {
+                String svmArn = configuration.path("StorageVirtualMachineArn").asText("");
+                String fileSystemId = fsxFileSystemId(svmArn);
+                if (!fileSystemId.isEmpty()) {
+                    configuration.put("FsxFilesystemArn", "arn:aws:fsx:" + arnRegion(svmArn, region) + ":"
+                            + arnAccountId(svmArn) + ":file-system/" + fileSystemId);
+                }
+            }
+            case HDFS -> {
+                if (!configuration.hasNonNull("BlockSize")) {
+                    configuration.put("BlockSize", 134217728);
+                }
+                if (!configuration.hasNonNull("ReplicationFactor")) {
+                    configuration.put("ReplicationFactor", 3);
+                }
+                ObjectNode qop = objectMember(configuration, "QopConfiguration");
+                defaultText(qop, "RpcProtection", "PRIVACY");
+                defaultText(qop, "DataTransferProtection", "PRIVACY");
+            }
+            case NFS -> defaultMountOptions(configuration);
+            case OBJECT_STORAGE -> {
+                defaultText(configuration, "ServerProtocol", "HTTPS");
+                if (!configuration.hasNonNull("ServerPort")) {
+                    configuration.put("ServerPort",
+                            "HTTP".equals(configuration.path("ServerProtocol").asText()) ? 80 : 443);
+                }
+            }
+            case S3 -> defaultText(configuration, "S3StorageClass", "STANDARD");
+            case SMB -> {
+                defaultText(configuration, "AuthenticationType", "NTLM");
+                defaultMountOptions(configuration);
+            }
+            default -> {
+                // FSx Lustre, FSx Windows and FSx OpenZFS carry no server-side defaults.
+            }
+        }
+    }
+
+    private void defaultMountOptions(ObjectNode configuration) {
+        defaultText(objectMember(configuration, "MountOptions"), "Version", "AUTOMATIC");
+    }
+
+    private static ObjectNode objectMember(ObjectNode parent, String member) {
+        return parent.get(member) instanceof ObjectNode existing ? existing : parent.putObject(member);
+    }
+
+    private static void defaultText(ObjectNode node, String member, String value) {
+        if (!node.hasNonNull(member) || node.get(member).asText().isEmpty()) {
+            node.put(member, value);
+        }
+    }
+
+    private void stripCredentials(ObjectNode configuration) {
+        CREDENTIAL_MEMBERS.forEach(configuration::remove);
+        JsonNode protocol = configuration.get("Protocol");
+        if (protocol instanceof ObjectNode protocolNode && protocolNode.get("SMB") instanceof ObjectNode smb) {
+            smb.remove("Password");
+        }
+    }
+
+    String buildLocationUri(DataSyncLocationType type, JsonNode configuration, String region) {
+        return switch (type) {
+            case AZURE_BLOB -> {
+                String authority = configuration.path("ContainerUrl").asText("")
+                        .replaceFirst("^https?://", "");
+                yield "azure-blob://" + trimTrailingSlashes(authority) + subdirectory(configuration);
+            }
+            case EFS -> fileSystemUri(type, configuration.path("EfsFilesystemArn").asText(""), region, configuration);
+            case FSX_LUSTRE, FSX_OPEN_ZFS, FSX_WINDOWS ->
+                    fileSystemUri(type, configuration.path("FsxFilesystemArn").asText(""), region, configuration);
+            case FSX_ONTAP -> {
+                String svmArn = configuration.path("StorageVirtualMachineArn").asText("");
+                yield "fsxn://" + arnRegion(svmArn, region) + "." + fsxFileSystemId(svmArn) + "."
+                        + fsxStorageVirtualMachineId(svmArn) + subdirectory(configuration);
+            }
+            case HDFS -> {
+                JsonNode nameNode = configuration.path("NameNodes").path(0);
+                int port = nameNode.path("Port").asInt(0);
+                yield "hdfs://" + nameNode.path("Hostname").asText("")
+                        + (port > 0 ? ":" + port : "") + subdirectory(configuration);
+            }
+            case NFS -> "nfs://" + configuration.path("ServerHostname").asText("") + subdirectory(configuration);
+            case SMB -> "smb://" + configuration.path("ServerHostname").asText("") + subdirectory(configuration);
+            case OBJECT_STORAGE -> "object-storage://" + configuration.path("ServerHostname").asText("")
+                    + "/" + configuration.path("BucketName").asText("") + subdirectory(configuration);
+            case S3 -> {
+                String subdirectory = subdirectory(configuration);
+                yield "s3://" + s3BucketName(configuration.path("S3BucketArn").asText(""))
+                        + ("/".equals(subdirectory) ? "" : subdirectory);
+            }
+        };
+    }
+
+    private String fileSystemUri(DataSyncLocationType type, String fileSystemArn, String region,
+                                 JsonNode configuration) {
+        String fileSystemId = arnResource(fileSystemArn);
+        int slash = fileSystemId.lastIndexOf('/');
+        if (slash >= 0) {
+            fileSystemId = fileSystemId.substring(slash + 1);
+        }
+        return type.uriScheme() + "://" + arnRegion(fileSystemArn, region) + "." + fileSystemId
+                + subdirectory(configuration);
+    }
+
+    private static String subdirectory(JsonNode configuration) {
+        String subdirectory = configuration.path("Subdirectory").asText("").trim();
+        while (subdirectory.endsWith("/")) {
+            subdirectory = subdirectory.substring(0, subdirectory.length() - 1);
+        }
+        if (subdirectory.isEmpty()) {
+            return "/";
+        }
+        return subdirectory.startsWith("/") ? subdirectory : "/" + subdirectory;
+    }
+
+    private static String trimTrailingSlashes(String value) {
+        String trimmed = value;
+        while (trimmed.endsWith("/")) {
+            trimmed = trimmed.substring(0, trimmed.length() - 1);
+        }
+        return trimmed;
+    }
+
+    private static String s3BucketName(String bucketArn) {
+        String resource = arnResource(bucketArn);
+        return resource.isEmpty() ? bucketArn : resource;
+    }
+
+    private static String fsxFileSystemId(String storageVirtualMachineArn) {
+        String[] segments = arnResource(storageVirtualMachineArn).split("/");
+        return segments.length > 1 ? segments[1] : "";
+    }
+
+    private static String fsxStorageVirtualMachineId(String storageVirtualMachineArn) {
+        String[] segments = arnResource(storageVirtualMachineArn).split("/");
+        return segments.length > 2 ? segments[2] : "";
+    }
+
+    private static String arnRegion(String arn, String fallback) {
+        String[] segments = arn.split(":", 6);
+        return segments.length > 3 && !segments[3].isEmpty() ? segments[3] : fallback;
+    }
+
+    private String arnAccountId(String arn) {
+        String[] segments = arn.split(":", 6);
+        return segments.length > 4 && !segments[4].isEmpty() ? segments[4] : regionResolver.getAccountId();
+    }
+
+    private static String arnResource(String arn) {
+        String[] segments = arn.split(":", 6);
+        return segments.length > 5 ? segments[5] : "";
+    }
+
+    // ---- Filters ----
+
+    private boolean matchesLocationFilters(DataSyncLocation location, JsonNode filters) {
+        if (filters == null || !filters.isArray()) {
+            return true;
+        }
+        for (JsonNode filter : filters) {
+            String name = filter.path("Name").asText("");
+            List<String> values = stringList(filter.path("Values"));
+            String operator = filter.path("Operator").asText("Equals");
+            boolean matched = switch (name) {
+                case "LocationUri" -> matchesString(location.getLocationUri(), values, operator);
+                case "LocationType" -> matchesString(location.getLocationType().operationSuffix(), values, operator)
+                        || matchesString(location.getLocationType().uriScheme(), values, operator);
+                case "CreationTime" -> matchesInstant(location.getCreationTime(), values, operator);
+                default -> throw new AwsException("InvalidRequestException",
+                        "Unsupported ListLocations filter name: " + name, 400);
+            };
+            if (!matched) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean matchesTaskFilters(DataSyncTask task, JsonNode filters) {
+        if (filters == null || !filters.isArray()) {
+            return true;
+        }
+        for (JsonNode filter : filters) {
+            String name = filter.path("Name").asText("");
+            List<String> values = stringList(filter.path("Values"));
+            String operator = filter.path("Operator").asText("Equals");
+            boolean matched = switch (name) {
+                case "LocationId" -> matchesString(task.getSourceLocationArn(), values, operator)
+                        || matchesString(task.getDestinationLocationArn(), values, operator);
+                case "CreationTime" -> matchesInstant(task.getCreationTime(), values, operator);
+                default -> throw new AwsException("InvalidRequestException",
+                        "Unsupported ListTasks filter name: " + name, 400);
+            };
+            if (!matched) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean matchesString(String attribute, List<String> values, String operator) {
+        String actual = attribute != null ? attribute : "";
+        return switch (operator) {
+            case "Equals", "In" -> values.stream().anyMatch(actual::equalsIgnoreCase);
+            case "NotEquals" -> values.stream().noneMatch(actual::equalsIgnoreCase);
+            case "Contains" -> values.stream()
+                    .anyMatch(value -> actual.toLowerCase(Locale.ROOT).contains(value.toLowerCase(Locale.ROOT)));
+            case "NotContains" -> values.stream()
+                    .noneMatch(value -> actual.toLowerCase(Locale.ROOT).contains(value.toLowerCase(Locale.ROOT)));
+            case "BeginsWith" -> values.stream()
+                    .anyMatch(value -> actual.toLowerCase(Locale.ROOT).startsWith(value.toLowerCase(Locale.ROOT)));
+            default -> throw new AwsException("InvalidRequestException",
+                    "Unsupported filter operator for a string attribute: " + operator, 400);
+        };
+    }
+
+    private static boolean matchesInstant(Instant attribute, List<String> values, String operator) {
+        Instant actual = attribute != null ? attribute : Instant.EPOCH;
+        return switch (operator) {
+            case "Equals", "In" -> values.stream().anyMatch(value -> actual.equals(parseInstant(value)));
+            case "NotEquals" -> values.stream().noneMatch(value -> actual.equals(parseInstant(value)));
+            case "LessThan" -> values.stream().allMatch(value -> actual.isBefore(parseInstant(value)));
+            case "LessThanOrEqual" -> values.stream().allMatch(value -> !actual.isAfter(parseInstant(value)));
+            case "GreaterThan" -> values.stream().allMatch(value -> actual.isAfter(parseInstant(value)));
+            case "GreaterThanOrEqual" -> values.stream().allMatch(value -> !actual.isBefore(parseInstant(value)));
+            default -> throw new AwsException("InvalidRequestException",
+                    "Unsupported filter operator for CreationTime: " + operator, 400);
+        };
+    }
+
+    private static Instant parseInstant(String value) {
+        try {
+            return Instant.parse(value);
+        } catch (DateTimeParseException notIso) {
+            try {
+                return Instant.ofEpochMilli((long) (Double.parseDouble(value) * 1000));
+            } catch (NumberFormatException notEpoch) {
+                throw new AwsException("InvalidRequestException",
+                        "CreationTime filter value is neither an ISO-8601 instant nor an epoch timestamp: "
+                                + value, 400);
+            }
+        }
+    }
+
+    // ---- Helpers ----
+
+    private JsonNode mergedOptions(JsonNode requested, String taskMode) {
+        ObjectNode options = mapper.createObjectNode();
+        options.put("VerifyMode", defaultVerifyMode(taskMode));
+        options.put("OverwriteMode", "ALWAYS");
+        options.put("Atime", "BEST_EFFORT");
+        options.put("Mtime", "PRESERVE");
+        options.put("Uid", "INT_VALUE");
+        options.put("Gid", "INT_VALUE");
+        options.put("PreserveDeletedFiles", "PRESERVE");
+        options.put("PreserveDevices", "NONE");
+        options.put("PosixPermissions", "PRESERVE");
+        options.put("BytesPerSecond", -1L);
+        options.put("TaskQueueing", "ENABLED");
+        options.put("LogLevel", "OFF");
+        options.put("TransferMode", "CHANGED");
+        options.put("SecurityDescriptorCopyFlags", "OWNER_DACL");
+        options.put("ObjectTags", "PRESERVE");
+        if (requested != null && requested.isObject()) {
+            requested.properties().forEach(member -> options.set(member.getKey(), member.getValue().deepCopy()));
+        }
+        requireSupportedVerifyMode(options.path("VerifyMode").asText(), taskMode);
+        return options;
+    }
+
+    private static String requestedTaskMode(JsonNode request) {
+        String taskMode = request.path("TaskMode").asText(DEFAULT_TASK_MODE);
+        if (!TASK_MODES.contains(taskMode)) {
+            throw new AwsException("InvalidRequestException",
+                    "TaskMode " + taskMode + " is not a supported task mode. Supported modes are "
+                            + DEFAULT_TASK_MODE + " and " + TASK_MODE_ENHANCED + ".", 400);
+        }
+        return taskMode;
+    }
+
+    /**
+     * The mode a stored task was created with. {@code UpdateTaskRequest} carries no
+     * {@code TaskMode}, so a task keeps the mode it was created with for life.
+     */
+    private static String taskModeOf(DataSyncTask task) {
+        return task.getTaskMode() != null ? task.getTaskMode() : DEFAULT_TASK_MODE;
+    }
+
+    private static String defaultVerifyMode(String taskMode) {
+        return TASK_MODE_ENHANCED.equals(taskMode)
+                ? VERIFY_MODE_ONLY_FILES_TRANSFERRED
+                : VERIFY_MODE_POINT_IN_TIME_CONSISTENT;
+    }
+
+    private static void requireSupportedVerifyMode(String verifyMode, String taskMode) {
+        if (TASK_MODE_ENHANCED.equals(taskMode) && VERIFY_MODE_POINT_IN_TIME_CONSISTENT.equals(verifyMode)) {
+            throw new AwsException("InvalidRequestException",
+                    "VerifyMode " + VERIFY_MODE_POINT_IN_TIME_CONSISTENT + " is not supported for "
+                            + TASK_MODE_ENHANCED + " mode tasks.", 400);
+        }
+    }
+
+    private JsonNode filterList(JsonNode requested) {
+        return requested != null && requested.isArray() ? requested.deepCopy() : mapper.createArrayNode();
+    }
+
+    private static JsonNode copyOrNull(JsonNode requested) {
+        return requested != null && !requested.isNull() ? requested.deepCopy() : null;
+    }
+
+    private static <T> Page<T> paginate(List<T> all, Function<T, String> identity,
+                                        String nextToken, int maxResults) {
+        int start = 0;
+        if (nextToken != null && !nextToken.isEmpty()) {
+            for (int i = 0; i < all.size(); i++) {
+                if (identity.apply(all.get(i)).equals(nextToken)) {
+                    start = i + 1;
+                    break;
+                }
+            }
+        }
+        int limit = maxResults > 0 ? maxResults : DEFAULT_MAX_RESULTS;
+        int end = Math.min(start + limit, all.size());
+        List<T> page = new ArrayList<>(all.subList(Math.min(start, all.size()), end));
+        String token = end < all.size() && !page.isEmpty() ? identity.apply(page.get(page.size() - 1)) : null;
+        return new Page<>(page, token);
+    }
+
+    public static Map<String, String> tagsOf(JsonNode tagList) {
+        Map<String, String> tags = new LinkedHashMap<>();
+        if (tagList != null && tagList.isArray()) {
+            for (JsonNode tag : tagList) {
+                String key = tag.path("Key").asText("");
+                if (!key.isEmpty()) {
+                    tags.put(key, tag.path("Value").asText(""));
+                }
+            }
+        }
+        return tags;
+    }
+
+    public static List<String> stringList(JsonNode arrayNode) {
+        List<String> values = new ArrayList<>();
+        if (arrayNode != null && arrayNode.isArray()) {
+            arrayNode.forEach(element -> values.add(element.asText("")));
+        }
+        return values;
+    }
+
+    private static boolean hasValue(JsonNode request, String member) {
+        JsonNode value = request.get(member);
+        return value != null && !value.isNull() && !(value.isTextual() && value.asText().isEmpty());
+    }
+
+    private static String requiredText(JsonNode request, String member, String operation) {
+        if (!hasValue(request, member)) {
+            throw new AwsException("InvalidRequestException", member + " is required for " + operation + ".", 400);
+        }
+        return request.get(member).asText();
+    }
+
+    private static String optionalText(JsonNode request, String member) {
+        return request.hasNonNull(member) ? request.get(member).asText() : null;
+    }
+
+    private static void requireArn(String arn, String member) {
+        if (arn == null || arn.isBlank()) {
+            throw new AwsException("InvalidRequestException", member + " is required.", 400);
+        }
+    }
+
+    private static String randomResourceId() {
+        StringBuilder id = new StringBuilder(RESOURCE_ID_LENGTH);
+        for (int i = 0; i < RESOURCE_ID_LENGTH; i++) {
+            id.append(HEX_ALPHABET.charAt(RANDOM.nextInt(HEX_ALPHABET.length())));
+        }
+        return id.toString();
+    }
 }

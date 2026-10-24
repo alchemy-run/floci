@@ -2912,17 +2912,6 @@ public class ApiGatewayController {
         return node;
     }
 
-    @Inject
-    public ApiGatewayController(ApiGatewayService service, ApiGatewayV2Service v2Service,
-                                ApiGatewayV2OpenApiImporter v2OpenApiImporter,
-                                RegionResolver regionResolver, ObjectMapper objectMapper) {
-        this.service = service;
-        this.v2Service = v2Service;
-        this.v2OpenApiImporter = v2OpenApiImporter;
-        this.regionResolver = regionResolver;
-        this.objectMapper = objectMapper;
-    }
-
     @POST
     @Path("/restapis")
     @Consumes(MediaType.WILDCARD)

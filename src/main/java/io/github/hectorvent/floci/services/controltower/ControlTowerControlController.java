@@ -2,7 +2,6 @@ package io.github.hectorvent.floci.services.controltower;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
@@ -17,8 +16,6 @@ import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
-
-import java.time.Instant;
 
 @Path("/")
 @Produces(MediaType.APPLICATION_JSON)
@@ -40,16 +37,22 @@ public class ControlTowerControlController {
 
     @POST @Path("/enable-control")
     public Response enable(@Context HttpHeaders headers, String body) {
-        ControlTowerControlService.EnableResult result = service.enable(account(), region(headers), parse(body));
+        var result = service.enable(account(), region(headers), parse(body));
         return Response.ok(objectMapper.createObjectNode().put("arn", result.arn())
                 .put("operationIdentifier", result.operationIdentifier())).build();
     }
 
+    @POST @Path("/disable-control")
+    public Response disable(@Context HttpHeaders headers, String body) {
+        String operationId = service.disable(account(), region(headers), parse(body));
+        return Response.ok(objectMapper.createObjectNode().put("operationIdentifier", operationId)).build();
+    }
+
     @POST @Path("/list-enabled-controls")
     public Response list(@Context HttpHeaders headers, String body) {
-        ControlTowerControlService.ListResult result = service.list(region(headers), parse(body));
+        var result = service.list(region(headers), parse(body));
         ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode array = response.putArray("enabledControls");
+        var array = response.putArray("enabledControls");
         result.controls().forEach(control -> array.add(summary(control)));
         if (result.nextToken() != null) response.put("nextToken", result.nextToken());
         return Response.ok(response).build();
@@ -82,7 +85,23 @@ public class ControlTowerControlController {
     @POST @Path("/get-control-operation")
     public Response operation(@Context HttpHeaders headers, String body) {
         JsonNode request = parse(body);
-        ControlTowerControlService.ControlOperation operation = service.operation(account(), region(headers), requireText(request, "operationIdentifier"));
+        var operation = service.operation(account(), region(headers), requireText(request, "operationIdentifier"));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("controlOperation", operationNode(operation));
+        return Response.ok(response).build();
+    }
+
+    @POST @Path("/list-control-operations")
+    public Response listOperations(@Context HttpHeaders headers, String body) {
+        var result = service.listOperations(account(), region(headers), parse(body));
+        ObjectNode response = objectMapper.createObjectNode();
+        var array = response.putArray("controlOperations");
+        result.operations().forEach(operation -> array.add(operationNode(operation)));
+        if (result.nextToken() != null) response.put("nextToken", result.nextToken());
+        return Response.ok(response).build();
+    }
+
+    private ObjectNode operationNode(ControlTowerControlService.ControlOperation operation) {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("operationIdentifier", operation.operationIdentifier());
         node.put("operationType", operation.operationType());
@@ -90,12 +109,9 @@ public class ControlTowerControlController {
         node.put("controlIdentifier", operation.controlIdentifier());
         node.put("enabledControlIdentifier", operation.enabledControlIdentifier());
         node.put("targetIdentifier", operation.targetIdentifier());
-        String now = Instant.now().toString();
-        node.put("startTime", now);
-        node.put("endTime", now);
-        ObjectNode response = objectMapper.createObjectNode();
-        response.set("controlOperation", node);
-        return Response.ok(response).build();
+        node.put("startTime", operation.startTime());
+        node.put("endTime", operation.endTime());
+        return node;
     }
 
     private ObjectNode summary(EnabledControl control) {
@@ -132,33 +148,4 @@ public class ControlTowerControlController {
     private String region(HttpHeaders headers) { return regionResolver.resolveRegion(headers); }
     private String account() { return requestContext.getAccountId(); }
     private static AwsException validation(String message) { return new AwsException("ValidationException", message, 400); }
-
-    @POST @Path("/disable-control")
-    public Response disable(@Context HttpHeaders headers, String body) {
-        String operationId = service.disable(account(), region(headers), parse(body));
-        return Response.ok(objectMapper.createObjectNode().put("operationIdentifier", operationId)).build();
-    }
-
-    @POST @Path("/list-control-operations")
-    public Response listOperations(@Context HttpHeaders headers, String body) {
-        var result = service.listOperations(account(), region(headers), parse(body));
-        ObjectNode response = objectMapper.createObjectNode();
-        var array = response.putArray("controlOperations");
-        result.operations().forEach(operation -> array.add(operationNode(operation)));
-        if (result.nextToken() != null) response.put("nextToken", result.nextToken());
-        return Response.ok(response).build();
-    }
-
-    private ObjectNode operationNode(ControlTowerControlService.ControlOperation operation) {
-        ObjectNode node = objectMapper.createObjectNode();
-        node.put("operationIdentifier", operation.operationIdentifier());
-        node.put("operationType", operation.operationType());
-        node.put("status", operation.status());
-        node.put("controlIdentifier", operation.controlIdentifier());
-        node.put("enabledControlIdentifier", operation.enabledControlIdentifier());
-        node.put("targetIdentifier", operation.targetIdentifier());
-        node.put("startTime", operation.startTime());
-        node.put("endTime", operation.endTime());
-        return node;
-    }
 }

@@ -588,15 +588,6 @@ public class SesIdentityController {
         };
     }
 
-    @Inject
-    public SesIdentityController(SesIdentityService identityService, SesService sesService,
-                                 RegionResolver regionResolver, ObjectMapper objectMapper) {
-        this.identityService = identityService;
-        this.sesService = sesService;
-        this.regionResolver = regionResolver;
-        this.objectMapper = objectMapper;
-    }
-
     @GET
     @Path("/identities")
     public Response listEmailIdentities(@Context HttpHeaders headers) {

@@ -27,6 +27,10 @@ import java.util.regex.Pattern;
 public class TransferService {
 
     private static final String CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
+    private static final Pattern WORKFLOW_ID = Pattern.compile("w-([a-z0-9]{17})");
+    private static final Pattern EXECUTION_ID = Pattern.compile(
+            "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
+    private static final Pattern CALLBACK_TOKEN = Pattern.compile("\\w+");
 
     private final AccountAwareStorageBackend<Server> serverStore;
     private final AccountAwareStorageBackend<User> userStore;
@@ -76,18 +80,10 @@ public class TransferService {
         server.setTags(tags != null ? tags : new HashMap<>());
         server.setCreationTime(Instant.now());
 
-        try {
-            putServer(server);
-            if (tags != null && !tags.isEmpty()) {
-                putTags("server/" + serverId, tags);
-            }
-        } catch (RuntimeException failure) {
-            try {
-                deleteServerRecord(server);
-            } catch (RuntimeException cleanupFailure) {
-                failure.addSuppressed(cleanupFailure);
-            }
-            throw failure;
+        putServer(server);
+
+        if (tags != null && !tags.isEmpty()) {
+            putTags("server/" + serverId, tags);
         }
 
         return server;
@@ -184,25 +180,6 @@ public class TransferService {
         return server;
     }
 
-    /** Reconciles mutable server properties, including ones removed from a CloudFormation template. */
-    public Server replaceServerConfiguration(String serverId,
-                                             List<String> protocols,
-                                             String endpointType,
-                                             Map<String, Object> endpointDetails,
-                                             Map<String, String> identityProviderDetails,
-                                             String loggingRole,
-                                             String securityPolicyName) {
-        Server server = getServer(serverId);
-        server.setProtocols(protocols);
-        server.setEndpointType(endpointType);
-        server.setEndpointDetails(endpointDetails);
-        server.setIdentityProviderDetails(identityProviderDetails);
-        server.setLoggingRole(loggingRole);
-        server.setSecurityPolicyName(securityPolicyName);
-        putServer(server);
-        return server;
-    }
-
     // ── Users ─────────────────────────────────────────────────────────────────
 
     public User createUser(String serverId, String region, String userName, String role,
@@ -295,21 +272,6 @@ public class TransferService {
         return key;
     }
 
-    /**
-     * Puts back a key exactly as it was, keeping its id and import date, so a CloudFormation rollback
-     * does not hand callers a new id for a key they already hold. A key already present is left alone.
-     */
-    public void restoreSshPublicKey(String serverId, String userName, SshPublicKey key) {
-        User user = getUser(serverId, userName);
-        List<SshPublicKey> keys = new ArrayList<>(user.getSshPublicKeys() != null ? user.getSshPublicKeys() : List.of());
-        if (keys.stream().anyMatch(k -> k.getSshPublicKeyId().equals(key.getSshPublicKeyId()))) {
-            return;
-        }
-        keys.add(key);
-        user.setSshPublicKeys(keys);
-        putUser(user);
-    }
-
     public void deleteSshPublicKey(String serverId, String userName, String sshPublicKeyId) {
         User user = getUser(serverId, userName);
         List<SshPublicKey> keys = new ArrayList<>(user.getSshPublicKeys() != null ? user.getSshPublicKeys() : List.of());
@@ -320,6 +282,32 @@ public class TransferService {
         }
         user.setSshPublicKeys(keys);
         putUser(user);
+    }
+
+    // ── Workflows ─────────────────────────────────────────────────────────────
+
+    /**
+     * Reports a custom workflow step's outcome. Floci does not implement Transfer workflows
+     * (CreateWorkflow is unsupported and no workflow ever executes), so after request validation
+     * the workflow can never be found.
+     */
+    public void sendWorkflowStepState(String workflowId, String executionId, String token, String status) {
+        new TransferRequestValidator()
+                .required("workflowId", workflowId)
+                .length("workflowId", workflowId, 19, 19, false)
+                .pattern("workflowId", workflowId, WORKFLOW_ID, "^w-([a-z0-9]{17})$")
+                .required("executionId", executionId)
+                .length("executionId", executionId, 36, 36, false)
+                .pattern("executionId", executionId, EXECUTION_ID,
+                        "^[0-9a-fA-F]{8}\\-[0-9a-fA-F]{4}\\-[0-9a-fA-F]{4}\\-[0-9a-fA-F]{4}\\-[0-9a-fA-F]{12}$")
+                .required("token", token)
+                .length("token", token, 1, 64, false)
+                .pattern("token", token, CALLBACK_TOKEN, "^\\w+$")
+                .required("status", status)
+                .oneOf("status", status, List.of("SUCCESS", "FAILURE"))
+                .validate();
+        throw new AwsException("ResourceNotFoundException", "Unknown workflow", 404,
+                Map.of("Resource", workflowId, "ResourceType", "Workflow"));
     }
 
     // ── Tags ──────────────────────────────────────────────────────────────────
@@ -588,36 +576,5 @@ public class TransferService {
             // Convert corrupt persisted records into the AWS resource error below.
         }
         throw new AwsException("ResourceNotFoundException", "Persisted Transfer user has an invalid ARN.", 404);
-    }
-
-    private static final Pattern WORKFLOW_ID = Pattern.compile("w-([a-z0-9]{17})");
-
-    private static final Pattern EXECUTION_ID = Pattern.compile(
-            "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
-
-    private static final Pattern CALLBACK_TOKEN = Pattern.compile("\\w+");
-
-    /**
-     * Reports a custom workflow step's outcome. Floci does not implement Transfer workflows
-     * (CreateWorkflow is unsupported and no workflow ever executes), so after request validation
-     * the workflow can never be found.
-     */
-    public void sendWorkflowStepState(String workflowId, String executionId, String token, String status) {
-        new TransferRequestValidator()
-                .required("workflowId", workflowId)
-                .length("workflowId", workflowId, 19, 19, false)
-                .pattern("workflowId", workflowId, WORKFLOW_ID, "^w-([a-z0-9]{17})$")
-                .required("executionId", executionId)
-                .length("executionId", executionId, 36, 36, false)
-                .pattern("executionId", executionId, EXECUTION_ID,
-                        "^[0-9a-fA-F]{8}\\-[0-9a-fA-F]{4}\\-[0-9a-fA-F]{4}\\-[0-9a-fA-F]{4}\\-[0-9a-fA-F]{12}$")
-                .required("token", token)
-                .length("token", token, 1, 64, false)
-                .pattern("token", token, CALLBACK_TOKEN, "^\\w+$")
-                .required("status", status)
-                .oneOf("status", status, List.of("SUCCESS", "FAILURE"))
-                .validate();
-        throw new AwsException("ResourceNotFoundException", "Unknown workflow", 404,
-                Map.of("Resource", workflowId, "ResourceType", "Workflow"));
     }
 }

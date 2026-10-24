@@ -59,7 +59,8 @@ public class Ec2QueryHandler {
     public Ec2QueryHandler(Ec2Service service, EmulatorConfig config, FlowLogService flowLogService,
                            Ec2EbsEncryptionService ebsEncryptionService,
                            Ec2SnapshotBlockPublicAccessService snapshotBlockPublicAccessService,
-                           Ec2IpamService ipamService, RegionResolver regionResolver) {
+                           Ec2IpamService ipamService, RegionResolver regionResolver, KmsService kmsService,
+                           Ec2ClientVpnService clientVpnService) {
         this.service = service;
         this.config = config;
         this.flowLogService = flowLogService;
@@ -67,6 +68,8 @@ public class Ec2QueryHandler {
         this.snapshotBlockPublicAccessService = snapshotBlockPublicAccessService;
         this.ipamService = ipamService;
         this.regionResolver = regionResolver;
+        this.kmsService = kmsService;
+        this.clientVpnService = clientVpnService;
     }
 
     public Response handle(String action, MultivaluedMap<String, String> params, String region) {
@@ -6710,31 +6713,6 @@ public class Ec2QueryHandler {
     private final KmsService kmsService;
 
     private final Ec2ClientVpnService clientVpnService;
-
-    @Inject
-    public Ec2QueryHandler(Ec2Service service, EmulatorConfig config, FlowLogService flowLogService,
-                           Ec2EbsEncryptionService ebsEncryptionService,
-                           Ec2SnapshotBlockPublicAccessService snapshotBlockPublicAccessService,
-                           Ec2IpamService ipamService, KmsService kmsService,
-                           Ec2ClientVpnService clientVpnService) {
-        this.service = service;
-        this.config = config;
-        this.flowLogService = flowLogService;
-        this.ebsEncryptionService = ebsEncryptionService;
-        this.snapshotBlockPublicAccessService = snapshotBlockPublicAccessService;
-        this.ipamService = ipamService;
-        this.kmsService = kmsService;
-        this.clientVpnService = clientVpnService;
-    }
-
-    public Ec2QueryHandler(Ec2Service service, EmulatorConfig config, FlowLogService flowLogService,
-                           Ec2EbsEncryptionService ebsEncryptionService,
-                           Ec2SnapshotBlockPublicAccessService snapshotBlockPublicAccessService,
-                           Ec2IpamService ipamService) {
-        this(service, config, flowLogService, ebsEncryptionService, snapshotBlockPublicAccessService,
-                ipamService, null);
-    }
-
 
     /**
      * Alchemy (and the AWS SDKs) send the primary ENI as

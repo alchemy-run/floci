@@ -357,7 +357,7 @@ public class EmulatorLifecycle {
         }
         try {
             metadataServerStarted.join();
-            eksService.restorePersistedRuntime();
+            // The fork's EKS service restores its clusters when it is first used.
         } catch (RuntimeException e) {
             // EKS requests retry the bean's creation, as before; the rest of the emulator still starts.
             LOG.error("Failed to restore persisted EKS clusters at startup", e);
@@ -404,7 +404,6 @@ public class EmulatorLifecycle {
         // still runs at the end to stop the flush schedulers and capture any shutdown-time writes.
         // DynamoDB stream consumers stop first, so the flush holds their final checkpoints.
         runCleanup("DynamoDB Streams poller", dynamodbStreamsPoller::shutdown);
-        runCleanup("Redshift zero-ETL consumer", redshiftZeroEtlConsumer::shutdown);
         runCleanup("storage flush", storageFactory::flushAll);
         runCleanup("EC2 metadata server", () -> {
             if (isMetadataServerNeeded()) {

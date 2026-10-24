@@ -59,8 +59,12 @@ public class CloudFrontController {
     private final CloudFrontService service;
 
     @Inject
-    public CloudFrontController(CloudFrontService service) {
+    public CloudFrontController(CloudFrontService service,
+            CloudFrontFunctionRuntime functionRuntime,
+            ObjectMapper mapper) {
         this.service = service;
+        this.functionRuntime = functionRuntime;
+        this.mapper = mapper;
     }
 
     // ── Distributions ─────────────────────────────────────────────────────────
@@ -3897,15 +3901,6 @@ public class CloudFrontController {
     private final CloudFrontFunctionRuntime functionRuntime;
 
     private final ObjectMapper mapper;
-
-    @Inject
-    public CloudFrontController(CloudFrontService service,
-                                CloudFrontFunctionRuntime functionRuntime,
-                                ObjectMapper mapper) {
-        this.service = service;
-        this.functionRuntime = functionRuntime;
-        this.mapper = mapper;
-    }
 
     /**
      * Runs a function against a caller-supplied event object and returns the

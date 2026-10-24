@@ -896,28 +896,6 @@ public class CloudMapService {
         return sb.toString();
     }
 
-    @Inject
-    public CloudMapService(StorageFactory storageFactory, EmulatorConfig config,
-                           RegionResolver regionResolver) {
-        this.namespaceStore = storageFactory.create("cloudmap", "cloudmap-namespaces.json",
-                new TypeReference<Map<String, Namespace>>() {});
-        this.serviceStore = storageFactory.create("cloudmap", "cloudmap-services.json",
-                new TypeReference<Map<String, Service>>() {});
-        this.instanceStore = storageFactory.create("cloudmap", "cloudmap-instances.json",
-                new TypeReference<Map<String, Instance>>() {});
-        this.operationStore = storageFactory.create("cloudmap", "cloudmap-operations.json",
-                new TypeReference<Map<String, Operation>>() {});
-        this.regionResolver = regionResolver;
-        this.completionDelaySeconds = config.services().cloudmap().operationCompletionDelaySeconds();
-        this.scheduler = completionDelaySeconds > 0
-                ? Executors.newSingleThreadScheduledExecutor(r -> {
-                    Thread t = new Thread(r, "cloudmap-ops");
-                    t.setDaemon(true);
-                    return t;
-                })
-                : null;
-    }
-
     public Operation createPublicDnsNamespace(String name, String creatorRequestId,
                                               String description, Map<String, String> tags, String region,
                                               Long soaTtl) {

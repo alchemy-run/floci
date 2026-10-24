@@ -5677,26 +5677,20 @@ public class DynamoDbService {
 
     private final ConcurrentHashMap<String, TableBackup> backups = new ConcurrentHashMap<>();
 
-    @Inject
-    public DynamoDbService(StorageFactory storageFactory, RegionResolver regionResolver,
-                           DynamoDbStreamService streamService,
-                           KinesisStreamingForwarder kinesisForwarder,
-                           S3Service s3Service,
-                           ObjectMapper objectMapper) {
-        this(storageFactory.create("dynamodb", "dynamodb-tables.json",
-                new TypeReference<Map<String, TableDefinition>>() {}),
-             storageFactory.create("dynamodb", "dynamodb-items.json",
-                new TypeReference<Map<String, Map<String, JsonNode>>>() {}),
-             storageFactory.create("dynamodb", "dynamodb-exports.json",
-                new TypeReference<Map<String, ExportDescription>>() {}),
-             storageFactory.create("dynamodb", "dynamodb-imports.json",
-                new TypeReference<Map<String, ImportTableDescription>>() {}),
-             regionResolver, streamService, kinesisForwarder, s3Service, objectMapper);
+
+
+
+    private Set<String> writtenAttributes(List<String> touchedPaths, String updateExpression,
+                                           JsonNode expressionAttrNames) {
+        Set<String> names = new LinkedHashSet<>();
+        for (String path : touchedPaths) {
+            List<Object> tokens = pathTokens(path, updateExpression, expressionAttrNames);
+            if (!tokens.isEmpty() && tokens.get(0) instanceof String name) {
+                names.add(name);
+            }
+        }
+        return names;
     }
-
-
-
-
 
 
 
@@ -5803,9 +5797,6 @@ public class DynamoDbService {
         return table;
     }
 
-    public TableBackup describeBackup(String backupArn) {
-        return requireBackup(backupArn);
-    }
 
 
 

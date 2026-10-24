@@ -87,7 +87,6 @@ public class LaunchedContainerAwsEnv {
      * the container reaches Floci.
      */
     public String flociEndpoint() {
-        return reachableEndpoint.baseUrl();
         return flociEndpoint(true);
     }
 

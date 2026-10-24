@@ -1625,8 +1625,8 @@ public class SsmService implements ResourceProvider {
 
     static final String AWS_MANAGED_SSM_ALIAS = "alias/aws/ssm";
 
-    private final KmsService kmsService;
-
+    @Inject
+    KmsService kmsService;
 
     public List<Parameter> getParameters(List<String> names, String region) {
         List<Parameter> result = new ArrayList<>();

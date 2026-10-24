@@ -2,7 +2,6 @@ package io.github.hectorvent.floci.services.controltower;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
@@ -23,7 +22,7 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * AWS Control Tower (Smithy restJson1) — the operations that unblock LZA's Prepare stage with
+ * AWS Control Tower (Smithy restJson1), the operations that unblock LZA's Prepare stage with
  * {@code controlTower.enable: true}: the landing-zone lifecycle (list/get/create/update/delete/reset),
  * operation polling for both landing zones and baselines, and the baseline surface
  * (list, list/get enabled, enable, reset, update).
@@ -37,7 +36,7 @@ import java.util.List;
  * (see {@link io.github.hectorvent.floci.services.rum.RumController}).
  *
  * <p>Note that every landing-zone URI spells "landingzone" as ONE word, {@code /create-landingzone}
- * included — that is how the AWS Control Tower model defines them.
+ * included, that is how the AWS Control Tower model defines them.
  */
 @Path("/")
 @Produces(MediaType.APPLICATION_JSON)
@@ -79,13 +78,20 @@ public class ControlTowerController {
     }
 
     @POST
+    @Path("/get-baseline")
+    public Response getBaseline(@Context HttpHeaders headers, String body) {
+        String identifier = requireText(parse(body), "baselineIdentifier");
+        return Response.ok(service.getBaseline(regionResolver.resolveRegion(headers), identifier)).build();
+    }
+
+    @POST
     @Path("/list-landingzones")
     @Consumes(MediaType.WILDCARD)
     public Response listLandingZones(@Context HttpHeaders headers) {
         List<LandingZone> landingZones = service.listLandingZones(
                 requestContext.getAccountId(), regionResolver.resolveRegion(headers));
         ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode array = response.putArray("landingZones");
+        var array = response.putArray("landingZones");
         for (LandingZone lz : landingZones) {
             ObjectNode node = objectMapper.createObjectNode();
             node.put("arn", lz.getArn());
@@ -164,7 +170,7 @@ public class ControlTowerController {
         ControlTowerService.ListLandingZoneOperationsResult result = service.listLandingZoneOperations(
                 requestContext.getAccountId(), regionResolver.resolveRegion(headers), parse(body));
         ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode array = response.putArray("landingZoneOperations");
+        var array = response.putArray("landingZoneOperations");
         for (ControlTowerService.LandingZoneOperationSummary operation : result.landingZoneOperations()) {
             ObjectNode node = objectMapper.createObjectNode();
             node.put("operationIdentifier", operation.operationIdentifier());
@@ -184,7 +190,7 @@ public class ControlTowerController {
     public Response listBaselines(@Context HttpHeaders headers) {
         List<ObjectNode> baselines = service.listBaselines(regionResolver.resolveRegion(headers));
         ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode array = response.putArray("baselines");
+        var array = response.putArray("baselines");
         array.addAll(baselines);
         return Response.ok(response).build();
     }
@@ -196,7 +202,7 @@ public class ControlTowerController {
         ControlTowerService.ListEnabledBaselinesResult result = service.listEnabledBaselines(
                 requestContext.getAccountId(), regionResolver.resolveRegion(headers), parse(body));
         ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode array = response.putArray("enabledBaselines");
+        var array = response.putArray("enabledBaselines");
         for (EnabledBaseline entry : result.enabledBaselines()) {
             array.add(enabledBaselineNode(entry));
         }
@@ -227,6 +233,17 @@ public class ControlTowerController {
         ObjectNode response = objectMapper.createObjectNode();
         response.put("operationIdentifier", result.operationIdentifier());
         response.put("arn", result.arn());
+        return Response.ok(response).build();
+    }
+
+    @POST
+    @Path("/disable-baseline")
+    public Response disableBaseline(@Context HttpHeaders headers, String body) {
+        String identifier = requireText(parse(body), "enabledBaselineIdentifier");
+        String opId = service.disableBaseline(
+                requestContext.getAccountId(), regionResolver.resolveRegion(headers), identifier);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("operationIdentifier", opId);
         return Response.ok(response).build();
     }
 
@@ -275,7 +292,7 @@ public class ControlTowerController {
         node.set("driftStatus", driftStatus);
         node.set("manifest", lz.getManifest());
         if (lz.getRemediationTypes() != null) {
-            ArrayNode remediationTypes = node.putArray("remediationTypes");
+            var remediationTypes = node.putArray("remediationTypes");
             lz.getRemediationTypes().forEach(remediationTypes::add);
         }
         return node;
@@ -337,23 +354,5 @@ public class ControlTowerController {
             throw new AwsException("ValidationException", field + " must be a string.", 400);
         }
         return value.textValue();
-    }
-
-    @POST
-    @Path("/get-baseline")
-    public Response getBaseline(@Context HttpHeaders headers, String body) {
-        String identifier = requireText(parse(body), "baselineIdentifier");
-        return Response.ok(service.getBaseline(regionResolver.resolveRegion(headers), identifier)).build();
-    }
-
-    @POST
-    @Path("/disable-baseline")
-    public Response disableBaseline(@Context HttpHeaders headers, String body) {
-        String identifier = requireText(parse(body), "enabledBaselineIdentifier");
-        String opId = service.disableBaseline(
-                requestContext.getAccountId(), regionResolver.resolveRegion(headers), identifier);
-        ObjectNode response = objectMapper.createObjectNode();
-        response.put("operationIdentifier", opId);
-        return Response.ok(response).build();
     }
 }

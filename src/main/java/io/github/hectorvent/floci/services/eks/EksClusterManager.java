@@ -1659,23 +1659,16 @@ public class EksClusterManager {
             nodeInstance = synthesizeClusterNodeInstance(cluster, containerIps.primaryIp(), region, accountId);
             nodeInstance.setDockerContainerId(containerId);
 
+            metadataServer.reconcileClusterNodeAddresses(containerIps.allIps(), nodeInstance);
             ContainerExecResult install = execInContainerForResult(containerId,
-                    Ec2MetadataProxy.authenticatedInstallCommand(), 180);
+                    Ec2MetadataProxy.installCommand(), 180);
             if (install.exitCode() != 0) {
                 LOG.warnv("Could not install IMDS proxy dependencies for EKS cluster {0}: {1}",
                         cluster.getName(), install.summary());
                 return;
             }
-
-            capability = metadataServer.registerProxy(nodeInstance);
-            String proxyConfig = new JsonObject()
-                    .put("host", dockerHostResolver.resolve())
-                    .put("port", config.services().ec2().imdsPort())
-                    .put("capability", capability).encode();
-            copyMetadataFile(containerId, "floci-imds-proxy.py", Ec2MetadataProxy.authenticatedProxyScript(), 0700);
-            copyMetadataFile(containerId, "floci-imds-proxy.json.next", proxyConfig, 0600);
             ContainerExecResult start = execInContainerForResult(containerId,
-                    Ec2MetadataProxy.authenticatedStartCommand(nodeInstance.getInstanceId()), 30);
+                    Ec2MetadataProxy.startCommand(dockerHostResolver.resolve(), config.services().ec2().imdsPort()), 30);
             if (start.exitCode() != 0) {
                 LOG.warnv("Could not start link-local IMDS proxy for EKS cluster {0}: {1}",
                         cluster.getName(), start.summary());
@@ -1693,8 +1686,8 @@ public class EksClusterManager {
             LOG.warnv("Could not configure link-local IMDS endpoint for EKS cluster {0}: {1}",
                     cluster.getName(), e.getMessage());
         } finally {
-            if (!configured && capability != null) {
-                metadataServer.unregisterProxy(nodeInstance, capability);
+            if (!configured && nodeInstance != null) {
+                metadataServer.unregisterInstance(nodeInstance);
             }
         }
     }

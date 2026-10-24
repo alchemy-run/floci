@@ -34,7 +34,7 @@ public class DynamoDbStreamService {
 
     private static final Logger LOG = Logger.getLogger(DynamoDbStreamService.class);
 
-    static final String SHARD_ID = "shardId-0000000001-00000000001";
+    public static final String SHARD_ID = "shardId-0000000001-00000000001";
     static final int MAX_RECORDS = 1000;
     private static final String ZERO_SEQUENCE_NUMBER = "000000000000000000000";
 
@@ -247,7 +247,7 @@ public class DynamoDbStreamService {
         return result;
     }
 
-    StreamDescription describeStream(String streamArn) {
+    public StreamDescription describeStream(String streamArn) {
         for (StreamDescription sd : streams.values()) {
             if (streamArn.equals(sd.getStreamArn())) {
                 return sd;
@@ -257,7 +257,7 @@ public class DynamoDbStreamService {
                 "Stream not found: " + streamArn, 400);
     }
 
-    String getShardIterator(String streamArn, String shardId,
+    public String getShardIterator(String streamArn, String shardId,
                             String iteratorType, String sequenceNumber) {
         StreamDescription sd = describeStream(streamArn);
         if (!"ENABLED".equals(sd.getStreamStatus()) && !"DISABLED".equals(sd.getStreamStatus())) {
@@ -308,9 +308,9 @@ public class DynamoDbStreamService {
         return records.size();
     }
 
-    record GetRecordsResult(List<DynamoDbStreamRecord> records, String nextShardIterator) {}
+    public record GetRecordsResult(List<DynamoDbStreamRecord> records, String nextShardIterator) {}
 
-    GetRecordsResult getRecords(String shardIterator, Integer limit) {
+    public GetRecordsResult getRecords(String shardIterator, Integer limit) {
         String[] parts = decodeIterator(shardIterator);
         String streamArn = parts[0];
         String cursorSequence = parts[1];

@@ -1594,7 +1594,6 @@ public class EcrService implements ResourceProvider {
     private final Map<String, LocalImage> localImages = new ConcurrentHashMap<>();
 
 
-
     public void startImageScan(String repositoryName, String registryId, String region, ImageIdentifier imageId) {
         requireRepo(repositoryName, registryId, region);
         if (imageId == null || (imageId.getImageTag() == null && imageId.getImageDigest() == null)) {

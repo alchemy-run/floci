@@ -836,7 +836,6 @@ public class CloudControlService {
 
     private final Map<String, ReentrantLock> operationLocks = new ConcurrentHashMap<>();
 
-
     public ProgressEvent updateResource(String region, String accountId, String typeName,
                                         String identifier, String patchDocument) {
         if (!"AWS::SSM::Parameter".equals(typeName) && !SsmDocumentResource.TYPE.equals(typeName)) {
@@ -867,7 +866,7 @@ public class CloudControlService {
             return record(new ProgressEvent(typeName, identifier, token, "UPDATE", "SUCCESS", null,
                     actual, accountId));
         } catch (AwsException e) {
-            return record(pending.failed(e));
+            return record(pending.failed(e.getMessage()));
         }
     }
 

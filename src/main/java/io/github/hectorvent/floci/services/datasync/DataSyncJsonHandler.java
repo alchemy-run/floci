@@ -21,11 +21,8 @@ import java.util.Map;
  * Translates the DataSync JSON wire protocol ({@code X-Amz-Target: FmrsService.<Action>})
  * to and from {@link DataSyncService}.
  *
- * <p>The task-execution data plane ({@code StartTaskExecution}, {@code DescribeTaskExecution},
- * {@code ListTaskExecutions}, {@code CancelTaskExecution}, {@code UpdateTaskExecution}) moves
- * real bytes between real storage systems and is not emulated. Those operations fall through
- * to a clean {@code UnknownOperationException} rather than a stub success, so callers fail
- * fast instead of stranding a waiter on a transfer that will never progress.
+ * <p>Task executions transfer objects between local S3 locations. Unsupported backends
+ * produce an execution error rather than reporting a successful transfer.
  *
  * <p>Every location action is spelled out as its own switch label rather than matched by
  * prefix: the action tables in {@code docs/services/datasync.md} are generated from these
@@ -144,13 +141,15 @@ public class DataSyncJsonHandler {
                 putNextToken(response, page.nextToken());
                 yield ok(response);
             }
-            case "CancelTaskExecution" -> {
-                dataSyncService.cancelTaskExecution(text(request, "TaskExecutionArn"), region);
-                yield ok(mapper.createObjectNode());
+
+            case "StartTaskExecution" -> {
+                ObjectNode execution = dataSyncService.startTaskExecution(request, region);
+                yield ok(mapper.createObjectNode().put("TaskExecutionArn", execution.path("TaskExecutionArn").asText()));
             }
-            case "UpdateTaskExecution" -> {
-                dataSyncService.updateTaskExecution(request, region);
-                yield ok(mapper.createObjectNode());
+            case "DescribeTaskExecution" -> {
+                ObjectNode execution = dataSyncService.describeTaskExecution(text(request, "TaskExecutionArn"), region);
+                execution.remove("Tags");
+                yield ok(execution);
             }
             case "ListTaskExecutions" -> {
                 DataSyncService.Page<ObjectNode> page = dataSyncService.listTaskExecutions(text(request, "TaskArn"),
@@ -165,14 +164,13 @@ public class DataSyncJsonHandler {
                 putNextToken(response, page.nextToken());
                 yield ok(response);
             }
-            case "DescribeTaskExecution" -> {
-                ObjectNode execution = dataSyncService.describeTaskExecution(text(request, "TaskExecutionArn"), region);
-                execution.remove("Tags");
-                yield ok(execution);
+            case "UpdateTaskExecution" -> {
+                dataSyncService.updateTaskExecution(request, region);
+                yield ok(mapper.createObjectNode());
             }
-            case "StartTaskExecution" -> {
-                ObjectNode execution = dataSyncService.startTaskExecution(request, region);
-                yield ok(mapper.createObjectNode().put("TaskExecutionArn", execution.path("TaskExecutionArn").asText()));
+            case "CancelTaskExecution" -> {
+                dataSyncService.cancelTaskExecution(text(request, "TaskExecutionArn"), region);
+                yield ok(mapper.createObjectNode());
             }
 
             case "TagResource" -> {
@@ -242,6 +240,10 @@ public class DataSyncJsonHandler {
         ObjectNode response = mapper.createObjectNode();
         response.put("TaskArn", task.getTaskArn());
         response.put("Status", task.getStatus());
+        String executionArn = dataSyncService.currentTaskExecutionArn(task.getTaskArn());
+        if (executionArn != null) {
+            response.put("CurrentTaskExecutionArn", executionArn);
+        }
         response.put("Name", task.getName() != null ? task.getName() : "");
         response.put("TaskMode", task.getTaskMode());
         response.put("SourceLocationArn", task.getSourceLocationArn());

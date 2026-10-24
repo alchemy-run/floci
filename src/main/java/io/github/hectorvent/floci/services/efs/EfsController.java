@@ -253,6 +253,14 @@ public class EfsController {
 
     // --- Policies ---
 
+    @GET
+    @Path("/file-systems/replication-configurations")
+    public Response describeReplicationConfigurations(@Context HttpHeaders headers,
+                                                      @QueryParam("FileSystemId") String fileSystemId) {
+        String region = regionResolver.resolveRegion(headers);
+        return Response.ok(efsService.describeReplicationConfigurations(region, fileSystemId)).build();
+    }
+
     @PUT
     @Path("/file-systems/{FileSystemId}/policy")
     public Response putFileSystemPolicy(@Context HttpHeaders headers, @PathParam("FileSystemId") String fileSystemId, PutFileSystemPolicyRequest request) {
@@ -320,13 +328,5 @@ public class EfsController {
         PutLifecycleConfigurationResponse res = new PutLifecycleConfigurationResponse();
         res.setLifecyclePolicies(efsService.getLifecycleConfiguration(region, fileSystemId));
         return Response.ok(res).build();
-    }
-
-    @GET
-    @Path("/file-systems/replication-configurations")
-    public Response describeReplicationConfigurations(@Context HttpHeaders headers,
-                                                      @QueryParam("FileSystemId") String fileSystemId) {
-        String region = regionResolver.resolveRegion(headers);
-        return Response.ok(efsService.describeReplicationConfigurations(region, fileSystemId)).build();
     }
 }

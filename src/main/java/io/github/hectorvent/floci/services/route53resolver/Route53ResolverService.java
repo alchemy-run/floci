@@ -107,7 +107,8 @@ public class Route53ResolverService {
     private final ObjectMapper objectMapper;
 
     @Inject
-    public Route53ResolverService(StorageFactory storageFactory, ObjectMapper objectMapper) {
+    public Route53ResolverService(StorageFactory storageFactory, ObjectMapper objectMapper,
+            Ec2Service ec2) {
         this.domainListStore = storageFactory.create("route53resolver", "route53resolver-domain-lists.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.endpointStore = storageFactory.create("route53resolver", "route53resolver-endpoints.json",
@@ -122,6 +123,7 @@ public class Route53ResolverService {
         this.tagStore = storageFactory.create("route53resolver", "route53resolver-tags.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.objectMapper = objectMapper;
+        this.ec2 = ec2;
     }
 
     // Package-private for hermetic tests: pass in-memory StorageBackends directly, so a test
@@ -141,6 +143,7 @@ public class Route53ResolverService {
         this.endpointIpRequestStore = endpointIpRequestStore;
         this.tagStore = tagStore;
         this.objectMapper = objectMapper;
+        this.ec2 = null;
     }
 
     public List<FirewallDomainList> listFirewallDomainLists(String region) {
@@ -885,23 +888,6 @@ public class Route53ResolverService {
     }
 
     private final Ec2Service ec2;
-
-    @Inject
-    public Route53ResolverService(StorageFactory storageFactory, ObjectMapper objectMapper, Ec2Service ec2) {
-        this.domainListStore = storageFactory.create("route53resolver", "route53resolver-domain-lists.json",
-                new TypeReference<Map<String, ObjectNode>>() {});
-        this.endpointStore = storageFactory.create("route53resolver", "route53resolver-endpoints.json",
-                new TypeReference<Map<String, ObjectNode>>() {});
-        this.ruleStore = storageFactory.create("route53resolver", "route53resolver-rules.json",
-                new TypeReference<Map<String, ObjectNode>>() {});
-        this.ruleAssociationStore = storageFactory.create("route53resolver",
-                "route53resolver-rule-associations.json", new TypeReference<Map<String, ObjectNode>>() {});
-        this.endpointIpRequestStore = storageFactory.create("route53resolver",
-                "route53resolver-endpoint-ip-requests.json",
-                new TypeReference<Map<String, ObjectNode>>() {});
-        this.objectMapper = objectMapper;
-        this.ec2 = ec2;
-    }
 
     public List<ObjectNode> listCustomFirewallDomainLists(String region) {
         return domainListStore.scan(key -> true).stream()

@@ -47,9 +47,11 @@ public class EmrHandler {
     private final ObjectMapper objectMapper;
 
     @Inject
-    public EmrHandler(EmrService service, ObjectMapper objectMapper) {
+    public EmrHandler(EmrService service, ObjectMapper objectMapper,
+            EmrStudioService studios) {
         this.service = service;
         this.objectMapper = objectMapper;
+        this.studios = studios;
     }
 
     public Response handle(String action, JsonNode request, String region) {
@@ -935,18 +937,8 @@ public class EmrHandler {
         }
     }
 
-    private final EmrReleaseCatalog releaseCatalog;
 
     private final EmrStudioService studios;
-
-    @Inject
-    public EmrHandler(EmrService service, ObjectMapper objectMapper,
-                      EmrReleaseCatalog releaseCatalog, EmrStudioService studios) {
-        this.service = service;
-        this.objectMapper = objectMapper;
-        this.releaseCatalog = releaseCatalog;
-        this.studios = studios;
-    }
 
 
     private Response handleAddTags(JsonNode request, String region) {

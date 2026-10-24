@@ -4,16 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.services.lakeformation.model.*;
-import jakarta.inject.Inject;
-import jakarta.ws.rs.Consumes;
-import jakarta.ws.rs.POST;
-import jakarta.ws.rs.Path;
-import jakarta.ws.rs.Produces;
-import jakarta.ws.rs.core.Context;
-import jakarta.ws.rs.core.HttpHeaders;
-import jakarta.ws.rs.core.MediaType;
-import jakarta.ws.rs.core.Response;
 import io.github.hectorvent.floci.services.lakeformation.model.AddLFTagsToResourceRequest;
 import io.github.hectorvent.floci.services.lakeformation.model.CreateLFTagRequest;
 import io.github.hectorvent.floci.services.lakeformation.model.DeleteLFTagRequest;
@@ -31,6 +21,15 @@ import io.github.hectorvent.floci.services.lakeformation.model.RemoveLFTagsFromR
 import io.github.hectorvent.floci.services.lakeformation.model.RevokePermissionsRequest;
 import io.github.hectorvent.floci.services.lakeformation.model.UpdateLFTagRequest;
 import io.github.hectorvent.floci.services.lakeformation.model.UpdateResourceRequest;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 
 @Path("/")
 @Produces(MediaType.APPLICATION_JSON)
@@ -40,12 +39,17 @@ public class LakeFormationController {
     private final LakeFormationService service;
     private final ObjectMapper mapper;
     private final RegionResolver regionResolver;
+    private final LakeFormationCatalogService catalog;
+    private final LakeFormationDataAccessService dataAccess;
 
     @Inject
-    public LakeFormationController(LakeFormationService service, ObjectMapper mapper, RegionResolver regionResolver) {
+    public LakeFormationController(LakeFormationService service, ObjectMapper mapper, RegionResolver regionResolver,
+                                   LakeFormationCatalogService catalog, LakeFormationDataAccessService dataAccess) {
         this.service = service;
         this.mapper = mapper;
         this.regionResolver = regionResolver;
+        this.catalog = catalog;
+        this.dataAccess = dataAccess;
     }
 
     private JsonNode parse(String body) {
@@ -177,20 +181,6 @@ public class LakeFormationController {
     @Path("/RemoveLFTagsFromResource")
     public Response removeLFTagsFromResource(@Context HttpHeaders headers, String body) throws Exception {
         return handleResponse(service.removeLFTagsFromResource(regionResolver.resolveRegion(headers), mapper.treeToValue(parse(body), RemoveLFTagsFromResourceRequest.class)));
-    }
-
-    private final LakeFormationCatalogService catalog;
-
-    private final LakeFormationDataAccessService dataAccess;
-
-    @Inject
-    public LakeFormationController(LakeFormationService service, ObjectMapper mapper, RegionResolver regionResolver,
-                                   LakeFormationCatalogService catalog, LakeFormationDataAccessService dataAccess) {
-        this.service = service;
-        this.mapper = mapper;
-        this.regionResolver = regionResolver;
-        this.catalog = catalog;
-        this.dataAccess = dataAccess;
     }
 
     @POST

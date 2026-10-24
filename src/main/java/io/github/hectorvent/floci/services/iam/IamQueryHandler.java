@@ -3550,7 +3550,6 @@ public class IamQueryHandler {
         return Response.ok(AwsQueryResponse.envelope("ListInstanceProfileTags", AwsNamespaces.IAM, result)).build();
     }
 
-
     private Response handleUpdateAccessKey(MultivaluedMap<String, String> params) {
         iamService.updateAccessKey(getParam(params, "UserName"),
                 getParam(params, "AccessKeyId"), getParam(params, "Status"));

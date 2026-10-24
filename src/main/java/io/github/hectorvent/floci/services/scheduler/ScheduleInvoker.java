@@ -451,14 +451,14 @@ public class ScheduleInvoker {
                 requireRedshiftData();
                 JsonNode executeParams = withoutWait(params);
                 RequestScopes.callAs(scheduleAccountId, region,
-                        () -> redshiftDataService.executeStatement(executeParams, region, principal));
+                        () -> redshiftDataService.executeStatement(executeParams, region));
                 LOG.debugv("Scheduler submitted to the Redshift Data API (universal target): {0}", serviceAction);
             }
             case "redshiftdata:batchExecuteStatement" -> {
                 requireRedshiftData();
                 JsonNode batchParams = withoutWait(params);
                 RequestScopes.callAs(scheduleAccountId, region,
-                        () -> redshiftDataService.batchExecuteStatement(batchParams, region, principal));
+                        () -> redshiftDataService.batchExecuteStatement(batchParams, region));
                 LOG.debugv("Scheduler submitted to the Redshift Data API (universal target): {0}", serviceAction);
             }
             default -> throw new UnsupportedOperationException(

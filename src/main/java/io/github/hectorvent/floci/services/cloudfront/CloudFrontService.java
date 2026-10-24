@@ -154,12 +154,14 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
     private final Pattern lambdaOriginHost;
 
     public CloudFrontService(StorageFactory factory, EmulatorConfig config, RegionResolver regionResolver) {
-        this(factory, config, regionResolver, null);
+        this(factory, config, regionResolver, null, null, null);
     }
 
     @Inject
     public CloudFrontService(StorageFactory factory, EmulatorConfig config, RegionResolver regionResolver,
-                             IamService iamService) {
+                             IamService iamService,
+            ElbV2Service elbV2,
+            CloudFrontEdgePorts edgePorts) {
         this.iamService = iamService;
         this.distStore = factory.create("cloudfront", "cloudfront-distributions.json",
                 new TypeReference<Map<String, Distribution>>() {});
@@ -200,6 +202,15 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
         this.configuredDomainSuffix = config.services().cloudfront().domainSuffix().orElse(null);
         this.localDeliverySuffixes = localDeliverySuffixes(config);
         this.lambdaOriginHost = lambdaOriginHost(config);
+        this.vpcOriginStore = factory.create("cloudfront", "cloudfront-vpc-origins.json",
+                new TypeReference<Map<String, VpcOrigin>>() {});
+        this.kvsStore = factory.create("cloudfront", "cloudfront-key-value-stores.json",
+                new TypeReference<Map<String, KeyValueStore>>() {});
+        this.kvsKeysStore = factory.create("cloudfront", "cloudfront-kvs-keys.json",
+                new TypeReference<Map<String, Map<String, String>>>() {});
+        this.domainSuffix = config.services().cloudfront().domainSuffix().orElse("cloudfront.net");
+        this.elbV2 = elbV2;
+        this.edgePorts = edgePorts;
     }
 
     // ── Distributions ─────────────────────────────────────────────────────────
@@ -2318,10 +2329,6 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
 
     /** Null in unit tests: a distribution without a local port is still Host-addressable. */
     private final CloudFrontEdgePorts edgePorts;
-
-    public CloudFrontService(StorageFactory factory, EmulatorConfig config) {
-        this(factory, config, null, null);
-    }
 
     /**
      * Serve this distribution's emulated edge on its own local port, so it is

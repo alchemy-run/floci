@@ -1,18 +1,18 @@
 package io.github.hectorvent.floci.services.efs.model;
 
-import com.fasterxml.jackson.databind.PropertyNamingStrategies;
-import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import io.quarkus.runtime.annotations.RegisterForReflection;
-import jakarta.ws.rs.QueryParam;
+
+import com.fasterxml.jackson.databind.annotation.JsonNaming;
+import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 
 @JsonNaming(PropertyNamingStrategies.UpperCamelCaseStrategy.class)
 @RegisterForReflection
 public class DescribeTagsRequest {
 
     private String fileSystemId;
-    @QueryParam("Marker")
+    @jakarta.ws.rs.QueryParam("Marker")
     private String marker;
-    @QueryParam("MaxItems")
+    @jakarta.ws.rs.QueryParam("MaxItems")
     private Integer maxItems;
 
     public String getFileSystemId() {

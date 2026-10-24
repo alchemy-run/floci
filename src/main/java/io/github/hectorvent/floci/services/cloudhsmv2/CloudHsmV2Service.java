@@ -5,26 +5,23 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.acm.CertificateGenerator;
-import io.github.hectorvent.floci.services.cloudhsmv2.model.Backup;
-import io.github.hectorvent.floci.services.cloudhsmv2.model.BackupRetentionPolicy;
 import io.github.hectorvent.floci.services.cloudhsmv2.model.Certificates;
 import io.github.hectorvent.floci.services.cloudhsmv2.model.Cluster;
 import io.github.hectorvent.floci.services.cloudhsmv2.model.ClusterState;
 import io.github.hectorvent.floci.services.cloudhsmv2.model.Hsm;
-import io.github.hectorvent.floci.services.ec2.Ec2Service;
-import io.github.hectorvent.floci.services.ec2.model.Subnet;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.bouncycastle.asn1.x500.X500Name;
-import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
-import org.bouncycastle.openssl.PEMParser;
+
 import org.bouncycastle.openssl.jcajce.JcaPEMWriter;
 import org.bouncycastle.operator.ContentSigner;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
 import org.bouncycastle.pkcs.PKCS10CertificationRequest;
 import org.bouncycastle.pkcs.PKCS10CertificationRequestBuilder;
 import org.bouncycastle.pkcs.jcajce.JcaPKCS10CertificationRequestBuilder;
+import org.bouncycastle.cert.X509CertificateHolder;
+import org.bouncycastle.openssl.PEMParser;
 import org.jboss.logging.Logger;
 
 import java.io.StringReader;
@@ -32,17 +29,15 @@ import java.io.StringWriter;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.SecureRandom;
-import java.security.cert.X509Certificate;
-import java.time.Instant;
+import io.github.hectorvent.floci.services.cloudhsmv2.model.Backup;
+import io.github.hectorvent.floci.services.cloudhsmv2.model.BackupRetentionPolicy;
 import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
+import java.time.Instant;
 import java.util.*;
+
+import io.github.hectorvent.floci.services.ec2.Ec2Service;
+import io.github.hectorvent.floci.services.ec2.model.Subnet;
 
 /**
  * CloudHSM v2 service implementation for the local emulator.
@@ -128,7 +123,17 @@ public class CloudHsmV2Service {
         cluster.setSubnetIds(new ArrayList<>(SubnetIds));
         Map<String, String> subnetMapping = new LinkedHashMap<>();
         if (ec2Service != null) {
-            List<Subnet> subnets = ec2Service.describeSubnets(region, SubnetIds, Collections.emptyMap());
+            List<Subnet> subnets;
+            try {
+                subnets = ec2Service.describeSubnets(region, SubnetIds, Collections.emptyMap());
+            } catch (AwsException e) {
+                if (e.getErrorCode() != null && e.getErrorCode().startsWith("InvalidSubnetID.")) {
+                    throw new AwsException("CloudHsmInvalidRequestException", e.getMessage(), 400);
+                }
+                throw e;
+            }
+            subnets.stream().map(Subnet::getVpcId).filter(Objects::nonNull).findFirst()
+                    .ifPresent(cluster::setVpcId);
             for (int i = 0; i < SubnetIds.size(); i++) {
                 String subId = SubnetIds.get(i);
                 final int index = i;
@@ -175,40 +180,20 @@ public class CloudHsmV2Service {
         certs.setClusterCsr(generateCsr(clusterId));
 
         try {
-            Instant certificateNotBefore = Instant.now();
-            Instant certificateNotAfter = certificateNotBefore.plus(365, ChronoUnit.DAYS);
-            Instant rootNotAfter = certificateNotBefore.plus(3650, ChronoUnit.DAYS);
-
-            KeyPair manufacturerRootKeyPair = generateKeyPair();
-            X500Name manufacturerRootName = new X500Name("CN=HSM Manufacturer Root CA,O=AWS,C=US");
-            X509Certificate manufacturerRoot = certificateGenerator.signCertificate(
-                    manufacturerRootName, manufacturerRootKeyPair.getPublic(), manufacturerRootName,
-                    manufacturerRootKeyPair.getPrivate(), List.of(), true, null,
-                    certificateNotBefore, rootNotAfter);
-
-            KeyPair awsRootKeyPair = generateKeyPair();
-            X500Name awsRootName = new X500Name("CN=AWS CloudHSM Root CA,O=AWS,C=US");
-            X509Certificate awsRoot = certificateGenerator.signCertificate(
-                    awsRootName, awsRootKeyPair.getPublic(), awsRootName,
-                    awsRootKeyPair.getPrivate(), List.of(), true, null,
-                    certificateNotBefore, rootNotAfter);
-
-            KeyPair hardwareKeyPair = generateKeyPair();
-            X500Name hardwareName = new X500Name("CN=HSM Hardware " + clusterId + ",O=AWS,C=US");
+            KeyPair mfrKeyPair = generateKeyPair();
+            X500Name mfrName = new X500Name("CN=HSM Manufacturer CA,O=AWS,C=US");
             certs.setManufacturerHardwareCertificate(certificateGenerator.toPem(certificateGenerator.signCertificate(
-                    hardwareName, hardwareKeyPair.getPublic(), manufacturerRootName,
-                    manufacturerRootKeyPair.getPrivate(), List.of(), true, null,
-                    certificateNotBefore, certificateNotAfter, manufacturerRoot.getPublicKey())));
+                    mfrName, mfrKeyPair.getPublic(), mfrName, mfrKeyPair.getPrivate(), List.of(), true, null, 365)));
+
+            KeyPair awsKeyPair = generateKeyPair();
+            X500Name awsName = new X500Name("CN=AWS CloudHSM Hardware CA,O=AWS,C=US");
             certs.setAwsHardwareCertificate(certificateGenerator.toPem(certificateGenerator.signCertificate(
-                    hardwareName, hardwareKeyPair.getPublic(), awsRootName,
-                    awsRootKeyPair.getPrivate(), List.of(), true, null,
-                    certificateNotBefore, certificateNotAfter, awsRoot.getPublicKey())));
+                    awsName, awsKeyPair.getPublic(), mfrName, mfrKeyPair.getPrivate(), List.of(), true, null, 365)));
 
             KeyPair hsmKeyPair = generateKeyPair();
             X500Name hsmName = new X500Name("CN=HSM Instance " + clusterId + ",O=AWS,C=US");
             certs.setHsmCertificate(certificateGenerator.toPem(certificateGenerator.signCertificate(
-                    hsmName, hsmKeyPair.getPublic(), hardwareName, hardwareKeyPair.getPrivate(), List.of(), false, null,
-                    certificateNotBefore, certificateNotAfter, hardwareKeyPair.getPublic())));
+                    hsmName, hsmKeyPair.getPublic(), awsName, awsKeyPair.getPrivate(), List.of(), false, null, 365)));
         } catch (Exception e) {
             LOG.warnv("Failed to generate emulated hardware certs: {0}", e.getMessage());
         }
@@ -344,8 +329,8 @@ public class CloudHsmV2Service {
     public Hsm createHsm(String clusterId, String availabilityZone, String ipAddress, String region) {
         Cluster cluster = getCluster(clusterId, region);
 
-        if (cluster.getState() != ClusterState.INITIALIZED
-                && cluster.getState() != ClusterState.ACTIVE) {
+        // The first HSM is added to an UNINITIALIZED cluster; InitializeCluster comes after it.
+        if (!acceptsNewHsm(cluster.getState())) {
             throw new AwsException("CloudHsmInvalidRequestException",
                     "Cannot create HSM in cluster " + clusterId + " with state " + cluster.getState().wireValue(), 400);
         }
@@ -527,6 +512,13 @@ public class CloudHsmV2Service {
                         "Cluster " + clusterId + " not found.", 400));
     }
 
+    static boolean acceptsNewHsm(ClusterState state) {
+        return state == ClusterState.UNINITIALIZED
+                || state == ClusterState.INITIALIZED
+                || state == ClusterState.ACTIVE
+                || state == ClusterState.DEGRADED;
+    }
+
     private String regionKey(String region, String clusterId) {
         return region + "::" + clusterId;
     }
@@ -702,14 +694,14 @@ public class CloudHsmV2Service {
 
     public Backup copyBackupToRegion(String destinationRegion, String backupId, String sourceRegion) {
         // Source region emulation: we'll just clone the backup locally.
-        Backup source = getBackup(backupId, sourceRegion);
+        Backup source = getBackup(backupId, sourceRegion != null ? sourceRegion : "us-east-1");
         Backup copy = new Backup();
         copy.setBackupId("backup-" + generateShortId());
         copy.setBackupState("READY");
         copy.setClusterId(source.getClusterId());
         copy.setCreateTimestamp(source.getCreateTimestamp());
         copy.setCopyTimestamp(Instant.now());
-        copy.setSourceRegion(sourceRegion);
+        copy.setSourceRegion(sourceRegion != null ? sourceRegion : "us-east-1");
         copy.setSourceBackup(backupId);
         copy.setSourceCluster(source.getClusterId());
         copy.setMode(source.getMode());
@@ -811,10 +803,4 @@ public class CloudHsmV2Service {
                 new AwsException("CloudHsmResourceNotFoundException", "Backup " + backupId + " not found.", 400));
     }
 
-    static boolean acceptsNewHsm(ClusterState state) {
-        return state == ClusterState.UNINITIALIZED
-                || state == ClusterState.INITIALIZED
-                || state == ClusterState.ACTIVE
-                || state == ClusterState.DEGRADED;
-    }
 }

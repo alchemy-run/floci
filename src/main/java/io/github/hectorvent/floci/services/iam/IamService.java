@@ -6397,7 +6397,6 @@ public class IamService implements SessionAccountLookup, ResourceProvider {
 
 
 
-
     private static Map<String, IamPolicy> buildAwsManagedPolicies() {
         Map<String, IamPolicy> catalog = new LinkedHashMap<>();
         for (AwsManagedPolicies.ManagedPolicyDef def : AwsManagedPolicies.POLICIES) {

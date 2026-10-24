@@ -6,7 +6,6 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.List;
-import java.util.Map;
 
 @RegisterForReflection
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -15,8 +14,4 @@ public record RecordingGroup(
         @JsonProperty("allSupported") Boolean allSupported,
         @JsonProperty("includeGlobalResourceTypes") Boolean includeGlobalResourceTypes,
         @JsonProperty("resourceTypes") List<String> resourceTypes) {
-
-    public RecordingGroup(Boolean allSupported, Boolean includeGlobalResourceTypes, List<String> resourceTypes) {
-        this(allSupported, includeGlobalResourceTypes, resourceTypes, null, null);
-    }
 }

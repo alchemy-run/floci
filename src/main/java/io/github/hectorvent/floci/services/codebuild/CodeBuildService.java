@@ -1,13 +1,13 @@
 package io.github.hectorvent.floci.services.codebuild;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.core.common.Base64Url;
 import io.github.hectorvent.floci.core.storage.StorageBackedMap;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.codebuild.model.Build;
@@ -22,28 +22,20 @@ import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
-import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import java.util.HashMap;
 
 @ApplicationScoped
 public class CodeBuildService {
-
-    private static final int LIST_PROJECTS_PAGE_SIZE = 100;
-    private static final ObjectMapper PAGE_TOKEN_MAPPER = new ObjectMapper();
 
     // key: region -> name -> project
     private Map<String, Map<String, Project>> projects = new ConcurrentHashMap<>();
@@ -63,12 +55,18 @@ public class CodeBuildService {
     private final CodeBuildRunner runner;
     private final EmulatorConfig config;
     private final StorageFactory storageFactory;
+    private final ObjectMapper mapper;
+    private Map<String, String> resourcePolicies = new ConcurrentHashMap<>();
+    private Map<String, JsonNode> buildBatches = new ConcurrentHashMap<>();
+    private Map<String, JsonNode> reports = new ConcurrentHashMap<>();
 
     @Inject
-    public CodeBuildService(CodeBuildRunner runner, EmulatorConfig config, StorageFactory storageFactory) {
+    public CodeBuildService(CodeBuildRunner runner, EmulatorConfig config, StorageFactory storageFactory,
+                            ObjectMapper mapper) {
         this.runner = runner;
         this.config = config;
         this.storageFactory = storageFactory;
+        this.mapper = mapper;
     }
 
     @PostConstruct
@@ -84,6 +82,12 @@ public class CodeBuildService {
                 new TypeReference<Map<String, Map<String, SourceCredential>>>() {});
         this.persistedBuildCounters = storageBacked("codebuild-build-counters.json",
                 new TypeReference<Map<String, Long>>() {});
+        this.resourcePolicies = storageBacked("codebuild-resource-policies.json",
+                new TypeReference<Map<String, String>>() {});
+        this.buildBatches = storageBacked("codebuild-build-batches.json",
+                new TypeReference<Map<String, JsonNode>>() {});
+        this.reports = storageBacked("codebuild-reports.json",
+                new TypeReference<Map<String, JsonNode>>() {});
         normalizeRegionMaps(projects);
         normalizeRegionMaps(reportGroups);
         normalizeRegionMaps(sourceCredentials);
@@ -234,12 +238,15 @@ public class CodeBuildService {
         return project;
     }
 
-    public void deleteProject(String region, String name) {
+    public synchronized void deleteProject(String region, String name) {
+        validateProjectName(name);
         Map<String, Project> store = projectsFor(region);
-        if (store.remove(name) == null) {
-            throw new AwsException("ResourceNotFoundException", "Project not found: " + name, 400);
+        Project project = store.get(name);
+        if (project != null) {
+            resourcePolicies.remove(project.getArn());
+            store.remove(name);
+            persistRegion(projects, region);
         }
-        persistRegion(projects, region);
     }
 
     public List<Project> batchGetProjects(String region, List<String> names) {
@@ -261,113 +268,6 @@ public class CodeBuildService {
 
     public List<String> listProjects(String region) {
         return new ArrayList<>(projectsFor(region).keySet());
-    }
-
-    public List<String> listProjects(String region, String sortBy, String sortOrder) {
-        if (sortBy == null && sortOrder == null) {
-            return listProjects(region);
-        }
-        return listProjectRecords(region, sortBy, sortOrder).stream()
-                .map(Project::getName)
-                .toList();
-    }
-
-    public ProjectPage listProjectsPage(String region, String sortBy, String sortOrder, String nextToken) {
-        if (sortBy == null && sortOrder == null && nextToken == null) {
-            List<String> names = listProjects(region);
-            if (names.size() <= LIST_PROJECTS_PAGE_SIZE) {
-                return new ProjectPage(names, null);
-            }
-        }
-
-        List<Project> projects = listProjectRecords(region, sortBy, sortOrder);
-        int start = 0;
-        if (nextToken != null) {
-            Project anchor = decodeListProjectsToken(nextToken, region, sortBy, sortOrder);
-            Comparator<Project> comparator = projectComparator(sortBy, sortOrder);
-            while (start < projects.size() && comparator.compare(projects.get(start), anchor) <= 0) {
-                start++;
-            }
-        }
-
-        int end = Math.min(start + LIST_PROJECTS_PAGE_SIZE, projects.size());
-        List<String> names = projects.subList(start, end).stream().map(Project::getName).toList();
-        String resultToken = end < projects.size()
-                ? encodeListProjectsToken(projects.get(end - 1), region, sortBy, sortOrder)
-                : null;
-        return new ProjectPage(names, resultToken);
-    }
-
-    private Project decodeListProjectsToken(String token, String region, String sortBy, String sortOrder) {
-        if (token.isEmpty()) {
-            throw new AwsException("InvalidInputException", "Invalid nextToken", 400);
-        }
-        JsonNode cursor;
-        try {
-            cursor = PAGE_TOKEN_MAPPER.readTree(Base64.getUrlDecoder().decode(token));
-        } catch (IllegalArgumentException | IOException e) {
-            throw new AwsException("InvalidInputException", "Invalid nextToken", 400);
-        }
-        JsonNode lastName = cursor == null ? null : cursor.path("lastName");
-        JsonNode sortValue = cursor == null ? null : cursor.path("sortValue");
-        if (cursor == null || !"ListProjects".equals(cursor.path("action").asText(null))
-                || !region.equals(cursor.path("region").asText(null))
-                || !cursor.has("sortBy") || !Objects.equals(sortBy, cursor.path("sortBy").asText(null))
-                || !cursor.has("sortOrder") || !Objects.equals(sortOrder, cursor.path("sortOrder").asText(null))
-                || !lastName.isTextual() || lastName.asText().isEmpty()
-                || (sortBy == null || "NAME".equals(sortBy)) && !sortValue.isNull()
-                || !sortValue.isNull() && !sortValue.isNumber()) {
-            throw new AwsException("InvalidInputException", "Invalid nextToken", 400);
-        }
-        Double value = sortValue.isNull() ? null : sortValue.asDouble();
-        if (value != null && !Double.isFinite(value)) {
-            throw new AwsException("InvalidInputException", "Invalid nextToken", 400);
-        }
-        Project anchor = new Project();
-        anchor.setName(lastName.asText());
-        anchor.setCreated(value);
-        anchor.setLastModified(value);
-        return anchor;
-    }
-
-    private String encodeListProjectsToken(Project last, String region, String sortBy, String sortOrder) {
-        Double value = switch (sortBy == null ? "NAME" : sortBy) {
-            case "CREATED_TIME" -> last.getCreated();
-            case "LAST_MODIFIED_TIME" -> last.getLastModified();
-            default -> null;
-        };
-        ObjectNode cursor = PAGE_TOKEN_MAPPER.createObjectNode();
-        cursor.put("action", "ListProjects");
-        cursor.put("region", region);
-        cursor.put("sortBy", sortBy);
-        cursor.put("sortOrder", sortOrder);
-        cursor.put("lastName", last.getName());
-        cursor.put("sortValue", value);
-        return Base64Url.encode(cursor.toString());
-    }
-
-    public record ProjectPage(List<String> projects, String nextToken) {
-    }
-
-    private List<Project> listProjectRecords(String region, String sortBy, String sortOrder) {
-        return projectsFor(region).values().stream()
-                .sorted(projectComparator(sortBy, sortOrder))
-                .toList();
-    }
-
-    private Comparator<Project> projectComparator(String sortBy, String sortOrder) {
-        Comparator<Project> comparator = switch (sortBy == null ? "NAME" : sortBy) {
-            case "NAME" -> Comparator.comparing(Project::getName);
-            case "CREATED_TIME" -> Comparator.comparing(Project::getCreated,
-                    Comparator.nullsFirst(Comparator.naturalOrder()));
-            case "LAST_MODIFIED_TIME" -> Comparator.comparing(Project::getLastModified,
-                    Comparator.nullsFirst(Comparator.naturalOrder()));
-            default -> throw new AwsException("InvalidInputException", "Invalid sortBy: " + sortBy, 400);
-        };
-        if (isDescendingSortOrder(sortOrder, false)) {
-            comparator = comparator.reversed();
-        }
-        return comparator.thenComparing(Project::getName);
     }
 
     // ---- Report Groups ----
@@ -421,288 +321,7 @@ public class CodeBuildService {
     }
 
     public void deleteReportGroup(String region, String arn) {
-        Map<String, ReportGroup> store = reportGroupsFor(region);
-        if (store.remove(arn) == null) {
-            throw new AwsException("ResourceNotFoundException", "Report group not found: " + arn, 400);
-        }
-        persistRegion(reportGroups, region);
-    }
-
-    public List<ReportGroup> batchGetReportGroups(String region, List<String> arns) {
-        Map<String, ReportGroup> store = reportGroupsFor(region);
-        return arns.stream()
-                .map(store::get)
-                .filter(rg -> rg != null)
-                .collect(Collectors.toList());
-    }
-
-    public List<String> listReportGroups(String region) {
-        return new ArrayList<>(reportGroupsFor(region).keySet());
-    }
-
-    // ---- Source Credentials ----
-
-    public SourceCredential importSourceCredentials(String region, String account,
-                                                     String token, String serverType, String authType,
-                                                     Boolean shouldOverwrite) {
-        Map<String, SourceCredential> store = sourceCredentialsFor(region);
-        // One credential per serverType+authType combo — overwrite existing by default
-        String key = serverType + "/" + authType;
-        SourceCredential existing = store.values().stream()
-                .filter(c -> c.getServerType().equals(serverType) && c.getAuthType().equals(authType))
-                .findFirst().orElse(null);
-        if (existing != null && Boolean.FALSE.equals(shouldOverwrite)) {
-            throw new AwsException("ResourceAlreadyExistsException",
-                    "Source credentials already exist for " + serverType + "/" + authType, 400);
-        }
-
-        String arn = AwsArnUtils.Arn.of("codebuild", region, account, "token/" + serverType.toLowerCase() + "-" + UUID.randomUUID()).toString();
-        if (existing != null) {
-            arn = existing.getArn();
-            store.remove(existing.getArn());
-        }
-
-        SourceCredential cred = new SourceCredential();
-        cred.setArn(arn);
-        cred.setServerType(serverType);
-        cred.setAuthType(authType);
-        // Token is accepted but not stored in plaintext in a returned field
-        store.put(arn, cred);
-        persistRegion(sourceCredentials, region);
-        return cred;
-    }
-
-    public List<SourceCredential> listSourceCredentials(String region) {
-        return new ArrayList<>(sourceCredentialsFor(region).values());
-    }
-
-    public void deleteSourceCredentials(String region, String arn) {
-        Map<String, SourceCredential> store = sourceCredentialsFor(region);
-        if (store.remove(arn) == null) {
-            throw new AwsException("ResourceNotFoundException",
-                    "Source credentials not found: " + arn, 400);
-        }
-        persistRegion(sourceCredentials, region);
-    }
-
-    // ---- Curated Environment Images ----
-
-    public List<Map<String, Object>> listCuratedEnvironmentImages() {
-        // Return the standard CodeBuild curated platform/language/image list
-        return List.of(
-                Map.of("platform", "AMAZON_LINUX_2",
-                        "languages", List.of(
-                                Map.of("language", "JAVA",
-                                        "images", List.of(
-                                                Map.of("name", "aws/codebuild/amazonlinux2-x86_64-standard:5.0",
-                                                        "description", "AWS CodeBuild - amazonlinux2 - 5.0",
-                                                        "versions", List.of("aws/codebuild/amazonlinux2-x86_64-standard:5.0")))),
-                                Map.of("language", "PYTHON",
-                                        "images", List.of(
-                                                Map.of("name", "aws/codebuild/amazonlinux2-x86_64-standard:5.0",
-                                                        "description", "AWS CodeBuild - amazonlinux2 - 5.0",
-                                                        "versions", List.of("aws/codebuild/amazonlinux2-x86_64-standard:5.0")))),
-                                Map.of("language", "NODE_JS",
-                                        "images", List.of(
-                                                Map.of("name", "aws/codebuild/amazonlinux2-x86_64-standard:5.0",
-                                                        "description", "AWS CodeBuild - amazonlinux2 - 5.0",
-                                                        "versions", List.of("aws/codebuild/amazonlinux2-x86_64-standard:5.0")))))),
-                Map.of("platform", "UBUNTU",
-                        "languages", List.of(
-                                Map.of("language", "JAVA",
-                                        "images", List.of(
-                                                Map.of("name", "aws/codebuild/standard:7.0",
-                                                        "description", "AWS CodeBuild - Ubuntu - 7.0",
-                                                        "versions", List.of("aws/codebuild/standard:7.0")))),
-                                Map.of("language", "PYTHON",
-                                        "images", List.of(
-                                                Map.of("name", "aws/codebuild/standard:7.0",
-                                                        "description", "AWS CodeBuild - Ubuntu - 7.0",
-                                                        "versions", List.of("aws/codebuild/standard:7.0")))),
-                                Map.of("language", "NODE_JS",
-                                        "images", List.of(
-                                                Map.of("name", "aws/codebuild/standard:7.0",
-                                                        "description", "AWS CodeBuild - Ubuntu - 7.0",
-                                                        "versions", List.of("aws/codebuild/standard:7.0")))))));
-    }
-
-    private void validateProjectName(String name) {
-        if (name == null || name.length() < 2 || name.length() > 150) {
-            throw new AwsException("InvalidInputException",
-                    "Project name must be between 2 and 150 characters", 400);
-        }
-    }
-
-    // ---- Builds ----
-
-    public Build startBuild(String region, String account, String projectName,
-                            String buildspecOverride,
-                            ProjectEnvironment environmentOverride,
-                            ProjectArtifacts artifactsOverride,
-                            String sourceVersion,
-                            Integer timeoutOverride,
-                            String imageOverride,
-                            String computeTypeOverride) {
-        Project project = projectsFor(region).get(projectName);
-        if (project == null) {
-            throw new AwsException("ResourceNotFoundException", "Project not found: " + projectName, 400);
-        }
-
-        String counterKey = account + ":" + region + ":" + projectName;
-        AtomicLong counter = buildCounters.computeIfAbsent(counterKey,
-                key -> new AtomicLong(persistedBuildCounters.getOrDefault(key, 0L)));
-        long buildNumber;
-        synchronized (counter) {
-            buildNumber = counter.incrementAndGet();
-            persistedBuildCounters.put(counterKey, buildNumber);
-        }
-
-        String buildId = projectName + ":" + buildNumber;
-        String arn = AwsArnUtils.Arn.of("codebuild", region, account, "build/" + buildId).toString();
-
-        Build build = new Build();
-        build.setId(buildId);
-        build.setArn(arn);
-        build.setBuildNumber(buildNumber);
-        build.setBuildStatus("IN_PROGRESS");
-        build.setBuildComplete(false);
-        build.setCurrentPhase("SUBMITTED");
-        build.setProjectName(projectName);
-        build.setInitiator("user");
-        build.setStartTime(Instant.now().toEpochMilli() / 1000.0);
-        build.setSource(project.getSource());
-        build.setArtifacts(artifactsOverride != null ? artifactsOverride : project.getArtifacts());
-        build.setTimeoutInMinutes(timeoutOverride != null ? timeoutOverride : project.getTimeoutInMinutes());
-        build.setQueuedTimeoutInMinutes(project.getQueuedTimeoutInMinutes());
-        build.setEncryptionKey(project.getEncryptionKey());
-
-        ProjectEnvironment env = environmentOverride != null ? environmentOverride : project.getEnvironment();
-        if (imageOverride != null || computeTypeOverride != null) {
-            ProjectEnvironment merged = new ProjectEnvironment();
-            merged.setType(env != null ? env.getType() : null);
-            merged.setImage(imageOverride != null ? imageOverride : (env != null ? env.getImage() : null));
-            merged.setComputeType(computeTypeOverride != null ? computeTypeOverride : (env != null ? env.getComputeType() : null));
-            merged.setEnvironmentVariables(env != null ? env.getEnvironmentVariables() : null);
-            merged.setPrivilegedMode(env != null ? env.getPrivilegedMode() : null);
-            build.setEnvironment(merged);
-        } else {
-            build.setEnvironment(env);
-        }
-
-        build.setPhases(new CopyOnWriteArrayList<>());
-
-        buildsFor(account, region).put(buildId, build);
-        if (buildspecOverride != null && !buildspecOverride.isBlank()) {
-            buildspecOverridesFor(account, region).put(buildId, buildspecOverride);
-        }
-        Build responseBuild = copyBuild(build);
-
-        runner.startBuild(region, build, project, buildspecOverride);
-
-        return responseBuild;
-    }
-
-    public Build getBuild(String region, String account, String buildId) {
-        Build build = buildsFor(account, region).get(buildId);
-        if (build == null) {
-            throw new AwsException("ResourceNotFoundException", "Build not found: " + buildId, 400);
-        }
-        return build;
-    }
-
-    public List<Build> batchGetBuilds(String region, String account, List<String> buildIds) {
-        Map<String, Build> store = buildsFor(account, region);
-        return buildIds.stream()
-                .map(store::get)
-                .filter(b -> b != null)
-                .collect(Collectors.toList());
-    }
-
-    public List<String> listBuilds(String region, String account, String sortOrder) {
-        Comparator<String> comparator = Comparator.naturalOrder();
-        if (isDescendingSortOrder(sortOrder, true)) {
-            comparator = comparator.reversed();
-        }
-        return buildsFor(account, region).keySet().stream()
-                .sorted(comparator)
-                .toList();
-    }
-
-    public List<String> listBuildsForProject(String region, String account, String projectName,
-                                             String sortOrder) {
-        Comparator<Build> comparator = Comparator.comparing(Build::getBuildNumber)
-                .thenComparing(Build::getId);
-        if (isDescendingSortOrder(sortOrder, true)) {
-            comparator = comparator.reversed();
-        }
-        return buildsFor(account, region).values().stream()
-                .filter(b -> projectName.equals(b.getProjectName()))
-                .sorted(comparator)
-                .map(Build::getId)
-                .toList();
-    }
-
-    private boolean isDescendingSortOrder(String sortOrder, boolean defaultDescending) {
-        if (sortOrder != null && !"ASCENDING".equals(sortOrder) && !"DESCENDING".equals(sortOrder)) {
-            throw new AwsException("InvalidInputException", "Invalid sortOrder: " + sortOrder, 400);
-        }
-        return sortOrder == null ? defaultDescending : "DESCENDING".equals(sortOrder);
-    }
-
-    public void stopBuild(String region, String account, String buildId) {
-        Build build = buildsFor(account, region).get(buildId);
-        if (build == null) {
-            throw new AwsException("ResourceNotFoundException", "Build not found: " + buildId, 400);
-        }
-        runner.stopBuild(build.getArn());
-    }
-
-    public Build retryBuild(String region, String account, String buildId) {
-        Build original = getBuild(region, account, buildId);
-        String buildspecOverride = buildspecOverridesFor(account, region).get(original.getId());
-        return startBuild(region, account, original.getProjectName(),
-                buildspecOverride, original.getEnvironment(), original.getArtifacts(),
-                null, original.getTimeoutInMinutes(), null, null);
-    }
-
-    private Build copyBuild(Build source) {
-        Build copy = new Build();
-        copy.setId(source.getId());
-        copy.setArn(source.getArn());
-        copy.setBuildNumber(source.getBuildNumber());
-        copy.setBuildStatus(source.getBuildStatus());
-        copy.setBuildComplete(source.getBuildComplete());
-        copy.setCurrentPhase(source.getCurrentPhase());
-        copy.setProjectName(source.getProjectName());
-        copy.setInitiator(source.getInitiator());
-        copy.setStartTime(source.getStartTime());
-        copy.setEndTime(source.getEndTime());
-        copy.setSource(source.getSource());
-        copy.setArtifacts(source.getArtifacts());
-        copy.setEnvironment(source.getEnvironment());
-        copy.setLogs(source.getLogs());
-        copy.setPhases(source.getPhases() != null ? new ArrayList<>(source.getPhases()) : null);
-        copy.setTimeoutInMinutes(source.getTimeoutInMinutes());
-        copy.setQueuedTimeoutInMinutes(source.getQueuedTimeoutInMinutes());
-        copy.setEncryptionKey(source.getEncryptionKey());
-        return copy;
-    }
-
-    private final ObjectMapper mapper;
-
-    private Map<String, String> resourcePolicies = new ConcurrentHashMap<>();
-
-    private Map<String, JsonNode> buildBatches = new ConcurrentHashMap<>();
-
-    private Map<String, JsonNode> reports = new ConcurrentHashMap<>();
-
-    @Inject
-    public CodeBuildService(CodeBuildRunner runner, EmulatorConfig config, StorageFactory storageFactory,
-                            ObjectMapper mapper) {
-        this.runner = runner;
-        this.config = config;
-        this.storageFactory = storageFactory;
-        this.mapper = mapper;
+        deleteReportGroup(region, arn, false);
     }
 
     public synchronized void deleteReportGroup(String region, String arn, boolean deleteReports) {
@@ -723,6 +342,20 @@ public class CodeBuildService {
             persistRegion(reportGroups, region);
         }
     }
+
+    public List<ReportGroup> batchGetReportGroups(String region, List<String> arns) {
+        Map<String, ReportGroup> store = reportGroupsFor(region);
+        return arns.stream()
+                .map(store::get)
+                .filter(rg -> rg != null)
+                .collect(Collectors.toList());
+    }
+
+    public List<String> listReportGroups(String region) {
+        return new ArrayList<>(reportGroupsFor(region).keySet());
+    }
+
+    // ---- Resource Policies ----
 
     public synchronized String getResourcePolicy(String region, String account, String resourceArn) {
         requirePolicyResource(region, account, resourceArn);
@@ -804,6 +437,8 @@ public class CodeBuildService {
             throw new AwsException("InvalidInputException", "Invalid resource policy statement", 400);
         }
     }
+
+    // ---- Batch Builds and Reports ----
 
     void configureBuildBatch(String region, String name, Map<String, Object> batchConfig) {
         Project project = projectsFor(region).get(name);
@@ -1008,6 +643,185 @@ public class CodeBuildService {
         return response;
     }
 
+    // ---- Source Credentials ----
+
+    public SourceCredential importSourceCredentials(String region, String account,
+                                                     String token, String serverType, String authType,
+                                                     Boolean shouldOverwrite) {
+        Map<String, SourceCredential> store = sourceCredentialsFor(region);
+        // One credential per serverType+authType combo — overwrite existing by default
+        String key = serverType + "/" + authType;
+        SourceCredential existing = store.values().stream()
+                .filter(c -> c.getServerType().equals(serverType) && c.getAuthType().equals(authType))
+                .findFirst().orElse(null);
+        if (existing != null && Boolean.FALSE.equals(shouldOverwrite)) {
+            throw new AwsException("ResourceAlreadyExistsException",
+                    "Source credentials already exist for " + serverType + "/" + authType, 400);
+        }
+
+        String arn = AwsArnUtils.Arn.of("codebuild", region, account, "token/" + serverType.toLowerCase() + "-" + UUID.randomUUID()).toString();
+        if (existing != null) {
+            arn = existing.getArn();
+            store.remove(existing.getArn());
+        }
+
+        SourceCredential cred = new SourceCredential();
+        cred.setArn(arn);
+        cred.setServerType(serverType);
+        cred.setAuthType(authType);
+        // Token is accepted but not stored in plaintext in a returned field
+        store.put(arn, cred);
+        persistRegion(sourceCredentials, region);
+        return cred;
+    }
+
+    public List<SourceCredential> listSourceCredentials(String region) {
+        return new ArrayList<>(sourceCredentialsFor(region).values());
+    }
+
+    public void deleteSourceCredentials(String region, String arn) {
+        Map<String, SourceCredential> store = sourceCredentialsFor(region);
+        if (store.remove(arn) == null) {
+            throw new AwsException("ResourceNotFoundException",
+                    "Source credentials not found: " + arn, 400);
+        }
+        persistRegion(sourceCredentials, region);
+    }
+
+    // ---- Curated Environment Images ----
+
+    public List<Map<String, Object>> listCuratedEnvironmentImages() {
+        // Return the standard CodeBuild curated platform/language/image list
+        return List.of(
+                Map.of("platform", "AMAZON_LINUX_2",
+                        "languages", List.of(
+                                Map.of("language", "JAVA",
+                                        "images", List.of(
+                                                Map.of("name", "aws/codebuild/amazonlinux2-x86_64-standard:5.0",
+                                                        "description", "AWS CodeBuild - amazonlinux2 - 5.0",
+                                                        "versions", List.of("aws/codebuild/amazonlinux2-x86_64-standard:5.0")))),
+                                Map.of("language", "PYTHON",
+                                        "images", List.of(
+                                                Map.of("name", "aws/codebuild/amazonlinux2-x86_64-standard:5.0",
+                                                        "description", "AWS CodeBuild - amazonlinux2 - 5.0",
+                                                        "versions", List.of("aws/codebuild/amazonlinux2-x86_64-standard:5.0")))),
+                                Map.of("language", "NODE_JS",
+                                        "images", List.of(
+                                                Map.of("name", "aws/codebuild/amazonlinux2-x86_64-standard:5.0",
+                                                        "description", "AWS CodeBuild - amazonlinux2 - 5.0",
+                                                        "versions", List.of("aws/codebuild/amazonlinux2-x86_64-standard:5.0")))))),
+                Map.of("platform", "UBUNTU",
+                        "languages", List.of(
+                                Map.of("language", "JAVA",
+                                        "images", List.of(
+                                                Map.of("name", "aws/codebuild/standard:7.0",
+                                                        "description", "AWS CodeBuild - Ubuntu - 7.0",
+                                                        "versions", List.of("aws/codebuild/standard:7.0")))),
+                                Map.of("language", "PYTHON",
+                                        "images", List.of(
+                                                Map.of("name", "aws/codebuild/standard:7.0",
+                                                        "description", "AWS CodeBuild - Ubuntu - 7.0",
+                                                        "versions", List.of("aws/codebuild/standard:7.0")))),
+                                Map.of("language", "NODE_JS",
+                                        "images", List.of(
+                                                Map.of("name", "aws/codebuild/standard:7.0",
+                                                        "description", "AWS CodeBuild - Ubuntu - 7.0",
+                                                        "versions", List.of("aws/codebuild/standard:7.0")))))));
+    }
+
+    private void validateProjectName(String name) {
+        if (name == null || name.length() < 2 || name.length() > 150) {
+            throw new AwsException("InvalidInputException",
+                    "Project name must be between 2 and 150 characters", 400);
+        }
+    }
+
+    // ---- Builds ----
+
+    public Build startBuild(String region, String account, String projectName,
+                            String buildspecOverride,
+                            ProjectEnvironment environmentOverride,
+                            ProjectArtifacts artifactsOverride,
+                            String sourceVersion,
+                            Integer timeoutOverride,
+                            String imageOverride,
+                            String computeTypeOverride) {
+        Project project = projectsFor(region).get(projectName);
+        if (project == null) {
+            throw new AwsException("ResourceNotFoundException", "Project not found: " + projectName, 400);
+        }
+
+        String counterKey = account + ":" + region + ":" + projectName;
+        AtomicLong counter = buildCounters.computeIfAbsent(counterKey,
+                key -> new AtomicLong(persistedBuildCounters.getOrDefault(key, 0L)));
+        long buildNumber;
+        synchronized (counter) {
+            buildNumber = counter.incrementAndGet();
+            persistedBuildCounters.put(counterKey, buildNumber);
+        }
+
+        String buildId = projectName + ":" + buildNumber;
+        String arn = AwsArnUtils.Arn.of("codebuild", region, account, "build/" + buildId).toString();
+
+        Build build = new Build();
+        build.setId(buildId);
+        build.setArn(arn);
+        build.setBuildNumber(buildNumber);
+        build.setBuildStatus("IN_PROGRESS");
+        build.setBuildComplete(false);
+        build.setCurrentPhase("SUBMITTED");
+        build.setProjectName(projectName);
+        build.setInitiator("user");
+        build.setStartTime(Instant.now().toEpochMilli() / 1000.0);
+        build.setSource(project.getSource());
+        build.setArtifacts(artifactsOverride != null ? artifactsOverride : project.getArtifacts());
+        build.setTimeoutInMinutes(timeoutOverride != null ? timeoutOverride : project.getTimeoutInMinutes());
+        build.setQueuedTimeoutInMinutes(project.getQueuedTimeoutInMinutes());
+        build.setEncryptionKey(project.getEncryptionKey());
+
+        ProjectEnvironment env = environmentOverride != null ? environmentOverride : project.getEnvironment();
+        if (imageOverride != null || computeTypeOverride != null) {
+            ProjectEnvironment merged = new ProjectEnvironment();
+            merged.setType(env != null ? env.getType() : null);
+            merged.setImage(imageOverride != null ? imageOverride : (env != null ? env.getImage() : null));
+            merged.setComputeType(computeTypeOverride != null ? computeTypeOverride : (env != null ? env.getComputeType() : null));
+            merged.setEnvironmentVariables(env != null ? env.getEnvironmentVariables() : null);
+            merged.setPrivilegedMode(env != null ? env.getPrivilegedMode() : null);
+            build.setEnvironment(merged);
+        } else {
+            build.setEnvironment(env);
+        }
+
+        build.setPhases(new CopyOnWriteArrayList<>());
+        runner.validateExecution(build, project);
+
+        buildsFor(account, region).put(buildId, build);
+        if (buildspecOverride != null && !buildspecOverride.isBlank()) {
+            buildspecOverridesFor(account, region).put(buildId, buildspecOverride);
+        }
+        Build responseBuild = copyBuild(build);
+
+        runner.startBuild(region, build, project, buildspecOverride);
+
+        return responseBuild;
+    }
+
+    public Build getBuild(String region, String account, String buildId) {
+        Build build = buildsFor(account, region).get(buildId);
+        if (build == null) {
+            throw new AwsException("ResourceNotFoundException", "Build not found: " + buildId, 400);
+        }
+        return build;
+    }
+
+    public List<Build> batchGetBuilds(String region, String account, List<String> buildIds) {
+        Map<String, Build> store = buildsFor(account, region);
+        return buildIds.stream()
+                .map(store::get)
+                .filter(b -> b != null)
+                .collect(Collectors.toList());
+    }
+
     public Map<String, List<?>> batchDeleteBuilds(String region, String account, List<String> ids) {
         if (ids == null || ids.isEmpty() || ids.size() > 100 || ids.stream().anyMatch(id -> id == null || id.isBlank())) {
             throw new AwsException("InvalidInputException", "ids must contain between 1 and 100 build IDs", 400);
@@ -1050,5 +864,44 @@ public class CodeBuildService {
                         a.getStartTime() != null ? a.getStartTime() : 0))
                 .map(Build::getId)
                 .collect(Collectors.toList());
+    }
+
+    public void stopBuild(String region, String account, String buildId) {
+        Build build = buildsFor(account, region).get(buildId);
+        if (build == null) {
+            throw new AwsException("ResourceNotFoundException", "Build not found: " + buildId, 400);
+        }
+        runner.stopBuild(build.getArn());
+    }
+
+    public Build retryBuild(String region, String account, String buildId) {
+        Build original = getBuild(region, account, buildId);
+        String buildspecOverride = buildspecOverridesFor(account, region).get(original.getId());
+        return startBuild(region, account, original.getProjectName(),
+                buildspecOverride, original.getEnvironment(), original.getArtifacts(),
+                null, original.getTimeoutInMinutes(), null, null);
+    }
+
+    private Build copyBuild(Build source) {
+        Build copy = new Build();
+        copy.setId(source.getId());
+        copy.setArn(source.getArn());
+        copy.setBuildNumber(source.getBuildNumber());
+        copy.setBuildStatus(source.getBuildStatus());
+        copy.setBuildComplete(source.getBuildComplete());
+        copy.setCurrentPhase(source.getCurrentPhase());
+        copy.setProjectName(source.getProjectName());
+        copy.setInitiator(source.getInitiator());
+        copy.setStartTime(source.getStartTime());
+        copy.setEndTime(source.getEndTime());
+        copy.setSource(source.getSource());
+        copy.setArtifacts(source.getArtifacts());
+        copy.setEnvironment(source.getEnvironment());
+        copy.setLogs(source.getLogs());
+        copy.setPhases(source.getPhases() != null ? new ArrayList<>(source.getPhases()) : null);
+        copy.setTimeoutInMinutes(source.getTimeoutInMinutes());
+        copy.setQueuedTimeoutInMinutes(source.getQueuedTimeoutInMinutes());
+        copy.setEncryptionKey(source.getEncryptionKey());
+        return copy;
     }
 }

@@ -1618,25 +1618,6 @@ public class SesQueryHandler {
                 || (cp >= 0x10000 && cp <= 0x10FFFF);
     }
 
-    @Inject
-    public SesQueryHandler(SesService sesService, SesReceiptRuleService receiptRuleService,
-                           SesIdentityService identityService, SesTemplateService templateService,
-                           SesCvetService cvetService, SesAccountService accountService,
-                           SesConfigurationSetService configSetService,
-                           SesPolicyService policyService,
-                           SesSentEmailService sentEmailService, ObjectMapper objectMapper) {
-        this.sesService = sesService;
-        this.receiptRuleService = receiptRuleService;
-        this.identityService = identityService;
-        this.templateService = templateService;
-        this.cvetService = cvetService;
-        this.accountService = accountService;
-        this.configSetService = configSetService;
-        this.policyService = policyService;
-        this.sentEmailService = sentEmailService;
-        this.objectMapper = objectMapper;
-    }
-
     private Response handleListTemplates(String region) {
         List<EmailTemplate> templates = templateService.listTemplates(region);
         var xml = new XmlBuilder().start("TemplatesMetadata");

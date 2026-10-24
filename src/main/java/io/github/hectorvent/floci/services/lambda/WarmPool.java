@@ -704,13 +704,6 @@ public class WarmPool implements ContainerTeardown, Resettable {
 
 
 
-    @Inject
-    public WarmPool(LambdaRuntimeLauncher lambdaRuntimeLauncher, EmulatorConfig config) {
-        this.lambdaRuntimeLauncher = lambdaRuntimeLauncher;
-        this.config = config;
-        this.maxPoolSizePerFunction = DEFAULT_MAX_POOL_SIZE;
-    }
-
 
 
 

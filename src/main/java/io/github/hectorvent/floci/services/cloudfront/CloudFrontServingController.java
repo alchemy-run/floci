@@ -932,7 +932,7 @@ public class CloudFrontServingController {
         return normalized.substring(prefix.length());
     }
 
-    static URI buildCustomOriginUri(String protocol, String domainName, int port,
+    public static URI buildCustomOriginUri(String protocol, String domainName, int port,
                                     String forwardUri, String rawQuery) {
         if (port < 1 || port > 65535) {
             throw new IllegalArgumentException("Custom origin port is outside the valid range");
@@ -1455,17 +1455,6 @@ public class CloudFrontServingController {
         }
     }
 
-    @Inject
-    public CloudFrontServingController(CloudFrontService service, S3Service s3Service,
-                                       EmulatorConfig emulatorConfig,
-                                       CurrentVertxRequest currentVertxRequest) {
-        this.service = service;
-        this.s3Service = s3Service;
-        this.currentVertxRequest = currentVertxRequest;
-        this.httpClient = new CloudFrontOriginHttpClient(
-                emulatorConfig.services().cloudfront().allowedPrivateOriginHosts().orElse(List.of()));
-    }
-
     private Response serve(String distId, String rawViewerPath, String decodedViewerPath,
                            String viewerScheme, String viewerHost,
                            String viewerAuthorization,
@@ -1569,8 +1558,7 @@ public class CloudFrontServingController {
         } else {
             String key = CloudFrontRequestRouter.resolveOriginKey(origin.getOriginPath(),
                     decodedViewerPath(rawPath), distribution.getConfig().getDefaultRootObject());
-            response = fetchFromS3(distribution, origin, key, headers.get("authorization"), !"HEAD".equals(method),
-                    resolved.accessControl());
+            response = fetchFromS3(distribution, origin, key, headers.get("authorization"), !"HEAD".equals(method));
         }
         return toResponse(response, !"HEAD".equals(method), null);
     }

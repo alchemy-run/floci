@@ -1415,15 +1415,6 @@ public class GlueJsonHandler {
         return crawler;
     }
 
-    @Inject
-    public GlueJsonHandler(GlueService glueService,
-                           GlueSchemaRegistryService schemaRegistryService,
-                           ObjectMapper mapper) {
-        this.glueService = glueService;
-        this.schemaRegistryService = schemaRegistryService;
-        this.mapper = mapper;
-    }
-
 
 
 

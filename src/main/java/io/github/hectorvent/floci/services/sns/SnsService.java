@@ -3060,36 +3060,6 @@ public class SnsService implements Resettable, ResourceProvider {
 
     private final Map<String, String> sandboxNumbers = new ConcurrentHashMap<>();
 
-    @Inject
-    public SnsService(StorageFactory storageFactory, EmulatorConfig config,
-                      RegionResolver regionResolver, SqsService sqsService,
-                      LambdaService lambdaService, FirehoseService firehoseService,
-                      ObjectMapper objectMapper) {
-        this(
-                storageFactory.create("sns", "sns-topics.json",
-                        new TypeReference<Map<String, Topic>>() {
-                        }),
-                storageFactory.create("sns", "sns-subscriptions.json",
-                        new TypeReference<Map<String, Subscription>>() {
-                        }),
-                storageFactory.create("sns", "sns-platform-applications.json",
-                        new TypeReference<Map<String, PlatformApplication>>() {
-                        }),
-                storageFactory.create("sns", "sns-platform-endpoints.json",
-                        new TypeReference<Map<String, PlatformEndpoint>>() {
-                        }),
-                storageFactory.create("sns", "sns-sms.json",
-                        new TypeReference<Map<String, SentSms>>() {
-                        }),
-                regionResolver,
-                sqsService,
-                lambdaService,
-                firehoseService,
-                config.effectiveBaseUrl(),
-                objectMapper
-        );
-    }
-
     public String getDataProtectionPolicy(String resourceArn, String region) {
         String key = topicKey(region, resourceArn);
         Topic topic = topicStore.get(key)

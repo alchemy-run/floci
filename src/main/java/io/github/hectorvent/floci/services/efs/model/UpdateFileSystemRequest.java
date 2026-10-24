@@ -1,8 +1,9 @@
 package io.github.hectorvent.floci.services.efs.model;
 
-import com.fasterxml.jackson.databind.PropertyNamingStrategies;
-import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import io.quarkus.runtime.annotations.RegisterForReflection;
+
+import com.fasterxml.jackson.databind.annotation.JsonNaming;
+import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 
 @JsonNaming(PropertyNamingStrategies.UpperCamelCaseStrategy.class)
 @RegisterForReflection

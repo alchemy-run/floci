@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsErrorResponse;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.AwsJson11Controller;
+import io.github.hectorvent.floci.services.wafv2.model.ApiKey;
 import io.github.hectorvent.floci.core.common.JsonErrorResponseUtils;
 import io.github.hectorvent.floci.services.wafv2.model.IpSet;
 import io.github.hectorvent.floci.services.wafv2.model.RegexPatternSet;
@@ -21,7 +22,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import io.github.hectorvent.floci.services.wafv2.model.ApiKey;
 
 /**
  * WAF v2 JSON 1.1 handler. Dispatched from {@link AwsJson11Controller} under the
@@ -44,11 +44,6 @@ public class WafV2Handler {
     public Response handle(String action, JsonNode request, String region) {
         LOG.debugv("WAFv2 action: {0}", action);
         try {
-            // Gated on the region the request was sent to; the service's own callers (CloudFormation)
-            // pass a resource's region explicitly and are checked where the ARN is built.
-            if ("CLOUDFRONT".equals(text(request, "Scope"))) {
-                service.requireCloudFrontScope(region);
-            }
             return switch (action) {
                 case "CreateWebACL" -> handleCreateWebAcl(request, region);
                 case "GetWebACL" -> handleGetWebAcl(request);
@@ -85,22 +80,22 @@ public class WafV2Handler {
                 case "TagResource" -> handleTagResource(request);
                 case "UntagResource" -> handleUntagResource(request);
                 case "ListTagsForResource" -> handleListTagsForResource(request);
-                case "GetTopPathStatisticsByTraffic" -> handleGetTopPathStatisticsByTraffic(request);
-                case "GetRateBasedStatementManagedKeys" -> handleGetRateBasedStatementManagedKeys(request);
-                case "GetSampledRequests" -> handleGetSampledRequests(request);
-                case "DescribeManagedProductsByVendor" -> handleDescribeManagedProductsByVendor(request);
-                case "DescribeAllManagedProducts" -> handleDescribeAllManagedProducts(request);
-                case "DescribeManagedRuleGroup" -> handleDescribeManagedRuleGroup(request);
+                case "CreateAPIKey" -> handleCreateApiKey(request);
+                case "GetDecryptedAPIKey" -> handleGetDecryptedApiKey(request);
+                case "ListAPIKeys" -> handleListApiKeys(request);
+                case "DeleteAPIKey" -> handleDeleteApiKey(request);
+                case "ListAvailableManagedRuleGroups" -> handleListAvailableManagedRuleGroups(request);
                 case "ListAvailableManagedRuleGroupVersions" ->
                         handleListAvailableManagedRuleGroupVersions(request);
-                case "ListAvailableManagedRuleGroups" -> handleListAvailableManagedRuleGroups(request);
-                case "DeleteAPIKey" -> handleDeleteApiKey(request);
-                case "ListAPIKeys" -> handleListApiKeys(request);
-                case "GetDecryptedAPIKey" -> handleGetDecryptedApiKey(request);
-                case "CreateAPIKey" -> handleCreateApiKey(request);
+                case "DescribeManagedRuleGroup" -> handleDescribeManagedRuleGroup(request);
+                case "DescribeAllManagedProducts" -> handleDescribeAllManagedProducts(request);
+                case "DescribeManagedProductsByVendor" -> handleDescribeManagedProductsByVendor(request);
+                case "GetSampledRequests" -> handleGetSampledRequests(request);
+                case "GetRateBasedStatementManagedKeys" -> handleGetRateBasedStatementManagedKeys(request);
+                case "GetTopPathStatisticsByTraffic" -> handleGetTopPathStatisticsByTraffic(request);
                 default -> Response.status(400)
-                        .entity(new AwsErrorResponse("WAFInvalidOperationException",
-                                "Operation " + action + " is not supported."))
+                        .entity(new AwsErrorResponse("UnknownOperationException",
+                                "Unknown operation " + action))
                         .build();
             };
         } catch (AwsException e) {
@@ -440,6 +435,156 @@ public class WafV2Handler {
         return Response.ok(response).build();
     }
 
+    // ──────────────────────────── API keys ────────────────────────────
+
+    private Response handleCreateApiKey(JsonNode request) {
+        ApiKey key = service.createApiKey(text(request, "Scope"), stringList(request.path("TokenDomains")));
+        return Response.ok(objectMapper.createObjectNode().put("APIKey", key.getApiKey())).build();
+    }
+
+    private Response handleGetDecryptedApiKey(JsonNode request) {
+        ApiKey key = service.getDecryptedApiKey(text(request, "Scope"), text(request, "APIKey"));
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode domains = response.putArray("TokenDomains");
+        key.getTokenDomains().forEach(domains::add);
+        if (key.getCreationTime() != null) {
+            response.put("CreationTimestamp", key.getCreationTime().getEpochSecond());
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleListApiKeys(JsonNode request) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode summaries = response.putArray("APIKeySummaries");
+        for (ApiKey key : page(service.listApiKeys(text(request, "Scope")), request)) {
+            ObjectNode summary = summaries.addObject();
+            ArrayNode domains = summary.putArray("TokenDomains");
+            key.getTokenDomains().forEach(domains::add);
+            summary.put("APIKey", key.getApiKey());
+            if (key.getCreationTime() != null) {
+                summary.put("CreationTimestamp", key.getCreationTime().getEpochSecond());
+            }
+            summary.put("Version", key.getVersion());
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleDeleteApiKey(JsonNode request) {
+        service.deleteApiKey(text(request, "Scope"), text(request, "APIKey"));
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    // ──────────────────────────── Managed catalog ────────────────────────────
+
+    private Response handleListAvailableManagedRuleGroups(JsonNode request) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode groups = response.putArray("ManagedRuleGroups");
+        for (ManagedRuleCatalog.Group group : page(
+                service.listAvailableManagedRuleGroups(text(request, "Scope")), request)) {
+            ObjectNode node = groups.addObject();
+            node.put("VendorName", group.vendorName());
+            node.put("Name", group.name());
+            node.put("VersioningSupported", group.versioningSupported());
+            node.put("Description", group.description());
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleListAvailableManagedRuleGroupVersions(JsonNode request) {
+        ManagedRuleCatalog.Group group = service.listAvailableManagedRuleGroupVersions(
+                text(request, "VendorName"), text(request, "Name"), text(request, "Scope"));
+        ObjectNode response = objectMapper.createObjectNode();
+        if (group.currentDefaultVersion() != null) {
+            response.put("CurrentDefaultVersion", group.currentDefaultVersion());
+        }
+        ArrayNode versions = response.putArray("Versions");
+        for (ManagedRuleCatalog.Version version : page(group.versions(), request)) {
+            ObjectNode node = versions.addObject();
+            node.put("Name", version.name());
+            if (version.lastUpdate() != null) {
+                node.put("LastUpdateTimestamp", version.lastUpdate().getEpochSecond());
+            }
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeManagedRuleGroup(JsonNode request) {
+        ManagedRuleCatalog.Group group = service.describeManagedRuleGroup(
+                text(request, "VendorName"), text(request, "Name"), text(request, "Scope"));
+        ObjectNode response = objectMapper.createObjectNode();
+        if (group.currentDefaultVersion() != null) {
+            response.put("VersionName", group.currentDefaultVersion());
+        }
+        response.put("Capacity", group.capacity());
+        response.put("LabelNamespace", group.labelNamespace());
+        ArrayNode rules = response.putArray("Rules");
+        for (ManagedRuleCatalog.Rule rule : group.rules()) {
+            ObjectNode node = rules.addObject();
+            node.put("Name", rule.name());
+            node.putObject("Action").putObject(actionName(rule.action()));
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeAllManagedProducts(JsonNode request) {
+        return managedProducts(service.describeManagedProducts(text(request, "Scope"), null));
+    }
+
+    private Response handleDescribeManagedProductsByVendor(JsonNode request) {
+        return managedProducts(service.describeManagedProducts(
+                text(request, "Scope"), text(request, "VendorName")));
+    }
+
+    private Response managedProducts(List<ManagedRuleCatalog.Group> groups) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode products = response.putArray("ManagedProducts");
+        for (ManagedRuleCatalog.Group group : groups) {
+            ObjectNode node = products.addObject();
+            node.put("VendorName", group.vendorName());
+            node.put("ManagedRuleSetName", group.name());
+            node.put("ProductId", group.productId());
+            node.put("ProductLink", group.productLink());
+            node.put("ProductTitle", group.productTitle());
+            node.put("ProductDescription", group.description());
+            node.put("IsVersioningSupported", group.versioningSupported());
+            node.put("IsAdvancedManagedRuleSet", group.advanced());
+        }
+        return Response.ok(response).build();
+    }
+
+    // ──────────────────────────── Analytics ────────────────────────────
+
+    private Response handleGetSampledRequests(JsonNode request) {
+        service.requireWebAclByArn(text(request, "WebAclArn"));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.putArray("SampledRequests");
+        response.put("PopulationSize", 0);
+        if (request.has("TimeWindow") && request.get("TimeWindow").isObject()) {
+            response.set("TimeWindow", request.get("TimeWindow"));
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleGetRateBasedStatementManagedKeys(JsonNode request) {
+        service.requireWebAcl(text(request, "Scope"), text(request, "WebACLId"));
+        ObjectNode response = objectMapper.createObjectNode();
+        ObjectNode v4 = response.putObject("ManagedKeysIPV4");
+        v4.put("IPAddressVersion", "IPV4");
+        v4.putArray("Addresses");
+        ObjectNode v6 = response.putObject("ManagedKeysIPV6");
+        v6.put("IPAddressVersion", "IPV6");
+        v6.putArray("Addresses");
+        return Response.ok(response).build();
+    }
+
+    private Response handleGetTopPathStatisticsByTraffic(JsonNode request) {
+        service.requireWebAclByArn(text(request, "WebAclArn"));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.putArray("PathStatistics");
+        response.put("TotalRequestCount", 0);
+        return Response.ok(response).build();
+    }
+
     // ──────────────────────────── Builders ────────────────────────────
 
     private ObjectNode summaryNode(String name, String id, String description,
@@ -478,6 +623,7 @@ public class WafV2Handler {
             ArrayNode domains = node.putArray("TokenDomains");
             acl.getTokenDomains().forEach(domains::add);
         }
+        setRawJson(node, "DataProtectionConfig", acl.getDataProtectionConfig());
         node.put("ManagedByFirewallManager", false);
         return node;
     }
@@ -584,150 +730,6 @@ public class WafV2Handler {
         } catch (Exception e) {
             LOG.warnv("Failed to parse stored {0} JSON; field omitted. Value: {1}", field, rawJson);
         }
-    }
-
-    private Response handleCreateApiKey(JsonNode request) {
-        ApiKey key = service.createApiKey(text(request, "Scope"), stringList(request.path("TokenDomains")));
-        return Response.ok(objectMapper.createObjectNode().put("APIKey", key.getApiKey())).build();
-    }
-
-    private Response handleGetDecryptedApiKey(JsonNode request) {
-        ApiKey key = service.getDecryptedApiKey(text(request, "Scope"), text(request, "APIKey"));
-        ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode domains = response.putArray("TokenDomains");
-        key.getTokenDomains().forEach(domains::add);
-        if (key.getCreationTime() != null) {
-            response.put("CreationTimestamp", key.getCreationTime().getEpochSecond());
-        }
-        return Response.ok(response).build();
-    }
-
-    private Response handleListApiKeys(JsonNode request) {
-        ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode summaries = response.putArray("APIKeySummaries");
-        for (ApiKey key : page(service.listApiKeys(text(request, "Scope")), request)) {
-            ObjectNode summary = summaries.addObject();
-            ArrayNode domains = summary.putArray("TokenDomains");
-            key.getTokenDomains().forEach(domains::add);
-            summary.put("APIKey", key.getApiKey());
-            if (key.getCreationTime() != null) {
-                summary.put("CreationTimestamp", key.getCreationTime().getEpochSecond());
-            }
-            summary.put("Version", key.getVersion());
-        }
-        return Response.ok(response).build();
-    }
-
-    private Response handleDeleteApiKey(JsonNode request) {
-        service.deleteApiKey(text(request, "Scope"), text(request, "APIKey"));
-        return Response.ok(objectMapper.createObjectNode()).build();
-    }
-
-    private Response handleListAvailableManagedRuleGroups(JsonNode request) {
-        ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode groups = response.putArray("ManagedRuleGroups");
-        for (ManagedRuleCatalog.Group group : page(
-                service.listAvailableManagedRuleGroups(text(request, "Scope")), request)) {
-            ObjectNode node = groups.addObject();
-            node.put("VendorName", group.vendorName());
-            node.put("Name", group.name());
-            node.put("VersioningSupported", group.versioningSupported());
-            node.put("Description", group.description());
-        }
-        return Response.ok(response).build();
-    }
-
-    private Response handleListAvailableManagedRuleGroupVersions(JsonNode request) {
-        ManagedRuleCatalog.Group group = service.listAvailableManagedRuleGroupVersions(
-                text(request, "VendorName"), text(request, "Name"), text(request, "Scope"));
-        ObjectNode response = objectMapper.createObjectNode();
-        if (group.currentDefaultVersion() != null) {
-            response.put("CurrentDefaultVersion", group.currentDefaultVersion());
-        }
-        ArrayNode versions = response.putArray("Versions");
-        for (ManagedRuleCatalog.Version version : page(group.versions(), request)) {
-            ObjectNode node = versions.addObject();
-            node.put("Name", version.name());
-            if (version.lastUpdate() != null) {
-                node.put("LastUpdateTimestamp", version.lastUpdate().getEpochSecond());
-            }
-        }
-        return Response.ok(response).build();
-    }
-
-    private Response handleDescribeManagedRuleGroup(JsonNode request) {
-        ManagedRuleCatalog.Group group = service.describeManagedRuleGroup(
-                text(request, "VendorName"), text(request, "Name"), text(request, "Scope"));
-        ObjectNode response = objectMapper.createObjectNode();
-        if (group.currentDefaultVersion() != null) {
-            response.put("VersionName", group.currentDefaultVersion());
-        }
-        response.put("Capacity", group.capacity());
-        response.put("LabelNamespace", group.labelNamespace());
-        ArrayNode rules = response.putArray("Rules");
-        for (ManagedRuleCatalog.Rule rule : group.rules()) {
-            ObjectNode node = rules.addObject();
-            node.put("Name", rule.name());
-            node.putObject("Action").putObject(actionName(rule.action()));
-        }
-        return Response.ok(response).build();
-    }
-
-    private Response handleDescribeAllManagedProducts(JsonNode request) {
-        return managedProducts(service.describeManagedProducts(text(request, "Scope"), null));
-    }
-
-    private Response handleDescribeManagedProductsByVendor(JsonNode request) {
-        return managedProducts(service.describeManagedProducts(
-                text(request, "Scope"), text(request, "VendorName")));
-    }
-
-    private Response managedProducts(List<ManagedRuleCatalog.Group> groups) {
-        ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode products = response.putArray("ManagedProducts");
-        for (ManagedRuleCatalog.Group group : groups) {
-            ObjectNode node = products.addObject();
-            node.put("VendorName", group.vendorName());
-            node.put("ManagedRuleSetName", group.name());
-            node.put("ProductId", group.productId());
-            node.put("ProductLink", group.productLink());
-            node.put("ProductTitle", group.productTitle());
-            node.put("ProductDescription", group.description());
-            node.put("IsVersioningSupported", group.versioningSupported());
-            node.put("IsAdvancedManagedRuleSet", group.advanced());
-        }
-        return Response.ok(response).build();
-    }
-
-    private Response handleGetSampledRequests(JsonNode request) {
-        service.requireWebAclByArn(text(request, "WebAclArn"));
-        ObjectNode response = objectMapper.createObjectNode();
-        response.putArray("SampledRequests");
-        response.put("PopulationSize", 0);
-        if (request.has("TimeWindow") && request.get("TimeWindow").isObject()) {
-            response.set("TimeWindow", request.get("TimeWindow"));
-        }
-        return Response.ok(response).build();
-    }
-
-    private Response handleGetRateBasedStatementManagedKeys(JsonNode request) {
-        service.requireWebAcl(text(request, "Scope"), text(request, "WebACLId"));
-        ObjectNode response = objectMapper.createObjectNode();
-        ObjectNode v4 = response.putObject("ManagedKeysIPV4");
-        v4.put("IPAddressVersion", "IPV4");
-        v4.putArray("Addresses");
-        ObjectNode v6 = response.putObject("ManagedKeysIPV6");
-        v6.put("IPAddressVersion", "IPV6");
-        v6.putArray("Addresses");
-        return Response.ok(response).build();
-    }
-
-    private Response handleGetTopPathStatisticsByTraffic(JsonNode request) {
-        service.requireWebAclByArn(text(request, "WebAclArn"));
-        ObjectNode response = objectMapper.createObjectNode();
-        response.putArray("PathStatistics");
-        response.put("TotalRequestCount", 0);
-        return Response.ok(response).build();
     }
 
     private <T> List<T> page(List<T> items, JsonNode request) {

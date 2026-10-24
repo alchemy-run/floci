@@ -16,6 +16,8 @@ import io.github.hectorvent.floci.services.batch.model.BatchKeyValue;
 import io.github.hectorvent.floci.services.batch.model.BatchNodeExecution;
 import io.github.hectorvent.floci.services.batch.model.BatchResourceRequirement;
 import io.github.hectorvent.floci.services.batch.model.BatchRunResult;
+import io.github.hectorvent.floci.services.batch.model.BatchRuntimePlatform;
+import io.github.hectorvent.floci.services.ecr.registry.EcrRegistryManager;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -27,8 +29,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import io.github.hectorvent.floci.services.batch.model.BatchRuntimePlatform;
-import io.github.hectorvent.floci.services.ecr.registry.EcrRegistryManager;
 import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
 
@@ -37,6 +37,7 @@ public class BatchDockerRunner implements ContainerTeardown {
 
     private static final Logger LOG = Logger.getLogger(BatchDockerRunner.class);
     private static final String LOG_GROUP = "/aws/batch/job";
+    private static final Pattern OWNER_ACCOUNT_ID = Pattern.compile("\\d{12}");
 
     // Containers of jobs currently inside run(); drained on emulator shutdown so a
     // SIGTERM mid-job does not orphan the container.
@@ -48,46 +49,67 @@ public class BatchDockerRunner implements ContainerTeardown {
     private final ContainerLogStreamer logStreamer;
     private final EmulatorConfig config;
     private final ContainerDetector containerDetector;
+    private final UnaryOperator<String> imageResolver;
 
     @Inject
     public BatchDockerRunner(ContainerBuilder containerBuilder,
                              ContainerLifecycleManager lifecycleManager,
                              ContainerLogStreamer logStreamer,
                              EmulatorConfig config,
-                             ContainerDetector containerDetector) {
+                             ContainerDetector containerDetector,
+                             EcrRegistryManager ecrRegistryManager) {
+        this(containerBuilder, lifecycleManager, logStreamer, config, containerDetector,
+                ecrRegistryManager::rewriteImageUri);
+    }
+
+    BatchDockerRunner(ContainerBuilder containerBuilder,
+                      ContainerLifecycleManager lifecycleManager,
+                      ContainerLogStreamer logStreamer,
+                      EmulatorConfig config,
+                      ContainerDetector containerDetector) {
+        this(containerBuilder, lifecycleManager, logStreamer, config, containerDetector, UnaryOperator.identity());
+    }
+
+    BatchDockerRunner(ContainerBuilder containerBuilder,
+                      ContainerLifecycleManager lifecycleManager,
+                      ContainerLogStreamer logStreamer,
+                      EmulatorConfig config,
+                      ContainerDetector containerDetector,
+                      UnaryOperator<String> imageResolver) {
         this.containerBuilder = containerBuilder;
         this.lifecycleManager = lifecycleManager;
         this.logStreamer = logStreamer;
         this.config = config;
         this.containerDetector = containerDetector;
+        this.imageResolver = imageResolver;
     }
 
     public BatchRunResult run(BatchJob job, int attemptNumber) {
-        String logStreamName = logStreamer.generateLogStreamName(
-                job.getJobDefinitionName() + "/default/" + job.getJobId());
-        String containerName = ContainerStorageHelper.dockerName(config, "batch-" + job.getJobId() + "-" + attemptNumber);
+        String logStreamName = logStreamName(job.getJobDefinitionName(), job.getJobId());
+        String containerName = ContainerStorageHelper.dockerName(config, "floci-batch-" + job.getJobId() + "-" + attemptNumber);
         return runContainer(job, job.getJobId(), containerName, logStreamName,
                 "batch:" + job.getJobName() + ":" + job.getJobId(),
-                job.getContainerImage(), "Job definition container image is missing",
+                job.getContainerImage(), BatchRuntimePlatform.dockerPlatform(job.getRuntimePlatform()),
+                "Job definition container image is missing",
                 job.getResolvedCommand(), buildEnvironment(job, attemptNumber), job.getResourceRequirements());
     }
 
     // A distinct inFlightContainers key per node, since nodes of one job run concurrently.
     public BatchRunResult run(BatchJob job, int attemptNumber, BatchNodeExecution node) {
-        String logStreamName = logStreamer.generateLogStreamName(
-                job.getJobDefinitionName() + "/default/" + job.getJobId() + "/" + node.getNodeIndex());
+        String logStreamName = logStreamName(job.getJobDefinitionName(), job.getJobId() + "/" + node.getNodeIndex());
         String containerName = ContainerStorageHelper.dockerName(config,
-                "batch-" + job.getJobId() + "-" + attemptNumber + "-node" + node.getNodeIndex());
+                "floci-batch-" + job.getJobId() + "-" + attemptNumber + "-node" + node.getNodeIndex());
         String inFlightKey = job.getJobId() + "#node" + node.getNodeIndex();
         return runContainer(job, inFlightKey, containerName, logStreamName,
                 "batch:" + job.getJobName() + ":" + job.getJobId() + ":node" + node.getNodeIndex(),
-                node.getContainerImage(), "Node " + node.getNodeIndex() + " container image is missing",
+                node.getContainerImage(), BatchRuntimePlatform.dockerPlatform(node.getRuntimePlatform()),
+                "Node " + node.getNodeIndex() + " container image is missing",
                 node.getResolvedCommand(), buildNodeEnvironment(job, attemptNumber, node), node.getResourceRequirements());
     }
 
     private BatchRunResult runContainer(BatchJob job, String inFlightKey, String containerName, String logStreamName,
-                                        String logSourceLabel, String image, String missingImageMessage,
-                                        List<String> command, List<String> env,
+                                        String logSourceLabel, String image, String platform,
+                                        String missingImageMessage, List<String> command, List<String> env,
                                         List<BatchResourceRequirement> resourceRequirements) {
         long startedAt = System.currentTimeMillis();
         Closeable logHandle = null;
@@ -101,7 +123,7 @@ public class BatchDockerRunner implements ContainerTeardown {
                 return failed(startedAt, logStreamName, missingImageMessage);
             }
 
-            ContainerBuilder.Builder builder = containerBuilder.newContainer(image)
+            ContainerBuilder.Builder builder = containerBuilder.newContainer(imageResolver.apply(image))
                     .withName(containerName)
                     .withEnv(env)
                     .withDockerNetwork(config.services().batch().dockerNetwork())
@@ -117,13 +139,17 @@ public class BatchDockerRunner implements ContainerTeardown {
             applyResourceRequirements(builder, resourceRequirements, job.getJobId());
 
             ContainerSpec spec = builder.build();
-            containerId = lifecycleManager.createAndStart(spec).containerId();
+            // AWS runs the image variant for the job's CPU architecture, not the host's, so a
+            // single-platform image (e.g. built for linux/amd64) must be pulled and run as such.
+            containerId = lifecycleManager.create(spec, platform);
             inFlightContainers.put(inFlightKey, containerId);
+            lifecycleManager.startCreated(containerId, spec);
             if (stopRequestedJobs.contains(job.getJobId())) {
                 releaseAndStop(inFlightKey, containerId, null);
                 return stopped(startedAt, logStreamName);
             }
-            logHandle = logStreamer.attach(containerId, LOG_GROUP, logStreamName, job.getRegion(), logSourceLabel);
+            logHandle = logStreamer.attachForAccount(job.getAccountId(), containerId, LOG_GROUP, logStreamName,
+                    job.getRegion(), logSourceLabel);
             if (stopRequestedJobs.contains(job.getJobId())) {
                 releaseAndStop(inFlightKey, containerId, logHandle);
                 return stopped(startedAt, logStreamName);
@@ -233,7 +259,11 @@ public class BatchDockerRunner implements ContainerTeardown {
         List<String> env = new ArrayList<>();
         env.add("AWS_REGION=" + job.getRegion());
         env.add("AWS_DEFAULT_REGION=" + job.getRegion());
-        env.add("AWS_ACCESS_KEY_ID=test");
+        // A 12-digit access key identifies the job's owning account to Floci; without it the
+        // workload's calls would resolve to the emulator's default account.
+        String accountId = job.getAccountId();
+        boolean ownerAccount = accountId != null && OWNER_ACCOUNT_ID.matcher(accountId).matches();
+        env.add("AWS_ACCESS_KEY_ID=" + (ownerAccount ? accountId : "test"));
         env.add("AWS_SECRET_ACCESS_KEY=test");
         env.add("AWS_SESSION_TOKEN=test");
         String hostname = resolveEndpointHostname();
@@ -270,17 +300,28 @@ public class BatchDockerRunner implements ContainerTeardown {
             return;
         }
         for (BatchResourceRequirement requirement : resourceRequirements) {
-            if (!"MEMORY".equalsIgnoreCase(requirement.getType()) || requirement.getValue() == null) {
+            if (requirement.getValue() == null) {
                 continue;
             }
             try {
-                builder.withMemoryMb(Integer.parseInt(requirement.getValue()));
+                if ("MEMORY".equalsIgnoreCase(requirement.getType())) {
+                    builder.withMemoryMb(Integer.parseInt(requirement.getValue()));
+                } else if ("VCPU".equalsIgnoreCase(requirement.getType())) {
+                    int cpuUnits = (int) Math.round(Double.parseDouble(requirement.getValue()) * 1024);
+                    if (cpuUnits > 0) {
+                        builder.withCpuUnits(cpuUnits);
+                    }
+                }
             } catch (NumberFormatException e) {
-                LOG.warnv("Ignoring invalid Batch MEMORY resource value for job {0}: {1}",
-                        jobId, requirement.getValue());
+                LOG.warnv("Ignoring invalid Batch {0} resource value for job {1}: {2}",
+                        requirement.getType(), jobId, requirement.getValue());
             }
-            return;
         }
+    }
+
+    // The awslogs driver names Batch streams {jobDefinitionName}/default/{taskId}.
+    static String logStreamName(String jobDefinitionName, String taskId) {
+        return jobDefinitionName + "/default/" + taskId;
     }
 
     private Duration timeout(BatchJob job) {
@@ -313,78 +354,5 @@ public class BatchDockerRunner implements ContainerTeardown {
         } catch (NotFoundException e) {
             return 1;
         }
-    }
-
-
-    private final UnaryOperator<String> imageResolver;
-
-
-    private BatchRunResult runContainer(BatchJob job, String inFlightKey, String containerName, String logStreamName,
-                                        String logSourceLabel, String image, String platform,
-                                        String missingImageMessage, List<String> command, List<String> env,
-                                        List<BatchResourceRequirement> resourceRequirements) {
-        long startedAt = System.currentTimeMillis();
-        Closeable logHandle = null;
-        String containerId = null;
-
-        try {
-            if (stopRequestedJobs.contains(job.getJobId())) {
-                return stopped(startedAt, logStreamName);
-            }
-            if (image == null || image.isBlank()) {
-                return failed(startedAt, logStreamName, missingImageMessage);
-            }
-
-            ContainerBuilder.Builder builder = containerBuilder.newContainer(imageResolver.apply(image))
-                    .withName(containerName)
-                    .withEnv(env)
-                    .withDockerNetwork(config.services().batch().dockerNetwork())
-                    .withHostDockerInternalOnLinux()
-                    .withEmbeddedDns()
-                    .withLogRotation()
-                    .withLabels(ContainerStorageHelper.resourceIdentityLabels(
-                            "batch", job.getJobId(), job.getAccountId(), job.getRegion()));
-
-            if (command != null && !command.isEmpty()) {
-                builder.withCmd(command);
-            }
-            applyResourceRequirements(builder, resourceRequirements, job.getJobId());
-
-            ContainerSpec spec = builder.build();
-            // AWS runs the image variant for the job's CPU architecture, not the host's, so a
-            // single-platform image (e.g. built for linux/amd64) must be pulled and run as such.
-            containerId = lifecycleManager.create(spec, platform);
-            inFlightContainers.put(inFlightKey, containerId);
-            lifecycleManager.startCreated(containerId, spec);
-            if (stopRequestedJobs.contains(job.getJobId())) {
-                releaseAndStop(inFlightKey, containerId, null);
-                return stopped(startedAt, logStreamName);
-            }
-            logHandle = logStreamer.attachForAccount(job.getAccountId(), containerId, LOG_GROUP, logStreamName,
-                    job.getRegion(), logSourceLabel);
-            if (stopRequestedJobs.contains(job.getJobId())) {
-                releaseAndStop(inFlightKey, containerId, logHandle);
-                return stopped(startedAt, logStreamName);
-            }
-
-            Integer exitCode = waitForExit(containerId, timeout(job));
-            long stoppedAt = System.currentTimeMillis();
-            releaseAndStop(inFlightKey, containerId, logHandle);
-            if (exitCode == null) {
-                return new BatchRunResult(137, "Job timed out", logStreamName, startedAt, stoppedAt, true);
-            }
-            return new BatchRunResult(exitCode, exitCode == 0 ? null : "Container exited with code " + exitCode,
-                    logStreamName, startedAt, stoppedAt, false);
-        } catch (Exception e) {
-            LOG.warnv("Batch Docker job {0} failed: {1}", job.getJobId(), e.getMessage());
-            if (containerId != null) {
-                releaseAndStop(inFlightKey, containerId, logHandle);
-            }
-            return failed(startedAt, logStreamName, e.getMessage());
-        }
-    }
-
-    static String logStreamName(String jobDefinitionName, String taskId) {
-        return jobDefinitionName + "/default/" + taskId;
     }
 }

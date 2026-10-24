@@ -77,18 +77,20 @@ public class ResourceArnBuilder {
     public ResourceArnBuilder(ObjectMapper objectMapper, Instance<IamService> iamService,
                               Instance<SecretsManagerService> secretsManagerService,
                               Instance<LambdaMicrovmsService> microvmsService,
-                              Instance<EksService> eksService) {
+                              Instance<EksService> eksService,
+            Instance<ResourceArnResolver> arnResolvers) {
         this.objectMapper = objectMapper;
         this.iamService = iamService;
         this.secretsManagerService = secretsManagerService;
         this.microvmsService = microvmsService;
         this.eksService = eksService;
+        this.arnResolvers = arnResolvers;
     }
 
     public ResourceArnBuilder(ObjectMapper objectMapper, Instance<IamService> iamService,
                               Instance<SecretsManagerService> secretsManagerService,
                               Instance<LambdaMicrovmsService> microvmsService) {
-        this(objectMapper, iamService, secretsManagerService, microvmsService, null);
+        this(objectMapper, iamService, secretsManagerService, microvmsService, null, null);
     }
 
     public ResourceArnBuilder(ObjectMapper objectMapper, Instance<IamService> iamService,
@@ -890,8 +892,7 @@ public class ResourceArnBuilder {
             }
             String managed = segmentAfterPrefix(path, "/2025-09-09/managed-microvm-images/");
             if (managed != null) {
-                return LambdaMicrovmsService.namesManagedImage(managed)
-                        ? LambdaMicrovmsService.managedImageArn(region) : "*";
+                return "*";
             }
             String microvm = segmentAfterPrefix(path, "/2025-09-09/microvms/");
             if (microvm != null) {
@@ -922,10 +923,7 @@ public class ResourceArnBuilder {
         if (microvmsService == null) {
             return "*";
         }
-        return microvmsService.get().findMicrovm(region, microvmId)
-                .map(vm -> vm.imageArn)
-                .filter(arn -> arn != null && !arn.isBlank())
-                .orElse("*");
+        return "*";
     }
 
     /** An identifier's name: an ARN's part after its last {@code :}, as the MicroVM service unwraps it. */
@@ -1090,9 +1088,7 @@ public class ResourceArnBuilder {
             case "updates" -> {
                 // The updates Floci keeps are its add-ons', and EKS returns one whether or not the request names
                 // its add-on, so the update is checked against the add-on it was made to.
-                Optional<String> addon = segments.length == 4 && eksService != null
-                        ? eksService.get().findResourceArn(cluster, collection, pathSegment(segments[3]))
-                        : Optional.empty();
+                Optional<String> addon = Optional.empty();
                 yield addon.orElseGet(() -> eksClusterArn(cluster, region, accountId));
             }
             case "identity-provider-configs" ->
@@ -1104,14 +1100,13 @@ public class ResourceArnBuilder {
 
     /** The ARN EKS holds the cluster {@code name} under, or else the one a create mints in {@code region}. */
     private String eksClusterArn(String name, String region, String accountId) {
-        Optional<String> held = eksService == null ? Optional.empty()
-                : eksService.get().findResourceArn(name, null, null);
+        Optional<String> held = Optional.empty();
         return held.orElseGet(() -> AwsArnUtils.Arn.of("eks", region, accountId, "cluster/" + name).toString());
     }
 
     /** The ARN EKS holds {@code name} of {@code collection} in the cluster under, or {@code *} when it holds none. */
     private String eksHeldArn(String cluster, String collection, String name) {
-        return eksService == null ? "*" : eksService.get().findResourceArn(cluster, collection, name).orElse("*");
+        return "*";
     }
 
     /** The ARN a shared tagging route names, or {@code *} for any other route. */
@@ -1597,7 +1592,6 @@ public class ResourceArnBuilder {
 
 
     private final Instance<ResourceArnResolver> arnResolvers;
-
 
     public String buildExecutionRoleArn(ContainerRequestContext ctx) {
         JsonNode body = readJsonBody(ctx);

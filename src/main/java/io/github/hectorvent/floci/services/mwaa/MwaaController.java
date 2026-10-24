@@ -36,8 +36,10 @@ public class MwaaController {
     private final MwaaService mwaaService;
 
     @Inject
-    public MwaaController(MwaaService mwaaService) {
+    public MwaaController(MwaaService mwaaService,
+            MwaaRestApiInvoker restApiInvoker) {
         this.mwaaService = mwaaService;
+        this.restApiInvoker = restApiInvoker;
     }
 
     @PUT
@@ -88,12 +90,6 @@ public class MwaaController {
     }
 
     private final MwaaRestApiInvoker restApiInvoker;
-
-    @Inject
-    public MwaaController(MwaaService mwaaService, MwaaRestApiInvoker restApiInvoker) {
-        this.mwaaService = mwaaService;
-        this.restApiInvoker = restApiInvoker;
-    }
 
     @POST
     @Path("/restapi/{name}")

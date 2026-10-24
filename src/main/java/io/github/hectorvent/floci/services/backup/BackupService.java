@@ -102,6 +102,8 @@ public class BackupService {
         this.objectMapper = objectMapper;
         this.snsService = snsService;
         this.jobCompletionDelaySeconds = config.services().backup().jobCompletionDelaySeconds();
+        this.restoreJobStore = storageFactory.create("backup", "backup-restore-jobs.json", new TypeReference<>() {});
+        this.copyJobStore = storageFactory.create("backup", "backup-copy-jobs.json", new TypeReference<>() {});
     }
 
     @PreDestroy
@@ -1097,20 +1099,6 @@ public class BackupService {
     private final StorageBackend<String, Map<String, Object>> restoreJobStore;
 
     private final StorageBackend<String, Map<String, Object>> copyJobStore;
-
-    @Inject
-    public BackupService(StorageFactory storageFactory, RegionResolver regionResolver,
-                         ObjectMapper objectMapper) {
-        this.vaultStore     = storageFactory.create("backup", "backup-vaults.json",     new TypeReference<>() {});
-        this.planStore      = storageFactory.create("backup", "backup-plans.json",      new TypeReference<>() {});
-        this.selectionStore = storageFactory.create("backup", "backup-selections.json", new TypeReference<>() {});
-        this.jobStore       = storageFactory.create("backup", "backup-jobs.json",       new TypeReference<>() {});
-        this.recoveryStore  = storageFactory.create("backup", "backup-recovery-points.json", new TypeReference<>() {});
-        this.regionResolver = regionResolver;
-        this.objectMapper = objectMapper;
-        this.restoreJobStore = storageFactory.create("backup", "backup-restore-jobs.json", new TypeReference<>() {});
-        this.copyJobStore = storageFactory.create("backup", "backup-copy-jobs.json", new TypeReference<>() {});
-    }
 
     public List<BackupVault> listBackupVaults(String region) {
         String prefix = region + ":";

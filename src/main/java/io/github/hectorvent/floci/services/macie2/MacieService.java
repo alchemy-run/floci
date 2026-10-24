@@ -1795,7 +1795,7 @@ public class MacieService implements Resettable {
         }
     }
 
- static AwsException validation(String message) {
+static AwsException validation(String message) {
         return new AwsException("ValidationException", message, 400);
     }
 
@@ -1803,7 +1803,7 @@ public class MacieService implements Resettable {
         return new AwsException("ConflictException", message, 409);
     }
 
- static AwsException notFound(String message) {
+static AwsException notFound(String message) {
         return new AwsException("ResourceNotFoundException", message, 404);
     }
 

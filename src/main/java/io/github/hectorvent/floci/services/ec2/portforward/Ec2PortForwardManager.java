@@ -389,22 +389,6 @@ public class Ec2PortForwardManager {
     record NetworkTarget(String network, String ip) {
     }
 
-    private final Ec2HttpPortMux httpPortMux;
-
-    @Inject
-    public Ec2PortForwardManager(DockerClient dockerClient,
-                                 ContainerBuilder containerBuilder,
-                                 ContainerLifecycleManager lifecycleManager,
-                                 PortAllocator portAllocator,
-                                 EmulatorConfig config,
-                                 Ec2HttpPortMux httpPortMux) {
-        this.dockerClient = dockerClient;
-        this.containerBuilder = containerBuilder;
-        this.lifecycleManager = lifecycleManager;
-        this.portAllocator = portAllocator;
-        this.config = config;
-        this.httpPortMux = httpPortMux;
-    }
 
 
     public static String publicHost(Instance instance) {

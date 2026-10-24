@@ -705,7 +705,6 @@ public class SesTenantService implements SesTaggable {
         return "tenant::" + region + "::";
     }
 
-    private final StorageBackend<String, TenantResource> legacyAssociationStore;
 
 
     /**
@@ -723,27 +722,4 @@ public class SesTenantService implements SesTaggable {
         }
     }
 
-    private StorageBackend<String, TenantResourceAssociation> associations(String region) {
-        if (legacyAssociationStore == null) {
-            return associationStore;
-        }
-        synchronized (tenantMutationLock) {
-            String prefix = "tenantResource::" + region + "::";
-            for (TenantResource legacy : legacyAssociationStore.scan(key -> key.startsWith(prefix))) {
-                Tenant tenant = tenantStore.get(tenantKey(region, legacy.getTenantName())).orElse(null);
-                if (tenant != null) {
-                    String arn = legacy.getResourceArn();
-                    AssociationResource resource = parseResourceArn(arn, AwsArnUtils.parse(arn).accountId(), region);
-                    String key = associationKey(region, tenant.tenantId(), resource);
-                    if (associationStore.get(key).isEmpty()) {
-                        associationStore.put(key, new TenantResourceAssociation(tenant.tenantName(), tenant.tenantId(),
-                                arn, resource.type(), tenant.createdTimestamp() != null
-                                        ? tenant.createdTimestamp() : Instant.now(clock)));
-                    }
-                }
-                legacyAssociationStore.delete(prefix + legacy.getTenantName() + "::" + legacy.getResourceArn());
-            }
-        }
-        return associationStore;
-    }
 }

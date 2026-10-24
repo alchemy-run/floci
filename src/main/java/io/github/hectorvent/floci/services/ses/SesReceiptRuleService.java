@@ -934,19 +934,6 @@ public class SesReceiptRuleService {
 
     private static final Pattern RECIPIENT_ADDRESS_LABEL = Pattern.compile("^[A-Za-z0-9-]+$");
 
-    @Inject
-    public SesReceiptRuleService(StorageFactory storageFactory, S3Service s3Service,
-                                 SnsService snsService, LambdaService lambdaService, Clock clock) {
-        this.receiptRuleSetStore = storageFactory.create("ses", "ses-receipt-rule-sets.json",
-                new TypeReference<Map<String, ReceiptRuleSet>>() {});
-        this.receiptFilterStore = storageFactory.create("ses", "ses-receipt-filters.json",
-                new TypeReference<Map<String, ReceiptFilter>>() {});
-        this.s3Service = s3Service;
-        this.snsService = snsService;
-        this.lambdaService = lambdaService;
-        this.clock = clock;
-    }
-
     /**
      * Validates every resource an action points at against the local emulator, reproducing the
      * checks real SES runs on create/update: any TopicArn must be a publishable SNS topic, an

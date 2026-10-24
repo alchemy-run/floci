@@ -206,7 +206,8 @@ public class GlueService {
                        GlueSchemaRegistryService schemaRegistryService,
                        RegionResolver regionResolver,
                        ResourceGroupsTaggingService resourceGroupsTaggingService,
-                       KmsService kmsService) {
+                       KmsService kmsService,
+            GlueCrawlerRunner crawlerRunner) {
         this.databaseStore = storageFactory.create("glue", "databases.json", new TypeReference<>() {});
         this.tableStore = storageFactory.create("glue", "tables.json", new TypeReference<>() {});
         this.tableVersionStore = storageFactory.create("glue", "table_versions.json", new TypeReference<>() {});
@@ -232,6 +233,9 @@ public class GlueService {
         this.regionResolver = regionResolver;
         this.resourceGroupsTaggingService = resourceGroupsTaggingService;
         this.kmsService = kmsService;
+        this.jobRunStore = storageFactory.create("glue", "job_runs.json", new TypeReference<>() {});
+        this.jobBookmarkStore = storageFactory.create("glue", "job_bookmarks.json", new TypeReference<>() {});
+        this.crawlerRunner = crawlerRunner;
     }
 
     GlueService(StorageBackend<String, Database> databaseStore,
@@ -276,6 +280,9 @@ public class GlueService {
         this.regionResolver = regionResolver;
         this.resourceGroupsTaggingService = resourceGroupsTaggingService;
         this.kmsService = kmsService;
+        this.jobRunStore = new io.github.hectorvent.floci.core.storage.InMemoryStorage<>();
+        this.jobBookmarkStore = new io.github.hectorvent.floci.core.storage.InMemoryStorage<>();
+        this.crawlerRunner = null;
     }
 
     public SecurityConfiguration createSecurityConfiguration(String name, JsonNode encryptionConfiguration,
@@ -3040,53 +3047,8 @@ public class GlueService {
 
     private final StorageBackend<String, Map<String, Object>> jobBookmarkStore;
 
-    private final StorageBackend<String, Map<String, String>> resourceTagStore;
 
     private final GlueCrawlerRunner crawlerRunner;
-
-    @Inject
-    public GlueService(StorageFactory storageFactory,
-                       GlueSchemaRegistryService schemaRegistryService,
-                       RegionResolver regionResolver,
-                       ResourceGroupsTaggingService resourceGroupsTaggingService,
-                       KmsService kmsService,
-                       GlueCrawlerRunner crawlerRunner) {
-        this.databaseStore = new GlueCatalogStorage<>(
-                storageFactory.create("glue", "databases.json", new TypeReference<>() {}), regionResolver);
-        this.tableStore = new GlueCatalogStorage<>(
-                storageFactory.create("glue", "tables.json", new TypeReference<>() {}), regionResolver);
-        this.tableVersionStore = new GlueCatalogStorage<>(
-                storageFactory.create("glue", "table_versions.json", new TypeReference<>() {}), regionResolver);
-        this.columnStatisticsStore = new GlueCatalogStorage<>(
-                storageFactory.create("glue", "column_statistics.json", new TypeReference<>() {}), regionResolver);
-        this.partitionStore = new GlueCatalogStorage<>(
-                storageFactory.create("glue", "partitions.json", new TypeReference<>() {}), regionResolver);
-        this.partitionIndexStore = new GlueCatalogStorage<>(
-                storageFactory.create("glue", "partition_indexes.json", new TypeReference<>() {}), regionResolver);
-        this.partitionColumnStatisticsStore = new GlueCatalogStorage<>(
-                storageFactory.create("glue", "partition_column_statistics.json", new TypeReference<>() {}), regionResolver);
-        this.functionStore = new GlueCatalogStorage<>(
-                storageFactory.create("glue", "functions.json", new TypeReference<>() {}), regionResolver);
-        this.jobStore = storageFactory.create("glue", "jobs.json", new TypeReference<>() {});
-        this.jobRunStore = storageFactory.create("glue", "job_runs.json", new TypeReference<>() {});
-        this.jobBookmarkStore = storageFactory.create("glue", "job_bookmarks.json", new TypeReference<>() {});
-        this.crawlerStore = storageFactory.create("glue", "crawlers.json", new TypeReference<>() {});
-        this.classifierStore = storageFactory.create("glue", "classifiers.json", new TypeReference<>() {});
-        this.connectionStore = new GlueCatalogStorage<>(
-                storageFactory.create("glue", "connections.json", new TypeReference<>() {}), regionResolver);
-        this.resourcePolicyStore = new GlueCatalogStorage<>(
-                storageFactory.create("glue", "resource_policy.json", new TypeReference<>() {}), regionResolver);
-        this.encryptionSettingsStore = new GlueCatalogStorage<>(storageFactory.create(
-                "glue", "catalog_encryption_settings.json", new TypeReference<>() {}), regionResolver);
-        this.securityConfigurationStore = storageFactory.create(
-                "glue", "security_configurations.json", new TypeReference<>() {});
-        this.resourceTagStore = storageFactory.create("glue", "resource_tags.json", new TypeReference<>() {});
-        this.schemaRegistryService = schemaRegistryService;
-        this.regionResolver = regionResolver;
-        this.resourceGroupsTaggingService = resourceGroupsTaggingService;
-        this.kmsService = kmsService;
-        this.crawlerRunner = crawlerRunner;
-    }
 
     public String startJobRun(String jobName, Map<String, String> arguments) {
         getJob(jobName);

@@ -104,22 +104,7 @@ public class BedrockAgentCoreTagHandler implements TagHandler {
         }
     }
 
-    private final BedrockAgentCoreToolsService toolsService;
 
-    private final RegionResolver regionResolver;
-
-    @Inject
-    public BedrockAgentCoreTagHandler(BedrockAgentCoreControlService runtimeService,
-                                      BedrockAgentCoreGatewayService gatewayService,
-                                      BedrockAgentCoreMemoryService memoryService,
-                                      BedrockAgentCoreToolsService toolsService,
-                                      RegionResolver regionResolver) {
-        this.runtimeService = runtimeService;
-        this.gatewayService = gatewayService;
-        this.memoryService = memoryService;
-        this.toolsService = toolsService;
-        this.regionResolver = regionResolver;
-    }
 
     @Override
     public boolean strictTagValidation() {

@@ -3,17 +3,23 @@ package io.github.hectorvent.floci.services.efs;
 import io.github.hectorvent.floci.core.common.AwsException;
 import jakarta.ws.rs.core.Response.Status;
 
-import java.util.Map;
 import java.util.HashMap;
+import java.util.Map;
 
 public class EfsException extends AwsException {
 
     public EfsException(Status status, String errorCode, String message) {
-        super(errorCode, message, status.getStatusCode());
+        this(status, errorCode, message, Map.of());
     }
 
     public EfsException(Status status, String errorCode, String message, Map<String, Object> extendedData) {
-        super(errorCode, message, status.getStatusCode(), extendedData);
+        super(errorCode, message, status.getStatusCode(), errorData(errorCode, extendedData));
+    }
+
+    private static Map<String, Object> errorData(String errorCode, Map<String, Object> extendedData) {
+        Map<String, Object> data = new HashMap<>(extendedData);
+        data.put("ErrorCode", errorCode);
+        return data;
     }
 
     public static EfsException fileSystemAlreadyExists(String token, String fileSystemId) {
@@ -48,11 +54,6 @@ public class EfsException extends AwsException {
         return new EfsException(Status.NOT_FOUND, "PolicyNotFound", "Policy for file system " + fileSystemId + " does not exist.");
     }
     
-    public static EfsException badRequest(String message) {
-        return new EfsException(Status.BAD_REQUEST, "BadRequest", message);
-    }
-
-
     public static EfsException replicationNotFound(String fileSystemId) {
         return new EfsException(Status.NOT_FOUND, "ReplicationNotFound",
                 "Replication configuration for file system " + fileSystemId + " does not exist.");
@@ -64,5 +65,9 @@ public class EfsException extends AwsException {
             default -> Status.BAD_REQUEST;
         };
         return new EfsException(status, errorCode, message);
+    }
+
+    public static EfsException badRequest(String message) {
+        return new EfsException(Status.BAD_REQUEST, "BadRequest", message);
     }
 }

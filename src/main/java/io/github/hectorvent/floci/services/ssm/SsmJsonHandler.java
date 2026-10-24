@@ -1461,13 +1461,6 @@ public class SsmJsonHandler {
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
-    @Inject
-    public SsmJsonHandler(SsmService ssmService, SsmCommandService commandService, ObjectMapper objectMapper) {
-        this.ssmService = ssmService;
-        this.commandService = commandService;
-        this.objectMapper = objectMapper;
-    }
-
 
 
     private Response handleGetParameters(JsonNode request, String region) {

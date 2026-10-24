@@ -2316,7 +2316,8 @@ public class IotService {
     static final Duration THING_TYPE_DELETION_DELAY = Duration.ofMinutes(5);
 
 
-    private final Clock clock;
+    @Inject
+    Clock clock;
 
 
 

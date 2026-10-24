@@ -525,13 +525,6 @@ public class BedrockAgentCoreControlService {
     }
 
 
-    @Inject
-    public BedrockAgentCoreControlService(StorageFactory storageFactory, RegionResolver regionResolver,
-                                          BedrockAgentCoreIdentityService identityService) {
-        this(storageFactory.create("bedrockagentcore", "bedrock-agentcore-runtimes.json",
-                new TypeReference<Map<String, AgentRuntime>>() {}), regionResolver, identityService);
-    }
-
     /** {@code arn:aws:bedrock-agentcore:<region>:<account>:runtime/<agentRuntimeId>}; versions are separate fields. */
     public String arn(AgentRuntime runtime, String region) {
         return regionResolver.buildArn(ARN_SERVICE, region, "runtime/" + runtime.getAgentRuntimeId());

@@ -4197,49 +4197,6 @@ public class LambdaService implements ResourceProvider {
 
     private LambdaImageDigestResolver imageDigestResolver;
 
-    @Inject
-    public LambdaService(LambdaFunctionStore functionStore,
-                          LambdaExecutorService executorService,
-                          LambdaConcurrencyLimiter concurrencyLimiter,
-                          WarmPool warmPool,
-                          CodeStore codeStore,
-                          ZipExtractor zipExtractor,
-                          EmulatorConfig config,
-                          RegionResolver regionResolver,
-                          EsmStore esmStore,
-                          LambdaAliasStore aliasStore,
-                          S3Service s3Service,
-                          SqsService sqsService,
-                          SqsEventSourcePoller poller,
-                          KinesisEventSourcePoller kinesisPoller,
-                          DynamoDbStreamsEventSourcePoller dynamodbStreamsPoller,
-                          StorageFactory storageFactory,
-                          LambdaLayerService layerService,
-                          Ec2Service ec2Service,
-                          CustomResourceLiveness customResourceLiveness,
-                          ObjectMapper objectMapper) {
-        this.customResourceLiveness = customResourceLiveness;
-        this.functionStore = functionStore;
-        this.executorService = executorService;
-        this.concurrencyLimiter = concurrencyLimiter;
-        this.warmPool = warmPool;
-        this.codeStore = codeStore;
-        this.zipExtractor = zipExtractor;
-        this.config = config;
-        this.regionResolver = regionResolver;
-        this.esmStore = esmStore;
-        this.aliasStore = aliasStore;
-        this.s3Service = s3Service;
-        this.sqsService = sqsService;
-        this.poller = poller;
-        this.kinesisPoller = kinesisPoller;
-        this.dynamodbStreamsPoller = dynamodbStreamsPoller;
-        this.storageFactory = storageFactory;
-        this.layerService = layerService;
-        this.ec2Service = ec2Service;
-        this.objectMapper = objectMapper;
-    }
-
 
     /** Test hook: wire the image digest resolver without CDI. */
     void setImageDigestResolver(LambdaImageDigestResolver imageDigestResolver) {
@@ -4382,6 +4339,7 @@ public class LambdaService implements ResourceProvider {
     }
 
 
+    private static final String TAG_TYPE_EVENT_SOURCE_MAPPING = "event-source-mapping";
 
     /**
      * Builds the IAM Condition block for AddPermission. AWS stores

@@ -427,14 +427,6 @@ public class ConfigServiceJsonHandler {
         return resp;
     }
 
-    private final ConfigResourceService resources;
-
-    @Inject
-    public ConfigServiceJsonHandler(AwsConfigService service, ObjectMapper mapper, ConfigResourceService resources) {
-        this.service = service;
-        this.mapper = mapper;
-        this.resources = resources;
-    }
 
     private Response tagResource(JsonNode req) {
         String arn = req.path("ResourceArn").asText(null);

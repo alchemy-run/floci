@@ -54,11 +54,13 @@ public class BedrockAgentCoreMemoryController {
     @Inject
     public BedrockAgentCoreMemoryController(BedrockAgentCoreMemoryService service,
                                             BedrockAgentCoreEventService eventService,
-                                            RegionResolver regionResolver, ObjectMapper objectMapper) {
+                                            RegionResolver regionResolver, ObjectMapper objectMapper,
+            BedrockAgentCoreMemoryRecordService recordService) {
         this.service = service;
         this.eventService = eventService;
         this.regionResolver = regionResolver;
         this.objectMapper = objectMapper;
+        this.recordService = recordService;
     }
 
     @POST
@@ -293,18 +295,6 @@ public class BedrockAgentCoreMemoryController {
     }
 
     private final BedrockAgentCoreMemoryRecordService recordService;
-
-    @Inject
-    public BedrockAgentCoreMemoryController(BedrockAgentCoreMemoryService service,
-                                            BedrockAgentCoreEventService eventService,
-                                            BedrockAgentCoreMemoryRecordService recordService,
-                                            RegionResolver regionResolver, ObjectMapper objectMapper) {
-        this.service = service;
-        this.eventService = eventService;
-        this.recordService = recordService;
-        this.regionResolver = regionResolver;
-        this.objectMapper = objectMapper;
-    }
 
     @POST
     @Path("/{memoryId}/actors")

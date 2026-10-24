@@ -6769,7 +6769,6 @@ public class CognitoService implements ResourceProvider {
 
 
 
-
     public Map<String, Object> setRiskConfiguration(String userPoolId, String clientId,
                                                     Map<String, Object> compromised,
                                                     Map<String, Object> accountTakeover,

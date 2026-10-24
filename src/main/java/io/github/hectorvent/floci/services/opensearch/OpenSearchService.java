@@ -452,19 +452,6 @@ public class OpenSearchService implements ResourceProvider {
     private static final Set<String> MAINTENANCE_ACTIONS =
             Set.of("REBOOT_NODE", "RESTART_SEARCH_PROCESS", "RESTART_DASHBOARD");
 
-    private final TlsCertificateManager certificateManager;
-
-    @Inject
-    public OpenSearchService(StorageFactory storageFactory, EmulatorConfig config,
-                             RegionResolver regionResolver, OpenSearchDomainManager domainManager,
-                             TlsCertificateManager certificateManager) {
-        this.domainStore = storageFactory.create("opensearch", "opensearch-domains.json",
-                new TypeReference<Map<String, Domain>>() {});
-        this.config = config;
-        this.regionResolver = regionResolver;
-        this.domainManager = domainManager;
-        this.certificateManager = certificateManager;
-    }
 
     /**
      * The endpoint DescribeDomain reports: the gateway host that serves the domain's REST API

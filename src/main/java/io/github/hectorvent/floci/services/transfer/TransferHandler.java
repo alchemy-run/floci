@@ -24,11 +24,14 @@ import java.util.Map;
 public class TransferHandler {
 
     private final TransferService service;
+    private final TransferIdentityProviderTester identityProviderTester;
     private final ObjectMapper objectMapper;
 
     @Inject
-    public TransferHandler(TransferService service, ObjectMapper objectMapper) {
+    public TransferHandler(TransferService service, TransferIdentityProviderTester identityProviderTester,
+                           ObjectMapper objectMapper) {
         this.service = service;
+        this.identityProviderTester = identityProviderTester;
         this.objectMapper = objectMapper;
     }
 
@@ -49,8 +52,8 @@ public class TransferHandler {
                 case "UpdateUser"         -> updateUser(request);
                 case "ImportSshPublicKey" -> importSshPublicKey(request);
                 case "DeleteSshPublicKey" -> deleteSshPublicKey(request);
-                case "SendWorkflowStepState" -> sendWorkflowStepState(request);
                 case "TestIdentityProvider" -> testIdentityProvider(request, region);
+                case "SendWorkflowStepState" -> sendWorkflowStepState(request);
                 case "TagResource"        -> tagResource(request);
                 case "UntagResource"      -> untagResource(request);
                 case "ListTagsForResource" -> listTagsForResource(request);
@@ -242,6 +245,27 @@ public class TransferHandler {
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
+    // ── Identity provider / workflow callbacks ───────────────────────────────
+
+    private Response testIdentityProvider(JsonNode req, String region) {
+        return Response.ok(identityProviderTester.testIdentityProvider(
+                textOrNull(req, "ServerId"),
+                textOrNull(req, "ServerProtocol"),
+                textOrNull(req, "SourceIp"),
+                textOrNull(req, "UserName"),
+                textOrNull(req, "UserPassword"),
+                region)).build();
+    }
+
+    private Response sendWorkflowStepState(JsonNode req) {
+        service.sendWorkflowStepState(
+                textOrNull(req, "WorkflowId"),
+                textOrNull(req, "ExecutionId"),
+                textOrNull(req, "Token"),
+                textOrNull(req, "Status"));
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
     // ── Tag handlers ──────────────────────────────────────────────────────────
 
     private Response tagResource(JsonNode req) {
@@ -352,7 +376,7 @@ public class TransferHandler {
                 kNode.put("SshPublicKeyId", k.getSshPublicKeyId());
                 kNode.put("SshPublicKeyBody", k.getSshPublicKeyBody());
                 if (k.getDateImported() != null) {
-                    kNode.put("DateImported", k.getDateImported().toEpochMilli() / 1000.0);
+                    kNode.put("DateImported", k.getDateImported().toString());
                 }
                 keys.add(kNode);
             }
@@ -440,34 +464,5 @@ public class TransferHandler {
             });
         }
         return list;
-    }
-
-    private final TransferIdentityProviderTester identityProviderTester;
-
-    @Inject
-    public TransferHandler(TransferService service, TransferIdentityProviderTester identityProviderTester,
-                           ObjectMapper objectMapper) {
-        this.service = service;
-        this.identityProviderTester = identityProviderTester;
-        this.objectMapper = objectMapper;
-    }
-
-    private Response testIdentityProvider(JsonNode req, String region) {
-        return Response.ok(identityProviderTester.testIdentityProvider(
-                textOrNull(req, "ServerId"),
-                textOrNull(req, "ServerProtocol"),
-                textOrNull(req, "SourceIp"),
-                textOrNull(req, "UserName"),
-                textOrNull(req, "UserPassword"),
-                region)).build();
-    }
-
-    private Response sendWorkflowStepState(JsonNode req) {
-        service.sendWorkflowStepState(
-                textOrNull(req, "WorkflowId"),
-                textOrNull(req, "ExecutionId"),
-                textOrNull(req, "Token"),
-                textOrNull(req, "Status"));
-        return Response.ok(objectMapper.createObjectNode()).build();
     }
 }

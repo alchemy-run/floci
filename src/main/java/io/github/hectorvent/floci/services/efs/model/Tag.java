@@ -1,10 +1,9 @@
 package io.github.hectorvent.floci.services.efs.model;
 
-import com.fasterxml.jackson.databind.PropertyNamingStrategies;
-import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
-import java.util.Objects;
+import com.fasterxml.jackson.databind.annotation.JsonNaming;
+import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 
 @JsonNaming(PropertyNamingStrategies.UpperCamelCaseStrategy.class)
 @RegisterForReflection
@@ -34,12 +33,12 @@ public class Tag {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         Tag tag = (Tag) o;
-        return Objects.equals(key, tag.key) &&
-               Objects.equals(value, tag.value);
+        return java.util.Objects.equals(key, tag.key) &&
+               java.util.Objects.equals(value, tag.value);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(key, value);
+        return java.util.Objects.hash(key, value);
     }
 }

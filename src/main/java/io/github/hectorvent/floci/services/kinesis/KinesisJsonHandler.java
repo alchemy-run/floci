@@ -943,8 +943,6 @@ public class KinesisJsonHandler {
         return Response.ok(response).build();
     }
 
-    private final long listShardsNextTokenTtlMillis;
-
     private Response handleUpdateStreamWarmThroughput(JsonNode request, String region) {
         String streamName = resolveStreamName(request);
         if (!request.has("WarmThroughputMiBps") || !request.path("WarmThroughputMiBps").isNumber()) {
@@ -1108,7 +1106,7 @@ public class KinesisJsonHandler {
         } catch (NumberFormatException e) {
             throw invalidNextToken();
         }
-        if (System.currentTimeMillis() - issuedAtEpochMilli >= listShardsNextTokenTtlMillis) {
+        if (System.currentTimeMillis() - issuedAtEpochMilli >= nextTokenTtlMillis) {
             throw new AwsException("ExpiredNextTokenException", "The NextToken has expired.", 400);
         }
         return new ShardToken(parts[0], parts[1], issuedAtEpochMilli);

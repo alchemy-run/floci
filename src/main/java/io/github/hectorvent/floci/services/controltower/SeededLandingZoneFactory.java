@@ -2,7 +2,6 @@ package io.github.hectorvent.floci.services.controltower;
 
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.services.controltower.model.LandingZone;
 
 /**
@@ -18,8 +17,8 @@ final class SeededLandingZoneFactory {
     }
 
     static LandingZone create(String accountId, String region) {
-        String arn = AwsArnUtils.Arn.of("controltower", region, accountId,
-                "landingzone/" + ControlTowerService.LANDING_ZONE_ID).toString();
+        String arn = "arn:aws:controltower:" + region + ":" + accountId
+                + ":landingzone/" + ControlTowerService.LANDING_ZONE_ID;
         return new LandingZone(
                 arn,
                 ControlTowerService.LANDING_ZONE_VERSION,
@@ -65,7 +64,7 @@ final class SeededLandingZoneFactory {
         configurations.set("loggingBucket", loggingBucket);
         configurations.set("accessLoggingBucket", accessLoggingBucket);
         configurations.put("kmsKeyArn",
-                AwsArnUtils.Arn.of("kms", region, accountId, "key/floci-seeded-ct-key").toString());
+                "arn:aws:kms:" + region + ":" + accountId + ":key/floci-seeded-ct-key");
 
         ObjectNode centralizedLogging = JsonNodeFactory.instance.objectNode();
         centralizedLogging.put("accountId", accountId);

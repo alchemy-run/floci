@@ -106,15 +106,5 @@ public class LambdaTagController {
         return Response.noContent().build();
     }
 
-    private final MicrovmImageService microvmImageService;
-
-    @Inject
-    public LambdaTagController(LambdaService lambdaService, MicrovmImageService microvmImageService,
-                               LambdaMicrovmsService microvmsService, ObjectMapper objectMapper) {
-        this.lambdaService = lambdaService;
-        this.microvmImageService = microvmImageService;
-        this.microvmsService = microvmsService;
-        this.objectMapper = objectMapper;
-    }
 
 }

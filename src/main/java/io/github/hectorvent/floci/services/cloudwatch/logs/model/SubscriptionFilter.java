@@ -11,6 +11,7 @@ public class SubscriptionFilter {
     private String logGroupName;
     private String filterPattern;
     private String destinationArn;
+    private String roleArn;
     private String distribution;
     private long creationTime;
 
@@ -28,15 +29,12 @@ public class SubscriptionFilter {
     public String getDestinationArn() { return destinationArn; }
     public void setDestinationArn(String destinationArn) { this.destinationArn = destinationArn; }
 
+    public String getRoleArn() { return roleArn; }
+    public void setRoleArn(String roleArn) { this.roleArn = roleArn; }
+
     public String getDistribution() { return distribution; }
     public void setDistribution(String distribution) { this.distribution = distribution; }
 
     public long getCreationTime() { return creationTime; }
     public void setCreationTime(long creationTime) { this.creationTime = creationTime; }
-
-    private String roleArn;
-
-    public String getRoleArn() { return roleArn; }
-
-    public void setRoleArn(String roleArn) { this.roleArn = roleArn; }
 }

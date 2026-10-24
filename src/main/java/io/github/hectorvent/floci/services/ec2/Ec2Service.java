@@ -14405,4 +14405,17 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
                 .filter(d -> ids == null || ids.isEmpty() || ids.contains(d.getDhcpOptionsId()))
                 .collect(Collectors.toList());
     }
+
+    private final Map<String, DhcpOptions> dhcpOptionsSets = new ConcurrentHashMap<>();
+
+    private void ensureDefaultDhcpOptions(String region) {
+        dhcpOptionsSets.computeIfAbsent(key(region, "dopt-default"), unused -> {
+            DhcpOptions defaults = new DhcpOptions();
+            defaults.setDhcpOptionsId("dopt-default");
+            defaults.setOwnerId(callerAccountId());
+            defaults.setRegion(region);
+            defaults.getConfigurations().put("domain-name-servers", List.of("AmazonProvidedDNS"));
+            return defaults;
+        });
+    }
 }

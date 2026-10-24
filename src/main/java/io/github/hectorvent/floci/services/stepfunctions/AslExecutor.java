@@ -6297,9 +6297,9 @@ public class AslExecutor {
 
     private static final long ECS_SYNC_POLL_INTERVAL_MS = 100;
 
+    private static final String AWS_SDK_SFN_PREFIX = "arn:aws:states:::aws-sdk:sfn:";
 
-
-    private final LambdaFunctionStore functionStore;
+    private static final String AWS_SDK_SCHEDULER_PREFIX = "arn:aws:states:::aws-sdk:scheduler:";
 
 
 

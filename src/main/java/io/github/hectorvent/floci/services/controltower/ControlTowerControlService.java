@@ -2,7 +2,6 @@ package io.github.hectorvent.floci.services.controltower;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
-import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -12,7 +11,6 @@ import jakarta.inject.Inject;
 
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -54,7 +52,7 @@ public class ControlTowerControlService {
         }
 
         String operationId = UUID.randomUUID().toString();
-        String arn = AwsArnUtils.Arn.of("controltower", region, accountId, "enabledcontrol/" + shortId()).toString();
+        String arn = "arn:aws:controltower:" + region + ":" + accountId + ":enabledcontrol/" + shortId();
         EnabledControl control = new EnabledControl(arn, controlIdentifier, targetIdentifier,
                 SUCCEEDED, IN_SYNC, operationId, parameters, tags);
         controls.put(key, control);
@@ -128,6 +126,63 @@ public class ControlTowerControlService {
         return operationId;
     }
 
+    /**
+     * Disables a control, identified either by its enabled-control ARN or by the
+     * control and target pair, and records a completed {@code DISABLE_CONTROL} operation.
+     */
+    public synchronized String disable(String accountId, String region, JsonNode request) {
+        requireObject(request);
+        String enabledControlIdentifier = optionalArn(request, "enabledControlIdentifier");
+        String controlIdentifier = optionalArn(request, "controlIdentifier");
+        String targetIdentifier = optionalArn(request, "targetIdentifier");
+        EnabledControl control;
+        if (enabledControlIdentifier != null) {
+            if (controlIdentifier != null || targetIdentifier != null) {
+                throw validation("Specify either enabledControlIdentifier or controlIdentifier and targetIdentifier.");
+            }
+            control = get(region, enabledControlIdentifier);
+        } else {
+            if (controlIdentifier == null || targetIdentifier == null) {
+                throw validation("enabledControlIdentifier, or controlIdentifier and targetIdentifier, are required.");
+            }
+            control = controls.get(key(region, targetIdentifier, controlIdentifier))
+                    .orElseThrow(() -> notFound("The request references an enabled control that does not exist."));
+        }
+        controls.delete(key(region, control.getTargetIdentifier(), control.getControlIdentifier()));
+        String operationId = UUID.randomUUID().toString();
+        record(accountId, region, operationId, "DISABLE_CONTROL", control);
+        return operationId;
+    }
+
+    public synchronized Map<String, String> listTags(String region, String arn) {
+        Map<String, String> tags = get(region, arn).getTags();
+        return tags == null ? Map.of() : new LinkedHashMap<>(tags);
+    }
+
+    public synchronized void tagResource(String region, String arn, Map<String, String> tags) {
+        EnabledControl control = get(region, arn);
+        tags.forEach((key, value) -> {
+            if (key == null || key.isBlank() || key.length() > 128 || value == null || value.length() > 256) {
+                throw validation("tags contain an invalid key or value.");
+            }
+        });
+        Map<String, String> merged = new LinkedHashMap<>(control.getTags() == null ? Map.of() : control.getTags());
+        merged.putAll(tags);
+        if (merged.size() > 200) {
+            throw validation("A resource can have at most 200 tags.");
+        }
+        control.setTags(merged);
+        controls.put(key(region, control.getTargetIdentifier(), control.getControlIdentifier()), control);
+    }
+
+    public synchronized void untagResource(String region, String arn, List<String> tagKeys) {
+        EnabledControl control = get(region, arn);
+        Map<String, String> remaining = new LinkedHashMap<>(control.getTags() == null ? Map.of() : control.getTags());
+        tagKeys.forEach(remaining::remove);
+        control.setTags(remaining);
+        controls.put(key(region, control.getTargetIdentifier(), control.getControlIdentifier()), control);
+    }
+
     public synchronized ControlOperation operation(String accountId, String region, String operationIdentifier) {
         if (operationIdentifier == null || !operationIdentifier.matches("[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}")) {
             throw validation("operationIdentifier must be a UUID.");
@@ -137,13 +192,66 @@ public class ControlTowerControlService {
         return operation;
     }
 
+    public synchronized OperationListResult listOperations(String accountId, String region, JsonNode request) {
+        requireObject(request);
+        JsonNode maxValue = request.get("maxResults");
+        int maxResults = 200;
+        if (maxValue != null && !maxValue.isNull()) {
+            if (!maxValue.isInt() || maxValue.intValue() < 1 || maxValue.intValue() > 200) {
+                throw validation("maxResults must be between 1 and 200.");
+            }
+            maxResults = maxValue.intValue();
+        }
+        int offset = nextToken(request);
+        Set<String> controlIds = Set.of();
+        Set<String> targetIds = Set.of();
+        Set<String> enabledControlIds = Set.of();
+        Set<String> statuses = Set.of();
+        Set<String> types = Set.of();
+        JsonNode filter = request.get("filter");
+        if (filter != null && !filter.isNull()) {
+            if (!filter.isObject()) throw validation("filter must be a JSON object.");
+            controlIds = stringSet(filter.get("controlIdentifiers"));
+            targetIds = stringSet(filter.get("targetIdentifiers"));
+            enabledControlIds = stringSet(filter.get("enabledControlIdentifiers"));
+            statuses = stringSet(filter.get("statuses"));
+            types = stringSet(filter.get("controlOperationTypes"));
+            if (statuses.stream().anyMatch(v -> !Set.of("SUCCEEDED", "FAILED", "IN_PROGRESS").contains(v))) {
+                throw validation("statuses contains an invalid value.");
+            }
+            if (types.stream().anyMatch(v -> !Set.of("ENABLE_CONTROL", "DISABLE_CONTROL",
+                    "UPDATE_ENABLED_CONTROL", "RESET_ENABLED_CONTROL").contains(v))) {
+                throw validation("controlOperationTypes contains an invalid value.");
+            }
+        }
+        String scopePrefix = accountId + "::" + region + "::";
+        List<ControlOperation> result = new ArrayList<>();
+        for (Map.Entry<String, ControlOperation> entry : operations.entrySet()) {
+            ControlOperation operation = entry.getValue();
+            if (entry.getKey().startsWith(scopePrefix)
+                    && (controlIds.isEmpty() || controlIds.contains(operation.controlIdentifier()))
+                    && (targetIds.isEmpty() || targetIds.contains(operation.targetIdentifier()))
+                    && (enabledControlIds.isEmpty() || enabledControlIds.contains(operation.enabledControlIdentifier()))
+                    && (statuses.isEmpty() || statuses.contains(operation.status()))
+                    && (types.isEmpty() || types.contains(operation.operationType()))) {
+                result.add(operation);
+            }
+        }
+        if (offset > result.size()) throw validation("nextToken is invalid.");
+        int end = Math.min(result.size(), offset + maxResults);
+        return new OperationListResult(new ArrayList<>(result.subList(offset, end)),
+                end < result.size() ? String.valueOf(end) : null);
+    }
+
     private void record(String accountId, String region, String operationId, String type, EnabledControl control) {
         String scopePrefix = accountId + "::" + region + "::";
+        String now = java.time.Instant.now().toString();
         operations.put(operationKey(accountId, region, operationId), new ControlOperation(
-                operationId, type, SUCCEEDED, control.getControlIdentifier(), control.getArn(), control.getTargetIdentifier()));
+                operationId, type, SUCCEEDED, control.getControlIdentifier(), control.getArn(),
+                control.getTargetIdentifier(), now, now));
         long inScope = operations.keySet().stream().filter(key -> key.startsWith(scopePrefix)).count();
         if (inScope > MAX_OPERATIONS_PER_SCOPE) {
-            Iterator<String> iterator = operations.keySet().iterator();
+            var iterator = operations.keySet().iterator();
             while (iterator.hasNext()) {
                 if (iterator.next().startsWith(scopePrefix)) {
                     iterator.remove();
@@ -188,7 +296,7 @@ public class ControlTowerControlService {
     }
 
     private static String requireArnValue(String value, String field) {
-        if (value == null || value.length() < 20 || value.length() > 2048 || !value.matches("^arn:" + AwsArnUtils.PARTITION_REGEX + "[0-9a-zA-Z_\\-:\\/]+$")) {
+        if (value == null || value.length() < 20 || value.length() > 2048 || !value.matches("^arn:aws[0-9a-zA-Z_\\-:\\/]+$")) {
             throw validation(field + " must be a valid ARN.");
         }
         return value;
@@ -268,115 +376,6 @@ public class ControlTowerControlService {
     public record ListResult(List<EnabledControl> controls, String nextToken) {}
     public record ControlOperation(String operationIdentifier, String operationType, String status,
                                    String controlIdentifier, String enabledControlIdentifier,
-                                   String targetIdentifier) {}
-
-    /**
-     * Disables a control, identified either by its enabled-control ARN or by the
-     * control and target pair, and records a completed {@code DISABLE_CONTROL} operation.
-     */
-    public synchronized String disable(String accountId, String region, JsonNode request) {
-        requireObject(request);
-        String enabledControlIdentifier = optionalArn(request, "enabledControlIdentifier");
-        String controlIdentifier = optionalArn(request, "controlIdentifier");
-        String targetIdentifier = optionalArn(request, "targetIdentifier");
-        EnabledControl control;
-        if (enabledControlIdentifier != null) {
-            if (controlIdentifier != null || targetIdentifier != null) {
-                throw validation("Specify either enabledControlIdentifier or controlIdentifier and targetIdentifier.");
-            }
-            control = get(region, enabledControlIdentifier);
-        } else {
-            if (controlIdentifier == null || targetIdentifier == null) {
-                throw validation("enabledControlIdentifier, or controlIdentifier and targetIdentifier, are required.");
-            }
-            control = controls.get(key(region, targetIdentifier, controlIdentifier))
-                    .orElseThrow(() -> notFound("The request references an enabled control that does not exist."));
-        }
-        controls.delete(key(region, control.getTargetIdentifier(), control.getControlIdentifier()));
-        String operationId = UUID.randomUUID().toString();
-        record(accountId, region, operationId, "DISABLE_CONTROL", control);
-        return operationId;
-    }
-
-    public synchronized Map<String, String> listTags(String region, String arn) {
-        Map<String, String> tags = get(region, arn).getTags();
-        return tags == null ? Map.of() : new LinkedHashMap<>(tags);
-    }
-
-    public synchronized void tagResource(String region, String arn, Map<String, String> tags) {
-        EnabledControl control = get(region, arn);
-        tags.forEach((key, value) -> {
-            if (key == null || key.isBlank() || key.length() > 128 || value == null || value.length() > 256) {
-                throw validation("tags contain an invalid key or value.");
-            }
-        });
-        Map<String, String> merged = new LinkedHashMap<>(control.getTags() == null ? Map.of() : control.getTags());
-        merged.putAll(tags);
-        if (merged.size() > 200) {
-            throw validation("A resource can have at most 200 tags.");
-        }
-        control.setTags(merged);
-        controls.put(key(region, control.getTargetIdentifier(), control.getControlIdentifier()), control);
-    }
-
-    public synchronized void untagResource(String region, String arn, List<String> tagKeys) {
-        EnabledControl control = get(region, arn);
-        Map<String, String> remaining = new LinkedHashMap<>(control.getTags() == null ? Map.of() : control.getTags());
-        tagKeys.forEach(remaining::remove);
-        control.setTags(remaining);
-        controls.put(key(region, control.getTargetIdentifier(), control.getControlIdentifier()), control);
-    }
-
-    public synchronized OperationListResult listOperations(String accountId, String region, JsonNode request) {
-        requireObject(request);
-        JsonNode maxValue = request.get("maxResults");
-        int maxResults = 200;
-        if (maxValue != null && !maxValue.isNull()) {
-            if (!maxValue.isInt() || maxValue.intValue() < 1 || maxValue.intValue() > 200) {
-                throw validation("maxResults must be between 1 and 200.");
-            }
-            maxResults = maxValue.intValue();
-        }
-        int offset = nextToken(request);
-        Set<String> controlIds = Set.of();
-        Set<String> targetIds = Set.of();
-        Set<String> enabledControlIds = Set.of();
-        Set<String> statuses = Set.of();
-        Set<String> types = Set.of();
-        JsonNode filter = request.get("filter");
-        if (filter != null && !filter.isNull()) {
-            if (!filter.isObject()) throw validation("filter must be a JSON object.");
-            controlIds = stringSet(filter.get("controlIdentifiers"));
-            targetIds = stringSet(filter.get("targetIdentifiers"));
-            enabledControlIds = stringSet(filter.get("enabledControlIdentifiers"));
-            statuses = stringSet(filter.get("statuses"));
-            types = stringSet(filter.get("controlOperationTypes"));
-            if (statuses.stream().anyMatch(v -> !Set.of("SUCCEEDED", "FAILED", "IN_PROGRESS").contains(v))) {
-                throw validation("statuses contains an invalid value.");
-            }
-            if (types.stream().anyMatch(v -> !Set.of("ENABLE_CONTROL", "DISABLE_CONTROL",
-                    "UPDATE_ENABLED_CONTROL", "RESET_ENABLED_CONTROL").contains(v))) {
-                throw validation("controlOperationTypes contains an invalid value.");
-            }
-        }
-        String scopePrefix = accountId + "::" + region + "::";
-        List<ControlOperation> result = new ArrayList<>();
-        for (Map.Entry<String, ControlOperation> entry : operations.entrySet()) {
-            ControlOperation operation = entry.getValue();
-            if (entry.getKey().startsWith(scopePrefix)
-                    && (controlIds.isEmpty() || controlIds.contains(operation.controlIdentifier()))
-                    && (targetIds.isEmpty() || targetIds.contains(operation.targetIdentifier()))
-                    && (enabledControlIds.isEmpty() || enabledControlIds.contains(operation.enabledControlIdentifier()))
-                    && (statuses.isEmpty() || statuses.contains(operation.status()))
-                    && (types.isEmpty() || types.contains(operation.operationType()))) {
-                result.add(operation);
-            }
-        }
-        if (offset > result.size()) throw validation("nextToken is invalid.");
-        int end = Math.min(result.size(), offset + maxResults);
-        return new OperationListResult(new ArrayList<>(result.subList(offset, end)),
-                end < result.size() ? String.valueOf(end) : null);
-    }
-
+                                   String targetIdentifier, String startTime, String endTime) {}
     public record OperationListResult(List<ControlOperation> operations, String nextToken) {}
 }

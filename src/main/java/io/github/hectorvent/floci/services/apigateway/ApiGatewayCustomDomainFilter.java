@@ -135,11 +135,4 @@ public class ApiGatewayCustomDomainFilter implements ContainerRequestFilter {
         }
         return host;
     }
-
-    @Inject
-    public ApiGatewayCustomDomainFilter(ApiGatewayService apiGatewayService,
-                                        ApiGatewayExecuteRouteContext routeContext) {
-        this.apiGatewayService = apiGatewayService;
-        this.routeContext = routeContext;
-    }
 }

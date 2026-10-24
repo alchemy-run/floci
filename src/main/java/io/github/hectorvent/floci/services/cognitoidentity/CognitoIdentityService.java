@@ -5,32 +5,32 @@ import com.fasterxml.jackson.databind.JsonNode;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.ReservedTags;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.cognito.model.CognitoFederatedIdentity;
 import io.github.hectorvent.floci.services.cognitoidentity.model.IdentityPool;
 import io.github.hectorvent.floci.services.cognitoidentity.model.PrincipalTagAttributeMap;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
-import io.github.hectorvent.floci.core.common.ReservedTags;
-import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
-import io.github.hectorvent.floci.services.cognito.model.CognitoFederatedIdentity;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.Optional;
 
 /**
- * Amazon Cognito Identity (federated identity pools) management plane.
+ * Amazon Cognito Identity pool management and local federated identities.
  *
  * <p>Pool ids follow the AWS format {@code <region>:<uuid>} and pool ARNs the documented
  * {@code arn:aws:cognito-identity:<region>:<account>:identitypool/<poolId>} form, so a caller
@@ -49,12 +49,27 @@ public class CognitoIdentityService {
     private static final int MAX_LIST_RESULTS = 60;
 
     private final StorageBackend<String, IdentityPool> pools;
+    private final StorageBackend<String, CognitoFederatedIdentity> identities;
     private final RegionResolver regionResolver;
 
     @Inject
     public CognitoIdentityService(StorageFactory storageFactory, RegionResolver regionResolver) {
-        this.pools = storageFactory.create("cognitoidentity", "cognitoidentity-pools.json",
-                new TypeReference<Map<String, IdentityPool>>() {});
+        AccountAwareStorageBackend<IdentityPool> managedPools = storageFactory.create(
+                "cognitoidentity", "cognitoidentity-pools.json", new TypeReference<Map<String, IdentityPool>>() {});
+        AccountAwareStorageBackend<CognitoFederatedIdentity> managedIdentities = storageFactory.create(
+                "cognitoidentity", "cognito-identities.json",
+                new TypeReference<Map<String, CognitoFederatedIdentity>>() {});
+        this.pools = managedPools;
+        this.identities = managedIdentities;
+        this.regionResolver = regionResolver;
+        CognitoIdentityMigration.migrate(storageFactory, managedPools, managedIdentities);
+    }
+
+    public CognitoIdentityService(StorageBackend<String, IdentityPool> pools,
+                                 StorageBackend<String, CognitoFederatedIdentity> identities,
+                                 RegionResolver regionResolver) {
+        this.pools = pools;
+        this.identities = identities;
         this.regionResolver = regionResolver;
     }
 
@@ -68,6 +83,8 @@ public class CognitoIdentityService {
         spec.setArn(regionResolver.buildArn("cognito-identity", region, ARN_RESOURCE_PREFIX + identityPoolId));
         spec.setAccountId(regionResolver.getAccountId());
         spec.setCreatedAt(Instant.now());
+        spec.setIdentityPoolTags(ReservedTags.stripReservedTags(
+                spec.getIdentityPoolTags() == null ? Map.of() : spec.getIdentityPoolTags()));
 
         pools.put(storageKey(region, identityPoolId), spec);
         LOG.infov("Created Cognito identity pool: {0}", identityPoolId);
@@ -83,9 +100,9 @@ public class CognitoIdentityService {
 
     /**
      * {@code UpdateIdentityPool} takes the whole {@code IdentityPool} shape and replaces the
-     * stored pool with it: a member the caller omits is reset to its default rather than
-     * carried over. The roles, role mappings and principal-tag maps are set by their own
-     * operations and are not part of the shape, so they survive the replace.
+     * stored configuration with it: omitted configuration members reset to their defaults.
+     * Tags survive when omitted, while an explicit tag map replaces them. Roles, role mappings
+     * and principal-tag maps are set by their own operations and survive the replace.
      */
     public IdentityPool updateIdentityPool(IdentityPool spec, String region) {
         IdentityPool existing = describeIdentityPool(spec.getIdentityPoolId(), region);
@@ -97,6 +114,9 @@ public class CognitoIdentityService {
         spec.setRoles(existing.getRoles());
         spec.setRoleMappings(existing.getRoleMappings());
         spec.setPrincipalTagAttributeMaps(existing.getPrincipalTagAttributeMaps());
+        spec.setIdentityPoolTags(spec.getIdentityPoolTags() == null
+                ? new LinkedHashMap<>(existing.getIdentityPoolTags())
+                : ReservedTags.stripReservedTags(spec.getIdentityPoolTags()));
 
         pools.put(storageKey(region, spec.getIdentityPoolId()), spec);
         LOG.infov("Updated Cognito identity pool: {0}", spec.getIdentityPoolId());
@@ -105,6 +125,9 @@ public class CognitoIdentityService {
 
     public void deleteIdentityPool(String identityPoolId, String region) {
         describeIdentityPool(identityPoolId, region);
+        identities.scan(id -> true).stream()
+                .filter(identity -> identityPoolId.equals(identity.getIdentityPoolId()))
+                .forEach(identity -> identities.delete(identity.getIdentityId()));
         pools.delete(storageKey(region, identityPoolId));
         LOG.infov("Deleted Cognito identity pool: {0}", identityPoolId);
     }
@@ -133,12 +156,18 @@ public class CognitoIdentityService {
         return new Page(ordered.subList(offset, end), end < ordered.size() ? String.valueOf(end) : null);
     }
 
+    public List<IdentityPool> listIdentityPools() {
+        return pools.scan(key -> true).stream()
+                .sorted(Comparator.comparing(IdentityPool::getIdentityPoolId))
+                .toList();
+    }
+
     // ──────────────────────────── Pool roles ────────────────────────────
 
     public IdentityPool setIdentityPoolRoles(String identityPoolId, Map<String, String> roles,
                                              JsonNode roleMappings, String region) {
         IdentityPool pool = describeIdentityPool(identityPoolId, region);
-        if (roles == null || roles.isEmpty()) {
+        if (roles == null) {
             throw new AwsException("InvalidParameterException", "Roles is required.", 400);
         }
         for (Map.Entry<String, String> entry : roles.entrySet()) {
@@ -212,8 +241,9 @@ public class CognitoIdentityService {
         if (tags == null || tags.isEmpty()) {
             throw new AwsException("InvalidParameterException", "Tags is required.", 400);
         }
+        ReservedTags.rejectUnknownReservedTags(tags, "InvalidParameterException");
         IdentityPool pool = findByArn(resourceArn, region);
-        pool.getIdentityPoolTags().putAll(tags);
+        pool.getIdentityPoolTags().putAll(ReservedTags.stripReservedTags(tags));
         pools.put(storageKey(pool), pool);
     }
 
@@ -224,110 +254,6 @@ public class CognitoIdentityService {
         IdentityPool pool = findByArn(resourceArn, region);
         tagKeys.forEach(pool.getIdentityPoolTags()::remove);
         pools.put(storageKey(pool), pool);
-    }
-
-    // ──────────────────────────── Helpers ────────────────────────────
-
-    /** One page of {@code ListIdentityPools} results plus the token for the page after it. */
-    public record Page(List<IdentityPool> identityPools, String nextToken) {}
-
-    private void validatePoolConfiguration(IdentityPool spec) {
-        String name = spec.getIdentityPoolName();
-        if (name == null || name.isBlank() || name.length() > 128 || !IDENTITY_POOL_NAME.matcher(name).matches()) {
-            throw new AwsException("InvalidParameterException",
-                    "IdentityPoolName must be 1-128 characters matching [\\w\\s+=,.@-]+.", 400);
-        }
-        String developerProviderName = spec.getDeveloperProviderName();
-        if (developerProviderName != null
-                && (developerProviderName.length() > 128
-                    || !DEVELOPER_PROVIDER_NAME.matcher(developerProviderName).matches())) {
-            throw new AwsException("InvalidParameterException",
-                    "DeveloperProviderName must be 1-128 characters matching [\\w._-]+.", 400);
-        }
-    }
-
-    private void validateRoleMappings(JsonNode roleMappings) {
-        if (roleMappings == null || !roleMappings.isObject()) {
-            return;
-        }
-        roleMappings.fields().forEachRemaining(entry -> {
-            JsonNode mapping = entry.getValue();
-            String type = mapping.path("Type").asText(null);
-            if (type == null || !ROLE_MAPPING_TYPES.contains(type)) {
-                throw new AwsException("InvalidParameterException",
-                        "RoleMapping Type for '" + entry.getKey() + "' must be one of Token, Rules.", 400);
-            }
-            if ("Rules".equals(type)) {
-                JsonNode rules = mapping.path("RulesConfiguration").path("Rules");
-                if (!rules.isArray() || rules.isEmpty()) {
-                    throw new AwsException("InvalidParameterException",
-                            "RoleMapping '" + entry.getKey() + "' of type Rules requires RulesConfiguration.Rules.",
-                            400);
-                }
-            }
-        });
-    }
-
-    private void requireIdentityPoolId(String identityPoolId) {
-        if (identityPoolId == null || identityPoolId.isBlank()) {
-            throw new AwsException("InvalidParameterException", "IdentityPoolId is required.", 400);
-        }
-    }
-
-    private IdentityPool findByArn(String resourceArn, String region) {
-        AwsArnUtils.Arn arn;
-        try {
-            arn = AwsArnUtils.parse(resourceArn);
-        } catch (IllegalArgumentException e) {
-            throw new AwsException("InvalidParameterException", "Invalid ResourceArn: " + resourceArn, 400);
-        }
-        if (!"cognito-identity".equals(arn.service()) || !arn.resource().startsWith(ARN_RESOURCE_PREFIX)) {
-            throw new AwsException("InvalidParameterException", "Invalid ResourceArn: " + resourceArn, 400);
-        }
-        String identityPoolId = arn.resource().substring(ARN_RESOURCE_PREFIX.length());
-        String arnRegion = arn.region().isEmpty() ? region : arn.region();
-        return pools.get(storageKey(arnRegion, identityPoolId))
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                        "IdentityPool '" + identityPoolId + "' not found.", 404));
-    }
-
-    private int parseToken(String nextToken) {
-        if (nextToken == null || nextToken.isBlank()) {
-            return 0;
-        }
-        try {
-            int offset = Integer.parseInt(nextToken);
-            if (offset < 0) {
-                throw new NumberFormatException(nextToken);
-            }
-            return offset;
-        } catch (NumberFormatException e) {
-            throw new AwsException("InvalidParameterException", "Invalid NextToken: " + nextToken, 400);
-        }
-    }
-
-    private String storageKey(String region, String identityPoolId) {
-        return region + "::" + identityPoolId;
-    }
-
-    private String storageKey(IdentityPool pool) {
-        return storageKey(AwsArnUtils.parse(pool.getArn()).region(), pool.getIdentityPoolId());
-    }
-
-    private final StorageBackend<String, CognitoFederatedIdentity> identities;
-
-    public CognitoIdentityService(StorageBackend<String, IdentityPool> pools,
-                                 StorageBackend<String, CognitoFederatedIdentity> identities,
-                                 RegionResolver regionResolver) {
-        this.pools = pools;
-        this.identities = identities;
-        this.regionResolver = regionResolver;
-    }
-
-    public List<IdentityPool> listIdentityPools() {
-        return pools.scan(key -> true).stream()
-                .sorted(Comparator.comparing(IdentityPool::getIdentityPoolId))
-                .toList();
     }
 
     public CognitoFederatedIdentity getId(String identityPoolId, Map<String, String> logins, String region) {
@@ -432,5 +358,93 @@ public class CognitoIdentityService {
 
     private static String base64Url(String json) {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(json.getBytes(StandardCharsets.UTF_8));
+    }
+
+    // ──────────────────────────── Helpers ────────────────────────────
+
+    /** One page of {@code ListIdentityPools} results plus the token for the page after it. */
+    public record Page(List<IdentityPool> identityPools, String nextToken) {}
+
+    private void validatePoolConfiguration(IdentityPool spec) {
+        String name = spec.getIdentityPoolName();
+        if (name == null || name.isBlank() || name.length() > 128 || !IDENTITY_POOL_NAME.matcher(name).matches()) {
+            throw new AwsException("InvalidParameterException",
+                    "IdentityPoolName must be 1-128 characters matching [\\w\\s+=,.@-]+.", 400);
+        }
+        String developerProviderName = spec.getDeveloperProviderName();
+        if (developerProviderName != null
+                && (developerProviderName.length() > 128
+                    || !DEVELOPER_PROVIDER_NAME.matcher(developerProviderName).matches())) {
+            throw new AwsException("InvalidParameterException",
+                    "DeveloperProviderName must be 1-128 characters matching [\\w._-]+.", 400);
+        }
+    }
+
+    private void validateRoleMappings(JsonNode roleMappings) {
+        if (roleMappings == null || !roleMappings.isObject()) {
+            return;
+        }
+        roleMappings.fields().forEachRemaining(entry -> {
+            JsonNode mapping = entry.getValue();
+            String type = mapping.path("Type").asText(null);
+            if (type == null || !ROLE_MAPPING_TYPES.contains(type)) {
+                throw new AwsException("InvalidParameterException",
+                        "RoleMapping Type for '" + entry.getKey() + "' must be one of Token, Rules.", 400);
+            }
+            if ("Rules".equals(type)) {
+                JsonNode rules = mapping.path("RulesConfiguration").path("Rules");
+                if (!rules.isArray() || rules.isEmpty()) {
+                    throw new AwsException("InvalidParameterException",
+                            "RoleMapping '" + entry.getKey() + "' of type Rules requires RulesConfiguration.Rules.",
+                            400);
+                }
+            }
+        });
+    }
+
+    private void requireIdentityPoolId(String identityPoolId) {
+        if (identityPoolId == null || identityPoolId.isBlank()) {
+            throw new AwsException("InvalidParameterException", "IdentityPoolId is required.", 400);
+        }
+    }
+
+    private IdentityPool findByArn(String resourceArn, String region) {
+        AwsArnUtils.Arn arn;
+        try {
+            arn = AwsArnUtils.parse(resourceArn);
+        } catch (IllegalArgumentException e) {
+            throw new AwsException("InvalidParameterException", "Invalid ResourceArn: " + resourceArn, 400);
+        }
+        if (!"cognito-identity".equals(arn.service()) || !arn.resource().startsWith(ARN_RESOURCE_PREFIX)) {
+            throw new AwsException("InvalidParameterException", "Invalid ResourceArn: " + resourceArn, 400);
+        }
+        String identityPoolId = arn.resource().substring(ARN_RESOURCE_PREFIX.length());
+        String arnRegion = arn.region().isEmpty() ? region : arn.region();
+        return pools.get(storageKey(arnRegion, identityPoolId))
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "IdentityPool '" + identityPoolId + "' not found.", 404));
+    }
+
+    private int parseToken(String nextToken) {
+        if (nextToken == null || nextToken.isBlank()) {
+            return 0;
+        }
+        try {
+            int offset = Integer.parseInt(nextToken);
+            if (offset < 0) {
+                throw new NumberFormatException(nextToken);
+            }
+            return offset;
+        } catch (NumberFormatException e) {
+            throw new AwsException("InvalidParameterException", "Invalid NextToken: " + nextToken, 400);
+        }
+    }
+
+    private String storageKey(String region, String identityPoolId) {
+        return region + "::" + identityPoolId;
+    }
+
+    private String storageKey(IdentityPool pool) {
+        return storageKey(AwsArnUtils.parse(pool.getArn()).region(), pool.getIdentityPoolId());
     }
 }

@@ -1,7 +1,6 @@
 package io.github.hectorvent.floci.services.cognitoidentity.model;
 
 import io.quarkus.runtime.annotations.RegisterForReflection;
-
 import java.util.LinkedHashMap;
 import java.util.Map;
 

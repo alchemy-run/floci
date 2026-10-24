@@ -37,9 +37,11 @@ public class DynamoDbJsonHandler {
     private final RegionResolver regionResolver;
 
     @Inject
-    public DynamoDbJsonHandler(DynamoDbOperations operations, RegionResolver regionResolver) {
+    public DynamoDbJsonHandler(DynamoDbOperations operations, RegionResolver regionResolver,
+            ObjectMapper objectMapper) {
         this.operations = operations;
         this.regionResolver = regionResolver;
+        this.objectMapper = objectMapper;
     }
 
     public Response handle(String action, JsonNode request, String region) throws Exception {
@@ -67,26 +69,12 @@ public class DynamoDbJsonHandler {
 
 
 
-    private final DynamoDbService dynamoDbService;
 
-    private final DynamoDbStreamService dynamoDbStreamService;
 
-    private final KinesisService kinesisService;
 
     private final ObjectMapper objectMapper;
 
-    private final DynamoDbPartiQLHandler partiQLHandler;
 
-
-    @Inject
-    public DynamoDbJsonHandler(DynamoDbService dynamoDbService, DynamoDbStreamService dynamoDbStreamService,
-                               KinesisService kinesisService, ObjectMapper objectMapper) {
-        this.dynamoDbService = dynamoDbService;
-        this.dynamoDbStreamService = dynamoDbStreamService;
-        this.kinesisService = kinesisService;
-        this.objectMapper = objectMapper;
-        this.partiQLHandler = new DynamoDbPartiQLHandler(dynamoDbService, objectMapper);
-    }
 
 
 

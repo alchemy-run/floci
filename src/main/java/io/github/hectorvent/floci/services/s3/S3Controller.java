@@ -4789,30 +4789,6 @@ public class S3Controller {
         return "EU".equalsIgnoreCase(value) || AwsRegions.isRegionId(value);
     }
 
-    @Inject
-    public S3Controller(S3Service s3Service, S3SelectService s3SelectService,
-                        RegionResolver regionResolver,
-                        SnsQueryHandler snsQueryHandler,
-                        io.quarkus.vertx.http.runtime.CurrentVertxRequest currentVertxRequest,
-                        io.github.hectorvent.floci.services.floci.ui.UiPages uiPages,
-                        CloudTrailService cloudTrailService,
-                        AccountResolver accountResolver,
-                        RequestContext requestContext,
-                        IamService iamService,
-                        IamEnforcementFilter iamEnforcementFilter) {
-        this.s3Service = s3Service;
-        this.s3SelectService = s3SelectService;
-        this.regionResolver = regionResolver;
-        this.snsQueryHandler = snsQueryHandler;
-        this.currentVertxRequest = currentVertxRequest;
-        this.uiPages = uiPages;
-        this.cloudTrailService = cloudTrailService;
-        this.accountResolver = accountResolver;
-        this.requestContext = requestContext;
-        this.iamService = iamService;
-        this.iamEnforcementFilter = iamEnforcementFilter;
-    }
-
     private Response fullObjectResponse(S3Object obj, ResponseHeaderOverrides overrides,
                                         boolean includeChecksum) {
         byte[] data = objectDataSnapshot(obj);
@@ -4917,6 +4893,19 @@ public class S3Controller {
 
 
 
+    private static int resolveMaxUploads(String maxUploads) {
+        if (maxUploads == null) {
+            return 1000;
+        }
+        if (maxUploads.matches("\\d{1,10}") && Long.parseLong(maxUploads) <= Integer.MAX_VALUE) {
+            return Integer.parseInt(maxUploads);
+        }
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("ArgumentName", "max-uploads");
+        detail.put("ArgumentValue", maxUploads);
+        throw new AwsException("InvalidArgument",
+                "Argument max-uploads must be an integer between 0 and 2147483647", 400, detail);
+    }
 
 
 

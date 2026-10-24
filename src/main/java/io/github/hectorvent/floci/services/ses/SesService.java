@@ -160,7 +160,8 @@ public class SesService {
                        SesTenantService tenantService, SesConfigurationSetService configSetService,
                        SesIdentityCertificateService certificateService, SmtpRelay smtpRelay,
                        SesEventPublisher eventPublisher, EmulatorConfig config,
-                       RegionResolver regionResolver) {
+                       RegionResolver regionResolver,
+            StorageFactory storageFactory) {
         this.identityService = identityService;
         this.sentEmailService = sentEmailService;
         this.templateService = templateService;
@@ -178,6 +179,8 @@ public class SesService {
         this.baseUrl = config.effectiveBaseUrl();
         this.regionResolver = regionResolver;
         this.taggableDomains = taggableDomains();
+        this.multiRegionEndpointStore = storageFactory.create("ses", "ses-multi-region-endpoints.json",
+                new TypeReference<Map<String, MultiRegionEndpoint>>() {});
     }
 
     SesService(SesIdentityService identityService,
@@ -209,6 +212,7 @@ public class SesService {
         this.baseUrl = "http://localhost:4566";
         this.regionResolver = null;
         this.taggableDomains = taggableDomains();
+        this.multiRegionEndpointStore = new io.github.hectorvent.floci.core.storage.InMemoryStorage<>();
     }
 
     private Map<String, SesTaggable> taggableDomains() {

@@ -1543,35 +1543,6 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
         }
     }
 
-    private final ContainerDetector containerDetector;
-
-    @Inject
-    public ContainerLauncher(ContainerBuilder containerBuilder,
-                             ContainerLifecycleManager lifecycleManager,
-                             ContainerLogStreamer logStreamer,
-                             ImageResolver imageResolver,
-                             RuntimeApiServerFactory runtimeApiServerFactory,
-                             DockerHostResolver dockerHostResolver,
-                             ContainerDetector containerDetector,
-                             EmulatorConfig config,
-                             EcrRegistryManager ecrRegistryManager,
-                             LambdaLayerService layerService,
-                             LaunchedContainerAwsEnv awsEnv,
-                             LambdaExecutionRoleCredentials executionRoleCredentials) {
-        this.containerBuilder = containerBuilder;
-        this.lifecycleManager = lifecycleManager;
-        this.logStreamer = logStreamer;
-        this.imageResolver = imageResolver;
-        this.runtimeApiServerFactory = runtimeApiServerFactory;
-        this.dockerHostResolver = dockerHostResolver;
-        this.containerDetector = containerDetector;
-        this.config = config;
-        this.ecrRegistryManager = ecrRegistryManager;
-        this.layerService = layerService;
-        this.awsEnv = awsEnv;
-        this.executionRoleCredentials = executionRoleCredentials;
-        this.populateSemaphore = new java.util.concurrent.Semaphore(resolvePopulateConcurrency(config));
-    }
 
     private static String sha256Hex(String value) {
         try {

@@ -182,10 +182,11 @@ public class ParquetEmitter {
             }
         }
         try {
-            s3Service.createInternalBucket(stagingBucket, defaultRegion);
+            s3Service.createBucket(stagingBucket, defaultRegion);
         } catch (AwsException e) {
             // BucketAlreadyOwnedByYou under race; safe to ignore.
-            if (!"BucketAlreadyOwnedByYou".equals(e.getErrorCode())) {
+            if (!"BucketAlreadyOwnedByYou".equals(e.getErrorCode())
+                    && !"BucketAlreadyExists".equals(e.getErrorCode())) {
                 throw e;
             }
         }
