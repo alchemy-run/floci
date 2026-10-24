@@ -2265,19 +2265,19 @@ public class S3Controller {
 
             for (ParsedNotificationGroup parsed : parseNotificationGroups(xml, "QueueConfiguration", "Queue")) {
                 config.getQueueConfigurations().add(
-                        new QueueNotification(parsed.id, parsed.arn, parsed.events, parsed.filterRules));
+                        new QueueNotification(notificationId(parsed.id), parsed.arn, parsed.events, parsed.filterRules));
             }
             for (ParsedNotificationGroup parsed : parseNotificationGroups(xml, "TopicConfiguration", "Topic")) {
                 config.getTopicConfigurations().add(
-                        new TopicNotification(parsed.id, parsed.arn, parsed.events, parsed.filterRules));
+                        new TopicNotification(notificationId(parsed.id), parsed.arn, parsed.events, parsed.filterRules));
             }
             for (ParsedNotificationGroup parsed : parseNotificationGroups(xml, "LambdaFunctionConfiguration", "LambdaFunctionArn")) {
                 config.getLambdaFunctionConfigurations().add(
-                        new LambdaNotification(parsed.id, parsed.arn, parsed.events, parsed.filterRules));
+                        new LambdaNotification(notificationId(parsed.id), parsed.arn, parsed.events, parsed.filterRules));
             }
             for (ParsedNotificationGroup parsed : parseNotificationGroups(xml, "CloudFunctionConfiguration", "CloudFunction")) {
                 config.getLambdaFunctionConfigurations().add(
-                        new LambdaNotification(parsed.id, parsed.arn, parsed.events, parsed.filterRules));
+                        new LambdaNotification(notificationId(parsed.id), parsed.arn, parsed.events, parsed.filterRules));
             }
 
             config.setEventBridgeEnabled(parseEventBridgeConfiguration(xml));
@@ -5144,5 +5144,14 @@ public class S3Controller {
             return xmlErrorResponse(concealUnlistableMiss(e, bucket, httpHeaders, authorization,
                     concealDeleteMarkerVersion), bucket);
         }
+    }
+
+    /** S3 assigns an Id to every notification configuration submitted without one. */
+    private static String notificationId(String id) {
+        if (id != null && !id.isBlank()) {
+            return id;
+        }
+        return Base64.getEncoder().withoutPadding().encodeToString(
+                UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8));
     }
 }
