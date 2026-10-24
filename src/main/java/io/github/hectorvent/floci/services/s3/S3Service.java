@@ -6425,10 +6425,34 @@ public class S3Service implements Resettable, ResourceProvider {
         return xml.end("AccelerateConfiguration").build();
     }
 
-    public void restoreObject(String bucketName, String key, String versionId, String restoreXml) {
-        // Validation only - stub implementation
-        getObject(bucketName, key, versionId);
-        LOG.infov("Restored object: {0}/{1} (stub)", bucketName, key);
+    /**
+     * Restores an archived version for the days {@code restoreXml} asks for. Retrieval is
+     * immediate: the restored copy is readable as soon as this returns. Only an archived storage
+     * class can be restored; any other answers InvalidObjectState.
+     *
+     * @return whether a restored copy was already present, which S3 answers with 200 instead of 202
+     */
+    public boolean restoreObject(String bucketName, String key, String versionId, String restoreXml) {
+        Bucket bucket = resolveBucket(bucketName)
+                .orElseThrow(() -> new AwsException("NoSuchBucket",
+                        "The specified bucket does not exist.", 404));
+        synchronized (bucket) {
+            AccountAwareStorageBackend.OwnedEntry<S3Object> owned =
+                    getStoredObjectEntry(bucketName, key, versionId);
+            S3Object object = owned.value();
+            if (!isRestorableStorageClass(object.getStorageClass())) {
+                throw new AwsException("InvalidObjectState",
+                        "The operation is not valid for the object's storage class", 403);
+            }
+            Instant now = Instant.now();
+            boolean alreadyRestored = object.getRestoreExpiryDate() != null
+                    && now.isBefore(object.getRestoreExpiryDate());
+            object.setRestoreExpiryDate(restoreExpiry(now, restoreXml));
+            putObjectMetadataForAccount(owned.account(), bucketName, key, object);
+            LOG.infov("Restored object: {0}/{1} v={2} until {3}", bucketName, key, versionId,
+                    object.getRestoreExpiryDate());
+            return alreadyRestored;
+        }
     }
 
     private static String defaultAclXml(String id, String displayName) {

@@ -1691,8 +1691,9 @@ public class S3Controller {
                 s3Service.authorizeObjectWrite(bucket, key, "s3:RestoreObject", authorization);
                 String objectKey = key;
                 return concealingMisses(bucket, httpHeaders, authorization, false, () -> {
-                    s3Service.restoreObject(bucket, objectKey, versionId, new String(body, StandardCharsets.UTF_8));
-                    return Response.accepted().build();
+                    boolean alreadyRestored = s3Service.restoreObject(bucket, objectKey, versionId,
+                            new String(body, StandardCharsets.UTF_8));
+                    return (alreadyRestored ? Response.ok() : Response.accepted()).build();
                 });
             }
 
