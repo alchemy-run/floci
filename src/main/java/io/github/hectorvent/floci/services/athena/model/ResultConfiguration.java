@@ -9,6 +9,9 @@ public class ResultConfiguration {
     @JsonProperty("OutputLocation")
     private String outputLocation;
 
+    @JsonProperty("EncryptionConfiguration")
+    private EncryptionConfiguration encryptionConfiguration;
+
     public ResultConfiguration() {}
 
     public ResultConfiguration(String outputLocation) {
@@ -17,12 +20,7 @@ public class ResultConfiguration {
 
     public String getOutputLocation() { return outputLocation; }
     public void setOutputLocation(String outputLocation) { this.outputLocation = outputLocation; }
-
-    @JsonProperty("EncryptionConfiguration")
-    private EncryptionConfiguration encryptionConfiguration;
-
     public EncryptionConfiguration getEncryptionConfiguration() { return encryptionConfiguration; }
-
     public void setEncryptionConfiguration(EncryptionConfiguration encryptionConfiguration) {
         this.encryptionConfiguration = encryptionConfiguration;
     }

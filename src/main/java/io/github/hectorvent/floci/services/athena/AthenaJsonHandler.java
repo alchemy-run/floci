@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.athena.model.CreateWorkGroupRequest;
+import io.github.hectorvent.floci.services.athena.model.NamedQuery;
+import io.github.hectorvent.floci.services.athena.model.PreparedStatement;
 import io.github.hectorvent.floci.services.athena.model.QueryExecution;
 import io.github.hectorvent.floci.services.athena.model.QueryExecutionContext;
 import io.github.hectorvent.floci.services.athena.model.ResultConfiguration;
@@ -18,8 +20,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import io.github.hectorvent.floci.services.athena.model.NamedQuery;
-import io.github.hectorvent.floci.services.athena.model.PreparedStatement;
+
 
 @ApplicationScoped
 public class AthenaJsonHandler {
@@ -146,43 +147,39 @@ public class AthenaJsonHandler {
                 if ("primary".equals(wg)) {
                     throw new AwsException("InvalidRequestException", "The primary workgroup cannot be deleted.", 400);
                 }
-                athenaService.deleteWorkGroup(wg, region);
+                athenaService.deleteWorkGroup(wg, region, request.path("RecursiveDeleteOption").asBoolean(false));
                 yield Response.ok(Map.of()).build();
             }
-            case "GetQueryRuntimeStatistics" -> Response.ok(
-                    athenaService.getQueryRuntimeStatistics(request.get("QueryExecutionId").asText())).build();
-            case "BatchGetQueryExecution" -> {
-                List<String> ids = mapper.convertValue(request.get("QueryExecutionIds"),
+            case "GetDatabase" -> {
+                String catalog = request.has("CatalogName") ? request.get("CatalogName").asText() : AthenaService.DEFAULT_CATALOG;
+                yield Response.ok(Map.of("Database",
+                        athenaService.getDatabase(catalog, request.get("DatabaseName").asText()))).build();
+            }
+            case "CreateNamedQuery" -> {
+                NamedQuery query =
+                        mapper.treeToValue(request, NamedQuery.class);
+                yield Response.ok(Map.of("NamedQueryId", athenaService.createNamedQuery(query))).build();
+            }
+            case "GetNamedQuery" -> Response.ok(Map.of("NamedQuery",
+                    athenaService.getNamedQuery(request.get("NamedQueryId").asText()))).build();
+            case "ListNamedQueries" -> Response.ok(Map.of("NamedQueryIds",
+                    athenaService.listNamedQueries(request.path("WorkGroup").asText(null)))).build();
+            case "UpdateNamedQuery" -> {
+                athenaService.updateNamedQuery(
+                        request.get("NamedQueryId").asText(),
+                        request.path("Name").asText(null),
+                        request.path("Description").asText(null),
+                        request.path("QueryString").asText(null));
+                yield Response.ok(Map.of()).build();
+            }
+            case "DeleteNamedQuery" -> {
+                athenaService.deleteNamedQuery(request.get("NamedQueryId").asText());
+                yield Response.ok(Map.of()).build();
+            }
+            case "BatchGetNamedQuery" -> {
+                List<String> ids = mapper.convertValue(request.get("NamedQueryIds"),
                         mapper.getTypeFactory().constructCollectionType(List.class, String.class));
-                yield Response.ok(athenaService.batchGetQueryExecution(ids)).build();
-            }
-            case "BatchGetPreparedStatement" -> {
-                String workGroup = request.path("WorkGroup").asText("primary");
-                List<String> names = mapper.convertValue(request.get("PreparedStatementNames"),
-                        mapper.getTypeFactory().constructCollectionType(List.class, String.class));
-                yield Response.ok(athenaService.batchGetPreparedStatement(workGroup, names)).build();
-            }
-            case "DeletePreparedStatement" -> {
-                athenaService.deletePreparedStatement(
-                        request.path("WorkGroup").asText("primary"),
-                        request.get("StatementName").asText());
-                yield Response.ok(Map.of()).build();
-            }
-            case "UpdatePreparedStatement" -> {
-                PreparedStatement statement =
-                        mapper.treeToValue(request, PreparedStatement.class);
-                if (statement.getWorkGroupName() == null && request.has("WorkGroup")) {
-                    statement.setWorkGroupName(request.get("WorkGroup").asText());
-                }
-                athenaService.updatePreparedStatement(statement);
-                yield Response.ok(Map.of()).build();
-            }
-            case "ListPreparedStatements" -> Response.ok(Map.of("PreparedStatements",
-                    athenaService.listPreparedStatements(request.path("WorkGroup").asText(null)))).build();
-            case "GetPreparedStatement" -> {
-                String workGroup = request.path("WorkGroup").asText("primary");
-                yield Response.ok(Map.of("PreparedStatement",
-                        athenaService.getPreparedStatement(workGroup, request.get("StatementName").asText()))).build();
+                yield Response.ok(athenaService.batchGetNamedQuery(ids)).build();
             }
             case "CreatePreparedStatement" -> {
                 PreparedStatement statement =
@@ -193,37 +190,41 @@ public class AthenaJsonHandler {
                 athenaService.createPreparedStatement(statement);
                 yield Response.ok(Map.of()).build();
             }
-            case "BatchGetNamedQuery" -> {
-                List<String> ids = mapper.convertValue(request.get("NamedQueryIds"),
+            case "GetPreparedStatement" -> {
+                String workGroup = request.path("WorkGroup").asText("primary");
+                yield Response.ok(Map.of("PreparedStatement",
+                        athenaService.getPreparedStatement(workGroup, request.get("StatementName").asText()))).build();
+            }
+            case "ListPreparedStatements" -> Response.ok(Map.of("PreparedStatements",
+                    athenaService.listPreparedStatements(request.path("WorkGroup").asText(null)))).build();
+            case "UpdatePreparedStatement" -> {
+                PreparedStatement statement =
+                        mapper.treeToValue(request, PreparedStatement.class);
+                if (statement.getWorkGroupName() == null && request.has("WorkGroup")) {
+                    statement.setWorkGroupName(request.get("WorkGroup").asText());
+                }
+                athenaService.updatePreparedStatement(statement);
+                yield Response.ok(Map.of()).build();
+            }
+            case "DeletePreparedStatement" -> {
+                athenaService.deletePreparedStatement(
+                        request.path("WorkGroup").asText("primary"),
+                        request.get("StatementName").asText());
+                yield Response.ok(Map.of()).build();
+            }
+            case "BatchGetPreparedStatement" -> {
+                String workGroup = request.path("WorkGroup").asText("primary");
+                List<String> names = mapper.convertValue(request.get("PreparedStatementNames"),
                         mapper.getTypeFactory().constructCollectionType(List.class, String.class));
-                yield Response.ok(athenaService.batchGetNamedQuery(ids)).build();
+                yield Response.ok(athenaService.batchGetPreparedStatement(workGroup, names)).build();
             }
-            case "DeleteNamedQuery" -> {
-                athenaService.deleteNamedQuery(request.get("NamedQueryId").asText());
-                yield Response.ok(Map.of()).build();
+            case "BatchGetQueryExecution" -> {
+                List<String> ids = mapper.convertValue(request.get("QueryExecutionIds"),
+                        mapper.getTypeFactory().constructCollectionType(List.class, String.class));
+                yield Response.ok(athenaService.batchGetQueryExecution(ids)).build();
             }
-            case "UpdateNamedQuery" -> {
-                athenaService.updateNamedQuery(
-                        request.get("NamedQueryId").asText(),
-                        request.path("Name").asText(null),
-                        request.path("Description").asText(null),
-                        request.path("QueryString").asText(null));
-                yield Response.ok(Map.of()).build();
-            }
-            case "ListNamedQueries" -> Response.ok(Map.of("NamedQueryIds",
-                    athenaService.listNamedQueries(request.path("WorkGroup").asText(null)))).build();
-            case "GetNamedQuery" -> Response.ok(Map.of("NamedQuery",
-                    athenaService.getNamedQuery(request.get("NamedQueryId").asText()))).build();
-            case "CreateNamedQuery" -> {
-                NamedQuery query =
-                        mapper.treeToValue(request, NamedQuery.class);
-                yield Response.ok(Map.of("NamedQueryId", athenaService.createNamedQuery(query))).build();
-            }
-            case "GetDatabase" -> {
-                String catalog = request.has("CatalogName") ? request.get("CatalogName").asText() : AthenaService.DEFAULT_CATALOG;
-                yield Response.ok(Map.of("Database",
-                        athenaService.getDatabase(catalog, request.get("DatabaseName").asText()))).build();
-            }
+            case "GetQueryRuntimeStatistics" -> Response.ok(
+                    athenaService.getQueryRuntimeStatistics(request.get("QueryExecutionId").asText())).build();
             default -> throw new AwsException("InvalidAction", "Action " + action + " is not supported", 400);
         };
     }

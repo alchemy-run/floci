@@ -1,12 +1,12 @@
 package io.github.hectorvent.floci.services.appconfig.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.HashMap;
 import java.util.Map;
-import com.fasterxml.jackson.annotation.JsonIgnore;
 
 @RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -17,6 +17,7 @@ public class Application {
     private String name;
     @JsonProperty("Description")
     private String description;
+    @JsonIgnore
     private Map<String, String> tags = new HashMap<>();
 
     public Application() {}

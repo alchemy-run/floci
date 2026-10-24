@@ -6,11 +6,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
-import io.github.hectorvent.floci.core.common.AwsEndpoints;
 import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.core.common.AwsRegions;
 import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.core.common.ServicePrincipals;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.cloudtrail.model.AdvancedEventSelector;
@@ -37,7 +34,6 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import java.util.regex.Pattern;
 
 @ApplicationScoped
 public class CloudTrailService {
@@ -45,11 +41,12 @@ public class CloudTrailService {
     private static final Logger LOG = Logger.getLogger(CloudTrailService.class);
 
     private static final String EVENT_VERSION = "1.11";
-    private static final String S3_EVENT_SOURCE = ServicePrincipals.of("s3");
+    private static final String S3_EVENT_SOURCE = "s3.amazonaws.com";
     static final int MAX_PENDING_RECORDS_PER_TRAIL = 1024;
     static final long MAX_PENDING_BYTES_PER_TRAIL = 4L * 1024L * 1024L;
 
     private final StorageBackend<String, CloudTrailEntry> store;
+    private final StorageBackend<String, List<String>> insightSelectors;
     private final RegionResolver regionResolver;
     private final IamService iamService;
     private final ObjectMapper mapper;
@@ -72,6 +69,8 @@ public class CloudTrailService {
                              IamService iamService, ObjectMapper mapper) {
         this.store = storageFactory.create("cloudtrail", "cloudtrail-trails.json",
                 new TypeReference<Map<String, CloudTrailEntry>>() {});
+        this.insightSelectors = storageFactory.create("cloudtrail", "cloudtrail-insight-selectors.json",
+                new TypeReference<Map<String, List<String>>>() {});
         this.regionResolver = regionResolver;
         this.iamService = iamService;
         this.mapper = mapper;
@@ -119,6 +118,7 @@ public class CloudTrailService {
                 name, arn, s3BucketName, s3KeyPrefix, snsTopicArn,
                 includeGlobalServiceEvents, isMultiRegionTrail, region,
                 enableLogFileValidation, false, false, isOrganizationTrail);
+        insightSelectors.delete(key);
         store.put(key, new CloudTrailEntry(trail, List.of(), List.of(), false, null, null,
                 initialTags, null, null));
         return trail;
@@ -127,8 +127,13 @@ public class CloudTrailService {
     public void deleteTrail(String region, String trailNameOrArn) {
         Trail trail = findTrailOrThrow(region, trailNameOrArn);
         String key = regionKey(trail.homeRegion(), trail.name());
-        withTrailLock(key, () -> store.delete(key));
-        pendingRecordsByTrail.keySet().removeIf(k -> k.trailName().equals(trail.name()));
+        withTrailLock(key, () -> {
+            insightSelectors.delete(key);
+            store.delete(key);
+        });
+        String accountId = regionResolver.getAccountId();
+        pendingRecordsByTrail.keySet().removeIf(k -> k.trailName().equals(trail.name())
+                && k.region().equals(trail.homeRegion()) && k.accountId().equals(accountId));
     }
 
     public Trail updateTrail(String region, String trailNameOrArn,
@@ -179,6 +184,42 @@ public class CloudTrailService {
             if (t != null) results.add(t);
         }
         return results;
+    }
+
+    public Trail describeTrail(String region, String trailNameOrArn) {
+        return findTrailOrThrow(region, trailNameOrArn);
+    }
+
+    public List<String> getInsightSelectors(String region, String trailNameOrArn) {
+        Trail trail = findTrailOrThrow(region, trailNameOrArn);
+        List<String> selectors = insightSelectors.get(regionKey(trail.homeRegion(), trail.name())).orElse(List.of());
+        if (selectors.isEmpty()) {
+            throw new AwsException("InsightNotEnabledException", "Insights are not enabled for this trail.", 400);
+        }
+        return selectors;
+    }
+
+    public List<String> putInsightSelectors(String region, String trailNameOrArn, List<String> selectors) {
+        if (selectors == null || selectors.size() > 2 || selectors.stream().distinct().count() != selectors.size()
+                || selectors.stream().anyMatch(type -> !"ApiCallRateInsight".equals(type)
+                        && !"ApiErrorRateInsight".equals(type))) {
+            throw new AwsException("InvalidInsightSelectorsException", "Invalid insight selectors.", 400);
+        }
+        List<String> normalized = List.copyOf(selectors);
+        Trail resolved = findTrailOrThrow(region, trailNameOrArn);
+        String key = regionKey(resolved.homeRegion(), resolved.name());
+        return withTrailLock(key, () -> {
+            CloudTrailEntry entry = store.get(key).orElseThrow(() -> new AwsException(
+                    "TrailNotFoundException", "Unknown trail: " + trailNameOrArn, 400));
+            Trail trail = entry.trail();
+            Trail updated = new Trail(trail.name(), trail.trailArn(), trail.s3BucketName(), trail.s3KeyPrefix(),
+                    trail.snsTopicArn(), trail.includeGlobalServiceEvents(), trail.isMultiRegionTrail(),
+                    trail.homeRegion(), trail.logFileValidationEnabled(), trail.hasCustomEventSelectors(),
+                    !normalized.isEmpty(), trail.isOrganizationTrail());
+            insightSelectors.put(key, normalized);
+            store.put(key, entry.withTrail(updated));
+            return normalized;
+        });
     }
 
     public List<EventSelector> putEventSelectors(String region, String trailNameOrArn, List<EventSelector> selectors) {
@@ -352,6 +393,36 @@ public class CloudTrailService {
 
     // --- Data plane: called by S3 (and other services) when an op happens ---
 
+    public boolean recordManagementEvent(String region, ObjectNode record) {
+        boolean selected = false;
+        for (CloudTrailEntry entry : store.scan(k -> true)) {
+            Trail trail = entry.trail();
+            if (!entry.logging() || (!trail.homeRegion().equals(region) && !trail.isMultiRegionTrail())) continue;
+            String source = record.path("eventSource").asText();
+            if (!trail.includeGlobalServiceEvents()
+                    && List.of("iam.amazonaws.com", "organizations.amazonaws.com").contains(source)) continue;
+            boolean matches;
+            if (entry.advancedSelectors() != null && !entry.advancedSelectors().isEmpty()) {
+                matches = CloudTrailLakeService.matchesSelectors(mapper.valueToTree(entry.advancedSelectors()), record);
+            } else {
+                List<EventSelector> selectors = entry.selectors() == null ? List.of() : entry.selectors();
+                boolean readOnly = record.path("readOnly").asBoolean();
+                matches = selectors.isEmpty() || selectors.stream().anyMatch(selector ->
+                        !Boolean.FALSE.equals(selector.includeManagementEvents())
+                                && !("ReadOnly".equals(selector.readWriteType()) && !readOnly)
+                                && !("WriteOnly".equals(selector.readWriteType()) && readOnly)
+                                && (selector.excludeManagementEventSources() == null
+                                    || !selector.excludeManagementEventSources().contains(source)));
+            }
+            if (matches) {
+                selected = true;
+                append(new TrailKey(trail.homeRegion(), trail.name(), region, regionResolver.getAccountId()),
+                        record.deepCopy());
+            }
+        }
+        return selected;
+    }
+
     public void emitS3DataEvent(S3EventInput in) {
         try {
             String region = in.region() != null ? in.region() : regionResolver.getDefaultRegion();
@@ -359,7 +430,7 @@ public class CloudTrailService {
             if (matched.isEmpty()) {
                 return;
             }
-            ObjectNode record = buildS3Record(in, region);
+            ObjectNode record = buildS3Record(in);
             for (MatchedTrail mt : matched) {
                 ObjectNode copy = record.deepCopy();
                 copy.put("recipientAccountId", regionResolver.getAccountId());
@@ -383,10 +454,16 @@ public class CloudTrailService {
             List<PendingRecord> pending = records.stream()
                     .map(record -> new PendingRecord(record, estimatedRecordBytes(record)))
                     .toList();
-            pendingRecordsByTrail.compute(pendingTrailKey(key), (ignored, buffer) -> {
-                PendingRecordBuffer updated = buffer == null ? new PendingRecordBuffer() : buffer;
-                updated.requeueFront(key.eventRegion(), pending);
-                return updated.isEmpty() ? null : updated;
+            withTrailLock(regionKey(key.region(), key.trailName()), () -> {
+                if (getTrail(key.region(), key.trailName()) == null) {
+                    discardPendingRecords(key);
+                    return;
+                }
+                pendingRecordsByTrail.compute(pendingTrailKey(key), (ignored, buffer) -> {
+                    PendingRecordBuffer updated = buffer == null ? new PendingRecordBuffer() : buffer;
+                    updated.requeueFront(key.eventRegion(), pending);
+                    return updated.isEmpty() ? null : updated;
+                });
             });
         }
     }
@@ -428,7 +505,8 @@ public class CloudTrailService {
         List<TrailKey> result = new ArrayList<>();
         for (Map.Entry<PendingTrailKey, PendingRecordBuffer> e : pendingRecordsByTrail.entrySet()) {
             for (String eventRegion : e.getValue().eventRegions()) {
-                result.add(new TrailKey(e.getKey().region(), e.getKey().trailName(), eventRegion));
+                result.add(new TrailKey(e.getKey().region(), e.getKey().trailName(), eventRegion,
+                        e.getKey().accountId()));
             }
         }
         return result;
@@ -483,9 +561,13 @@ public class CloudTrailService {
      * {@code eventRegion} is the region where the event occurred (used for the S3 delivery path).
      * For single-region trails these are the same; for multi-region trails they differ.
      */
-    public record TrailKey(String region, String trailName, String eventRegion) {}
+    public record TrailKey(String region, String trailName, String eventRegion, String accountId) {
+        public TrailKey(String region, String trailName, String eventRegion) {
+            this(region, trailName, eventRegion, null);
+        }
+    }
 
-    private record PendingTrailKey(String region, String trailName) {}
+    private record PendingTrailKey(String region, String trailName, String accountId) {}
 
     private record PendingRecord(ObjectNode record, long byteCount) {}
 
@@ -612,8 +694,9 @@ public class CloudTrailService {
         }
     }
 
-    private static PendingTrailKey pendingTrailKey(TrailKey key) {
-        return new PendingTrailKey(key.region(), key.trailName());
+    private PendingTrailKey pendingTrailKey(TrailKey key) {
+        return new PendingTrailKey(key.region(), key.trailName(),
+                key.accountId() == null ? regionResolver.getAccountId() : key.accountId());
     }
 
     // --- Helpers ---
@@ -678,7 +761,7 @@ public class CloudTrailService {
     }
 
     private boolean matchesAnyAdvancedSelector(List<AdvancedEventSelector> selectors, S3EventInput in) {
-        String arn = regionResolver.buildGlobalArn("s3", "", in.bucketName() + (in.key() != null ? "/" + in.key() : ""));
+        String arn = "arn:aws:s3:::" + in.bucketName() + (in.key() != null ? "/" + in.key() : "");
         // Bucket-level operations (e.g. ListObjects) have no object key and are reported
         // by CloudTrail as AWS::S3::Bucket resources, not AWS::S3::Object: matching real
         // AWS behavior, an AWS::S3::Object DataResource selector must never match them.
@@ -741,21 +824,20 @@ public class CloudTrailService {
         return values == null || values.isEmpty();
     }
 
-    private static final Pattern BARE_S3_ARN = Pattern.compile("arn:" + AwsArnUtils.PARTITION_REGEX + ":s3");
-
     // Package-private for unit testing.
     static boolean matchesS3DataResourceArn(String configured, String bucketName, String key) {
         if (configured == null) return false;
-        // "arn:<partition>:s3" (bare, no ":::") is shorthand for all buckets + all objects.
-        if (BARE_S3_ARN.matcher(configured).matches()) return true;
-        // Forms accepted, in any partition:
+        // "arn:aws:s3" (bare, no ":::") is shorthand for all buckets + all objects.
+        if (configured.equals("arn:aws:s3")) return true;
+        // Forms accepted:
         //   arn:aws:s3:::                    → all buckets, all keys
         //   arn:aws:s3:::*                   → all buckets (wildcard)
         //   arn:aws:s3:::bucket/             → all keys in bucket
         //   arn:aws:s3:::bucket/prefix       → keys with the given prefix in bucket
         //   arn:aws:s3:::*/*                 → all objects (wildcard bucket + any key)
-        String tail = AwsArnUtils.resourceIfArnFor(configured, "s3").orElse(null);
-        if (tail == null) return false;
+        String prefix = "arn:aws:s3:::";
+        if (!configured.startsWith(prefix)) return false;
+        String tail = configured.substring(prefix.length());
         if (tail.isEmpty() || tail.equals("/")) {
             return true;
         }
@@ -776,28 +858,18 @@ public class CloudTrailService {
         return key.startsWith(configKeyPart);
     }
 
-    // Package-private for unit testing. A read-only event is one that doesn't change a resource, so
-    // SelectObjectContent is one although it is sent as a POST.
+    // Package-private for unit testing.
     static boolean isReadOnlyEvent(String eventName) {
         if (eventName == null) return true;
         return switch (eventName) {
             case "GetObject", "HeadObject", "ListObjects", "ListObjectsV2",
-                 "GetObjectAcl", "GetObjectTagging", "GetObjectAttributes", "ListMultipartUploads",
-                 "GetObjectAnnotation", "ListObjectAnnotations", "SelectObjectContent" -> true;
+                 "GetObjectAcl", "GetObjectTagging", "ListMultipartUploads",
+                 "GetObjectAnnotation", "ListObjectAnnotations" -> true;
             default -> false;
         };
     }
 
-    /**
-     * {@code region} is the event's region, resolved by the caller. Hosts and ARNs are built from it
-     * rather than from the request scope, because the log writer emits its own deliveries from the
-     * flush thread, where the request region falls back to the deployment default.
-     */
-    private ObjectNode buildS3Record(S3EventInput in, String region) {
-        String s3Host = in.bucketName() == null
-                ? "s3." + AwsRegions.dnsSuffixFor(region)
-                : AwsEndpoints.s3Host(in.bucketName(), region);
-        String partition = AwsRegions.partitionFor(region);
+    private ObjectNode buildS3Record(S3EventInput in) {
         ObjectNode record = mapper.createObjectNode();
         record.put("eventVersion", EVENT_VERSION);
         record.set("userIdentity", buildUserIdentity(in.accessKeyId()));
@@ -807,7 +879,7 @@ public class CloudTrailService {
                         .truncatedTo(java.time.temporal.ChronoUnit.SECONDS)));
         record.put("eventSource", S3_EVENT_SOURCE);
         record.put("eventName", in.eventName());
-        record.put("awsRegion", region);
+        record.put("awsRegion", in.region());
         record.put("sourceIPAddress", in.sourceIp() == null ? "127.0.0.1" : in.sourceIp());
         record.put("userAgent", in.userAgent() == null ? "" : in.userAgent());
 
@@ -820,7 +892,9 @@ public class CloudTrailService {
 
         ObjectNode reqParams = mapper.createObjectNode();
         if (in.bucketName() != null) reqParams.put("bucketName", in.bucketName());
-        reqParams.put("Host", s3Host);
+        reqParams.put("Host", in.bucketName() == null
+                ? "s3.amazonaws.com"
+                : in.bucketName() + ".s3.amazonaws.com");
         if (in.key() != null) reqParams.put("key", in.key());
         record.set("requestParameters", reqParams);
         record.set("responseElements", mapper.nullNode());
@@ -842,13 +916,12 @@ public class CloudTrailService {
             ObjectNode bucketRes = mapper.createObjectNode();
             bucketRes.put("accountId", regionResolver.getAccountId());
             bucketRes.put("type", "AWS::S3::Bucket");
-            bucketRes.put("ARN", AwsArnUtils.Arn.global(partition, "s3", "", in.bucketName()).toString());
+            bucketRes.put("ARN", "arn:aws:s3:::" + in.bucketName());
             resources.add(bucketRes);
             if (in.key() != null) {
                 ObjectNode objRes = mapper.createObjectNode();
                 objRes.put("type", "AWS::S3::Object");
-                objRes.put("ARN",
-                        AwsArnUtils.Arn.global(partition, "s3", "", in.bucketName() + "/" + in.key()).toString());
+                objRes.put("ARN", "arn:aws:s3:::" + in.bucketName() + "/" + in.key());
                 resources.add(objRes);
             }
             record.set("resources", resources);
@@ -861,7 +934,9 @@ public class CloudTrailService {
         ObjectNode tls = mapper.createObjectNode();
         tls.put("tlsVersion", "TLSv1.3");
         tls.put("cipherSuite", "TLS_AES_128_GCM_SHA256");
-        tls.put("clientProvidedHostHeader", s3Host);
+        tls.put("clientProvidedHostHeader", in.bucketName() == null
+                ? "s3.amazonaws.com"
+                : in.bucketName() + ".s3.amazonaws.com");
         record.set("tlsDetails", tls);
 
         return record;
@@ -874,7 +949,7 @@ public class CloudTrailService {
         if (accessKeyId == null || "test".equals(accessKeyId)) {
             identity.put("type", "IAMUser");
             identity.put("principalId", "AIDA" + repeat('A', 17));
-            identity.put("arn", regionResolver.buildGlobalArn("iam", accountId, "root"));
+            identity.put("arn", "arn:aws:iam::" + accountId + ":root");
             identity.put("accountId", accountId);
             identity.put("accessKeyId", accessKeyId == null ? "" : accessKeyId);
             identity.put("userName", "root");
@@ -897,7 +972,7 @@ public class CloudTrailService {
 
         identity.put("type", "IAMUser");
         identity.put("principalId", "AIDA" + repeat('A', 17));
-        identity.put("arn", regionResolver.buildGlobalArn("iam", accountId, "user/anonymous"));
+        identity.put("arn", "arn:aws:iam::" + accountId + ":user/anonymous");
         identity.put("accountId", accountId);
         identity.put("accessKeyId", accessKeyId);
         identity.put("userName", "anonymous");
@@ -1033,117 +1108,5 @@ public class CloudTrailService {
                         errorCode, errorMessage, eventTimeMillis);
             }
         }
-    }
-
-    private final StorageBackend<String, List<String>> insightSelectors;
-
-    public Trail describeTrail(String region, String trailNameOrArn) {
-        return findTrailOrThrow(region, trailNameOrArn);
-    }
-
-    public List<String> getInsightSelectors(String region, String trailNameOrArn) {
-        Trail trail = findTrailOrThrow(region, trailNameOrArn);
-        List<String> selectors = insightSelectors.get(regionKey(trail.homeRegion(), trail.name())).orElse(List.of());
-        if (selectors.isEmpty()) {
-            throw new AwsException("InsightNotEnabledException", "Insights are not enabled for this trail.", 400);
-        }
-        return selectors;
-    }
-
-    public List<String> putInsightSelectors(String region, String trailNameOrArn, List<String> selectors) {
-        if (selectors == null || selectors.size() > 2 || selectors.stream().distinct().count() != selectors.size()
-                || selectors.stream().anyMatch(type -> !"ApiCallRateInsight".equals(type)
-                        && !"ApiErrorRateInsight".equals(type))) {
-            throw new AwsException("InvalidInsightSelectorsException", "Invalid insight selectors.", 400);
-        }
-        List<String> normalized = List.copyOf(selectors);
-        Trail resolved = findTrailOrThrow(region, trailNameOrArn);
-        String key = regionKey(resolved.homeRegion(), resolved.name());
-        return withTrailLock(key, () -> {
-            CloudTrailEntry entry = store.get(key).orElseThrow(() -> new AwsException(
-                    "TrailNotFoundException", "Unknown trail: " + trailNameOrArn, 400));
-            Trail trail = entry.trail();
-            Trail updated = new Trail(trail.name(), trail.trailArn(), trail.s3BucketName(), trail.s3KeyPrefix(),
-                    trail.snsTopicArn(), trail.includeGlobalServiceEvents(), trail.isMultiRegionTrail(),
-                    trail.homeRegion(), trail.logFileValidationEnabled(), trail.hasCustomEventSelectors(),
-                    !normalized.isEmpty(), trail.isOrganizationTrail());
-            insightSelectors.put(key, normalized);
-            store.put(key, entry.withTrail(updated));
-            return normalized;
-        });
-    }
-
-
-    private ObjectNode buildS3Record(S3EventInput in) {
-        ObjectNode record = mapper.createObjectNode();
-        record.put("eventVersion", EVENT_VERSION);
-        record.set("userIdentity", buildUserIdentity(in.accessKeyId()));
-        record.put("eventTime", DateTimeFormatter.ISO_INSTANT.format(
-                Instant.ofEpochMilli((in.eventTimeMillis() == 0L
-                        ? System.currentTimeMillis() : in.eventTimeMillis()))
-                        .truncatedTo(java.time.temporal.ChronoUnit.SECONDS)));
-        record.put("eventSource", S3_EVENT_SOURCE);
-        record.put("eventName", in.eventName());
-        record.put("awsRegion", in.region());
-        record.put("sourceIPAddress", in.sourceIp() == null ? "127.0.0.1" : in.sourceIp());
-        record.put("userAgent", in.userAgent() == null ? "" : in.userAgent());
-
-        if (in.errorCode() != null) {
-            record.put("errorCode", in.errorCode());
-            if (in.errorMessage() != null) {
-                record.put("errorMessage", in.errorMessage());
-            }
-        }
-
-        ObjectNode reqParams = mapper.createObjectNode();
-        if (in.bucketName() != null) reqParams.put("bucketName", in.bucketName());
-        reqParams.put("Host", in.bucketName() == null
-                ? "s3.amazonaws.com"
-                : in.bucketName() + ".s3.amazonaws.com");
-        if (in.key() != null) reqParams.put("key", in.key());
-        record.set("requestParameters", reqParams);
-        record.set("responseElements", mapper.nullNode());
-
-        ObjectNode addl = mapper.createObjectNode();
-        addl.put("SignatureVersion", "SigV4");
-        addl.put("CipherSuite", "TLS_AES_128_GCM_SHA256");
-        addl.put("bytesTransferredIn", in.bytesIn());
-        addl.put("AuthenticationMethod", "AuthHeader");
-        addl.put("bytesTransferredOut", in.bytesOut());
-        record.set("additionalEventData", addl);
-
-        record.put("requestID", UUID.randomUUID().toString().replace("-", "").substring(0, 16).toUpperCase());
-        record.put("eventID", UUID.randomUUID().toString());
-        record.put("readOnly", isReadOnlyEvent(in.eventName()));
-
-        if (in.bucketName() != null) {
-            ArrayNode resources = mapper.createArrayNode();
-            ObjectNode bucketRes = mapper.createObjectNode();
-            bucketRes.put("accountId", regionResolver.getAccountId());
-            bucketRes.put("type", "AWS::S3::Bucket");
-            bucketRes.put("ARN", "arn:aws:s3:::" + in.bucketName());
-            resources.add(bucketRes);
-            if (in.key() != null) {
-                ObjectNode objRes = mapper.createObjectNode();
-                objRes.put("type", "AWS::S3::Object");
-                objRes.put("ARN", "arn:aws:s3:::" + in.bucketName() + "/" + in.key());
-                resources.add(objRes);
-            }
-            record.set("resources", resources);
-        }
-
-        record.put("eventType", "AwsApiCall");
-        record.put("managementEvent", false);
-        record.put("eventCategory", "Data");
-
-        ObjectNode tls = mapper.createObjectNode();
-        tls.put("tlsVersion", "TLSv1.3");
-        tls.put("cipherSuite", "TLS_AES_128_GCM_SHA256");
-        tls.put("clientProvidedHostHeader", in.bucketName() == null
-                ? "s3.amazonaws.com"
-                : in.bucketName() + ".s3.amazonaws.com");
-        record.set("tlsDetails", tls);
-
-        return record;
     }
 }

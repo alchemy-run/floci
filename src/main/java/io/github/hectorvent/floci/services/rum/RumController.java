@@ -2,17 +2,20 @@ package io.github.hectorvent.floci.services.rum;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.rum.model.AppMonitor;
+import io.github.hectorvent.floci.services.rum.model.RumMetricDefinition;
+import io.github.hectorvent.floci.services.rum.model.RumMetricsDestination;
+import io.github.hectorvent.floci.services.rum.model.RumResourcePolicy;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.PATCH;
 import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
@@ -21,22 +24,18 @@ import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
-import io.github.hectorvent.floci.services.rum.model.RumMetricDefinition;
-import io.github.hectorvent.floci.services.rum.model.RumMetricsDestination;
-import io.github.hectorvent.floci.services.rum.model.RumResourcePolicy;
-import jakarta.ws.rs.PUT;
+
 import java.util.List;
 
 /**
- * CloudWatch RUM (Smithy restJson1) — minimal app-monitor lifecycle.
+ * CloudWatch RUM (Smithy restJson1): app monitors, extended-metrics destinations and metric
+ * definitions, resource-based policies, and the PutRumEvents / GetAppMonitorData telemetry path.
+ * Tagging is served on {@code /tags/{ResourceArn}} through {@link RumTagHandler}.
  *
- * <p>Exists so the CDK RUM AppMonitor custom resource ({@code Custom::AWS} / AwsCustomResource) —
- * which calls {@code rum:createAppMonitor}/{@code updateAppMonitor}/{@code deleteAppMonitor} — gets a
- * JSON response. Without a {@code rum} service these requests fell through to the S3 catch-all
- * ({@code @Path("/{bucket}")}) and returned an XML error, which the restJson1 SDK could not parse.
- *
- * <p>The literal {@code /appmonitor} paths take JAX-RS precedence over S3's {@code /{bucket}} and
- * {@code /{bucket}/{key}} template routes, so these routes win with no extra routing wiring.
+ * <p>The literal {@code /appmonitor}, {@code /appmonitors} and {@code /rummetrics} paths take JAX-RS
+ * precedence over S3's {@code /{bucket}} and {@code /{bucket}/{key}} template routes, so these routes
+ * win with no extra routing wiring. A RUM path without a route here falls through to S3 and answers
+ * with an S3 XML error the restJson1 SDK cannot parse.
  */
 @Path("/")
 @Produces(MediaType.APPLICATION_JSON)
@@ -116,7 +115,7 @@ public class RumController {
         RumService.Page page = service.listAppMonitors(
                 regionResolver.resolveRegion(headers), maxResults, nextToken);
         ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode summaries = response.putArray("AppMonitorSummaries");
+        var summaries = response.putArray("AppMonitorSummaries");
         for (AppMonitor monitor : page.monitors()) {
             ObjectNode summary = objectMapper.createObjectNode();
             summary.put("Created", monitor.getCreated());
@@ -133,6 +132,8 @@ public class RumController {
         return Response.ok(response).build();
     }
 
+    // Data plane (dataplane.rum.<region>.amazonaws.com in AWS). The SDK sends
+    // POST /appmonitors/{Id}/; the trailing slash is tolerated by the route matcher.
     @POST
     @Path("/appmonitors/{id}")
     public Response putRumEvents(@Context HttpHeaders headers, @PathParam("id") String id, String body) {

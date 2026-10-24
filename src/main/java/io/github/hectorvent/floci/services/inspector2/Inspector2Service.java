@@ -2,34 +2,34 @@ package io.github.hectorvent.floci.services.inspector2;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
+import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.Resettable;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.inspector2.model.CisScanConfiguration;
+import io.github.hectorvent.floci.services.inspector2.model.CisTargets;
+import io.github.hectorvent.floci.services.inspector2.model.InspectorFilter;
 import io.github.hectorvent.floci.services.inspector2.model.InspectorState;
 import io.github.hectorvent.floci.services.organizations.OrganizationsService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.github.hectorvent.floci.core.common.AwsArnUtils;
-import io.github.hectorvent.floci.core.common.PaginatedResult;
-import io.github.hectorvent.floci.core.common.Pagination;
-import io.github.hectorvent.floci.services.inspector2.model.CisScanConfiguration;
-import io.github.hectorvent.floci.services.inspector2.model.CisTargets;
-import io.github.hectorvent.floci.services.inspector2.model.InspectorFilter;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.IntStream;
 
@@ -37,6 +37,24 @@ import java.util.stream.IntStream;
 public class Inspector2Service implements Resettable {
     private static final Set<String> RESOURCE_TYPES = Set.of(
             "EC2", "ECR", "LAMBDA", "LAMBDA_CODE", "CODE_REPOSITORY");
+    private static final Set<String> ENCRYPTION_RESOURCE_TYPES = Set.of(
+            "AWS_EC2_INSTANCE", "AWS_ECR_CONTAINER_IMAGE", "AWS_ECR_REPOSITORY", "AWS_LAMBDA_FUNCTION",
+            "CODE_REPOSITORY", "Microsoft.Compute/virtualMachines",
+            "Microsoft.ContainerRegistry/registry/containerImage", "Microsoft.Web/sites");
+    private static final Map<String, List<String>> PERMISSION_OPERATIONS = permissionOperations();
+    private static final Set<String> CIS_SECURITY_LEVELS = Set.of("LEVEL_1", "LEVEL_2");
+    private static final Set<String> DAYS = Set.of("SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT");
+    private static final String TIME_OF_DAY = "^([0-1]?[0-9]|2[0-3]):([0-5][0-9])$";
+    /** Amazon Inspector's free trial lasts 15 days from activation of each scan type. */
+    private static final double FREE_TRIAL_SECONDS = 15 * 24 * 60 * 60;
+
+    private static Map<String, List<String>> permissionOperations() {
+        Map<String, List<String>> operations = new LinkedHashMap<>();
+        operations.put("EC2", List.of("ENABLE_SCANNING", "DISABLE_SCANNING"));
+        operations.put("ECR", List.of("ENABLE_SCANNING", "DISABLE_SCANNING", "ENABLE_REPOSITORY", "DISABLE_REPOSITORY"));
+        operations.put("LAMBDA", List.of("ENABLE_SCANNING", "DISABLE_SCANNING"));
+        return java.util.Collections.unmodifiableMap(operations);
+    }
 
     private final AccountAwareStorageBackend<InspectorState> states;
     private final OrganizationsService organizationsService;
@@ -54,301 +72,6 @@ public class Inspector2Service implements Resettable {
 
     public InspectorState state(String region) {
         return states.get(region).orElseGet(InspectorState::new);
-    }
-
-    public InspectorState delegatedAdminState(String region, String callerAccountId) {
-        requireManagementAccount(callerAccountId);
-        return stateForAccount(callerAccountId, region);
-    }
-
-    public synchronized void enableDelegatedAdmin(String region, String callerAccountId, String accountId) {
-        requireAccountId(accountId);
-        String managementAccountId = requireManagementAccount(callerAccountId);
-        requireSameOrganization(managementAccountId, accountId);
-
-        InspectorState management = stateForAccount(managementAccountId, region);
-        if (management.getAdminAccountId() != null && !management.getAdminAccountId().equals(accountId)) {
-            throw new AwsException("ConflictException",
-                    "A different delegated administrator is already configured.", 409);
-        }
-        management.setAdminAccountId(accountId);
-        states.putForAccount(managementAccountId, region, management);
-
-        InspectorState delegated = stateForAccount(accountId, region);
-        delegated.setAdminAccountId(accountId);
-        for (String resourceType : RESOURCE_TYPES) {
-            delegated.setResourceStatus(resourceType, "ENABLED");
-        }
-        delegated.setStatus("ENABLED");
-        delegated.setEnablingPollsRemaining(0);
-        states.putForAccount(accountId, region, delegated);
-    }
-
-    public synchronized void disableDelegatedAdmin(String region, String callerAccountId, String accountId) {
-        requireAccountId(accountId);
-        String managementAccountId = requireManagementAccount(callerAccountId);
-        requireSameOrganization(managementAccountId, accountId);
-        InspectorState management = stateForAccount(managementAccountId, region);
-        if (!accountId.equals(management.getAdminAccountId())) {
-            throw new AwsException("ResourceNotFoundException",
-                    "The specified delegated administrator was not found.", 404);
-        }
-        management.setAdminAccountId(null);
-        states.putForAccount(managementAccountId, region, management);
-        InspectorState delegated = stateForAccount(accountId, region);
-        delegated.setAdminAccountId(null);
-        states.putForAccount(accountId, region, delegated);
-    }
-
-    public synchronized InspectorState accountStatus(String region, String callerAccountId, String accountId) {
-        requireAccountId(accountId);
-        authorizeAccountAccess(region, callerAccountId, accountId);
-        InspectorState state = stateForAccount(accountId, region);
-        if ("ENABLING".equals(state.getStatus()) && state.getEnablingPollsRemaining() > 0) {
-            InspectorState response = copyState(state);
-            state.setEnablingPollsRemaining(state.getEnablingPollsRemaining() - 1);
-            states.putForAccount(accountId, region, state);
-            return response;
-        }
-        if ("ENABLING".equals(state.getStatus())) {
-            for (String resourceType : RESOURCE_TYPES) {
-                if ("ENABLING".equals(state.resourceStatus(resourceType))) {
-                    state.setResourceStatus(resourceType, "ENABLED");
-                }
-            }
-            state.setStatus(overallStatus(state));
-            states.putForAccount(accountId, region, state);
-        }
-        return copyState(state);
-    }
-
-    public synchronized Map<String, InspectorState> enable(
-            String region, String callerAccountId, JsonNode request) {
-        List<String> resourceTypes = resourceTypes(request);
-        List<String> accountIds = accountIds(request, callerAccountId);
-
-        for (String accountId : accountIds) {
-            authorizeAccountAccess(region, callerAccountId, accountId);
-        }
-
-        Map<String, InspectorState> result = new LinkedHashMap<>();
-        for (String accountId : accountIds) {
-            InspectorState state = stateForAccount(accountId, region);
-            boolean changed = false;
-            for (String resourceType : resourceTypes) {
-                String current = state.resourceStatus(resourceType);
-                if (!"ENABLED".equals(current) && !"ENABLING".equals(current)) {
-                    state.setResourceStatus(resourceType, "ENABLING");
-                    changed = true;
-                }
-            }
-            if (changed) {
-                state.setStatus("ENABLING");
-                state.setEnablingPollsRemaining(1);
-                states.putForAccount(accountId, region, state);
-            }
-            result.put(accountId, copyState(state));
-        }
-        return result;
-    }
-
-    public synchronized InspectorState updateOrganizationConfiguration(
-            String region, String callerAccountId, JsonNode request) {
-        InspectorState state = requireAdministrator(region, callerAccountId);
-        JsonNode autoEnable = request.get("autoEnable");
-        if (autoEnable == null || !autoEnable.isObject()) {
-            throw new AwsException("ValidationException", "autoEnable is required.", 400);
-        }
-
-        boolean ec2 = requiredBoolean(autoEnable, "ec2");
-        boolean ecr = requiredBoolean(autoEnable, "ecr");
-        boolean lambda = optionalBoolean(autoEnable, "lambda");
-        boolean lambdaCode = optionalBoolean(autoEnable, "lambdaCode");
-        boolean codeRepository = optionalBoolean(autoEnable, "codeRepository");
-
-        state.setAutoEnableEc2(ec2);
-        state.setAutoEnableEcr(ecr);
-        state.setAutoEnableLambda(lambda);
-        state.setAutoEnableLambdaCode(lambdaCode);
-        state.setAutoEnableCodeRepository(codeRepository);
-        states.putForAccount(callerAccountId, region, state);
-        return copyState(state);
-    }
-
-    public InspectorState organizationConfiguration(String region, String callerAccountId) {
-        return copyState(requireAdministrator(region, callerAccountId));
-    }
-
-    private InspectorState requireAdministrator(String region, String callerAccountId) {
-        String managementAccountId = managementAccountFor(callerAccountId)
-                .orElseThrow(() -> new AwsException("AccessDeniedException",
-                        "Only the delegated Amazon Inspector administrator can manage organization configuration.", 403));
-        InspectorState management = stateForAccount(managementAccountId, region);
-        if (management.getAdminAccountId() == null || !callerAccountId.equals(management.getAdminAccountId())) {
-            throw new AwsException("AccessDeniedException",
-                    "Only the delegated Amazon Inspector administrator can manage organization configuration.", 403);
-        }
-        return stateForAccount(callerAccountId, region);
-    }
-
-    private void authorizeAccountAccess(String region, String callerAccountId, String targetAccountId) {
-        if (callerAccountId.equals(targetAccountId)) {
-            return;
-        }
-        String managementAccountId = managementAccountFor(callerAccountId)
-                .orElseThrow(() -> accessDenied("The caller cannot manage the requested Amazon Inspector account."));
-        requireSameOrganization(managementAccountId, targetAccountId);
-        InspectorState management = stateForAccount(managementAccountId, region);
-        if (!callerAccountId.equals(management.getAdminAccountId())) {
-            throw accessDenied("Only the delegated Amazon Inspector administrator can manage member accounts.");
-        }
-    }
-
-    private String requireManagementAccount(String callerAccountId) {
-        String managementAccountId = managementAccountFor(callerAccountId)
-                .orElseThrow(() -> accessDenied("Only the AWS Organizations management account can perform this operation."));
-        if (!callerAccountId.equals(managementAccountId)) {
-            throw accessDenied("Only the AWS Organizations management account can perform this operation.");
-        }
-        return managementAccountId;
-    }
-
-    private void requireSameOrganization(String managementAccountId, String accountId) {
-        String targetManagementAccount = managementAccountFor(accountId)
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                        "The specified AWS account is not a member of the organization.", 404));
-        if (!managementAccountId.equals(targetManagementAccount)) {
-            throw new AwsException("ResourceNotFoundException",
-                    "The specified AWS account is not a member of the organization.", 404);
-        }
-    }
-
-    private java.util.Optional<String> managementAccountFor(String accountId) {
-        return organizationsService.findManagementAccountForResource(accountId);
-    }
-
-    private InspectorState stateForAccount(String accountId, String region) {
-        return states.getForAccount(accountId, region).orElseGet(InspectorState::new);
-    }
-
-    private static List<String> resourceTypes(JsonNode request) {
-        JsonNode resourceTypes = request.get("resourceTypes");
-        if (resourceTypes == null || !resourceTypes.isArray() || resourceTypes.isEmpty() || resourceTypes.size() > 5) {
-            throw new AwsException("ValidationException",
-                    "resourceTypes must contain between 1 and 5 resource types.", 400);
-        }
-        List<String> result = new ArrayList<>(resourceTypes.size());
-        for (JsonNode resourceType : resourceTypes) {
-            if (!resourceType.isTextual() || !RESOURCE_TYPES.contains(resourceType.textValue())) {
-                throw new AwsException("ValidationException", "resourceTypes contains an invalid resource type.", 400);
-            }
-            if (!result.contains(resourceType.textValue())) {
-                result.add(resourceType.textValue());
-            }
-        }
-        return result;
-    }
-
-    private static List<String> accountIds(JsonNode request, String callerAccountId) {
-        JsonNode accountIds = request.get("accountIds");
-        if (accountIds != null && (!accountIds.isArray() || accountIds.size() > 100)) {
-            throw new AwsException("ValidationException", "accountIds must contain at most 100 account IDs.", 400);
-        }
-        if (accountIds == null || accountIds.isEmpty()) {
-            return List.of(callerAccountId);
-        }
-        List<String> result = new ArrayList<>(accountIds.size());
-        for (JsonNode accountId : accountIds) {
-            requireAccountId(accountId.asText(null));
-            result.add(accountId.asText());
-        }
-        return result;
-    }
-
-    private static String overallStatus(InspectorState state) {
-        boolean enabling = RESOURCE_TYPES.stream().anyMatch(type -> "ENABLING".equals(state.resourceStatus(type)));
-        if (enabling) {
-            return "ENABLING";
-        }
-        boolean enabled = RESOURCE_TYPES.stream().anyMatch(type -> "ENABLED".equals(state.resourceStatus(type)));
-        return enabled ? "ENABLED" : "DISABLED";
-    }
-
-    private static InspectorState copyState(InspectorState source) {
-        InspectorState copy = new InspectorState();
-        copy.setAdminAccountId(source.getAdminAccountId());
-        copy.setStatus(source.getStatus());
-        copy.setEnablingPollsRemaining(source.getEnablingPollsRemaining());
-        copy.setEc2Status(source.getEc2Status());
-        copy.setEcrStatus(source.getEcrStatus());
-        copy.setLambdaStatus(source.getLambdaStatus());
-        copy.setLambdaCodeStatus(source.getLambdaCodeStatus());
-        copy.setCodeRepositoryStatus(source.getCodeRepositoryStatus());
-        copy.setAutoEnableEc2(source.isAutoEnableEc2());
-        copy.setAutoEnableEcr(source.isAutoEnableEcr());
-        copy.setAutoEnableLambda(source.isAutoEnableLambda());
-        copy.setAutoEnableLambdaCode(source.isAutoEnableLambdaCode());
-        copy.setAutoEnableCodeRepository(source.isAutoEnableCodeRepository());
-        return copy;
-    }
-
-    private static boolean requiredBoolean(JsonNode node, String field) {
-        JsonNode value = node.get(field);
-        if (value == null || !value.isBoolean()) {
-            throw new AwsException("ValidationException", "autoEnable." + field + " is required.", 400);
-        }
-        return value.booleanValue();
-    }
-
-    private static boolean optionalBoolean(JsonNode node, String field) {
-        JsonNode value = node.get(field);
-        if (value == null || value.isNull()) {
-            return false;
-        }
-        if (!value.isBoolean()) {
-            throw new AwsException("ValidationException", "autoEnable." + field + " must be a boolean.", 400);
-        }
-        return value.booleanValue();
-    }
-
-    private static AwsException accessDenied(String message) {
-        return new AwsException("AccessDeniedException", message, 403);
-    }
-
-    @Override
-    public void clear() {
-        states.clear();
-    }
-
-    static void requireAccountId(String accountId) {
-        if (accountId == null || !accountId.matches("\\d{12}")) {
-            throw new AwsException("ValidationException",
-                    "accountId must be a 12 digit AWS account ID.", 400);
-        }
-    }
-
-    private static final Set<String> ENCRYPTION_RESOURCE_TYPES = Set.of(
-            "AWS_EC2_INSTANCE", "AWS_ECR_CONTAINER_IMAGE", "AWS_ECR_REPOSITORY", "AWS_LAMBDA_FUNCTION",
-            "CODE_REPOSITORY", "Microsoft.Compute/virtualMachines",
-            "Microsoft.ContainerRegistry/registry/containerImage", "Microsoft.Web/sites");
-
-    private static final Map<String, List<String>> PERMISSION_OPERATIONS = permissionOperations();
-
-    private static final Set<String> CIS_SECURITY_LEVELS = Set.of("LEVEL_1", "LEVEL_2");
-
-    private static final Set<String> DAYS = Set.of("SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT");
-
-    private static final String TIME_OF_DAY = "^([0-1]?[0-9]|2[0-3]):([0-5][0-9])$";
-
-    /** Amazon Inspector's free trial lasts 15 days from activation of each scan type. */
-    private static final double FREE_TRIAL_SECONDS = 15 * 24 * 60 * 60;
-
-    private static Map<String, List<String>> permissionOperations() {
-        Map<String, List<String>> operations = new LinkedHashMap<>();
-        operations.put("EC2", List.of("ENABLE_SCANNING", "DISABLE_SCANNING"));
-        operations.put("ECR", List.of("ENABLE_SCANNING", "DISABLE_SCANNING", "ENABLE_REPOSITORY", "DISABLE_REPOSITORY"));
-        operations.put("LAMBDA", List.of("ENABLE_SCANNING", "DISABLE_SCANNING"));
-        return java.util.Collections.unmodifiableMap(operations);
     }
 
     public synchronized String createFilter(String region, String accountId, JsonNode request) {
@@ -1229,6 +952,123 @@ public class Inspector2Service implements Resettable {
         return new AwsException("ValidationException", message, 400);
     }
 
+    public InspectorState delegatedAdminState(String region, String callerAccountId) {
+        requireManagementAccount(callerAccountId);
+        return stateForAccount(callerAccountId, region);
+    }
+
+    public synchronized void enableDelegatedAdmin(String region, String callerAccountId, String accountId) {
+        requireAccountId(accountId);
+        String managementAccountId = requireManagementAccount(callerAccountId);
+        requireSameOrganization(managementAccountId, accountId);
+
+        InspectorState management = stateForAccount(managementAccountId, region);
+        if (management.getAdminAccountId() != null && !management.getAdminAccountId().equals(accountId)) {
+            throw new AwsException("ConflictException",
+                    "A different delegated administrator is already configured.", 409);
+        }
+        management.setAdminAccountId(accountId);
+        states.putForAccount(managementAccountId, region, management);
+
+        InspectorState delegated = stateForAccount(accountId, region);
+        delegated.setAdminAccountId(accountId);
+        for (String resourceType : RESOURCE_TYPES) {
+            delegated.setResourceStatus(resourceType, "ENABLED");
+            delegated.getFreeTrialStarts().putIfAbsent(resourceType, timestamp());
+        }
+        delegated.setStatus("ENABLED");
+        delegated.setDeepInspectionStatus("ACTIVATED");
+        delegated.setEnablingPollsRemaining(0);
+        states.putForAccount(accountId, region, delegated);
+    }
+
+    public synchronized void disableDelegatedAdmin(String region, String callerAccountId, String accountId) {
+        requireAccountId(accountId);
+        String managementAccountId = requireManagementAccount(callerAccountId);
+        requireSameOrganization(managementAccountId, accountId);
+        InspectorState management = stateForAccount(managementAccountId, region);
+        if (!accountId.equals(management.getAdminAccountId())) {
+            throw new AwsException("ResourceNotFoundException",
+                    "The specified delegated administrator was not found.", 404);
+        }
+        management.setAdminAccountId(null);
+        states.putForAccount(managementAccountId, region, management);
+        InspectorState delegated = stateForAccount(accountId, region);
+        delegated.setAdminAccountId(null);
+        states.putForAccount(accountId, region, delegated);
+    }
+
+    /**
+     * Reports an account's scan status. Enabling and disabling are asynchronous in AWS: a
+     * resource type that was just enabled or disabled is observed once in its transitional
+     * state (ENABLING or DISABLING) before it settles.
+     */
+    public synchronized InspectorState accountStatus(String region, String callerAccountId, String accountId) {
+        requireAccountId(accountId);
+        authorizeAccountAccess(region, callerAccountId, accountId);
+        InspectorState state = stateForAccount(accountId, region);
+        boolean enabling = hasResourceStatus(state, "ENABLING");
+        boolean disabling = hasResourceStatus(state, "DISABLING");
+        if (!enabling && !disabling) {
+            return copyState(state);
+        }
+        if (enabling) {
+            if (state.getEnablingPollsRemaining() > 0) {
+                state.setEnablingPollsRemaining(state.getEnablingPollsRemaining() - 1);
+            } else {
+                settle(state, "ENABLING", "ENABLED", "ACTIVATED");
+            }
+        }
+        if (disabling) {
+            if (state.getDisablingPollsRemaining() > 0) {
+                state.setDisablingPollsRemaining(state.getDisablingPollsRemaining() - 1);
+            } else {
+                settle(state, "DISABLING", "DISABLED", "DEACTIVATED");
+            }
+        }
+        state.setStatus(overallStatus(state));
+        states.putForAccount(accountId, region, state);
+        return copyState(state);
+    }
+
+    public synchronized StatusChange enable(String region, String callerAccountId, JsonNode request) {
+        List<String> resourceTypes = resourceTypes(request);
+        List<String> accountIds = accountIds(request, callerAccountId);
+
+        for (String accountId : accountIds) {
+            authorizeAccountAccess(region, callerAccountId, accountId);
+        }
+
+        Map<String, InspectorState> result = new LinkedHashMap<>();
+        List<FailedAccount> failed = new ArrayList<>();
+        for (String accountId : accountIds) {
+            InspectorState state = stateForAccount(accountId, region);
+            boolean disabling = resourceTypes.stream()
+                    .anyMatch(resourceType -> "DISABLING".equals(state.resourceStatus(resourceType)));
+            if (disabling) {
+                failed.add(new FailedAccount(accountId, copyState(state), "DISABLE_IN_PROGRESS",
+                        "A requested resource type is still being disabled for this account."));
+                continue;
+            }
+            boolean changed = false;
+            for (String resourceType : resourceTypes) {
+                String current = state.resourceStatus(resourceType);
+                if (!"ENABLED".equals(current) && !"ENABLING".equals(current)) {
+                    state.setResourceStatus(resourceType, "ENABLING");
+                    state.getFreeTrialStarts().putIfAbsent(resourceType, timestamp());
+                    changed = true;
+                }
+            }
+            if (changed) {
+                state.setStatus(overallStatus(state));
+                state.setEnablingPollsRemaining(1);
+                states.putForAccount(accountId, region, state);
+            }
+            result.put(accountId, copyState(state));
+        }
+        return new StatusChange(result, failed);
+    }
+
     /**
      * Disables scanning of the requested resource types (all of them when none are named).
      * Types that are still enabling are rejected per account with {@code ENABLE_IN_PROGRESS},
@@ -1304,6 +1144,188 @@ public class Inspector2Service implements Resettable {
             }
         }
         return result;
+    }
+
+    public synchronized InspectorState updateOrganizationConfiguration(
+            String region, String callerAccountId, JsonNode request) {
+        InspectorState state = requireAdministrator(region, callerAccountId);
+        JsonNode autoEnable = request.get("autoEnable");
+        if (autoEnable == null || !autoEnable.isObject()) {
+            throw new AwsException("ValidationException", "autoEnable is required.", 400);
+        }
+
+        boolean ec2 = requiredBoolean(autoEnable, "ec2");
+        boolean ecr = requiredBoolean(autoEnable, "ecr");
+        boolean lambda = optionalBoolean(autoEnable, "lambda");
+        boolean lambdaCode = optionalBoolean(autoEnable, "lambdaCode");
+        boolean codeRepository = optionalBoolean(autoEnable, "codeRepository");
+
+        state.setAutoEnableEc2(ec2);
+        state.setAutoEnableEcr(ecr);
+        state.setAutoEnableLambda(lambda);
+        state.setAutoEnableLambdaCode(lambdaCode);
+        state.setAutoEnableCodeRepository(codeRepository);
+        states.putForAccount(callerAccountId, region, state);
+        return copyState(state);
+    }
+
+    public InspectorState organizationConfiguration(String region, String callerAccountId) {
+        return copyState(requireAdministrator(region, callerAccountId));
+    }
+
+    private InspectorState requireAdministrator(String region, String callerAccountId) {
+        String managementAccountId = managementAccountFor(callerAccountId)
+                .orElseThrow(() -> new AwsException("AccessDeniedException",
+                        "Only the delegated Amazon Inspector administrator can manage organization configuration.", 403));
+        InspectorState management = stateForAccount(managementAccountId, region);
+        if (management.getAdminAccountId() == null || !callerAccountId.equals(management.getAdminAccountId())) {
+            throw new AwsException("AccessDeniedException",
+                    "Only the delegated Amazon Inspector administrator can manage organization configuration.", 403);
+        }
+        return stateForAccount(callerAccountId, region);
+    }
+
+    private void authorizeAccountAccess(String region, String callerAccountId, String targetAccountId) {
+        if (callerAccountId.equals(targetAccountId)) {
+            return;
+        }
+        String managementAccountId = managementAccountFor(callerAccountId)
+                .orElseThrow(() -> accessDenied("The caller cannot manage the requested Amazon Inspector account."));
+        requireSameOrganization(managementAccountId, targetAccountId);
+        InspectorState management = stateForAccount(managementAccountId, region);
+        if (!callerAccountId.equals(management.getAdminAccountId())) {
+            throw accessDenied("Only the delegated Amazon Inspector administrator can manage member accounts.");
+        }
+    }
+
+    private String requireManagementAccount(String callerAccountId) {
+        String managementAccountId = managementAccountFor(callerAccountId)
+                .orElseThrow(() -> accessDenied("Only the AWS Organizations management account can perform this operation."));
+        if (!callerAccountId.equals(managementAccountId)) {
+            throw accessDenied("Only the AWS Organizations management account can perform this operation.");
+        }
+        return managementAccountId;
+    }
+
+    private void requireSameOrganization(String managementAccountId, String accountId) {
+        String targetManagementAccount = managementAccountFor(accountId)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "The specified AWS account is not a member of the organization.", 404));
+        if (!managementAccountId.equals(targetManagementAccount)) {
+            throw new AwsException("ResourceNotFoundException",
+                    "The specified AWS account is not a member of the organization.", 404);
+        }
+    }
+
+    private java.util.Optional<String> managementAccountFor(String accountId) {
+        return organizationsService.findManagementAccountForResource(accountId);
+    }
+
+    private InspectorState stateForAccount(String accountId, String region) {
+        return states.getForAccount(accountId, region).orElseGet(InspectorState::new);
+    }
+
+    private static List<String> resourceTypes(JsonNode request) {
+        JsonNode resourceTypes = request.get("resourceTypes");
+        if (resourceTypes == null || !resourceTypes.isArray() || resourceTypes.isEmpty() || resourceTypes.size() > 5) {
+            throw new AwsException("ValidationException",
+                    "resourceTypes must contain between 1 and 5 resource types.", 400);
+        }
+        List<String> result = new ArrayList<>(resourceTypes.size());
+        for (JsonNode resourceType : resourceTypes) {
+            if (!resourceType.isTextual() || !RESOURCE_TYPES.contains(resourceType.textValue())) {
+                throw new AwsException("ValidationException", "resourceTypes contains an invalid resource type.", 400);
+            }
+            if (!result.contains(resourceType.textValue())) {
+                result.add(resourceType.textValue());
+            }
+        }
+        return result;
+    }
+
+    private static List<String> accountIds(JsonNode request, String callerAccountId) {
+        JsonNode accountIds = request.get("accountIds");
+        if (accountIds != null && (!accountIds.isArray() || accountIds.size() > 100)) {
+            throw new AwsException("ValidationException", "accountIds must contain at most 100 account IDs.", 400);
+        }
+        if (accountIds == null || accountIds.isEmpty()) {
+            return List.of(callerAccountId);
+        }
+        List<String> result = new ArrayList<>(accountIds.size());
+        for (JsonNode accountId : accountIds) {
+            requireAccountId(accountId.asText(null));
+            result.add(accountId.asText());
+        }
+        return result;
+    }
+
+    private static String overallStatus(InspectorState state) {
+        if (hasResourceStatus(state, "ENABLING")) {
+            return "ENABLING";
+        }
+        if (hasResourceStatus(state, "ENABLED")) {
+            return "ENABLED";
+        }
+        return hasResourceStatus(state, "DISABLING") ? "DISABLING" : "DISABLED";
+    }
+
+    private static InspectorState copyState(InspectorState source) {
+        InspectorState copy = new InspectorState();
+        copy.setAdminAccountId(source.getAdminAccountId());
+        copy.setStatus(source.getStatus());
+        copy.setEnablingPollsRemaining(source.getEnablingPollsRemaining());
+        copy.setDisablingPollsRemaining(source.getDisablingPollsRemaining());
+        copy.setEc2Status(source.getEc2Status());
+        copy.setEcrStatus(source.getEcrStatus());
+        copy.setLambdaStatus(source.getLambdaStatus());
+        copy.setLambdaCodeStatus(source.getLambdaCodeStatus());
+        copy.setCodeRepositoryStatus(source.getCodeRepositoryStatus());
+        copy.setAutoEnableEc2(source.isAutoEnableEc2());
+        copy.setAutoEnableEcr(source.isAutoEnableEcr());
+        copy.setAutoEnableLambda(source.isAutoEnableLambda());
+        copy.setAutoEnableLambdaCode(source.isAutoEnableLambdaCode());
+        copy.setAutoEnableCodeRepository(source.isAutoEnableCodeRepository());
+        copy.setDeepInspectionStatus(source.getDeepInspectionStatus());
+        source.getFilters().forEach((arn, filter) -> copy.getFilters().put(arn, filter.copy()));
+        source.getCisScanConfigurations().forEach((arn, configuration) ->
+                copy.getCisScanConfigurations().put(arn, configuration.copy()));
+        copy.getFreeTrialStarts().putAll(source.getFreeTrialStarts());
+        return copy;
+    }
+
+    private static boolean requiredBoolean(JsonNode node, String field) {
+        JsonNode value = node.get(field);
+        if (value == null || !value.isBoolean()) {
+            throw new AwsException("ValidationException", "autoEnable." + field + " is required.", 400);
+        }
+        return value.booleanValue();
+    }
+
+    private static boolean optionalBoolean(JsonNode node, String field) {
+        JsonNode value = node.get(field);
+        if (value == null || value.isNull()) {
+            return false;
+        }
+        if (!value.isBoolean()) {
+            throw new AwsException("ValidationException", "autoEnable." + field + " must be a boolean.", 400);
+        }
+        return value.booleanValue();
+    }
+
+    private static AwsException accessDenied(String message) {
+        return new AwsException("AccessDeniedException", message, 403);
+    }
+
+    @Override
+    public void clear() {
+        states.clear();
+    }
+
+    static void requireAccountId(String accountId) {
+        if (accountId == null || !accountId.matches("\\d{12}")) {
+            throw new AwsException("ValidationException",
+                    "accountId must be a 12 digit AWS account ID.", 400);
+        }
     }
 
     /** An account an Enable or Disable request could not change, with the AWS error code. */

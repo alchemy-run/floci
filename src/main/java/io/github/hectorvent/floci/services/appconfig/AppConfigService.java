@@ -1,45 +1,44 @@
 package io.github.hectorvent.floci.services.appconfig;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
-import io.github.hectorvent.floci.core.storage.StorageOperations;
 import io.github.hectorvent.floci.services.appconfig.model.Application;
 import io.github.hectorvent.floci.services.appconfig.model.ConfigurationProfile;
 import io.github.hectorvent.floci.services.appconfig.model.Deployment;
 import io.github.hectorvent.floci.services.appconfig.model.DeploymentStrategy;
 import io.github.hectorvent.floci.services.appconfig.model.DeploymentSummary;
 import io.github.hectorvent.floci.services.appconfig.model.Environment;
-import io.github.hectorvent.floci.services.appconfig.model.HostedConfigurationVersion;
-import io.github.hectorvent.floci.services.appconfig.model.HostedConfigurationVersionSummary;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
-import org.jboss.logging.Logger;
-
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.hectorvent.floci.core.common.AwsArnUtils;
-import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.appconfig.model.Extension;
 import io.github.hectorvent.floci.services.appconfig.model.ExtensionAssociation;
+import io.github.hectorvent.floci.services.appconfig.model.HostedConfigurationVersion;
+import io.github.hectorvent.floci.services.appconfig.model.HostedConfigurationVersionSummary;
 import io.github.hectorvent.floci.services.eventbridge.EventBridgeService;
 import io.github.hectorvent.floci.services.lambda.LambdaService;
 import io.github.hectorvent.floci.services.lambda.model.InvocationType;
 import jakarta.annotation.PreDestroy;
+import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
+import jakarta.inject.Inject;
+import org.jboss.logging.Logger;
+
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -48,6 +47,7 @@ import java.util.concurrent.TimeUnit;
 @ApplicationScoped
 public class AppConfigService {
     private static final Logger LOG = Logger.getLogger(AppConfigService.class);
+    private static final Set<String> IN_FLIGHT_STATES = Set.of("DEPLOYING", "BAKING", "VALIDATING", "ROLLING_BACK");
 
     private final StorageBackend<String, Application> applicationStore;
     private final StorageBackend<String, Environment> environmentStore;
@@ -56,11 +56,21 @@ public class AppConfigService {
     private final StorageBackend<String, HostedConfigurationVersion> versionStore;
     private final StorageBackend<String, Deployment> deploymentStore;
     private final StorageBackend<String, String> activeConfigStore; // envId::profileId -> versionNumber
+    private final StorageBackend<String, Extension> extensionStore;
+    private final StorageBackend<String, ExtensionAssociation> associationStore;
+    private final RegionResolver regionResolver;
+    private final Instance<LambdaService> lambdaService;
+    private final Instance<EventBridgeService> eventBridgeService;
+    private final ObjectMapper objectMapper;
+    private final ScheduledExecutorService scheduler;
+    private final ConcurrentHashMap<String, ScheduledFuture<?>> pendingCompletions = new ConcurrentHashMap<>();
     private final Map<String, DeploymentPageToken> deploymentPageTokens = new ConcurrentHashMap<>();
     private static final int MAX_DEPLOYMENT_PAGE_TOKENS = 1000;
 
     @Inject
-    public AppConfigService(StorageFactory storageFactory, EmulatorConfig config) {
+    public AppConfigService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver,
+                            Instance<LambdaService> lambdaService, Instance<EventBridgeService> eventBridgeService,
+                            ObjectMapper objectMapper) {
         this.applicationStore = storageFactory.create("appconfig", "appconfig-applications.json", new TypeReference<>() {});
         this.environmentStore = storageFactory.create("appconfig", "appconfig-environments.json", new TypeReference<>() {});
         this.profileStore = storageFactory.create("appconfig", "appconfig-profiles.json", new TypeReference<>() {});
@@ -68,6 +78,24 @@ public class AppConfigService {
         this.versionStore = storageFactory.create("appconfig", "appconfig-versions.json", new TypeReference<>() {});
         this.deploymentStore = storageFactory.create("appconfig", "appconfig-deployments.json", new TypeReference<>() {});
         this.activeConfigStore = storageFactory.create("appconfig", "appconfig-active-configs.json", new TypeReference<>() {});
+        this.extensionStore = storageFactory.create("appconfig", "appconfig-extensions.json", new TypeReference<>() {});
+        this.associationStore = storageFactory.create("appconfig", "appconfig-extension-associations.json", new TypeReference<>() {});
+        this.regionResolver = regionResolver;
+        this.lambdaService = lambdaService;
+        this.eventBridgeService = eventBridgeService;
+        this.objectMapper = objectMapper;
+        this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread thread = new Thread(r, "appconfig-deployments");
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
+
+    @PreDestroy
+    void shutdown() {
+        pendingCompletions.values().forEach(future -> future.cancel(false));
+        pendingCompletions.clear();
+        scheduler.shutdownNow();
     }
 
     // ──────────────────────────── Application ────────────────────────────
@@ -77,75 +105,83 @@ public class AppConfigService {
         app.setId(shortId(7));
         app.setName((String) request.get("Name"));
         app.setDescription((String) request.get("Description"));
+        applyTags(app.getTags(), request.get("Tags"));
         applicationStore.put(app.getId(), app);
         return app;
     }
 
-    public Application getApplication(String idOrName) {
-        return resolveApplication(idOrName);
+    public Application updateApplication(String id, Map<String, Object> request) {
+        Application app = getApplication(id);
+        if (request.containsKey("Name")) {
+            app.setName((String) request.get("Name"));
+        }
+        if (request.containsKey("Description")) {
+            app.setDescription((String) request.get("Description"));
+        }
+        applicationStore.put(id, app);
+        return app;
     }
 
-    /** The application whose ID or name is {@code idOrName}. */
-    public Application resolveApplication(String idOrName) {
-        return applicationStore.get(idOrName)
-                .or(() -> listApplications().stream().filter(a -> idOrName.equals(a.getName())).findFirst())
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Application not found", 404));
+    public Application getApplication(String id) {
+        return applicationStore.get(id).orElseThrow(() -> new AwsException("ResourceNotFoundException", "Application not found", 404));
     }
 
     public List<Application> listApplications() {
         return applicationStore.scan(k -> true);
     }
 
-    public void deleteApplication(String idOrName) {
-        applicationStore.get(idOrName)
-                .or(() -> listApplications().stream().filter(a -> idOrName.equals(a.getName())).findFirst())
-                .ifPresent(application -> applicationStore.delete(application.getId()));
+    public void deleteApplication(String id) {
+        getApplication(id);
+        if (!listEnvironments(id).isEmpty() || !listConfigurationProfiles(id).isEmpty()) {
+            throw new AwsException("BadRequestException",
+                    "Cannot delete application " + id + ", because there are still environments existing under it", 400);
+        }
+        applicationStore.delete(id);
     }
 
     // ──────────────────────────── Environment ────────────────────────────
 
-    public Environment createEnvironment(String applicationIdentifier, Map<String, Object> request) {
-        String appId = resolveApplication(applicationIdentifier).getId();
+    public Environment createEnvironment(String appId, Map<String, Object> request) {
+        getApplication(appId);
         Environment env = new Environment();
         env.setId(shortId(7));
         env.setApplicationId(appId);
         env.setName((String) request.get("Name"));
         env.setDescription((String) request.get("Description"));
         env.setState("READY");
+        env.setMonitors(monitorsFrom(request.get("Monitors")));
+        applyTags(env.getTags(), request.get("Tags"));
         environmentStore.put(env.getId(), env);
         return env;
     }
 
-    public Environment getEnvironment(String applicationIdentifier, String environmentIdentifier) {
-        String appId = resolveApplication(applicationIdentifier).getId();
-        return resolveEnvironment(appId, environmentIdentifier);
+    public Environment updateEnvironment(String appId, String envId, Map<String, Object> request) {
+        Environment env = getEnvironment(appId, envId);
+        if (request.containsKey("Name")) {
+            env.setName((String) request.get("Name"));
+        }
+        if (request.containsKey("Description")) {
+            env.setDescription((String) request.get("Description"));
+        }
+        if (request.containsKey("Monitors")) {
+            env.setMonitors(monitorsFrom(request.get("Monitors")));
+        }
+        environmentStore.put(envId, env);
+        return env;
     }
 
-    public synchronized void deleteEnvironment(String applicationIdentifier, String environmentIdentifier) {
-        Application application = resolveApplication(applicationIdentifier);
-        Environment environment = resolveEnvironment(application.getId(), environmentIdentifier);
-        String appId = application.getId();
-        String envId = environment.getId();
-
-        StorageOperations.deleteByPrefix(deploymentStore, appId + "::" + envId + "::");
-        StorageOperations.deleteByPrefix(activeConfigStore, envId + "::");
-
-        String deploymentScope = appId + "::" + envId;
-        deploymentPageTokens.entrySet().removeIf(entry -> entry.getValue().scope().equals(deploymentScope));
+    public void deleteEnvironment(String appId, String envId) {
+        getEnvironment(appId, envId);
         environmentStore.delete(envId);
     }
 
-    /** The environment of {@code appId} whose ID or name is {@code idOrName}. */
-    public Environment resolveEnvironment(String appId, String idOrName) {
-        // An exact ID always wins over another environment's name, and a direct lookup skips the scan.
-        return environmentStore.get(idOrName)
-                .filter(e -> appId.equals(e.getApplicationId()))
-                .or(() -> listEnvironments(appId).stream().filter(e -> idOrName.equals(e.getName())).findFirst())
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Environment not found", 404));
+    public Environment getEnvironment(String appId, String envId) {
+        Environment env = environmentStore.get(envId).orElseThrow(() -> new AwsException("ResourceNotFoundException", "Environment not found", 404));
+        if (!env.getApplicationId().equals(appId)) throw new AwsException("ResourceNotFoundException", "Environment not found in this application", 404);
+        return env;
     }
 
-    public List<Environment> listEnvironments(String applicationIdentifier) {
-        String appId = resolveApplication(applicationIdentifier).getId();
+    public List<Environment> listEnvironments(String appId) {
         return environmentStore.scan(k -> true).stream()
                 .filter(e -> e.getApplicationId().equals(appId))
                 .toList();
@@ -153,8 +189,8 @@ public class AppConfigService {
 
     // ──────────────────────────── Configuration Profile ────────────────────────────
 
-    public ConfigurationProfile createConfigurationProfile(String applicationIdentifier, Map<String, Object> request) {
-        String appId = resolveApplication(applicationIdentifier).getId();
+    public ConfigurationProfile createConfigurationProfile(String appId, Map<String, Object> request) {
+        getApplication(appId);
         ConfigurationProfile profile = new ConfigurationProfile();
         profile.setId(shortId(7));
         profile.setApplicationId(appId);
@@ -162,68 +198,71 @@ public class AppConfigService {
         profile.setDescription((String) request.get("Description"));
         profile.setLocationUri((String) request.get("LocationUri"));
         profile.setType((String) request.get("Type"));
+        profile.setRetrievalRoleArn((String) request.get("RetrievalRoleArn"));
+        profile.setKmsKeyIdentifier((String) request.get("KmsKeyIdentifier"));
+        profile.setValidators(monitorsFrom(request.get("Validators")));
+        applyTags(profile.getTags(), request.get("Tags"));
         profileStore.put(profile.getId(), profile);
         return profile;
     }
 
-    public ConfigurationProfile getConfigurationProfile(String applicationIdentifier, String profileIdentifier) {
-        String appId = resolveApplication(applicationIdentifier).getId();
-        return resolveConfigurationProfile(appId, profileIdentifier);
+    public ConfigurationProfile updateConfigurationProfile(String appId, String profileId, Map<String, Object> request) {
+        ConfigurationProfile profile = getConfigurationProfile(appId, profileId);
+        if (request.containsKey("Name")) {
+            profile.setName((String) request.get("Name"));
+        }
+        if (request.containsKey("Description")) {
+            profile.setDescription((String) request.get("Description"));
+        }
+        if (request.containsKey("RetrievalRoleArn")) {
+            profile.setRetrievalRoleArn((String) request.get("RetrievalRoleArn"));
+        }
+        if (request.containsKey("KmsKeyIdentifier")) {
+            profile.setKmsKeyIdentifier((String) request.get("KmsKeyIdentifier"));
+        }
+        if (request.containsKey("Validators")) {
+            profile.setValidators(monitorsFrom(request.get("Validators")));
+        }
+        profileStore.put(profileId, profile);
+        return profile;
     }
 
-    /** The configuration profile of {@code appId} whose ID or name is {@code idOrName}. */
-    public ConfigurationProfile resolveConfigurationProfile(String appId, String idOrName) {
-        return profileStore.get(idOrName)
-                .filter(p -> appId.equals(p.getApplicationId()))
-                .or(() -> listConfigurationProfiles(appId).stream().filter(p -> idOrName.equals(p.getName())).findFirst())
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Configuration profile not found", 404));
+
+    public ConfigurationProfile getConfigurationProfile(String appId, String profileId) {
+        ConfigurationProfile profile = profileStore.get(profileId).orElseThrow(() -> new AwsException("ResourceNotFoundException", "Configuration profile not found", 404));
+        if (!profile.getApplicationId().equals(appId)) throw new AwsException("ResourceNotFoundException", "Profile not found in this application", 404);
+        return profile;
     }
 
-    public List<ConfigurationProfile> listConfigurationProfiles(String applicationIdentifier) {
-        String appId = resolveApplication(applicationIdentifier).getId();
+    public List<ConfigurationProfile> listConfigurationProfiles(String appId) {
         return profileStore.scan(k -> true).stream()
                 .filter(p -> p.getApplicationId().equals(appId))
                 .toList();
     }
 
-    public void deleteConfigurationProfile(String applicationIdentifier, String profileIdentifier) {
-        String appId = resolveApplication(applicationIdentifier).getId();
+    public void deleteConfigurationProfile(String appId, String profileId) {
         // Unlike deleteApplication (a single, unscoped ID), a profile is nested under an
         // application - a mismatched appId must not be able to delete another application's
         // profile just because its bare profileId is guessed/known. A profileId that doesn't
         // exist at all is still an idempotent no-op, matching deleteApplication's convention;
         // only an existing-but-wrongly-scoped one is rejected.
-        ConfigurationProfile exactProfile = profileStore.get(profileIdentifier).orElse(null);
-        ConfigurationProfile profile = exactProfile != null && appId.equals(exactProfile.getApplicationId())
-                ? exactProfile
-                : listConfigurationProfiles(appId).stream()
-                    .filter(candidate -> profileIdentifier.equals(candidate.getName()))
-                    .findFirst()
-                    .orElse(null);
-        if (profile == null && exactProfile != null) {
-            throw new AwsException("ResourceNotFoundException",
-                    "Configuration profile not found in this application", 404);
+        profileStore.get(profileId).ifPresent(profile -> {
+            if (!profile.getApplicationId().equals(appId)) {
+                throw new AwsException("ResourceNotFoundException", "Configuration profile not found in this application", 404);
+            }
+        });
+        String versionPrefix = appId + "::" + profileId + "::";
+        if (!versionStore.scan(key -> key.startsWith(versionPrefix)).isEmpty()) {
+            throw new AwsException("BadRequestException",
+                    "Cannot delete configuration profile " + profileId + " because hosted configuration versions still exist", 400);
         }
-        if (profile == null) {
-            return;
-        }
-        String profileId = profile.getId();
-        // A hosted configuration version isn't independently addressable outside its profile's
-        // lifecycle - cascade the delete so a caller can't still fetch versions for a profile
-        // that's supposedly gone.
-        StorageOperations.deleteByPrefix(versionStore, appId + "::" + profileId + "::");
         profileStore.delete(profileId);
     }
 
     // ──────────────────────────── Hosted Configuration Version ────────────────────────────
 
-    public HostedConfigurationVersion createHostedConfigurationVersion(String applicationIdentifier,
-                                                                         String profileIdentifier,
-                                                                         byte[] content,
-                                                                         String contentType,
-                                                                         String description) {
-        String appId = resolveApplication(applicationIdentifier).getId();
-        String profileId = resolveConfigurationProfile(appId, profileIdentifier).getId();
+    public HostedConfigurationVersion createHostedConfigurationVersion(String appId, String profileId, byte[] content, String contentType, String description, String versionLabel) {
+        getConfigurationProfile(appId, profileId);
         String prefix = appId + "::" + profileId + "::";
         int nextVersion = versionStore.scan(k -> k.startsWith(prefix))
                 .stream().mapToInt(HostedConfigurationVersion::getVersionNumber).max().orElse(0) + 1;
@@ -235,24 +274,19 @@ public class AppConfigService {
         version.setContent(content);
         version.setContentType(contentType);
         version.setDescription(description);
+        version.setVersionLabel(versionLabel);
 
         versionStore.put(prefix + nextVersion, version);
         return version;
     }
 
-    public HostedConfigurationVersion getHostedConfigurationVersion(String applicationIdentifier,
-                                                                      String profileIdentifier,
-                                                                      int versionNumber) {
-        String appId = resolveApplication(applicationIdentifier).getId();
-        String profileId = resolveConfigurationProfile(appId, profileIdentifier).getId();
+
+    public HostedConfigurationVersion getHostedConfigurationVersion(String appId, String profileId, int versionNumber) {
         return versionStore.get(appId + "::" + profileId + "::" + versionNumber)
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Hosted configuration version not found", 404));
     }
 
-    public List<HostedConfigurationVersionSummary> listHostedConfigurationVersions(String applicationIdentifier,
-                                                                                     String profileIdentifier) {
-        String appId = resolveApplication(applicationIdentifier).getId();
-        String profileId = resolveConfigurationProfile(appId, profileIdentifier).getId();
+    public List<HostedConfigurationVersionSummary> listHostedConfigurationVersions(String appId, String profileId) {
         String prefix = appId + "::" + profileId + "::";
         return versionStore.scan(k -> k.startsWith(prefix))
                 .stream()
@@ -269,11 +303,7 @@ public class AppConfigService {
                 .toList();
     }
 
-    public void deleteHostedConfigurationVersion(String applicationIdentifier,
-                                                  String profileIdentifier,
-                                                  int versionNumber) {
-        String appId = resolveApplication(applicationIdentifier).getId();
-        String profileId = resolveConfigurationProfile(appId, profileIdentifier).getId();
+    public void deleteHostedConfigurationVersion(String appId, String profileId, int versionNumber) {
         versionStore.delete(appId + "::" + profileId + "::" + versionNumber);
     }
 
@@ -289,9 +319,36 @@ public class AppConfigService {
         strategy.setFinalBakeTimeInMinutes((Integer) request.getOrDefault("FinalBakeTimeInMinutes", 0));
         strategy.setGrowthType((String) request.getOrDefault("GrowthType", "LINEAR"));
         strategy.setReplicateTo((String) request.getOrDefault("ReplicateTo", "NONE"));
+        applyTags(strategy.getTags(), request.get("Tags"));
         strategyStore.put(strategy.getId(), strategy);
         return strategy;
     }
+
+
+    public DeploymentStrategy updateDeploymentStrategy(String id, Map<String, Object> request) {
+        DeploymentStrategy strategy = getDeploymentStrategy(id);
+        if (id.startsWith("AppConfig.")) {
+            throw new AwsException("BadRequestException", "Cannot update predefined Deployment Strategy", 400);
+        }
+        if (request.containsKey("Description")) {
+            strategy.setDescription((String) request.get("Description"));
+        }
+        if (request.get("DeploymentDurationInMinutes") instanceof Number duration) {
+            strategy.setDeploymentDurationInMinutes(duration.intValue());
+        }
+        if (request.get("FinalBakeTimeInMinutes") instanceof Number bake) {
+            strategy.setFinalBakeTimeInMinutes(bake.intValue());
+        }
+        if (request.get("GrowthFactor") instanceof Number growth) {
+            strategy.setGrowthFactor(growth.floatValue());
+        }
+        if (request.containsKey("GrowthType")) {
+            strategy.setGrowthType((String) request.get("GrowthType"));
+        }
+        strategyStore.put(id, strategy);
+        return strategy;
+    }
+
 
     public DeploymentStrategy getDeploymentStrategy(String id) {
         // AWS predefined built-in strategies
@@ -359,56 +416,91 @@ public class AppConfigService {
 
     // ──────────────────────────── Deployment ────────────────────────────
 
-    public synchronized Deployment startDeployment(String applicationIdentifier,
-                                                    String environmentIdentifier,
-                                                    Map<String, Object> request) {
-        String appId = resolveApplication(applicationIdentifier).getId();
-        String envId = resolveEnvironment(appId, environmentIdentifier).getId();
-        String profileId = resolveConfigurationProfile(
-                appId, (String) request.get("ConfigurationProfileId")).getId();
+    public Deployment startDeployment(String appId, String envId, Map<String, Object> request) {
+        Environment env = getEnvironment(appId, envId);
+        String profileId = (String) request.get("ConfigurationProfileId");
         String version = (String) request.get("ConfigurationVersion");
         String strategyId = (String) request.get("DeploymentStrategyId");
 
-        getDeploymentStrategy(strategyId);
+        ConfigurationProfile profile = getConfigurationProfile(appId, profileId);
+        DeploymentStrategy strategy = getDeploymentStrategy(strategyId);
+
+        String envPrefix = appId + "::" + envId + "::";
+        boolean inFlight = deploymentStore.scan(k -> k.startsWith(envPrefix)).stream()
+                .anyMatch(d -> IN_FLIGHT_STATES.contains(d.getState()));
+        if (inFlight) {
+            throw new AwsException("ConflictException",
+                    "Environment " + envId + " already has a deployment in progress", 409);
+        }
+
+        int nextNumber = deploymentStore.scan(k -> k.startsWith(envPrefix)).stream()
+                .mapToInt(Deployment::getDeploymentNumber)
+                .max()
+                .orElse(0) + 1;
+
+        boolean gradual = strategy.getDeploymentDurationInMinutes() > 0;
+        Instant now = Instant.now();
 
         Deployment deployment = new Deployment();
         deployment.setApplicationId(appId);
         deployment.setEnvironmentId(envId);
         deployment.setConfigurationProfileId(profileId);
+        deployment.setConfigurationName(profile.getName());
         deployment.setConfigurationVersion(version);
         deployment.setDeploymentStrategyId(strategyId);
-        int nextDeploymentNumber = deploymentStore.scan(key -> true).stream()
-                .mapToInt(Deployment::getDeploymentNumber)
-                .max()
-                .orElse(0) + 1;
-        deployment.setDeploymentNumber(nextDeploymentNumber);
-        deployment.setState("COMPLETE"); // Synchronous immediate deployment
+        deployment.setDeploymentNumber(nextNumber);
         deployment.setDescription((String) request.get("Description"));
+        deployment.setDeploymentDurationInMinutes(strategy.getDeploymentDurationInMinutes());
+        deployment.setGrowthFactor(strategy.getGrowthFactor());
+        deployment.setFinalBakeTimeInMinutes(strategy.getFinalBakeTimeInMinutes());
+        deployment.setGrowthType(strategy.getGrowthType());
+        deployment.setStartedAt(now.toString());
+        if (gradual) {
+            deployment.setState("DEPLOYING");
+            deployment.setPercentageComplete(0f);
+        } else {
+            deployment.setState("COMPLETE");
+            deployment.setPercentageComplete(100f);
+            deployment.setCompletedAt(now.toString());
+        }
 
-        deploymentStore.put(appId + "::" + envId + "::" + deployment.getDeploymentNumber(), deployment);
+        String key = envPrefix + nextNumber;
+        deploymentStore.put(key, deployment);
 
-        // Update active configuration
-        activeConfigStore.put(envId + "::" + profileId, version);
+        if (gradual) {
+            env.setState("DEPLOYING");
+            environmentStore.put(envId, env);
+            ScheduledFuture<?> future = scheduler.schedule(
+                    () -> completeDeployment(key),
+                    strategy.getDeploymentDurationInMinutes(),
+                    TimeUnit.MINUTES);
+            pendingCompletions.put(key, future);
+        } else {
+            activeConfigStore.put(envId + "::" + profileId, version);
+        }
 
-        LOG.infov("Started deployment for app {0}, env {1}, profile {2}, version {3}. State: COMPLETE", appId, envId, profileId, version);
+        // ON_* actions are fire-and-forget. Run them after this call returns so a
+        // Lambda that started the deployment can finish its request before we
+        // invoke the same function with the extension payload.
+        scheduler.execute(() -> {
+            fireExtensionActions(deployment, "ON_DEPLOYMENT_START");
+            if (!gradual) {
+                fireExtensionActions(deployment, "ON_DEPLOYMENT_COMPLETE");
+            }
+        });
+
+        LOG.infov("Started deployment for app {0}, env {1}, profile {2}, version {3}. State: {4}",
+                appId, envId, profileId, version, deployment.getState());
         return deployment;
     }
 
-    public Deployment getDeployment(String applicationIdentifier,
-                                    String environmentIdentifier,
-                                    int deploymentNumber) {
-        String appId = resolveApplication(applicationIdentifier).getId();
-        String envId = resolveEnvironment(appId, environmentIdentifier).getId();
+    public Deployment getDeployment(String appId, String envId, int deploymentNumber) {
         return deploymentStore.get(appId + "::" + envId + "::" + deploymentNumber)
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Deployment not found", 404));
     }
 
-    public DeploymentPage listDeployments(String applicationIdentifier,
-                                          String environmentIdentifier,
-                                          Integer maxResults,
-                                          String nextToken) {
-        String appId = resolveApplication(applicationIdentifier).getId();
-        String envId = resolveEnvironment(appId, environmentIdentifier).getId();
+    public DeploymentPage listDeployments(String appId, String envId, Integer maxResults, String nextToken) {
+        getEnvironment(appId, envId);
         int pageSize = maxResults == null ? 50 : maxResults;
         if (pageSize < 1 || pageSize > 50) {
             throw new AwsException("BadRequestException", "max_results must be between 1 and 50", 400);
@@ -464,12 +556,23 @@ public class AppConfigService {
             summary.setConfigurationName(profile.getName());
             summary.setType(profile.getType());
         }
-        DeploymentStrategy strategy = getDeploymentStrategy(deployment.getDeploymentStrategyId());
-        summary.setDeploymentDurationInMinutes(strategy.getDeploymentDurationInMinutes());
-        summary.setFinalBakeTimeInMinutes(strategy.getFinalBakeTimeInMinutes());
-        summary.setGrowthFactor(strategy.getGrowthFactor());
-        summary.setGrowthType(strategy.getGrowthType());
-        summary.setPercentageComplete("COMPLETE".equals(deployment.getState()) ? 100.0f : 0.0f);
+        summary.setStartedAt(deployment.getStartedAt());
+        summary.setCompletedAt(deployment.getCompletedAt());
+        summary.setDeploymentDurationInMinutes(deployment.getDeploymentDurationInMinutes());
+        summary.setFinalBakeTimeInMinutes(deployment.getFinalBakeTimeInMinutes());
+        summary.setGrowthFactor(deployment.getGrowthFactor());
+        summary.setGrowthType(deployment.getGrowthType());
+        summary.setPercentageComplete(deployment.getPercentageComplete());
+        if (summary.getDeploymentDurationInMinutes() == null) {
+            DeploymentStrategy strategy = getDeploymentStrategy(deployment.getDeploymentStrategyId());
+            summary.setDeploymentDurationInMinutes(strategy.getDeploymentDurationInMinutes());
+            summary.setFinalBakeTimeInMinutes(strategy.getFinalBakeTimeInMinutes());
+            summary.setGrowthFactor(strategy.getGrowthFactor());
+            summary.setGrowthType(strategy.getGrowthType());
+        }
+        if (summary.getPercentageComplete() == null) {
+            summary.setPercentageComplete("COMPLETE".equals(deployment.getState()) ? 100.0f : 0.0f);
+        }
         return summary;
     }
 
@@ -490,168 +593,6 @@ public class AppConfigService {
 
     public String getActiveVersion(String envId, String profileId) {
         return activeConfigStore.get(envId + "::" + profileId).orElse(null);
-    }
-
-    // ──────────────────────────── Tags ────────────────────────────
-
-    public Map<String, String> getApplicationTags(String appId) {
-        return getApplication(appId).getTags();
-    }
-
-    public void tagApplication(String appId, Map<String, String> tags) {
-        Application app = getApplication(appId);
-        app.getTags().putAll(tags);
-        applicationStore.put(app.getId(), app);
-    }
-
-    public void untagApplication(String appId, List<String> tagKeys) {
-        Application app = getApplication(appId);
-        tagKeys.forEach(app.getTags()::remove);
-        applicationStore.put(app.getId(), app);
-    }
-
-    private static String shortId(int length) {
-        return UUID.randomUUID().toString().replace("-", "").substring(0, length);
-    }
-
-    private static final Set<String> IN_FLIGHT_STATES = Set.of("DEPLOYING", "BAKING", "VALIDATING", "ROLLING_BACK");
-
-    private final StorageBackend<String, Extension> extensionStore;
-
-    private final StorageBackend<String, ExtensionAssociation> associationStore;
-
-    private final RegionResolver regionResolver;
-
-    private final Instance<LambdaService> lambdaService;
-
-    private final Instance<EventBridgeService> eventBridgeService;
-
-    private final ObjectMapper objectMapper;
-
-    private final ScheduledExecutorService scheduler;
-
-    private final ConcurrentHashMap<String, ScheduledFuture<?>> pendingCompletions = new ConcurrentHashMap<>();
-
-    @Inject
-    public AppConfigService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver,
-                            Instance<LambdaService> lambdaService, Instance<EventBridgeService> eventBridgeService,
-                            ObjectMapper objectMapper) {
-        this.applicationStore = storageFactory.create("appconfig", "appconfig-applications.json", new TypeReference<>() {});
-        this.environmentStore = storageFactory.create("appconfig", "appconfig-environments.json", new TypeReference<>() {});
-        this.profileStore = storageFactory.create("appconfig", "appconfig-profiles.json", new TypeReference<>() {});
-        this.strategyStore = storageFactory.create("appconfig", "appconfig-strategies.json", new TypeReference<>() {});
-        this.versionStore = storageFactory.create("appconfig", "appconfig-versions.json", new TypeReference<>() {});
-        this.deploymentStore = storageFactory.create("appconfig", "appconfig-deployments.json", new TypeReference<>() {});
-        this.activeConfigStore = storageFactory.create("appconfig", "appconfig-active-configs.json", new TypeReference<>() {});
-        this.extensionStore = storageFactory.create("appconfig", "appconfig-extensions.json", new TypeReference<>() {});
-        this.associationStore = storageFactory.create("appconfig", "appconfig-extension-associations.json", new TypeReference<>() {});
-        this.regionResolver = regionResolver;
-        this.lambdaService = lambdaService;
-        this.eventBridgeService = eventBridgeService;
-        this.objectMapper = objectMapper;
-        this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread thread = new Thread(r, "appconfig-deployments");
-            thread.setDaemon(true);
-            return thread;
-        });
-    }
-
-    @PreDestroy
-    void shutdown() {
-        pendingCompletions.values().forEach(future -> future.cancel(false));
-        pendingCompletions.clear();
-        scheduler.shutdownNow();
-    }
-
-    public Application updateApplication(String id, Map<String, Object> request) {
-        Application app = getApplication(id);
-        if (request.containsKey("Name")) {
-            app.setName((String) request.get("Name"));
-        }
-        if (request.containsKey("Description")) {
-            app.setDescription((String) request.get("Description"));
-        }
-        applicationStore.put(id, app);
-        return app;
-    }
-
-    public Environment updateEnvironment(String appId, String envId, Map<String, Object> request) {
-        Environment env = getEnvironment(appId, envId);
-        if (request.containsKey("Name")) {
-            env.setName((String) request.get("Name"));
-        }
-        if (request.containsKey("Description")) {
-            env.setDescription((String) request.get("Description"));
-        }
-        if (request.containsKey("Monitors")) {
-            env.setMonitors(monitorsFrom(request.get("Monitors")));
-        }
-        environmentStore.put(envId, env);
-        return env;
-    }
-
-    public ConfigurationProfile updateConfigurationProfile(String appId, String profileId, Map<String, Object> request) {
-        ConfigurationProfile profile = getConfigurationProfile(appId, profileId);
-        if (request.containsKey("Name")) {
-            profile.setName((String) request.get("Name"));
-        }
-        if (request.containsKey("Description")) {
-            profile.setDescription((String) request.get("Description"));
-        }
-        if (request.containsKey("RetrievalRoleArn")) {
-            profile.setRetrievalRoleArn((String) request.get("RetrievalRoleArn"));
-        }
-        if (request.containsKey("KmsKeyIdentifier")) {
-            profile.setKmsKeyIdentifier((String) request.get("KmsKeyIdentifier"));
-        }
-        if (request.containsKey("Validators")) {
-            profile.setValidators(monitorsFrom(request.get("Validators")));
-        }
-        profileStore.put(profileId, profile);
-        return profile;
-    }
-
-    public HostedConfigurationVersion createHostedConfigurationVersion(String appId, String profileId, byte[] content, String contentType, String description, String versionLabel) {
-        getConfigurationProfile(appId, profileId);
-        String prefix = appId + "::" + profileId + "::";
-        int nextVersion = versionStore.scan(k -> k.startsWith(prefix))
-                .stream().mapToInt(HostedConfigurationVersion::getVersionNumber).max().orElse(0) + 1;
-
-        HostedConfigurationVersion version = new HostedConfigurationVersion();
-        version.setApplicationId(appId);
-        version.setConfigurationProfileId(profileId);
-        version.setVersionNumber(nextVersion);
-        version.setContent(content);
-        version.setContentType(contentType);
-        version.setDescription(description);
-        version.setVersionLabel(versionLabel);
-
-        versionStore.put(prefix + nextVersion, version);
-        return version;
-    }
-
-    public DeploymentStrategy updateDeploymentStrategy(String id, Map<String, Object> request) {
-        DeploymentStrategy strategy = getDeploymentStrategy(id);
-        if (id.startsWith("AppConfig.")) {
-            throw new AwsException("BadRequestException", "Cannot update predefined Deployment Strategy", 400);
-        }
-        if (request.containsKey("Description")) {
-            strategy.setDescription((String) request.get("Description"));
-        }
-        if (request.get("DeploymentDurationInMinutes") instanceof Number duration) {
-            strategy.setDeploymentDurationInMinutes(duration.intValue());
-        }
-        if (request.get("FinalBakeTimeInMinutes") instanceof Number bake) {
-            strategy.setFinalBakeTimeInMinutes(bake.intValue());
-        }
-        if (request.get("GrowthFactor") instanceof Number growth) {
-            strategy.setGrowthFactor(growth.floatValue());
-        }
-        if (request.containsKey("GrowthType")) {
-            strategy.setGrowthType((String) request.get("GrowthType"));
-        }
-        strategyStore.put(id, strategy);
-        return strategy;
     }
 
     public Deployment stopDeployment(String appId, String envId, int deploymentNumber) {
@@ -878,6 +819,8 @@ public class AppConfigService {
         return value == null ? "" : value;
     }
 
+    // ──────────────────────────── Extensions ────────────────────────────
+
     public Extension createExtension(Map<String, Object> request) {
         Extension extension = new Extension();
         extension.setId(shortId(7));
@@ -989,6 +932,24 @@ public class AppConfigService {
                 // Non-hosted versions are accepted as-is for local validation.
             }
         }
+    }
+
+    // ──────────────────────────── Tags ────────────────────────────
+
+    public Map<String, String> getApplicationTags(String appId) {
+        return getApplication(appId).getTags();
+    }
+
+    public void tagApplication(String appId, Map<String, String> tags) {
+        Application app = getApplication(appId);
+        app.getTags().putAll(tags);
+        applicationStore.put(appId, app);
+    }
+
+    public void untagApplication(String appId, List<String> tagKeys) {
+        Application app = getApplication(appId);
+        tagKeys.forEach(app.getTags()::remove);
+        applicationStore.put(appId, app);
     }
 
     public Map<String, String> getEnvironmentTags(String envId) {
@@ -1129,5 +1090,9 @@ public class AppConfigService {
                 target.put(String.valueOf(k), String.valueOf(v));
             }
         });
+    }
+
+    private static String shortId(int length) {
+        return UUID.randomUUID().toString().replace("-", "").substring(0, length);
     }
 }

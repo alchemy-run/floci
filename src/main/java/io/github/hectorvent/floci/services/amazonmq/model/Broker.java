@@ -63,31 +63,40 @@ public class Broker {
     @JsonProperty("tags")
     private Map<String, String> tags;
 
-    // Optional CreateBroker members, echoed back by DescribeBroker. Null when the
-    // request omitted them, and on records persisted before they were stored.
-    @JsonProperty("securityGroups")
-    private List<String> securityGroups;
+    // UpdateBroker state. Engine version, instance type, authentication strategy and
+    // configuration changes stay pending until the next RebootBroker, as on AWS.
+    @JsonProperty("authenticationStrategy")
+    private String authenticationStrategy;
 
-    @JsonProperty("subnetIds")
-    private List<String> subnetIds;
+    @JsonProperty("pendingEngineVersion")
+    private String pendingEngineVersion;
 
-    @JsonProperty("logs")
-    private Map<String, Object> logs;
+    @JsonProperty("pendingHostInstanceType")
+    private String pendingHostInstanceType;
+
+    @JsonProperty("pendingAuthenticationStrategy")
+    private String pendingAuthenticationStrategy;
+
+    @JsonProperty("configurationId")
+    private String configurationId;
+
+    @JsonProperty("configurationRevision")
+    private Integer configurationRevision;
+
+    @JsonProperty("pendingConfigurationId")
+    private String pendingConfigurationId;
+
+    @JsonProperty("pendingConfigurationRevision")
+    private Integer pendingConfigurationRevision;
 
     @JsonProperty("maintenanceWindowStartTime")
     private Map<String, Object> maintenanceWindowStartTime;
 
-    @JsonProperty("storageType")
-    private String storageType;
+    @JsonProperty("logs")
+    private Map<String, Object> logs;
 
-    @JsonProperty("authenticationStrategy")
-    private String authenticationStrategy;
-
-    @JsonProperty("encryptionOptions")
-    private Map<String, Object> encryptionOptions;
-
-    @JsonProperty("configuration")
-    private Map<String, Object> configuration;
+    @JsonProperty("securityGroups")
+    private List<String> securityGroups;
 
     // Internal bookkeeping. These are NOT part of the AWS response shape, but they ARE
     // persisted so the broker stays manageable after an emulator restart in persistent
@@ -102,13 +111,6 @@ public class Broker {
     // naming (same convention as MskCluster.volumeId, which is likewise persisted so
     // removeBrokerStorage can locate the named volume after a restart).
     private String volumeId;
-
-    /**
-     * The Docker volume name. Stamped at creation with the current prefix; null on records
-     * written before this field existed, which are backfilled with the frozen legacy name so
-     * their data stays reachable.
-     */
-    private String dockerVolumeName;
 
     public Broker() {}
 
@@ -127,12 +129,6 @@ public class Broker {
     }
 
     public String getBrokerId() { return brokerId; }
-
-    /**
-     * The CloudWatch log group the broker's general logs go to, as DescribeBroker
-     * reports it. Not a getter, so Jackson neither persists nor returns it.
-     */
-    public String generalLogGroup() { return "/aws/amazonmq/broker/" + brokerId + "/general"; }
     public void setBrokerId(String brokerId) { this.brokerId = brokerId; }
 
     public String getBrokerArn() { return brokerArn; }
@@ -174,29 +170,38 @@ public class Broker {
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags; }
 
-    public List<String> getSecurityGroups() { return securityGroups; }
-    public void setSecurityGroups(List<String> securityGroups) { this.securityGroups = securityGroups; }
+    public String getAuthenticationStrategy() { return authenticationStrategy; }
+    public void setAuthenticationStrategy(String authenticationStrategy) { this.authenticationStrategy = authenticationStrategy; }
 
-    public List<String> getSubnetIds() { return subnetIds; }
-    public void setSubnetIds(List<String> subnetIds) { this.subnetIds = subnetIds; }
+    public String getPendingEngineVersion() { return pendingEngineVersion; }
+    public void setPendingEngineVersion(String pendingEngineVersion) { this.pendingEngineVersion = pendingEngineVersion; }
 
-    public Map<String, Object> getLogs() { return logs; }
-    public void setLogs(Map<String, Object> logs) { this.logs = logs; }
+    public String getPendingHostInstanceType() { return pendingHostInstanceType; }
+    public void setPendingHostInstanceType(String pendingHostInstanceType) { this.pendingHostInstanceType = pendingHostInstanceType; }
+
+    public String getPendingAuthenticationStrategy() { return pendingAuthenticationStrategy; }
+    public void setPendingAuthenticationStrategy(String pendingAuthenticationStrategy) { this.pendingAuthenticationStrategy = pendingAuthenticationStrategy; }
+
+    public String getConfigurationId() { return configurationId; }
+    public void setConfigurationId(String configurationId) { this.configurationId = configurationId; }
+
+    public Integer getConfigurationRevision() { return configurationRevision; }
+    public void setConfigurationRevision(Integer configurationRevision) { this.configurationRevision = configurationRevision; }
+
+    public String getPendingConfigurationId() { return pendingConfigurationId; }
+    public void setPendingConfigurationId(String pendingConfigurationId) { this.pendingConfigurationId = pendingConfigurationId; }
+
+    public Integer getPendingConfigurationRevision() { return pendingConfigurationRevision; }
+    public void setPendingConfigurationRevision(Integer pendingConfigurationRevision) { this.pendingConfigurationRevision = pendingConfigurationRevision; }
 
     public Map<String, Object> getMaintenanceWindowStartTime() { return maintenanceWindowStartTime; }
     public void setMaintenanceWindowStartTime(Map<String, Object> maintenanceWindowStartTime) { this.maintenanceWindowStartTime = maintenanceWindowStartTime; }
 
-    public String getStorageType() { return storageType; }
-    public void setStorageType(String storageType) { this.storageType = storageType; }
+    public Map<String, Object> getLogs() { return logs; }
+    public void setLogs(Map<String, Object> logs) { this.logs = logs; }
 
-    public String getAuthenticationStrategy() { return authenticationStrategy; }
-    public void setAuthenticationStrategy(String authenticationStrategy) { this.authenticationStrategy = authenticationStrategy; }
-
-    public Map<String, Object> getEncryptionOptions() { return encryptionOptions; }
-    public void setEncryptionOptions(Map<String, Object> encryptionOptions) { this.encryptionOptions = encryptionOptions; }
-
-    public Map<String, Object> getConfiguration() { return configuration; }
-    public void setConfiguration(Map<String, Object> configuration) { this.configuration = configuration; }
+    public List<String> getSecurityGroups() { return securityGroups; }
+    public void setSecurityGroups(List<String> securityGroups) { this.securityGroups = securityGroups; }
 
     public String getContainerId() { return containerId; }
     public void setContainerId(String containerId) { this.containerId = containerId; }
@@ -206,57 +211,4 @@ public class Broker {
 
     public String getVolumeId() { return volumeId; }
     public void setVolumeId(String volumeId) { this.volumeId = volumeId; }
-
-    public String getDockerVolumeName() { return dockerVolumeName; }
-
-    public void setDockerVolumeName(String dockerVolumeName) { this.dockerVolumeName = dockerVolumeName; }
-
-    @JsonProperty("pendingEngineVersion")
-    private String pendingEngineVersion;
-
-    @JsonProperty("pendingHostInstanceType")
-    private String pendingHostInstanceType;
-
-    @JsonProperty("pendingAuthenticationStrategy")
-    private String pendingAuthenticationStrategy;
-
-    @JsonProperty("configurationId")
-    private String configurationId;
-
-    @JsonProperty("configurationRevision")
-    private Integer configurationRevision;
-
-    @JsonProperty("pendingConfigurationId")
-    private String pendingConfigurationId;
-
-    @JsonProperty("pendingConfigurationRevision")
-    private Integer pendingConfigurationRevision;
-
-    public String getPendingEngineVersion() { return pendingEngineVersion; }
-
-    public void setPendingEngineVersion(String pendingEngineVersion) { this.pendingEngineVersion = pendingEngineVersion; }
-
-    public String getPendingHostInstanceType() { return pendingHostInstanceType; }
-
-    public void setPendingHostInstanceType(String pendingHostInstanceType) { this.pendingHostInstanceType = pendingHostInstanceType; }
-
-    public String getPendingAuthenticationStrategy() { return pendingAuthenticationStrategy; }
-
-    public void setPendingAuthenticationStrategy(String pendingAuthenticationStrategy) { this.pendingAuthenticationStrategy = pendingAuthenticationStrategy; }
-
-    public String getConfigurationId() { return configurationId; }
-
-    public void setConfigurationId(String configurationId) { this.configurationId = configurationId; }
-
-    public Integer getConfigurationRevision() { return configurationRevision; }
-
-    public void setConfigurationRevision(Integer configurationRevision) { this.configurationRevision = configurationRevision; }
-
-    public String getPendingConfigurationId() { return pendingConfigurationId; }
-
-    public void setPendingConfigurationId(String pendingConfigurationId) { this.pendingConfigurationId = pendingConfigurationId; }
-
-    public Integer getPendingConfigurationRevision() { return pendingConfigurationRevision; }
-
-    public void setPendingConfigurationRevision(Integer pendingConfigurationRevision) { this.pendingConfigurationRevision = pendingConfigurationRevision; }
 }

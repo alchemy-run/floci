@@ -9,15 +9,13 @@ public class HealthCheck {
     private String callerReference;
     private HealthCheckConfig config;
     private long healthCheckVersion;
-    private String requestSettings;
 
     public HealthCheck() {}
 
-    public HealthCheck(String id, String callerReference, HealthCheckConfig config, String requestSettings) {
+    public HealthCheck(String id, String callerReference, HealthCheckConfig config) {
         this.id = id;
         this.callerReference = callerReference;
         this.config = config;
-        this.requestSettings = requestSettings;
         this.healthCheckVersion = 1;
     }
 
@@ -32,8 +30,4 @@ public class HealthCheck {
 
     public long getHealthCheckVersion() { return healthCheckVersion; }
     public void setHealthCheckVersion(long healthCheckVersion) { this.healthCheckVersion = healthCheckVersion; }
-
-    /** The create request's settings in canonical form, which a retry with the same reference must match. */
-    public String getRequestSettings() { return requestSettings; }
-    public void setRequestSettings(String requestSettings) { this.requestSettings = requestSettings; }
 }

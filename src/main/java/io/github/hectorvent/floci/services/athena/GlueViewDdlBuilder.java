@@ -1,22 +1,22 @@
 package io.github.hectorvent.floci.services.athena;
 
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.glue.GlueService;
-import io.github.hectorvent.floci.services.glue.GlueTableResolver;
+import io.github.hectorvent.floci.services.glue.model.Column;
 import io.github.hectorvent.floci.services.glue.model.Database;
 import io.github.hectorvent.floci.services.glue.model.Table;
+import io.github.hectorvent.floci.services.s3.S3Service;
+import io.github.hectorvent.floci.services.s3.model.S3Object;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
-import java.util.List;
-import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.services.glue.model.Column;
-import io.github.hectorvent.floci.services.s3.S3Service;
-import io.github.hectorvent.floci.services.s3.model.S3Object;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+
 
 @ApplicationScoped
 public class GlueViewDdlBuilder {
@@ -30,11 +30,21 @@ public class GlueViewDdlBuilder {
      */
     private static final String ICEBERG_EXTENSION_SETUP = "INSTALL iceberg; LOAD iceberg;\n";
 
+    /** Glue table property AWS/pyiceberg set to mark a table as Iceberg-format. */
+    private static final String PARAM_TABLE_TYPE = "table_type";
+
+    /** Glue table property holding the path to the table's current Iceberg metadata JSON. */
+    private static final String PARAM_METADATA_LOCATION = "metadata_location";
+
+    private static final String ICEBERG_TABLE_TYPE = "ICEBERG";
+
     private final GlueService glueService;
+    private final S3Service s3Service;
 
     @Inject
-    public GlueViewDdlBuilder(GlueService glueService) {
+    public GlueViewDdlBuilder(GlueService glueService, S3Service s3Service) {
         this.glueService = glueService;
+        this.s3Service = s3Service;
     }
 
     public String build(String contextDatabase) {
@@ -107,23 +117,22 @@ public class GlueViewDdlBuilder {
                 String target = qualified
                         ? quote(schemaOrNull) + "." + quote(t.getName())
                         : quote(t.getName());
-                String fromClause;
-                if (GlueTableResolver.isIcebergTable(t) && GlueTableResolver.icebergMetadataLocation(t) != null
-                        && !GlueTableResolver.icebergMetadataLocation(t).isBlank()) {
-                    fromClause = GlueTableResolver.icebergReadExpression(GlueTableResolver.icebergMetadataLocation(t));
+                List<String> selects = new ArrayList<>();
+                if (isIcebergTable(t) && icebergMetadataLocation(t) != null && !icebergMetadataLocation(t).isBlank()) {
+                    selects.add("SELECT " + buildProjection(t) + " FROM " + icebergReadExpression(icebergMetadataLocation(t)));
                     usesIceberg = true;
                 } else {
-                    String readFn = GlueTableResolver.inferReadFunction(t);
-                    String readPath = GlueTableResolver.readPath(t, normalizedLocation);
-                    fromClause = GlueTableResolver.readExpression(readFn, readPath);
+                    String readPath = PartitionProjection.readPath(t, normalizedLocation);
+                    List<String> paths = dataPaths(t, readPath);
+                    if (paths.isEmpty()) {
+                        continue;
+                    }
+                    for (String path : paths) {
+                        selects.add("SELECT " + buildProjection(t) + " FROM " + AthenaGlueDdl.readExpression(t, path));
+                    }
                 }
-                sb.append("CREATE OR REPLACE VIEW ")
-                  .append(target)
-                  .append(" AS SELECT ")
-                  .append(GlueTableResolver.buildProjection(t))
-                  .append(" FROM ")
-                  .append(fromClause)
-                  .append(";\n");
+                sb.append("CREATE OR REPLACE VIEW ").append(target)
+                        .append(" AS ").append(String.join(" UNION ALL ", selects)).append(";\n");
             } catch (Exception e) {
                 LOG.debugv("skip Glue table {0}.{1}: {2}", schemaOrNull, t != null ? t.getName() : "unknown", e.getMessage());
             }
@@ -131,26 +140,33 @@ public class GlueViewDdlBuilder {
         return usesIceberg;
     }
 
-    static String quote(String id) {
-        return "\"" + id.replace("\"", "\"\"") + "\"";
+    private List<String> dataPaths(Table table, String location) {
+        if (!location.startsWith("s3://")) {
+            return List.of(AthenaGlueDdl.globForPrefix(location));
+        }
+        int slash = location.indexOf('/', 5);
+        String bucket = slash < 0 ? location.substring(5) : location.substring(5, slash);
+        try {
+            s3Service.headBucket(bucket);
+        } catch (AwsException e) {
+            if ("NoSuchBucket".equals(e.getErrorCode()) || e.getHttpStatus() == 404) {
+                return List.of();
+            }
+            throw e;
+        }
+        if (!PartitionProjection.enabled(table)) {
+            String prefix = slash < 0 ? "" : location.substring(slash + 1) + "/";
+            List<String> files = s3Service.listObjects(bucket, prefix, null, 1000).stream()
+                    .map(S3Object::getKey)
+                    .filter(key -> key != null && !key.endsWith("/"))
+                    .map(key -> "s3://" + bucket + "/" + key)
+                    .toList();
+            if (!files.isEmpty()) {
+                return files;
+            }
+        }
+        return List.of(AthenaGlueDdl.globForPrefix(location));
     }
-
-    /** Glue table property AWS/pyiceberg set to mark a table as Iceberg-format. */
-    private static final String PARAM_TABLE_TYPE = "table_type";
-
-    /** Glue table property holding the path to the table's current Iceberg metadata JSON. */
-    private static final String PARAM_METADATA_LOCATION = "metadata_location";
-
-    private static final String ICEBERG_TABLE_TYPE = "ICEBERG";
-
-    private final S3Service s3Service;
-
-    @Inject
-    public GlueViewDdlBuilder(GlueService glueService, S3Service s3Service) {
-        this.glueService = glueService;
-        this.s3Service = s3Service;
-    }
-
 
     /**
      * Projects the columns the catalog declares, rather than whatever the underlying files spell.
@@ -256,5 +272,9 @@ public class GlueViewDdlBuilder {
 
     static boolean containsIgnoreCase(String str, String sub) {
         return str != null && str.toLowerCase(Locale.ROOT).contains(sub);
+    }
+
+    static String quote(String id) {
+        return "\"" + id.replace("\"", "\"\"") + "\"";
     }
 }

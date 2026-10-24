@@ -1,10 +1,10 @@
 package io.github.hectorvent.floci.services.sagemaker;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.dockerjava.api.command.InspectContainerResponse;
 import com.github.dockerjava.api.exception.NotFoundException;
 import com.github.dockerjava.api.model.Frame;
 import com.github.dockerjava.core.command.LogContainerResultCallback;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.ContainerTeardown;
 import io.github.hectorvent.floci.core.common.Resettable;
@@ -15,7 +15,6 @@ import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.core.common.docker.ContainerStorageHelper;
-import io.github.hectorvent.floci.core.common.docker.RetryingTarCopier;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
 import io.github.hectorvent.floci.services.sagemaker.model.SageMakerEntities.TrainingJobResource;
@@ -27,6 +26,7 @@ import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream;
 import org.jboss.logging.Logger;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.InputStream;
@@ -80,19 +80,15 @@ public class SageMakerTrainingRunner implements ContainerTeardown, Resettable {
     }
 
     public void runAsync(TrainingJobResource job, SageMakerService service) {
-        runAsync(job, service, RetryingTarCopier.DEFAULT_BACKOFF_MS);
+        executor.submit(() -> run(job, service));
     }
 
-    void runAsync(TrainingJobResource job, SageMakerService service, long backoffMillis) {
-        executor.submit(() -> run(job, service, backoffMillis));
-    }
-
-    private void run(TrainingJobResource job, SageMakerService service, long backoffMillis) {
+    private void run(TrainingJobResource job, SageMakerService service) {
         String containerId = null;
         Closeable logs = null;
         try {
             String image = SageMakerEndpointManager.string(job.algorithmSpecification.get("TrainingImage"));
-            String name = ContainerStorageHelper.dockerName(config, "sagemaker-training-" + job.trainingJobName);
+            String name = ContainerStorageHelper.dockerName(config, "floci-sagemaker-training-" + job.trainingJobName);
             lifecycleManager.removeIfExists(name);
             ContainerBuilder.Builder builder = containerBuilder.newContainer(image)
                     .withName(name)
@@ -110,7 +106,7 @@ public class SageMakerTrainingRunner implements ContainerTeardown, Resettable {
             containerId = lifecycleManager.create(spec);
             containers.put(job.trainingJobName, containerId);
             job.containerId = containerId;
-            copyTrainingInput(containerId, job, backoffMillis);
+            copyTrainingInput(containerId, job);
             lifecycleManager.startCreated(containerId, spec);
             job.trainingStartTime = System.currentTimeMillis();
             job.secondaryStatus = "Training";
@@ -224,7 +220,7 @@ public class SageMakerTrainingRunner implements ContainerTeardown, Resettable {
         return containerDetector.isRunningInContainer() ? config.hostname().orElse(EmbeddedDnsServer.DEFAULT_SUFFIX) : "host.docker.internal";
     }
 
-    void copyTrainingInput(String containerId, TrainingJobResource job, long backoffMillis) throws Exception {
+    private void copyTrainingInput(String containerId, TrainingJobResource job) throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try (TarArchiveOutputStream tar = new TarArchiveOutputStream(out)) {
             SageMakerEndpointManager.addFile(tar, "opt/ml/input/config/hyperparameters.json",
@@ -237,10 +233,10 @@ public class SageMakerTrainingRunner implements ContainerTeardown, Resettable {
                 copyChannelObjects(tar, channel);
             }
         }
-        byte[] tarData = out.toByteArray();
-        RetryingTarCopier.copyStreamed(lifecycleManager.getDockerClient(), containerId, "/",
-                "sagemaker-training-input", stream -> stream.write(tarData),
-                RetryingTarCopier.DEFAULT_MAX_ATTEMPTS, backoffMillis);
+        lifecycleManager.getDockerClient().copyArchiveToContainerCmd(containerId)
+                .withRemotePath("/")
+                .withTarInputStream(new ByteArrayInputStream(out.toByteArray()))
+                .exec();
     }
 
     private Map<String, Object> inputDataConfig(List<Map<String, Object>> channels) {

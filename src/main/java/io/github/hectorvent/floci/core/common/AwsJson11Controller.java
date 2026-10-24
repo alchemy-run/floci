@@ -62,7 +62,6 @@ import io.github.hectorvent.floci.services.networkfirewall.NetworkFirewallJsonHa
 import io.github.hectorvent.floci.services.organizations.OrganizationsJsonHandler;
 import io.github.hectorvent.floci.services.pricing.PricingJsonHandler;
 import io.github.hectorvent.floci.services.redshiftdata.RedshiftDataJsonHandler;
-import io.github.hectorvent.floci.services.redshiftserverless.RedshiftServerlessJsonHandler;
 import io.github.hectorvent.floci.services.rekognition.RekognitionJsonHandler;
 import io.github.hectorvent.floci.services.resourcegroupstagging.ResourceGroupsTaggingJsonHandler;
 import io.github.hectorvent.floci.services.route53resolver.Route53ResolverJsonHandler;
@@ -124,7 +123,6 @@ public class AwsJson11Controller {
     private final GlueJsonHandler glueJsonHandler;
     private final AthenaJsonHandler athenaJsonHandler;
     private final RedshiftDataJsonHandler redshiftDataJsonHandler;
-    private final RedshiftServerlessJsonHandler redshiftServerlessJsonHandler;
     private final FirehoseJsonHandler firehoseJsonHandler;
     private final ResourceGroupsTaggingJsonHandler resourceGroupsTaggingJsonHandler;
     private final CodeBuildJsonHandler codeBuildJsonHandler;
@@ -181,7 +179,6 @@ public class AwsJson11Controller {
                                EcrJsonHandler ecrJsonHandler, GlueJsonHandler glueJsonHandler,
                                AthenaJsonHandler athenaJsonHandler,
                                RedshiftDataJsonHandler redshiftDataJsonHandler,
-                               RedshiftServerlessJsonHandler redshiftServerlessJsonHandler,
                                FirehoseJsonHandler firehoseJsonHandler,
                                ResourceGroupsTaggingJsonHandler resourceGroupsTaggingJsonHandler,
                                CodeBuildJsonHandler codeBuildJsonHandler,
@@ -242,7 +239,6 @@ public class AwsJson11Controller {
         this.glueJsonHandler = glueJsonHandler;
         this.athenaJsonHandler = athenaJsonHandler;
         this.redshiftDataJsonHandler = redshiftDataJsonHandler;
-        this.redshiftServerlessJsonHandler = redshiftServerlessJsonHandler;
         this.firehoseJsonHandler = firehoseJsonHandler;
         this.resourceGroupsTaggingJsonHandler = resourceGroupsTaggingJsonHandler;
         this.codeBuildJsonHandler = codeBuildJsonHandler;
@@ -347,8 +343,6 @@ public class AwsJson11Controller {
                 case "glue" -> glueJsonHandler.handle(action, request, region);
                 case "athena" -> athenaJsonHandler.handle(action, request, region);
                 case "redshift-data" -> redshiftDataJsonHandler.handle(action, request, region);
-                case "redshift-serverless" -> redshiftServerlessJsonHandler.handle(
-                        action, request, region, authorization);
                 case "firehose" -> firehoseJsonHandler.handle(action, request, region);
                 case "tagging" -> resourceGroupsTaggingJsonHandler.handle(action, request, region);
                 case "codebuild" -> codeBuildJsonHandler.handle(action, request, region, regionResolver.getAccountId());

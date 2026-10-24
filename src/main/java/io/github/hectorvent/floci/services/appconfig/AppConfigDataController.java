@@ -42,9 +42,8 @@ public class AppConfigDataController {
     // without a token fall through to S3's /{bucket} handler.
     @GET
     @Path(AppConfigConfigurationRouteFilter.INTERNAL_PATH)
-    public Response getLatestConfiguration(@QueryParam("configuration_token") String token,
-                                           @HeaderParam("Accept") String accept) {
-        ConfigurationData data = service.getLatestConfiguration(token, accept);
+    public Response getLatestConfiguration(@QueryParam("configuration_token") String token) {
+        ConfigurationData data = service.getLatestConfiguration(token);
         return Response.ok(data.content())
                 .header("Content-Type", data.contentType())
                 .header("Version-Label", data.configurationVersion())

@@ -10,6 +10,7 @@ import io.github.hectorvent.floci.services.route53.model.ChangeInfo;
 import io.github.hectorvent.floci.services.route53.model.HealthCheck;
 import io.github.hectorvent.floci.services.route53.model.HealthCheckConfig;
 import io.github.hectorvent.floci.services.route53.model.HostedZone;
+import io.github.hectorvent.floci.services.route53.model.QueryLoggingConfig;
 import io.github.hectorvent.floci.services.route53.model.ResourceRecord;
 import io.github.hectorvent.floci.services.route53.model.ResourceRecordSet;
 import io.github.hectorvent.floci.services.route53.model.VpcAssociation;
@@ -21,7 +22,10 @@ import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriInfo;
 
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamReader;
@@ -32,16 +36,34 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import io.github.hectorvent.floci.services.route53.model.QueryLoggingConfig;
-import jakarta.ws.rs.core.Context;
-import jakarta.ws.rs.core.MultivaluedMap;
-import jakarta.ws.rs.core.UriInfo;
 
 @Path("/2013-04-01")
 public class Route53Controller {
 
     private static final String NS = AwsNamespaces.ROUTE53;
     private static final String XML = "application/xml";
+
+    /**
+     * The {@code VPCRegion} enum, verbatim from the Route 53 model. Deliberately not
+     * {@code AwsRegions.KNOWN_IDS}: the enum admits the ISO and European Sovereign
+     * partitions that this emulator never advertises, and rejecting those would refuse
+     * requests AWS accepts.
+     */
+    private static final Set<String> VPC_REGIONS = Set.of(
+            "us-east-1", "us-east-2", "us-west-1", "us-west-2",
+            "eu-west-1", "eu-west-2", "eu-west-3", "eu-central-1", "eu-central-2",
+            "ap-east-1", "ap-east-2", "me-south-1", "me-central-1",
+            "us-gov-west-1", "us-gov-east-1",
+            "us-iso-east-1", "us-iso-west-1", "us-isob-east-1", "us-isob-west-1",
+            "us-isof-south-1", "us-isof-east-1", "eu-isoe-west-1", "eusc-de-east-1",
+            "ap-southeast-1", "ap-southeast-2", "ap-southeast-3", "ap-southeast-4",
+            "ap-southeast-5", "ap-southeast-6", "ap-southeast-7",
+            "ap-south-1", "ap-south-2",
+            "ap-northeast-1", "ap-northeast-2", "ap-northeast-3",
+            "eu-north-1", "sa-east-1", "ca-central-1", "ca-west-1",
+            "cn-north-1", "cn-northwest-1",
+            "af-south-1", "eu-south-1", "eu-south-2",
+            "il-central-1", "mx-central-1");
 
     private static final Set<String> CHANGE_ACTIONS = Set.of("CREATE", "DELETE", "UPSERT");
 
@@ -58,6 +80,11 @@ public class Route53Controller {
             String callerRef = XmlParser.extractFirst(body, "CallerReference", null);
             String comment = XmlParser.extractFirst(body, "Comment", null);
             VpcAssociation vpcAssociation = parseVpcAssociation(body);
+            if (vpcAssociation == null && Boolean.parseBoolean(
+                    XmlParser.extractFirst(body, "PrivateZone", "false"))) {
+                throw new AwsException("InvalidInput",
+                        "A VPC is required when creating a private hosted zone.", 400);
+            }
             if (vpcAssociation != null) {
                 requireModelledVpcRegion(vpcAssociation.getVpcRegion());
             }
@@ -174,12 +201,14 @@ public class Route53Controller {
 
     @GET
     @Path("/hostedzonesbyname")
-    public Response listHostedZonesByName(@QueryParam("dnsname") String dnsName,
-                                           @QueryParam("maxitems") @DefaultValue("100") int maxItems) {
+    public Response listHostedZonesByName(@Context UriInfo uriInfo) {
         try {
-            List<HostedZone> zones = service.listHostedZonesByName(dnsName, maxItems);
-            long total = service.getHostedZoneCount();
-            boolean truncated = zones.size() == maxItems && zones.size() < total;
+            String dnsName = queryParam(uriInfo, "dnsname", "DNSName", "dnsName");
+            String hostedZoneId = queryParam(uriInfo, "hostedzoneid", "HostedZoneId", "hostedZoneId");
+            int maxItems = queryInt(uriInfo, 100, "maxitems", "MaxItems", "maxItems");
+            List<HostedZone> fetched = service.listHostedZonesByName(dnsName, hostedZoneId, maxItems + 1);
+            boolean truncated = fetched.size() > maxItems;
+            List<HostedZone> zones = truncated ? fetched.subList(0, maxItems) : fetched;
 
             XmlBuilder xml = new XmlBuilder()
                     .start("ListHostedZonesByNameResponse", NS)
@@ -192,6 +221,14 @@ public class Route53Controller {
                .elem("MaxItems", String.valueOf(maxItems));
             if (dnsName != null && !dnsName.isEmpty()) {
                 xml.elem("DNSName", dnsName);
+            }
+            if (hostedZoneId != null && !hostedZoneId.isEmpty()) {
+                xml.elem("HostedZoneId", hostedZoneId);
+            }
+            if (truncated && !zones.isEmpty()) {
+                HostedZone next = fetched.get(maxItems);
+                xml.elem("NextDNSName", next.getName())
+                   .elem("NextHostedZoneId", next.getId());
             }
             xml.end("ListHostedZonesByNameResponse");
 
@@ -468,7 +505,7 @@ public class Route53Controller {
                 throw new AwsException("InvalidInput", "CallerReference is required.", 400);
             }
             HealthCheckConfig cfg = parseHealthCheckConfig(body);
-            HealthCheck hc = service.createHealthCheck(callerRef, cfg, healthCheckSettings(body));
+            HealthCheck hc = service.createHealthCheck(callerRef, cfg);
             String xml = new XmlBuilder()
                     .start("CreateHealthCheckResponse", NS)
                     .raw(xmlHealthCheck(hc))
@@ -638,7 +675,7 @@ public class Route53Controller {
                     .start("HealthCheckObservations")
                     .start("HealthCheckObservation")
                     .elem("IPAddress", "1.2.3.4")
-                    .elem("Region", "us-east-1") // partition-literal: health-check observation fixture
+                    .elem("Region", "us-east-1")
                     .start("StatusReport")
                     .elem("Status", "Success: HTTP Status Code 200, OK")
                     .elem("CheckedTime", now)
@@ -667,6 +704,128 @@ public class Route53Controller {
                     .start("KeySigningKeys")
                     .end("KeySigningKeys")
                     .end("GetDNSSECResponse")
+                    .build();
+            return Response.ok(xml, XML).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @POST
+    @Path("/queryloggingconfig")
+    public Response createQueryLoggingConfig(String body) {
+        try {
+            QueryLoggingConfig cfg = service.createQueryLoggingConfig(
+                    XmlParser.extractFirst(body, "HostedZoneId", null),
+                    XmlParser.extractFirst(body, "CloudWatchLogsLogGroupArn", null));
+            String xml = new XmlBuilder()
+                    .start("CreateQueryLoggingConfigResponse", NS)
+                    .raw(xmlQueryLoggingConfig(cfg))
+                    .end("CreateQueryLoggingConfigResponse")
+                    .build();
+            return Response.created(URI.create("/2013-04-01/queryloggingconfig/" + cfg.getId()))
+                    .type(XML)
+                    .entity(xml)
+                    .build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @GET
+    @Path("/queryloggingconfig/{Id}")
+    public Response getQueryLoggingConfig(@PathParam("Id") String id) {
+        try {
+            QueryLoggingConfig cfg = service.getQueryLoggingConfig(id);
+            String xml = new XmlBuilder()
+                    .start("GetQueryLoggingConfigResponse", NS)
+                    .raw(xmlQueryLoggingConfig(cfg))
+                    .end("GetQueryLoggingConfigResponse")
+                    .build();
+            return Response.ok(xml, XML).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @DELETE
+    @Path("/queryloggingconfig/{Id}")
+    public Response deleteQueryLoggingConfig(@PathParam("Id") String id) {
+        try {
+            service.deleteQueryLoggingConfig(id);
+            return Response.ok("", XML).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @GET
+    @Path("/queryloggingconfig")
+    public Response listQueryLoggingConfigs(@QueryParam("hostedzoneid") String hostedZoneId) {
+        try {
+            List<QueryLoggingConfig> configs = service.listQueryLoggingConfigs(hostedZoneId);
+            XmlBuilder xml = new XmlBuilder()
+                    .start("ListQueryLoggingConfigsResponse", NS)
+                    .start("QueryLoggingConfigs");
+            for (QueryLoggingConfig cfg : configs) {
+                xml.raw(xmlQueryLoggingConfig(cfg));
+            }
+            xml.end("QueryLoggingConfigs").end("ListQueryLoggingConfigsResponse");
+            return Response.ok(xml.build(), XML).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @GET
+    @Path("/testdnsanswer")
+    public Response testDnsAnswer(@QueryParam("hostedzoneid") String hostedZoneId,
+                                   @QueryParam("recordname") String recordName,
+                                   @QueryParam("recordtype") String recordType) {
+        try {
+            Route53Service.DnsAnswer answer = service.testDnsAnswer(hostedZoneId, recordName, recordType);
+            XmlBuilder xml = new XmlBuilder()
+                    .start("TestDNSAnswerResponse", NS)
+                    .elem("Nameserver", service.getNameServers().get(0))
+                    .elem("RecordName", answer.recordName())
+                    .elem("RecordType", answer.recordType())
+                    .start("RecordData");
+            for (String value : answer.records()) {
+                xml.elem("RecordDataEntry", value);
+            }
+            xml.end("RecordData")
+               .elem("ResponseCode", answer.records().isEmpty() ? "NXDOMAIN" : "NOERROR")
+               .elem("Protocol", "UDP")
+               .end("TestDNSAnswerResponse");
+            return Response.ok(xml.build(), XML).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @GET
+    @Path("/healthcheck/{HealthCheckId}/lastfailurereason")
+    public Response getHealthCheckLastFailureReason(@PathParam("HealthCheckId") String id) {
+        try {
+            service.getHealthCheck(id);
+            // Never-failed checks have no failure text, but distilled's required
+            // HealthCheckObservations array does not decode from an empty wrapper
+            // (Lambda then 500s). Return one well-formed observation, matching
+            // GetHealthCheckStatus, so `.length >= 0` always holds.
+            String now = Instant.now().toString();
+            String xml = new XmlBuilder()
+                    .start("GetHealthCheckLastFailureReasonResponse", NS)
+                    .start("HealthCheckObservations")
+                    .start("HealthCheckObservation")
+                    .elem("IPAddress", "1.2.3.4")
+                    .elem("Region", "us-east-1")
+                    .start("StatusReport")
+                    .elem("Status", "Unknown: no failure recorded")
+                    .elem("CheckedTime", now)
+                    .end("StatusReport")
+                    .end("HealthCheckObservation")
+                    .end("HealthCheckObservations")
+                    .end("GetHealthCheckLastFailureReasonResponse")
                     .build();
             return Response.ok(xml, XML).build();
         } catch (AwsException e) {
@@ -748,6 +907,16 @@ public class Route53Controller {
                 .build();
     }
 
+    private String xmlQueryLoggingConfig(QueryLoggingConfig cfg) {
+        return new XmlBuilder()
+                .start("QueryLoggingConfig")
+                .elem("Id", cfg.getId())
+                .elem("HostedZoneId", cfg.getHostedZoneId())
+                .elem("CloudWatchLogsLogGroupArn", cfg.getCloudWatchLogsLogGroupArn())
+                .end("QueryLoggingConfig")
+                .build();
+    }
+
     private String xmlVpcAssociations(List<VpcAssociation> associations) {
         if (associations == null || associations.isEmpty()) {
             return "";
@@ -801,6 +970,28 @@ public class Route53Controller {
                .end("AliasTarget");
         }
         if (rrs.getHealthCheckId() != null) xml.elem("HealthCheckId", rrs.getHealthCheckId());
+        if (rrs.getGeoContinentCode() != null || rrs.getGeoCountryCode() != null) {
+            xml.start("GeoLocation");
+            if (rrs.getGeoContinentCode() != null) xml.elem("ContinentCode", rrs.getGeoContinentCode());
+            if (rrs.getGeoCountryCode() != null) xml.elem("CountryCode", rrs.getGeoCountryCode());
+            if (rrs.getGeoSubdivisionCode() != null) xml.elem("SubdivisionCode", rrs.getGeoSubdivisionCode());
+            xml.end("GeoLocation");
+        }
+        if (rrs.getCidrCollectionId() != null) {
+            xml.start("CidrRoutingConfig")
+               .elem("CollectionId", rrs.getCidrCollectionId())
+               .elem("LocationName", rrs.getCidrLocationName())
+               .end("CidrRoutingConfig");
+        }
+        if (rrs.getGeoProximityAwsRegion() != null || rrs.getGeoProximityLocalZoneGroup() != null) {
+            xml.start("GeoProximityLocation");
+            if (rrs.getGeoProximityAwsRegion() != null) xml.elem("AWSRegion", rrs.getGeoProximityAwsRegion());
+            if (rrs.getGeoProximityLocalZoneGroup() != null) {
+                xml.elem("LocalZoneGroup", rrs.getGeoProximityLocalZoneGroup());
+            }
+            if (rrs.getGeoProximityBias() != null) xml.elem("Bias", rrs.getGeoProximityBias().longValue());
+            xml.end("GeoProximityLocation");
+        }
         xml.end("ResourceRecordSet");
         return xml.build();
     }
@@ -841,6 +1032,39 @@ public class Route53Controller {
                 .end("ErrorResponse")
                 .build();
         return Response.status(e.getHttpStatus()).type(XML).entity(xml).build();
+    }
+
+    private static String queryParam(UriInfo uriInfo, String... names) {
+        MultivaluedMap<String, String> params = uriInfo.getQueryParameters();
+        for (String name : names) {
+            String value = params.getFirst(name);
+            if (value != null && !value.isEmpty()) {
+                return value;
+            }
+        }
+        for (String key : params.keySet()) {
+            for (String name : names) {
+                if (key != null && key.equalsIgnoreCase(name)) {
+                    String value = params.getFirst(key);
+                    if (value != null && !value.isEmpty()) {
+                        return value;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private static int queryInt(UriInfo uriInfo, int fallback, String... names) {
+        String raw = queryParam(uriInfo, names);
+        if (raw == null) {
+            return fallback;
+        }
+        try {
+            return Integer.parseInt(raw);
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
     }
 
     // ── Request parsers ───────────────────────────────────────────────────────
@@ -892,7 +1116,7 @@ public class Route53Controller {
      * the later disassociate and ListHostedZonesByVPC silently miss it.
      */
     private static void requireModelledVpcRegion(String vpcRegion) {
-        if (!Route53VpcRegions.VPC_REGIONS.contains(vpcRegion)) {
+        if (!VPC_REGIONS.contains(vpcRegion)) {
             throw new AwsException("InvalidInput",
                     "Invalid value '" + vpcRegion + "' at 'VPCRegion' failed to satisfy constraint: "
                             + "Member must satisfy enum value set.", 400);
@@ -1149,63 +1373,21 @@ public class Route53Controller {
         HealthCheckConfig cfg = new HealthCheckConfig();
         cfg.setType(XmlParser.extractFirst(body, "Type", null));
         cfg.setIpAddress(XmlParser.extractFirst(body, "IPAddress", null));
-        cfg.setPort(integerElement(body, "Port"));
+        String portStr = XmlParser.extractFirst(body, "Port", null);
+        if (portStr != null) {
+            try { cfg.setPort(Integer.parseInt(portStr)); } catch (NumberFormatException ignored) {}
+        }
         cfg.setResourcePath(XmlParser.extractFirst(body, "ResourcePath", null));
         cfg.setFullyQualifiedDomainName(XmlParser.extractFirst(body, "FullyQualifiedDomainName", null));
-        cfg.setRequestInterval(integerElement(body, "RequestInterval"));
-        cfg.setFailureThreshold(integerElement(body, "FailureThreshold"));
+        String riStr = XmlParser.extractFirst(body, "RequestInterval", null);
+        if (riStr != null) {
+            try { cfg.setRequestInterval(Integer.parseInt(riStr)); } catch (NumberFormatException ignored) {}
+        }
+        String ftStr = XmlParser.extractFirst(body, "FailureThreshold", null);
+        if (ftStr != null) {
+            try { cfg.setFailureThreshold(Integer.parseInt(ftStr)); } catch (NumberFormatException ignored) {}
+        }
         return cfg;
-    }
-
-    private static Integer integerElement(String body, String name) {
-        String value = XmlParser.extractFirst(body, name, null);
-        if (value == null) {
-            return null;
-        }
-        try {
-            return Integer.parseInt(value.trim());
-        } catch (NumberFormatException e) {
-            throw new AwsException("InvalidInput", "Invalid value for " + name + ": " + value, 400);
-        }
-    }
-
-    /**
-     * The create request's settings in a canonical form, so a retry can be told from a different
-     * request: every value under {@code HealthCheckConfig} as {@code path=value}, sorted, because
-     * {@code Regions} and {@code ChildHealthChecks} are sets. An omitted {@code RequestInterval} or
-     * {@code FailureThreshold} counts as AWS's default (30 and 3), except for {@code RECOVERY_CONTROL},
-     * which takes neither, so stating the default explicitly is still the same request.
-     */
-    static String healthCheckSettings(String body) {
-        // Null for malformed XML as well as a missing element; HealthCheckConfig is required either way.
-        XmlParser.XmlElement config = XmlParser.extractElementTree(body, "HealthCheckConfig");
-        if (config == null) {
-            throw new AwsException("InvalidInput", "Could not parse the request body.", 400);
-        }
-        List<String> entries = new ArrayList<>();
-        collectSettings(config, "", entries);
-        if (!entries.contains("Type=RECOVERY_CONTROL")) {
-            addDefault(entries, "RequestInterval", "30");
-            addDefault(entries, "FailureThreshold", "3");
-        }
-        entries.sort(null);
-        return String.join("\n", entries);
-    }
-
-    private static void collectSettings(XmlParser.XmlElement element, String prefix, List<String> entries) {
-        for (XmlParser.XmlElement child : element.children()) {
-            String path = prefix + child.name();
-            if (!child.text().isEmpty()) {
-                entries.add(path + "=" + child.text());
-            }
-            collectSettings(child, path + "/", entries);
-        }
-    }
-
-    private static void addDefault(List<String> entries, String name, String value) {
-        if (entries.stream().noneMatch(entry -> entry.startsWith(name + "="))) {
-            entries.add(name + "=" + value);
-        }
     }
 
     /**
@@ -1233,231 +1415,5 @@ public class Route53Controller {
             r.close();
         } catch (Exception ignored) {}
         return keys;
-    }
-
-    /**
-     * The {@code VPCRegion} enum, verbatim from the Route 53 model. Deliberately not
-     * {@code AwsRegions.KNOWN_IDS}: the enum admits the ISO and European Sovereign
-     * partitions that this emulator never advertises, and rejecting those would refuse
-     * requests AWS accepts.
-     */
-    private static final Set<String> VPC_REGIONS = Set.of(
-            "us-east-1", "us-east-2", "us-west-1", "us-west-2",
-            "eu-west-1", "eu-west-2", "eu-west-3", "eu-central-1", "eu-central-2",
-            "ap-east-1", "ap-east-2", "me-south-1", "me-central-1",
-            "us-gov-west-1", "us-gov-east-1",
-            "us-iso-east-1", "us-iso-west-1", "us-isob-east-1", "us-isob-west-1",
-            "us-isof-south-1", "us-isof-east-1", "eu-isoe-west-1", "eusc-de-east-1",
-            "ap-southeast-1", "ap-southeast-2", "ap-southeast-3", "ap-southeast-4",
-            "ap-southeast-5", "ap-southeast-6", "ap-southeast-7",
-            "ap-south-1", "ap-south-2",
-            "ap-northeast-1", "ap-northeast-2", "ap-northeast-3",
-            "eu-north-1", "sa-east-1", "ca-central-1", "ca-west-1",
-            "cn-north-1", "cn-northwest-1",
-            "af-south-1", "eu-south-1", "eu-south-2",
-            "il-central-1", "mx-central-1");
-
-    @GET
-    @Path("/hostedzonesbyname")
-    public Response listHostedZonesByName(@Context UriInfo uriInfo) {
-        try {
-            String dnsName = queryParam(uriInfo, "dnsname", "DNSName", "dnsName");
-            String hostedZoneId = queryParam(uriInfo, "hostedzoneid", "HostedZoneId", "hostedZoneId");
-            int maxItems = queryInt(uriInfo, 100, "maxitems", "MaxItems", "maxItems");
-            List<HostedZone> fetched = service.listHostedZonesByName(dnsName, hostedZoneId, maxItems + 1);
-            boolean truncated = fetched.size() > maxItems;
-            List<HostedZone> zones = truncated ? fetched.subList(0, maxItems) : fetched;
-
-            XmlBuilder xml = new XmlBuilder()
-                    .start("ListHostedZonesByNameResponse", NS)
-                    .start("HostedZones");
-            for (HostedZone zone : zones) {
-                xml.raw(xmlHostedZone(zone));
-            }
-            xml.end("HostedZones")
-               .elem("IsTruncated", String.valueOf(truncated))
-               .elem("MaxItems", String.valueOf(maxItems));
-            if (dnsName != null && !dnsName.isEmpty()) {
-                xml.elem("DNSName", dnsName);
-            }
-            if (hostedZoneId != null && !hostedZoneId.isEmpty()) {
-                xml.elem("HostedZoneId", hostedZoneId);
-            }
-            if (truncated && !zones.isEmpty()) {
-                HostedZone next = fetched.get(maxItems);
-                xml.elem("NextDNSName", next.getName())
-                   .elem("NextHostedZoneId", next.getId());
-            }
-            xml.end("ListHostedZonesByNameResponse");
-
-            return Response.ok(xml.build(), XML).build();
-        } catch (AwsException e) {
-            return xmlErrorResponse(e);
-        }
-    }
-
-    @POST
-    @Path("/queryloggingconfig")
-    public Response createQueryLoggingConfig(String body) {
-        try {
-            QueryLoggingConfig cfg = service.createQueryLoggingConfig(
-                    XmlParser.extractFirst(body, "HostedZoneId", null),
-                    XmlParser.extractFirst(body, "CloudWatchLogsLogGroupArn", null));
-            String xml = new XmlBuilder()
-                    .start("CreateQueryLoggingConfigResponse", NS)
-                    .raw(xmlQueryLoggingConfig(cfg))
-                    .end("CreateQueryLoggingConfigResponse")
-                    .build();
-            return Response.created(URI.create("/2013-04-01/queryloggingconfig/" + cfg.getId()))
-                    .type(XML)
-                    .entity(xml)
-                    .build();
-        } catch (AwsException e) {
-            return xmlErrorResponse(e);
-        }
-    }
-
-    @GET
-    @Path("/queryloggingconfig/{Id}")
-    public Response getQueryLoggingConfig(@PathParam("Id") String id) {
-        try {
-            QueryLoggingConfig cfg = service.getQueryLoggingConfig(id);
-            String xml = new XmlBuilder()
-                    .start("GetQueryLoggingConfigResponse", NS)
-                    .raw(xmlQueryLoggingConfig(cfg))
-                    .end("GetQueryLoggingConfigResponse")
-                    .build();
-            return Response.ok(xml, XML).build();
-        } catch (AwsException e) {
-            return xmlErrorResponse(e);
-        }
-    }
-
-    @DELETE
-    @Path("/queryloggingconfig/{Id}")
-    public Response deleteQueryLoggingConfig(@PathParam("Id") String id) {
-        try {
-            service.deleteQueryLoggingConfig(id);
-            return Response.ok("", XML).build();
-        } catch (AwsException e) {
-            return xmlErrorResponse(e);
-        }
-    }
-
-    @GET
-    @Path("/queryloggingconfig")
-    public Response listQueryLoggingConfigs(@QueryParam("hostedzoneid") String hostedZoneId) {
-        try {
-            List<QueryLoggingConfig> configs = service.listQueryLoggingConfigs(hostedZoneId);
-            XmlBuilder xml = new XmlBuilder()
-                    .start("ListQueryLoggingConfigsResponse", NS)
-                    .start("QueryLoggingConfigs");
-            for (QueryLoggingConfig cfg : configs) {
-                xml.raw(xmlQueryLoggingConfig(cfg));
-            }
-            xml.end("QueryLoggingConfigs").end("ListQueryLoggingConfigsResponse");
-            return Response.ok(xml.build(), XML).build();
-        } catch (AwsException e) {
-            return xmlErrorResponse(e);
-        }
-    }
-
-    @GET
-    @Path("/testdnsanswer")
-    public Response testDnsAnswer(@QueryParam("hostedzoneid") String hostedZoneId,
-                                   @QueryParam("recordname") String recordName,
-                                   @QueryParam("recordtype") String recordType) {
-        try {
-            Route53Service.DnsAnswer answer = service.testDnsAnswer(hostedZoneId, recordName, recordType);
-            XmlBuilder xml = new XmlBuilder()
-                    .start("TestDNSAnswerResponse", NS)
-                    .elem("Nameserver", service.getNameServers().get(0))
-                    .elem("RecordName", answer.recordName())
-                    .elem("RecordType", answer.recordType())
-                    .start("RecordData");
-            for (String value : answer.records()) {
-                xml.elem("RecordDataEntry", value);
-            }
-            xml.end("RecordData")
-               .elem("ResponseCode", answer.records().isEmpty() ? "NXDOMAIN" : "NOERROR")
-               .elem("Protocol", "UDP")
-               .end("TestDNSAnswerResponse");
-            return Response.ok(xml.build(), XML).build();
-        } catch (AwsException e) {
-            return xmlErrorResponse(e);
-        }
-    }
-
-    @GET
-    @Path("/healthcheck/{HealthCheckId}/lastfailurereason")
-    public Response getHealthCheckLastFailureReason(@PathParam("HealthCheckId") String id) {
-        try {
-            service.getHealthCheck(id);
-            // Never-failed checks have no failure text, but distilled's required
-            // HealthCheckObservations array does not decode from an empty wrapper
-            // (Lambda then 500s). Return one well-formed observation, matching
-            // GetHealthCheckStatus, so `.length >= 0` always holds.
-            String now = Instant.now().toString();
-            String xml = new XmlBuilder()
-                    .start("GetHealthCheckLastFailureReasonResponse", NS)
-                    .start("HealthCheckObservations")
-                    .start("HealthCheckObservation")
-                    .elem("IPAddress", "1.2.3.4")
-                    .elem("Region", "us-east-1")
-                    .start("StatusReport")
-                    .elem("Status", "Unknown: no failure recorded")
-                    .elem("CheckedTime", now)
-                    .end("StatusReport")
-                    .end("HealthCheckObservation")
-                    .end("HealthCheckObservations")
-                    .end("GetHealthCheckLastFailureReasonResponse")
-                    .build();
-            return Response.ok(xml, XML).build();
-        } catch (AwsException e) {
-            return xmlErrorResponse(e);
-        }
-    }
-
-    private String xmlQueryLoggingConfig(QueryLoggingConfig cfg) {
-        return new XmlBuilder()
-                .start("QueryLoggingConfig")
-                .elem("Id", cfg.getId())
-                .elem("HostedZoneId", cfg.getHostedZoneId())
-                .elem("CloudWatchLogsLogGroupArn", cfg.getCloudWatchLogsLogGroupArn())
-                .end("QueryLoggingConfig")
-                .build();
-    }
-
-    private static String queryParam(UriInfo uriInfo, String... names) {
-        MultivaluedMap<String, String> params = uriInfo.getQueryParameters();
-        for (String name : names) {
-            String value = params.getFirst(name);
-            if (value != null && !value.isEmpty()) {
-                return value;
-            }
-        }
-        for (String key : params.keySet()) {
-            for (String name : names) {
-                if (key != null && key.equalsIgnoreCase(name)) {
-                    String value = params.getFirst(key);
-                    if (value != null && !value.isEmpty()) {
-                        return value;
-                    }
-                }
-            }
-        }
-        return null;
-    }
-
-    private static int queryInt(UriInfo uriInfo, int fallback, String... names) {
-        String raw = queryParam(uriInfo, names);
-        if (raw == null) {
-            return fallback;
-        }
-        try {
-            return Integer.parseInt(raw);
-        } catch (NumberFormatException ignored) {
-            return fallback;
-        }
     }
 }

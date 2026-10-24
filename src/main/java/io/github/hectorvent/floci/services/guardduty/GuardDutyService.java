@@ -2,29 +2,31 @@ package io.github.hectorvent.floci.services.guardduty;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.core.common.AwsRegions;
-import io.github.hectorvent.floci.core.common.Base64Url;
-import io.github.hectorvent.floci.core.common.ServicePrincipals;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
-import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.guardduty.model.AdminAccount;
 import io.github.hectorvent.floci.services.guardduty.model.Detector;
 import io.github.hectorvent.floci.services.guardduty.model.DetectorAdditionalConfiguration;
 import io.github.hectorvent.floci.services.guardduty.model.DetectorFeature;
-import io.github.hectorvent.floci.services.guardduty.model.MalwareProtectionPlan;
 import io.github.hectorvent.floci.services.guardduty.model.MemberAccount;
 import io.github.hectorvent.floci.services.guardduty.model.OrganizationAdditionalConfiguration;
 import io.github.hectorvent.floci.services.guardduty.model.OrganizationConfiguration;
 import io.github.hectorvent.floci.services.guardduty.model.OrganizationFeature;
-import io.github.hectorvent.floci.services.guardduty.model.PublishingDestination;
-import io.github.hectorvent.floci.services.iam.ServiceLinkedRoles;
+import io.github.hectorvent.floci.services.organizations.OrganizationsService;
+import io.github.hectorvent.floci.services.organizations.model.OrganizationAccount;
+import io.github.hectorvent.floci.services.s3.S3Service;
+import io.github.hectorvent.floci.services.s3.model.S3Object;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.net.InetAddress;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -36,15 +38,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.github.hectorvent.floci.services.organizations.OrganizationsService;
-import io.github.hectorvent.floci.services.organizations.model.OrganizationAccount;
-import io.github.hectorvent.floci.services.s3.S3Service;
-import io.github.hectorvent.floci.services.s3.model.S3Object;
-import java.net.InetAddress;
-import java.net.URI;
 
 /**
  * GuardDuty detector lifecycle and organization configuration backed by the configured
@@ -76,21 +69,6 @@ public class GuardDutyService {
     private static final Set<String> FINDING_PUBLISHING_FREQUENCIES =
             Set.of("FIFTEEN_MINUTES", "ONE_HOUR", "SIX_HOURS");
     private static final Set<String> FEATURE_STATUSES = Set.of("ENABLED", "DISABLED");
-    private static final int MAX_PLAN_OBJECT_PREFIXES = 5;
-    private static final int MAX_PLAN_OBJECT_PREFIX_LENGTH = 1024;
-    private static final int MAX_PLAN_TAGS = 200;
-    /**
-     * GuardDuty's documented TagKey pattern, {@code ^(?!aws:)[a-zA-Z+-=._:/]+$}, kept verbatim: the
-     * {@code +-=} range spans the digits and {@code , - . / : ; <}, so a space, {@code @} or
-     * {@code #} is rejected while a digit is not.
-     */
-    private static final Pattern PLAN_TAG_KEY_PATTERN = Pattern.compile("^(?!aws:)[a-zA-Z+-=._:/]+$");
-    /** The documented default page size of ListMalwareProtectionPlans. */
-    private static final int PLAN_PAGE_SIZE = 100;
-    private static final String PLAN_TOKEN_PREFIX = "guardduty:v1:plan:";
-    private static final String PLAN_ARN_RESOURCE_PREFIX = "malware-protection-plan/";
-    static final String PLAN_NOT_FOUND_MESSAGE =
-            "The request is rejected because the input malwareProtectionPlanId is not owned by the current account.";
     private static final Set<String> ORG_AUTO_ENABLE_VALUES = Set.of("NEW", "NONE", "ALL");
     private static final Set<String> DETECTOR_FEATURE_NAMES = Set.of(
             "S3_DATA_EVENTS", "EKS_AUDIT_LOGS", "EBS_MALWARE_PROTECTION", "RDS_LOGIN_EVENTS",
@@ -105,11 +83,12 @@ public class GuardDutyService {
     private final StorageBackend<String, Detector> detectorStore;
     private final StorageBackend<String, AdminAccount> adminAccountStore;
     private final StorageBackend<String, MemberAccount> memberStore;
-    private final StorageBackend<String, MalwareProtectionPlan> malwareProtectionPlanStore;
-    private final StorageBackend<String, PublishingDestination> destinationStore;
+    private final S3Service s3Service;
+    private final OrganizationsService organizationsService;
 
     @Inject
-    public GuardDutyService(StorageFactory storageFactory) {
+    public GuardDutyService(StorageFactory storageFactory, S3Service s3Service,
+                            OrganizationsService organizationsService) {
         this(storageFactory.create(
                         "guardduty",
                         "guardduty-detectors.json",
@@ -124,46 +103,35 @@ public class GuardDutyService {
                         "guardduty",
                         "guardduty-members.json",
                         new TypeReference<Map<String, MemberAccount>>() {
-                        }),
-                storageFactory.create(
-                        "guardduty",
-                        "guardduty-malware-protection-plans.json",
-                        new TypeReference<Map<String, MalwareProtectionPlan>>() {
-                        }),
-                storageFactory.create(
-                        "guardduty",
-                        "guardduty-publishing-destinations.json",
-                        new TypeReference<Map<String, PublishingDestination>>() {
-                        }));
+                        }), s3Service, organizationsService);
     }
 
-    // Keeps the three-store arity existing fixtures construct this service with.
     GuardDutyService(
             StorageBackend<String, Detector> detectorStore,
             StorageBackend<String, AdminAccount> adminAccountStore,
             StorageBackend<String, MemberAccount> memberStore) {
-        this(detectorStore, adminAccountStore, memberStore, new InMemoryStorage<>());
+        this(detectorStore, adminAccountStore, memberStore, null, null);
     }
 
     GuardDutyService(
             StorageBackend<String, Detector> detectorStore,
             StorageBackend<String, AdminAccount> adminAccountStore,
             StorageBackend<String, MemberAccount> memberStore,
-            StorageBackend<String, MalwareProtectionPlan> malwareProtectionPlanStore) {
-        this(detectorStore, adminAccountStore, memberStore, malwareProtectionPlanStore, new InMemoryStorage<>());
+            S3Service s3Service) {
+        this(detectorStore, adminAccountStore, memberStore, s3Service, null);
     }
 
     GuardDutyService(
             StorageBackend<String, Detector> detectorStore,
             StorageBackend<String, AdminAccount> adminAccountStore,
             StorageBackend<String, MemberAccount> memberStore,
-            StorageBackend<String, MalwareProtectionPlan> malwareProtectionPlanStore,
-            StorageBackend<String, PublishingDestination> destinationStore) {
+            S3Service s3Service,
+            OrganizationsService organizationsService) {
         this.detectorStore = detectorStore;
         this.adminAccountStore = adminAccountStore;
         this.memberStore = memberStore;
-        this.malwareProtectionPlanStore = malwareProtectionPlanStore;
-        this.destinationStore = destinationStore;
+        this.s3Service = s3Service;
+        this.organizationsService = organizationsService;
     }
 
     public synchronized Detector createDetector(String region, String accountId, JsonNode request) {
@@ -183,7 +151,7 @@ public class GuardDutyService {
                 UUID.randomUUID().toString().replace("-", ""),
                 enable ? "ENABLED" : "DISABLED",
                 frequency,
-                serviceRoleArn(region, accountId),
+                serviceRoleArn(accountId),
                 now,
                 now,
                 tags,
@@ -220,9 +188,8 @@ public class GuardDutyService {
             throw detectorNotFound();
         }
         detectorStore.delete(key);
-        String prefix = destinationKey(region, detectorId, "");
-        destinationStore.scan(k -> k.startsWith(prefix)).forEach(d ->
-                destinationStore.delete(destinationKey(region, detectorId, d.destinationId())));
+        String memberPrefix = region + "::" + detectorId + "::";
+        memberStore.keys().stream().filter(memberKey -> memberKey.startsWith(memberPrefix)).forEach(memberStore::delete);
     }
 
     public Page<String> listDetectorIds(String region, String accountId, String maxResultsValue, String nextToken) {
@@ -238,905 +205,6 @@ public class GuardDutyService {
         String responseToken = end < ids.size() ? encodeOffset(end) : null;
         return new Page<>(ids.subList(offset, end), responseToken);
     }
-
-    public OrganizationConfiguration describeOrganizationConfiguration(String region, String detectorId) {
-        Detector detector = getDetector(region, detectorId);
-        OrganizationConfiguration configuration = detector.getOrganizationConfiguration();
-        if (configuration == null) {
-            return new OrganizationConfiguration(false, "NONE", List.of());
-        }
-        return configuration;
-    }
-
-    public synchronized void updateOrganizationConfiguration(String region, String detectorId, JsonNode request) {
-        String key = storageKey(region, detectorId);
-        Detector detector = detectorStore.get(key).orElseThrow(GuardDutyService::detectorNotFound);
-
-        OrganizationConfiguration current = detector.getOrganizationConfiguration();
-        boolean autoEnable = current != null && Boolean.TRUE.equals(current.getAutoEnable());
-        String members = current == null ? "NONE" : current.getAutoEnableOrganizationMembers();
-        List<OrganizationFeature> features = current == null ? List.of() : current.getFeatures();
-
-        if (request.has("autoEnableOrganizationMembers")) {
-            members = requireText(request, "autoEnableOrganizationMembers");
-            if (!ORG_AUTO_ENABLE_VALUES.contains(members)) {
-                throw badRequest("autoEnableOrganizationMembers must be one of NEW, ALL, or NONE.");
-            }
-            autoEnable = !"NONE".equals(members);
-        } else if (request.has("autoEnable")) {
-            autoEnable = requireBoolean(request, "autoEnable");
-            members = autoEnable ? "NEW" : "NONE";
-        }
-        if (request.has("features")) {
-            features = mergeOrganizationFeatures(features, readOrganizationFeatures(request));
-        }
-
-        detector.setOrganizationConfiguration(new OrganizationConfiguration(autoEnable, members, features));
-        detectorStore.put(key, detector);
-    }
-
-    public synchronized void enableOrganizationAdminAccount(String region, JsonNode request) {
-        String adminAccountId = readAdminAccountId(request);
-        List<AdminAccount> existing = organizationAdminAccounts(region);
-        if (!existing.isEmpty() && !existing.get(0).getAdminAccountId().equals(adminAccountId)) {
-            throw badRequest("The request is rejected because the organization already has a "
-                    + "delegated administrator account for GuardDuty.");
-        }
-        adminAccountStore.put(storageKey(region, adminAccountId), new AdminAccount(adminAccountId, "ENABLED"));
-    }
-
-    public synchronized void disableOrganizationAdminAccount(String region, JsonNode request) {
-        String adminAccountId = readAdminAccountId(request);
-        String key = storageKey(region, adminAccountId);
-        if (adminAccountStore.get(key).isEmpty()) {
-            throw badRequest(ADMIN_ALREADY_DISABLED_MESSAGE);
-        }
-        adminAccountStore.delete(key);
-    }
-
-    public Page<AdminAccount> listOrganizationAdminAccounts(
-            String region, String maxResultsValue, String nextToken) {
-        int maxResults = parseMaxResults(maxResultsValue);
-        List<AdminAccount> accounts = new ArrayList<>(organizationAdminAccounts(region));
-        accounts.sort(Comparator.comparing(AdminAccount::getAdminAccountId));
-
-        int offset = decodeOffset(nextToken, accounts.size());
-        int end = Math.min(offset + maxResults, accounts.size());
-        String responseToken = end < accounts.size() ? encodeOffset(end) : null;
-        return new Page<>(accounts.subList(offset, end), responseToken);
-    }
-
-    public synchronized void createMembers(String region, String detectorId, JsonNode request) {
-        Detector detector = getDetector(region, detectorId);
-        JsonNode details = request.get("accountDetails");
-        if (details == null || !details.isArray() || details.size() < 1 || details.size() > 50) {
-            throw badRequest("accountDetails must contain between 1 and 50 accounts.");
-        }
-        String administratorId = accountIdFromServiceRole(detector.getServiceRole());
-        boolean organizationDelegatedAdministrator = organizationAdminAccounts(region).stream()
-                .anyMatch(account -> administratorId.equals(account.getAdminAccountId())
-                        && "ENABLED".equals(account.getAdminStatus()));
-        String relationshipStatus = organizationDelegatedAdministrator ? "Enabled" : "Created";
-        String now = Instant.now().toString();
-        List<MemberWrite> writes = new ArrayList<>(details.size());
-        for (JsonNode detail : details) {
-            String accountId = requireText(detail, "accountId");
-            if (!ACCOUNT_ID_PATTERN.matcher(accountId).matches()) {
-                throw badRequest("accountId must be a 12-digit account ID.");
-            }
-            String email = requireText(detail, "email");
-            if (!validMemberEmail(email)) {
-                throw badRequest("email must be a valid GuardDuty member email address.");
-            }
-            String key = region + "::" + detectorId + "::" + accountId;
-            MemberAccount existing = memberStore.get(key).orElse(null);
-            writes.add(new MemberWrite(key, new MemberAccount(
-                    accountId,
-                    email,
-                    relationshipStatus,
-                    administratorId,
-                    detectorId,
-                    existing == null ? now : existing.invitedAt(),
-                    now)));
-        }
-        for (MemberWrite write : writes) {
-            memberStore.put(write.key(), write.member());
-        }
-    }
-
-    public Page<MemberAccount> listMembers(String region, String detectorId, String maxResults,
-                                           String nextToken, String onlyAssociated) {
-        Detector detector = getDetector(region, detectorId);
-        int limit = parseMaxResults(maxResults);
-        if (onlyAssociated != null && !onlyAssociated.equalsIgnoreCase("true")
-                && !onlyAssociated.equalsIgnoreCase("false")) {
-            throw badRequest("onlyAssociated must be true or false.");
-        }
-        String prefix = region + "::" + detectorId + "::";
-        List<MemberAccount> members = memberStore.scan(key -> key.startsWith(prefix)).stream()
-                .filter(member -> !"true".equalsIgnoreCase(onlyAssociated)
-                        || isAssociatedRelationship(member.relationshipStatus()))
-                .sorted(Comparator.comparing(MemberAccount::accountId)).toList();
-        int offset = decodeOffset(nextToken, members.size());
-        int end = Math.min(members.size(), offset + limit);
-        return new Page<>(members.subList(offset, end), end < members.size() ? encodeOffset(end) : null);
-    }
-
-    public List<MemberAccount> listMembers(String region, String detectorId) {
-        return listMembers(region, detectorId, null, null, null).items();
-    }
-
-    public synchronized PublishingDestination createPublishingDestination(
-            String region, String detectorId, JsonNode request) {
-        getDetector(region, detectorId);
-        if (!"S3".equals(requireText(request, "destinationType"))) {
-            throw badRequest("destinationType must be S3.");
-        }
-        JsonNode properties = request.get("destinationProperties");
-        requireObject(properties, "destinationProperties");
-        String clientToken = optionalText(request, "clientToken");
-        if (clientToken != null && clientToken.codePointCount(0, clientToken.length()) > 64) {
-            // botocore's ClientToken shape: string, min 0, max 64.
-            throw badRequest("clientToken must be at most 64 characters.");
-        }
-        if (clientToken != null) {
-            // Idempotent replay: a retried create returns the destination the token already made.
-            String prefix = destinationKey(region, detectorId, "");
-            for (PublishingDestination existing : destinationStore.scan(k -> k.startsWith(prefix))) {
-                if (clientToken.equals(existing.clientToken())) {
-                    return existing;
-                }
-            }
-        }
-        PublishingDestination destination = new PublishingDestination(
-                UUID.randomUUID().toString().replace("-", ""),
-                "S3",
-                optionalText(properties, "destinationArn"),
-                optionalText(properties, "kmsKeyArn"),
-                "PUBLISHING",
-                clientToken);
-        destinationStore.put(destinationKey(region, detectorId, destination.destinationId()), destination);
-        return destination;
-    }
-
-    public PublishingDestination describePublishingDestination(
-            String region, String detectorId, String destinationId) {
-        getDetector(region, detectorId);
-        return destinationStore.get(destinationKey(region, detectorId, destinationId))
-                .orElseThrow(GuardDutyService::destinationNotFound);
-    }
-
-    public synchronized void updatePublishingDestination(
-            String region, String detectorId, String destinationId, JsonNode request) {
-        PublishingDestination current = describePublishingDestination(region, detectorId, destinationId);
-        JsonNode properties = request.get("destinationProperties");
-        if (properties == null) {
-            return;
-        }
-        requireObject(properties, "destinationProperties");
-        destinationStore.put(destinationKey(region, detectorId, destinationId), new PublishingDestination(
-                destinationId,
-                current.destinationType(),
-                properties.has("destinationArn") ? optionalText(properties, "destinationArn") : current.destinationArn(),
-                properties.has("kmsKeyArn") ? optionalText(properties, "kmsKeyArn") : current.kmsKeyArn(),
-                current.status(),
-                current.clientToken()));
-    }
-
-    public synchronized void deletePublishingDestination(String region, String detectorId, String destinationId) {
-        describePublishingDestination(region, detectorId, destinationId);
-        destinationStore.delete(destinationKey(region, detectorId, destinationId));
-    }
-
-    public Page<PublishingDestination> listPublishingDestinations(
-            String region, String detectorId, String maxResults, String nextToken) {
-        getDetector(region, detectorId);
-        int limit = parseMaxResults(maxResults);
-        String prefix = destinationKey(region, detectorId, "");
-        List<PublishingDestination> destinations = destinationStore.scan(key -> key.startsWith(prefix)).stream()
-                .sorted(Comparator.comparing(PublishingDestination::destinationId)).toList();
-        int offset = decodeOffset(nextToken, destinations.size());
-        int end = Math.min(destinations.size(), offset + limit);
-        return new Page<>(destinations.subList(offset, end), end < destinations.size() ? encodeOffset(end) : null);
-    }
-
-    private static String destinationKey(String region, String detectorId, String destinationId) {
-        return region + "::" + detectorId + "::" + destinationId;
-    }
-
-    private static String optionalText(JsonNode parent, String field) {
-        JsonNode value = parent.get(field);
-        if (value == null || value.isNull()) {
-            return null;
-        }
-        if (!value.isTextual()) {
-            throw badRequest(field + " must be a string.");
-        }
-        return value.textValue();
-    }
-
-    /** Matched verbatim by the Terraform AWS provider to detect a deleted publishing destination. */
-    private static AwsException destinationNotFound() {
-        return badRequest("The request is rejected because the one or more input parameters have invalid values.");
-    }
-
-    private static boolean isAssociatedRelationship(String status) {
-        return "Enabled".equals(status) || "Invited".equals(status) || "EmailVerificationInProgress".equals(status);
-    }
-
-    private static boolean validMemberEmail(String email) {
-        if (email == null || email.length() < 6 || email.length() > 64 || !email.chars().allMatch(ch -> ch < 128)) {
-            return false;
-        }
-        int at = email.indexOf('@');
-        if (at <= 0 || at != email.lastIndexOf('@') || at == email.length() - 1) {
-            return false;
-        }
-        String local = email.substring(0, at);
-        String domain = email.substring(at + 1);
-        if (local.startsWith(".") || local.matches(".*[\\s\"'()<>\\[\\]:,\\\\|%&].*")) {
-            return false;
-        }
-        if (!domain.matches("[A-Za-z0-9.-]+") || !domain.contains(".")
-                || domain.startsWith(".") || domain.endsWith(".") || domain.startsWith("-") || domain.endsWith("-")) {
-            return false;
-        }
-        return true;
-    }
-    // ── Malware Protection plans ─────────────────────────────────────────────────
-
-    public synchronized MalwareProtectionPlan createMalwareProtectionPlan(
-            String region, String accountId, JsonNode request) {
-        JsonNode resource = request.get("protectedResource");
-        requireObject(resource, "protectedResource");
-        JsonNode bucket = resource.get("s3Bucket");
-        requireObject(bucket, "protectedResource.s3Bucket");
-        String bucketName = requireText(bucket, "bucketName");
-        if (bucketName.length() < 3 || bucketName.length() > 63) {
-            throw badRequest("bucketName must be between 3 and 63 characters.");
-        }
-        String role = readRole(request);
-        List<String> prefixes = readObjectPrefixes(bucket);
-        String taggingStatus = readTaggingStatus(request);
-        Map<String, String> tags = readPlanTags(request);
-        String clientToken = request.hasNonNull("clientToken") ? requireText(request, "clientToken") : null;
-        if (clientToken != null && clientToken.length() > 64) {
-            throw badRequest("clientToken must be at most 64 characters.");
-        }
-
-        String prefix = region + "::";
-        List<MalwareProtectionPlan> existing = malwareProtectionPlanStore.scan(key -> key.startsWith(prefix));
-        if (clientToken != null) {
-            for (MalwareProtectionPlan plan : existing) {
-                if (clientToken.equals(plan.getClientToken())) {
-                    return plan;
-                }
-            }
-        }
-        for (MalwareProtectionPlan plan : existing) {
-            if (bucketName.equals(plan.getBucketName())) {
-                throw new AwsException("ConflictException",
-                        "A Malware Protection plan already exists for the bucket " + bucketName + ".", 409);
-            }
-        }
-
-        MalwareProtectionPlan plan = new MalwareProtectionPlan();
-        plan.setId(UUID.randomUUID().toString().replace("-", ""));
-        plan.setArn(AwsArnUtils.Arn.of("guardduty", region, accountId, PLAN_ARN_RESOURCE_PREFIX + plan.getId())
-                .toString());
-        plan.setRole(role);
-        plan.setBucketName(bucketName);
-        plan.setObjectPrefixes(prefixes);
-        plan.setTaggingStatus(taggingStatus);
-        plan.setStatus("ACTIVE");
-        plan.setCreatedAt(isoTimestamp());
-        plan.setClientToken(clientToken);
-        plan.setTags(tags);
-        malwareProtectionPlanStore.put(storageKey(region, plan.getId()), plan);
-        return plan;
-    }
-
-    public MalwareProtectionPlan getMalwareProtectionPlan(String region, String planId) {
-        return malwareProtectionPlanStore.get(storageKey(region, planId))
-                .orElseThrow(GuardDutyService::planNotFound);
-    }
-
-    /** Only role, object prefixes and the tagging action can change; the bucket is fixed at creation. */
-    public synchronized void updateMalwareProtectionPlan(String region, String planId, JsonNode request) {
-        String key = storageKey(region, planId);
-        MalwareProtectionPlan plan = malwareProtectionPlanStore.get(key).orElseThrow(GuardDutyService::planNotFound);
-
-        // Every supplied field is validated before any of them is applied: the store hands back the
-        // live object, so a change made before a later field is rejected would outlive the 400.
-        boolean roleSupplied = request.has("role");
-        String role = roleSupplied ? readRole(request) : null;
-        JsonNode resource = request.get("protectedResource");
-        boolean prefixesSupplied = false;
-        List<String> prefixes = null;
-        if (resource != null && resource.has("s3Bucket")) {
-            JsonNode bucket = resource.get("s3Bucket");
-            requireObject(bucket, "protectedResource.s3Bucket");
-            prefixesSupplied = bucket.has("objectPrefixes");
-            prefixes = prefixesSupplied ? readObjectPrefixes(bucket) : null;
-        }
-        boolean actionsSupplied = request.has("actions");
-        String taggingStatus = actionsSupplied ? readTaggingStatus(request) : null;
-
-        if (roleSupplied) {
-            plan.setRole(role);
-        }
-        if (prefixesSupplied) {
-            plan.setObjectPrefixes(prefixes);
-        }
-        if (actionsSupplied) {
-            plan.setTaggingStatus(taggingStatus);
-        }
-        malwareProtectionPlanStore.put(key, plan);
-    }
-
-    /**
-     * Puts a plan's mutable settings back exactly as given, nulls included. Not an AWS operation:
-     * it is how a failed CloudFormation stack update undoes an in-place change, which the partial
-     * update above cannot express because it treats an absent field as "leave alone".
-     */
-    public synchronized void restoreMalwareProtectionPlan(String region, String planId, String role,
-            List<String> objectPrefixes, String taggingStatus, Map<String, String> tags) {
-        String key = storageKey(region, planId);
-        MalwareProtectionPlan plan = malwareProtectionPlanStore.get(key).orElseThrow(GuardDutyService::planNotFound);
-        plan.setRole(role);
-        plan.setObjectPrefixes(objectPrefixes);
-        plan.setTaggingStatus(taggingStatus);
-        plan.setTags(tags);
-        malwareProtectionPlanStore.put(key, plan);
-    }
-
-    public synchronized void deleteMalwareProtectionPlan(String region, String planId) {
-        String key = storageKey(region, planId);
-        if (malwareProtectionPlanStore.get(key).isEmpty()) {
-            throw planNotFound();
-        }
-        malwareProtectionPlanStore.delete(key);
-    }
-
-    /**
-     * Pages by plan id rather than position: the token names the last id returned and the next page
-     * starts at the first id after it, so a plan created or deleted between pages (the token's own
-     * plan included) neither fails the request nor skips or repeats a plan.
-     */
-    public Page<MalwareProtectionPlan> listMalwareProtectionPlans(String region, String nextToken) {
-        String prefix = region + "::";
-        String after = decodePlanToken(nextToken);
-        List<MalwareProtectionPlan> remaining = malwareProtectionPlanStore.scan(key -> key.startsWith(prefix)).stream()
-                .sorted(Comparator.comparing(MalwareProtectionPlan::getId))
-                .filter(plan -> after == null || plan.getId().compareTo(after) > 0)
-                .toList();
-        if (remaining.size() <= PLAN_PAGE_SIZE) {
-            return new Page<>(remaining, null);
-        }
-        List<MalwareProtectionPlan> page = remaining.subList(0, PLAN_PAGE_SIZE);
-        return new Page<>(page, encodePlanToken(page.get(page.size() - 1).getId()));
-    }
-
-    private static String encodePlanToken(String lastId) {
-        return Base64.getUrlEncoder().withoutPadding()
-                .encodeToString((PLAN_TOKEN_PREFIX + lastId).getBytes(StandardCharsets.UTF_8));
-    }
-
-    private static String decodePlanToken(String token) {
-        if (token == null) {
-            return null;
-        }
-        try {
-            String decoded = new String(Base64.getUrlDecoder().decode(token), StandardCharsets.UTF_8);
-            if (decoded.startsWith(PLAN_TOKEN_PREFIX) && decoded.length() > PLAN_TOKEN_PREFIX.length()) {
-                return decoded.substring(PLAN_TOKEN_PREFIX.length());
-            }
-        } catch (IllegalArgumentException e) {
-            // falls through to the rejection below
-        }
-        throw badRequest("nextToken is invalid.");
-    }
-
-    /** The role must be an IAM role ARN; any other well-formed ARN is rejected. */
-    private static String readRole(JsonNode request) {
-        String role = requireText(request, "role");
-        boolean iamRole;
-        try {
-            AwsArnUtils.Arn arn = AwsArnUtils.parse(role);
-            iamRole = "iam".equals(arn.service()) && arn.resource().startsWith("role/")
-                    && arn.resource().length() > "role/".length();
-        } catch (IllegalArgumentException e) {
-            iamRole = false;
-        }
-        if (!iamRole) {
-            throw badRequest("role must be the ARN of an IAM role.");
-        }
-        return role;
-    }
-
-    private static List<String> readObjectPrefixes(JsonNode bucket) {
-        if (!bucket.has("objectPrefixes")) {
-            return null;
-        }
-        JsonNode node = bucket.get("objectPrefixes");
-        if (!node.isArray() || node.size() > MAX_PLAN_OBJECT_PREFIXES) {
-            throw badRequest("objectPrefixes must be an array of at most " + MAX_PLAN_OBJECT_PREFIXES + " strings.");
-        }
-        List<String> prefixes = new ArrayList<>(node.size());
-        for (JsonNode item : node) {
-            if (!item.isTextual() || item.textValue().length() > MAX_PLAN_OBJECT_PREFIX_LENGTH) {
-                throw badRequest("objectPrefixes must contain strings of at most "
-                        + MAX_PLAN_OBJECT_PREFIX_LENGTH + " characters.");
-            }
-            prefixes.add(item.textValue());
-        }
-        // An empty list means "the whole bucket", the same as none, so it is stored as none and a
-        // plan created without prefixes and one updated to have none read back identically.
-        return prefixes.isEmpty() ? null : prefixes;
-    }
-
-    private static String readTaggingStatus(JsonNode request) {
-        JsonNode actions = request.get("actions");
-        if (actions == null || actions.isNull()) {
-            return null;
-        }
-        requireObject(actions, "actions");
-        JsonNode tagging = actions.get("tagging");
-        if (tagging == null || tagging.isNull()) {
-            return null;
-        }
-        requireObject(tagging, "actions.tagging");
-        String status = requireText(tagging, "status");
-        if (!FEATURE_STATUSES.contains(status)) {
-            throw badRequest("actions.tagging.status must be ENABLED or DISABLED.");
-        }
-        return status;
-    }
-
-    private static Map<String, String> readPlanTags(JsonNode request) {
-        if (!request.has("tags")) {
-            return null;
-        }
-        JsonNode tagsNode = request.get("tags");
-        if (!tagsNode.isObject() || tagsNode.size() > MAX_PLAN_TAGS) {
-            throw badRequest("tags must be an object with at most " + MAX_PLAN_TAGS + " entries.");
-        }
-        Map<String, String> tags = new LinkedHashMap<>();
-        tagsNode.fields().forEachRemaining(entry -> {
-            JsonNode valueNode = entry.getValue();
-            if (!valueNode.isTextual()) {
-                throw badRequest("tags contains a non-string value.");
-            }
-            requireValidPlanTag(entry.getKey(), valueNode.textValue());
-            tags.put(entry.getKey(), valueNode.textValue());
-        });
-        return tags;
-    }
-
-    /** The tag rules of a Malware Protection plan, shared by creation and the tag routes. */
-    private static void requireValidPlanTag(String key, String value) {
-        if (key.length() > 128 || !PLAN_TAG_KEY_PATTERN.matcher(key).matches()) {
-            throw badRequest("tags contains an invalid key: " + key);
-        }
-        if (value.length() > 256) {
-            throw badRequest("tags contains a value longer than 256 characters.");
-        }
-    }
-
-    private static boolean isMalwareProtectionPlanArn(String arn) {
-        try {
-            return AwsArnUtils.parse(arn).resource().startsWith(PLAN_ARN_RESOURCE_PREFIX);
-        } catch (IllegalArgumentException e) {
-            return false;
-        }
-    }
-
-    /**
-     * Resolves the plan a tag route names. The store is keyed by region and id alone, so the whole
-     * supplied ARN must equal the stored plan's: a matching id under another partition, service or
-     * account does not identify this plan.
-     */
-    private MalwareProtectionPlan planFromArn(String arn, DetectorRef ref) {
-        MalwareProtectionPlan plan = malwareProtectionPlanStore.get(ref.key())
-                .orElseThrow(GuardDutyService::planNotFound);
-        if (!arn.equals(plan.getArn())) {
-            throw planNotFound();
-        }
-        return plan;
-    }
-
-    private static DetectorRef parsePlanArn(String arn) {
-        AwsArnUtils.Arn parsed = AwsArnUtils.parse(arn);
-        String id = parsed.resource().substring(PLAN_ARN_RESOURCE_PREFIX.length());
-        if (id.isEmpty()) {
-            throw badRequest("The request is rejected because an invalid resource ARN is specified: " + arn);
-        }
-        return new DetectorRef(parsed.region(), id);
-    }
-
-    private static AwsException planNotFound() {
-        return new AwsException("ResourceNotFoundException", PLAN_NOT_FOUND_MESSAGE, 404);
-    }
-
-    public Map<String, String> listTags(String arn) {
-        if (isMalwareProtectionPlanArn(arn)) {
-            MalwareProtectionPlan plan = planFromArn(arn, parsePlanArn(arn));
-            return plan.getTags() == null ? Map.of() : plan.getTags();
-        }
-        Detector detector = detectorFromArn(arn);
-        return detector.getTags() == null ? Map.of() : detector.getTags();
-    }
-
-    public synchronized void tagResource(String arn, Map<String, String> tags) {
-        if (isMalwareProtectionPlanArn(arn)) {
-            DetectorRef ref = parsePlanArn(arn);
-            MalwareProtectionPlan plan = planFromArn(arn, ref);
-            tags.forEach(GuardDutyService::requireValidPlanTag);
-            Map<String, String> merged = new LinkedHashMap<>();
-            if (plan.getTags() != null) {
-                merged.putAll(plan.getTags());
-            }
-            merged.putAll(tags);
-            if (merged.size() > MAX_PLAN_TAGS) {
-                throw badRequest("A Malware Protection plan can have at most " + MAX_PLAN_TAGS + " tags.");
-            }
-            plan.setTags(merged);
-            malwareProtectionPlanStore.put(ref.key(), plan);
-            return;
-        }
-        DetectorRef ref = parseDetectorArn(arn);
-        Detector detector = detectorStore.get(ref.key()).orElseThrow(GuardDutyService::detectorNotFound);
-        Map<String, String> merged = new LinkedHashMap<>();
-        if (detector.getTags() != null) {
-            merged.putAll(detector.getTags());
-        }
-        merged.putAll(tags);
-        detector.setTags(merged);
-        detectorStore.put(ref.key(), detector);
-    }
-
-    public synchronized void untagResource(String arn, List<String> tagKeys) {
-        if (isMalwareProtectionPlanArn(arn)) {
-            DetectorRef ref = parsePlanArn(arn);
-            MalwareProtectionPlan plan = planFromArn(arn, ref);
-            if (plan.getTags() == null) {
-                return;
-            }
-            Map<String, String> remaining = new LinkedHashMap<>(plan.getTags());
-            tagKeys.forEach(remaining::remove);
-            plan.setTags(remaining);
-            malwareProtectionPlanStore.put(ref.key(), plan);
-            return;
-        }
-        DetectorRef ref = parseDetectorArn(arn);
-        Detector detector = detectorStore.get(ref.key()).orElseThrow(GuardDutyService::detectorNotFound);
-        if (detector.getTags() == null) {
-            return;
-        }
-        Map<String, String> remaining = new LinkedHashMap<>(detector.getTags());
-        tagKeys.forEach(remaining::remove);
-        detector.setTags(remaining);
-        detectorStore.put(ref.key(), detector);
-    }
-
-    private Detector detectorFromArn(String arn) {
-        DetectorRef ref = parseDetectorArn(arn);
-        return detectorStore.get(ref.key()).orElseThrow(GuardDutyService::detectorNotFound);
-    }
-
-    private static DetectorRef parseDetectorArn(String arn) {
-        AwsArnUtils.Arn parsed;
-        try {
-            parsed = AwsArnUtils.parse(arn);
-        } catch (IllegalArgumentException e) {
-            throw badRequest("The request is rejected because an invalid resource ARN is specified: " + arn);
-        }
-        String prefix = "detector/";
-        String resource = parsed.resource();
-        if (!resource.startsWith(prefix) || resource.length() == prefix.length()) {
-            throw badRequest("The request is rejected because an invalid resource ARN is specified: " + arn);
-        }
-        return new DetectorRef(parsed.region(), resource.substring(prefix.length()));
-    }
-
-    private static List<DetectorFeature> mergeDetectorFeatures(
-            List<DetectorFeature> current, List<DetectorFeature> submitted) {
-        List<DetectorFeature> merged = current == null ? new ArrayList<>() : new ArrayList<>(current);
-        for (DetectorFeature update : submitted) {
-            DetectorFeature existing = merged.stream()
-                    .filter(feature -> feature.getName().equals(update.getName()))
-                    .findFirst()
-                    .orElse(null);
-            if (existing == null) {
-                merged.add(update);
-            } else {
-                existing.setStatus(update.getStatus());
-                existing.setUpdatedAt(update.getUpdatedAt());
-                if (update.getAdditionalConfiguration() != null) {
-                    existing.setAdditionalConfiguration(update.getAdditionalConfiguration());
-                }
-            }
-        }
-        return merged;
-    }
-
-    private static List<OrganizationFeature> mergeOrganizationFeatures(
-            List<OrganizationFeature> current, List<OrganizationFeature> submitted) {
-        List<OrganizationFeature> merged = current == null ? new ArrayList<>() : new ArrayList<>(current);
-        for (OrganizationFeature update : submitted) {
-            OrganizationFeature existing = merged.stream()
-                    .filter(feature -> feature.getName().equals(update.getName()))
-                    .findFirst()
-                    .orElse(null);
-            if (existing == null) {
-                merged.add(update);
-            } else {
-                existing.setAutoEnable(update.getAutoEnable());
-                if (update.getAdditionalConfiguration() != null) {
-                    existing.setAdditionalConfiguration(update.getAdditionalConfiguration());
-                }
-            }
-        }
-        return merged;
-    }
-
-    private static List<DetectorFeature> readDetectorFeatures(JsonNode request) {
-        if (!request.has("features")) {
-            return null;
-        }
-        JsonNode featuresNode = request.get("features");
-        if (!featuresNode.isArray()) {
-            throw badRequest("features must be an array.");
-        }
-        long now = Instant.now().getEpochSecond();
-        List<DetectorFeature> features = new ArrayList<>(featuresNode.size());
-        for (JsonNode featureNode : featuresNode) {
-            requireObject(featureNode, "features member");
-            String name = requireText(featureNode, "name");
-            if (!DETECTOR_FEATURE_NAMES.contains(name)) {
-                throw badRequest("features contains an unsupported feature name: " + name);
-            }
-            String status = requireText(featureNode, "status");
-            if (!FEATURE_STATUSES.contains(status)) {
-                throw badRequest("features contains an invalid status: " + status);
-            }
-            features.add(new DetectorFeature(
-                    name, status, now, readDetectorAdditionalConfiguration(featureNode, now)));
-        }
-        return features;
-    }
-
-    private static List<DetectorAdditionalConfiguration> readDetectorAdditionalConfiguration(
-            JsonNode featureNode, long now) {
-        if (!featureNode.has("additionalConfiguration")) {
-            return null;
-        }
-        JsonNode configurationNode = featureNode.get("additionalConfiguration");
-        if (!configurationNode.isArray()) {
-            throw badRequest("additionalConfiguration must be an array.");
-        }
-        List<DetectorAdditionalConfiguration> configurations = new ArrayList<>(configurationNode.size());
-        for (JsonNode node : configurationNode) {
-            requireObject(node, "additionalConfiguration member");
-            String name = requireText(node, "name");
-            if (!ADDITIONAL_CONFIGURATION_NAMES.contains(name)) {
-                throw badRequest("additionalConfiguration contains an unsupported name: " + name);
-            }
-            String status = requireText(node, "status");
-            if (!FEATURE_STATUSES.contains(status)) {
-                throw badRequest("additionalConfiguration contains an invalid status: " + status);
-            }
-            configurations.add(new DetectorAdditionalConfiguration(name, status, now));
-        }
-        return configurations;
-    }
-
-    private static List<OrganizationFeature> readOrganizationFeatures(JsonNode request) {
-        JsonNode featuresNode = request.get("features");
-        if (!featuresNode.isArray()) {
-            throw badRequest("features must be an array.");
-        }
-        List<OrganizationFeature> features = new ArrayList<>(featuresNode.size());
-        for (JsonNode featureNode : featuresNode) {
-            requireObject(featureNode, "features member");
-            String name = requireText(featureNode, "name");
-            if (!ORG_FEATURE_NAMES.contains(name)) {
-                throw badRequest("features contains an unsupported feature name: " + name);
-            }
-            String autoEnable = requireText(featureNode, "autoEnable");
-            if (!ORG_AUTO_ENABLE_VALUES.contains(autoEnable)) {
-                throw badRequest("features contains an invalid autoEnable value: " + autoEnable);
-            }
-            features.add(new OrganizationFeature(
-                    name, autoEnable, readOrganizationAdditionalConfiguration(featureNode)));
-        }
-        return features;
-    }
-
-    private static List<OrganizationAdditionalConfiguration> readOrganizationAdditionalConfiguration(
-            JsonNode featureNode) {
-        if (!featureNode.has("additionalConfiguration")) {
-            return null;
-        }
-        JsonNode configurationNode = featureNode.get("additionalConfiguration");
-        if (!configurationNode.isArray()) {
-            throw badRequest("additionalConfiguration must be an array.");
-        }
-        List<OrganizationAdditionalConfiguration> configurations = new ArrayList<>(configurationNode.size());
-        for (JsonNode node : configurationNode) {
-            requireObject(node, "additionalConfiguration member");
-            String name = requireText(node, "name");
-            if (!ADDITIONAL_CONFIGURATION_NAMES.contains(name)) {
-                throw badRequest("additionalConfiguration contains an unsupported name: " + name);
-            }
-            String autoEnable = requireText(node, "autoEnable");
-            if (!ORG_AUTO_ENABLE_VALUES.contains(autoEnable)) {
-                throw badRequest("additionalConfiguration contains an invalid autoEnable value: " + autoEnable);
-            }
-            configurations.add(new OrganizationAdditionalConfiguration(name, autoEnable));
-        }
-        return configurations;
-    }
-
-    private static String readFindingPublishingFrequency(JsonNode request, String defaultValue) {
-        if (!request.has("findingPublishingFrequency")) {
-            return defaultValue;
-        }
-        String frequency = requireText(request, "findingPublishingFrequency");
-        if (!FINDING_PUBLISHING_FREQUENCIES.contains(frequency)) {
-            throw badRequest("findingPublishingFrequency must be one of FIFTEEN_MINUTES, ONE_HOUR, or SIX_HOURS.");
-        }
-        return frequency;
-    }
-
-    private static Map<String, String> readTags(JsonNode request) {
-        if (!request.has("tags")) {
-            return null;
-        }
-        JsonNode tagsNode = request.get("tags");
-        if (!tagsNode.isObject() || tagsNode.size() > 50) {
-            throw badRequest("tags must be an object with at most 50 entries.");
-        }
-        Map<String, String> tags = new LinkedHashMap<>();
-        tagsNode.fields().forEachRemaining(entry -> {
-            JsonNode valueNode = entry.getValue();
-            if (!valueNode.isTextual()) {
-                throw badRequest("tags contains a non-string value.");
-            }
-            tags.put(entry.getKey(), valueNode.textValue());
-        });
-        return tags;
-    }
-
-    private List<AdminAccount> organizationAdminAccounts(String region) {
-        String prefix = region + "::";
-        if (adminAccountStore instanceof AccountAwareStorageBackend<AdminAccount> accountAware) {
-            return accountAware.scanAllAccountEntries(key -> key.startsWith(prefix)).stream()
-                    .map(AccountAwareStorageBackend.AccountEntry::value)
-                    .toList();
-        }
-        return adminAccountStore.scan(key -> key.startsWith(prefix));
-    }
-
-    private static String readAdminAccountId(JsonNode request) {
-        String adminAccountId = requireText(request, "adminAccountId");
-        if (!ACCOUNT_ID_PATTERN.matcher(adminAccountId).matches()) {
-            throw badRequest("adminAccountId must be a 12-digit account ID.");
-        }
-        return adminAccountId;
-    }
-
-    private static String storageKey(String region, String id) {
-        return region + "::" + id;
-    }
-
-    private static String serviceRoleArn(String region, String accountId) {
-        return AwsArnUtils.Arn.global(AwsRegions.partitionFor(region), "iam", accountId,
-                "role/aws-service-role/" + ServicePrincipals.of("guardduty") + "/"
-                        + ServiceLinkedRoles.roleName(ServicePrincipals.of("guardduty")).orElseThrow())
-                .toString();
-    }
-
-    private static String isoTimestamp() {
-        return Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS).toString();
-    }
-
-    private static void requireObject(JsonNode value, String field) {
-        if (value == null || !value.isObject()) {
-            throw badRequest(field + " must be a JSON object.");
-        }
-    }
-
-    private static String requireText(JsonNode parent, String field) {
-        JsonNode value = parent.get(field);
-        if (value == null || !value.isTextual()) {
-            throw badRequest(field + " must be a string.");
-        }
-        return value.textValue();
-    }
-
-    private static boolean requireBoolean(JsonNode parent, String field) {
-        JsonNode value = parent.get(field);
-        if (value == null || !value.isBoolean()) {
-            throw badRequest(field + " must be a boolean.");
-        }
-        return value.booleanValue();
-    }
-
-    private static int parseMaxResults(String value) {
-        if (value == null) {
-            return DEFAULT_MAX_RESULTS;
-        }
-        try {
-            int parsed = Integer.parseInt(value);
-            if (parsed < 1 || parsed > MAX_RESULTS) {
-                throw badRequest("maxResults must be between 1 and " + MAX_RESULTS + ".");
-            }
-            return parsed;
-        } catch (NumberFormatException e) {
-            throw badRequest("maxResults must be an integer between 1 and " + MAX_RESULTS + ".");
-        }
-    }
-
-    private static int decodeOffset(String token, int resultSize) {
-        if (token == null) {
-            return 0;
-        }
-        try {
-            String decoded = new String(Base64.getUrlDecoder().decode(token), StandardCharsets.UTF_8);
-            if (!decoded.startsWith(TOKEN_PREFIX)) {
-                throw badRequest("nextToken is invalid.");
-            }
-            int offset = Integer.parseInt(decoded.substring(TOKEN_PREFIX.length()));
-            if (offset < 1 || offset >= resultSize) {
-                throw badRequest("nextToken is invalid.");
-            }
-            return offset;
-        } catch (IllegalArgumentException e) {
-            throw badRequest("nextToken is invalid.");
-        }
-    }
-
-    private static String encodeOffset(int offset) {
-        return Base64Url.encode(TOKEN_PREFIX + offset);
-    }
-
-    private static AwsException detectorNotFound() {
-        return badRequest(DETECTOR_NOT_FOUND_MESSAGE);
-    }
-
-    private static AwsException badRequest(String message) {
-        return new AwsException("BadRequestException", message, 400);
-    }
-
-    private static String accountIdFromServiceRole(String serviceRole) {
-        if (serviceRole == null) {
-            return "000000000000";
-        }
-        String[] parts = serviceRole.split(":", 6);
-        return parts.length > 4 && ACCOUNT_ID_PATTERN.matcher(parts[4]).matches() ? parts[4] : "000000000000";
-    }
-
-
-    public record Page<T>(List<T> items, String nextToken) {
-        public Page {
-            items = List.copyOf(items);
-        }
-    }
-
-    private record DetectorRef(String region, String detectorId) {
-        String key() {
-            return storageKey(region, detectorId);
-        }
-    }
-
-    private record MemberWrite(String key, MemberAccount member) {
-    }
-
-    private final S3Service s3Service;
-
-    private final OrganizationsService organizationsService;
-
 
     public synchronized String createResource(String region, String detectorId, String kind, JsonNode request) {
         Detector detector = getDetector(region, detectorId);
@@ -1589,6 +657,37 @@ public class GuardDutyService {
         return response;
     }
 
+    public synchronized ObjectNode inviteMembers(String region, String detectorId, JsonNode request) {
+        Detector detector = getDetector(region, detectorId);
+        List<String> accountIds = stringList(request, "accountIds", 1, 50);
+        if (!request.has("disableEmailNotification") || !requireBoolean(request, "disableEmailNotification")) {
+            throw badRequest("Floci cannot send GuardDuty invitation emails; disableEmailNotification must be true.");
+        }
+        if (!"ENABLED".equals(detector.getStatus())) {
+            throw badRequest("Inviting members requires an enabled detector.");
+        }
+        for (String accountId : accountIds) {
+            if (!ACCOUNT_ID_PATTERN.matcher(accountId).matches()) {
+                throw badRequest("accountIds must contain 12-digit account IDs.");
+            }
+        }
+        ObjectNode response = object();
+        ArrayNode unprocessed = response.putArray("unprocessedAccounts");
+        for (String accountId : accountIds) {
+            String key = region + "::" + detectorId + "::" + accountId;
+            MemberAccount member = memberStore.get(key).orElse(null);
+            if (member == null || "Enabled".equals(member.relationshipStatus())
+                    || accountId.equals(accountIdFromServiceRole(detector.getServiceRole()))) {
+                unprocessed.addObject().put("accountId", accountId)
+                        .put("result", "The account is not an eligible, created member of this detector.");
+                continue;
+            }
+            String now = isoTimestamp();
+            memberStore.put(key, new MemberAccount(member.accountId(), member.email(), "Invited",
+                    member.administratorId(), detectorId, now, now, UUID.randomUUID().toString().replace("-", "")));
+        }
+        return response;
+    }
 
     public Page<MemberAccount> listInvitations(String region, String accountId, String maxResults, String nextToken) {
         return page(invitations(region, accountId), maxResults, nextToken);
@@ -1926,6 +1025,10 @@ public class GuardDutyService {
         return result;
     }
 
+    private static String optionalText(JsonNode request, String field) {
+        return request.has(field) ? request.get(field).asText() : null;
+    }
+
     private static <T> Page<T> page(List<T> items, String maxResults, String nextToken) {
         int limit = parseMaxResults(maxResults);
         int offset = decodeOffset(nextToken, items.size());
@@ -1937,10 +1040,523 @@ public class GuardDutyService {
         return JsonNodeFactory.instance.objectNode();
     }
 
+    public OrganizationConfiguration describeOrganizationConfiguration(String region, String detectorId) {
+        Detector detector = getDetector(region, detectorId);
+        OrganizationConfiguration configuration = detector.getOrganizationConfiguration();
+        if (configuration == null) {
+            return new OrganizationConfiguration(false, "NONE", List.of());
+        }
+        return configuration;
+    }
+
+    public synchronized void updateOrganizationConfiguration(String region, String detectorId, JsonNode request) {
+        String key = storageKey(region, detectorId);
+        Detector detector = detectorStore.get(key).orElseThrow(GuardDutyService::detectorNotFound);
+
+        OrganizationConfiguration current = detector.getOrganizationConfiguration();
+        boolean autoEnable = current != null && Boolean.TRUE.equals(current.getAutoEnable());
+        String members = current == null ? "NONE" : current.getAutoEnableOrganizationMembers();
+        List<OrganizationFeature> features = current == null ? List.of() : current.getFeatures();
+
+        if (request.has("autoEnableOrganizationMembers")) {
+            members = requireText(request, "autoEnableOrganizationMembers");
+            if (!ORG_AUTO_ENABLE_VALUES.contains(members)) {
+                throw badRequest("autoEnableOrganizationMembers must be one of NEW, ALL, or NONE.");
+            }
+            autoEnable = !"NONE".equals(members);
+        } else if (request.has("autoEnable")) {
+            autoEnable = requireBoolean(request, "autoEnable");
+            members = autoEnable ? "NEW" : "NONE";
+        }
+        if (request.has("features")) {
+            features = mergeOrganizationFeatures(features, readOrganizationFeatures(request));
+        }
+
+        detector.setOrganizationConfiguration(new OrganizationConfiguration(autoEnable, members, features));
+        detectorStore.put(key, detector);
+    }
+
+    public synchronized void enableOrganizationAdminAccount(String region, JsonNode request) {
+        String adminAccountId = readAdminAccountId(request);
+        List<AdminAccount> existing = organizationAdminAccounts(region);
+        if (!existing.isEmpty() && !existing.get(0).getAdminAccountId().equals(adminAccountId)) {
+            throw badRequest("The request is rejected because the organization already has a "
+                    + "delegated administrator account for GuardDuty.");
+        }
+        adminAccountStore.put(storageKey(region, adminAccountId), new AdminAccount(adminAccountId, "ENABLED"));
+    }
+
+    public synchronized void disableOrganizationAdminAccount(String region, JsonNode request) {
+        String adminAccountId = readAdminAccountId(request);
+        String key = storageKey(region, adminAccountId);
+        if (adminAccountStore.get(key).isEmpty()) {
+            throw badRequest(ADMIN_ALREADY_DISABLED_MESSAGE);
+        }
+        adminAccountStore.delete(key);
+    }
+
+    public Page<AdminAccount> listOrganizationAdminAccounts(
+            String region, String maxResultsValue, String nextToken) {
+        int maxResults = parseMaxResults(maxResultsValue);
+        List<AdminAccount> accounts = new ArrayList<>(organizationAdminAccounts(region));
+        accounts.sort(Comparator.comparing(AdminAccount::getAdminAccountId));
+
+        int offset = decodeOffset(nextToken, accounts.size());
+        int end = Math.min(offset + maxResults, accounts.size());
+        String responseToken = end < accounts.size() ? encodeOffset(end) : null;
+        return new Page<>(accounts.subList(offset, end), responseToken);
+    }
+
+    public synchronized void createMembers(String region, String detectorId, JsonNode request) {
+        Detector detector = getDetector(region, detectorId);
+        JsonNode details = request.get("accountDetails");
+        if (details == null || !details.isArray() || details.size() < 1 || details.size() > 50) {
+            throw badRequest("accountDetails must contain between 1 and 50 accounts.");
+        }
+        String administratorId = accountIdFromServiceRole(detector.getServiceRole());
+        boolean organizationDelegatedAdministrator = organizationAdminAccounts(region).stream()
+                .anyMatch(account -> administratorId.equals(account.getAdminAccountId())
+                        && "ENABLED".equals(account.getAdminStatus()));
+        String relationshipStatus = organizationDelegatedAdministrator ? "Enabled" : "Created";
+        String now = Instant.now().toString();
+        List<MemberWrite> writes = new ArrayList<>(details.size());
+        for (JsonNode detail : details) {
+            String accountId = requireText(detail, "accountId");
+            if (!ACCOUNT_ID_PATTERN.matcher(accountId).matches()) {
+                throw badRequest("accountId must be a 12-digit account ID.");
+            }
+            String email = requireText(detail, "email");
+            if (!validMemberEmail(email)) {
+                throw badRequest("email must be a valid GuardDuty member email address.");
+            }
+            String key = region + "::" + detectorId + "::" + accountId;
+            MemberAccount existing = memberStore.get(key).orElse(null);
+            writes.add(new MemberWrite(key, new MemberAccount(
+                    accountId,
+                    email,
+                    existing == null ? relationshipStatus : existing.relationshipStatus(),
+                    administratorId,
+                    detectorId,
+                    existing == null ? null : existing.invitedAt(),
+                    now,
+                    existing == null ? null : existing.invitationId())));
+        }
+        for (MemberWrite write : writes) {
+            memberStore.put(write.key(), write.member());
+        }
+    }
+
+    public Page<MemberAccount> listMembers(String region, String detectorId, String maxResults,
+                                           String nextToken, String onlyAssociated) {
+        Detector detector = getDetector(region, detectorId);
+        int limit = parseMaxResults(maxResults);
+        if (onlyAssociated != null && !onlyAssociated.equalsIgnoreCase("true")
+                && !onlyAssociated.equalsIgnoreCase("false")) {
+            throw badRequest("onlyAssociated must be true or false.");
+        }
+        String prefix = region + "::" + detectorId + "::";
+        List<MemberAccount> members = memberStore.scan(key -> key.startsWith(prefix)).stream()
+                .filter(member -> !"true".equalsIgnoreCase(onlyAssociated)
+                        || isAssociatedRelationship(member.relationshipStatus()))
+                .sorted(Comparator.comparing(MemberAccount::accountId)).toList();
+        int offset = decodeOffset(nextToken, members.size());
+        int end = Math.min(members.size(), offset + limit);
+        return new Page<>(members.subList(offset, end), end < members.size() ? encodeOffset(end) : null);
+    }
+
+    public List<MemberAccount> listMembers(String region, String detectorId) {
+        return listMembers(region, detectorId, null, null, null).items();
+    }
+
+    private static boolean isAssociatedRelationship(String status) {
+        return "Enabled".equals(status) || "Invited".equals(status) || "EmailVerificationInProgress".equals(status);
+    }
+
+    private static boolean validMemberEmail(String email) {
+        if (email == null || email.length() < 6 || email.length() > 64 || !email.chars().allMatch(ch -> ch < 128)) {
+            return false;
+        }
+        int at = email.indexOf('@');
+        if (at <= 0 || at != email.lastIndexOf('@') || at == email.length() - 1) {
+            return false;
+        }
+        String local = email.substring(0, at);
+        String domain = email.substring(at + 1);
+        if (local.startsWith(".") || local.matches(".*[\\s\"'()<>\\[\\]:,\\\\|%&].*")) {
+            return false;
+        }
+        if (!domain.matches("[A-Za-z0-9.-]+") || !domain.contains(".")
+                || domain.startsWith(".") || domain.endsWith(".") || domain.startsWith("-") || domain.endsWith("-")) {
+            return false;
+        }
+        return true;
+    }
+    public Map<String, String> listTags(String arn) {
+        DetectorRef ref = parseDetectorArn(arn);
+        Detector detector = detectorFromArn(arn);
+        if (ref.resourceKey() == null) {
+            return detector.getTags() == null ? Map.of() : detector.getTags();
+        }
+        JsonNode resource = detector.getResources().get(ref.resourceKey());
+        if (resource == null) {
+            throw badRequest("The requested detector resource does not exist.");
+        }
+        Map<String, String> tags = new LinkedHashMap<>();
+        resource.path("tags").fields().forEachRemaining(entry -> tags.put(entry.getKey(), entry.getValue().asText()));
+        return tags;
+    }
+
+    public synchronized void tagResource(String arn, Map<String, String> tags) {
+        Map<String, String> merged = new LinkedHashMap<>(listTags(arn));
+        merged.putAll(tags);
+        if (merged.size() > 50) {
+            throw badRequest("A resource may have at most 50 tags.");
+        }
+        saveTags(arn, merged);
+    }
+
+    public synchronized void untagResource(String arn, List<String> tagKeys) {
+        Map<String, String> remaining = new LinkedHashMap<>(listTags(arn));
+        tagKeys.forEach(remaining::remove);
+        saveTags(arn, remaining);
+    }
+
+    private void saveTags(String arn, Map<String, String> tags) {
+        DetectorRef ref = parseDetectorArn(arn);
+        Detector detector = detectorFromArn(arn);
+        if (ref.resourceKey() == null) {
+            detector.setTags(tags);
+            detectorStore.put(ref.key(), detector);
+        } else {
+            ObjectNode resource = (ObjectNode) detector.getResources().get(ref.resourceKey()).deepCopy();
+            ObjectNode tagNode = resource.putObject("tags");
+            tags.forEach(tagNode::put);
+            saveResource(ref.region(), detector, ref.resourceKey(), resource);
+        }
+    }
+
+    private Detector detectorFromArn(String arn) {
+        DetectorRef ref = parseDetectorArn(arn);
+        Detector detector = detectorStore.get(ref.key()).orElseThrow(GuardDutyService::detectorNotFound);
+        if (!ref.accountId().equals(accountIdFromServiceRole(detector.getServiceRole()))) {
+            throw detectorNotFound();
+        }
+        return detector;
+    }
+
+    private static DetectorRef parseDetectorArn(String arn) {
+        AwsArnUtils.Arn parsed;
+        try {
+            parsed = AwsArnUtils.parse(arn);
+        } catch (IllegalArgumentException e) {
+            throw badRequest("The request is rejected because an invalid resource ARN is specified: " + arn);
+        }
+        String prefix = "detector/";
+        String resource = parsed.resource();
+        if (!resource.startsWith(prefix) || resource.length() == prefix.length()) {
+            throw badRequest("The request is rejected because an invalid resource ARN is specified: " + arn);
+        }
+        String[] parts = resource.split("/", -1);
+        if (!"guardduty".equals(parsed.service()) || !ACCOUNT_ID_PATTERN.matcher(parsed.accountId()).matches()
+                || (parts.length != 2 && parts.length != 4) || parts[1].isBlank()
+                || (parts.length == 4 && (!Set.of("filter", "ipset", "threatintelset").contains(parts[2])
+                || parts[3].isBlank()))) {
+            throw badRequest("The request contains an invalid GuardDuty resource ARN.");
+        }
+        return new DetectorRef(parsed.region(), parts[1], parsed.accountId(),
+                parts.length == 4 ? parts[2] + "/" + parts[3] : null);
+    }
+
+    private static List<DetectorFeature> mergeDetectorFeatures(
+            List<DetectorFeature> current, List<DetectorFeature> submitted) {
+        List<DetectorFeature> merged = current == null ? new ArrayList<>() : new ArrayList<>(current);
+        for (DetectorFeature update : submitted) {
+            DetectorFeature existing = merged.stream()
+                    .filter(feature -> feature.getName().equals(update.getName()))
+                    .findFirst()
+                    .orElse(null);
+            if (existing == null) {
+                merged.add(update);
+            } else {
+                existing.setStatus(update.getStatus());
+                existing.setUpdatedAt(update.getUpdatedAt());
+                if (update.getAdditionalConfiguration() != null) {
+                    existing.setAdditionalConfiguration(update.getAdditionalConfiguration());
+                }
+            }
+        }
+        return merged;
+    }
+
+    private static List<OrganizationFeature> mergeOrganizationFeatures(
+            List<OrganizationFeature> current, List<OrganizationFeature> submitted) {
+        List<OrganizationFeature> merged = current == null ? new ArrayList<>() : new ArrayList<>(current);
+        for (OrganizationFeature update : submitted) {
+            OrganizationFeature existing = merged.stream()
+                    .filter(feature -> feature.getName().equals(update.getName()))
+                    .findFirst()
+                    .orElse(null);
+            if (existing == null) {
+                merged.add(update);
+            } else {
+                existing.setAutoEnable(update.getAutoEnable());
+                if (update.getAdditionalConfiguration() != null) {
+                    existing.setAdditionalConfiguration(update.getAdditionalConfiguration());
+                }
+            }
+        }
+        return merged;
+    }
+
+    private static List<DetectorFeature> readDetectorFeatures(JsonNode request) {
+        if (!request.has("features")) {
+            return null;
+        }
+        JsonNode featuresNode = request.get("features");
+        if (!featuresNode.isArray()) {
+            throw badRequest("features must be an array.");
+        }
+        long now = Instant.now().getEpochSecond();
+        List<DetectorFeature> features = new ArrayList<>(featuresNode.size());
+        for (JsonNode featureNode : featuresNode) {
+            requireObject(featureNode, "features member");
+            String name = requireText(featureNode, "name");
+            if (!DETECTOR_FEATURE_NAMES.contains(name)) {
+                throw badRequest("features contains an unsupported feature name: " + name);
+            }
+            String status = requireText(featureNode, "status");
+            if (!FEATURE_STATUSES.contains(status)) {
+                throw badRequest("features contains an invalid status: " + status);
+            }
+            features.add(new DetectorFeature(
+                    name, status, now, readDetectorAdditionalConfiguration(featureNode, now)));
+        }
+        return features;
+    }
+
+    private static List<DetectorAdditionalConfiguration> readDetectorAdditionalConfiguration(
+            JsonNode featureNode, long now) {
+        if (!featureNode.has("additionalConfiguration")) {
+            return null;
+        }
+        JsonNode configurationNode = featureNode.get("additionalConfiguration");
+        if (!configurationNode.isArray()) {
+            throw badRequest("additionalConfiguration must be an array.");
+        }
+        List<DetectorAdditionalConfiguration> configurations = new ArrayList<>(configurationNode.size());
+        for (JsonNode node : configurationNode) {
+            requireObject(node, "additionalConfiguration member");
+            String name = requireText(node, "name");
+            if (!ADDITIONAL_CONFIGURATION_NAMES.contains(name)) {
+                throw badRequest("additionalConfiguration contains an unsupported name: " + name);
+            }
+            String status = requireText(node, "status");
+            if (!FEATURE_STATUSES.contains(status)) {
+                throw badRequest("additionalConfiguration contains an invalid status: " + status);
+            }
+            configurations.add(new DetectorAdditionalConfiguration(name, status, now));
+        }
+        return configurations;
+    }
+
+    private static List<OrganizationFeature> readOrganizationFeatures(JsonNode request) {
+        JsonNode featuresNode = request.get("features");
+        if (!featuresNode.isArray()) {
+            throw badRequest("features must be an array.");
+        }
+        List<OrganizationFeature> features = new ArrayList<>(featuresNode.size());
+        for (JsonNode featureNode : featuresNode) {
+            requireObject(featureNode, "features member");
+            String name = requireText(featureNode, "name");
+            if (!ORG_FEATURE_NAMES.contains(name)) {
+                throw badRequest("features contains an unsupported feature name: " + name);
+            }
+            String autoEnable = requireText(featureNode, "autoEnable");
+            if (!ORG_AUTO_ENABLE_VALUES.contains(autoEnable)) {
+                throw badRequest("features contains an invalid autoEnable value: " + autoEnable);
+            }
+            features.add(new OrganizationFeature(
+                    name, autoEnable, readOrganizationAdditionalConfiguration(featureNode)));
+        }
+        return features;
+    }
+
+    private static List<OrganizationAdditionalConfiguration> readOrganizationAdditionalConfiguration(
+            JsonNode featureNode) {
+        if (!featureNode.has("additionalConfiguration")) {
+            return null;
+        }
+        JsonNode configurationNode = featureNode.get("additionalConfiguration");
+        if (!configurationNode.isArray()) {
+            throw badRequest("additionalConfiguration must be an array.");
+        }
+        List<OrganizationAdditionalConfiguration> configurations = new ArrayList<>(configurationNode.size());
+        for (JsonNode node : configurationNode) {
+            requireObject(node, "additionalConfiguration member");
+            String name = requireText(node, "name");
+            if (!ADDITIONAL_CONFIGURATION_NAMES.contains(name)) {
+                throw badRequest("additionalConfiguration contains an unsupported name: " + name);
+            }
+            String autoEnable = requireText(node, "autoEnable");
+            if (!ORG_AUTO_ENABLE_VALUES.contains(autoEnable)) {
+                throw badRequest("additionalConfiguration contains an invalid autoEnable value: " + autoEnable);
+            }
+            configurations.add(new OrganizationAdditionalConfiguration(name, autoEnable));
+        }
+        return configurations;
+    }
+
+    private static String readFindingPublishingFrequency(JsonNode request, String defaultValue) {
+        if (!request.has("findingPublishingFrequency")) {
+            return defaultValue;
+        }
+        String frequency = requireText(request, "findingPublishingFrequency");
+        if (!FINDING_PUBLISHING_FREQUENCIES.contains(frequency)) {
+            throw badRequest("findingPublishingFrequency must be one of FIFTEEN_MINUTES, ONE_HOUR, or SIX_HOURS.");
+        }
+        return frequency;
+    }
+
+    private static Map<String, String> readTags(JsonNode request) {
+        if (!request.has("tags")) {
+            return null;
+        }
+        JsonNode tagsNode = request.get("tags");
+        if (!tagsNode.isObject() || tagsNode.size() > 50) {
+            throw badRequest("tags must be an object with at most 50 entries.");
+        }
+        Map<String, String> tags = new LinkedHashMap<>();
+        tagsNode.fields().forEachRemaining(entry -> {
+            JsonNode valueNode = entry.getValue();
+            if (!valueNode.isTextual()) {
+                throw badRequest("tags contains a non-string value.");
+            }
+            tags.put(entry.getKey(), valueNode.textValue());
+        });
+        return tags;
+    }
+
+    private List<AdminAccount> organizationAdminAccounts(String region) {
+        String prefix = region + "::";
+        if (adminAccountStore instanceof AccountAwareStorageBackend<AdminAccount> accountAware) {
+            return accountAware.scanAllAccountEntries(key -> key.startsWith(prefix)).stream()
+                    .map(AccountAwareStorageBackend.AccountEntry::value)
+                    .toList();
+        }
+        return adminAccountStore.scan(key -> key.startsWith(prefix));
+    }
+
+    private static String readAdminAccountId(JsonNode request) {
+        String adminAccountId = requireText(request, "adminAccountId");
+        if (!ACCOUNT_ID_PATTERN.matcher(adminAccountId).matches()) {
+            throw badRequest("adminAccountId must be a 12-digit account ID.");
+        }
+        return adminAccountId;
+    }
+
+    private static String storageKey(String region, String id) {
+        return region + "::" + id;
+    }
 
     private static String serviceRoleArn(String accountId) {
         return "arn:aws:iam::" + accountId
                 + ":role/aws-service-role/guardduty.amazonaws.com/AWSServiceRoleForAmazonGuardDuty";
     }
 
+    private static String isoTimestamp() {
+        return Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS).toString();
+    }
+
+    private static void requireObject(JsonNode value, String field) {
+        if (value == null || !value.isObject()) {
+            throw badRequest(field + " must be a JSON object.");
+        }
+    }
+
+    private static String requireText(JsonNode parent, String field) {
+        JsonNode value = parent.get(field);
+        if (value == null || !value.isTextual()) {
+            throw badRequest(field + " must be a string.");
+        }
+        return value.textValue();
+    }
+
+    private static boolean requireBoolean(JsonNode parent, String field) {
+        JsonNode value = parent.get(field);
+        if (value == null || !value.isBoolean()) {
+            throw badRequest(field + " must be a boolean.");
+        }
+        return value.booleanValue();
+    }
+
+    private static int parseMaxResults(String value) {
+        if (value == null) {
+            return DEFAULT_MAX_RESULTS;
+        }
+        try {
+            int parsed = Integer.parseInt(value);
+            if (parsed < 1 || parsed > MAX_RESULTS) {
+                throw badRequest("maxResults must be between 1 and " + MAX_RESULTS + ".");
+            }
+            return parsed;
+        } catch (NumberFormatException e) {
+            throw badRequest("maxResults must be an integer between 1 and " + MAX_RESULTS + ".");
+        }
+    }
+
+    private static int decodeOffset(String token, int resultSize) {
+        if (token == null) {
+            return 0;
+        }
+        try {
+            String decoded = new String(Base64.getUrlDecoder().decode(token), StandardCharsets.UTF_8);
+            if (!decoded.startsWith(TOKEN_PREFIX)) {
+                throw badRequest("nextToken is invalid.");
+            }
+            int offset = Integer.parseInt(decoded.substring(TOKEN_PREFIX.length()));
+            if (offset < 1 || offset >= resultSize) {
+                throw badRequest("nextToken is invalid.");
+            }
+            return offset;
+        } catch (IllegalArgumentException e) {
+            throw badRequest("nextToken is invalid.");
+        }
+    }
+
+    private static String encodeOffset(int offset) {
+        return Base64.getUrlEncoder().withoutPadding()
+                .encodeToString((TOKEN_PREFIX + offset).getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static AwsException detectorNotFound() {
+        return badRequest(DETECTOR_NOT_FOUND_MESSAGE);
+    }
+
+    private static AwsException badRequest(String message) {
+        return new AwsException("BadRequestException", message, 400);
+    }
+
+    private static String accountIdFromServiceRole(String serviceRole) {
+        if (serviceRole == null) {
+            return "000000000000";
+        }
+        String[] parts = serviceRole.split(":", 6);
+        return parts.length > 4 && ACCOUNT_ID_PATTERN.matcher(parts[4]).matches() ? parts[4] : "000000000000";
+    }
+
+
+    public record Page<T>(List<T> items, String nextToken) {
+        public Page {
+            items = List.copyOf(items);
+        }
+    }
+
+    private record DetectorRef(String region, String detectorId, String accountId, String resourceKey) {
+        String key() {
+            return storageKey(region, detectorId);
+        }
+    }
+
+    private record MemberWrite(String key, MemberAccount member) {
+    }
 }

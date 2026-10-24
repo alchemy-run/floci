@@ -18,14 +18,10 @@ import java.util.Set;
  *   <li>{@code arn:aws:appconfig:<region>:<account>:application/<appId>}
  *   <li>{@code arn:aws:appconfig:<region>:<account>:application/<appId>/environment/<envId>}
  *   <li>{@code arn:aws:appconfig:<region>:<account>:application/<appId>/configurationprofile/<profileId>}
- *   <li>{@code arn:aws:appconfig:<region>:<account>:deploymentstrategy/<strategyId>}
- *   <li>{@code arn:aws:appconfig:<region>:<account>:extension/<extensionId>}
- *   <li>{@code arn:aws:appconfig:<region>:<account>:extensionassociation/<associationId>}
+ *   <li>{@code arn:aws:appconfig:<region>:<account>:deploymentstrategy/<id>}
+ *   <li>{@code arn:aws:appconfig:<region>:<account>:extension/<id>[/<version>]}
+ *   <li>{@code arn:aws:appconfig:<region>:<account>:extensionassociation/<id>}
  * </ul>
- * Only application-level tags are actually stored; every other recognized ARN shape above is
- * accepted (not rejected with a 400) but the tag call itself is a no-op - this satisfies callers
- * (e.g. Terraform's AWS provider) that read tags back after a write without erroring on a resource
- * type Floci doesn't yet persist tags for.
  */
 @ApplicationScoped
 public class AppConfigTagHandler implements TagHandler {
@@ -52,11 +48,11 @@ public class AppConfigTagHandler implements TagHandler {
         ResourceRef ref = parseArn(arn);
         return switch (ref.type()) {
             case "application" -> service.getApplicationTags(ref.id());
-            case "extensionassociation" -> service.getAssociationTags(ref.id());
-            case "extension" -> service.getExtensionTags(ref.id());
-            case "deploymentstrategy" -> service.getStrategyTags(ref.id());
-            case "configurationprofile" -> service.getProfileTags(ref.id());
             case "environment" -> service.getEnvironmentTags(ref.id());
+            case "configurationprofile" -> service.getProfileTags(ref.id());
+            case "deploymentstrategy" -> service.getStrategyTags(ref.id());
+            case "extension" -> service.getExtensionTags(ref.id());
+            case "extensionassociation" -> service.getAssociationTags(ref.id());
             default -> Map.of();
         };
     }
@@ -64,16 +60,30 @@ public class AppConfigTagHandler implements TagHandler {
     @Override
     public void tagResource(String region, String arn, Map<String, String> tags) {
         ResourceRef ref = parseArn(arn);
-        if ("application".equals(ref.type())) {
-            service.tagApplication(ref.id(), tags);
+        switch (ref.type()) {
+            case "application" -> service.tagApplication(ref.id(), tags);
+            case "environment" -> service.tagEnvironment(ref.id(), tags);
+            case "configurationprofile" -> service.tagProfile(ref.id(), tags);
+            case "deploymentstrategy" -> service.tagStrategy(ref.id(), tags);
+            case "extension" -> service.tagExtension(ref.id(), tags);
+            case "extensionassociation" -> service.tagAssociation(ref.id(), tags);
+            default -> {
+            }
         }
     }
 
     @Override
     public void untagResource(String region, String arn, List<String> tagKeys) {
         ResourceRef ref = parseArn(arn);
-        if ("application".equals(ref.type())) {
-            service.untagApplication(ref.id(), tagKeys);
+        switch (ref.type()) {
+            case "application" -> service.untagApplication(ref.id(), tagKeys);
+            case "environment" -> service.untagEnvironment(ref.id(), tagKeys);
+            case "configurationprofile" -> service.untagProfile(ref.id(), tagKeys);
+            case "deploymentstrategy" -> service.untagStrategy(ref.id(), tagKeys);
+            case "extension" -> service.untagExtension(ref.id(), tagKeys);
+            case "extensionassociation" -> service.untagAssociation(ref.id(), tagKeys);
+            default -> {
+            }
         }
     }
 
@@ -87,7 +97,6 @@ public class AppConfigTagHandler implements TagHandler {
     private static final Set<String> TOP_LEVEL_TYPES = Set.of("deploymentstrategy", "extension", "extensionassociation");
 
     private static ResourceRef parseArn(String arn) {
-        // arn:aws:appconfig:<region>:<account>:<resource>
         String resource;
         try {
             resource = AwsArnUtils.parse(arn).resource();
@@ -99,13 +108,18 @@ public class AppConfigTagHandler implements TagHandler {
             return new ResourceRef(parts[0], parts[1]);
         }
         if (parts.length >= 2 && "application".equals(parts[0])) {
-            // application/<appId>
             if (parts.length == 2) return new ResourceRef("application", parts[1]);
-            // application/<appId>/environment/<envId>
-            // application/<appId>/configurationprofile/<profileId>
             if (parts.length == 4) return new ResourceRef(parts[2], parts[3]);
-            // application/<appId>/environment/<envId>/deployment/<num>
             if (parts.length == 6) return new ResourceRef(parts[4], parts[5]);
+        }
+        if (parts.length >= 2 && "deploymentstrategy".equals(parts[0])) {
+            return new ResourceRef("deploymentstrategy", parts[1]);
+        }
+        if (parts.length >= 2 && "extension".equals(parts[0])) {
+            return new ResourceRef("extension", parts[1]);
+        }
+        if (parts.length >= 2 && "extensionassociation".equals(parts[0])) {
+            return new ResourceRef("extensionassociation", parts[1]);
         }
         throw new AwsException("BadRequestException", "Invalid resource ARN: " + arn, 400);
     }

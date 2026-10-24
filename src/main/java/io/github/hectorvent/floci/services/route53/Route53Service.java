@@ -3,9 +3,7 @@ package io.github.hectorvent.floci.services.route53;
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.core.common.DomainNames;
 import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.core.common.Resettable;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -15,9 +13,11 @@ import io.github.hectorvent.floci.services.route53.model.ChangeInfo;
 import io.github.hectorvent.floci.services.route53.model.HealthCheck;
 import io.github.hectorvent.floci.services.route53.model.HealthCheckConfig;
 import io.github.hectorvent.floci.services.route53.model.HostedZone;
+import io.github.hectorvent.floci.services.route53.model.QueryLoggingConfig;
 import io.github.hectorvent.floci.services.route53.model.ResourceRecord;
 import io.github.hectorvent.floci.services.route53.model.ResourceRecordSet;
 import io.github.hectorvent.floci.services.route53.model.VpcAssociation;
+import io.github.hectorvent.floci.services.route53.model.ZoneVpc;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -25,21 +25,18 @@ import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
-import io.github.hectorvent.floci.services.route53.model.QueryLoggingConfig;
-import io.github.hectorvent.floci.services.route53.model.ZoneVpc;
-import java.util.Comparator;
-import java.util.Locale;
 
 @ApplicationScoped
-public class Route53Service implements Resettable {
+public class Route53Service {
 
     private static final String CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     private static final SecureRandom RANDOM = new SecureRandom();
@@ -54,6 +51,7 @@ public class Route53Service implements Resettable {
     private final StorageBackend<String, HealthCheck> healthCheckStore;
     private final StorageBackend<String, ChangeInfo> changeStore;
     private final StorageBackend<String, Map<String, String>> tagStore;
+    private final StorageBackend<String, QueryLoggingConfig> queryLogStore;
     private final StorageBackend<String, List<VpcAssociation>> vpcAuthorizationStore;
     private final List<String> nameServers;
     private final String defaultAccountId;
@@ -62,8 +60,6 @@ public class Route53Service implements Resettable {
     private final long vpcAssociationControlPlaneDelayMs;
     private final Map<String, Long> hostedZoneMutationBusyUntilNanos = new ConcurrentHashMap<>();
     private final Map<String, Long> authorizationMutationBusyUntilNanos = new ConcurrentHashMap<>();
-    private final Map<String, Integer> privateZoneNameCounts = new ConcurrentHashMap<>();
-    private final Map<String, Integer> publicZoneNameCounts = new ConcurrentHashMap<>();
 
     @Inject
     public Route53Service(StorageFactory factory, EmulatorConfig config, RegionResolver regionResolver,
@@ -78,6 +74,8 @@ public class Route53Service implements Resettable {
                 new TypeReference<Map<String, ChangeInfo>>() {});
         this.tagStore = factory.create("route53", "route53-tags.json",
                 new TypeReference<Map<String, Map<String, String>>>() {});
+        this.queryLogStore = factory.create("route53", "route53-query-logs.json",
+                new TypeReference<Map<String, QueryLoggingConfig>>() {});
         this.vpcAuthorizationStore = factory.create("route53", "route53-vpc-association-authorizations.json",
                 new TypeReference<Map<String, List<VpcAssociation>>>() {});
 
@@ -92,13 +90,71 @@ public class Route53Service implements Resettable {
         this.regionResolver = regionResolver;
         this.ec2Service = ec2Service;
         this.vpcAssociationControlPlaneDelayMs = Math.max(0, r53.vpcAssociationControlPlaneDelayMs());
-        for (OwnedZone owned : allHostedZonesAcrossAccounts()) {
-            zoneNameCounts(owned.zone().isPrivateZone()).merge(
-                    normalizeName(owned.zone().getName()).toLowerCase(), 1, Integer::sum);
+        migrateLegacyVpcAuthorizations(factory);
+    }
+
+    private void migrateLegacyVpcAuthorizations(StorageFactory factory) {
+        AccountAwareStorageBackend<ZoneVpc> legacy = factory.create("route53", "route53-vpc-auth.json",
+                new TypeReference<Map<String, ZoneVpc>>() {});
+        AccountAwareStorageBackend<Boolean> migrated = factory.create("route53", "route53-vpc-auth-migrations.json",
+                new TypeReference<Map<String, Boolean>>() {});
+        @SuppressWarnings("unchecked")
+        AccountAwareStorageBackend<List<VpcAssociation>> canonical =
+                (AccountAwareStorageBackend<List<VpcAssociation>>) vpcAuthorizationStore;
+        @SuppressWarnings("unchecked")
+        AccountAwareStorageBackend<HostedZone> zones = (AccountAwareStorageBackend<HostedZone>) zoneStore;
+        synchronized (canonical) {
+            Map<String, HostedZone> rawZones = zones.scanAllAccountsWithRawKeys();
+            for (AccountAwareStorageBackend.AccountEntry<ZoneVpc> entry : legacy.scanAllAccountEntries(k -> true)) {
+                String accountId = entry.accountId();
+                String key = entry.key();
+                if (migrated.getForAccount(accountId, key).orElse(false)) {
+                    continue;
+                }
+                ZoneVpc source = legacy.getForAccount(accountId, key).orElse(entry.value());
+                int separator = key.indexOf('/');
+                if (separator <= 0 || source.getVpcId() == null || source.getVpcId().isBlank()
+                        || source.getVpcRegion() == null || source.getVpcRegion().isBlank()
+                        || !key.substring(separator + 1).equals(source.getVpcId())) {
+                    continue;
+                }
+                String zoneId = key.substring(0, separator);
+                HostedZone zone = zones.getForAccount(accountId, zoneId)
+                        .orElse(accountId.equals(defaultAccountId) ? rawZones.get(zoneId) : null);
+                if (zone == null || !zoneId.equals(zone.getId())
+                        || (zone.getOwnerAccountId() != null && !accountId.equals(zone.getOwnerAccountId()))) {
+                    continue;
+                }
+                if (accountId.equals(defaultAccountId)) {
+                    canonical.getForAccountMigratingLegacyKeys(accountId, zoneId, List.of(), authorizations -> true);
+                }
+                List<VpcAssociation> existing = canonical.getForAccount(accountId, zoneId).orElse(null);
+                List<VpcAssociation> authorizations = new ArrayList<>(existing != null ? existing : List.of());
+                VpcAssociation authorization = new VpcAssociation(source.getVpcId(), source.getVpcRegion());
+                if (findAssociation(authorizations, authorization) == null) {
+                    authorizations.add(authorization);
+                    canonical.putForAccount(accountId, zoneId, authorizations);
+                }
+                // Mark each source once so deleting an authorization cannot resurrect it on restart.
+                canonical.flush();
+                migrated.putForAccount(accountId, key, true);
+                migrated.flush();
+            }
         }
     }
 
     // ── Hosted Zones ──────────────────────────────────────────────────────────
+
+    public CreateZoneResult createHostedZone(String name, String callerReference, String comment,
+                                              boolean privateZone, String vpcId, String vpcRegion) {
+        if (privateZone && (vpcId == null || vpcId.isBlank())) {
+            throw new AwsException("InvalidInput",
+                    "A VPC is required when creating a private hosted zone.", 400);
+        }
+        VpcAssociation vpc = vpcId == null || vpcId.isBlank() ? null
+                : new VpcAssociation(vpcId, vpcRegion != null ? vpcRegion : "us-east-1");
+        return createHostedZone(name, callerReference, comment, vpc);
+    }
 
     public synchronized CreateZoneResult createHostedZone(String name, String callerReference,
                                                            String comment, VpcAssociation vpcAssociation) {
@@ -119,7 +175,6 @@ public class Route53Service implements Resettable {
         if (vpcAssociation != null) {
             vpcAssociation.setOwnerAccountId(callerAccountId);
         }
-        zoneNameCounts(zone.isPrivateZone()).merge(normalizedName.toLowerCase(), 1, Integer::sum);
         zoneStore.put(id, zone);
         recordStore.put(id, buildDefaultRecords(normalizedName));
         ChangeInfo change = newChange(null);
@@ -127,16 +182,18 @@ public class Route53Service implements Resettable {
     }
 
     public HostedZone getHostedZone(String id) {
-        HostedZone zone = zoneStore.get(id).orElseThrow(() ->
+        String zoneId = normalizeZoneId(id);
+        HostedZone zone = zoneStore.get(zoneId).orElseThrow(() ->
                 new AwsException("NoSuchHostedZone",
-                        "No hosted zone found with ID: " + id, 404));
-        zone.setResourceRecordSetCount(recordCount(id));
+                        "No hosted zone found with ID: " + zoneId, 404));
+        zone.setResourceRecordSetCount(recordCount(zoneId));
         return zone;
     }
 
     public synchronized ChangeInfo deleteHostedZone(String id) {
         HostedZone zone = getHostedZone(id);
-        List<ResourceRecordSet> records = recordStore.get(id).orElse(List.of());
+        String zoneId = zone.getId();
+        List<ResourceRecordSet> records = recordStore.get(zoneId).orElse(List.of());
         long nonDefault = records.stream()
                 .filter(r -> !isApexSoaOrNs(r, zone.getName()))
                 .count();
@@ -144,13 +201,71 @@ public class Route53Service implements Resettable {
             throw new AwsException("HostedZoneNotEmpty",
                     "The hosted zone contains resource record sets in addition to the default NS and SOA records.", 400);
         }
-        zoneStore.delete(id);
-        recordStore.delete(id);
-        tagStore.delete("hostedzone/" + id);
-        vpcAuthorizationStore.delete(id);
-        zoneNameCounts(zone.isPrivateZone()).computeIfPresent(normalizeName(zone.getName()).toLowerCase(),
-                (k, v) -> v > 1 ? v - 1 : null);
+        zoneStore.delete(zoneId);
+        recordStore.delete(zoneId);
+        tagStore.delete("hostedzone/" + zoneId);
+        for (QueryLoggingConfig cfg : queryLogStore.scan(k -> true)) {
+            if (zoneId.equals(cfg.getHostedZoneId())) {
+                queryLogStore.delete(cfg.getId());
+            }
+        }
+        vpcAuthorizationStore.delete(zoneId);
         return newChange(null);
+    }
+
+    public QueryLoggingConfig createQueryLoggingConfig(String hostedZoneId, String logGroupArn) {
+        HostedZone zone = getHostedZone(hostedZoneId);
+        for (QueryLoggingConfig existing : queryLogStore.scan(k -> true)) {
+            if (zone.getId().equals(existing.getHostedZoneId())) {
+                throw new AwsException("QueryLoggingConfigAlreadyExists",
+                        "A query logging config already exists for this hosted zone.", 409);
+            }
+        }
+        String id = UUID.randomUUID().toString();
+        QueryLoggingConfig cfg = new QueryLoggingConfig(id, zone.getId(), logGroupArn);
+        queryLogStore.put(id, cfg);
+        return cfg;
+    }
+
+    public QueryLoggingConfig getQueryLoggingConfig(String id) {
+        return queryLogStore.get(id).orElseThrow(() ->
+                new AwsException("NoSuchQueryLoggingConfig",
+                        "No query logging config found with ID: " + id, 404));
+    }
+
+    public void deleteQueryLoggingConfig(String id) {
+        getQueryLoggingConfig(id);
+        queryLogStore.delete(id);
+    }
+
+    public List<QueryLoggingConfig> listQueryLoggingConfigs(String hostedZoneId) {
+        if (hostedZoneId != null && !hostedZoneId.isBlank()) {
+            String zoneId = normalizeZoneId(hostedZoneId);
+            getHostedZone(zoneId);
+            return queryLogStore.scan(k -> true).stream()
+                    .filter(c -> zoneId.equals(c.getHostedZoneId()))
+                    .toList();
+        }
+        return new ArrayList<>(queryLogStore.scan(k -> true));
+    }
+
+    public record DnsAnswer(String recordName, String recordType, long ttl, List<String> records) {}
+
+    public DnsAnswer testDnsAnswer(String hostedZoneId, String recordName, String recordType) {
+        HostedZone zone = getHostedZone(hostedZoneId);
+        String name = canonicalRecordName(recordName);
+        List<ResourceRecordSet> records = recordStore.get(zone.getId()).orElse(List.of());
+        ResourceRecordSet match = records.stream()
+                .filter(r -> canonicalRecordName(r.getName()).equals(name) && r.getType().equals(recordType))
+                .findFirst()
+                .orElse(null);
+        if (match == null) {
+            return new DnsAnswer(name, recordType, 0L, List.of());
+        }
+        List<String> values = match.getRecords() == null ? List.of()
+                : match.getRecords().stream().map(ResourceRecord::getValue).toList();
+        return new DnsAnswer(match.getName(), match.getType(),
+                match.getTtl() != null ? match.getTtl() : 0L, values);
     }
 
     /**
@@ -158,9 +273,9 @@ public class Route53Service implements Resettable {
      * leaving the previous comment in place.
      */
     public synchronized HostedZone updateHostedZoneComment(String id, String comment) {
-        HostedZone zone = getHostedZoneOwnedByCaller(id);
+        HostedZone zone = getHostedZoneOwnedByCaller(normalizeZoneId(id));
         zone.setComment(comment);
-        zoneStore.put(id, zone);
+        zoneStore.put(zone.getId(), zone);
         return zone;
     }
 
@@ -187,17 +302,42 @@ public class Route53Service implements Resettable {
     }
 
     public List<HostedZone> listHostedZonesByName(String dnsName, int maxItems) {
+        return listHostedZonesByName(dnsName, null, maxItems);
+    }
+
+    /**
+     * AWS {@code ListHostedZonesByName} order: labels reversed, then
+     * lexicographic (so {@code example.com.} sorts as {@code com.example}).
+     * Pagination starts at {@code dnsName} (inclusive). Same-name public zones
+     * sort before private so {@code MaxItems=1} exact lookups used by Alchemy
+     * ECS domain wiring and HostedZone adoption return the public zone.
+     */
+    public List<HostedZone> listHostedZonesByName(String dnsName, String hostedZoneId, int maxItems) {
         List<HostedZone> all = new ArrayList<>(zoneStore.scan(k -> true));
-        all.sort((a, b) -> a.getName().compareTo(b.getName()));
         for (HostedZone zone : all) {
+            zone.setName(normalizeName(zone.getName()));
             zone.setResourceRecordSetCount(recordCount(zone.getId()));
         }
+        all.sort(hostedZoneByNameOrder());
+
         if (dnsName != null && !dnsName.isEmpty()) {
             String normalized = normalizeName(dnsName);
-            all = all.stream()
-                    .filter(z -> z.getName().compareTo(normalized) >= 0)
-                    .toList();
-            all = new ArrayList<>(all);
+            int start = 0;
+            while (start < all.size() && compareDnsNames(all.get(start).getName(), normalized) < 0) {
+                start++;
+            }
+            all = new ArrayList<>(all.subList(start, all.size()));
+        }
+        if (hostedZoneId != null && !hostedZoneId.isEmpty()) {
+            String id = normalizeZoneId(hostedZoneId);
+            int idx = 0;
+            for (int i = 0; i < all.size(); i++) {
+                if (id.equals(all.get(i).getId())) {
+                    idx = i;
+                    break;
+                }
+            }
+            all = new ArrayList<>(all.subList(idx, all.size()));
         }
         if (maxItems > 0 && all.size() > maxItems) {
             return all.subList(0, maxItems);
@@ -411,40 +551,44 @@ public class Route53Service implements Resettable {
                                                              List<Map<String, Object>> changes,
                                                              String comment) {
         HostedZone zone = getHostedZone(zoneId);
+        String id = zone.getId();
         List<ResourceRecordSet> current = new ArrayList<>(
-                recordStore.get(zoneId).orElse(new ArrayList<>()));
+                recordStore.get(id).orElse(new ArrayList<>()));
+        current.forEach(r -> r.setName(canonicalRecordName(r.getName())));
 
         for (Map<String, Object> change : changes) {
             String action = (String) change.get("action");
             ResourceRecordSet rrs = (ResourceRecordSet) change.get("rrs");
+            rrs.setName(canonicalRecordName(rrs.getName()));
             validateChange(action, rrs, current, zone.getName());
             applyChange(action, rrs, current);
         }
 
         zone.setResourceRecordSetCount(current.size());
-        zoneStore.put(zoneId, zone);
-        recordStore.put(zoneId, current);
+        zoneStore.put(id, zone);
+        recordStore.put(id, current);
         return newChange(comment);
     }
 
     public List<ResourceRecordSet> listResourceRecordSets(String zoneId, String startName,
                                                            String startType, int maxItems) {
-        getHostedZone(zoneId);
+        HostedZone zone = getHostedZone(zoneId);
         List<ResourceRecordSet> records = new ArrayList<>(
-                recordStore.get(zoneId).orElse(List.of()));
+                recordStore.get(zone.getId()).orElse(List.of()));
+        records.forEach(r -> r.setName(canonicalRecordName(r.getName())));
 
         records.sort((a, b) -> {
-            int cmp = normalizeRecordName(a.getName()).compareTo(normalizeRecordName(b.getName()));
+            int cmp = a.getName().compareTo(b.getName());
             if (cmp != 0) return cmp;
             return a.getType().compareTo(b.getType());
         });
 
         if (startName != null && !startName.isEmpty()) {
-            String normalizedStart = normalizeRecordName(startName);
+            String normalizedStart = canonicalRecordName(startName);
             final String finalStartType = startType;
             records = records.stream()
                     .filter(r -> {
-                        int cmp = normalizeRecordName(r.getName()).compareTo(normalizedStart);
+                        int cmp = r.getName().compareTo(normalizedStart);
                         if (cmp > 0) return true;
                         if (cmp == 0 && finalStartType != null && !finalStartType.isEmpty()) {
                             return r.getType().compareTo(finalStartType) >= 0;
@@ -464,31 +608,23 @@ public class Route53Service implements Resettable {
     // ── Changes ───────────────────────────────────────────────────────────────
 
     public ChangeInfo getChange(String changeId) {
-        return changeStore.get(changeId).orElseThrow(() ->
+        String id = normalizeChangeId(changeId);
+        return changeStore.get(id).orElseThrow(() ->
                 new AwsException("NoSuchChange",
-                        "No change found with ID: " + changeId, 404));
+                        "No change found with ID: " + id, 404));
     }
 
     // ── Health Checks ─────────────────────────────────────────────────────────
 
-    /**
-     * A caller reference makes the create safe to retry: the same reference with the same settings
-     * (the request's canonical {@code requestSettings}) returns the health check it already created,
-     * and different settings are refused.
-     */
-    public synchronized HealthCheck createHealthCheck(String callerReference, HealthCheckConfig cfg,
-                                                      String requestSettings) {
+    public synchronized HealthCheck createHealthCheck(String callerReference, HealthCheckConfig cfg) {
         for (HealthCheck existing : healthCheckStore.scan(k -> true)) {
             if (existing.getCallerReference().equals(callerReference)) {
-                if (requestSettings.equals(existing.getRequestSettings())) {
-                    return existing;
-                }
                 throw new AwsException("HealthCheckAlreadyExists",
                         "A health check with caller reference " + callerReference + " already exists.", 409);
             }
         }
         String id = UUID.randomUUID().toString();
-        HealthCheck hc = new HealthCheck(id, callerReference, cfg, requestSettings);
+        HealthCheck hc = new HealthCheck(id, callerReference, cfg);
         healthCheckStore.put(id, hc);
         return hc;
     }
@@ -597,167 +733,6 @@ public class Route53Service implements Resettable {
         return zoneStore.scan(k -> true).stream()
                 .map(zone -> new OwnedZone(ownerAccountId(zone), zone))
                 .toList();
-    }
-
-    public boolean isCoveredByPrivateZone(String qname) {
-        if (qname == null || qname.isBlank()) {
-            return false;
-        }
-        String normalizedQname = normalizeName(qname).toLowerCase();
-        if (privateZoneNameCounts.isEmpty()
-                || privateZoneNameCounts.keySet().stream().noneMatch(z -> DomainNames.isWithin(normalizedQname, z))) {
-            return false;
-        }
-        for (OwnedZone owned : allHostedZonesAcrossAccounts()) {
-            HostedZone zone = owned.zone();
-            if (!zone.isPrivateZone()) {
-                continue;
-            }
-            String zoneName = normalizeName(zone.getName()).toLowerCase();
-            if (DomainNames.isWithin(normalizedQname, zoneName)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    public List<ResourceRecordSet> findPrivateRecordsForName(String qname) {
-        if (qname == null || qname.isBlank()) {
-            return List.of();
-        }
-        return findRecordsForName(normalizeName(qname).toLowerCase(),
-                mostSpecificZones(normalizeName(qname).toLowerCase(), true).stream()
-                        .map(owned -> getRecordsForZoneAcrossAccounts(owned.accountId(), owned.zone().getId()))
-                        .toList());
-    }
-
-    private static List<ResourceRecordSet> findRecordsForName(String normalizedQname,
-                                                              List<List<ResourceRecordSet>> zoneRecords) {
-        List<ResourceRecordSet> nameMatches = new ArrayList<>();
-        List<ResourceRecordSet> wildcardMatches = new ArrayList<>();
-
-        for (List<ResourceRecordSet> records : zoneRecords) {
-            List<ResourceRecordSet> zoneWildcards = new ArrayList<>();
-            for (ResourceRecordSet rrs : records) {
-                String rName = normalizeName(rrs.getName()).toLowerCase();
-                if (rName.equals(normalizedQname)) {
-                    nameMatches.add(rrs);
-                } else if (rName.startsWith("*.")) {
-                    zoneWildcards.add(rrs);
-                }
-            }
-            if (nameMatches.isEmpty()) {
-                for (ResourceRecordSet rrs : zoneWildcards) {
-                    String rName = normalizeName(rrs.getName()).toLowerCase();
-                    String wildcardSuffix = rName.substring(2); // e.g. "corp.internal."
-                    if (normalizedQname.endsWith("." + wildcardSuffix)) {
-                        // A wildcard cannot match when the name or an ancestor closer than the wildcard's
-                        // parent exists, and a name with records only beneath it exists too (RFC 4592 2.2)
-                        boolean closerNameExists = records.stream()
-                                .map(r -> normalizeName(r.getName()).toLowerCase())
-                                .anyMatch(n -> sharedSuffixLength(n, normalizedQname) > wildcardSuffix.length());
-                        if (!closerNameExists) {
-                            wildcardMatches.add(rrs);
-                        }
-                    }
-                }
-            }
-        }
-        return !nameMatches.isEmpty() ? nameMatches : wildcardMatches;
-    }
-
-    /** Length of the longest whole-label suffix two normalized names share, trailing dot included. */
-    private static int sharedSuffixLength(String a, String b) {
-        int i = a.length();
-        int j = b.length();
-        int shared = 0;
-        while (i > 0 && j > 0 && a.charAt(i - 1) == b.charAt(j - 1)) {
-            i--;
-            j--;
-            boolean labelStart = (i == 0 || a.charAt(i - 1) == '.') && (j == 0 || b.charAt(j - 1) == '.');
-            if (labelStart) {
-                shared = a.length() - i;
-            }
-        }
-        return shared;
-    }
-
-    /**
-     * Whether a private zone holds records beneath {@code qname} although none at it: an empty
-     * non-terminal, which exists in DNS and so answers NOERROR rather than NXDOMAIN.
-     */
-    public boolean hasPrivateRecordsBeneath(String qname) {
-        if (qname == null || qname.isBlank()) {
-            return false;
-        }
-        String normalizedQname = normalizeName(qname).toLowerCase();
-        String suffix = "." + normalizedQname;
-        for (OwnedZone owned : mostSpecificZones(normalizedQname, true)) {
-            for (ResourceRecordSet rrs : getRecordsForZoneAcrossAccounts(owned.accountId(), owned.zone().getId())) {
-                if (normalizeName(rrs.getName()).toLowerCase().endsWith(suffix)) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    record PublicDnsZone(String name, List<ResourceRecordSet> matchingRecords, List<ResourceRecordSet> records) {}
-
-    List<PublicDnsZone> publicDnsZones(String qname) {
-        String normalized = normalizeName(qname).toLowerCase();
-        return mostSpecificZones(normalized, false).stream()
-                .map(owned -> {
-                    List<ResourceRecordSet> records = getRecordsForZoneAcrossAccounts(
-                            owned.accountId(), owned.zone().getId());
-                    return new PublicDnsZone(owned.zone().getName(),
-                            findRecordsForName(normalized, List.of(records)), records);
-                })
-                .toList();
-    }
-
-    private Map<String, Integer> zoneNameCounts(boolean privateZone) {
-        return privateZone ? privateZoneNameCounts : publicZoneNameCounts;
-    }
-
-    /** The longest containing zones, so a parent never answers for a more specific child. */
-    private List<OwnedZone> mostSpecificZones(String normalizedQname, boolean privateZone) {
-        Map<String, Integer> names = zoneNameCounts(privateZone);
-        if (names.isEmpty() || names.keySet().stream().noneMatch(z -> DomainNames.isWithin(normalizedQname, z))) {
-            return List.of();
-        }
-        List<OwnedZone> matchingZones = new ArrayList<>();
-        int maxZoneLength = -1;
-        for (OwnedZone owned : allHostedZonesAcrossAccounts()) {
-            HostedZone zone = owned.zone();
-            if (zone.isPrivateZone() != privateZone) {
-                continue;
-            }
-            String zoneName = normalizeName(zone.getName()).toLowerCase();
-            if (!DomainNames.isWithin(normalizedQname, zoneName)) {
-                continue;
-            }
-            if (zoneName.length() > maxZoneLength) {
-                matchingZones.clear();
-                maxZoneLength = zoneName.length();
-            }
-            if (zoneName.length() == maxZoneLength) {
-                matchingZones.add(owned);
-            }
-        }
-        return matchingZones;
-    }
-
-    private List<ResourceRecordSet> getRecordsForZoneAcrossAccounts(String accountId, String zoneId) {
-        if (recordStore instanceof AccountAwareStorageBackend<?> rawAccountAware) {
-            @SuppressWarnings("unchecked")
-            AccountAwareStorageBackend<List<ResourceRecordSet>> accountAware =
-                    (AccountAwareStorageBackend<List<ResourceRecordSet>>) rawAccountAware;
-            return accountAware.getForAccount(accountId, zoneId)
-                    .or(() -> accountAware.findAnyAccount(zoneId))
-                    .orElse(List.of());
-        }
-        return recordStore.get(zoneId).orElse(List.of());
     }
 
     private void putZoneForAccount(String accountId, String zoneId, HostedZone zone) {
@@ -888,357 +863,10 @@ public class Route53Service implements Resettable {
                 + TimeUnit.MILLISECONDS.toNanos(vpcAssociationControlPlaneDelayMs));
     }
 
-    public static String normalizeName(String name) {
+    static String normalizeName(String name) {
         if (name == null || name.isEmpty()) return name;
         return name.endsWith(".") ? name : name + ".";
     }
-
-    public static String normalizeRecordName(String name) {
-        String normalized = normalizeName(name);
-        if (normalized == null) {
-            return null;
-        }
-        StringBuilder result = new StringBuilder(normalized.length());
-        for (int i = 0; i < normalized.length(); i++) {
-            result.append(asciiLower(normalized.charAt(i)));
-        }
-        return result.toString();
-    }
-
-    private static String generateZoneId() {
-        StringBuilder sb = new StringBuilder("Z");
-        for (int i = 0; i < 14; i++) {
-            sb.append(CHARS.charAt(RANDOM.nextInt(CHARS.length())));
-        }
-        return sb.toString();
-    }
-
-    private static String generateChangeId() {
-        StringBuilder sb = new StringBuilder("C");
-        for (int i = 0; i < 13; i++) {
-            sb.append(CHARS.charAt(RANDOM.nextInt(CHARS.length())));
-        }
-        return sb.toString();
-    }
-
-    private ChangeInfo newChange(String comment) {
-        String id = generateChangeId();
-        ChangeInfo change = new ChangeInfo(id, Instant.now().toString(), comment);
-        changeStore.put(id, change);
-        return change;
-    }
-
-    private List<ResourceRecordSet> buildDefaultRecords(String zoneName) {
-        List<ResourceRecordSet> records = new ArrayList<>();
-
-        ResourceRecordSet soa = new ResourceRecordSet();
-        soa.setName(zoneName);
-        soa.setType("SOA");
-        soa.setTtl(900L);
-        soa.setRecords(List.of(new ResourceRecord(
-                nameServers.get(0) + " awsdns-hostmaster.amazon.com. 1 7200 900 1209600 86400")));
-        records.add(soa);
-
-        ResourceRecordSet ns = new ResourceRecordSet();
-        ns.setName(zoneName);
-        ns.setType("NS");
-        ns.setTtl(172800L);
-        ns.setRecords(nameServers.stream()
-                .map(n -> new ResourceRecord(n + "."))
-                .toList());
-        records.add(ns);
-
-        return records;
-    }
-
-    private boolean isApexSoaOrNs(ResourceRecordSet rrs, String zoneName) {
-        return normalizeRecordName(rrs.getName()).equals(normalizeRecordName(zoneName)) &&
-                ("SOA".equals(rrs.getType()) || "NS".equals(rrs.getType()));
-    }
-
-    private int recordCount(String zoneId) {
-        return recordStore.get(zoneId).map(List::size).orElse(0);
-    }
-
-    private void validateChange(String action, ResourceRecordSet rrs,
-                                List<ResourceRecordSet> current, String zoneName) {
-        if ("DELETE".equals(action) && isApexSoaOrNs(rrs, zoneName)) {
-            throw new AwsException("InvalidChangeBatch",
-                    "Invalid resource record set: Deleting the SOA or NS record at the zone apex is not permitted.", 400);
-        }
-        if ("CREATE".equals(action)) {
-            boolean exists = current.stream().anyMatch(r -> sameRecord(r, rrs));
-            if (exists) {
-                throw new AwsException("InvalidChangeBatch",
-                        "Tried to create resource record set [name='" + rrs.getName() +
-                        "', type='" + rrs.getType() + "'] but it already exists.", 400);
-            }
-        }
-        if ("DELETE".equals(action)) {
-            List<ResourceRecordSet> existing = current.stream().filter(r -> sameRecord(r, rrs)).toList();
-            if (existing.isEmpty()) {
-                throw new AwsException("InvalidChangeBatch",
-                        "Tried to delete resource record set " + deleteTargetDescription(rrs)
-                                + " but it was not found", 400);
-            }
-            if (existing.stream().noneMatch(r -> recordSetsMatch(r, rrs))) {
-                throw new AwsException("InvalidChangeBatch",
-                        "Tried to delete resource record set " + deleteTargetDescription(rrs)
-                                + " but the values provided do not match the current values", 400);
-            }
-        }
-    }
-
-    private void applyChange(String action, ResourceRecordSet rrs, List<ResourceRecordSet> current) {
-        switch (action) {
-            case "CREATE" -> {
-                ResourceRecordSet normalized = new ResourceRecordSet(rrs);
-                normalized.setName(normalizeRecordName(rrs.getName()));
-                current.add(normalized);
-            }
-            case "DELETE" -> current.remove(deleteTarget(current, rrs));
-            case "UPSERT" -> {
-                current.removeIf(r -> sameRecord(r, rrs));
-                ResourceRecordSet normalized = new ResourceRecordSet(rrs);
-                normalized.setName(normalizeRecordName(rrs.getName()));
-                current.add(normalized);
-            }
-        }
-    }
-
-    /**
-     * Whether two record sets share an identity: name, type and set identifier. Route 53 treats a
-     * name with ASCII case differences or without the trailing dot as the same, and requires a set identifier of at least one
-     * character, so a blank one is none. That also matches a record an earlier CloudFormation
-     * provisioner stored with the template's undotted Name or empty SetIdentifier.
-     */
-    public static boolean sameRecord(ResourceRecordSet a, ResourceRecordSet b) {
-        return normalizeRecordName(a.getName()).equals(normalizeRecordName(b.getName()))
-                && a.getType().equals(b.getType())
-                && Objects.equals(blankToNull(a.getSetIdentifier()), blankToNull(b.getSetIdentifier()));
-    }
-
-    private static String blankToNull(String value) {
-        return value == null || value.isBlank() ? null : value;
-    }
-
-    /**
-     * One DELETE removes one record. An earlier version could store the same record both undotted and
-     * dotted, possibly for two owners, so prefer the copy named exactly as the request names it.
-     */
-    private static ResourceRecordSet deleteTarget(List<ResourceRecordSet> current, ResourceRecordSet rrs) {
-        List<ResourceRecordSet> matches = current.stream().filter(r -> recordSetsMatch(r, rrs)).toList();
-        return matches.stream().filter(r -> r.getName().equals(rrs.getName())).findFirst().orElse(matches.get(0));
-    }
-
-    private static String deleteTargetDescription(ResourceRecordSet rrs) {
-        String description = "[name='" + rrs.getName() + "', type='" + rrs.getType() + "'";
-        if (rrs.getSetIdentifier() != null) {
-            description += ", set-identifier='" + rrs.getSetIdentifier() + "'";
-        }
-        return description + "]";
-    }
-
-    private static boolean recordSetsMatch(ResourceRecordSet a, ResourceRecordSet b) {
-        return sameRecord(a, b)
-                && Objects.equals(a.getTtl(), b.getTtl())
-                && Objects.equals(a.getWeight(), b.getWeight())
-                && Objects.equals(a.getRegion(), b.getRegion())
-                && Objects.equals(a.getFailover(), b.getFailover())
-                && Objects.equals(a.getHealthCheckId(), b.getHealthCheckId())
-                && aliasTargetsMatch(a.getAliasTarget(), b.getAliasTarget())
-                && recordValuesMatch(a.getRecords(), b.getRecords());
-    }
-
-    private static boolean aliasTargetsMatch(AliasTarget a, AliasTarget b) {
-        if (a == null || b == null) {
-            return a == b;
-        }
-        return Objects.equals(a.getHostedZoneId(), b.getHostedZoneId())
-                && aliasDnsNamesMatch(a.getDnsName(), b.getDnsName())
-                && a.isEvaluateTargetHealth() == b.isEvaluateTargetHealth();
-    }
-
-    private static boolean aliasDnsNamesMatch(String a, String b) {
-        return Objects.equals(normalizeRecordName(a), normalizeRecordName(b));
-    }
-
-    private static char asciiLower(char c) {
-        return c >= 'A' && c <= 'Z' ? (char) (c + ('a' - 'A')) : c;
-    }
-
-    private static boolean recordValuesMatch(List<ResourceRecord> a, List<ResourceRecord> b) {
-        List<String> av = a == null ? List.of() : a.stream().map(ResourceRecord::getValue).sorted().toList();
-        List<String> bv = b == null ? List.of() : b.stream().map(ResourceRecord::getValue).sorted().toList();
-        return av.equals(bv);
-    }
-
-    @Override
-    public void clear() {
-        hostedZoneMutationBusyUntilNanos.clear();
-        authorizationMutationBusyUntilNanos.clear();
-        privateZoneNameCounts.clear();
-        publicZoneNameCounts.clear();
-    }
-
-    private final StorageBackend<String, QueryLoggingConfig> queryLogStore;
-
-    private void migrateLegacyVpcAuthorizations(StorageFactory factory) {
-        AccountAwareStorageBackend<ZoneVpc> legacy = factory.create("route53", "route53-vpc-auth.json",
-                new TypeReference<Map<String, ZoneVpc>>() {});
-        AccountAwareStorageBackend<Boolean> migrated = factory.create("route53", "route53-vpc-auth-migrations.json",
-                new TypeReference<Map<String, Boolean>>() {});
-        @SuppressWarnings("unchecked")
-        AccountAwareStorageBackend<List<VpcAssociation>> canonical =
-                (AccountAwareStorageBackend<List<VpcAssociation>>) vpcAuthorizationStore;
-        @SuppressWarnings("unchecked")
-        AccountAwareStorageBackend<HostedZone> zones = (AccountAwareStorageBackend<HostedZone>) zoneStore;
-        synchronized (canonical) {
-            Map<String, HostedZone> rawZones = zones.scanAllAccountsWithRawKeys();
-            for (AccountAwareStorageBackend.AccountEntry<ZoneVpc> entry : legacy.scanAllAccountEntries(k -> true)) {
-                String accountId = entry.accountId();
-                String key = entry.key();
-                if (migrated.getForAccount(accountId, key).orElse(false)) {
-                    continue;
-                }
-                ZoneVpc source = legacy.getForAccount(accountId, key).orElse(entry.value());
-                int separator = key.indexOf('/');
-                if (separator <= 0 || source.getVpcId() == null || source.getVpcId().isBlank()
-                        || source.getVpcRegion() == null || source.getVpcRegion().isBlank()
-                        || !key.substring(separator + 1).equals(source.getVpcId())) {
-                    continue;
-                }
-                String zoneId = key.substring(0, separator);
-                HostedZone zone = zones.getForAccount(accountId, zoneId)
-                        .orElse(accountId.equals(defaultAccountId) ? rawZones.get(zoneId) : null);
-                if (zone == null || !zoneId.equals(zone.getId())
-                        || (zone.getOwnerAccountId() != null && !accountId.equals(zone.getOwnerAccountId()))) {
-                    continue;
-                }
-                if (accountId.equals(defaultAccountId)) {
-                    canonical.getForAccountMigratingLegacyKeys(accountId, zoneId, List.of(), authorizations -> true);
-                }
-                List<VpcAssociation> existing = canonical.getForAccount(accountId, zoneId).orElse(null);
-                List<VpcAssociation> authorizations = new ArrayList<>(existing != null ? existing : List.of());
-                VpcAssociation authorization = new VpcAssociation(source.getVpcId(), source.getVpcRegion());
-                if (findAssociation(authorizations, authorization) == null) {
-                    authorizations.add(authorization);
-                    canonical.putForAccount(accountId, zoneId, authorizations);
-                }
-                // Mark each source once so deleting an authorization cannot resurrect it on restart.
-                canonical.flush();
-                migrated.putForAccount(accountId, key, true);
-                migrated.flush();
-            }
-        }
-    }
-
-    public CreateZoneResult createHostedZone(String name, String callerReference, String comment,
-                                              boolean privateZone, String vpcId, String vpcRegion) {
-        if (privateZone && (vpcId == null || vpcId.isBlank())) {
-            throw new AwsException("InvalidInput",
-                    "A VPC is required when creating a private hosted zone.", 400);
-        }
-        VpcAssociation vpc = vpcId == null || vpcId.isBlank() ? null
-                : new VpcAssociation(vpcId, vpcRegion != null ? vpcRegion : "us-east-1");
-        return createHostedZone(name, callerReference, comment, vpc);
-    }
-
-    public QueryLoggingConfig createQueryLoggingConfig(String hostedZoneId, String logGroupArn) {
-        HostedZone zone = getHostedZone(hostedZoneId);
-        for (QueryLoggingConfig existing : queryLogStore.scan(k -> true)) {
-            if (zone.getId().equals(existing.getHostedZoneId())) {
-                throw new AwsException("QueryLoggingConfigAlreadyExists",
-                        "A query logging config already exists for this hosted zone.", 409);
-            }
-        }
-        String id = UUID.randomUUID().toString();
-        QueryLoggingConfig cfg = new QueryLoggingConfig(id, zone.getId(), logGroupArn);
-        queryLogStore.put(id, cfg);
-        return cfg;
-    }
-
-    public QueryLoggingConfig getQueryLoggingConfig(String id) {
-        return queryLogStore.get(id).orElseThrow(() ->
-                new AwsException("NoSuchQueryLoggingConfig",
-                        "No query logging config found with ID: " + id, 404));
-    }
-
-    public void deleteQueryLoggingConfig(String id) {
-        getQueryLoggingConfig(id);
-        queryLogStore.delete(id);
-    }
-
-    public List<QueryLoggingConfig> listQueryLoggingConfigs(String hostedZoneId) {
-        if (hostedZoneId != null && !hostedZoneId.isBlank()) {
-            String zoneId = normalizeZoneId(hostedZoneId);
-            getHostedZone(zoneId);
-            return queryLogStore.scan(k -> true).stream()
-                    .filter(c -> zoneId.equals(c.getHostedZoneId()))
-                    .toList();
-        }
-        return new ArrayList<>(queryLogStore.scan(k -> true));
-    }
-
-    public record DnsAnswer(String recordName, String recordType, long ttl, List<String> records) {}
-
-    public DnsAnswer testDnsAnswer(String hostedZoneId, String recordName, String recordType) {
-        HostedZone zone = getHostedZone(hostedZoneId);
-        String name = canonicalRecordName(recordName);
-        List<ResourceRecordSet> records = recordStore.get(zone.getId()).orElse(List.of());
-        ResourceRecordSet match = records.stream()
-                .filter(r -> canonicalRecordName(r.getName()).equals(name) && r.getType().equals(recordType))
-                .findFirst()
-                .orElse(null);
-        if (match == null) {
-            return new DnsAnswer(name, recordType, 0L, List.of());
-        }
-        List<String> values = match.getRecords() == null ? List.of()
-                : match.getRecords().stream().map(ResourceRecord::getValue).toList();
-        return new DnsAnswer(match.getName(), match.getType(),
-                match.getTtl() != null ? match.getTtl() : 0L, values);
-    }
-
-    /**
-     * AWS {@code ListHostedZonesByName} order: labels reversed, then
-     * lexicographic (so {@code example.com.} sorts as {@code com.example}).
-     * Pagination starts at {@code dnsName} (inclusive). Same-name public zones
-     * sort before private so {@code MaxItems=1} exact lookups used by Alchemy
-     * ECS domain wiring and HostedZone adoption return the public zone.
-     */
-    public List<HostedZone> listHostedZonesByName(String dnsName, String hostedZoneId, int maxItems) {
-        List<HostedZone> all = new ArrayList<>(zoneStore.scan(k -> true));
-        for (HostedZone zone : all) {
-            zone.setName(normalizeName(zone.getName()));
-            zone.setResourceRecordSetCount(recordCount(zone.getId()));
-        }
-        all.sort(hostedZoneByNameOrder());
-
-        if (dnsName != null && !dnsName.isEmpty()) {
-            String normalized = normalizeName(dnsName);
-            int start = 0;
-            while (start < all.size() && compareDnsNames(all.get(start).getName(), normalized) < 0) {
-                start++;
-            }
-            all = new ArrayList<>(all.subList(start, all.size()));
-        }
-        if (hostedZoneId != null && !hostedZoneId.isEmpty()) {
-            String id = normalizeZoneId(hostedZoneId);
-            int idx = 0;
-            for (int i = 0; i < all.size(); i++) {
-                if (id.equals(all.get(i).getId())) {
-                    idx = i;
-                    break;
-                }
-            }
-            all = new ArrayList<>(all.subList(idx, all.size()));
-        }
-        if (maxItems > 0 && all.size() > maxItems) {
-            return all.subList(0, maxItems);
-        }
-        return all;
-    }
-
 
     /**
      * The form Route 53 stores and returns a record name in: fully qualified, with every byte
@@ -1348,6 +976,106 @@ public class Route53Service implements Resettable {
         };
     }
 
+    private static String generateZoneId() {
+        StringBuilder sb = new StringBuilder("Z");
+        for (int i = 0; i < 14; i++) {
+            sb.append(CHARS.charAt(RANDOM.nextInt(CHARS.length())));
+        }
+        return sb.toString();
+    }
+
+    private static String generateChangeId() {
+        StringBuilder sb = new StringBuilder("C");
+        for (int i = 0; i < 13; i++) {
+            sb.append(CHARS.charAt(RANDOM.nextInt(CHARS.length())));
+        }
+        return sb.toString();
+    }
+
+    private ChangeInfo newChange(String comment) {
+        String id = generateChangeId();
+        ChangeInfo change = new ChangeInfo(id, Instant.now().toString(), comment);
+        changeStore.put(id, change);
+        return change;
+    }
+
+    private List<ResourceRecordSet> buildDefaultRecords(String zoneName) {
+        List<ResourceRecordSet> records = new ArrayList<>();
+
+        ResourceRecordSet soa = new ResourceRecordSet();
+        soa.setName(zoneName);
+        soa.setType("SOA");
+        soa.setTtl(900L);
+        soa.setRecords(List.of(new ResourceRecord(
+                nameServers.get(0) + " awsdns-hostmaster.amazon.com. 1 7200 900 1209600 86400")));
+        records.add(soa);
+
+        ResourceRecordSet ns = new ResourceRecordSet();
+        ns.setName(zoneName);
+        ns.setType("NS");
+        ns.setTtl(172800L);
+        ns.setRecords(nameServers.stream()
+                .map(n -> new ResourceRecord(n + "."))
+                .toList());
+        records.add(ns);
+
+        return records;
+    }
+
+    private boolean isApexSoaOrNs(ResourceRecordSet rrs, String zoneName) {
+        return rrs.getName().equals(zoneName) &&
+                ("SOA".equals(rrs.getType()) || "NS".equals(rrs.getType()));
+    }
+
+    private int recordCount(String zoneId) {
+        return recordStore.get(zoneId).map(List::size).orElse(0);
+    }
+
+    private void validateChange(String action, ResourceRecordSet rrs,
+                                List<ResourceRecordSet> current, String zoneName) {
+        if ("DELETE".equals(action) && isApexSoaOrNs(rrs, zoneName)) {
+            throw new AwsException("InvalidChangeBatch",
+                    "Invalid resource record set: Deleting the SOA or NS record at the zone apex is not permitted.", 400);
+        }
+        if ("CREATE".equals(action)) {
+            boolean exists = current.stream().anyMatch(r ->
+                    r.getName().equals(rrs.getName()) &&
+                    r.getType().equals(rrs.getType()) &&
+                    equalOrNull(r.getSetIdentifier(), rrs.getSetIdentifier()));
+            if (exists) {
+                throw new AwsException("InvalidChangeBatch",
+                        "Tried to create resource record set [name='" + rrs.getName() +
+                        "', type='" + rrs.getType() + "'] but it already exists.", 400);
+            }
+        }
+        if ("DELETE".equals(action)) {
+            ResourceRecordSet existing = findByNameTypeAndSetIdentifier(current, rrs);
+            if (existing == null) {
+                throw new AwsException("InvalidChangeBatch",
+                        "Tried to delete resource record set " + deleteTargetDescription(rrs)
+                                + " but it was not found", 400);
+            }
+            if (!recordSetsMatch(existing, rrs)) {
+                throw new AwsException("InvalidChangeBatch",
+                        "Tried to delete resource record set " + deleteTargetDescription(rrs)
+                                + " but the values provided do not match the current values", 400);
+            }
+        }
+    }
+
+    private void applyChange(String action, ResourceRecordSet rrs, List<ResourceRecordSet> current) {
+        switch (action) {
+            case "CREATE" -> current.add(rrs);
+            case "DELETE" -> current.removeIf(r -> recordSetsMatch(r, rrs));
+            case "UPSERT" -> {
+                current.removeIf(r ->
+                        r.getName().equals(rrs.getName()) && r.getType().equals(rrs.getType()) &&
+                        equalOrNull(r.getSetIdentifier(), rrs.getSetIdentifier()));
+                current.add(rrs);
+            }
+        }
+    }
+
     private static boolean equalOrNull(String a, String b) {
         if (a == null && b == null) return true;
         if (a == null || b == null) return false;
@@ -1362,5 +1090,41 @@ public class Route53Service implements Resettable {
                         && Objects.equals(r.getSetIdentifier(), rrs.getSetIdentifier()))
                 .findFirst()
                 .orElse(null);
+    }
+
+    private static String deleteTargetDescription(ResourceRecordSet rrs) {
+        String description = "[name='" + rrs.getName() + "', type='" + rrs.getType() + "'";
+        if (rrs.getSetIdentifier() != null) {
+            description += ", set-identifier='" + rrs.getSetIdentifier() + "'";
+        }
+        return description + "]";
+    }
+
+    private static boolean recordSetsMatch(ResourceRecordSet a, ResourceRecordSet b) {
+        return a.getName().equals(b.getName())
+                && a.getType().equals(b.getType())
+                && Objects.equals(a.getSetIdentifier(), b.getSetIdentifier())
+                && Objects.equals(a.getTtl(), b.getTtl())
+                && Objects.equals(a.getWeight(), b.getWeight())
+                && Objects.equals(a.getRegion(), b.getRegion())
+                && Objects.equals(a.getFailover(), b.getFailover())
+                && Objects.equals(a.getHealthCheckId(), b.getHealthCheckId())
+                && aliasTargetsMatch(a.getAliasTarget(), b.getAliasTarget())
+                && recordValuesMatch(a.getRecords(), b.getRecords());
+    }
+
+    private static boolean aliasTargetsMatch(AliasTarget a, AliasTarget b) {
+        if (a == null || b == null) {
+            return a == b;
+        }
+        return Objects.equals(a.getHostedZoneId(), b.getHostedZoneId())
+                && Objects.equals(a.getDnsName(), b.getDnsName())
+                && a.isEvaluateTargetHealth() == b.isEvaluateTargetHealth();
+    }
+
+    private static boolean recordValuesMatch(List<ResourceRecord> a, List<ResourceRecord> b) {
+        List<String> av = a == null ? List.of() : a.stream().map(ResourceRecord::getValue).sorted().toList();
+        List<String> bv = b == null ? List.of() : b.stream().map(ResourceRecord::getValue).sorted().toList();
+        return av.equals(bv);
     }
 }

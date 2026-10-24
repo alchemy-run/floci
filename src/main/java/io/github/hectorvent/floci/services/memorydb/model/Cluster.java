@@ -4,10 +4,10 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -23,6 +23,8 @@ public class Cluster {
     private String engine;
     private String engineVersion;
     private String aclName;
+    private String parameterGroupName;
+    private String subnetGroupName;
     private boolean tlsEnabled;
     private Endpoint clusterEndpoint;
     private String arn;
@@ -64,8 +66,21 @@ public class Cluster {
     public String getEngineVersion() { return engineVersion; }
     public void setEngineVersion(String engineVersion) { this.engineVersion = engineVersion; }
 
+    public String getParameterGroupName() { return parameterGroupName; }
+    public void setParameterGroupName(String parameterGroupName) { this.parameterGroupName = parameterGroupName; }
+
+    public String getSubnetGroupName() { return subnetGroupName; }
+    public void setSubnetGroupName(String subnetGroupName) { this.subnetGroupName = subnetGroupName; }
+
     public String getAclName() { return aclName; }
     public void setAclName(String aclName) { this.aclName = aclName; }
+
+    private List<String> securityGroupIds = new ArrayList<>();
+
+    public List<String> getSecurityGroupIds() { return securityGroupIds; }
+    public void setSecurityGroupIds(List<String> securityGroupIds) {
+        this.securityGroupIds = securityGroupIds != null ? new ArrayList<>(securityGroupIds) : new ArrayList<>();
+    }
 
     public boolean isTlsEnabled() { return tlsEnabled; }
     public void setTlsEnabled(boolean tlsEnabled) { this.tlsEnabled = tlsEnabled; }
@@ -95,24 +110,4 @@ public class Cluster {
 
     public int getContainerPort() { return containerPort; }
     public void setContainerPort(int containerPort) { this.containerPort = containerPort; }
-
-    private String parameterGroupName;
-
-    private String subnetGroupName;
-
-    public String getParameterGroupName() { return parameterGroupName; }
-
-    public void setParameterGroupName(String parameterGroupName) { this.parameterGroupName = parameterGroupName; }
-
-    public String getSubnetGroupName() { return subnetGroupName; }
-
-    public void setSubnetGroupName(String subnetGroupName) { this.subnetGroupName = subnetGroupName; }
-
-    private List<String> securityGroupIds = new ArrayList<>();
-
-    public List<String> getSecurityGroupIds() { return securityGroupIds; }
-
-    public void setSecurityGroupIds(List<String> securityGroupIds) {
-        this.securityGroupIds = securityGroupIds != null ? new ArrayList<>(securityGroupIds) : new ArrayList<>();
-    }
 }

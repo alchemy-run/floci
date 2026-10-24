@@ -6,7 +6,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.core.common.ServicePrincipals;
+import io.github.hectorvent.floci.core.common.RequestContext;
+import io.quarkus.arc.Arc;
+import io.quarkus.arc.ManagedContext;
 import io.github.hectorvent.floci.services.cloudtrail.model.Trail;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.quarkus.runtime.ShutdownEvent;
@@ -31,9 +33,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.zip.GZIPOutputStream;
-import io.github.hectorvent.floci.core.common.RequestContext;
-import io.quarkus.arc.Arc;
-import io.quarkus.arc.ManagedContext;
 
 /**
  * Periodically drains queued CloudTrail records from {@link CloudTrailService}
@@ -119,7 +118,7 @@ public class CloudTrailLogWriter {
         try {
             for (CloudTrailService.TrailKey key : cloudTrailService.trailsWithPendingRecords()) {
                 try {
-                    flushTrailBatches(key);
+                    flushForAccount(key);
                 } catch (RuntimeException e) {
                     LOG.warnv(e, "CloudTrail log flush failed for trail {0} in {1}",
                             key.trailName(), key.region());
@@ -127,6 +126,24 @@ public class CloudTrailLogWriter {
             }
         } catch (RuntimeException outer) {
             LOG.errorv(outer, "CloudTrail log writer iteration failed");
+        }
+    }
+
+    private void flushForAccount(CloudTrailService.TrailKey key) {
+        ManagedContext context = Arc.container().requestContext();
+        boolean active = context.isActive();
+        if (!active) context.activate();
+        RequestContext request = Arc.container().instance(RequestContext.class).get();
+        String previousAccount = request.getAccountId();
+        String previousRegion = request.getRegion();
+        try {
+            request.setAccountId(key.accountId() == null ? regionResolver.getDefaultAccountId() : key.accountId());
+            request.setRegion(key.region());
+            flushTrailBatches(key);
+        } finally {
+            request.setAccountId(previousAccount);
+            request.setRegion(previousRegion);
+            if (!active) context.terminate();
         }
     }
 
@@ -223,7 +240,7 @@ public class CloudTrailLogWriter {
                     .key(objectKey)
                     .accessKeyId(null)
                     .sourceIp(null)
-                    .userAgent(ServicePrincipals.of("cloudtrail"))
+                    .userAgent("cloudtrail.amazonaws.com")
                     .bytesIn(payload.length)
                     .bytesOut(0)
                     .errorCode(null)
@@ -284,5 +301,4 @@ public class CloudTrailLogWriter {
         }
         return sb.toString();
     }
-
 }

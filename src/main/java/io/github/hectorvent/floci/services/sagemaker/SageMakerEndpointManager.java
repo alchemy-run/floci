@@ -11,7 +11,6 @@ import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager.C
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager.EndpointInfo;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.core.common.docker.ContainerStorageHelper;
-import io.github.hectorvent.floci.core.common.docker.RetryingTarCopier;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
 import io.github.hectorvent.floci.services.sagemaker.model.SageMakerEntities.EndpointResource;
@@ -28,10 +27,10 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.net.ConnectException;
 import java.net.URI;
+import java.net.http.HttpTimeoutException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.net.http.HttpTimeoutException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -71,14 +70,10 @@ public class SageMakerEndpointManager implements ContainerTeardown, Resettable {
     }
 
     public void startEndpointAsync(EndpointResource endpoint, SageMakerService service) {
-        startEndpointAsync(endpoint, service, RetryingTarCopier.DEFAULT_BACKOFF_MS);
+        executor.submit(() -> startEndpoint(endpoint, service));
     }
 
-    void startEndpointAsync(EndpointResource endpoint, SageMakerService service, long backoffMillis) {
-        executor.submit(() -> startEndpoint(endpoint, service, backoffMillis));
-    }
-
-    private void startEndpoint(EndpointResource endpoint, SageMakerService service, long backoffMillis) {
+    private void startEndpoint(EndpointResource endpoint, SageMakerService service) {
         String containerId = null;
         try {
             ModelResource model = service.modelForEndpoint(endpoint);
@@ -87,7 +82,7 @@ public class SageMakerEndpointManager implements ContainerTeardown, Resettable {
             if (image == null) {
                 throw new IllegalArgumentException("PrimaryContainer.Image is required");
             }
-            String name = ContainerStorageHelper.dockerName(config, "sagemaker-endpoint-" + endpoint.endpointName);
+            String name = ContainerStorageHelper.dockerName(config, "floci-sagemaker-endpoint-" + endpoint.endpointName);
             lifecycleManager.removeIfExists(name);
             ContainerBuilder.Builder builder = containerBuilder.newContainer(image)
                     .withName(name)
@@ -102,7 +97,7 @@ public class SageMakerEndpointManager implements ContainerTeardown, Resettable {
             containerId = lifecycleManager.create(spec);
             String modelDataUrl = string(c.get("ModelDataUrl"));
             if (modelDataUrl != null && !modelDataUrl.isBlank()) {
-                copyModelData(containerId, modelDataUrl, backoffMillis);
+                copyModelData(containerId, modelDataUrl);
             }
             ContainerInfo info = lifecycleManager.startCreated(containerId, spec);
             EndpointInfo ep = info.getEndpoint(PORT);
@@ -111,6 +106,14 @@ public class SageMakerEndpointManager implements ContainerTeardown, Resettable {
             endpoint.invokePort = ep.port();
             containers.put(endpoint.endpointName, containerId);
             waitForPing(endpoint.invokeHost, endpoint.invokePort);
+            Map<String, String> resolved = new LinkedHashMap<>();
+            for (String specified : service.deployedImages(endpoint)) {
+                String digest = resolveImage(specified);
+                if (digest != null) {
+                    resolved.put(specified, digest);
+                }
+            }
+            endpoint.resolvedImages = resolved;
             endpoint.endpointStatus = "InService";
             endpoint.failureReason = null;
             finishStart(endpoint, service);
@@ -196,6 +199,43 @@ public class SageMakerEndpointManager implements ContainerTeardown, Resettable {
         return env;
     }
 
+    /**
+     * Pins an image reference to the registry digest Docker pulled for it, as SageMaker reports in
+     * {@code DeployedImages[].ResolvedImage}. Returns {@code null} when Docker knows no digest.
+     */
+    String resolveImage(String image) {
+        if (image == null || image.isBlank()) {
+            return null;
+        }
+        if (image.contains("@sha256:")) {
+            return image;
+        }
+        try {
+            List<String> digests = lifecycleManager.getDockerClient().inspectImageCmd(image).exec().getRepoDigests();
+            if (digests == null || digests.isEmpty()) {
+                return null;
+            }
+            String repository = repositoryOf(image);
+            String chosen = digests.stream()
+                    .filter(d -> d.startsWith(repository + "@"))
+                    .findFirst()
+                    .orElse(digests.get(0));
+            int at = chosen.indexOf('@');
+            return at < 0 ? null : repository + chosen.substring(at);
+        } catch (RuntimeException e) {
+            LOG.debugv("Could not resolve SageMaker image {0} to a digest: {1}", image, e.getMessage());
+            return null;
+        }
+    }
+
+    /** The image reference without its tag or digest. */
+    static String repositoryOf(String image) {
+        int at = image.indexOf('@');
+        String withoutDigest = at >= 0 ? image.substring(0, at) : image;
+        int colon = withoutDigest.lastIndexOf(':');
+        return colon > withoutDigest.lastIndexOf('/') ? withoutDigest.substring(0, colon) : withoutDigest;
+    }
+
     private String resolveEndpointHostname() {
         return containerDetector.isRunningInContainer() ? config.hostname().orElse(EmbeddedDnsServer.DEFAULT_SUFFIX) : "host.docker.internal";
     }
@@ -215,13 +255,14 @@ public class SageMakerEndpointManager implements ContainerTeardown, Resettable {
         }
     }
 
-    void copyModelData(String containerId, String s3Uri, long backoffMillis) throws Exception {
+    private void copyModelData(String containerId, String s3Uri) throws Exception {
         S3Uri uri = S3Uri.parse(s3Uri);
         S3Object object = s3Service.getObject(uri.bucket(), uri.key());
         byte[] tarData = tarModelData(object.getData(), uri.key());
-        RetryingTarCopier.copyStreamed(lifecycleManager.getDockerClient(), containerId, "/",
-                "sagemaker-model-data", out -> out.write(tarData),
-                RetryingTarCopier.DEFAULT_MAX_ATTEMPTS, backoffMillis);
+        lifecycleManager.getDockerClient().copyArchiveToContainerCmd(containerId)
+                .withRemotePath("/")
+                .withTarInputStream(new ByteArrayInputStream(tarData))
+                .exec();
     }
 
     private byte[] tarModelData(byte[] data, String key) throws Exception {
@@ -293,53 +334,5 @@ public class SageMakerEndpointManager implements ContainerTeardown, Resettable {
 
     static String string(Object value) {
         return value == null ? null : String.valueOf(value);
-    }
-
-
-    /**
-     * Pins an image reference to the registry digest Docker pulled for it, as SageMaker reports in
-     * {@code DeployedImages[].ResolvedImage}. Returns {@code null} when Docker knows no digest.
-     */
-    String resolveImage(String image) {
-        if (image == null || image.isBlank()) {
-            return null;
-        }
-        if (image.contains("@sha256:")) {
-            return image;
-        }
-        try {
-            List<String> digests = lifecycleManager.getDockerClient().inspectImageCmd(image).exec().getRepoDigests();
-            if (digests == null || digests.isEmpty()) {
-                return null;
-            }
-            String repository = repositoryOf(image);
-            String chosen = digests.stream()
-                    .filter(d -> d.startsWith(repository + "@"))
-                    .findFirst()
-                    .orElse(digests.get(0));
-            int at = chosen.indexOf('@');
-            return at < 0 ? null : repository + chosen.substring(at);
-        } catch (RuntimeException e) {
-            LOG.debugv("Could not resolve SageMaker image {0} to a digest: {1}", image, e.getMessage());
-            return null;
-        }
-    }
-
-    /** The image reference without its tag or digest. */
-    static String repositoryOf(String image) {
-        int at = image.indexOf('@');
-        String withoutDigest = at >= 0 ? image.substring(0, at) : image;
-        int colon = withoutDigest.lastIndexOf(':');
-        return colon > withoutDigest.lastIndexOf('/') ? withoutDigest.substring(0, colon) : withoutDigest;
-    }
-
-    private void copyModelData(String containerId, String s3Uri) throws Exception {
-        S3Uri uri = S3Uri.parse(s3Uri);
-        S3Object object = s3Service.getObject(uri.bucket(), uri.key());
-        byte[] tarData = tarModelData(object.getData(), uri.key());
-        lifecycleManager.getDockerClient().copyArchiveToContainerCmd(containerId)
-                .withRemotePath("/")
-                .withTarInputStream(new ByteArrayInputStream(tarData))
-                .exec();
     }
 }
