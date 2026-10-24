@@ -5,13 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsErrorResponse;
+import io.github.hectorvent.floci.core.common.AwsException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.util.Optional;
-import io.github.hectorvent.floci.core.common.AwsException;
 
 /**
  * JSON 1.1 handler for Route 53 Resolver operations.
@@ -36,6 +36,7 @@ public class Route53ResolverJsonHandler {
     public Response handle(String action, JsonNode request, String region, String accountId) {
         LOG.debugv("Route53Resolver action: {0}", action);
         try {
+            service.validateRequestRegion(request, region);
             return switch (action) {
                 case "ListFirewallDomainLists" -> handleListFirewallDomainLists(region);
                 case "GetFirewallDomainList" -> handleGetFirewallDomainList(request, region);
@@ -50,9 +51,10 @@ public class Route53ResolverJsonHandler {
                         service.deleteResolverEndpoint(text(request, "ResolverEndpointId")));
                 case "GetResolverEndpoint" -> resolverEndpointResponse(
                         service.getResolverEndpoint(text(request, "ResolverEndpointId")));
-                case "ListResolverEndpoints" -> handleListResolverEndpoints();
-                case "ListResolverEndpointIpAddresses" -> handleListResolverEndpointIpAddresses(
-                        text(request, "ResolverEndpointId"));
+                case "ListResolverEndpoints" -> Response.ok(
+                        service.listResources("ResolverEndpoints", request, region, accountId)).build();
+                case "ListResolverEndpointIpAddresses" -> Response.ok(
+                        service.listResolverEndpointIpAddresses(request, region)).build();
                 case "UpdateResolverEndpoint" -> resolverEndpointResponse(
                         service.updateResolverEndpoint(text(request, "ResolverEndpointId"), request));
 
@@ -62,7 +64,8 @@ public class Route53ResolverJsonHandler {
                         service.deleteResolverRule(text(request, "ResolverRuleId")));
                 case "GetResolverRule" -> resolverRuleResponse(
                         service.getResolverRule(text(request, "ResolverRuleId")));
-                case "ListResolverRules" -> handleListResolverRules();
+                case "ListResolverRules" -> Response.ok(
+                        service.listResources("ResolverRules", request, region, accountId)).build();
                 case "UpdateResolverRule" -> resolverRuleResponse(
                         service.updateResolverRule(text(request, "ResolverRuleId"), request.path("Config")));
 
@@ -72,26 +75,24 @@ public class Route53ResolverJsonHandler {
                         service.disassociateResolverRule(request));
                 case "GetResolverRuleAssociation" -> resolverRuleAssociationResponse(
                         service.getResolverRuleAssociation(text(request, "ResolverRuleAssociationId")));
-                case "ListResolverRuleAssociations" -> handleListResolverRuleAssociations();
-
+                case "ListResolverRuleAssociations" -> Response.ok(
+                        service.listResources("ResolverRuleAssociations", request, region, accountId)).build();
+                case "ListTagsForResource" -> Response.ok(service.listTagsForResource(request, region)).build();
                 case "TagResource" -> {
-                    service.tagResource(text(request, "ResourceArn"), request.get("Tags"), region, accountId);
+                    service.tagResource(request, region);
                     yield Response.ok(objectMapper.createObjectNode()).build();
                 }
                 case "UntagResource" -> {
-                    service.untagResource(text(request, "ResourceArn"), request.get("TagKeys"), region, accountId);
+                    service.untagResource(request, region);
                     yield Response.ok(objectMapper.createObjectNode()).build();
                 }
-                case "ListTagsForResource" -> Response.ok(service.listTagsForResource(
-                        text(request, "ResourceArn"), request.get("MaxResults"),
-                        text(request, "NextToken"), region, accountId)).build();
 
                 default -> Response.status(400)
                         .entity(new AwsErrorResponse("UnknownOperationException",
                                 "Unknown operation: Route53Resolver." + action))
                         .build();
             };
-        } catch (io.github.hectorvent.floci.core.common.AwsException e) {
+        } catch (AwsException e) {
             return Response.status(e.getHttpStatus())
                     .entity(new AwsErrorResponse(e.jsonType(), e.getMessage())).build();
         }
@@ -150,34 +151,10 @@ public class Route53ResolverJsonHandler {
         return Response.ok(objectMapper.createObjectNode().set("ResolverEndpoint", endpoint)).build();
     }
 
-    private Response handleListResolverEndpoints() {
-        ObjectNode result = objectMapper.createObjectNode();
-        ArrayNode endpoints = result.putArray("ResolverEndpoints");
-        for (ObjectNode endpoint : service.listResolverEndpoints()) {
-            endpoints.add(endpoint);
-        }
-        return Response.ok(result).build();
-    }
-
-    private Response handleListResolverEndpointIpAddresses(String endpointId) {
-        ObjectNode result = objectMapper.createObjectNode();
-        result.putArray("IpAddresses").addAll(service.listResolverEndpointIpAddresses(endpointId));
-        return Response.ok(result).build();
-    }
-
     // ---------- Resolver rules ----------
 
     private Response resolverRuleResponse(ObjectNode rule) {
         return Response.ok(objectMapper.createObjectNode().set("ResolverRule", rule)).build();
-    }
-
-    private Response handleListResolverRules() {
-        ObjectNode result = objectMapper.createObjectNode();
-        ArrayNode rules = result.putArray("ResolverRules");
-        for (ObjectNode rule : service.listResolverRules()) {
-            rules.add(rule);
-        }
-        return Response.ok(result).build();
     }
 
     // ---------- Resolver rule associations ----------
@@ -187,12 +164,4 @@ public class Route53ResolverJsonHandler {
                 .set("ResolverRuleAssociation", association)).build();
     }
 
-    private Response handleListResolverRuleAssociations() {
-        ObjectNode result = objectMapper.createObjectNode();
-        ArrayNode associations = result.putArray("ResolverRuleAssociations");
-        for (ObjectNode association : service.listResolverRuleAssociations()) {
-            associations.add(association);
-        }
-        return Response.ok(result).build();
-    }
 }
