@@ -5,10 +5,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.bedrockagentcore.BedrockAgentCoreEventService;
+import io.github.hectorvent.floci.services.bedrockagentcore.BedrockAgentCoreMemoryRecordService;
 import io.github.hectorvent.floci.services.bedrockagentcore.model.Branch;
 import io.github.hectorvent.floci.services.bedrockagentcore.model.MemoryEvent;
 import io.github.hectorvent.floci.services.bedrockagentcore.model.PayloadType;
@@ -33,7 +34,6 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import io.github.hectorvent.floci.services.bedrockagentcore.BedrockAgentCoreMemoryRecordService;
 
 /**
  * AgentCore memory endpoints. The operation is a literal path suffix
@@ -48,15 +48,18 @@ public class BedrockAgentCoreMemoryController {
 
     private final BedrockAgentCoreMemoryService service;
     private final BedrockAgentCoreEventService eventService;
+    private final BedrockAgentCoreMemoryRecordService recordService;
     private final RegionResolver regionResolver;
     private final ObjectMapper objectMapper;
 
     @Inject
     public BedrockAgentCoreMemoryController(BedrockAgentCoreMemoryService service,
                                             BedrockAgentCoreEventService eventService,
+                                            BedrockAgentCoreMemoryRecordService recordService,
                                             RegionResolver regionResolver, ObjectMapper objectMapper) {
         this.service = service;
         this.eventService = eventService;
+        this.recordService = recordService;
         this.regionResolver = regionResolver;
         this.objectMapper = objectMapper;
     }
@@ -281,20 +284,6 @@ public class BedrockAgentCoreMemoryController {
         }
     }
 
-    /** Request body of {@code CreateEvent}; {@code sessionId} and {@code branch} are optional. */
-    public record CreateEventRequest(String actorId, String sessionId, Double eventTimestamp,
-                                     List<PayloadType> payload, Branch branch) {
-        public CreateEventRequest() { this(null, null, null, null, null); }
-    }
-
-    /** Request body of {@code ListEvents}. */
-    public record ListEventsRequest(Boolean includePayloads, Integer maxResults, String nextToken) {
-        public ListEventsRequest() { this(null, null, null); }
-    }
-
-    @Inject
-    BedrockAgentCoreMemoryRecordService recordService;
-
     @POST
     @Path("/{memoryId}/actors")
     public Response listActors(@Context HttpHeaders headers, @PathParam("memoryId") String memoryId, String body) {
@@ -476,4 +465,16 @@ public class BedrockAgentCoreMemoryController {
         }
         return value.asInt();
     }
+
+    /** Request body of {@code CreateEvent}; {@code sessionId} and {@code branch} are optional. */
+    public record CreateEventRequest(String actorId, String sessionId, Double eventTimestamp,
+                                     List<PayloadType> payload, Branch branch) {
+        public CreateEventRequest() { this(null, null, null, null, null); }
+    }
+
+    /** Request body of {@code ListEvents}. */
+    public record ListEventsRequest(Boolean includePayloads, Integer maxResults, String nextToken) {
+        public ListEventsRequest() { this(null, null, null); }
+    }
+
 }

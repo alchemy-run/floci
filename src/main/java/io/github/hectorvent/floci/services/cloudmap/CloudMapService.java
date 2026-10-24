@@ -1,17 +1,9 @@
 package io.github.hectorvent.floci.services.cloudmap;
 
-import com.fasterxml.jackson.core.JacksonException;
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.MissingNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.core.common.dns.DnsAnswer;
-import io.github.hectorvent.floci.core.common.dns.DnsRecord;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -19,7 +11,6 @@ import io.github.hectorvent.floci.services.cloudmap.model.Instance;
 import io.github.hectorvent.floci.services.cloudmap.model.Namespace;
 import io.github.hectorvent.floci.services.cloudmap.model.Operation;
 import io.github.hectorvent.floci.services.cloudmap.model.Service;
-import io.netty.util.NetUtil;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -28,17 +19,13 @@ import org.jboss.logging.Logger;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -52,8 +39,6 @@ public class CloudMapService {
 
     private static final Logger LOG = Logger.getLogger(CloudMapService.class);
     private static final String ALNUM = "abcdefghijklmnopqrstuvwxyz0123456789";
-    /** Route 53 answers a service discovery query with at most eight records. */
-    private static final int MAX_DNS_ANSWERS = 8;
 
     private final SecureRandom random = new SecureRandom();
 
@@ -62,13 +47,12 @@ public class CloudMapService {
     private final StorageBackend<String, Instance> instanceStore;
     private final StorageBackend<String, Operation> operationStore;
     private final RegionResolver regionResolver;
-    private final ObjectMapper objectMapper;
     private final int completionDelaySeconds;
     private final ScheduledExecutorService scheduler;
 
     @Inject
     public CloudMapService(StorageFactory storageFactory, EmulatorConfig config,
-                           RegionResolver regionResolver, ObjectMapper objectMapper) {
+                           RegionResolver regionResolver) {
         this.namespaceStore = storageFactory.create("cloudmap", "cloudmap-namespaces.json",
                 new TypeReference<Map<String, Namespace>>() {});
         this.serviceStore = storageFactory.create("cloudmap", "cloudmap-services.json",
@@ -78,7 +62,6 @@ public class CloudMapService {
         this.operationStore = storageFactory.create("cloudmap", "cloudmap-operations.json",
                 new TypeReference<Map<String, Operation>>() {});
         this.regionResolver = regionResolver;
-        this.objectMapper = objectMapper;
         this.completionDelaySeconds = config.services().cloudmap().operationCompletionDelaySeconds();
         this.scheduler = completionDelaySeconds > 0
                 ? Executors.newSingleThreadScheduledExecutor(r -> {
@@ -106,21 +89,29 @@ public class CloudMapService {
     }
 
     public Operation createPublicDnsNamespace(String name, String creatorRequestId,
-                                              String description, Map<String, String> tags, String region) {
+                                              String description, Map<String, String> tags, String region,
+                                              Long soaTtl) {
         Namespace ns = newNamespace(name, "DNS_PUBLIC", description, creatorRequestId, tags, region);
         ns.setHostedZoneId(generateHostedZoneId());
+        if (soaTtl != null) {
+            ns.setSoaTtl(soaTtl);
+        }
         namespaceStore.put(ns.getId(), ns);
         return submitOperation("CREATE_NAMESPACE", "NAMESPACE", ns.getId(), region);
     }
 
     public Operation createPrivateDnsNamespace(String name, String vpc, String creatorRequestId,
-                                               String description, Map<String, String> tags, String region) {
+                                               String description, Map<String, String> tags, String region,
+                                               Long soaTtl) {
         if (vpc == null || vpc.isBlank()) {
             throw new AwsException("InvalidInput", "Vpc is required for a private DNS namespace.", 400);
         }
         Namespace ns = newNamespace(name, "DNS_PRIVATE", description, creatorRequestId, tags, region);
         ns.setVpc(vpc);
         ns.setHostedZoneId(generateHostedZoneId());
+        if (soaTtl != null) {
+            ns.setSoaTtl(soaTtl);
+        }
         namespaceStore.put(ns.getId(), ns);
         return submitOperation("CREATE_NAMESPACE", "NAMESPACE", ns.getId(), region);
     }
@@ -157,19 +148,78 @@ public class CloudMapService {
     }
 
     public List<Namespace> listNamespaces(String region) {
+        return listNamespaces(region, Map.of());
+    }
+
+    public List<Namespace> listNamespaces(String region, Map<String, List<String>> filters) {
         List<Namespace> result = new ArrayList<>();
         for (Namespace n : scan(namespaceStore)) {
-            if (region.equals(n.getRegion())) {
+            if (region.equals(n.getRegion()) && matchesNamespaceFilters(n, filters)) {
                 result.add(n);
             }
         }
         return result;
     }
 
-    public void updateNamespace(String id, String description) {
+    private boolean matchesNamespaceFilters(Namespace ns, Map<String, List<String>> filters) {
+        if (filters == null || filters.isEmpty()) {
+            return true;
+        }
+        for (Map.Entry<String, List<String>> f : filters.entrySet()) {
+            List<String> values = f.getValue();
+            if (values == null || values.isEmpty()) {
+                continue;
+            }
+            boolean ok = switch (f.getKey()) {
+                case "TYPE" -> values.contains(ns.getType());
+                case "NAME" -> values.contains(ns.getName());
+                default -> true;
+            };
+            if (!ok) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public Operation updateHttpNamespace(String id, String description, String region) {
         Namespace ns = requireNamespace(id);
-        ns.setDescription(description);
-        namespaceStore.put(id, ns);
+        if (!"HTTP".equals(ns.getType())) {
+            throw new AwsException("InvalidInput", "Namespace " + id + " is not an HTTP namespace.", 400);
+        }
+        if (description != null) {
+            ns.setDescription(description);
+            namespaceStore.put(ns.getId(), ns);
+        }
+        return submitOperation("UPDATE_NAMESPACE", "NAMESPACE", ns.getId(), region);
+    }
+
+    public Operation updatePublicDnsNamespace(String id, String description, Long soaTtl, String region) {
+        Namespace ns = requireNamespace(id);
+        if (!"DNS_PUBLIC".equals(ns.getType())) {
+            throw new AwsException("InvalidInput", "Namespace " + id + " is not a public DNS namespace.", 400);
+        }
+        applyNamespaceUpdate(ns, description, soaTtl);
+        return submitOperation("UPDATE_NAMESPACE", "NAMESPACE", ns.getId(), region);
+    }
+
+    public Operation updatePrivateDnsNamespace(String id, String description, Long soaTtl, String region) {
+        Namespace ns = requireNamespace(id);
+        if (!"DNS_PRIVATE".equals(ns.getType())) {
+            throw new AwsException("InvalidInput", "Namespace " + id + " is not a private DNS namespace.", 400);
+        }
+        applyNamespaceUpdate(ns, description, soaTtl);
+        return submitOperation("UPDATE_NAMESPACE", "NAMESPACE", ns.getId(), region);
+    }
+
+    private void applyNamespaceUpdate(Namespace ns, String description, Long soaTtl) {
+        if (description != null) {
+            ns.setDescription(description);
+        }
+        if (soaTtl != null) {
+            ns.setSoaTtl(soaTtl);
+        }
+        namespaceStore.put(ns.getId(), ns);
     }
 
     public Operation deleteNamespace(String id, String region) {
@@ -193,19 +243,18 @@ public class CloudMapService {
         if (name == null || name.isBlank()) {
             throw new AwsException("InvalidInput", "Service name is required.", 400);
         }
-        JsonNode dnsConfigNode = dnsConfig == null ? null : parseDnsConfig(dnsConfig);
         String resolvedNamespaceId = namespaceId;
-        if (dnsConfigNode != null && resolvedNamespaceId == null) {
+        if (dnsConfig != null && resolvedNamespaceId == null) {
             // DnsConfig may carry the namespace id when the top-level field is absent.
-            resolvedNamespaceId = dnsConfigNode.path("NamespaceId").textValue();
+            resolvedNamespaceId = dnsConfigNamespaceId(dnsConfig);
         }
-        Namespace namespace = resolvedNamespaceId == null ? null : requireNamespace(resolvedNamespaceId);
-        boolean dnsNamespace = namespace != null && ("DNS_PRIVATE".equals(namespace.getType())
-                || "DNS_PUBLIC".equals(namespace.getType()));
+        if (resolvedNamespaceId != null) {
+            requireNamespace(resolvedNamespaceId);
+        }
         final String nsId = resolvedNamespaceId;
         boolean exists = scan(serviceStore).stream()
-                .anyMatch(s -> region.equals(s.getRegion()) && Objects.equals(nsId, s.getNamespaceId())
-                        && (dnsNamespace ? name.equalsIgnoreCase(s.getName()) : name.equals(s.getName())));
+                .anyMatch(s -> region.equals(s.getRegion()) && name.equals(s.getName())
+                        && java.util.Objects.equals(nsId, s.getNamespaceId()));
         if (exists) {
             throw new AwsException("ServiceAlreadyExists",
                     "A service named \"" + name + "\" already exists.", 400);
@@ -256,24 +305,40 @@ public class CloudMapService {
         return result;
     }
 
-    /**
-     * Only the TTLs of the existing DNS records can change, as on AWS: any other DnsConfig change
-     * (record types or count, RoutingPolicy), or a DnsConfig for a service without one, is rejected.
-     * A null {@code dnsConfig} keeps the stored one, since AWS cannot remove it; a null description
-     * or health check config clears it, as AWS UpdateService does.
-     */
-    public void updateService(String id, String description, String dnsConfig, String healthCheckConfig) {
+    public Operation updateService(String id, String description, String dnsConfig,
+                                   String healthCheckConfig, String region) {
         Service service = requireService(id);
-        if (dnsConfig != null) {
-            if (!withoutTtls(parseDnsConfig(dnsConfig)).equals(withoutTtls(dnsConfigNode(service)))) {
-                throw new AwsException("InvalidInput",
-                        "Only the TTLs of a service's DNS records can be updated.", 400);
-            }
-            service.setDnsConfig(dnsConfig);
+        if (description != null) {
+            service.setDescription(description);
         }
-        service.setDescription(description);
+        if (dnsConfig != null) {
+            service.setDnsConfig(mergeDnsConfig(service.getDnsConfig(), dnsConfig));
+        }
+        // AWS UpdateService replaces HealthCheckConfig with whatever was
+        // supplied — omitting it deletes the existing config.
         service.setHealthCheckConfig(healthCheckConfig);
-        serviceStore.put(id, service);
+        serviceStore.put(service.getId(), service);
+        return submitOperation("UPDATE_SERVICE", "SERVICE", service.getId(), region);
+    }
+
+    public Map<String, String> getServiceAttributes(String serviceId) {
+        return new LinkedHashMap<>(requireService(serviceId).getAttributes());
+    }
+
+    public void updateServiceAttributes(String serviceId, Map<String, String> attributes) {
+        Service service = requireService(serviceId);
+        if (attributes != null) {
+            service.getAttributes().putAll(attributes);
+            serviceStore.put(service.getId(), service);
+        }
+    }
+
+    public void deleteServiceAttributes(String serviceId, List<String> keys) {
+        Service service = requireService(serviceId);
+        if (keys != null) {
+            keys.forEach(service.getAttributes()::remove);
+            serviceStore.put(service.getId(), service);
+        }
     }
 
     public void deleteService(String id) {
@@ -302,17 +367,6 @@ public class CloudMapService {
         }
         if (attributes == null || attributes.isEmpty()) {
             throw new AwsException("InvalidInput", "Attributes are required.", 400);
-        }
-        if (dnsRecordTtl(service, "SRV") >= 0 && service.getNamespaceId() != null) {
-            Namespace namespace = requireNamespace(service.getNamespaceId());
-            if ("DNS_PRIVATE".equals(namespace.getType()) || "DNS_PUBLIC".equals(namespace.getType())) {
-                try {
-                    DnsRecord.encodeName(instanceId + "." + service.getName() + "." + namespace.getName());
-                } catch (IllegalArgumentException e) {
-                    throw new AwsException("InvalidInput",
-                            "The SRV target must have ASCII labels of 1 to 63 bytes and at most 253 characters.", 400);
-                }
-            }
         }
         Instance instance = new Instance();
         instance.setInstanceId(instanceId);
@@ -350,6 +404,15 @@ public class CloudMapService {
     public List<Instance> listInstances(String serviceId) {
         requireService(serviceId);
         return scanInstances(serviceId);
+    }
+
+    public void updateInstanceCustomHealthStatus(String serviceId, String instanceId, String status) {
+        Instance instance = getInstance(serviceId, instanceId);
+        if (status == null || (!"HEALTHY".equals(status) && !"UNHEALTHY".equals(status))) {
+            throw new AwsException("InvalidInput", "Status must be HEALTHY or UNHEALTHY.", 400);
+        }
+        instance.setHealthStatus(status);
+        instanceStore.put(instanceKey(serviceId, instanceId), instance);
     }
 
     public Map<String, String> getInstancesHealthStatus(String serviceId, List<String> instanceIds) {
@@ -404,295 +467,6 @@ public class CloudMapService {
             }
             default -> instances;
         };
-    }
-
-    /**
-     * Resolves {@code <service>.<namespace>} to the IPv4 addresses registered under it, so the
-     * embedded DNS server can answer for a DNS namespace. The DNS server forwards names outside
-     * every DNS namespace upstream, while a name inside a namespace remains owned even when no
-     * usable A records exist.
-     *
-     * <p>Only DNS namespaces answer. An HTTP namespace is discoverable through DiscoverInstances
-     * and has no DNS records on AWS, so giving it any here would invent behaviour callers cannot
-     * rely on outside Floci.
-     *
-     * <p>Unlike {@link #discoverInstances}, this takes no region: a DNS query carries none. The
-     * longest matching namespace name wins, and a namespace name registered in more than one
-     * region resolves through whichever copy holds instances.
-     *
-     * <p>A DNS query carries no credential either, so this reads the default account's
-     * partition. A namespace registered under a non-default account is discoverable through
-     * the API but does not resolve by name.
-     *
-     * <p>Health and answer size follow Route 53: healthy instances answer while any exist, all
-     * of them answer when none is healthy, and at most {@link #MAX_DNS_ANSWERS} records go back
-     * either way.
-     */
-    public List<String> resolveDnsName(String queryName) {
-        return resolveDnsNameIfOwned(queryName)
-                .map(DnsAnswer::addresses).orElse(List.of());
-    }
-
-    /** Keeps zone ownership distinct from the A records and their TTL. */
-    public Optional<DnsAnswer> resolveDnsNameIfOwned(String queryName) {
-        return resolveDnsNameIfOwned(queryName, 1);
-    }
-
-    public Optional<DnsAnswer> resolveDnsNameIfOwned(String queryName, int type) {
-        if (queryName == null || queryName.isBlank()) {
-            return Optional.empty();
-        }
-        String name = queryName.toLowerCase(Locale.ROOT);
-        if (name.endsWith(".")) {
-            name = name.substring(0, name.length() - 1);
-        }
-
-        String matchedNamespaceName = null;
-        boolean nameExists = false;
-        for (Namespace namespace : dnsNamespacesByLongestName()) {
-            String namespaceName = namespace.getName().toLowerCase(Locale.ROOT);
-            String suffix = "." + namespaceName;
-            boolean apex = name.equals(namespaceName);
-            if (!apex && !name.endsWith(suffix)) {
-                continue;
-            }
-            if (matchedNamespaceName != null && !matchedNamespaceName.equals(namespaceName)) {
-                break;
-            }
-            matchedNamespaceName = namespaceName;
-            if (apex) {
-                nameExists = true;
-                continue;
-            }
-            String label = name.substring(0, name.length() - suffix.length());
-            List<Service> services = scan(serviceStore).stream()
-                    .filter(service -> namespace.getId().equals(service.getNamespaceId()))
-                    .toList();
-            Optional<DnsAnswer> byService = resolveServiceName(services, label, namespace.getName(), type);
-            if (byService.filter(answer -> !answer.isEmpty()).isPresent()) {
-                return byService;
-            }
-            Optional<DnsAnswer> byInstance = resolveInstanceHostname(services, label, type);
-            if (byInstance.filter(answer -> !answer.isEmpty()).isPresent()) {
-                return byInstance;
-            }
-            nameExists |= byService.isPresent() || byInstance.isPresent();
-        }
-        return matchedNamespaceName != null
-                ? Optional.of(nameExists ? DnsAnswer.noData() : DnsAnswer.nxDomain()) : Optional.empty();
-    }
-
-    /**
-     * Requested records at {@code <service>.<namespace>}, preserving ownership for other types.
-     */
-    private Optional<DnsAnswer> resolveServiceName(List<Service> services, String label, String namespace, int type) {
-        boolean exists = false;
-        for (Service service : services) {
-            if (!label.equalsIgnoreCase(service.getName())) {
-                continue;
-            }
-            List<Instance> instances = scanInstances(service.getId());
-            exists |= !instances.isEmpty();
-            int recordType = type;
-            String recordName = switch (type) {
-                case 1 -> "A";
-                case 5 -> "CNAME";
-                case 28 -> "AAAA";
-                case 33 -> "SRV";
-                default -> "";
-            };
-            int ttl = dnsRecordTtl(service, recordName);
-            if (ttl < 0 && dnsRecordTtl(service, "CNAME") >= 0) {
-                recordType = 5;
-                ttl = dnsRecordTtl(service, "CNAME");
-            }
-            if (ttl < 0) {
-                continue;
-            }
-            List<DnsRecord> records = new ArrayList<>();
-            for (Instance instance : applyHealthFilter(instances, "HEALTHY_OR_ELSE_ALL")) {
-                DnsRecord record = instanceDnsRecord(instance, service, namespace, recordType);
-                if (record != null) {
-                    records.add(record);
-                }
-            }
-            if (!records.isEmpty()) {
-                if (recordType == 5 || "WEIGHTED".equals(dnsConfigNode(service).path("RoutingPolicy").asText())) {
-                    return Optional.of(DnsAnswer.typedRecords(
-                            List.of(records.get(ThreadLocalRandom.current().nextInt(records.size()))), ttl));
-                }
-                return Optional.of(DnsAnswer.typedRecords(records.size() > MAX_DNS_ANSWERS
-                        ? records.subList(0, MAX_DNS_ANSWERS) : records, ttl));
-            }
-        }
-        return exists ? Optional.of(DnsAnswer.noData()) : Optional.empty();
-    }
-
-    /**
-     * The address records at an SRV record's target, {@code <InstanceId>.<service>.<namespace>},
-     * published with the service's SRV TTL.
-     */
-    private Optional<DnsAnswer> resolveInstanceHostname(List<Service> services, String label, int type) {
-        boolean exists = false;
-        for (Service service : services) {
-            String serviceSuffix = "." + service.getName().toLowerCase(Locale.ROOT);
-            if (!label.endsWith(serviceSuffix)) {
-                continue;
-            }
-            int ttl = dnsRecordTtl(service, "SRV");
-            if (ttl < 0) {
-                continue;
-            }
-            String instanceId = label.substring(0, label.length() - serviceSuffix.length());
-            for (Instance instance : scanInstances(service.getId())) {
-                if (!instanceId.equalsIgnoreCase(instance.getInstanceId())) {
-                    continue;
-                }
-                exists = true;
-                DnsRecord record = instanceDnsRecord(instance, service, "", type);
-                if ((type == 1 || type == 28) && record != null) {
-                    return Optional.of(DnsAnswer.typedRecords(List.of(record), ttl));
-                }
-            }
-        }
-        return exists ? Optional.of(DnsAnswer.noData()) : Optional.empty();
-    }
-
-    private DnsRecord instanceDnsRecord(Instance instance, Service service, String namespace, int type) {
-        Map<String, String> attributes = instance.getAttributes();
-        String ipv4 = attributes.get("AWS_INSTANCE_IPV4");
-        String ipv6 = attributes.get("AWS_INSTANCE_IPV6");
-        try {
-            DnsRecord record = switch (type) {
-                case 1 -> isIpv4(ipv4) ? new DnsRecord.Address(1, ipv4) : null;
-                case 28 -> ipv6 != null && !ipv6.contains("%") && !ipv6.startsWith("[")
-                        && NetUtil.isValidIpV6Address(ipv6) ? new DnsRecord.Address(28, ipv6) : null;
-                case 5 -> attributes.get("AWS_INSTANCE_CNAME") != null
-                        ? new DnsRecord.Cname(attributes.get("AWS_INSTANCE_CNAME")) : null;
-                case 33 -> attributes.get("AWS_INSTANCE_PORT") != null
-                        ? new DnsRecord.Srv(Integer.parseInt(attributes.get("AWS_INSTANCE_PORT")),
-                                instance.getInstanceId() + "." + service.getName() + "." + namespace) : null;
-                default -> null;
-            };
-            if (record != null) {
-                record.data();
-            }
-            return record;
-        } catch (IllegalArgumentException e) {
-            LOG.debugv("Invalid DNS attributes for Cloud Map instance {0}: {1}",
-                    instance.getInstanceId(), e.getMessage());
-            return null;
-        }
-    }
-
-    private JsonNode parseDnsConfig(String dnsConfig) {
-        JsonNode config;
-        try {
-            config = objectMapper.readTree(dnsConfig);
-        } catch (JacksonException e) {
-            throw new AwsException("InvalidInput", "DnsConfig must be valid JSON.", 400);
-        }
-        JsonNode records = config == null ? MissingNode.getInstance() : config.path("DnsRecords");
-        if (!records.isArray()) {
-            throw new AwsException("InvalidInput", "DnsConfig.DnsRecords is required.", 400);
-        }
-        for (JsonNode record : records) {
-            if (ttlSeconds(record.path("TTL")) < 0) {
-                throw new AwsException("InvalidInput",
-                        "DnsRecords TTL must be an integer from 0 to 2147483647.", 400);
-            }
-        }
-        return config;
-    }
-
-    /** The DnsConfig as an update must keep it: record types in any order, TTLs free to change. */
-    private static JsonNode withoutTtls(JsonNode dnsConfig) {
-        JsonNode copy = dnsConfig.deepCopy();
-        if (copy instanceof ObjectNode object) {
-            List<String> types = new ArrayList<>();
-            for (JsonNode record : object.path("DnsRecords")) {
-                types.add(record.path("Type").asText());
-            }
-            types.sort(Comparator.naturalOrder());
-            ArrayNode records = object.putArray("DnsRecords");
-            types.forEach(records::add);
-        }
-        return copy;
-    }
-
-    /** Returns -1 when the service has no record of the requested type. */
-    private int dnsRecordTtl(Service service, String type) {
-        JsonNode records = dnsConfigNode(service).path("DnsRecords");
-        if (!records.isArray()) {
-            return "A".equals(type) ? DnsAnswer.DEFAULT_TTL_SECONDS : -1;
-        }
-        for (JsonNode record : records) {
-            if (type.equalsIgnoreCase(record.path("Type").asText())) {
-                int ttl = ttlSeconds(record.path("TTL"));
-                return ttl >= 0 ? ttl : DnsAnswer.DEFAULT_TTL_SECONDS;
-            }
-        }
-        return -1;
-    }
-
-    private static int ttlSeconds(JsonNode ttl) {
-        if (!ttl.isIntegralNumber() || !ttl.canConvertToInt()) {
-            return -1;
-        }
-        int value = ttl.intValue();
-        return value >= 0 ? value : -1;
-    }
-
-    private JsonNode dnsConfigNode(Service service) {
-        String dnsConfig = service.getDnsConfig();
-        if (dnsConfig == null || dnsConfig.isBlank()) {
-            return MissingNode.getInstance();
-        }
-        try {
-            return objectMapper.readTree(dnsConfig);
-        } catch (JacksonException e) {
-            LOG.debugv("Could not read the DnsConfig of Cloud Map service {0}: {1}",
-                    service.getId(), e.getMessage());
-            return MissingNode.getInstance();
-        }
-    }
-
-    /**
-     * Whether the attribute is a dotted-quad the DNS server can put in an A record's rdata.
-     * AWS rejects anything else at {@code RegisterInstance}; Floci stores it, so a name whose
-     * only instance carries a bad value receives a negative response rather than an invalid A
-     * record or an answer from an unrelated upstream resolver.
-     */
-    private static boolean isIpv4(String value) {
-        if (value == null || value.isBlank()) {
-            return false;
-        }
-        String[] octets = value.split("\\.", -1);
-        if (octets.length != 4) {
-            return false;
-        }
-        for (String octet : octets) {
-            if (octet.isEmpty() || octet.length() > 3) {
-                return false;
-            }
-            for (int i = 0; i < octet.length(); i++) {
-                if (!Character.isDigit(octet.charAt(i))) {
-                    return false;
-                }
-            }
-            if (Integer.parseInt(octet) > 255) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private List<Namespace> dnsNamespacesByLongestName() {
-        return scan(namespaceStore).stream()
-                .filter(n -> n.getName() != null && !n.getName().isBlank())
-                .filter(n -> "DNS_PRIVATE".equals(n.getType()) || "DNS_PUBLIC".equals(n.getType()))
-                .sorted(Comparator.comparingInt((Namespace n) -> n.getName().length()).reversed())
-                .toList();
     }
 
     private Service resolveService(String namespaceName, String serviceName, String region) {
@@ -879,167 +653,6 @@ public class CloudMapService {
         return dnsConfig != null ? "DNS_HTTP" : "HTTP";
     }
 
-    private String randomId(int length) {
-        StringBuilder sb = new StringBuilder(length);
-        for (int i = 0; i < length; i++) {
-            sb.append(ALNUM.charAt(random.nextInt(ALNUM.length())));
-        }
-        return sb.toString();
-    }
-
-    private String generateHostedZoneId() {
-        StringBuilder sb = new StringBuilder("Z");
-        String chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-        for (int i = 0; i < 13; i++) {
-            sb.append(chars.charAt(random.nextInt(chars.length())));
-        }
-        return sb.toString();
-    }
-
-    public Operation createPublicDnsNamespace(String name, String creatorRequestId,
-                                              String description, Map<String, String> tags, String region,
-                                              Long soaTtl) {
-        Namespace ns = newNamespace(name, "DNS_PUBLIC", description, creatorRequestId, tags, region);
-        ns.setHostedZoneId(generateHostedZoneId());
-        if (soaTtl != null) {
-            ns.setSoaTtl(soaTtl);
-        }
-        namespaceStore.put(ns.getId(), ns);
-        return submitOperation("CREATE_NAMESPACE", "NAMESPACE", ns.getId(), region);
-    }
-
-    public Operation createPrivateDnsNamespace(String name, String vpc, String creatorRequestId,
-                                               String description, Map<String, String> tags, String region,
-                                               Long soaTtl) {
-        if (vpc == null || vpc.isBlank()) {
-            throw new AwsException("InvalidInput", "Vpc is required for a private DNS namespace.", 400);
-        }
-        Namespace ns = newNamespace(name, "DNS_PRIVATE", description, creatorRequestId, tags, region);
-        ns.setVpc(vpc);
-        ns.setHostedZoneId(generateHostedZoneId());
-        if (soaTtl != null) {
-            ns.setSoaTtl(soaTtl);
-        }
-        namespaceStore.put(ns.getId(), ns);
-        return submitOperation("CREATE_NAMESPACE", "NAMESPACE", ns.getId(), region);
-    }
-
-    public List<Namespace> listNamespaces(String region, Map<String, List<String>> filters) {
-        List<Namespace> result = new ArrayList<>();
-        for (Namespace n : scan(namespaceStore)) {
-            if (region.equals(n.getRegion()) && matchesNamespaceFilters(n, filters)) {
-                result.add(n);
-            }
-        }
-        return result;
-    }
-
-    private boolean matchesNamespaceFilters(Namespace ns, Map<String, List<String>> filters) {
-        if (filters == null || filters.isEmpty()) {
-            return true;
-        }
-        for (Map.Entry<String, List<String>> f : filters.entrySet()) {
-            List<String> values = f.getValue();
-            if (values == null || values.isEmpty()) {
-                continue;
-            }
-            boolean ok = switch (f.getKey()) {
-                case "TYPE" -> values.contains(ns.getType());
-                case "NAME" -> values.contains(ns.getName());
-                default -> true;
-            };
-            if (!ok) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    public Operation updateHttpNamespace(String id, String description, String region) {
-        Namespace ns = requireNamespace(id);
-        if (!"HTTP".equals(ns.getType())) {
-            throw new AwsException("InvalidInput", "Namespace " + id + " is not an HTTP namespace.", 400);
-        }
-        if (description != null) {
-            ns.setDescription(description);
-            namespaceStore.put(ns.getId(), ns);
-        }
-        return submitOperation("UPDATE_NAMESPACE", "NAMESPACE", ns.getId(), region);
-    }
-
-    public Operation updatePublicDnsNamespace(String id, String description, Long soaTtl, String region) {
-        Namespace ns = requireNamespace(id);
-        if (!"DNS_PUBLIC".equals(ns.getType())) {
-            throw new AwsException("InvalidInput", "Namespace " + id + " is not a public DNS namespace.", 400);
-        }
-        applyNamespaceUpdate(ns, description, soaTtl);
-        return submitOperation("UPDATE_NAMESPACE", "NAMESPACE", ns.getId(), region);
-    }
-
-    public Operation updatePrivateDnsNamespace(String id, String description, Long soaTtl, String region) {
-        Namespace ns = requireNamespace(id);
-        if (!"DNS_PRIVATE".equals(ns.getType())) {
-            throw new AwsException("InvalidInput", "Namespace " + id + " is not a private DNS namespace.", 400);
-        }
-        applyNamespaceUpdate(ns, description, soaTtl);
-        return submitOperation("UPDATE_NAMESPACE", "NAMESPACE", ns.getId(), region);
-    }
-
-    private void applyNamespaceUpdate(Namespace ns, String description, Long soaTtl) {
-        if (description != null) {
-            ns.setDescription(description);
-        }
-        if (soaTtl != null) {
-            ns.setSoaTtl(soaTtl);
-        }
-        namespaceStore.put(ns.getId(), ns);
-    }
-
-    public Operation updateService(String id, String description, String dnsConfig,
-                                   String healthCheckConfig, String region) {
-        Service service = requireService(id);
-        if (description != null) {
-            service.setDescription(description);
-        }
-        if (dnsConfig != null) {
-            service.setDnsConfig(mergeDnsConfig(service.getDnsConfig(), dnsConfig));
-        }
-        // AWS UpdateService replaces HealthCheckConfig with whatever was
-        // supplied — omitting it deletes the existing config.
-        service.setHealthCheckConfig(healthCheckConfig);
-        serviceStore.put(service.getId(), service);
-        return submitOperation("UPDATE_SERVICE", "SERVICE", service.getId(), region);
-    }
-
-    public Map<String, String> getServiceAttributes(String serviceId) {
-        return new LinkedHashMap<>(requireService(serviceId).getAttributes());
-    }
-
-    public void updateServiceAttributes(String serviceId, Map<String, String> attributes) {
-        Service service = requireService(serviceId);
-        if (attributes != null) {
-            service.getAttributes().putAll(attributes);
-            serviceStore.put(service.getId(), service);
-        }
-    }
-
-    public void deleteServiceAttributes(String serviceId, List<String> keys) {
-        Service service = requireService(serviceId);
-        if (keys != null) {
-            keys.forEach(service.getAttributes()::remove);
-            serviceStore.put(service.getId(), service);
-        }
-    }
-
-    public void updateInstanceCustomHealthStatus(String serviceId, String instanceId, String status) {
-        Instance instance = getInstance(serviceId, instanceId);
-        if (status == null || (!"HEALTHY".equals(status) && !"UNHEALTHY".equals(status))) {
-            throw new AwsException("InvalidInput", "Status must be HEALTHY or UNHEALTHY.", 400);
-        }
-        instance.setHealthStatus(status);
-        instanceStore.put(instanceKey(serviceId, instanceId), instance);
-    }
-
     private String dnsConfigNamespaceId(String dnsConfig) {
         // Best-effort extraction of a NamespaceId embedded in the DnsConfig JSON.
         int idx = dnsConfig.indexOf("\"NamespaceId\"");
@@ -1049,6 +662,14 @@ public class CloudMapService {
         int start = dnsConfig.indexOf('"', dnsConfig.indexOf(':', idx) + 1);
         int end = dnsConfig.indexOf('"', start + 1);
         return (start > 0 && end > start) ? dnsConfig.substring(start + 1, end) : null;
+    }
+
+    private String randomId(int length) {
+        StringBuilder sb = new StringBuilder(length);
+        for (int i = 0; i < length; i++) {
+            sb.append(ALNUM.charAt(random.nextInt(ALNUM.length())));
+        }
+        return sb.toString();
     }
 
     private String mergeDnsConfig(String existing, String incoming) {
@@ -1072,5 +693,14 @@ public class CloudMapService {
         return incoming.substring(0, brace + 1)
                 + "\"NamespaceId\":\"" + namespaceId + "\","
                 + incoming.substring(brace + 1);
+    }
+
+    private String generateHostedZoneId() {
+        StringBuilder sb = new StringBuilder("Z");
+        String chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        for (int i = 0; i < 13; i++) {
+            sb.append(chars.charAt(random.nextInt(chars.length())));
+        }
+        return sb.toString();
     }
 }

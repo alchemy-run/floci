@@ -9,13 +9,10 @@ import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.bedrockagentcorecontrol.model.AgentRuntime;
 import io.github.hectorvent.floci.services.bedrockagentcorecontrol.model.AgentRuntimeEndpoint;
 import io.github.hectorvent.floci.services.bedrockagentcorecontrol.model.AgentRuntimeVersion;
-import io.github.hectorvent.floci.testing.MutableClock;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.time.Duration;
 import java.util.HashSet;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -31,13 +28,12 @@ class BedrockAgentCoreControlServiceTest {
 
     private static final String REGION = "us-east-1";
     private final ObjectMapper mapper = new ObjectMapper();
-    private final MutableClock clock = new MutableClock();
     private BedrockAgentCoreControlService service;
 
     @BeforeEach
     void setUp() {
         service = new BedrockAgentCoreControlService(
-                new InMemoryStorage<>(), new RegionResolver(REGION, "000000000000"), null, clock);
+                new InMemoryStorage<>(), new RegionResolver(REGION, "000000000000"));
     }
 
     private ObjectNode artifact() {
@@ -64,9 +60,31 @@ class BedrockAgentCoreControlServiceTest {
         assertEquals(1, rt.getLatestVersion());
         assertEquals("READY", rt.getStatus());
         assertTrue(rt.getWorkloadIdentityArn().contains(":bedrock-agentcore:"));
-        assertTrue(service.arn(rt, "1", REGION)
-                .matches("arn:aws:bedrock-agentcore:us-east-1:000000000000:agent/[0-9a-f-]{36}:1"),
-                service.arn(rt, "1", REGION));
+        assertEquals("arn:aws:bedrock-agentcore:us-east-1:000000000000:runtime/" + rt.getAgentRuntimeId(),
+                service.arn(rt, REGION));
+    }
+
+    @Test
+    void arnsMatchRealAgentCoreShapes() {
+        AgentRuntime rt = create("myAgent");
+        String runtimeArn = service.arn(rt, REGION);
+        AgentRuntimeEndpoint endpoint = service.getEndpoint(rt.getAgentRuntimeId(), "DEFAULT", REGION);
+        assertEquals(runtimeArn + "/runtime-endpoint/DEFAULT", service.endpointArn(rt, endpoint, REGION));
+
+        // The runtime ARN is stable across versions.
+        AgentRuntime updated = service.updateAgentRuntime(rt.getAgentRuntimeId(), artifact(), network(),
+                "arn:aws:iam::000000000000:role/agent", null, null, null, null, REGION);
+        assertEquals(runtimeArn, service.arn(updated, REGION));
+
+        assertTrue(service.runtimeArnExists(REGION, runtimeArn));
+        assertTrue(service.runtimeArnExists(REGION, runtimeArn + "/runtime-endpoint/DEFAULT"));
+        assertTrue(!service.runtimeArnExists(REGION,
+                "arn:aws:bedrock-agentcore:us-east-1:000000000000:runtime/ghost-abcdefghij"));
+
+        service.tagByArn(REGION, runtimeArn, java.util.Map.of("env", "test"));
+        assertEquals(java.util.Map.of("env", "test"), service.getTagsByArn(REGION, runtimeArn));
+        assertEquals("ValidationException", assertThrows(AwsException.class,
+                () -> service.getTagsByArn(REGION, runtimeArn + ":1")).getErrorCode());
     }
 
     @Test
@@ -93,77 +111,6 @@ class BedrockAgentCoreControlServiceTest {
         assertTrue(service.resolveVersion(updated, "1").getRoleArn().endsWith("role/agent"));
         assertTrue(service.resolveVersion(updated, "2").getRoleArn().endsWith("role/agent2"));
         assertEquals("2", service.resolveVersion(updated, null).getVersion());
-    }
-
-    @Test
-    void updatePublishesExactlyTheConfigurationTheRequestCarries() {
-        ObjectNode authorizer = mapper.createObjectNode();
-        authorizer.putObject("customJWTAuthorizer").put("discoveryUrl", "A");
-        ObjectNode protocol = mapper.createObjectNode().put("serverProtocol", "MCP");
-        AgentRuntime rt = service.createAgentRuntime("myAgent", artifact(), network(),
-                "arn:aws:iam::000000000000:role/agent", "desc", Map.of("K", "v"), authorizer, protocol, null, REGION);
-        String id = rt.getAgentRuntimeId();
-
-        // A PUT with the optional members omitted: the new version carries none of them.
-        service.updateAgentRuntime(id, artifact(), network(),
-                "arn:aws:iam::000000000000:role/agent", null, null, null, null, REGION);
-
-        AgentRuntime fresh = service.getAgentRuntime(id, REGION);
-        AgentRuntimeVersion latest = service.resolveVersion(fresh, null);
-        assertNull(latest.getDescription());
-        assertNull(latest.getAuthorizerConfiguration());
-        assertNull(latest.getProtocolConfiguration());
-        assertTrue(latest.getEnvironmentVariables().isEmpty());
-        AgentRuntimeVersion first = service.resolveVersion(fresh, "1");
-        assertEquals("A", first.getAuthorizerConfiguration().path("customJWTAuthorizer").path("discoveryUrl").asText());
-        assertEquals("MCP", first.getProtocolConfiguration().path("serverProtocol").asText());
-        assertEquals(Map.of("K", "v"), first.getEnvironmentVariables());
-    }
-
-    @Test
-    void createAndUpdateRejectUnknownNetworkModeAndServerProtocol() {
-        ObjectNode privateNetwork = mapper.createObjectNode().put("networkMode", "PRIVATE");
-        AwsException badMode = assertThrows(AwsException.class, () -> service.createAgentRuntime("myAgent",
-                artifact(), privateNetwork, "arn:aws:iam::000000000000:role/agent", null, null, null, null, null, REGION));
-        assertEquals("ValidationException", badMode.getErrorCode());
-        assertEquals("1 validation error detected: Value 'PRIVATE' at 'networkConfiguration.networkMode' failed to "
-                + "satisfy constraint: Member must satisfy enum value set: [PUBLIC, VPC]", badMode.getMessage());
-
-        AwsException noMode = assertThrows(AwsException.class, () -> service.createAgentRuntime("myAgent",
-                artifact(), mapper.createObjectNode(), "arn:aws:iam::000000000000:role/agent", null, null, null, null,
-                null, REGION));
-        assertEquals("networkConfiguration.networkMode is required", noMode.getMessage());
-
-        String id = create("myAgent").getAgentRuntimeId();
-        ObjectNode grpc = mapper.createObjectNode().put("serverProtocol", "GRPC");
-        AwsException badProtocol = assertThrows(AwsException.class, () -> service.updateAgentRuntime(id, artifact(),
-                network(), "arn:aws:iam::000000000000:role/agent", null, null, null, grpc, REGION));
-        assertEquals("1 validation error detected: Value 'GRPC' at 'protocolConfiguration.serverProtocol' failed to "
-                + "satisfy constraint: Member must satisfy enum value set: [MCP, HTTP, A2A, AGUI]", badProtocol.getMessage());
-        assertEquals(1, service.getAgentRuntime(id, REGION).getLatestVersion(), "a rejected update publishes nothing");
-    }
-
-    @Test
-    void createAcceptsTheAguiServerProtocol() {
-        ObjectNode agui = mapper.createObjectNode().put("serverProtocol", "AGUI");
-        AgentRuntime rt = service.createAgentRuntime("aguiAgent", artifact(), network(),
-                "arn:aws:iam::000000000000:role/agent", null, null, null, agui, null, REGION);
-        assertEquals("AGUI", service.resolveVersion(rt, "1").getProtocolConfiguration().path("serverProtocol").asText());
-    }
-
-    @Test
-    void updateEndpointClearsAnOmittedDescriptionOnlyWhenReplacingOmitted() {
-        String id = create("myAgent").getAgentRuntimeId();
-        service.createEndpoint(id, "prod", "1", "prod ep", null, REGION);
-
-        service.updateEndpoint(id, "prod", null, null, REGION);
-        assertEquals("prod ep", service.getEndpoint(id, "prod", REGION).getDescription(),
-                "the API call leaves an omitted description alone");
-
-        service.updateEndpoint(id, "prod", null, null, true, REGION);
-        assertNull(service.getEndpoint(id, "prod", REGION).getDescription());
-        assertEquals("1", service.getEndpoint(id, "prod", REGION).getTargetVersion(),
-                "an omitted version keeps the endpoint on the version it serves");
     }
 
     @Test
@@ -293,76 +240,6 @@ class BedrockAgentCoreControlServiceTest {
     }
 
     @Test
-    void deleteRuntimeTokenExpiresAfterWindowReturns404() {
-        AgentRuntime rt = create("myAgent");
-        String id = rt.getAgentRuntimeId();
-        assertEquals("DELETING", service.deleteAgentRuntime(id, "del-1", REGION).getStatus());
-
-        clock.advance(DeletedTokenLedger.TTL.plusSeconds(1));
-
-        assertEquals(404, assertThrows(AwsException.class,
-                () -> service.deleteAgentRuntime(id, "del-1", REGION)).getHttpStatus());
-    }
-
-    @Test
-    void deleteRuntimeTokenCanBeReusedAfterItExpires() {
-        // Once a token's record expires it must behave as if it had never been recorded,
-        // not merely as "expired but still occupying the map": a later delete that reuses
-        // the same token value records it again, and that fresh record is honored.
-        AgentRuntime first = create("firstAgent");
-        String firstId = first.getAgentRuntimeId();
-        assertEquals("DELETING", service.deleteAgentRuntime(firstId, "reused-token", REGION).getStatus());
-
-        clock.advance(DeletedTokenLedger.TTL.plusSeconds(1));
-
-        AgentRuntime second = create("secondAgent");
-        String secondId = second.getAgentRuntimeId();
-        assertEquals("DELETING", service.deleteAgentRuntime(secondId, "reused-token", REGION).getStatus());
-
-        // The replay right after is still within the fresh token's own window.
-        assertEquals("DELETING", service.deleteAgentRuntime(secondId, "reused-token", REGION).getStatus());
-        // The old runtime's id is unrelated to the reused token and stays gone.
-        assertEquals(404, assertThrows(AwsException.class,
-                () -> service.deleteAgentRuntime(firstId, "some-other-token", REGION)).getHttpStatus());
-    }
-
-    @Test
-    void deleteRuntimeTokenReusedWithinItsWindowStillExpiresFromItsFirstUse() {
-        // The window runs from the first request that used the token, so reusing it does
-        // not extend the window.
-        String firstId = create("firstAgent").getAgentRuntimeId();
-        assertEquals("DELETING", service.deleteAgentRuntime(firstId, "reused-token", REGION).getStatus());
-
-        clock.advance(Duration.ofHours(7));
-        String secondId = create("secondAgent").getAgentRuntimeId();
-        assertEquals("DELETING", service.deleteAgentRuntime(secondId, "reused-token", REGION).getStatus());
-
-        clock.advance(Duration.ofHours(1).plusSeconds(1));
-
-        assertEquals(404, assertThrows(AwsException.class,
-                () -> service.deleteAgentRuntime(secondId, "reused-token", REGION)).getHttpStatus());
-    }
-
-    @Test
-    void deleteRuntimeTokenReusedAfterExpiryIsHonouredEvenWhenTheClockMovedBack() {
-        // A wall clock stepping back can leave an expired token behind a live one, where the
-        // front purge cannot reach it. Reusing that token must still start a fresh window.
-        clock.advance(Duration.ofHours(2));
-        String liveId = create("liveAgent").getAgentRuntimeId();
-        assertEquals("DELETING", service.deleteAgentRuntime(liveId, "live-token", REGION).getStatus());
-
-        clock.advance(Duration.ofHours(-3));
-        String staleId = create("staleAgent").getAgentRuntimeId();
-        assertEquals("DELETING", service.deleteAgentRuntime(staleId, "stale-token", REGION).getStatus());
-
-        clock.advance(DeletedTokenLedger.TTL.plusSeconds(1));
-        String reusedId = create("reusedAgent").getAgentRuntimeId();
-        assertEquals("DELETING", service.deleteAgentRuntime(reusedId, "stale-token", REGION).getStatus());
-
-        assertEquals("DELETING", service.deleteAgentRuntime(reusedId, "stale-token", REGION).getStatus());
-    }
-
-    @Test
     void deleteRemovesAndReportsDeleting() {
         AgentRuntime rt = create("myAgent");
         String id = rt.getAgentRuntimeId();
@@ -430,32 +307,5 @@ class BedrockAgentCoreControlServiceTest {
         // The auto-created DEFAULT endpoint also conflicts.
         assertEquals(409, assertThrows(AwsException.class,
                 () -> service.createEndpoint(id, "DEFAULT", null, null, null, REGION)).getHttpStatus());
-    }
-
-    @Test
-    void deleteEndpointIsIdempotentByClientToken() {
-        AgentRuntime rt = create("myAgent");
-        String id = rt.getAgentRuntimeId();
-        service.createEndpoint(id, "prod", null, null, null, REGION);
-
-        assertEquals("DELETING", service.deleteEndpoint(id, "prod", "ep-del-1", REGION).getStatus());
-        // Replayed delete with the same token succeeds instead of 404ing.
-        assertEquals("DELETING", service.deleteEndpoint(id, "prod", "ep-del-1", REGION).getStatus());
-        // A different token against the now-missing endpoint still 404s.
-        assertEquals(404, assertThrows(AwsException.class,
-                () -> service.deleteEndpoint(id, "prod", "other", REGION)).getHttpStatus());
-    }
-
-    @Test
-    void deleteEndpointTokenExpiresAfterWindowReturns404() {
-        AgentRuntime rt = create("myAgent");
-        String id = rt.getAgentRuntimeId();
-        service.createEndpoint(id, "prod", null, null, null, REGION);
-        assertEquals("DELETING", service.deleteEndpoint(id, "prod", "ep-del-1", REGION).getStatus());
-
-        clock.advance(DeletedTokenLedger.TTL.plusSeconds(1));
-
-        assertEquals(404, assertThrows(AwsException.class,
-                () -> service.deleteEndpoint(id, "prod", "ep-del-1", REGION)).getHttpStatus());
     }
 }

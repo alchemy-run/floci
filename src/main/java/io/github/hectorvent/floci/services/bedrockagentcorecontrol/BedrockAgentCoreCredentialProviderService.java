@@ -4,11 +4,9 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.github.hectorvent.floci.core.common.AwsArnUtils;
-import io.github.hectorvent.floci.core.common.AwsEndpoints;
 import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -205,7 +203,7 @@ public class BedrockAgentCoreCredentialProviderService {
         item.put("name", name);
         item.put("credentialProviderArn", oauthCredentialProviderArn(region, name));
         item.put("credentialProviderVendor", vendor);
-        item.put("callbackUrl", "https://" + AwsEndpoints.host("bedrock-agentcore", region) + "/oauth2/callback");
+        item.put("callbackUrl", "https://bedrock-agentcore." + region + ".amazonaws.com/oauth2/callback");
         item.put("clientSecretSource", source);
         if (source.equals("EXTERNAL")) {
             item.putObject("clientSecretArn").put("secretArn", secretConfig.path("secretId").asText());
@@ -298,23 +296,23 @@ public class BedrockAgentCoreCredentialProviderService {
     }
 
     private String credentialProviderArn(String region, String name) {
-        return AwsArnUtils.Arn.of("acps", region, regionResolver.getAccountId(),
-                "token-vault/default/apikeycredentialprovider/" + name).toString();
+        return "arn:aws:acps:" + region + ":" + regionResolver.getAccountId()
+                + ":token-vault/default/apikeycredentialprovider/" + name;
     }
 
     private String managedSecretArn(String region, String name) {
-        return AwsArnUtils.Arn.of("secretsmanager", region, regionResolver.getAccountId(),
-                "secret:agentcore-" + name).toString();
+        return "arn:aws:secretsmanager:" + region + ":" + regionResolver.getAccountId()
+                + ":secret:agentcore-" + name;
     }
 
     private String oauthCredentialProviderArn(String region, String name) {
-        return AwsArnUtils.Arn.of("acps", region, regionResolver.getAccountId(),
-                "token-vault/default/oauth2credentialprovider/" + name).toString();
+        return "arn:aws:acps:" + region + ":" + regionResolver.getAccountId()
+                + ":token-vault/default/oauth2credentialprovider/" + name;
     }
 
     private String managedOauthSecretArn(String region, String name) {
-        return AwsArnUtils.Arn.of("secretsmanager", region, regionResolver.getAccountId(),
-                "secret:agentcore-oauth2-" + name).toString();
+        return "arn:aws:secretsmanager:" + region + ":" + regionResolver.getAccountId()
+                + ":secret:agentcore-oauth2-" + name;
     }
 
     private static ObjectNode oauthOutputConfig(String vendor, ObjectNode config) {

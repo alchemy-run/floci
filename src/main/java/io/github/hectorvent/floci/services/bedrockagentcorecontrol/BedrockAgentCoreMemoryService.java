@@ -2,8 +2,8 @@ package io.github.hectorvent.floci.services.bedrockagentcorecontrol;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -11,12 +11,13 @@ import io.github.hectorvent.floci.services.bedrockagentcorecontrol.model.Memory;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
-import java.time.Clock;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 
 /** CRUD for AgentCore memory resources. Metadata registry only. */
@@ -31,25 +32,17 @@ public class BedrockAgentCoreMemoryService {
 
     private final StorageBackend<String, Memory> storage;
     private final RegionResolver regionResolver;
-    // clientToken idempotency: tokens of completed deletes, so a replayed delete succeeds
-    // instead of 404ing. In-memory only (reset on restart), and each entry expires after
-    // DeletedTokenLedger.TTL, after which a replay 404s like an unknown token.
-    private final DeletedTokenLedger deletedTokens;
+    private final Set<String> deletedTokens = ConcurrentHashMap.newKeySet();
 
     @Inject
-    public BedrockAgentCoreMemoryService(StorageFactory storageFactory, RegionResolver regionResolver, Clock clock) {
+    public BedrockAgentCoreMemoryService(StorageFactory storageFactory, RegionResolver regionResolver) {
         this(storageFactory.create("bedrockagentcore", "bedrock-agentcore-memories.json",
-                new TypeReference<Map<String, Memory>>() {}), regionResolver, clock);
+                new TypeReference<Map<String, Memory>>() {}), regionResolver);
     }
 
     BedrockAgentCoreMemoryService(StorageBackend<String, Memory> storage, RegionResolver regionResolver) {
-        this(storage, regionResolver, Clock.systemUTC());
-    }
-
-    BedrockAgentCoreMemoryService(StorageBackend<String, Memory> storage, RegionResolver regionResolver, Clock clock) {
         this.storage = storage;
         this.regionResolver = regionResolver;
-        this.deletedTokens = new DeletedTokenLedger(clock);
     }
 
     public Memory create(String name, Integer eventExpiryDuration, String description,
@@ -97,32 +90,21 @@ public class BedrockAgentCoreMemoryService {
                         "Memory not found: " + id, 404));
     }
 
-    /** UpdateMemory on the API: a null field is left as it is, as on AWS. */
     public Memory update(String id, String description, Integer eventExpiryDuration,
                          String memoryExecutionRoleArn, String region) {
-        return update(id, description, eventExpiryDuration, memoryExecutionRoleArn, false, region);
-    }
-
-    /**
-     * Updates a memory from arguments that are its whole declared configuration when
-     * {@code replaceOmitted} is true: a null description or execution role then clears the stored
-     * one, which the API call leaves alone.
-     */
-    public Memory update(String id, String description, Integer eventExpiryDuration,
-                         String memoryExecutionRoleArn, boolean replaceOmitted, String region) {
         // Validate all inputs before mutating: get() returns the live stored object,
         // so a throw after the first setter would leave a partially applied update.
         if (eventExpiryDuration != null) {
             validateExpiry(eventExpiryDuration);
         }
         Memory memory = get(id, region);
-        if (description != null || replaceOmitted) {
+        if (description != null) {
             memory.setDescription(description);
         }
         if (eventExpiryDuration != null) {
             memory.setEventExpiryDuration(eventExpiryDuration);
         }
-        if (memoryExecutionRoleArn != null || replaceOmitted) {
+        if (memoryExecutionRoleArn != null) {
             memory.setMemoryExecutionRoleArn(memoryExecutionRoleArn);
         }
         memory.setUpdatedAt(Instant.now());
@@ -150,7 +132,7 @@ public class BedrockAgentCoreMemoryService {
         Memory memory = found.get();
         storage.delete(key(region, id));
         if (clientToken != null) {
-            deletedTokens.record(region + " " + clientToken);
+            deletedTokens.add(region + " " + clientToken);
         }
         memory.setStatus(STATUS_DELETING);
         return memory;
@@ -169,23 +151,22 @@ public class BedrockAgentCoreMemoryService {
     // ── Tagging ──
 
     public Map<String, String> getTagsByArn(String region, String arn) {
-        return new HashMap<>(getByArn(region, arn).getTags());
+        return new HashMap<>(findByArn(region, arn).getTags());
     }
 
     public void tagByArn(String region, String arn, Map<String, String> tags) {
-        Memory memory = getByArn(region, arn);
+        Memory memory = findByArn(region, arn);
         memory.getTags().putAll(tags);
         storage.put(key(region, memory.getMemoryId()), memory);
     }
 
     public void untagByArn(String region, String arn, List<String> keys) {
-        Memory memory = getByArn(region, arn);
+        Memory memory = findByArn(region, arn);
         keys.forEach(memory.getTags()::remove);
         storage.put(key(region, memory.getMemoryId()), memory);
     }
 
-    /** The memory a memory ARN names; ValidationException for any other ARN, ResourceNotFoundException when gone. */
-    public Memory getByArn(String region, String arn) {
+    private Memory findByArn(String region, String arn) {
         String[] parts = arn == null ? new String[0] : arn.split(":");
         if (parts.length < 6 || !parts[5].startsWith("memory/")) {
             throw new AwsException("ValidationException", "Unsupported resource ARN: " + arn, 400);

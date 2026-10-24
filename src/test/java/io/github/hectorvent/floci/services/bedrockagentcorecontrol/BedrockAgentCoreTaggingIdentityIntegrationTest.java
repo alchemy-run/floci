@@ -1,8 +1,6 @@
 package io.github.hectorvent.floci.services.bedrockagentcorecontrol;
 
 import io.quarkus.test.junit.QuarkusTest;
-import io.restassured.response.ExtractableResponse;
-import io.restassured.response.Response;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -32,7 +30,7 @@ class BedrockAgentCoreTaggingIdentityIntegrationTest {
     @Test
     @Order(1)
     void createRuntimeCapturesArns() {
-        ExtractableResponse<Response> resp = given().contentType("application/json").body(CREATE_RUNTIME)
+        var resp = given().contentType("application/json").body(CREATE_RUNTIME)
                 .when().put("/runtimes/")
                 .then().statusCode(202)
                 .body("workloadIdentityDetails.workloadIdentityArn", notNullValue())
