@@ -675,9 +675,7 @@ public class VpcNetworkManager {
     private String materialise(VpcBinding vpc) {
         synchronized (vpc) {
             if (vpc.created) {
-                // A network retained across restarts is marked created at plan time, so its
-                // endpoints have not been read yet; Docker rejects a duplicate connect.
-                attachCurrentContainer(vpc, vpc.flociContainerId == null ? inspectQuietly(vpc) : null);
+                attachCurrentContainer(vpc, null);
                 return vpc.networkName;
             }
             Network existing = null;
@@ -825,12 +823,10 @@ public class VpcNetworkManager {
 
     private Map<String, String> networkLabels(VpcBinding vpc) {
         Map<String, String> labels = new LinkedHashMap<>(ContainerStorageHelper.defaultLabels(config));
-        labels.put(LABEL_COMPONENT, COMPONENT_VALUE);
-        labels.put(LABEL_VPC_ID, vpc.vpcId);
-        labels.put(LABEL_VPC_REGION, vpc.region);
-        labels.put(LABEL_DECLARED_CIDR, String.valueOf(vpc.declared));
-        labels.put(LABEL_OWNER_PORT, String.valueOf(config.port()));
-        return labels;
+        labels.putAll(ContainerStorageHelper.resourceIdentityLabels(SERVICE_VALUE, vpc.vpcId, null, vpc.region));
+        labels.put(ContainerStorageHelper.COMPONENT_LABEL, COMPONENT_VALUE);
+        labels.put(ContainerStorageHelper.OWNER_LABEL, ContainerStorageHelper.ownerIdentity(config));
+        return ALIASES.withLegacyAliases(labels);
     }
 
     // ─── Teardown ────────────────────────────────────────────────────────────
