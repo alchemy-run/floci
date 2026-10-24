@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.Base64Url;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.resource.ExplorerResource;
 import io.github.hectorvent.floci.core.resource.ResourceProvider;
@@ -1305,8 +1306,7 @@ public class RumService implements ResourceProvider {
     }
 
     private static String encodeOffset(int offset) {
-        return Base64.getUrlEncoder().withoutPadding()
-                .encodeToString((TOKEN_PREFIX + offset).getBytes(StandardCharsets.UTF_8));
+        return Base64Url.encode(TOKEN_PREFIX + offset);
     }
 
     private static AwsException resourceConflict(String name) {

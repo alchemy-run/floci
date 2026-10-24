@@ -52,6 +52,17 @@ public class SentEmail {
     @JsonProperty("Headers")
     private List<MessageHeader> headers;
 
+    /** The attachments of a Simple send; absent for one without attachments and for raw sends. */
+    @JsonProperty("Attachments")
+    private List<SentAttachment> attachments;
+
+    /**
+     * The assembled MIME message of a Simple send with attachments, base64-encoded. Kept apart from
+     * {@code rawData} so the record still reads as a Simple send.
+     */
+    @JsonProperty("MimeData")
+    private String mimeData;
+
     @JsonProperty("SentAt")
     private Instant sentAt;
 
@@ -62,6 +73,29 @@ public class SentEmail {
      */
     @JsonProperty("RejectReason")
     private String rejectReason;
+
+    @JsonProperty("EmailTags")
+    private List<MessageTag> emailTags;
+
+    /**
+     * The configuration set the send resolved to, which BatchGetMetricData filters on. Absent when
+     * the send named none and no default applied.
+     */
+    @JsonProperty("ConfigurationSetName")
+    private String configurationSetName;
+
+    /**
+     * The tenant the send named, which the TENANT_NAME metric dimension filters on. Absent for a
+     * send that named none, and always absent on the v1 surface, which has no tenants.
+     */
+    @JsonProperty("TenantName")
+    private String tenantName;
+
+    /**
+     * Per-recipient event timelines, derived at send time and served by {@code GetMessageInsights}.
+     */
+    @JsonProperty("Insights")
+    private List<EmailInsights> insights;
 
     public SentEmail() {}
 
@@ -135,6 +169,12 @@ public class SentEmail {
 
     public boolean isRaw() { return rawData != null; }
 
+    public List<SentAttachment> getAttachments() { return attachments; }
+    public void setAttachments(List<SentAttachment> attachments) { this.attachments = attachments; }
+
+    public String getMimeData() { return mimeData; }
+    public void setMimeData(String mimeData) { this.mimeData = mimeData; }
+
     public Instant getSentAt() { return sentAt; }
     public void setSentAt(Instant sentAt) { this.sentAt = sentAt; }
 
@@ -153,5 +193,21 @@ public class SentEmail {
         this.bodyText = null;
         this.bodyHtml = null;
         this.rawData = null;
+        this.attachments = null;
+        this.mimeData = null;
     }
+
+    public List<MessageTag> getEmailTags() { return emailTags; }
+    public void setEmailTags(List<MessageTag> emailTags) { this.emailTags = emailTags; }
+
+    public String getTenantName() { return tenantName; }
+    public void setTenantName(String tenantName) { this.tenantName = tenantName; }
+
+    public String getConfigurationSetName() { return configurationSetName; }
+    public void setConfigurationSetName(String configurationSetName) {
+        this.configurationSetName = configurationSetName;
+    }
+
+    public List<EmailInsights> getInsights() { return insights; }
+    public void setInsights(List<EmailInsights> insights) { this.insights = insights; }
 }

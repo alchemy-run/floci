@@ -1,9 +1,20 @@
 package io.github.hectorvent.floci.services.ec2;
 
+import com.github.dockerjava.api.DockerClient;
+import com.github.dockerjava.api.async.ResultCallback;
+import com.github.dockerjava.api.command.InspectContainerResponse;
+import com.github.dockerjava.api.exception.NotFoundException;
+import com.github.dockerjava.api.model.Container;
+import com.github.dockerjava.api.model.ContainerNetwork;
+import com.github.dockerjava.api.model.Frame;
+import com.github.dockerjava.api.model.Mount;
+import com.github.dockerjava.api.model.MountType;
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.AwsRegions;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
 import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
+import io.github.hectorvent.floci.core.common.docker.ContainerExec;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
 import io.github.hectorvent.floci.core.common.docker.ContainerReachableEndpoint;
@@ -11,31 +22,21 @@ import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.core.common.docker.ContainerStorageHelper;
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
 import io.github.hectorvent.floci.core.common.docker.PortAllocator;
+import io.github.hectorvent.floci.core.common.docker.RetryingTarCopier;
+import io.github.hectorvent.floci.core.common.docker.UserDataPipeline;
+import io.github.hectorvent.floci.services.ec2.Ec2InstanceTypeCatalog.CatalogInstanceType;
+import io.github.hectorvent.floci.services.ec2.model.GroupIdentifier;
 import io.github.hectorvent.floci.services.ec2.model.Instance;
 import io.github.hectorvent.floci.services.ec2.model.InstanceNetworkInterface;
 import io.github.hectorvent.floci.services.ec2.model.InstanceState;
-import io.github.hectorvent.floci.services.ec2.model.GroupIdentifier;
+import io.github.hectorvent.floci.services.ec2.model.SecurityGroup;
 import io.github.hectorvent.floci.services.ec2.net.VpcNetworkManager;
 import io.github.hectorvent.floci.services.ec2.portforward.Ec2PortForwardManager;
-import com.github.dockerjava.api.DockerClient;
-import com.github.dockerjava.api.command.InspectContainerResponse;
-import com.github.dockerjava.api.exception.NotFoundException;
-import com.github.dockerjava.api.async.ResultCallback;
-import com.github.dockerjava.api.model.Container;
-import com.github.dockerjava.api.model.ContainerNetwork;
-import com.github.dockerjava.api.model.Frame;
-import com.github.dockerjava.api.model.Mount;
-import com.github.dockerjava.api.model.MountType;
-import io.github.hectorvent.floci.services.lambda.launcher.ImageCacheService;
-import io.vertx.core.json.JsonObject;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
-import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import org.jboss.logging.Logger;
 
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.IOException;
@@ -44,18 +45,14 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.WeakHashMap;
-import io.github.hectorvent.floci.services.ec2.model.SecurityGroup;
 import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
@@ -63,8 +60,9 @@ import java.util.concurrent.RejectedExecutionHandler;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.function.BiPredicate;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BiPredicate;
+import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -82,33 +80,10 @@ public class Ec2ContainerManager {
 
     private static final Logger LOG = Logger.getLogger(Ec2ContainerManager.class);
     // Guest-created /tmp mounts hide files copied through Docker's archive API.
-    private static final String USER_DATA_SCRIPT_PATH = "/var/lib/user-data.sh";
-    private static final Pattern MIME_BOUNDARY = Pattern.compile("(?im)^content-type:\\s*multipart/[^;]+;\\s*boundary=\"?([^\";\\n\\r]+)\"?.*$");
+    private static final String USER_DATA_SCRIPT_PATH = UserDataPipeline.USER_DATA_SCRIPT_PATH;
     private static final List<String> ALLOWED_SSHD_PATHS = List.of("/usr/sbin/sshd", "/usr/local/sbin/sshd", "/sbin/sshd");
     /** Exit code the sshd install probe uses for "sshd is present but scp is not". See startSshd. */
     static final int SSH_CLIENT_MISSING_EXIT_CODE = 2;
-    /** Base64 alphabet plus the line breaks base64-encoded UserData is commonly wrapped at. */
-    private static final Pattern BASE64_BODY = Pattern.compile("[A-Za-z0-9+/\\s]+={0,2}");
-    private static final int MAX_USER_DATA_DECODE_ROUNDS = 3;
-    /** Mirrors AwsJsonCborController.decodeBody's cap: no AWS service should need more than
-     *  10 MB decompressed, and it bounds how much a caller-controlled gzip stream can expand
-     *  to in the shared emulator JVM. */
-    private static final int MAX_DECOMPRESSED_USER_DATA_BYTES = 10 * 1024 * 1024;
-    private static final int MAX_EXEC_OUTPUT_BYTES = 2048;
-    /** Caps concurrent UserData gzip decompressions across ALL instance launches, not just one.
-     *  Launches run independently on {@link #executor}, so the
-     *  per-payload cap above only bounds a single launch's allocation: without this, N concurrent
-     *  RunInstances/CreateLaunchConfiguration calls, each smuggling a near-cap gzip payload, could
-     *  together decompress N * 10 MB at once in the shared emulator JVM with no aggregate ceiling.
-     *  4 permits budgets ~40 MB of decompressed UserData in flight at a time - a few multiples of
-     *  the per-payload cap rather than 1, so an ordinary burst of legitimate concurrent launches
-     *  (e.g. an Auto Scaling group launching a handful of instances together) is not serialized
-     *  down to one decompression at a time, while a launch storm still cannot grow memory usage
-     *  without bound. */
-    private static final int MAX_CONCURRENT_USER_DATA_DECOMPRESSIONS = 4;
-    /** Gates entry to {@link #gunzip}; see {@link #MAX_CONCURRENT_USER_DATA_DECOMPRESSIONS}. */
-    private static final Semaphore USER_DATA_DECOMPRESSION_BUDGET =
-            new Semaphore(MAX_CONCURRENT_USER_DATA_DECOMPRESSIONS);
     private static final int LAUNCH_CORE_THREADS = 4;
     private static final int LAUNCH_MAX_THREADS = 8;
     private static final int LAUNCH_QUEUE_CAPACITY = 64;
@@ -129,22 +104,20 @@ public class Ec2ContainerManager {
             throw new RejectedExecutionException("Interrupted while waiting for EC2 launch capacity", e);
         }
     };
-    /** Test seam: when non-null, invoked by {@link #gunzip} right after it acquires a
-     *  decompression-budget permit and before it starts decompressing, so tests can observe and
-     *  serialize concurrent decompressions deterministically. Always null in production. */
-    static volatile Runnable userDataDecompressionTestHook;
 
     /**
-     * Label identifying the Floci process that created an EC2 instance container, by its API
-     * port. {@link #reconcileOrphanedContainers} lists on the existing {@code io.floci.service=ec2}
-     * identity label (see {@link ContainerStorageHelper#resourceIdentityLabels}) and then keeps
-     * only containers carrying <em>this</em> process's owner port: several emulators can share one
+     * Label identifying the Floci deployment that created an EC2 instance container, by its
+     * resource namespace and API port. {@link #reconcileOrphanedContainers} lists on the existing
+     * {@code io.floci.service=ec2} identity label (see
+     * {@link ContainerStorageHelper#resourceIdentityLabels}) and then keeps
+     * only containers carrying <em>this</em> deployment's owner: several emulators can share one
      * Docker daemon, and an unscoped sweep would reap a sibling's live instances.
      * {@code floci_namespace} is the documented scoping mechanism for that, but it is absent
      * unless a resource namespace is configured, so it cannot scope the default configuration.
      * Containers created before this label existed carry no owner and are therefore never swept.
      */
-    static final String LABEL_OWNER_PORT = "floci_owner_port";
+    static final String LABEL_OWNER = ContainerStorageHelper.OWNER_LABEL;
+    private static final ContainerStorageHelper.LabelAliases ALIASES = ContainerStorageHelper.CONTAINER_LABEL_ALIASES;
 
     /**
      * Identity of the Floci deployment that owns a container, for scoping the startup sweep.
@@ -154,20 +127,17 @@ public class Ec2ContainerManager {
      * unnamespaced single Floci keeps the bare port it already stamped.
      */
     private String ownerIdentity() {
-        String ns = config.docker() == null || config.docker().resourceNamespace() == null
-                ? "" : config.docker().resourceNamespace().orElse("");
-        return ns.isBlank() ? String.valueOf(config.port()) : ns + "/" + config.port();
+        return ContainerStorageHelper.ownerIdentity(config);
     }
-    static final String LABEL_SERVICE = "io.floci.service";
+    static final String LABEL_SERVICE = ContainerStorageHelper.SERVICE_LABEL;
     static final String SERVICE_VALUE = "ec2";
-    static final String LABEL_RESOURCE_ID = "io.floci.resource-id";
-    static final String LABEL_REGION = "io.floci.region";
+    static final String LABEL_RESOURCE_ID = ContainerStorageHelper.RESOURCE_ID_LABEL;
+    static final String LABEL_REGION = ContainerStorageHelper.REGION_LABEL;
 
     static int containerBridgeIpAttempts = 30;
     static long containerBridgeIpPollMillis = 500;
 
     private final ContainerBuilder containerBuilder;
-    private final Ec2BootstrapImage bootstrapImage;
     private final ContainerLifecycleManager lifecycleManager;
     private final ContainerLogStreamer logStreamer;
     private final ContainerDetector containerDetector;
@@ -181,12 +151,12 @@ public class Ec2ContainerManager {
     private final ContainerNetworkReachability containerNetworkReachability;
     private final VpcNetworkManager vpcNetworkManager;
     private final ContainerReachableEndpoint reachableEndpoint;
+    private final Ec2InstanceTypeCatalog instanceTypeCatalog;
     private SecurityGroupFirewallManager firewallManager;
     private final ExecutorService executor;
+    private final Map<String, CompletableFuture<Void>> lifecycleOperations = new ConcurrentHashMap<>();
     private final Duration userDataExecutionTimeout;
     private final Set<ResultCallback<Frame>> activeUserDataCallbacks = ConcurrentHashMap.newKeySet();
-    private final Map<Instance, Object> metadataLocks = Collections.synchronizedMap(new WeakHashMap<>());
-    private final Map<Instance, Backing> backings = new ConcurrentHashMap<>();
 
     private volatile boolean dockerUnavailableLogged;
 
@@ -219,88 +189,39 @@ public class Ec2ContainerManager {
         String helperId = mode.substring("container:".length());
         InspectContainerResponse helper = dockerClient.inspectContainerCmd(helperId).exec();
         Map<String, String> labels = helper.getConfig().getLabels();
-        if (!"true".equals(labels.get("floci.security-group-helper"))
+        if (!ALIASES.consistent(helperId, labels)
+                || !ALIASES.matches(labels, ContainerStorageHelper.SECURITY_GROUP_HELPER_LABEL, "true")
                 || !"ec2".equals(labels.get(LABEL_SERVICE))
                 || !instance.getInstanceId().equals(labels.get(LABEL_RESOURCE_ID))
-                || !ownerIdentity().equals(labels.get("floci_owner_port"))
-                || !Objects.equals(instance.getRegion(), labels.get(LABEL_REGION))
-                || !Objects.equals(Ec2MetadataServer.instanceAccountId(instance, regionResolver.getAccountId()),
-                        labels.get("io.floci.account"))) {
+                || !ALIASES.matches(labels, LABEL_OWNER, ownerIdentity())) {
             throw new IllegalStateException("EC2 workload network namespace is not Floci protected");
         }
-        Map<String, ContainerNetwork> networks = helper.getNetworkSettings().getNetworks();
-        String retained = instance.getContainerBridgeIp();
-        String address = networks.values().stream().map(ContainerNetwork::getIpAddress)
-                .filter(ip -> ip != null && !ip.isBlank() && ip.equals(retained)).findFirst().orElse(null);
-        if (retained != null && !retained.isBlank() && address == null) {
-            throw new IllegalStateException("EC2 namespace lost its retained Docker transport address");
-        }
-        if (address == null && vpcNetworkManager != null) {
-            String network = vpcNetworkManager.networkNameFor(instance.getRegion(), instance.getVpcId()).orElse(null);
-            ContainerNetwork attachment = network == null ? null : networks.get(network);
-            address = attachment == null ? null : attachment.getIpAddress();
-        }
-        if (address == null || address.isBlank()) {
-            address = networks.values().stream().map(ContainerNetwork::getIpAddress)
-                    .filter(ip -> ip != null && !ip.isBlank()).findFirst()
-                    .orElseThrow(() -> new IllegalStateException("EC2 namespace has no Docker transport"));
-        }
-        if (vpcNetworkManager != null && vpcNetworkManager.enabled()) {
-            String network = vpcNetworkManager.networkNameFor(instance.getRegion(), instance.getVpcId()).orElse(null);
-            if (network != null && networks.containsKey(network)
-                    && !vpcNetworkManager.reserveTransportPrivateIp(instance.getRegion(), instance.getSubnetId(),
-                            instance.getLogicalPrivateIpAddress() != null ? instance.getLogicalPrivateIpAddress()
-                                    : instance.getPrivateIpAddress(), address, instance.getInstanceId())) {
-                throw new IllegalStateException("EC2 namespace transport lease is owned by another instance");
-            }
-        }
+        String address = helper.getNetworkSettings().getNetworks().values().stream()
+                .map(network -> network.getIpAddress()).filter(ip -> ip != null && !ip.isBlank())
+                .findFirst().orElseThrow(() -> new IllegalStateException("EC2 firewall helper has no Docker IP"));
         return new ProtectedNamespace(helperId, address);
     }
 
     private record ProtectedNamespace(String helperId, String transportAddress) {}
 
-    private boolean needsPrivateNamespace(Instance instance) {
-        return instance.getLogicalPrivateIpAddress() != null
-                || (firewallManager != null && firewallManager.enabled())
-                || (vpcNetworkManager != null && vpcNetworkManager.enabled());
-    }
-
-    private static InstanceNetworkInterface primaryInterface(Instance instance) {
-        return instance.getNetworkInterfaces().stream().filter(eni -> eni.getDeviceIndex() == 0)
-                .findFirst().orElseThrow(() -> new IllegalStateException("EC2 instance has no primary ENI"));
-    }
-
-    private void registerNamespace(Instance instance, String region, List<SecurityGroup> groups,
-                                   Map<String, List<String>> prefixLists, String helperId, String transport) {
-        if (firewallManager == null) {
-            throw new IllegalStateException("EC2 private networking requires a namespace manager");
-        }
-        InstanceNetworkInterface eni = primaryInterface(instance);
-        String logical = instance.getLogicalPrivateIpAddress() != null
-                ? instance.getLogicalPrivateIpAddress() : eni.getPrivateIpAddress();
-        SecurityGroupNftCompiler.Endpoint endpoint = new SecurityGroupNftCompiler.Endpoint(
-                Ec2MetadataServer.instanceAccountId(instance, regionResolver.getAccountId()), region,
-                instance.getVpcId(), eni.getNetworkInterfaceId(), logical, transport,
-                instance.getSecurityGroups().stream().map(GroupIdentifier::getGroupId)
-                        .collect(Collectors.toSet()), groups);
-        if (firewallManager.enabled()) {
-            firewallManager.register(endpoint, helperId, prefixLists);
-        } else {
-            firewallManager.registerNetworkEndpoint(endpoint, helperId);
-        }
-    }
-
     public void restoreSecurityGroups(Instance instance, String region, List<SecurityGroup> groups,
                                       Map<String, List<String>> prefixLists) {
-        if (!needsPrivateNamespace(instance)) {
+        if (firewallManager == null || !firewallManager.enabled()) {
             return;
         }
         ProtectedNamespace namespace = protectedNamespace(instance);
         if (namespace == null) {
             throw new IllegalStateException("EC2 workload has no protected network namespace");
         }
-        instance.setContainerBridgeIp(namespace.transportAddress());
-        registerNamespace(instance, region, groups, prefixLists, namespace.helperId(), namespace.transportAddress());
+        String helperId = namespace.helperId();
+        String address = namespace.transportAddress();
+        InstanceNetworkInterface eni = instance.getNetworkInterfaces().getFirst();
+        String logical = instance.getLogicalPrivateIpAddress() != null
+                ? instance.getLogicalPrivateIpAddress() : eni.getPrivateIpAddress();
+        firewallManager.register(new SecurityGroupNftCompiler.Endpoint(regionResolver.getAccountId(), region,
+                instance.getVpcId(), eni.getNetworkInterfaceId(), logical, address,
+                instance.getSecurityGroups().stream().map(GroupIdentifier::getGroupId)
+                        .collect(Collectors.toSet()), groups), helperId, prefixLists);
     }
 
     @Inject
@@ -318,11 +239,54 @@ public class Ec2ContainerManager {
                                ContainerNetworkReachability containerNetworkReachability,
                                VpcNetworkManager vpcNetworkManager,
                                ContainerReachableEndpoint reachableEndpoint,
+                               SecurityGroupFirewallManager firewallManager,
+                               Ec2InstanceTypeCatalog instanceTypeCatalog) {
+        this(containerBuilder, lifecycleManager, logStreamer, containerDetector, dockerHostResolver,
+                dockerClient, portAllocator, config, metadataServer, portForwardManager, regionResolver,
+                containerNetworkReachability, vpcNetworkManager, reachableEndpoint, instanceTypeCatalog);
+        this.firewallManager = firewallManager;
+    }
+
+    public Ec2ContainerManager(ContainerBuilder containerBuilder,
+                               ContainerLifecycleManager lifecycleManager,
+                               ContainerLogStreamer logStreamer,
+                               ContainerDetector containerDetector,
+                               DockerHostResolver dockerHostResolver,
+                               DockerClient dockerClient,
+                               PortAllocator portAllocator,
+                               EmulatorConfig config,
+                               Ec2MetadataServer metadataServer,
+                               Ec2PortForwardManager portForwardManager,
+                               RegionResolver regionResolver,
+                               ContainerNetworkReachability containerNetworkReachability,
+                               VpcNetworkManager vpcNetworkManager,
+                               ContainerReachableEndpoint reachableEndpoint,
                                SecurityGroupFirewallManager firewallManager) {
         this(containerBuilder, lifecycleManager, logStreamer, containerDetector, dockerHostResolver,
                 dockerClient, portAllocator, config, metadataServer, portForwardManager, regionResolver,
-                containerNetworkReachability, vpcNetworkManager, reachableEndpoint);
-        this.firewallManager = firewallManager;
+                containerNetworkReachability, vpcNetworkManager, reachableEndpoint, firewallManager,
+                new Ec2InstanceTypeCatalog());
+    }
+
+    public Ec2ContainerManager(ContainerBuilder containerBuilder,
+                               ContainerLifecycleManager lifecycleManager,
+                               ContainerLogStreamer logStreamer,
+                               ContainerDetector containerDetector,
+                               DockerHostResolver dockerHostResolver,
+                               DockerClient dockerClient,
+                               PortAllocator portAllocator,
+                               EmulatorConfig config,
+                               Ec2MetadataServer metadataServer,
+                               Ec2PortForwardManager portForwardManager,
+                               RegionResolver regionResolver,
+                               ContainerNetworkReachability containerNetworkReachability,
+                               VpcNetworkManager vpcNetworkManager,
+                               ContainerReachableEndpoint reachableEndpoint,
+                               Ec2InstanceTypeCatalog instanceTypeCatalog) {
+        this(containerBuilder, lifecycleManager, logStreamer, containerDetector, dockerHostResolver, dockerClient,
+                portAllocator, config, metadataServer, portForwardManager, regionResolver,
+                containerNetworkReachability, vpcNetworkManager, reachableEndpoint, instanceTypeCatalog,
+                createLaunchExecutor(), Duration.ofMinutes(USER_DATA_EXECUTION_TIMEOUT_MINUTES));
     }
 
     public Ec2ContainerManager(ContainerBuilder containerBuilder,
@@ -341,8 +305,43 @@ public class Ec2ContainerManager {
                                ContainerReachableEndpoint reachableEndpoint) {
         this(containerBuilder, lifecycleManager, logStreamer, containerDetector, dockerHostResolver, dockerClient,
                 portAllocator, config, metadataServer, portForwardManager, regionResolver,
-                containerNetworkReachability, vpcNetworkManager, reachableEndpoint, createLaunchExecutor(),
-                Duration.ofMinutes(USER_DATA_EXECUTION_TIMEOUT_MINUTES));
+                containerNetworkReachability, vpcNetworkManager, reachableEndpoint, new Ec2InstanceTypeCatalog());
+    }
+
+    Ec2ContainerManager(ContainerBuilder containerBuilder,
+                        ContainerLifecycleManager lifecycleManager,
+                        ContainerLogStreamer logStreamer,
+                        ContainerDetector containerDetector,
+                        DockerHostResolver dockerHostResolver,
+                        DockerClient dockerClient,
+                        PortAllocator portAllocator,
+                        EmulatorConfig config,
+                        Ec2MetadataServer metadataServer,
+                        Ec2PortForwardManager portForwardManager,
+                        RegionResolver regionResolver,
+                        ContainerNetworkReachability containerNetworkReachability,
+                        VpcNetworkManager vpcNetworkManager,
+                        ContainerReachableEndpoint reachableEndpoint,
+                        Ec2InstanceTypeCatalog instanceTypeCatalog,
+                        ExecutorService executor,
+                        Duration userDataExecutionTimeout) {
+        this.containerBuilder = containerBuilder;
+        this.lifecycleManager = lifecycleManager;
+        this.logStreamer = logStreamer;
+        this.containerDetector = containerDetector;
+        this.dockerHostResolver = dockerHostResolver;
+        this.dockerClient = dockerClient;
+        this.portAllocator = portAllocator;
+        this.config = config;
+        this.regionResolver = regionResolver;
+        this.metadataServer = metadataServer;
+        this.portForwardManager = portForwardManager;
+        this.containerNetworkReachability = containerNetworkReachability;
+        this.vpcNetworkManager = vpcNetworkManager;
+        this.reachableEndpoint = reachableEndpoint;
+        this.instanceTypeCatalog = instanceTypeCatalog != null ? instanceTypeCatalog : new Ec2InstanceTypeCatalog();
+        this.executor = executor;
+        this.userDataExecutionTimeout = userDataExecutionTimeout;
     }
 
     Ec2ContainerManager(ContainerBuilder containerBuilder,
@@ -361,48 +360,10 @@ public class Ec2ContainerManager {
                         ContainerReachableEndpoint reachableEndpoint,
                         ExecutorService executor,
                         Duration userDataExecutionTimeout) {
-        this(containerBuilder, lifecycleManager, logStreamer, containerDetector, dockerHostResolver,
-                dockerClient, portAllocator, config, metadataServer, portForwardManager, regionResolver,
-                containerNetworkReachability, vpcNetworkManager, reachableEndpoint, executor,
-                userDataExecutionTimeout, null);
-    }
-
-    Ec2ContainerManager(ContainerBuilder containerBuilder,
-                        ContainerLifecycleManager lifecycleManager,
-                        ContainerLogStreamer logStreamer,
-                        ContainerDetector containerDetector,
-                        DockerHostResolver dockerHostResolver,
-                        DockerClient dockerClient,
-                        PortAllocator portAllocator,
-                        EmulatorConfig config,
-                        Ec2MetadataServer metadataServer,
-                        Ec2PortForwardManager portForwardManager,
-                        RegionResolver regionResolver,
-                        ContainerNetworkReachability containerNetworkReachability,
-                        VpcNetworkManager vpcNetworkManager,
-                        ContainerReachableEndpoint reachableEndpoint,
-                        ExecutorService executor,
-                        Duration userDataExecutionTimeout,
-                        SecurityGroupFirewallManager firewallManager) {
-        this.firewallManager = firewallManager;
-        this.containerBuilder = containerBuilder;
-        this.bootstrapImage = new Ec2BootstrapImage(dockerClient, containerBuilder, lifecycleManager,
-                new ImageCacheService(dockerClient, config));
-        this.lifecycleManager = lifecycleManager;
-        this.logStreamer = logStreamer;
-        this.containerDetector = containerDetector;
-        this.dockerHostResolver = dockerHostResolver;
-        this.dockerClient = dockerClient;
-        this.portAllocator = portAllocator;
-        this.config = config;
-        this.regionResolver = regionResolver;
-        this.metadataServer = metadataServer;
-        this.portForwardManager = portForwardManager;
-        this.containerNetworkReachability = containerNetworkReachability;
-        this.vpcNetworkManager = vpcNetworkManager;
-        this.reachableEndpoint = reachableEndpoint;
-        this.executor = executor;
-        this.userDataExecutionTimeout = userDataExecutionTimeout;
+        this(containerBuilder, lifecycleManager, logStreamer, containerDetector, dockerHostResolver, dockerClient,
+                portAllocator, config, metadataServer, portForwardManager, regionResolver,
+                containerNetworkReachability, vpcNetworkManager, reachableEndpoint, new Ec2InstanceTypeCatalog(),
+                executor, userDataExecutionTimeout);
     }
 
     private static ExecutorService createLaunchExecutor() {
@@ -429,8 +390,9 @@ public class Ec2ContainerManager {
 
     /**
      * Launches a Docker container for the given EC2 instance.
-     * Guest startup is asynchronous and preserves an already-running control-plane record.
-     * With no Docker daemon reachable, the instance runs as metadata only.
+     * The instance starts in pending state; an async thread transitions it to running
+     * and handles SSH key injection and UserData execution. With no Docker daemon
+     * reachable the instance goes straight to running as metadata only.
      *
      * @param instance    the EC2 instance model (mutated in-place as state transitions occur)
      * @param dockerImage Docker image URI resolved from the instance's AMI ID
@@ -456,20 +418,7 @@ public class Ec2ContainerManager {
     public void launch(Instance instance, ResolvedAmiImage image, String publicKey, String region,
                        Set<Integer> appPorts, List<SecurityGroup> groups,
                        Map<String, List<String>> prefixLists) {
-        synchronized (instance) {
-            if (isLaunchCancelledState(instance)) {
-                return;
-            }
-            instance.setContainerLaunchPending(true);
-            instance.setContainerLaunchFailed(false);
-            if (needsPrivateNamespace(instance) && instance.getDockerContainerId() == null) {
-                instance.setState(InstanceState.pending());
-                backings.putIfAbsent(instance, new Backing());
-            }
-        }
-        if (instance.getState() == null || instance.getState().getName() == null) {
-            instance.setState(InstanceState.pending());
-        }
+        instance.setState(InstanceState.pending());
 
         // An instance record is metadata: id, addresses, tags and lifecycle state are all
         // served without a container runtime. Only the guest itself (SSH, UserData, SSM
@@ -477,7 +426,7 @@ public class Ec2ContainerManager {
         // instead of dying: Floci in Docker without a mounted socket, or a stopped daemon
         // on the host, would otherwise terminate every instance the moment it launched.
         if (!isDockerAvailable()) {
-            if (needsPrivateNamespace(instance)) {
+            if (firewallManager != null && firewallManager.enabled()) {
                 failLaunch(instance);
             } else {
                 markContainerlessRunning(instance);
@@ -494,8 +443,10 @@ public class Ec2ContainerManager {
             executor.execute(() -> {
                 try {
                     String instanceId = instance.getInstanceId();
-                ResolvedAmiImage preparedImage = prepareImage(image);
-                StartedContainer started = createAndStartContainer(instance, preparedImage, region,
+                // IMDS endpoint that this container should use
+                String flociHost = dockerHostResolver.resolve();
+                int imdsPort = config.services().ec2().imdsPort();
+                StartedContainer started = createAndStartContainer(instance, image, region, flociHost, imdsPort,
                         leasedPrivateIp, groups, prefixLists);
                 if (started == null) {
                     return;
@@ -503,7 +454,7 @@ public class Ec2ContainerManager {
                 int sshHostPort = started.sshHostPort();
                 String containerId = started.containerId();
                 String vpcAddress = started.vpcAddress();
-                if (vpcAddress == null && started.namespace() == null && !needsPrivateNamespace(instance)) {
+                if (vpcAddress == null && started.namespace() == null) {
                     // Nothing holds the address, and moments from now this instance will be
                     // reporting its bridge address instead, so the lease would no longer be
                     // findable from the instance at terminate time. Give it back here.
@@ -566,56 +517,55 @@ public class Ec2ContainerManager {
                     metadataServer.registerContainer(containerIp, instanceId, instance);
                 }
                 else {
-                    LOG.warnv("EC2 instance {0} container {1} did not receive a usable bridge IP for IMDS; keeping control-plane record",
+                    LOG.warnv("EC2 instance {0} container {1} did not receive a usable bridge IP for IMDS",
                             instanceId, containerId);
                     failLaunch(instance, leasedPrivateIp);
                     return;
                 }
 
-                String networkContainer = started.namespace() == null ? containerId : started.namespace().helperId();
-                if (started.namespace() != null) {
-                    refreshImdsSourceRegistration(instance, networkContainer, containerIp);
-                }
-                refreshMetadataAddresses(instance, networkContainer);
+                refreshMetadataAddresses(instance, containerId);
 
-                prepareGuestFilesystem(containerId, instanceId);
-                installSystemctlShim(containerId, instanceId);
-
-                if (!needsPrivateNamespace(instance) && !markRunning(instance)) {
+                if (!markRunning(instance)) {
                     failLaunch(instance, leasedPrivateIp);
                     return;
                 }
 
-                // Set public-facing addresses only for instances whose subnet
-                // opts in via MapPublicIpOnLaunch (#1984). Private-subnet
-                // instances have no public IP/DNS, matching real EC2.
-                if (instance.isAssociatePublicIp() && instance.getPublicIpAddress() == null) {
+                // Set public-facing addresses only for instances due one, by the rule mock instances
+                // follow too, or holding an Elastic IP their interface carries, which RunInstances
+                // recorded. Private-subnet instances have no public IP/DNS, matching real EC2.
+                if (instance.getPublicIpAddress() != null || AutomaticPublicAddress.isDue(instance, false)) {
                     exposeReachablePublicAddress(instance);
                 }
 
                 LOG.infov("EC2 instance {0} running in container {1} (SSH host port {2})",
                         instanceId, containerId, String.valueOf(sshHostPort));
 
-                boolean metadataReady = configureLinkLocalMetadataEndpoint(instance, networkContainer);
-                if (needsPrivateNamespace(instance) && (!metadataReady || !markRunning(instance))) {
-                    failLaunch(instance, leasedPrivateIp);
-                    return;
-                }
+                // IMDS proxy setup is best effort and has its own bounded commands. The instance
+                // is already running once Docker has assigned its reachable network address.
+                configureLinkLocalMetadataEndpoint(started.namespace() == null
+                        ? containerId : started.namespace().helperId(), instanceId, flociHost, imdsPort);
 
                 // Publish security-group TCP ingress ports on the host via socat sidecars.
                 if (appPorts != null && !appPorts.isEmpty()) {
                     portForwardManager.reconcile(instance, appPorts);
                 }
 
+                // Inject SSH public key, if one was provided
+                if (publicKey != null && !publicKey.isBlank()) {
+                    injectSshKey(containerId, publicKey);
+                }
+                // sshd runs on every instance regardless of whether a key pair was supplied,
+                // matching real AWS AMIs (which start it as part of normal boot, independent of
+                // key-pair association) - starting it only when a key was present meant
+                // run-instances without --key-name produced a "connection refused" instead of AWS's
+                // actual behavior: a running daemon with simply nothing to authenticate against.
+                startSshd(containerId, instanceId);
+
+                // Execute UserData
                 String userData = instance.getUserData();
                 if (userData != null && !userData.isBlank()) {
                     executeUserData(containerId, instanceId, userData, region);
                 }
-
-                if (publicKey != null && !publicKey.isBlank()) {
-                    injectSshKey(containerId, publicKey);
-                }
-                startSshd(containerId, instanceId);
 
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
@@ -625,7 +575,7 @@ public class Ec2ContainerManager {
                     // The daemon can disappear between the probe above and any of the calls in
                     // this block. Losing Docker is not the instance's fault, so degrade to a
                     // metadata-only instance; a genuine container failure still fails the launch.
-                    if (needsPrivateNamespace(instance) || isDockerAvailable()) {
+                    if ((firewallManager != null && firewallManager.enabled()) || isDockerAvailable()) {
                         failLaunch(instance, leasedPrivateIp);
                     } else {
                         markContainerlessRunning(instance);
@@ -640,25 +590,21 @@ public class Ec2ContainerManager {
     }
 
     private StartedContainer createAndStartContainer(Instance instance, ResolvedAmiImage image, String region,
-                                                     String leasedPrivateIp,
+                                                     String flociHost, int imdsPort, String leasedPrivateIp,
                                                      List<SecurityGroup> groups,
                                                      Map<String, List<String>> prefixLists) {
-        if (needsPrivateNamespace(instance)) {
-            return createManagedContainer(instance, image, region, groups, prefixLists);
-        }
         String instanceId = instance.getInstanceId();
         String containerName = ContainerStorageHelper.resourceName(config, "ec2", null, instanceId);
-        String imdsEndpoint = Ec2MetadataProxy.ENDPOINT;
-        String accountId = Ec2MetadataServer.instanceAccountId(instance, regionResolver.getAccountId());
+        String imdsEndpoint = "http://" + flociHost + ":" + imdsPort;
         String serviceEndpoint = reachableEndpoint.baseUrl();
 
-        while (true) {
+        return portAllocator.allocateAndStart(
+                config.services().ec2().sshPortRangeStart(),
+                config.services().ec2().sshPortRangeEnd(), sshHostPort -> {
             if (isLaunchCancelled(instance)) {
+                portAllocator.release(sshHostPort);
                 return null;
             }
-            int sshHostPort = portAllocator.allocate(
-                    config.services().ec2().sshPortRangeStart(),
-                    config.services().ec2().sshPortRangeEnd());
             SecurityGroupFirewallManager.Namespace namespace = null;
             String eniId = null;
             String containerId = null;
@@ -672,8 +618,8 @@ public class Ec2ContainerManager {
                     eniId = eni.getNetworkInterfaceId();
                     instance.setLogicalPrivateIpAddress(eni.getPrivateIpAddress());
                     namespace = firewallManager.createNamespace("ec2", instanceId,
-                            accountId, region, Optional.empty(), Map.of(22, sshHostPort));
-                    firewallManager.register(new SecurityGroupNftCompiler.Endpoint(accountId,
+                            regionResolver.getAccountId(), region, Optional.empty(), Map.of(22, sshHostPort));
+                    firewallManager.register(new SecurityGroupNftCompiler.Endpoint(regionResolver.getAccountId(),
                             region, instance.getVpcId(), eniId, eni.getPrivateIpAddress(),
                             namespace.transportAddress(),
                             instance.getSecurityGroups().stream().map(g -> g.getGroupId())
@@ -681,7 +627,8 @@ public class Ec2ContainerManager {
                             namespace.helperId(), prefixLists);
                 }
                 ContainerSpec spec = buildContainerSpec(containerName, image, region, serviceEndpoint, imdsEndpoint,
-                        instanceId, sshHostPort, namespace, instance.getIamInstanceProfileArn() != null, accountId);
+                        instanceId, sshHostPort, namespace, instance.getIamInstanceProfileArn() != null,
+                        instance.getInstanceType());
                 containerId = image.dockerPlatform() == null
                         ? lifecycleManager.create(spec)
                         : lifecycleManager.create(spec, image.dockerPlatform());
@@ -719,250 +666,50 @@ public class Ec2ContainerManager {
                     }
                     lifecycleManager.removeIfExists(namespace.helperId());
                 }
-                if (isHostPortCollision(e)) {
-                    // Docker Desktop can own a published port without exposing it to a host-side
-                    // ServerSocket probe. Keep it unavailable for this process and try the next port.
-                    portAllocator.markReserved(sshHostPort);
-                    LOG.warnv("EC2 instance {0} could not use SSH host port {1}; trying another port",
-                            instanceId, String.valueOf(sshHostPort));
-                    continue;
-                }
-                portAllocator.release(sshHostPort);
                 throw e;
             }
-        }
-    }
-
-    private static final class Backing {
-        String containerId;
-        String helperId;
-        String eniId;
-        int sshHostPort;
-        boolean creating;
-        boolean collidedPort;
-    }
-
-    private StartedContainer createManagedContainer(Instance instance, ResolvedAmiImage image, String region,
-                                                     List<SecurityGroup> groups,
-                                                     Map<String, List<String>> prefixLists) {
-        if (firewallManager == null) {
-            throw new IllegalStateException("EC2 private networking requires a namespace manager");
-        }
-        String instanceId = instance.getInstanceId();
-        String accountId = Ec2MetadataServer.instanceAccountId(instance, regionResolver.getAccountId());
-        for (int attempt = 0; attempt < 10; attempt++) {
-            Backing backing = new Backing();
-            synchronized (instance) {
-                if (isLaunchCancelledState(instance)) {
-                    return null;
-                }
-                backing.eniId = primaryInterface(instance).getNetworkInterfaceId();
-                backing.creating = true;
-                backings.put(instance, backing);
-            }
-            try {
-                backing.sshHostPort = portAllocator.allocate(config.services().ec2().sshPortRangeStart(),
-                        config.services().ec2().sshPortRangeEnd());
-                backing.helperId = ContainerStorageHelper.resourceName(config, "sg", null,
-                        instanceId.replaceAll("[^a-zA-Z0-9_.-]", "-"));
-                SecurityGroupFirewallManager.Namespace namespace = firewallManager.createNetworkNamespace(
-                        "ec2", instanceId, accountId, region, Optional.empty(), Map.of(22, backing.sshHostPort));
-                backing.helperId = namespace.helperId();
-                String logical = instance.getLogicalPrivateIpAddress() != null
-                        ? instance.getLogicalPrivateIpAddress() : primaryInterface(instance).getPrivateIpAddress();
-                instance.setLogicalPrivateIpAddress(logical);
-                String transport = namespace.transportAddress();
-                if (vpcNetworkManager.enabled()) {
-                    transport = vpcNetworkManager.allocateTransportPrivateIp(region, instance.getSubnetId(),
-                            logical, instanceId).orElseThrow(() -> new IllegalStateException("No Docker transport address available"));
-                    if (vpcNetworkManager.attach(region, instance.getVpcId(), instance.getSubnetId(),
-                            backing.helperId, transport).isEmpty()) {
-                        throw new IllegalStateException("Cannot attach EC2 namespace to its VPC transport");
-                    }
-                }
-                namespace = new SecurityGroupFirewallManager.Namespace(backing.helperId, transport);
-                instance.setContainerBridgeIp(transport);
-                registerNamespace(instance, region, groups, prefixLists, backing.helperId, transport);
-                ContainerSpec spec = buildContainerSpec(ContainerStorageHelper.resourceName(config, "ec2", null, instanceId),
-                        image, region, reachableEndpoint.baseUrl(), Ec2MetadataProxy.ENDPOINT, instanceId,
-                        backing.sshHostPort, namespace, instance.getIamInstanceProfileArn() != null, accountId);
-                if (!isLaunchCancelled(instance)) {
-                    backing.containerId = image.dockerPlatform() == null ? lifecycleManager.create(spec)
-                            : lifecycleManager.create(spec, image.dockerPlatform());
-                    synchronized (instance) {
-                        instance.setDockerContainerId(backing.containerId);
-                        instance.setSshHostPort(backing.sshHostPort);
-                    }
-                    if (!isLaunchCancelled(instance)) {
-                        lifecycleManager.startCreated(backing.containerId, spec);
-                    }
-                }
-                synchronized (instance) {
-                    backing.creating = false;
-                }
-                if (isLaunchCancelled(instance)) {
-                    failLaunch(instance);
-                    return null;
-                }
-                return new StartedContainer(backing.containerId, backing.sshHostPort, transport, namespace, backing.eniId);
-            } catch (RuntimeException e) {
-                synchronized (instance) {
-                    backing.creating = false;
-                    backing.collidedPort = isHostPortCollision(e);
-                }
-                boolean removed = cleanupManagedBacking(instance, backing);
-                if (removed && backing.collidedPort && !isLaunchCancelled(instance)) {
-                    continue;
-                }
-                throw e;
-            }
-        }
-        throw new IllegalStateException("EC2 SSH port allocation failed after ten attempts");
-    }
-
-    private Backing restoredBacking(Instance instance) {
-        Backing existing = backings.get(instance);
-        if (existing != null) {
-            return existing;
-        }
-        Backing restored = new Backing();
-        restored.containerId = instance.getDockerContainerId();
-        restored.sshHostPort = instance.getSshHostPort();
-        restored.eniId = primaryInterface(instance).getNetworkInterfaceId();
-        try {
-            ProtectedNamespace namespace = protectedNamespace(instance);
-            if (namespace != null) {
-                restored.helperId = namespace.helperId();
-            }
-        } catch (NotFoundException missingWorker) {
-            // The namespace can survive a workload removed before an emulator restart.
-        }
-        if (restored.helperId == null) {
-            String name = ContainerStorageHelper.resourceName(config, "sg", null,
-                    instance.getInstanceId().replaceAll("[^a-zA-Z0-9_.-]", "-"));
-            try {
-                InspectContainerResponse helper = dockerClient.inspectContainerCmd(name).exec();
-                Map<String, String> labels = helper.getConfig().getLabels();
-                if (!ownerIdentity().equals(labels.get(LABEL_OWNER_PORT))
-                        || !instance.getInstanceId().equals(labels.get(LABEL_RESOURCE_ID))
-                        || !"true".equals(labels.get("floci.security-group-helper"))) {
-                    throw new IllegalStateException("Cannot clean an EC2 namespace owned by another instance");
-                }
-                restored.helperId = helper.getId();
-            } catch (NotFoundException missingHelper) {
-                // Both resources may already have been removed on the previous attempt.
-            }
-        }
-        backings.put(instance, restored);
-        return restored;
-    }
-
-    private void requireOwnedHelper(Instance instance, String helperId) {
-        if (helperId == null) {
-            return;
-        }
-        try {
-            InspectContainerResponse helper = dockerClient.inspectContainerCmd(helperId).exec();
-            Map<String, String> labels = helper.getConfig().getLabels();
-            if (!"true".equals(labels.get("floci.security-group-helper"))
-                    || !SERVICE_VALUE.equals(labels.get(LABEL_SERVICE))
-                    || !ownerIdentity().equals(labels.get(LABEL_OWNER_PORT))
-                    || !instance.getInstanceId().equals(labels.get(LABEL_RESOURCE_ID))
-                    || !Objects.equals(instance.getRegion(), labels.get(LABEL_REGION))
-                    || !Objects.equals(Ec2MetadataServer.instanceAccountId(instance, regionResolver.getAccountId()),
-                            labels.get("io.floci.account"))) {
-                throw new IllegalStateException("EC2 cleanup target is not this instance's namespace");
-            }
-        } catch (NotFoundException removed) {
-            // An already removed helper cannot own a Docker endpoint.
-        }
-    }
-
-    private boolean removeConfirmed(String containerId) {
-        if (containerId == null) {
-            return true;
-        }
-        lifecycleManager.removeIfExists(containerId);
-        try {
-            dockerClient.inspectContainerCmd(containerId).exec();
-            return false;
-        } catch (NotFoundException removed) {
-            return true;
-        }
-    }
-
-    private boolean cleanupManagedBacking(Instance instance, Backing backing) {
-        synchronized (instance) {
-            if (backings.get(instance) != backing || backing.creating) {
-                return false;
-            }
-            try {
-                requireOwnedHelper(instance, backing.helperId);
-                portForwardManager.unpublishAll(instance);
-                if (!removeConfirmed(backing.containerId) || !removeConfirmed(backing.helperId)) {
-                    LOG.warnv("EC2 instance {0} retains its private lease because Docker removal is incomplete",
-                            instance.getInstanceId());
-                    return false;
-                }
-                if (backing.helperId != null) {
-                    firewallManager.unregister(backing.eniId, backing.helperId);
-                }
-                vpcNetworkManager.releaseTransportPrivateIp(instance.getRegion(), instance.getSubnetId(), instance.getInstanceId());
-                if (backing.sshHostPort > 0 && !backing.collidedPort) {
-                    portAllocator.release(backing.sshHostPort);
-                }
-                metadataServer.unregisterContainer(instance.getContainerBridgeIp(), instance);
-                metadataServer.unregisterContainer(instance.getImdsSourceIp(), instance);
-                instance.setDockerContainerId(null);
-                instance.setSshHostPort(0);
-                instance.setContainerBridgeIp(null);
-                instance.setImdsSourceIp(null);
-                backings.remove(instance, backing);
-                return true;
-            } catch (RuntimeException e) {
-                LOG.warnv("EC2 instance {0} cleanup failed; retaining its private lease: {1}",
-                        instance.getInstanceId(), e.getMessage());
-                return false;
-            }
-        }
-    }
-
-    private void finishManagedRemoval(Instance instance, Backing backing) {
-        synchronized (instance) {
-            if (cleanupManagedBacking(instance, backing)) {
-                instance.setContainerLaunchPending(false);
-                instance.setState(InstanceState.terminated());
-                instance.setTerminatedAt(System.currentTimeMillis());
-            }
-        }
+        });
     }
 
     private ContainerSpec buildContainerSpec(String containerName, ResolvedAmiImage image, String region,
                                              String serviceEndpoint, String imdsEndpoint, String instanceId,
                                              int sshHostPort, SecurityGroupFirewallManager.Namespace namespace,
-                                             boolean hasInstanceProfile, String accountId) {
+                                             boolean hasInstanceProfile, String instanceType) {
         // Minimal images keep the historic tail command, while cloud-image AMI guests can boot their init.
         ContainerBuilder.Builder specBuilder = containerBuilder.newContainer(image.dockerImage())
                 .withName(containerName)
+                .withEmbeddedDns()
                 .withDockerNetwork(Optional.empty())
                 .withEnv(localAwsEnvironment(region, serviceEndpoint, imdsEndpoint,
                         hasInstanceProfile))
                 .withEnv("AWS_EC2_INSTANCE_ID", instanceId)
+                .withHostDockerInternalOnLinux()
                 .withLogRotation()
                 .withLabels(ContainerStorageHelper.resourceIdentityLabels(
-                        "ec2", instanceId, accountId, region))
+                        "ec2", instanceId, regionResolver.getAccountId(), region))
                 // Which Floci owns this container, so the startup reconciler cannot reap a
-                // sibling emulator's live instances off a shared daemon. See LABEL_OWNER_PORT.
-                .withLabels(Map.of(LABEL_OWNER_PORT, ownerIdentity()))
+                // sibling emulator's live instances off a shared daemon. See LABEL_OWNER.
+                .withLabels(Map.of(LABEL_OWNER, ownerIdentity()))
                 // EC2 instances expose IMDS on 169.254.169.254. Floci needs network administration
                 // privileges in the local container to attach that link-local address.
                 .withPrivileged(namespace == null)
                 .withCmd(image.systemd() ? List.of("/sbin/init") : List.of("tail", "-f", "/dev/null"));
+        if (config.services().ec2().instanceResourceLimits() && instanceType != null && !instanceType.isBlank()) {
+            Optional<CatalogInstanceType> catalogType = instanceTypeCatalog.find(instanceType);
+            if (catalogType.isPresent()) {
+                CatalogInstanceType type = catalogType.get();
+                specBuilder.withMemoryMb(type.memoryMib);
+                specBuilder.withCpuUnits(type.vcpu * 1024);
+            } else {
+                LOG.debugv("EC2 instance {0} has unknown instance type {1}; launching without resource limits",
+                        instanceId, instanceType);
+            }
+        }
         if (namespace == null) {
-            specBuilder.withEmbeddedDns().withHostDockerInternalOnLinux().withPortBinding(22, sshHostPort);
+            specBuilder.withPortBinding(22, sshHostPort);
         } else {
             specBuilder.withNetworkMode("container:" + namespace.helperId());
-            specBuilder.withLabels(Map.of("floci.security-group-workload", "true"));
+            specBuilder.withLabels(Map.of(ContainerStorageHelper.SECURITY_GROUP_WORKLOAD_LABEL, "true"));
         }
         if (image.systemd()) {
             specBuilder
@@ -978,48 +725,32 @@ public class Ec2ContainerManager {
         failLaunch(instance, instance.getPrivateIpAddress());
     }
 
-    /** Releases failed guest resources without revoking an already-ready control-plane record. */
+    /**
+     * Ends a launch that never reached RUNNING.
+     *
+     * <p>The private address was leased before the container existed, and {@link #terminate}, the
+     * only other place it is given back, is not on this path: an instance that fails here is
+     * already terminated, so nothing terminates it again and the lease would be held for the life
+     * of the process. Detaching first is what makes the release safe; Docker keeps the address
+     * reserved while the endpoint stands, and would refuse the next launch handed the same one.
+     */
     private void failLaunch(Instance instance, String leasedPrivateIp) {
-        if (needsPrivateNamespace(instance)) {
-            synchronized (instance) {
-                instance.setContainerLaunchFailed(true);
-                instance.setContainerLaunchPending(false);
-                metadataServer.unregisterInstance(instance);
-                Backing backing = backings.get(instance);
-                if (backing == null && instance.getDockerContainerId() != null) {
-                    backing = restoredBacking(instance);
-                }
-                if (backing == null) {
-                    instance.setState(InstanceState.terminated());
-                    instance.setTerminatedAt(System.currentTimeMillis());
-                } else {
-                    instance.setState(InstanceState.shuttingDown());
-                    finishManagedRemoval(instance, backing);
-                }
-            }
-            return;
-        }
         String containerId;
         int sshHostPort;
         String containerIp;
         boolean alreadyCleaned;
         synchronized (instance) {
-            alreadyCleaned = instance.isContainerLaunchFailed() && !instance.isContainerLaunchPending()
+            alreadyCleaned = isLaunchCancelledState(instance)
                     && instance.getDockerContainerId() == null
                     && instance.getSshHostPort() <= 0
                     && (instance.getContainerBridgeIp() == null || instance.getContainerBridgeIp().isBlank());
-            instance.setContainerLaunchFailed(true);
-            instance.setContainerLaunchPending(false);
-            if (instance.getState() == null || !"running".equals(instance.getState().getName())) {
-                instance.setState(InstanceState.terminated());
-            }
+            instance.setState(InstanceState.terminated());
             containerId = instance.getDockerContainerId();
             sshHostPort = instance.getSshHostPort();
             containerIp = instance.getContainerBridgeIp();
             instance.setDockerContainerId(null);
             instance.setSshHostPort(0);
             instance.setContainerBridgeIp(null);
-            metadataServer.unregisterInstance(instance);
         }
         if (alreadyCleaned) {
             return;
@@ -1051,6 +782,7 @@ public class Ec2ContainerManager {
         if (sshHostPort > 0) {
             portAllocator.release(sshHostPort);
         }
+        metadataServer.unregisterInstance(instance);
         if (containerIp != null && !containerIp.isBlank()) {
             try {
                 metadataServer.unregisterContainer(containerIp, instance);
@@ -1060,17 +792,23 @@ public class Ec2ContainerManager {
         }
     }
 
-    /** Cancels an unfinished guest launch, preventing a late Docker create from publishing a container. */
+    /**
+     * Cancels a pending asynchronous launch. Returns {@code false} only when the instance reached
+     * running state while the caller was waiting, in which case it must not be torn down as a timeout.
+     *
+     * <p>The terminal state is established atomically before cleanup. The launch worker checks that
+     * state between phases, and {@link #recordCreatedContainer(Instance, String, int)} rejects and
+     * removes a container whose blocking Docker create call returns after cancellation. A timed-out
+     * CloudFormation waiter therefore cannot leave a late worker able to transition the instance to
+     * running.</p>
+     */
     boolean cancelLaunch(Instance instance) {
         synchronized (instance) {
             String state = instance.getState() != null ? instance.getState().getName() : null;
-            if ("running".equals(state) && !instance.isContainerLaunchPending()) {
+            if ("running".equals(state)) {
                 return false;
             }
-            instance.setContainerLaunchFailed(true);
-            if (!"running".equals(state)) {
-                instance.setState(needsPrivateNamespace(instance) ? InstanceState.shuttingDown() : InstanceState.terminated());
-            }
+            instance.setState(InstanceState.terminated());
         }
         failLaunch(instance);
         return true;
@@ -1088,7 +826,6 @@ public class Ec2ContainerManager {
                 return false;
             }
             instance.setState(InstanceState.running());
-            instance.setContainerLaunchPending(false);
             return true;
         }
     }
@@ -1118,18 +855,7 @@ public class Ec2ContainerManager {
 
     private static boolean isLaunchCancelledState(Instance instance) {
         String state = instance.getState() != null ? instance.getState().getName() : null;
-        return instance.isContainerLaunchFailed() || "shutting-down".equals(state) || "terminated".equals(state);
-    }
-
-    private static boolean isHostPortCollision(Exception exception) {
-        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
-            String message = cause.getMessage();
-            if (message != null && (message.toLowerCase(Locale.ROOT).contains("port is already allocated")
-                    || message.toLowerCase(Locale.ROOT).contains("address already in use"))) {
-                return true;
-            }
-        }
-        return false;
+        return "shutting-down".equals(state) || "terminated".equals(state);
     }
 
     private record StartedContainer(String containerId, int sshHostPort, String vpcAddress,
@@ -1165,22 +891,19 @@ public class Ec2ContainerManager {
      * reboot already handle a null container id, so the rest of the lifecycle keeps working.
      */
     private void markContainerlessRunning(Instance instance) {
-        LOG.infov("EC2 instance {0} is running without a backing container (no Docker daemon reachable)",
-                instance.getInstanceId());
-        markRunning(instance);
+        if (markRunning(instance)) {
+            LOG.infov("EC2 instance {0} is running without a backing container (no Docker daemon reachable)",
+                    instance.getInstanceId());
+        }
     }
 
     /**
      * Synchronous stop for emulator shutdown: tears down the port-forward sidecars and
      * stops the container with a short timeout so N instances cannot exhaust the SIGTERM
      * grace window. Unlike {@link #stop}, runs on the caller's thread (the async executor
-     * would be abandoned mid-flight during shutdown) and leaves the final stopped state to the caller.
+     * would be abandoned mid-flight during shutdown) and leaves state handling to the caller.
      */
     public void stopForShutdown(Instance instance) {
-        synchronized (instance) {
-            instance.setState(InstanceState.stopping());
-            metadataServer.unregisterInstance(instance);
-        }
         String containerId = instance.getDockerContainerId();
         if (containerId == null) {
             return;
@@ -1195,41 +918,55 @@ public class Ec2ContainerManager {
         }
     }
 
+    private void submitLifecycleOperation(String containerId, Runnable operation) {
+        synchronized (lifecycleOperations) {
+            CompletableFuture<Void> previous = lifecycleOperations.getOrDefault(containerId,
+                    CompletableFuture.completedFuture(null));
+            CompletableFuture<Void> completed = new CompletableFuture<>();
+            lifecycleOperations.put(containerId, completed);
+            previous.whenComplete((ignored, priorFailure) -> {
+                try {
+                    executor.submit(() -> {
+                        try {
+                            operation.run();
+                        } finally {
+                            lifecycleOperations.remove(containerId, completed);
+                            completed.complete(null);
+                        }
+                    });
+                } catch (RuntimeException failure) {
+                    lifecycleOperations.remove(containerId, completed);
+                    completed.completeExceptionally(failure);
+                    LOG.warnv(failure, "Could not schedule lifecycle operation for EC2 container {0}", containerId);
+                }
+            });
+        }
+    }
+
     /**
      * Gracefully stops a running container (30 second timeout then SIGKILL).
      * Updates instance state through stopping → stopped.
      */
     public void stop(Instance instance) {
-        String containerId;
-        synchronized (instance) {
-            if (needsPrivateNamespace(instance) && isLaunchCancelledState(instance)) {
-                return;
-            }
-            containerId = instance.getDockerContainerId();
-            instance.setState(containerId == null ? InstanceState.stopped() : InstanceState.stopping());
-            metadataServer.unregisterInstance(instance);
-        }
+        String containerId = instance.getDockerContainerId();
         if (containerId == null) {
+            instance.setState(InstanceState.stopped());
             return;
         }
-        executor.submit(() -> {
+        InstanceState stopping = InstanceState.stopping();
+        instance.setState(stopping);
+        submitLifecycleOperation(containerId, () -> {
             // Sidecars forward to the container's current IP, which Docker reassigns on the
             // next start; tear them down so no forward is left pointing at a stale address.
             portForwardManager.unpublishAll(instance);
             try {
                 dockerClient.stopContainerCmd(containerId).withTimeout(30).exec();
-            } catch (NotFoundException e) {
-                // already gone
+            } catch (NotFoundException ignored) {
+                // An already removed container needs no further stop.
             } catch (Exception e) {
                 LOG.warnv("Error stopping EC2 container {0}: {1}", containerId, e.getMessage());
             }
-            synchronized (instance) {
-                if (!isLaunchCancelledState(instance)
-                        && Objects.equals(containerId, instance.getDockerContainerId())
-                        && "stopping".equals(instance.getState().getName())) {
-                    instance.setState(InstanceState.stopped());
-                }
-            }
+            instance.compareAndSetState(stopping, InstanceState.stopped());
         });
     }
 
@@ -1238,23 +975,24 @@ public class Ec2ContainerManager {
      * Updates instance state through pending → running.
      */
     public void start(Instance instance) {
-        String containerId;
-        synchronized (instance) {
-            if (needsPrivateNamespace(instance) && isLaunchCancelledState(instance)) {
-                throw new IllegalStateException("Cannot start an EC2 instance whose backing is being removed");
+        start(instance, null);
+    }
+
+    /**
+     * Starts a previously stopped container, executing postStart once the container is running.
+     */
+    public void start(Instance instance, Runnable postStart) {
+        String containerId = instance.getDockerContainerId();
+        if (containerId == null) {
+            instance.setState(InstanceState.running());
+            if (postStart != null) {
+                postStart.run();
             }
-            metadataServer.unregisterInstance(instance);
-            containerId = instance.getDockerContainerId();
-            if (containerId == null) {
-                if (needsPrivateNamespace(instance)) {
-                    throw new IllegalStateException("EC2 private instance has no backing container to start");
-                }
-                instance.setState(InstanceState.running());
-                return;
-            }
-            instance.setState(InstanceState.pending());
+            return;
         }
-        executor.submit(() -> {
+        InstanceState pending = InstanceState.pending();
+        instance.setState(pending);
+        submitLifecycleOperation(containerId, () -> {
             try {
                 dockerClient.startContainerCmd(containerId).exec();
                 boolean running = false;
@@ -1269,9 +1007,6 @@ public class Ec2ContainerManager {
                 // attachment of its own to rediscover: the helper keeps the transport address
                 // across the workload's stop/start, exactly as launch used it.
                 ProtectedNamespace namespace = protectedNamespace(instance);
-                if (needsPrivateNamespace(instance) && (namespace == null || !running)) {
-                    throw new IllegalStateException("EC2 private namespace did not restart");
-                }
                 String containerIp = namespace == null
                         ? waitForContainerBridgeIp(containerId, instanceId)
                         : namespace.transportAddress();
@@ -1282,41 +1017,37 @@ public class Ec2ContainerManager {
                                 config.services().ec2().awsFaithfulPrivateIp());
                     }
                     // Docker hands out a new bridge IP on restart, so the previously reported
-                    // public address can now point at another container entirely.
-                    if (instance.isAssociatePublicIp() || instance.getPublicIpAddress() != null) {
+                    // public address can now point at another container entirely. An address the
+                    // stop left in place is an Elastic IP's; a released automatic one is replaced
+                    // only when the shared rule allows it.
+                    if (instance.getPublicIpAddress() != null || AutomaticPublicAddress.isDue(instance, true)) {
                         exposeReachablePublicAddress(instance);
                     }
                     metadataServer.registerContainer(containerIp, instanceId, instance);
-                    String networkContainer = namespace == null ? containerId : namespace.helperId();
-                    refreshImdsSourceRegistration(instance, networkContainer, containerIp);
-                    refreshMetadataAddresses(instance, networkContainer);
-                    if (!configureLinkLocalMetadataEndpoint(instance, networkContainer) && needsPrivateNamespace(instance)) {
-                        throw new IllegalStateException("Cannot configure EC2 namespace metadata proxy");
-                    }
+                    refreshImdsSourceRegistration(instance, containerId, containerIp);
+                    refreshMetadataAddresses(instance, containerId);
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                markStartFailed(instance, containerId);
+                instance.compareAndSetState(pending, InstanceState.stopped());
                 return;
             } catch (Exception e) {
                 LOG.warnv("Error starting EC2 container {0}: {1}", containerId, e.getMessage());
-                markStartFailed(instance, containerId);
+                instance.compareAndSetState(pending, InstanceState.stopped());
                 return;
             }
-            if (markRunning(instance) && needsPrivateNamespace(instance)) {
-                portForwardManager.restore(instance);
+            if (!instance.compareAndSetState(pending, InstanceState.running())) {
+                return;
+            }
+            if (postStart != null) {
+                try {
+                    postStart.run();
+                } catch (Exception e) {
+                    LOG.warnv("Error in post-start hook for instance {0}: {1}",
+                            instance.getInstanceId(), e.getMessage());
+                }
             }
         });
-    }
-
-    private void markStartFailed(Instance instance, String containerId) {
-        synchronized (instance) {
-            if (!isLaunchCancelledState(instance) && Objects.equals(containerId, instance.getDockerContainerId())
-                    && "pending".equals(instance.getState().getName())) {
-                metadataServer.unregisterInstance(instance);
-                instance.setState(InstanceState.stopped());
-            }
-        }
     }
 
     boolean isContainerRunning(String containerId) {
@@ -1355,7 +1086,7 @@ public class Ec2ContainerManager {
                     .exec();
             for (Container container : containers) {
                 Map<String, String> labels = container.getLabels() == null ? Map.of() : container.getLabels();
-                if (!owner.equals(labels.get(LABEL_OWNER_PORT))) {
+                if (!ALIASES.consistent(container.getId(), labels) || !ALIASES.matches(labels, LABEL_OWNER, owner)) {
                     continue;
                 }
                 String instanceId = labels.get(LABEL_RESOURCE_ID);
@@ -1410,12 +1141,7 @@ public class Ec2ContainerManager {
             return false;
         }
 
-        ProtectedNamespace namespace = needsPrivateNamespace(instance) ? protectedNamespace(instance) : null;
-        if (needsPrivateNamespace(instance) && namespace == null) {
-            throw new IllegalStateException("EC2 private networking has no retained namespace");
-        }
-        String networkContainer = namespace == null ? containerId : namespace.helperId();
-        String containerIp = namespace == null ? getContainerBridgeIp(containerId) : namespace.transportAddress();
+        String containerIp = getContainerBridgeIp(containerId);
         if (containerIp == null || containerIp.isBlank()) {
             containerIp = instance.getContainerBridgeIp();
         }
@@ -1431,13 +1157,13 @@ public class Ec2ContainerManager {
         }
         instance.setContainerBridgeIp(containerIp);
         exposeReachablePrivateAddress(instance, containerIp, config.services().ec2().awsFaithfulPrivateIp());
-        if (instance.isAssociatePublicIp() || instance.getPublicIpAddress() != null) {
+        if (instance.getPublicIpAddress() != null || AutomaticPublicAddress.isDue(instance, true)) {
             exposeReachablePublicAddress(instance);
         }
         metadataServer.registerContainer(containerIp, instance.getInstanceId(), instance);
-        refreshImdsSourceRegistration(instance, networkContainer, containerIp);
-        refreshMetadataAddresses(instance, networkContainer);
-        return configureMetadataEndpoint(instance);
+        refreshImdsSourceRegistration(instance, containerId, containerIp);
+        refreshMetadataAddresses(instance, containerId);
+        return true;
     }
 
     /**
@@ -1544,10 +1270,6 @@ public class Ec2ContainerManager {
      * and callers that prefer PublicDnsName over PublicIpAddress would be handed a dead name.
      */
     void exposeReachablePublicAddress(Instance instance) {
-        if (instance != null
-                && (instance.getInstanceId() + ".localhost.floci.io").equals(instance.getPublicIpAddress())) {
-            return;
-        }
         String publicAddress = reachablePublicAddress(instance);
         if (publicAddress == null) {
             return;
@@ -1571,11 +1293,11 @@ public class Ec2ContainerManager {
         if (instance == null || privateIp == null || privateIp.isBlank()) {
             return;
         }
-        if (awsFaithful || instance.getLogicalPrivateIpAddress() != null) {
+        if (awsFaithful) {
             return;
         }
 
-        String privateDnsName = "ip-" + privateIp.replace('.', '-') + ".ec2.internal";
+        String privateDnsName = AwsRegions.ec2PrivateIpDnsName(privateIp, instance.getRegion());
         instance.setPrivateIpAddress(privateIp);
         instance.setPrivateDnsName(privateDnsName);
         if (instance.getNetworkInterfaces() != null) {
@@ -1592,23 +1314,26 @@ public class Ec2ContainerManager {
      * Sets terminatedAt for TTL pruning.
      */
     public void terminate(Instance instance) {
-        if (needsPrivateNamespace(instance)) {
-            Backing backing;
-            synchronized (instance) {
-                if (instance.getState() != null && "terminated".equals(instance.getState().getName())) {
-                    return;
-                }
-                instance.setState(InstanceState.shuttingDown());
-                metadataServer.unregisterInstance(instance);
-                backing = restoredBacking(instance);
-            }
-            try {
-                executor.execute(() -> finishManagedRemoval(instance, backing));
-            } catch (RejectedExecutionException e) {
-                finishManagedRemoval(instance, backing);
-            }
-            return;
-        }
+        terminate(instance, null);
+    }
+
+    /**
+     * Terminates an instance and runs {@code afterTeardown} once the container is actually gone.
+     *
+     * <p>The teardown scheduled here is asynchronous, so anything that depends on the container
+     * no longer holding a Docker resource cannot run at the call site. Reclaiming a deregistered
+     * AMI's captured layer is the case that needs this: attempted while the container still
+     * exists, the daemon refuses to delete the image, and with no later attempt the layer stays
+     * on disk for the lifetime of the emulator.
+     *
+     * <p>The callback runs on the teardown executor, and only once the container is established
+     * to be gone: removed, already absent, or never launched. Everything after removal can fail
+     * without making the callback wrong, so it runs from a finally block, but running it when
+     * removal itself failed would attempt work Docker is bound to refuse with no later retry
+     * behind it. A skip is logged. Anything the callback throws is logged and swallowed rather
+     * than killing the executor task.
+     */
+    public void terminate(Instance instance, Runnable afterTeardown) {
         String containerId;
         String containerIp;
         String imdsSourceIp;
@@ -1619,41 +1344,64 @@ public class Ec2ContainerManager {
             imdsSourceIp = instance.getImdsSourceIp();
             sshHostPort = instance.getSshHostPort();
             instance.setState(InstanceState.shuttingDown());
-            metadataServer.unregisterInstance(instance);
         }
         executor.submit(() -> {
-            portForwardManager.unpublishAll(instance);
-            if (containerId != null) {
-                try {
-                    dockerClient.removeContainerCmd(containerId).withForce(true).exec();
-                } catch (NotFoundException e) {
-                    // already gone
-                } catch (Exception e) {
-                    LOG.warnv("Error removing EC2 container {0}: {1}", containerId, e.getMessage());
+            // The post-teardown hook's only precondition; see the Javadoc above for why.
+            boolean containerGone = false;
+            try {
+                portForwardManager.unpublishAll(instance);
+                if (containerId == null) {
+                    // Nothing was ever launched, so there is no container to hold the image.
+                    containerGone = true;
                 }
-                try {
-                    // iptables/veth teardown lags behind container removal; prevents port-reuse conflicts.
-                    Thread.sleep(500);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
+                if (containerId != null) {
+                    try {
+                        dockerClient.removeContainerCmd(containerId).withForce(true).exec();
+                        containerGone = true;
+                    } catch (NotFoundException e) {
+                        // already gone
+                        containerGone = true;
+                    } catch (Exception e) {
+                        LOG.warnv("Error removing EC2 container {0}: {1}", containerId, e.getMessage());
+                    }
+                    try {
+                        // iptables/veth teardown lags behind container removal; prevents port-reuse conflicts.
+                        Thread.sleep(500);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+                if (firewallManager != null && firewallManager.enabled()
+                        && instance.getNetworkInterfaces() != null && !instance.getNetworkInterfaces().isEmpty()) {
+                    firewallManager.unregister(instance.getNetworkInterfaces().getFirst().getNetworkInterfaceId());
+                }
+                if (sshHostPort > 0) {
+                    portAllocator.release(sshHostPort);
+                }
+                metadataServer.unregisterContainer(containerIp, instance);
+                metadataServer.unregisterContainer(imdsSourceIp, instance);
+                metadataServer.unregisterInstance(instance);
+                // Give the address back only now that the container is gone: releasing it while
+                // Docker still holds the endpoint would hand the same IP to the next launch and
+                // have Docker refuse it.
+                vpcNetworkManager.releasePrivateIp(instance.getRegion(), instance.getSubnetId(),
+                        instance.getPrivateIpAddress());
+                instance.setState(InstanceState.terminated());
+                instance.setTerminatedAt(System.currentTimeMillis());
+            } finally {
+                if (afterTeardown != null && containerGone) {
+                    try {
+                        afterTeardown.run();
+                    } catch (Exception e) {
+                        LOG.warnv("Post-teardown hook failed for instance {0}: {1}",
+                                instance.getInstanceId(), e.getMessage());
+                    }
+                } else if (afterTeardown != null) {
+                    LOG.warnv("Skipping post-teardown hook for instance {0}: its container is "
+                            + "not established to be gone, so anything waiting on the container "
+                            + "being gone would fail", instance.getInstanceId());
                 }
             }
-            if (firewallManager != null && firewallManager.enabled()
-                    && instance.getNetworkInterfaces() != null && !instance.getNetworkInterfaces().isEmpty()) {
-                firewallManager.unregister(instance.getNetworkInterfaces().getFirst().getNetworkInterfaceId());
-            }
-            if (sshHostPort > 0) {
-                portAllocator.release(sshHostPort);
-            }
-            metadataServer.unregisterContainer(containerIp, instance);
-            metadataServer.unregisterContainer(imdsSourceIp, instance);
-            // Give the address back only now that the container is gone: releasing it while
-            // Docker still holds the endpoint would hand the same IP to the next launch and
-            // have Docker refuse it.
-            vpcNetworkManager.releasePrivateIp(instance.getRegion(), instance.getSubnetId(),
-                    instance.getPrivateIpAddress());
-            instance.setState(InstanceState.terminated());
-            instance.setTerminatedAt(System.currentTimeMillis());
         });
     }
 
@@ -1661,10 +1409,6 @@ public class Ec2ContainerManager {
      * Reboots an instance via docker restart.
      */
     public void reboot(Instance instance) {
-        if (needsPrivateNamespace(instance) && isLaunchCancelled(instance)) {
-            throw new IllegalStateException("Cannot reboot an EC2 instance whose backing is being removed");
-        }
-        metadataServer.unregisterInstance(instance);
         String containerId = instance.getDockerContainerId();
         if (containerId == null) {
             return;
@@ -1673,69 +1417,10 @@ public class Ec2ContainerManager {
             try {
                 dockerClient.restartContainerCmd(containerId).exec();
                 LOG.infov("Rebooted EC2 container {0}", containerId);
-                restartGuestServices(instance, containerId);
             } catch (Exception e) {
                 LOG.warnv("Error rebooting EC2 container {0}: {1}", containerId, e.getMessage());
             }
         });
-    }
-
-    /**
-     * Post-reboot guest bring-up. On a real instance systemd restarts enabled
-     * units at boot — ExecStartPre included, which re-downloads the Alchemy
-     * hosted bundle and env file. The systemctl shim's unit processes die
-     * with the container and nothing inside the guest re-runs them, so mirror
-     * the launch-time bring-up here: wait for the restarted container,
-     * refresh the IMDS wiring for its (possibly changed) bridge IP, re-run
-     * the persisted user data (idempotent for Alchemy hosted guests: it
-     * rewrites the same unit files and {@code systemctl enable --now}s them —
-     * the shim sees the stale pidfile and starts a fresh process with a fresh
-     * ExecStartPre), and re-point the port-forward mux at the new IP.
-     */
-    private void restartGuestServices(Instance instance, String containerId) {
-        try {
-            String instanceId = instance.getInstanceId();
-            boolean running = false;
-            for (int i = 0; i < 30 && !running; i++) {
-                running = lifecycleManager.isContainerRunning(containerId);
-                if (!running) {
-                    Thread.sleep(500);
-                }
-            }
-            if (!running) {
-                LOG.warnv("EC2 container {0} did not come back after reboot", containerId);
-                return;
-            }
-            ProtectedNamespace namespace = protectedNamespace(instance);
-            if (needsPrivateNamespace(instance) && (namespace == null || isLaunchCancelled(instance))) {
-                throw new IllegalStateException("EC2 private namespace is unavailable after reboot");
-            }
-            String containerIp = namespace == null
-                    ? waitForContainerBridgeIp(containerId, instanceId) : namespace.transportAddress();
-            if (containerIp != null && !containerIp.isBlank()) {
-                instance.setContainerBridgeIp(containerIp);
-                metadataServer.registerContainer(containerIp, instanceId, instance);
-                String networkContainer = namespace == null ? containerId : namespace.helperId();
-                refreshImdsSourceRegistration(instance, networkContainer, containerIp);
-                refreshMetadataAddresses(instance, networkContainer);
-            }
-            if (!configureLinkLocalMetadataEndpoint(instance, namespace == null ? containerId : namespace.helperId())
-                    && needsPrivateNamespace(instance)) {
-                throw new IllegalStateException("Cannot configure EC2 namespace metadata proxy after reboot");
-            }
-            String userData = instance.getUserData();
-            if (userData != null && !userData.isBlank()) {
-                executeUserData(containerId, instanceId, userData, instance.getRegion());
-            }
-            // Mux backends capture the instance's bridge IP at registration —
-            // re-register so a changed IP does not strand the published port.
-            portForwardManager.restore(instance);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        } catch (Exception e) {
-            LOG.warnv("Post-reboot bring-up failed for EC2 container {0}: {1}",
-                    containerId, e.getMessage());
-        }
     }
 
     public boolean isContainerRunning(Instance instance) {
@@ -1821,11 +1506,8 @@ public class Ec2ContainerManager {
 
             // Copy authorized_keys via docker cp
             String keyContent = publicKey.trim() + "\n";
-            byte[] tar = buildSingleFileTar("authorized_keys", keyContent.getBytes(StandardCharsets.UTF_8), 0600);
-            dockerClient.copyArchiveToContainerCmd(containerId)
-                    .withRemotePath("/root/.ssh")
-                    .withTarInputStream(new ByteArrayInputStream(tar))
-                    .exec();
+            RetryingTarCopier.copyBytes(dockerClient, containerId, "/root/.ssh",
+                    "authorized_keys", keyContent.getBytes(StandardCharsets.UTF_8), 0600);
 
             execInContainer(containerId, new String[]{"chmod", "600", "/root/.ssh/authorized_keys"}, 5);
             LOG.infov("Injected SSH public key into container {0}", containerId);
@@ -1836,19 +1518,21 @@ public class Ec2ContainerManager {
 
     private void startSshd(String containerId, String instanceId) {
         try {
-            // Custom and captured guests supply their own tools; startup never downloads packages.
-            ContainerExecResult install = execInContainerForResult(containerId, sshdInstallProbeCommand(), 10);
+            // Exit 1 means sshd is absent and there is nothing to start; exit 2 means sshd is
+            // there but the client package did not land. Only the first is fatal - see
+            // sshdInstallProbeCommand() for why the probe distinguishes them.
+            ContainerExec.Result install = execInContainerForResult(containerId, sshdInstallProbeCommand(), 120);
             if (install.exitCode() == SSH_CLIENT_MISSING_EXIT_CODE) {
                 LOG.warnv("sshd is available on EC2 instance {0} but the OpenSSH client package is not:"
                         + " scp is missing, so provisioners that upload files over scp will fail: {1}",
                         instanceId, install.summary());
             } else if (install.exitCode() != 0) {
-                LOG.warnv("OpenSSH server is unavailable for EC2 instance {0}: {1}",
+                LOG.warnv("Could not install openssh-server for EC2 instance {0}: {1}",
                         instanceId, install.summary());
                 return;
             }
             // Generate host keys
-            ContainerExecResult keygen = execInContainerForResult(containerId, new String[]{"ssh-keygen", "-A"}, 10);
+            ContainerExec.Result keygen = execInContainerForResult(containerId, new String[]{"ssh-keygen", "-A"}, 10);
             if (keygen.exitCode() != 0) {
                 LOG.warnv("Could not generate SSH host keys for EC2 instance {0}: {1}",
                         instanceId, keygen.summary());
@@ -1856,7 +1540,7 @@ public class Ec2ContainerManager {
             }
             // Modern OpenSSH refuses to start without its privilege-separation directory, and /run
             // is a fresh tmpfs in most container images, so /run/sshd genuinely isn't there yet.
-            ContainerExecResult mkdir = execInContainerForResult(containerId,
+            ContainerExec.Result mkdir = execInContainerForResult(containerId,
                     new String[]{"mkdir", "-p", "/run/sshd"}, 5);
             if (mkdir.exitCode() != 0) {
                 LOG.warnv("Could not create /run/sshd for EC2 instance {0}: {1}",
@@ -1866,7 +1550,7 @@ public class Ec2ContainerManager {
             // Start sshd without -D so it daemonizes itself and survives this exec session. Since sshd
             // requires execution with an absolute path, several paths are tried until it starts
             for (String sshdPath : ALLOWED_SSHD_PATHS) {
-                ContainerExecResult start = execInContainerForResult(containerId, new String[]{sshdPath}, 5);
+                ContainerExec.Result start = execInContainerForResult(containerId, new String[]{sshdPath}, 5);
                 if (start.exitCode() != 0) {
                     LOG.warnv("Could not start sshd using path {0} for EC2 instance {1}: {2}", sshdPath, instanceId, start.summary());
                     continue;
@@ -1880,119 +1564,18 @@ public class Ec2ContainerManager {
     }
 
     private void executeUserData(String containerId, String instanceId, String userData, String region) {
-        try {
-            String logGroup = "/aws/ec2/" + instanceId;
-            String logStream = logStreamer.generateLogStreamName("user-data");
+        String logGroup = "/aws/ec2/" + instanceId;
+        String logStream = logStreamer != null ? logStreamer.generateLogStreamName("user-data") : null;
 
-            List<String> shellScripts = userDataShellScripts(userData);
-            if (shellScripts.isEmpty()) {
-                LOG.warnv("UserData for EC2 instance {0} did not contain executable shellscript parts, "
-                        + "so nothing it was meant to install has run. Floci executes cloud-init "
-                        + "text/x-shellscript parts and bare '#!' scripts only.", instanceId);
-                return;
-            }
-
-            // Execute the script and stream output to CloudWatch
-            for (int i = 0; i < shellScripts.size(); i++) {
-                executeUserDataShellScript(
-                        containerId, instanceId, shellScripts.get(i), i + 1, shellScripts.size(),
-                        logGroup, logStream, region
-                );
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            LOG.warnv("UserData execution interrupted for EC2 instance {0}", instanceId);
-        } catch (Exception e) {
-            LOG.warnv("UserData execution failed for EC2 instance {0}: {1}", instanceId, e.getMessage());
-        }
-    }
-
-    private void executeUserDataShellScript(
-            String containerId, String instanceId, String scriptContent, int partNumber, int partCount,
-            String logGroup, String logStream, String region
-    ) throws Exception {
-        byte[] script = scriptContent.getBytes(StandardCharsets.UTF_8);
-        byte[] tar = buildSingleFileTar("user-data.sh", script, 0755);
-        dockerClient.copyArchiveToContainerCmd(containerId)
-                .withRemotePath("/var/lib")
-                .withTarInputStream(new ByteArrayInputStream(tar))
-                .exec();
-
-        // Execute the script directly so Docker honors its shebang, matching cloud-init shellscript behavior.
-        String execId = dockerClient.execCreateCmd(containerId)
-                .withCmd(userDataExecutionCommand())
-                .withAttachStdout(true)
-                .withAttachStderr(true)
-                .exec()
-                .getId();
-
-        BoundedOutput output = new BoundedOutput(MAX_EXEC_OUTPUT_BYTES);
-        CountDownLatch latch = new CountDownLatch(1);
-
-        AtomicBoolean cancelled = new AtomicBoolean();
-        ResultCallback.Adapter<Frame> callback = new ResultCallback.Adapter<>() {
-            @Override
-            public void onStart(Closeable stream) {
-                if (cancelled.get()) {
-                    closeUserDataStream(stream, instanceId);
-                    return;
-                }
-                super.onStart(stream);
-                if (cancelled.get()) {
-                    closeUserDataStream(stream, instanceId);
-                }
-            }
-
-            @Override
-            public void onNext(Frame frame) {
-                if (cancelled.get()) {
-                    return;
-                }
-                byte[] payload = frame.getPayload();
-                if (payload == null) {
-                    return;
-                }
-                try { output.write(payload); } catch (IOException ignored) {}
-                String line = new String(payload, StandardCharsets.UTF_8).stripTrailing();
-                if (!line.isEmpty()) {
-                    logStreamer.streamToCloudWatchLogs(logGroup, logStream, region, line);
-                }
-            }
-            @Override
-            public void onComplete() { latch.countDown(); }
-            @Override
-            public void onError(Throwable t) { latch.countDown(); }
-            @Override
-            public void close() throws IOException {
-                cancelled.set(true);
-                super.close();
+        Consumer<String> lineConsumer = line -> {
+            if (logStreamer != null && logGroup != null && logStream != null && region != null) {
+                logStreamer.streamToCloudWatchLogs(logGroup, logStream, region, line);
             }
         };
-        activeUserDataCallbacks.add(callback);
 
-        try {
-            dockerClient.execStartCmd(execId).exec(callback);
-
-            boolean completed = latch.await(userDataExecutionTimeout.toMillis(), TimeUnit.MILLISECONDS);
-            if (!completed) {
-                LOG.warnv("UserData shellscript part {0}/{1} timed out for EC2 instance {2}",
-                        partNumber, partCount, instanceId);
-                return;
-            }
-
-            Long exitCode = dockerClient.inspectExecCmd(execId).exec().getExitCodeLong();
-            if (exitCode != null && exitCode != 0) {
-                LOG.warnv("UserData shellscript part {0}/{1} failed for EC2 instance {2} with exit code {3}: {4}",
-                        partNumber, partCount, instanceId, exitCode, summarizeUserDataOutput(output));
-                return;
-            }
-
-            LOG.infov("UserData shellscript part {0}/{1} completed for EC2 instance {2}: {3}",
-                    partNumber, partCount, instanceId, summarizeUserDataOutput(output));
-        } finally {
-            activeUserDataCallbacks.remove(callback);
-            closeUserDataCallback(callback, instanceId);
-        }
+        UserDataPipeline.executeUserData(
+                dockerClient, containerId, "EC2 instance " + instanceId, userData,
+                userDataExecutionTimeout, lineConsumer, activeUserDataCallbacks);
     }
 
     private void closeActiveUserDataCallbacks() {
@@ -2007,179 +1590,12 @@ public class Ec2ContainerManager {
         }
     }
 
-    private void closeUserDataStream(Closeable stream, String instanceId) {
-        try {
-            stream.close();
-        } catch (IOException e) {
-            LOG.warnv("Could not close Docker UserData stream for EC2 instance {0}: {1}",
-                    instanceId, e.getMessage());
-        }
-    }
-
     static List<String> userDataShellScripts(String userData) {
-        String decoded = decodeUserDataPayload(userData);
-        if (decoded == null || decoded.isBlank()) {
-            return List.of();
-        }
-
-        String normalized = decoded.replace("\r\n", "\n").replace('\r', '\n');
-        String trimmed = normalized.stripLeading();
-        if (trimmed.startsWith("#!")) {
-            return List.of(normalized);
-        }
-
-        Matcher matcher = MIME_BOUNDARY.matcher(normalized);
-        if (!matcher.find()) {
-            return List.of();
-        }
-
-        String boundary = matcher.group(1).trim();
-        if (boundary.isEmpty()) {
-            return List.of();
-        }
-
-        List<String> scripts = new ArrayList<>();
-        String marker = "--" + boundary;
-        for (String segment : normalized.split(Pattern.quote(marker))) {
-            String part = segment.stripLeading();
-            if (part.isBlank() || part.startsWith("--")) {
-                continue;
-            }
-            int headerEnd = part.indexOf("\n\n");
-            if (headerEnd < 0) {
-                continue;
-            }
-            String headers = part.substring(0, headerEnd);
-            String body = part.substring(headerEnd + 2);
-            if (hasShellscriptContentType(headers)) {
-                scripts.add(body.stripTrailing() + "\n");
-            }
-        }
-        return List.copyOf(scripts);
+        return UserDataPipeline.extractShellScripts(userData);
     }
 
-    /**
-     * Unwraps whatever encoding the UserData arrived in until a cloud-init document is
-     * visible: gzip, base64, and base64-of-gzip, in any nesting the callers produce.
-     *
-     * <p>RunInstances decodes the wire-level base64 (and its gzip) before Floci ever stores
-     * the value, but not every path does — CreateLaunchConfiguration stores what the client
-     * sent, still base64 — and {@code data.cloudinit_config { gzip = true }}, the documented
-     * way to pass a multipart cloud-init, produces a payload that survives one decode still
-     * compressed. Left unwrapped it matches neither the {@code #!} nor the MIME test below and
-     * the whole document is silently dropped, so the instance boots without anything its
-     * user-data was supposed to install.
-     *
-     * @return the decoded document, or the input unchanged when it is not encoded
-     */
     static String decodeUserDataPayload(String userData) {
-        if (userData == null || userData.isBlank()) {
-            return null;
-        }
-        byte[] payload = userData.getBytes(StandardCharsets.UTF_8);
-        // Bounded so a crafted payload cannot make this loop forever; two rounds already
-        // covers base64(gzip(document)), the deepest form in practice.
-        for (int round = 0; round < MAX_USER_DATA_DECODE_ROUNDS; round++) {
-            byte[] next = gunzip(payload);
-            if (next == null) {
-                next = base64Decode(payload);
-            }
-            if (next == null) {
-                break;
-            }
-            payload = next;
-        }
-        return new String(payload, StandardCharsets.UTF_8);
-    }
-
-    /** @return the decompressed bytes, or null when the input does not start with the gzip magic */
-    private static byte[] gunzip(byte[] payload) {
-        if (payload.length < 2 || (payload[0] & 0xff) != 0x1f || (payload[1] & 0xff) != 0x8b) {
-            return null;
-        }
-        // Aggregate bound (see MAX_CONCURRENT_USER_DATA_DECOMPRESSIONS): this call runs on
-        // whichever launch worker submitted it to the unbounded #executor, independently of every
-        // other concurrent launch, so the per-payload cap below is not enough on its own - it only
-        // stops one caller from expanding past 10 MB, not many callers doing so at once. Blocking
-        // here (rather than failing the launch) mirrors ContainerLauncher's POPULATE_SEMAPHORE: a
-        // burst of legitimate concurrent launches queues briefly instead of being rejected.
-        try {
-            USER_DATA_DECOMPRESSION_BUDGET.acquire();
-        } catch (InterruptedException ie) {
-            Thread.currentThread().interrupt();
-            LOG.warnv("Interrupted while waiting for UserData decompression budget; discarding payload");
-            return null;
-        }
-        try {
-            Runnable hook = userDataDecompressionTestHook;
-            if (hook != null) {
-                hook.run();
-            }
-            // Bounded the same way AwsJsonCborController.decodeBody is: a crafted payload can
-            // otherwise expand to gigabytes of image-heap while the launch worker holds it, since
-            // UserData is caller-controlled and this runs in the shared emulator JVM.
-            byte[] buffer = new byte[64 * 1024];
-            int totalRead = 0;
-            ByteArrayOutputStream decompressed = new ByteArrayOutputStream();
-            try (GZIPInputStream gzip = new GZIPInputStream(new ByteArrayInputStream(payload))) {
-                int read;
-                while ((read = gzip.read(buffer)) != -1) {
-                    totalRead += read;
-                    if (totalRead > MAX_DECOMPRESSED_USER_DATA_BYTES) {
-                        LOG.warnv("UserData decompressed past {0} bytes; discarding as oversized",
-                                MAX_DECOMPRESSED_USER_DATA_BYTES);
-                        return null;
-                    }
-                    decompressed.write(buffer, 0, read);
-                }
-                return decompressed.toByteArray();
-            } catch (IOException e) {
-                LOG.warnv("UserData starts with the gzip magic bytes but could not be decompressed: {0}", e.getMessage());
-                return null;
-            }
-        } finally {
-            USER_DATA_DECOMPRESSION_BUDGET.release();
-        }
-    }
-
-    /**
-     * @return the decoded bytes when the input is base64 that unwraps to something recognisable
-     *         (gzip, a shebang, or MIME headers), null otherwise. The recognisability test is
-     *         what keeps a plain shell script — which can be accidentally valid base64 — from
-     *         being mangled into binary noise.
-     */
-    private static byte[] base64Decode(byte[] payload) {
-        String text = new String(payload, StandardCharsets.UTF_8).strip();
-        if (text.isEmpty() || !BASE64_BODY.matcher(text).matches()) {
-            return null;
-        }
-        byte[] decoded;
-        try {
-            decoded = Base64.getMimeDecoder().decode(text);
-        } catch (IllegalArgumentException e) {
-            return null;
-        }
-        if (decoded.length < 2) {
-            return null;
-        }
-        if ((decoded[0] & 0xff) == 0x1f && (decoded[1] & 0xff) == 0x8b) {
-            return decoded;
-        }
-        String head = new String(decoded, 0, Math.min(decoded.length, 512), StandardCharsets.UTF_8).stripLeading();
-        return head.startsWith("#!") || head.toLowerCase(Locale.ROOT).startsWith("content-type:")
-                || head.toLowerCase(Locale.ROOT).startsWith("mime-version:") || head.startsWith("#cloud-config")
-                ? decoded
-                : null;
-    }
-
-    private static boolean hasShellscriptContentType(String headers) {
-        for (String line : headers.split("\n")) {
-            String lower = line.toLowerCase(Locale.ROOT).strip();
-            if (lower.startsWith("content-type:") && lower.contains("text/x-shellscript")) {
-                return true;
-            }
-        }
-        return false;
+        return UserDataPipeline.decodeUserDataPayload(userData);
     }
 
     static String[] userDataExecutionCommand() {
@@ -2187,122 +1603,52 @@ public class Ec2ContainerManager {
     }
 
     /**
-     * Official amazonlinux/ubuntu images have no systemd. Alchemy hosted
-     * user-data writes a unit and calls {@code systemctl enable --now}; this
-     * shim runs ExecStartPre + ExecStart with Restart=always so the HTTP
-     * server comes up the same way it does on a real AMI.
+     * The install-and-verify probe {@link #startSshd} execs in the guest. Extracted so tests can
+     * assert against the string production actually issues rather than against a copy of it.
+     *
+     * <p>Installs openssh-server if absent. The trailing "command -v" checks make the script's own
+     * exit code the source of truth for whether sshd is actually available afterward - without
+     * them, a shell if/elif chain with no matching branch (no dnf/yum/apt-get/apk found) or whose
+     * install command itself failed (e.g. no network yet, apt lock held) still exits 0 by bash
+     * convention, so every later step in startSshd would silently no-op against a daemon that was
+     * never installed while still logging success.
+     *
+     * <p>The client package is installed alongside the server because provisioning tools need scp
+     * <em>on the instance</em>: Packer's default file transfer for a shell provisioner uploads the
+     * script with scp, and real AMIs carry it. Installing only openssh-server leaves sftp-server
+     * present but /usr/bin/scp absent, so the upload fails with "SCP failed to start. This usually
+     * means that SCP is not properly installed on the remote system." The guard tests for scp too:
+     * keying it on sshd alone would skip the install entirely on an image that already has the
+     * server but no client. Package names differ - openssh-clients on rpm distributions,
+     * openssh-client on Debian; apk's openssh already contains both.
+     *
+     * <p>The two failures are not equally fatal, so the script separates them: exit 1 means no sshd
+     * and there is nothing to start, while exit 2 means sshd is there but the client package did
+     * not land. A guest that can serve SSH but cannot scp is still worth starting - it just cannot
+     * run a Packer shell provisioner - so that case warns and continues rather than leaving the
+     * instance unreachable. Checking only sshd at the end would report that state as outright
+     * success, which is the silent failure this probe exists to prevent.
      */
-    static String[] systemctlShimInstallCommand() {
-        return new String[]{"sh", "-c", String.join("\n",
-                "set -eu",
-                "mkdir -p /etc/systemd/system /lib/systemd/system /usr/local/sbin /usr/local/bin /var/log /var/run",
-                "if command -v systemctl >/dev/null 2>&1; then",
-                "  if [ -d /run/systemd/system ] || ! systemctl --version 2>/dev/null | grep -q '^systemd '; then exit 0; fi",
-                "fi",
-                "cat > /usr/local/sbin/systemctl <<'SHIM'",
-                "#!/bin/sh",
-                "cmd=\"${1:-}\"",
-                "shift || true",
-                "case \"$cmd\" in",
-                "  daemon-reload|status|is-enabled|is-active) exit 0 ;;",
-                "  enable|start|restart)",
-                "    unit=\"\"",
-                "    for a in \"$@\"; do",
-                "      case \"$a\" in --now) ;; *) unit=\"$a\" ;; esac",
-                "    done",
-                "    [ -n \"$unit\" ] || exit 0",
-                "    unit=\"${unit%.service}\"",
-                "    unitfile=\"/etc/systemd/system/${unit}.service\"",
-                "    [ -f \"$unitfile\" ] || unitfile=\"/lib/systemd/system/${unit}.service\"",
-                "    [ -f \"$unitfile\" ] || exit 0",
-                "    wd=$(sed -n 's/^WorkingDirectory=//p' \"$unitfile\" | tail -n 1)",
-                "    pre=$(sed -n 's/^ExecStartPre=//p' \"$unitfile\" | tail -n 1)",
-                "    start=$(sed -n 's/^ExecStart=//p' \"$unitfile\" | tail -n 1)",
-                "    envfile=$(sed -n 's/^EnvironmentFile=-\\{0,1\\}//p' \"$unitfile\" | tail -n 1)",
-                "    pidfile=\"/var/run/${unit}.pid\"",
-                "    # PIDs restart from 1 after a container reboot, so a stale pidfile can",
-                "    # name an unrelated live process: only trust it if it is this unit's loop.",
-                "    if [ -f \"$pidfile\" ]; then",
-                "      pid=$(cat \"$pidfile\")",
-                "      if [ -n \"$pid\" ] && kill -0 \"$pid\" 2>/dev/null \\",
-                "          && tr '\\000' ' ' < \"/proc/$pid/cmdline\" 2>/dev/null | grep -qF \"$unitfile\"; then",
-                "        exit 0",
-                "      fi",
-                "    fi",
-                "    # ExecStartPre downloads EnvironmentFile (Alchemy hosted env).",
-                "    # Run it INSIDE the restart loop, like systemd Restart=always",
-                "    # does: every unit restart re-syncs the bundle and re-sources",
-                "    # the env before ExecStart.",
-                "    nohup sh -c '",
-                "      unitfile=\"$0\"",
-                "      wd=$(sed -n \"s/^WorkingDirectory=//p\" \"$unitfile\" | tail -n 1)",
-                "      pre=$(sed -n \"s/^ExecStartPre=//p\" \"$unitfile\" | tail -n 1)",
-                "      start=$(sed -n \"s/^ExecStart=//p\" \"$unitfile\" | tail -n 1)",
-                "      envfile=$(sed -n \"s/^EnvironmentFile=-\\{0,1\\}//p\" \"$unitfile\" | tail -n 1)",
-                "      if [ -n \"$wd\" ]; then cd \"$wd\" || exit 1; fi",
-                "      while true; do",
-                "        if [ -n \"$pre\" ]; then $pre || { sleep 5; continue; }; fi",
-                "        if [ -n \"$envfile\" ] && [ -f \"$envfile\" ]; then set -a; . \"$envfile\"; set +a; fi",
-                "        if [ -n \"$start\" ]; then $start; fi",
-                "        sleep 5",
-                "      done",
-                "    ' \"$unitfile\" >/var/log/${unit}.log 2>&1 &",
-                "    echo $! > \"$pidfile\"",
-                "    exit 0",
-                "    ;;",
-                "  *) exit 0 ;;",
-                "esac",
-                "SHIM",
-                "chmod 755 /usr/local/sbin/systemctl",
-                "if [ ! -e /usr/bin/systemctl ]; then ln -s /usr/local/sbin/systemctl /usr/bin/systemctl; fi")};
-    }
-
-    /**
-     * Catalog images (amazonlinux:2023 / ubuntu:24.04) have no systemd tree.
-     * Alchemy hosted user-data writes {@code /etc/systemd/system/*.service};
-     * without the directory {@code cat >} fails and {@code systemctl enable}
-     * is a no-op.
-     */
-    static String[] prepareGuestFilesystemCommand() {
-        return new String[]{"sh", "-c",
-                "mkdir -p /etc/systemd/system /lib/systemd/system /usr/local/bin /usr/local/sbin /var/log /var/run"};
-    }
-
-    ResolvedAmiImage prepareImage(ResolvedAmiImage image) {
-        return bootstrapImage.prepare(image);
-    }
-
-    private void prepareGuestFilesystem(String containerId, String instanceId) {
-        try {
-            ContainerExecResult result = execInContainerForResult(containerId, prepareGuestFilesystemCommand(), 10);
-            if (result.exitCode() != 0) {
-                LOG.warnv("Could not prepare guest filesystem for EC2 instance {0}: {1}",
-                        instanceId, result.summary());
-            }
-        } catch (Exception e) {
-            LOG.warnv("Could not prepare guest filesystem for EC2 instance {0}: {1}",
-                    instanceId, e.getMessage());
-        }
-    }
-
-    private void installSystemctlShim(String containerId, String instanceId) {
-        try {
-            ContainerExecResult result = execInContainerForResult(containerId, systemctlShimInstallCommand(), 15);
-            if (result.exitCode() != 0) {
-                LOG.warnv("Could not install systemctl shim for EC2 instance {0}: {1}",
-                        instanceId, result.summary());
-            }
-        } catch (Exception e) {
-            LOG.warnv("Could not install systemctl shim for EC2 instance {0}: {1}",
-                    instanceId, e.getMessage());
-        }
-    }
-
-    /** Missing scp does not prevent a supplied sshd from serving the guest. */
     static String[] sshdInstallProbeCommand() {
         return new String[]{"sh", "-c",
-                "command -v sshd >/dev/null 2>&1 || exit 1;"
-                        + "command -v scp >/dev/null 2>&1 || exit 2"};
+            // dnf and yum are Python programs: an image's PYTHONHOME or LD_LIBRARY_PATH made them
+            // fail to start, so sshd was never installed.
+            Ec2MetadataProxy.CLEAR_APPLICATION_PATHS + ";" +
+            "if ! command -v sshd >/dev/null 2>&1 || ! command -v scp >/dev/null 2>&1; then" +
+                    "  if command -v dnf >/dev/null 2>&1; then dnf install -y openssh-server openssh-clients >/dev/null 2>&1;" +
+                    // yum is probed after dnf, and the order is load-bearing: Amazon Linux
+                    // 2023 and modern Fedora/RHEL ship both, and there dnf is the supported
+                    // front end while yum is only a compatibility shim over it. Amazon Linux
+                    // 2 -- reached by explicitly requesting ami-amazonlinux2, not the default
+                    // image -- ships only yum, so without this branch the chain falls through
+                    // and sshd is never installed.
+                    "  elif command -v yum >/dev/null 2>&1; then yum install -y openssh-server openssh-clients >/dev/null 2>&1;" +
+                    "  elif command -v apt-get >/dev/null 2>&1; then DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server openssh-client >/dev/null 2>&1;" +
+                    "  elif command -v apk >/dev/null 2>&1; then apk add --no-cache openssh >/dev/null 2>&1;" +
+                    "  fi;" +
+                    "fi;" +
+                    "command -v sshd >/dev/null 2>&1 || exit 1;" +
+                    "command -v scp >/dev/null 2>&1 || exit 2"};
     }
 
     static String[] metadataProxyInstallCommand() {
@@ -2332,241 +1678,57 @@ public class Ec2ContainerManager {
         return environment;
     }
 
-    static String summarizeUserDataOutput(BoundedOutput output) {
-        String text = output.utf8Tail().stripTrailing();
-        if (text.isBlank()) {
-            text = "(no output)";
-        }
-        if (output.truncated()) {
-            return "(output truncated; showing last " + output.capacity() + " bytes)\n" + text;
-        }
-        return text;
+    static String summarizeUserDataOutput(UserDataPipeline.BoundedOutput output) {
+        return UserDataPipeline.summarizeUserDataOutput(output);
     }
 
-    static final class BoundedOutput extends OutputStream {
-        private final byte[] buffer;
-        private int size;
-        private long totalBytes;
-
+    static class BoundedOutput extends UserDataPipeline.BoundedOutput {
         BoundedOutput(int capacity) {
-            if (capacity <= 0) {
-                throw new IllegalArgumentException("capacity must be positive");
-            }
-            buffer = new byte[capacity];
-        }
-
-        @Override
-        public void write(int value) {
-            write(new byte[]{(byte) value}, 0, 1);
-        }
-
-        @Override
-        public void write(byte[] source, int offset, int length) {
-            Objects.checkFromIndexSize(offset, length, source.length);
-            if (length == 0) {
-                return;
-            }
-            totalBytes += length;
-            if (length >= buffer.length) {
-                System.arraycopy(source, offset + length - buffer.length, buffer, 0, buffer.length);
-                size = buffer.length;
-                return;
-            }
-            int overflow = Math.max(0, size + length - buffer.length);
-            if (overflow > 0) {
-                System.arraycopy(buffer, overflow, buffer, 0, size - overflow);
-                size -= overflow;
-            }
-            System.arraycopy(source, offset, buffer, size, length);
-            size += length;
-        }
-
-        String utf8Tail() {
-            int start = 0;
-            while (start < size) {
-                int sequenceLength = utf8SequenceLength(buffer[start]);
-                if (sequenceLength == 0) {
-                    start++;
-                    continue;
-                }
-                if (sequenceLength == 1) {
-                    break;
-                }
-                if (sequenceLength <= size - start && hasContinuationBytes(start, sequenceLength)) {
-                    break;
-                }
-                start++;
-            }
-            return new String(buffer, start, size - start, StandardCharsets.UTF_8);
-        }
-
-        boolean truncated() {
-            return totalBytes > buffer.length;
-        }
-
-        int capacity() {
-            return buffer.length;
-        }
-
-        private boolean hasContinuationBytes(int start, int sequenceLength) {
-            for (int i = 1; i < sequenceLength; i++) {
-                if ((buffer[start + i] & 0xC0) != 0x80) {
-                    return false;
-                }
-            }
-            return true;
-        }
-
-        private static int utf8SequenceLength(byte value) {
-            int unsigned = value & 0xFF;
-            if (unsigned < 0x80) {
-                return 1;
-            }
-            if ((unsigned & 0xC0) == 0x80) {
-                return 0;
-            }
-            if ((unsigned & 0xE0) == 0xC0) {
-                return 2;
-            }
-            if ((unsigned & 0xF0) == 0xE0) {
-                return 3;
-            }
-            if ((unsigned & 0xF8) == 0xF0) {
-                return 4;
-            }
-            return 1;
+            super(capacity);
         }
     }
 
-    boolean configureMetadataEndpoint(Instance instance) {
+    private void configureLinkLocalMetadataEndpoint(String containerId, String instanceId, String flociHost, int imdsPort) {
         try {
-            ProtectedNamespace namespace = protectedNamespace(instance);
-            return configureLinkLocalMetadataEndpoint(instance,
-                    namespace == null ? instance.getDockerContainerId() : namespace.helperId());
-        } catch (RuntimeException e) {
-            LOG.warnv("Could not resolve IMDS proxy container for EC2 instance {0}: {1}",
-                    instance.getInstanceId(), e.getMessage());
-            return false;
-        }
-    }
-
-    boolean configureLinkLocalMetadataEndpoint(Instance instance, String containerId) {
-        Object lock = metadataLocks.computeIfAbsent(instance, key -> new Object());
-        synchronized (lock) {
-            return configureMetadataProxy(instance, containerId);
-        }
-    }
-
-    private boolean configureMetadataProxy(Instance instance, String containerId) {
-        String instanceId = instance.getInstanceId();
-        String capability;
-        synchronized (instance) {
-            String state = instance.getState() == null ? null : instance.getState().getName();
-            if (isLaunchCancelledState(instance) || "stopping".equals(state) || "stopped".equals(state)) {
-                return false;
-            }
-            if ("disabled".equals(instance.effectiveMetadataOptions().getHttpEndpoint())) {
-                metadataServer.unregisterInstance(instance);
-                return true;
-            }
-            capability = metadataServer.registerProxy(instance);
-        }
-        boolean configured = false;
-        try {
-            InspectContainerResponse inspect = dockerClient.inspectContainerCmd(containerId).exec();
-            Map<String, String> labels = inspect.getConfig() == null ? Map.of() : inspect.getConfig().getLabels();
-            String accountId = Ec2MetadataServer.instanceAccountId(instance, regionResolver.getAccountId());
-            if (accountId == null || !accountId.matches("[0-9]{12}")
-                    || labels == null || !ownerIdentity().equals(labels.get(LABEL_OWNER_PORT))
-                    || !SERVICE_VALUE.equals(labels.get(LABEL_SERVICE))
-                    || !instanceId.equals(labels.get(LABEL_RESOURCE_ID))
-                    || !Objects.equals(accountId, labels.get("io.floci.account"))
-                    || !Objects.equals(instance.getRegion(), labels.get(LABEL_REGION))) {
-                throw new IllegalStateException("IMDS proxy target is not the owned EC2 container");
-            }
-            ContainerExecResult install = execInContainerForResult(containerId,
-                    new String[]{"sh", "-c", "command -v ip && command -v python3 && command -v curl"}, 10);
+            ContainerExec.Result install = execInContainerForResult(containerId, metadataProxyInstallCommand(), 180);
             if (install.exitCode() != 0) {
-                LOG.warnv("IMDS proxy dependencies are unavailable for EC2 instance {0}: {1}",
+                LOG.warnv("Could not install IMDS proxy dependencies for EC2 instance {0}: {1}",
                         instanceId, install.summary());
-                return false;
+                return;
             }
-            String proxyConfig = new JsonObject()
-                    .put("host", dockerHostResolver.resolve())
-                    .put("port", config.services().ec2().imdsPort())
-                    .put("capability", capability).encode();
-            copyMetadataFile(containerId, "floci-imds-proxy.py", Ec2MetadataProxy.authenticatedProxyScript(), 0700);
-            copyMetadataFile(containerId, "floci-imds-proxy.json.next", proxyConfig, 0600);
-            ContainerExecResult start = execInContainerForResult(containerId,
-                    Ec2MetadataProxy.authenticatedStartCommand(instanceId), 45);
+
+            ContainerExec.Result start = execInContainerForResult(containerId, metadataProxyStartCommand(flociHost, imdsPort), 30);
             if (start.exitCode() != 0) {
                 LOG.warnv("Could not start link-local IMDS proxy for EC2 instance {0}: {1}",
                         instanceId, start.summary());
-                return false;
+                return;
             }
-            configured = true;
+
             LOG.infov("Configured link-local IMDS endpoint for EC2 instance {0}", instanceId);
-            return true;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            LOG.debugv("Interrupted IMDS proxy setup for EC2 instance {0}", instanceId);
-            return false;
         } catch (Exception e) {
             LOG.warnv("Could not configure link-local IMDS endpoint for EC2 instance {0}: {1}", instanceId, e.getMessage());
-            return false;
-        } finally {
-            if (!configured) {
-                metadataServer.unregisterProxy(instance, capability);
-            }
         }
     }
 
-    private void copyMetadataFile(String containerId, String name, String content, int mode) throws IOException {
-        byte[] archive = buildSingleFileTar(name, content.getBytes(StandardCharsets.UTF_8), mode);
-        dockerClient.copyArchiveToContainerCmd(containerId)
-                .withRemotePath("/var/lib")
-                .withTarInputStream(new ByteArrayInputStream(archive))
-                .exec();
-    }
-
-    private void execInContainer(String containerId, String[] cmd, int timeoutSeconds) throws Exception {
+    private void execInContainer(String containerId, String[] cmd, int timeoutSeconds) {
         execInContainerForResult(containerId, cmd, timeoutSeconds);
     }
 
-    private ContainerExecResult execInContainerForResult(String containerId, String[] cmd, int timeoutSeconds) throws Exception {
-        String execId = dockerClient.execCreateCmd(containerId)
-                .withCmd(cmd)
-                .withAttachStdout(true)
-                .withAttachStderr(true)
-                .exec()
-                .getId();
-
-        CountDownLatch latch = new CountDownLatch(1);
-        BoundedOutput output = new BoundedOutput(MAX_EXEC_OUTPUT_BYTES);
-        dockerClient.execStartCmd(execId).exec(new ResultCallback.Adapter<Frame>() {
-            @Override
-            public void onNext(Frame frame) {
-                if (frame.getPayload() != null) {
-                    try { output.write(frame.getPayload()); } catch (IOException ignored) {}
-                }
+    private ContainerExec.Result execInContainerForResult(String containerId, String[] cmd, int timeoutSeconds) {
+        BoundedOutput output = new BoundedOutput(UserDataPipeline.MAX_EXEC_OUTPUT_BYTES);
+        ContainerExec.Result result;
+        try {
+            result = ContainerExec.run(dockerClient, containerId, cmd, timeoutSeconds, output, output);
+        } catch (RuntimeException e) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw e;
             }
-            @Override
-            public void onComplete() { latch.countDown(); }
-            @Override
-            public void onError(Throwable t) { latch.countDown(); }
-        });
-        boolean completed = latch.await(timeoutSeconds, TimeUnit.SECONDS);
-        if (!completed) {
-            return new ContainerExecResult(-1, "Timed out after " + timeoutSeconds + "s");
+            return new ContainerExec.Result(-1, "", Objects.requireNonNullElse(e.getMessage(), e.toString()), false);
         }
-        Long exitCode = dockerClient.inspectExecCmd(execId).exec().getExitCodeLong();
-        return new ContainerExecResult(exitCode != null ? exitCode : -1, summarizeUserDataOutput(output));
-    }
-
-    record ContainerExecResult(long exitCode, String output) {
-        String summary() {
-            return output == null || output.isBlank() ? "(no output)" : output;
+        if (result.timedOut()) {
+            return result;
         }
+        return new ContainerExec.Result(result.exitCode(), summarizeUserDataOutput(output), "", false);
     }
 
     private String getContainerBridgeIp(String containerId) {
@@ -2613,19 +1775,5 @@ public class Ec2ContainerManager {
 
     static Optional<String> preferredMetadataSourceIp(Map<String, ContainerNetwork> networks) {
         return Ec2MetadataProxy.preferredMetadataSourceIp(networks);
-    }
-
-    private byte[] buildSingleFileTar(String filename, byte[] content, int mode) throws IOException {
-        ByteArrayOutputStream bos = new ByteArrayOutputStream();
-        try (TarArchiveOutputStream tar = new TarArchiveOutputStream(bos)) {
-            tar.setLongFileMode(TarArchiveOutputStream.LONGFILE_GNU);
-            TarArchiveEntry entry = new TarArchiveEntry(filename);
-            entry.setSize(content.length);
-            entry.setMode(mode);
-            tar.putArchiveEntry(entry);
-            tar.write(content);
-            tar.closeArchiveEntry();
-        }
-        return bos.toByteArray();
     }
 }

@@ -1,12 +1,12 @@
 package io.github.hectorvent.floci.core.common.docker;
 
-import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.services.cloudwatch.logs.CloudWatchLogsService;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.LogContainerCmd;
 import com.github.dockerjava.api.model.Frame;
 import com.github.dockerjava.api.model.StreamType;
+import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.services.cloudwatch.logs.CloudWatchLogsService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -28,14 +28,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
 
 /**
- * Streams Docker container logs to both the Floci console logger and CloudWatch Logs.
+ * Streams Docker container logs to CloudWatch Logs and, by default, the Floci console logger.
  * Consolidates the log streaming pattern used across container managers.
  */
 @ApplicationScoped
@@ -47,8 +47,12 @@ public class ContainerLogStreamer {
     private final DockerClient dockerClient;
     private final CloudWatchLogsService cloudWatchLogsService;
 
+    // Log-follow attaches hold their connection open for the whole container lifetime, so
+    // this class is the primary consumer of the streaming pool: sharing the control-plane
+    // pool is what starved short create/start/stop calls during an LZA Logging fan-out
+    // (see DockerClientProducer / StreamingDocker).
     @Inject
-    public ContainerLogStreamer(DockerClient dockerClient, CloudWatchLogsService cloudWatchLogsService) {
+    public ContainerLogStreamer(@StreamingDocker DockerClient dockerClient, CloudWatchLogsService cloudWatchLogsService) {
         this.dockerClient = dockerClient;
         this.cloudWatchLogsService = cloudWatchLogsService;
     }
@@ -112,7 +116,25 @@ public class ContainerLogStreamer {
                 forwardToCloudWatchLogs(accountId, logGroup, logStream, region, trimmed);
             }
         };
+        return follow(containerId, since, emitter);
+    }
 
+    /**
+     * Like {@link #attach}, but sends the output only to the console logger, not to CloudWatch Logs.
+     * Use it for a container whose output must stay visible locally but has no CloudWatch
+     * destination, such as an ECS container without an {@code awslogs} log configuration.
+     */
+    public Closeable attachConsoleOnly(String containerId, String logPrefix) {
+        Consumer<String> emitter = line -> {
+            String trimmed = line.stripTrailing();
+            if (!trimmed.isEmpty()) {
+                LOG.infov("[{0}] {1}", logPrefix, trimmed);
+            }
+        };
+        return follow(containerId, null, emitter);
+    }
+
+    private Closeable follow(String containerId, Instant since, Consumer<String> emitter) {
         try {
             LogReassemblyCallback callback = new LogReassemblyCallback(emitter);
             LogContainerCmd command = dockerClient.logContainerCmd(containerId)
@@ -155,17 +177,28 @@ public class ContainerLogStreamer {
 
     public ResultCallback.Adapter<Frame> execLogCallbackForAccount(
             String accountId, String logGroup, String logStream, String region, String logPrefix) {
-        return frameCallback(accountId, logGroup, logStream, region, logPrefix);
+        return execLogCallbackForAccount(accountId, logGroup, logStream, region, logPrefix, true);
     }
 
     /**
-     * Shared frame handling for both the container log stream and exec streams.
+     * Returns an exec callback that always forwards to CloudWatch Logs.
+     *
+     * @param logToConsole whether to also write each frame to the Floci console at INFO level
+     */
+    public ResultCallback.Adapter<Frame> execLogCallbackForAccount(
+            String accountId, String logGroup, String logStream, String region, String logPrefix,
+            boolean logToConsole) {
+        return frameCallback(accountId, logGroup, logStream, region, logPrefix, logToConsole);
+    }
+
+    /**
+     * Handles frames from Docker exec streams.
      *
      * @param accountId account that owns the destination log stream, or {@code null} for the
      *                  default account
      */
     private ResultCallback.Adapter<Frame> frameCallback(String accountId, String logGroup, String logStream,
-                                                        String region, String logPrefix) {
+                                                        String region, String logPrefix, boolean logToConsole) {
         return new ResultCallback.Adapter<>() {
             @Override
             public void onNext(Frame frame) {
@@ -174,7 +207,9 @@ public class ContainerLogStreamer {
                 }
                 String line = new String(frame.getPayload(), StandardCharsets.UTF_8).stripTrailing();
                 if (!line.isEmpty()) {
-                    LOG.infov("[{0}] {1}", logPrefix, line);
+                    if (logToConsole) {
+                        LOG.infov("[{0}] {1}", logPrefix, line);
+                    }
                     forwardToCloudWatchLogs(accountId, logGroup, logStream, region, line);
                 }
             }
@@ -255,7 +290,7 @@ public class ContainerLogStreamer {
         private static final ScheduledExecutorService CLOSE_DRAIN_SCHEDULER = closeDrainScheduler();
 
         private static ScheduledExecutorService closeDrainScheduler() {
-            var scheduler = new ScheduledThreadPoolExecutor(1, runnable -> {
+            ScheduledThreadPoolExecutor scheduler = new ScheduledThreadPoolExecutor(1, runnable -> {
                 Thread thread = new Thread(runnable, "floci-container-log-close");
                 thread.setDaemon(true);
                 return thread;

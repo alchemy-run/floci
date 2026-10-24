@@ -2,8 +2,11 @@ package io.github.hectorvent.floci.services.cloudfront;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.config.EmulatorConfig;
-import io.github.hectorvent.floci.core.common.AwsArnUtils;
+import io.github.hectorvent.floci.config.LocalStackParity;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.CloudFrontEdgeDomain;
+import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -32,9 +35,12 @@ import io.github.hectorvent.floci.services.cloudfront.model.VpcOrigin;
 import io.github.hectorvent.floci.services.cloudfront.edge.CloudFrontEdgePorts;
 import io.github.hectorvent.floci.services.elbv2.ElbV2Service;
 import io.github.hectorvent.floci.services.elbv2.model.LoadBalancer;
+import io.github.hectorvent.floci.services.iam.IamService;
+import io.github.hectorvent.floci.services.iam.ServerCertificateReferenceProvider;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.net.URI;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -52,19 +58,24 @@ import java.util.SequencedSet;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.function.Supplier;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @ApplicationScoped
-public class CloudFrontService {
+public class CloudFrontService implements ServerCertificateReferenceProvider {
 
     private static final String CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     private static final int MAX_CUSTOM_RESPONSE_HEADERS_POLICIES = 20;
     private static final int MAX_DISTRIBUTIONS_PER_RESPONSE_HEADERS_POLICY = 100;
     private static final SecureRandom RANDOM = new SecureRandom();
-    private static final Set<String> OAC_ORIGIN_TYPES =
-            Set.of("s3", "mediastore", "mediapackagev2", "lambda");
-    private static final Set<String> OAC_SIGNING_BEHAVIORS =
-            Set.of("always", "never", "no-override");
+    /** The enum values in the order AWS lists them. */
+    private static final List<String> OAC_ORIGIN_TYPES =
+            List.of("s3", "execute-api", "lambda", "mediastore", "mediapackagev2");
+    private static final List<String> OAC_SIGNING_PROTOCOLS = List.of("sigv4", "sigv4a");
+    private static final List<String> OAC_SIGNING_BEHAVIORS =
+            List.of("always-amz-auth", "never", "always", "no-override");
+    private static final Set<String> FUNCTION_RUNTIMES = Set.of("cloudfront-js-1.0", "cloudfront-js-2.0");
     private static final int MAX_ORIGIN_CUSTOM_HEADERS = 30;
     private static final int MAX_CUSTOM_HEADER_NAME_LENGTH = 256;
     private static final int MAX_CUSTOM_HEADER_VALUE_LENGTH = 1_783;
@@ -89,6 +100,24 @@ public class CloudFrontService {
             "60669652-455b-4ae9-85a4-c4c02393f86c";
     private static final Map<String, ResponseHeadersPolicy> MANAGED_RESPONSE_HEADERS_POLICIES =
             managedResponseHeadersPolicies();
+    static final String MANAGED_ALL_VIEWER_ORIGIN_REQUEST_POLICY_ID =
+            "216adef6-5c7f-47e4-b989-5492eafa07d3";
+    static final String MANAGED_ALL_VIEWER_AND_CLOUDFRONT_HEADERS_ORIGIN_REQUEST_POLICY_ID =
+            "33f36d7e-f396-46d9-90e0-52428a34d9dc";
+    static final String MANAGED_ALL_VIEWER_EXCEPT_HOST_HEADER_ORIGIN_REQUEST_POLICY_ID =
+            "b689b0a8-53d0-40ab-baf2-68738e2966ac";
+    static final String MANAGED_CORS_CUSTOM_ORIGIN_ORIGIN_REQUEST_POLICY_ID =
+            "59781a5b-3903-41f3-afcb-af62929ccde1";
+    static final String MANAGED_CORS_S3_ORIGIN_ORIGIN_REQUEST_POLICY_ID =
+            "88a5eaf4-2fd4-4709-b370-b4c650ea3fcf";
+    static final String MANAGED_MEDIATAILOR_ORIGIN_REQUEST_POLICY_ID =
+            "775133bc-15f2-49f9-abea-afb2e0bf67d2";
+    static final String MANAGED_HOST_HEADER_ONLY_ORIGIN_REQUEST_POLICY_ID =
+            "bf0718e1-ba1e-49d1-88b1-f726733018ae";
+    static final String MANAGED_USER_AGENT_REFERER_ORIGIN_REQUEST_POLICY_ID =
+            "acba4595-bd28-49b8-b9fe-13317c0390fa";
+    private static final Map<String, OriginRequestPolicy> MANAGED_ORIGIN_REQUEST_POLICIES =
+            managedOriginRequestPolicies();
 
     private final StorageBackend<String, Distribution> distStore;
     private final StorageBackend<String, List<Invalidation>> invalidationStore;
@@ -112,20 +141,29 @@ public class CloudFrontService {
     /** KVS data-plane keys, keyed by store id → (key → value). */
     private final StorageBackend<String, Map<String, String>> kvsKeysStore;
     private final String accountId;
-    private final String domainSuffix;
-    private final ElbV2Service elbV2;
-    /** Null in unit tests: a distribution without a local port is still Host-addressable. */
-    private final CloudFrontEdgePorts edgePorts;
-    /** Local DNS and TLS host suffixes accepted in addition to the assigned distribution domain. */
+    private final RegionResolver regionResolver;
+    private final IamService iamService;
+    private final String configuredDomainSuffix;
+    /**
+     * Host suffixes under which every distribution is served as {@code <id><suffix>}, whatever
+     * {@code floci.services.cloudfront.domain-suffix} makes the assigned domain name. They carry the
+     * {@code cloudfront} service label on the endpoint hosts the embedded DNS resolves, the same
+     * derivation API Gateway uses for {@code <id>.execute-api.<host>}, so a name that resolves to
+     * Floci is also routed by it. {@code <id>.cloudfront.localhost.floci.io} and
+     * {@code <id>.cloudfront.localhost} are additionally covered by the generated HTTPS
+     * certificate, so a signed URL for either can be downloaded over HTTPS.
+     */
     private final List<String> localDeliverySuffixes;
+    private final Pattern lambdaOriginHost;
 
-    public CloudFrontService(StorageFactory factory, EmulatorConfig config) {
-        this(factory, config, null, null);
+    public CloudFrontService(StorageFactory factory, EmulatorConfig config, RegionResolver regionResolver) {
+        this(factory, config, regionResolver, null);
     }
 
     @Inject
-    public CloudFrontService(StorageFactory factory, EmulatorConfig config, ElbV2Service elbV2,
-                             CloudFrontEdgePorts edgePorts) {
+    public CloudFrontService(StorageFactory factory, EmulatorConfig config, RegionResolver regionResolver,
+                             IamService iamService) {
+        this.iamService = iamService;
         this.distStore = factory.create("cloudfront", "cloudfront-distributions.json",
                 new TypeReference<Map<String, Distribution>>() {});
         this.invalidationStore = factory.create("cloudfront", "cloudfront-invalidations.json",
@@ -167,33 +205,37 @@ public class CloudFrontService {
         this.kvsKeysStore = factory.create("cloudfront", "cloudfront-kvs-keys.json",
                 new TypeReference<Map<String, Map<String, String>>>() {});
         this.accountId = config.defaultAccountId();
-        this.domainSuffix = config.services().cloudfront().domainSuffix();
-        this.elbV2 = elbV2;
-        this.edgePorts = edgePorts;
+        this.regionResolver = regionResolver;
+        this.configuredDomainSuffix = config.services().cloudfront().domainSuffix().orElse(null);
         this.localDeliverySuffixes = localDeliverySuffixes(config);
+        this.lambdaOriginHost = lambdaOriginHost(config);
     }
 
     // ── Distributions ─────────────────────────────────────────────────────────
 
     public synchronized Distribution createDistribution(Distribution dist, Map<String, String> tags) {
         ensureAliasesAvailable(dist.getConfig(), null);
+        validateOriginSettings(dist.getConfig());
         validateOriginCustomHeaders(dist.getConfig());
         validateResponseHeadersPolicyReferences(dist.getConfig(), null);
         validateTrustedKeyGroups(dist.getConfig());
-        String id = generateDistributionId();
-        dist.setId(id);
-        dist.setArn(AwsArnUtils.Arn.of("cloudfront", "", accountId, "distribution/" + id).toString());
-        dist.setDomainName(domainNameFor(id));
-        dist.setStatus("Deployed");
-        dist.setLastModifiedTime(Instant.now());
-        dist.setEtag(UUID.randomUUID().toString());
-        if (tags != null && !tags.isEmpty()) {
-            dist.setTags(tags);
-            tagStore.put("distribution/" + id, tags);
-        }
-        distStore.put(id, dist);
-        bindEdgePort(id);
-        return dist;
+        validateOriginAccessControls(dist.getConfig());
+        return whileCertificatesHeld(dist.getConfig(), () -> {
+            validateViewerCertificate(dist.getConfig());
+            String id = generateDistributionId();
+            dist.setId(id);
+            dist.setArn(arn("distribution/" + id));
+            dist.setDomainName(domainNameFor(id));
+            dist.setStatus("Deployed");
+            dist.setLastModifiedTime(Instant.now());
+            dist.setEtag(UUID.randomUUID().toString());
+            if (tags != null && !tags.isEmpty()) {
+                dist.setTags(tags);
+                tagStore.put("distribution/" + id, tags);
+            }
+            distStore.put(id, dist);
+            return dist;
+        });
     }
 
     public Distribution getDistribution(String id) {
@@ -208,18 +250,123 @@ public class CloudFrontService {
                     "The If-Match version is missing or not valid for the resource.", 400);
         }
         ensureAliasesAvailable(updated.getConfig(), id);
+        validateOriginSettings(updated.getConfig());
         validateOriginCustomHeaders(updated.getConfig());
         validateResponseHeadersPolicyReferences(updated.getConfig(), id);
         validateTrustedKeyGroups(updated.getConfig());
-        updated.setId(id);
-        updated.setArn(existing.getArn());
-        updated.setDomainName(existing.getDomainName());
-        updated.setStatus("Deployed");
-        updated.setLastModifiedTime(Instant.now());
-        updated.setEtag(UUID.randomUUID().toString());
-        updated.setTags(existing.getTags());
-        distStore.put(id, updated);
-        return updated;
+        validateOriginAccessControls(updated.getConfig());
+        return whileCertificatesHeld(updated.getConfig(), () -> {
+            validateViewerCertificate(updated.getConfig());
+            updated.setId(id);
+            updated.setArn(existing.getArn());
+            updated.setDomainName(existing.getDomainName());
+            updated.setStatus("Deployed");
+            updated.setLastModifiedTime(Instant.now());
+            updated.setEtag(UUID.randomUUID().toString());
+            updated.setTags(existing.getTags());
+            distStore.put(id, updated);
+            return updated;
+        });
+    }
+
+    @Override
+    public List<Reference> serverCertificateReferences() {
+        List<Reference> references = new ArrayList<>();
+        for (Distribution distribution : distStore.scan(k -> true)) {
+            String certificateId = iamCertificateId(distribution.getConfig());
+            if (certificateId != null) {
+                references.add(new Reference(certificateId, "distribution " + distribution.getId()));
+            }
+        }
+        return references;
+    }
+
+    private static String iamCertificateId(DistributionConfig config) {
+        if (config == null || config.getViewerCertificate() == null) {
+            return null;
+        }
+        String certificateId = config.getViewerCertificate().get("IAMCertificateId");
+        return certificateId == null || certificateId.isBlank() ? null : certificateId;
+    }
+
+    private void validateViewerCertificate(DistributionConfig config) {
+        String certificateId = iamCertificateId(config);
+        if (certificateId != null && iamService != null
+                && iamService.findServerCertificateById(certificateId).isEmpty()) {
+            throw new AwsException("InvalidViewerCertificate",
+                    "The specified SSL certificate doesn't exist, isn't valid, "
+                            + "or doesn't include a valid certificate chain.", 400);
+        }
+    }
+
+    /**
+     * Runs a write that may record an IAM server certificate reference while IAM holds the lock
+     * {@code DeleteServerCertificate} takes, so the certificate cannot be deleted between
+     * {@link #validateViewerCertificate} and the store write. Without the guard the delete sees no
+     * reference, because the distribution is not saved yet, and the distribution is left holding a
+     * certificate that is gone.
+     */
+    private <T> T whileCertificatesHeld(DistributionConfig config, Supplier<T> action) {
+        if (iamService == null || iamCertificateId(config) == null) {
+            // Nothing to order. A distribution that names no IAM certificate cannot be left
+            // holding one, and the scan reads a copy of the store rather than a live collection,
+            // so this write cannot disturb it either. Taking the lock anyway would make every
+            // distribution write wait on a certificate delete, and the other way round.
+            return action.get();
+        }
+        return iamService.supplyWithServerCertificatesHeld(action);
+    }
+
+    private static void validateOriginSettings(DistributionConfig config) {
+        if (config == null || config.getOrigins() == null) {
+            return;
+        }
+        for (Origin origin : config.getOrigins()) {
+            requireRange("InvalidArgument", "ConnectionAttempts",
+                    origin.getConnectionAttempts(),
+                    CloudFrontOriginTimeouts.MIN_CONNECTION_ATTEMPTS,
+                    CloudFrontOriginTimeouts.MAX_CONNECTION_ATTEMPTS, "");
+            requireRange("InvalidArgument", "ConnectionTimeout",
+                    origin.getConnectionTimeout(),
+                    CloudFrontOriginTimeouts.MIN_CONNECTION_TIMEOUT_SECONDS,
+                    CloudFrontOriginTimeouts.MAX_CONNECTION_TIMEOUT_SECONDS, " seconds");
+            Map<String, Object> customOriginConfig = origin.getCustomOriginConfig();
+            if (customOriginConfig == null) {
+                continue;
+            }
+            requireRange("InvalidOriginReadTimeout", "OriginReadTimeout",
+                    asIntOrNull(customOriginConfig.get("OriginReadTimeout")),
+                    CloudFrontOriginTimeouts.MIN_ORIGIN_READ_TIMEOUT_SECONDS,
+                    CloudFrontOriginTimeouts.MAX_ORIGIN_READ_TIMEOUT_SECONDS, " seconds");
+            requireRange("InvalidOriginKeepaliveTimeout", "OriginKeepaliveTimeout",
+                    asIntOrNull(customOriginConfig.get("OriginKeepaliveTimeout")),
+                    CloudFrontOriginTimeouts.MIN_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS,
+                    CloudFrontOriginTimeouts.MAX_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS, " seconds");
+        }
+    }
+
+    private static void requireRange(String errorCode, String field, Integer value,
+            int min, int max, String unit) {
+        if (value != null && (value < min || value > max)) {
+            throw new AwsException(
+                    errorCode,
+                    "The parameter " + field + " must be between " + min + " and " + max + unit + ".",
+                    400);
+        }
+    }
+
+    private static Integer asIntOrNull(Object value) {
+        if (value instanceof Integer intValue) {
+            return intValue;
+        }
+        if (value instanceof String text) {
+            try {
+                return Integer.valueOf(text);
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private static void validateOriginCustomHeaders(DistributionConfig config) {
@@ -433,6 +580,20 @@ public class CloudFrontService {
         EmbeddedDnsServer.BUILTIN_SUFFIXES.forEach(endpointHosts::add);
         config.hostname().ifPresent(endpointHosts::add);
         config.dns().extraSuffixes().ifPresent(endpointHosts::addAll);
+     * the resource a signed URL was signed for. The suffix is the request partition's unless one
+     * is configured.
+     */
+    private String domainNameFor(String id) {
+        return id.toLowerCase(Locale.ROOT) + "."
+                + CloudFrontEdgeDomain.domainSuffix(configuredDomainSuffix, regionResolver.getPartition());
+    }
+
+    private static List<String> localDeliverySuffixes(EmulatorConfig config) {
+        SequencedSet<String> endpointHosts = new LinkedHashSet<>();
+        endpointHosts.add("localhost");
+        EmbeddedDnsServer.BUILTIN_SUFFIXES.forEach(endpointHosts::add);
+        config.hostname().ifPresent(endpointHosts::add);
+        LocalStackParity.withDnsSuffixes(config.dns().extraSuffixes()).ifPresent(endpointHosts::addAll);
         return endpointHosts.stream()
                 .map(host -> ".cloudfront." + host.toLowerCase(Locale.ROOT))
                 .toList();
@@ -590,14 +751,19 @@ public class CloudFrontService {
     }
 
     public OriginRequestPolicy getOriginRequestPolicy(String id) {
-        return orpStore.get(id).orElseThrow(() ->
-                new AwsException("NoSuchOriginRequestPolicy",
+        return orpStore.get(id)
+                .or(() -> Optional.ofNullable(MANAGED_ORIGIN_REQUEST_POLICIES.get(id)))
+                .orElseThrow(() -> new AwsException("NoSuchOriginRequestPolicy",
                         "The specified origin request policy does not exist.", 404));
     }
 
     public synchronized OriginRequestPolicy updateOriginRequestPolicy(String id, String ifMatch,
                                                                        OriginRequestPolicy updated) {
         OriginRequestPolicy existing = getOriginRequestPolicy(id);
+        if (isManagedOriginRequestPolicy(id)) {
+            throw new AwsException("IllegalUpdate",
+                    "AWS managed origin request policies cannot be updated.", 400);
+        }
         if (!existing.getEtag().equals(ifMatch)) {
             throw new AwsException("InvalidIfMatchVersion",
                     "The If-Match version is missing or not valid for the resource.", 400);
@@ -611,6 +777,10 @@ public class CloudFrontService {
 
     public synchronized void deleteOriginRequestPolicy(String id, String ifMatch) {
         OriginRequestPolicy existing = getOriginRequestPolicy(id);
+        if (isManagedOriginRequestPolicy(id)) {
+            throw new AwsException("IllegalDelete",
+                    "AWS managed origin request policies cannot be deleted.", 400);
+        }
         if (!existing.getEtag().equals(ifMatch)) {
             throw new AwsException("InvalidIfMatchVersion",
                     "The If-Match version is missing or not valid for the resource.", 400);
@@ -624,10 +794,32 @@ public class CloudFrontService {
     }
 
     public List<OriginRequestPolicy> listOriginRequestPolicies(String marker, int maxItems) {
-        List<OriginRequestPolicy> all = new ArrayList<>(orpStore.scan(k -> true));
+        return listOriginRequestPolicies(marker, maxItems, null);
+    }
+
+    /**
+     * Lists custom and AWS managed origin request policies; {@code type} narrows the list to the
+     * AWS lowercase {@code managed} or {@code custom} value.
+     */
+    public List<OriginRequestPolicy> listOriginRequestPolicies(String marker, int maxItems, String type) {
+        if (type != null && !"custom".equals(type) && !"managed".equals(type)) {
+            throw new AwsException("InvalidArgument",
+                    "Origin request policy Type must be managed or custom.", 400);
+        }
+        List<OriginRequestPolicy> all = new ArrayList<>();
+        if (!"managed".equals(type)) {
+            all.addAll(orpStore.scan(k -> true));
+        }
+        if (!"custom".equals(type)) {
+            all.addAll(MANAGED_ORIGIN_REQUEST_POLICIES.values());
+        }
         all.sort((a, b) -> a.getName() != null && b.getName() != null
                 ? a.getName().compareTo(b.getName()) : a.getId().compareTo(b.getId()));
         return paginate(all, marker, maxItems, OriginRequestPolicy::getId);
+    }
+
+    static boolean isManagedOriginRequestPolicy(String id) {
+        return MANAGED_ORIGIN_REQUEST_POLICIES.containsKey(id);
     }
 
     // ── Response Headers Policies ─────────────────────────────────────────────
@@ -887,6 +1079,112 @@ public class CloudFrontService {
         return Map.copyOf(policies);
     }
 
+    /**
+     * The AWS managed origin request policies, with the IDs and settings the CloudFront Developer
+     * Guide lists under "Use managed origin request policies".
+     */
+    private static Map<String, OriginRequestPolicy> managedOriginRequestPolicies() {
+        Map<String, OriginRequestPolicy> policies = new LinkedHashMap<>();
+        policies.put(MANAGED_ALL_VIEWER_ORIGIN_REQUEST_POLICY_ID, managedOriginRequestPolicy(
+                MANAGED_ALL_VIEWER_ORIGIN_REQUEST_POLICY_ID, "Managed-AllViewer",
+                "Includes all values (headers, cookies, and query strings) from the viewer request",
+                selection("HeaderBehavior", "allViewer", "Headers", List.of()),
+                selection("CookieBehavior", "all", "Cookies", List.of()),
+                selection("QueryStringBehavior", "all", "QueryStrings", List.of())));
+        policies.put(MANAGED_ALL_VIEWER_AND_CLOUDFRONT_HEADERS_ORIGIN_REQUEST_POLICY_ID,
+                managedOriginRequestPolicy(
+                        MANAGED_ALL_VIEWER_AND_CLOUDFRONT_HEADERS_ORIGIN_REQUEST_POLICY_ID,
+                        "Managed-AllViewerAndCloudFrontHeaders-2022-06",
+                        "Includes all values from the viewer request and all CloudFront headers "
+                                + "released through June 2022",
+                        selection("HeaderBehavior", "allViewerAndWhitelistCloudFront", "Headers",
+                                List.of("CloudFront-Forwarded-Proto", "CloudFront-Is-Android-Viewer",
+                                        "CloudFront-Is-Desktop-Viewer", "CloudFront-Is-IOS-Viewer",
+                                        "CloudFront-Is-Mobile-Viewer", "CloudFront-Is-SmartTV-Viewer",
+                                        "CloudFront-Is-Tablet-Viewer", "CloudFront-Viewer-Address",
+                                        "CloudFront-Viewer-ASN", "CloudFront-Viewer-City",
+                                        "CloudFront-Viewer-Country", "CloudFront-Viewer-Country-Name",
+                                        "CloudFront-Viewer-Country-Region",
+                                        "CloudFront-Viewer-Country-Region-Name",
+                                        "CloudFront-Viewer-Http-Version", "CloudFront-Viewer-Latitude",
+                                        "CloudFront-Viewer-Longitude", "CloudFront-Viewer-Metro-Code",
+                                        "CloudFront-Viewer-Postal-Code", "CloudFront-Viewer-Time-Zone",
+                                        "CloudFront-Viewer-TLS")),
+                        selection("CookieBehavior", "all", "Cookies", List.of()),
+                        selection("QueryStringBehavior", "all", "QueryStrings", List.of())));
+        policies.put(MANAGED_ALL_VIEWER_EXCEPT_HOST_HEADER_ORIGIN_REQUEST_POLICY_ID,
+                managedOriginRequestPolicy(
+                        MANAGED_ALL_VIEWER_EXCEPT_HOST_HEADER_ORIGIN_REQUEST_POLICY_ID,
+                        "Managed-AllViewerExceptHostHeader",
+                        "Includes all values from the viewer request except the Host header",
+                        selection("HeaderBehavior", "allExcept", "Headers", List.of("Host")),
+                        selection("CookieBehavior", "all", "Cookies", List.of()),
+                        selection("QueryStringBehavior", "all", "QueryStrings", List.of())));
+        policies.put(MANAGED_CORS_CUSTOM_ORIGIN_ORIGIN_REQUEST_POLICY_ID, managedOriginRequestPolicy(
+                MANAGED_CORS_CUSTOM_ORIGIN_ORIGIN_REQUEST_POLICY_ID, "Managed-CORS-CustomOrigin",
+                "Includes the header that enables CORS requests when the origin is a custom origin",
+                selection("HeaderBehavior", "whitelist", "Headers", List.of("Origin")),
+                selection("CookieBehavior", "none", "Cookies", List.of()),
+                selection("QueryStringBehavior", "none", "QueryStrings", List.of())));
+        policies.put(MANAGED_CORS_S3_ORIGIN_ORIGIN_REQUEST_POLICY_ID, managedOriginRequestPolicy(
+                MANAGED_CORS_S3_ORIGIN_ORIGIN_REQUEST_POLICY_ID, "Managed-CORS-S3Origin",
+                "Includes the headers that enable CORS requests when the origin is an Amazon S3 bucket",
+                selection("HeaderBehavior", "whitelist", "Headers", List.of(
+                        "Origin", "Access-Control-Request-Headers", "Access-Control-Request-Method")),
+                selection("CookieBehavior", "none", "Cookies", List.of()),
+                selection("QueryStringBehavior", "none", "QueryStrings", List.of())));
+        policies.put(MANAGED_MEDIATAILOR_ORIGIN_REQUEST_POLICY_ID, managedOriginRequestPolicy(
+                MANAGED_MEDIATAILOR_ORIGIN_REQUEST_POLICY_ID,
+                "Managed-Elemental-MediaTailor-PersonalizedManifests",
+                "For use with an origin that is an AWS Elemental MediaTailor endpoint",
+                selection("HeaderBehavior", "whitelist", "Headers", List.of(
+                        "Origin", "Access-Control-Request-Headers", "Access-Control-Request-Method",
+                        "User-Agent", "X-Forwarded-For")),
+                selection("CookieBehavior", "none", "Cookies", List.of()),
+                selection("QueryStringBehavior", "all", "QueryStrings", List.of())));
+        policies.put(MANAGED_HOST_HEADER_ONLY_ORIGIN_REQUEST_POLICY_ID, managedOriginRequestPolicy(
+                MANAGED_HOST_HEADER_ONLY_ORIGIN_REQUEST_POLICY_ID, "Managed-HostHeaderOnly",
+                "Includes only the Host header from the viewer request",
+                selection("HeaderBehavior", "whitelist", "Headers", List.of("Host")),
+                selection("CookieBehavior", "none", "Cookies", List.of()),
+                selection("QueryStringBehavior", "none", "QueryStrings", List.of())));
+        policies.put(MANAGED_USER_AGENT_REFERER_ORIGIN_REQUEST_POLICY_ID, managedOriginRequestPolicy(
+                MANAGED_USER_AGENT_REFERER_ORIGIN_REQUEST_POLICY_ID, "Managed-UserAgentRefererHeaders",
+                "Includes only the User-Agent and Referer headers",
+                selection("HeaderBehavior", "whitelist", "Headers", List.of("User-Agent", "Referer")),
+                selection("CookieBehavior", "none", "Cookies", List.of()),
+                selection("QueryStringBehavior", "none", "QueryStrings", List.of())));
+        return Map.copyOf(policies);
+    }
+
+    private static OriginRequestPolicy managedOriginRequestPolicy(
+            String id, String name, String comment, Map<String, Object> headers,
+            Map<String, Object> cookies, Map<String, Object> queryStrings) {
+        Map<String, Object> config = new LinkedHashMap<>();
+        config.put("HeadersConfig", headers);
+        config.put("CookiesConfig", cookies);
+        config.put("QueryStringsConfig", queryStrings);
+        OriginRequestPolicy policy = new OriginRequestPolicy();
+        policy.setId(id);
+        policy.setName(name);
+        policy.setComment(comment);
+        policy.setEtag("E23ZP02F085DFQ");
+        policy.setLastModifiedTime(Instant.EPOCH);
+        policy.setConfig(Map.copyOf(config));
+        return policy;
+    }
+
+    /** One policy selection block, in the shape {@link CloudFrontPolicyConfigCodec} stores. */
+    private static Map<String, Object> selection(String behaviorKey, String behavior,
+                                                 String listKey, List<String> names) {
+        Map<String, Object> block = new LinkedHashMap<>();
+        block.put(behaviorKey, behavior);
+        if (!names.isEmpty()) {
+            block.put(listKey, List.copyOf(names));
+        }
+        return Map.copyOf(block);
+    }
+
     private static ResponseHeadersPolicy managedResponseHeadersPolicy(
             String id, String name, String comment, Map<String, Object> config) {
         ResponseHeadersPolicy policy = new ResponseHeadersPolicy();
@@ -953,6 +1251,9 @@ public class CloudFrontService {
                     "The If-Match version is missing or not valid for the resource.", 400);
         }
         validateOriginAccessControl(updated);
+        if (changesHowItSigns(existing, updated) && originAccessControlInUse(id)) {
+            throw new AwsException("IllegalUpdate", "Cannot update origin type when associated to origins.", 400);
+        }
         updated.setId(id);
         updated.setEtag(UUID.randomUUID().toString());
         updated.setLastModifiedTime(Instant.now());
@@ -1043,29 +1344,166 @@ public class CloudFrontService {
             throw new AwsException("InvalidArgument",
                     "The origin access control configuration is required.", 400);
         }
-        if (oac.getName() == null || oac.getName().isBlank()) {
-            throw new AwsException("InvalidArgument", "The parameter Name is required.", 400);
+        List<String> violations = new ArrayList<>();
+        addEnumViolation(violations, "originAccessControlOriginType", oac.getOriginAccessControlOriginType(),
+                OAC_ORIGIN_TYPES);
+        addEnumViolation(violations, "signingProtocol", oac.getSigningProtocol(), OAC_SIGNING_PROTOCOLS);
+        addEnumViolation(violations, "signingBehavior", oac.getSigningBehavior(), OAC_SIGNING_BEHAVIORS);
+        if (oac.getName() == null) {
+            violations.add(nullViolation("name"));
+        }
+        if (!violations.isEmpty()) {
+            throw SmithyValidationErrors.exception("MalformedXML", violations);
+        }
+        if (oac.getName().isEmpty()) {
+            throw new AwsException("InvalidArgument", "The parameter Name is too small or empty.", 400);
         }
         if (oac.getName().length() > 64) {
-            throw new AwsException("InvalidArgument",
-                    "The parameter Name must be 64 characters or fewer.", 400);
+            throw new AwsException("InvalidArgument", "The parameter Name is too big.", 400);
         }
-        if (!"sigv4".equals(oac.getSigningProtocol())) {
+        String originType = oac.getOriginAccessControlOriginType();
+        if ("always-amz-auth".equals(oac.getSigningBehavior()) && !"lambda".equals(originType)) {
             throw new AwsException("InvalidArgument",
-                    "The parameter SigningProtocol must be sigv4.", 400);
+                    "The parameter SigningBehavior always-amz-auth is only supported with lambda origin type.", 400);
         }
-        if (oac.getSigningBehavior() == null
-                || !OAC_SIGNING_BEHAVIORS.contains(oac.getSigningBehavior())) {
+        if ("sigv4a".equals(oac.getSigningProtocol()) && !"s3".equals(originType) && !"lambda".equals(originType)) {
             throw new AwsException("InvalidArgument",
-                    "The parameter SigningBehavior must be one of always, never, or no-override.",
-                    400);
+                    "The parameter OriginType sigv4a is only supported with s3 or lambda origin types.", 400);
         }
-        if (oac.getOriginAccessControlOriginType() == null
-                || !OAC_ORIGIN_TYPES.contains(oac.getOriginAccessControlOriginType())) {
-            throw new AwsException("InvalidArgument",
-                    "The parameter OriginAccessControlOriginType must be one of s3, mediastore, "
-                            + "mediapackagev2, or lambda.",
-                    400);
+        if ("execute-api".equals(originType)) {
+            // AWS lists this origin type but refuses it.
+            throw new AwsException("AccessDenied", "Access Denied.", 403);
+        }
+    }
+
+    /** What an origin access control may not change while an origin uses it. */
+    private static boolean changesHowItSigns(OriginAccessControl existing, OriginAccessControl updated) {
+        return !Objects.equals(existing.getOriginAccessControlOriginType(), updated.getOriginAccessControlOriginType())
+                || !Objects.equals(existing.getSigningProtocol(), updated.getSigningProtocol())
+                || "always-amz-auth".equals(existing.getSigningBehavior())
+                        != "always-amz-auth".equals(updated.getSigningBehavior());
+    }
+
+    private static void addEnumViolation(List<String> violations, String member, String value, List<String> values) {
+        if (value == null) {
+            violations.add(nullViolation(member));
+        } else if (!values.contains(value)) {
+            violations.add("Value '" + value + "' at 'originAccessControlConfig." + member
+                    + "' failed to satisfy constraint: Member must satisfy enum value set: ["
+                    + String.join(", ", values) + "]");
+        }
+    }
+
+    private static String nullViolation(String member) {
+        return "Value null at 'originAccessControlConfig." + member
+                + "' failed to satisfy constraint: Member must not be null";
+    }
+
+    /** The kinds of Lambda origin CloudFront tells apart. */
+    private enum LambdaOrigin { NONE, FUNCTION_URL, WEB_FUNCTION, GLOBAL_WEB_FUNCTION }
+
+    /**
+     * CloudFront knows a Lambda origin by its hostname alone, case sensitively. The endpoints of this
+     * Floci end in its own host instead of {@code on.aws}.
+     */
+    private static Pattern lambdaOriginHost(EmulatorConfig config) {
+        String authority = URI.create(config.effectiveBaseUrl()).getAuthority();
+        String flociHost = Pattern.quote(authority.replaceFirst(":\\d+$", "")) + "(?::\\d+)?";
+        return Pattern.compile(".+\\.(lambda-web|lambda-url)\\.(global|[a-z]{2,4}-[a-z-]+-\\d+)\\.(?:on\\.aws|"
+                + flociHost + ")");
+    }
+
+    private LambdaOrigin lambdaOrigin(String domainName) {
+        Matcher matcher = lambdaOriginHost.matcher(domainName == null ? "" : domainName);
+        if (!matcher.matches()) {
+            return LambdaOrigin.NONE;
+        }
+        boolean global = "global".equals(matcher.group(2));
+        if ("lambda-url".equals(matcher.group(1))) {
+            return global ? LambdaOrigin.NONE : LambdaOrigin.FUNCTION_URL;
+        }
+        return global ? LambdaOrigin.GLOBAL_WEB_FUNCTION : LambdaOrigin.WEB_FUNCTION;
+    }
+
+    /**
+     * The origin access control an origin names has to exist, and suit a Lambda origin by the rules
+     * CloudFront checks in this order. Then come the Lambda@Edge origin triggers it refuses in front
+     * of the origins those controls sign.
+     */
+    private void validateOriginAccessControls(DistributionConfig config) {
+        if (config == null || config.getOrigins() == null) {
+            return;
+        }
+        Set<String> amzAuthOrigins = new HashSet<>();
+        for (Origin origin : config.getOrigins()) {
+            String oacId = origin == null ? null : origin.getOriginAccessControlId();
+            if (oacId == null || oacId.isBlank()) {
+                continue;
+            }
+            Optional<OriginAccessControl> oac = oacStore.get(oacId);
+            if (oac.isEmpty()) {
+                throw new AwsException("InvalidOriginAccessControl",
+                        "The specified origin access control does not exist or is not valid.", 400);
+            }
+            validateOriginAccessControlFor(lambdaOrigin(origin.getDomainName()), oac.get());
+            if ("always-amz-auth".equals(oac.get().getSigningBehavior())
+                    || "sigv4a".equals(oac.get().getSigningProtocol())) {
+                amzAuthOrigins.add(origin.getId());
+            }
+        }
+        if (config.getDefaultCacheBehavior() != null) {
+            rejectOriginTriggers(amzAuthOrigins, config.getDefaultCacheBehavior().getTargetOriginId(),
+                    config.getDefaultCacheBehavior().getLambdaFunctionAssociations());
+        }
+        if (config.getCacheBehaviors() != null) {
+            for (CacheBehavior behavior : config.getCacheBehaviors()) {
+                rejectOriginTriggers(amzAuthOrigins, behavior.getTargetOriginId(),
+                        behavior.getLambdaFunctionAssociations());
+            }
+        }
+    }
+
+    private static void validateOriginAccessControlFor(LambdaOrigin origin, OriginAccessControl oac) {
+        boolean lambda = "lambda".equals(oac.getOriginAccessControlOriginType());
+        boolean webFunction = origin == LambdaOrigin.WEB_FUNCTION || origin == LambdaOrigin.GLOBAL_WEB_FUNCTION;
+        if (webFunction ? !lambda : (lambda && origin == LambdaOrigin.NONE)) {
+            throw illegalOriginAccessConfiguration("The origin type and OAC origin type differ");
+        }
+        if (!lambda) {
+            return;
+        }
+        boolean sigv4a = "sigv4a".equals(oac.getSigningProtocol());
+        if (origin == LambdaOrigin.GLOBAL_WEB_FUNCTION && !sigv4a) {
+            throw illegalOriginAccessConfiguration("This origin domain requires SigV4a signing protocol.");
+        }
+        if (origin != LambdaOrigin.GLOBAL_WEB_FUNCTION && sigv4a) {
+            throw illegalOriginAccessConfiguration("SigV4a signing protocol is not compatible with this origin domain.");
+        }
+        boolean amzAuth = "always-amz-auth".equals(oac.getSigningBehavior());
+        if (webFunction && !amzAuth) {
+            throw illegalOriginAccessConfiguration("Lambda-Web origins require always-amz-auth signing behavior.");
+        }
+        if (!webFunction && amzAuth) {
+            throw illegalOriginAccessConfiguration("always-amz-auth signing behavior requires a Lambda-Web origin.");
+        }
+    }
+
+    private static AwsException illegalOriginAccessConfiguration(String reason) {
+        return new AwsException("IllegalOriginAccessConfiguration", "Illegal configuration: " + reason, 400);
+    }
+
+    private static void rejectOriginTriggers(Set<String> amzAuthOrigins, String targetOriginId,
+                                             List<Map<String, Object>> associations) {
+        if (!amzAuthOrigins.contains(targetOriginId) || associations == null) {
+            return;
+        }
+        for (Map<String, Object> association : associations) {
+            Object eventType = association.get("EventType");
+            if ("origin-request".equals(eventType) || "origin-response".equals(eventType)) {
+                throw new AwsException("InvalidLambdaFunctionAssociation",
+                        "Lambda@Edge origin triggers are incompatible with SigV4a and always-amz-auth origins."
+                                + " Use a different origin or disassociate the function.", 400);
+            }
         }
     }
 
@@ -1130,11 +1568,15 @@ public class CloudFrontService {
     }
 
     public synchronized CloudFrontFunction createFunction(CloudFrontFunction fn) {
-        if (fn.getName() != null && findFunction(fn.getName(), null).isPresent()) {
+        validateFunctionRuntime(fn.getRuntime());
+        // The bare name holds the DEVELOPMENT stage, and the LIVE stage of releases before
+        // stage-aware keys.
+        if (functionStore.get(fn.getName()).isPresent()
+                || functionStore.get(functionKey(fn.getName(), "LIVE")).isPresent()) {
             throw new AwsException("FunctionAlreadyExists",
-                    "A function with the specified name already exists.", 409);
+                    "A function with the same name already exists in this AWS account.", 409);
         }
-        fn.setStage(FUNCTION_STAGE_DEVELOPMENT);
+        fn.setStage("DEVELOPMENT");
         fn.setStatus("UNPUBLISHED");
         fn.setEtag(UUID.randomUUID().toString());
         fn.setCreatedTime(Instant.now());
@@ -1162,7 +1604,8 @@ public class CloudFrontService {
 
     public synchronized CloudFrontFunction updateFunction(String name, String ifMatch,
                                                           CloudFrontFunction updated) {
-        CloudFrontFunction existing = describeFunction(name, FUNCTION_STAGE_DEVELOPMENT);
+        validateFunctionRuntime(updated.getRuntime());
+        CloudFrontFunction existing = describeFunction(name, null);
         if (!existing.getEtag().equals(ifMatch)) {
             throw new AwsException("InvalidIfMatchVersion",
                     "The If-Match version is missing or not valid for the resource.", 400);
@@ -1237,6 +1680,13 @@ public class CloudFrontService {
             throw invalidFunctionStage(effectiveStage);
         }
         return effectiveStage;
+    }
+
+    private static void validateFunctionRuntime(String runtime) {
+        if (runtime != null && !FUNCTION_RUNTIMES.contains(runtime)) {
+            throw new AwsException("InvalidArgument",
+                    "The parameter Runtime must be cloudfront-js-1.0 or cloudfront-js-2.0.", 400);
+        }
     }
 
     private static AwsException invalidFunctionStage(String stage) {
@@ -1663,7 +2113,7 @@ public class CloudFrontService {
     // ── Realtime Log Configs ──────────────────────────────────────────────────
 
     public synchronized RealtimeLogConfig createRealtimeLogConfig(RealtimeLogConfig cfg) {
-        String arn = AwsArnUtils.Arn.of("cloudfront", "", accountId, "realtime-log-config/" + cfg.getName()).toString();
+        String arn = arn("realtime-log-config/" + cfg.getName());
         cfg.setArn(arn);
         realtimeLogConfigStore.put(cfg.getName(), cfg);
         return cfg;
@@ -1683,7 +2133,7 @@ public class CloudFrontService {
 
     public synchronized RealtimeLogConfig updateRealtimeLogConfig(RealtimeLogConfig updated) {
         getRealtimeLogConfig(updated.getName());
-        String arn = AwsArnUtils.Arn.of("cloudfront", "", accountId, "realtime-log-config/" + updated.getName()).toString();
+        String arn = arn("realtime-log-config/" + updated.getName());
         updated.setArn(arn);
         realtimeLogConfigStore.put(updated.getName(), updated);
         return updated;
@@ -1706,7 +2156,7 @@ public class CloudFrontService {
     public synchronized StreamingDistribution createStreamingDistribution(StreamingDistribution sd) {
         String id = generateDistributionId();
         sd.setId(id);
-        sd.setArn(AwsArnUtils.Arn.of("cloudfront", "", accountId, "streaming-distribution/" + id).toString());
+        sd.setArn(arn("streaming-distribution/" + id));
         sd.setDomainName(domainNameFor(id));
         sd.setStatus("Deployed");
         sd.setLastModifiedTime(Instant.now());
@@ -2094,8 +2544,9 @@ public class CloudFrontService {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    public String getAccountId() {
-        return accountId;
+    /** A CloudFront ARN: global, so it carries no region and takes the request's partition. */
+    public String arn(String resource) {
+        return regionResolver.buildGlobalArn("cloudfront", accountId, resource);
     }
 
     private static String generateDistributionId() {

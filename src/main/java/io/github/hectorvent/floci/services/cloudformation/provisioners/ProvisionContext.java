@@ -14,16 +14,16 @@ import java.util.function.Consumer;
 /**
  * The per-provision context every resource handler drew from: the template engine (for resolving
  * intrinsic functions in properties) plus the region/account/stack it is being created in. The
- * helpers are lifted verbatim from {@code CloudFormationResourceProvisioner}'s private methods
+ * helpers were lifted verbatim from the former CloudFormation monolith's private methods
  * so extracted provisioners produce byte-identical physical ids and resolved values.
  */
 public record ProvisionContext(CloudFormationTemplateEngine engine, String region,
                                String accountId, String stackName, String priorPhysicalId,
-                               Consumer<StackEvent> progress) {
+                               Consumer<StackEvent> progress, JsonNode priorProperties) {
 
     public ProvisionContext(CloudFormationTemplateEngine engine, String region,
                             String accountId, String stackName, String priorPhysicalId) {
-        this(engine, region, accountId, stackName, priorPhysicalId, event -> {});
+        this(engine, region, accountId, stackName, priorPhysicalId, event -> {}, null);
     }
 
     /** Intermediate resource events retain the stack pipeline's event IDs and metadata. */
@@ -59,11 +59,26 @@ public record ProvisionContext(CloudFormationTemplateEngine engine, String regio
     }
 
     /**
-     * Resolves a CloudFormation {@code [{Key, Value}]} tag list to a map, preserving template
-     * order. The whole node is resolved first so an {@code Fn::If} wrapping the list works, not
-     * just intrinsics inside each entry. Entries whose key resolves blank are skipped and a
-     * missing value becomes {@code ""}; an absent or non-array property yields an empty map, never
-     * null.
+     * Whether the previous template declared {@code name} on this resource, which tells an update
+     * that removes a property apart from one the stack never declared.
+     *
+     * <p>Reads the previous template's properties after its conditions chose each top-level
+     * {@code Fn::If}, so one that chose {@code AWS::NoValue} was not declared. False for a resource
+     * that was never provisioned, which has no prior physical id: a create, a resource the previous
+     * template did not have, and one whose {@code Condition} kept it out.
+     */
+    public boolean previouslyDeclared(String name) {
+        return isUpdate() && priorProperties != null && priorProperties.has(name)
+                && !priorProperties.get(name).isNull();
+    }
+
+    /**
+     * Resolves a CloudFormation tag property to a map, preserving template order. Both registry
+     * shapes are read: the {@code [{Key, Value}]} list most types declare, and the
+     * {@code {key: value}} object types such as {@code AWS::Batch::*} declare. The whole node is
+     * resolved first so an {@code Fn::If} wrapping it works, not just intrinsics inside each entry.
+     * Entries whose key resolves blank are skipped and a missing value becomes {@code ""}; an
+     * absent property, or one of any other shape, yields an empty map, never null.
      *
      * <p>Deliberately does not validate. Callers needing AWS's tag rules (the 50-tag cap, the
      * reserved {@code aws:} prefix) keep their own validating parse, and callers using null to mean
@@ -75,7 +90,17 @@ public record ProvisionContext(CloudFormationTemplateEngine engine, String regio
             return tags;
         }
         JsonNode resolved = engine.resolveNode(props.get(name));
-        if (resolved == null || !resolved.isArray()) {
+        if (resolved == null) {
+            return tags;
+        }
+        if (resolved.isObject()) {
+            resolved.fields().forEachRemaining(entry -> {
+                String value = engine.resolve(entry.getValue());
+                tags.put(entry.getKey(), value == null ? "" : value);
+            });
+            return tags;
+        }
+        if (!resolved.isArray()) {
             return tags;
         }
         for (JsonNode tag : resolved) {
@@ -199,6 +224,20 @@ public record ProvisionContext(CloudFormationTemplateEngine engine, String regio
             }
         }
         return stale;
+    }
+
+    /**
+     * Whether {@code name} has the shape {@link #generatePhysicalName} gives this logical id: the
+     * same prefix and length, ending in a 12-character lowercase hex suffix.
+     */
+    public boolean isGeneratedPhysicalName(String name, String logicalId, int maxLength, boolean lowercase) {
+        String sample = generatePhysicalName(logicalId, maxLength, lowercase);
+        if (name == null || name.length() != sample.length()) {
+            return false;
+        }
+        int prefixLength = sample.length() - 12;
+        return name.startsWith(sample.substring(0, prefixLength))
+                && name.substring(prefixLength).matches("[0-9a-f]{12}");
     }
 
     /** Generates a CloudFormation-style physical name: {@code <stack>-<logicalId>-<suffix>}. */

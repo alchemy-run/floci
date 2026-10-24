@@ -7,7 +7,9 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.RequestScopes;
 import io.github.hectorvent.floci.core.common.Resettable;
+import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.ssm.model.Command;
@@ -22,6 +24,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -45,8 +48,12 @@ public class SsmCommandService implements Resettable {
 
     private static final Logger LOG = Logger.getLogger(SsmCommandService.class);
     private static final int MIN_TIMEOUT_SECONDS = 30;
-    private static final int MAX_STDOUT_CHARS = 24000;
-    private static final int MAX_STDERR_CHARS = 8000;
+    private static final int MAX_TIMEOUT_SECONDS = 2_592_000;
+    private static final int MAX_INSTANCE_IDS = 50;
+    private static final int DEFAULT_SHELL_EXECUTION_TIMEOUT_SECONDS = 3600;
+    private static final int MAX_SHELL_EXECUTION_TIMEOUT_SECONDS = 172800;
+    static final int MAX_STDOUT_CHARS = 24000;
+    static final int MAX_STDERR_CHARS = 8000;
 
     private final StorageBackend<String, InstanceInformation> instanceStore;
     private final StorageBackend<String, Command> commandStore;
@@ -56,10 +63,10 @@ public class SsmCommandService implements Resettable {
     private final SsmDirectCommandExecutor directCommandExecutor;
     private final ExecutorService directExecutionExecutor;
 
-    // In-memory queues: instanceId → pending messages. Not persisted — lost on restart.
-    private final ConcurrentHashMap<String, Queue<PendingMessage>> messageQueues = new ConcurrentHashMap<>();
-    // messageId → (commandId, instanceId) for correlating SendReply back to an invocation
-    private final ConcurrentHashMap<String, String[]> messageIndex = new ConcurrentHashMap<>();
+    // In-memory queues are owned by the issuing account, region and instance. Lost on restart.
+    private final ConcurrentHashMap<MessageOwner, Queue<PendingMessage>> messageQueues = new ConcurrentHashMap<>();
+    // Message correlations retain the same owner through every agent operation.
+    private final ConcurrentHashMap<String, MessageCorrelation> messageIndex = new ConcurrentHashMap<>();
 
     @Inject
     public SsmCommandService(
@@ -73,11 +80,10 @@ public class SsmCommandService implements Resettable {
         this.objectMapper = objectMapper;
         this.regionResolver = regionResolver;
         this.directCommandExecutor = directCommandExecutor;
-        this.directExecutionExecutor = Executors.newCachedThreadPool(runnable -> {
-            Thread thread = new Thread(runnable, "floci-ssm-direct-execution");
-            thread.setDaemon(true);
-            return thread;
-        });
+        // Each direct execution blocks for the whole container exec, up to its execution budget, so every
+        // target gets its own virtual thread instead of a platform thread.
+        this.directExecutionExecutor = Executors.newThreadPerTaskExecutor(
+                Thread.ofVirtual().name("floci-ssm-direct-execution").factory());
     }
 
     @PreDestroy
@@ -151,11 +157,19 @@ public class SsmCommandService implements Resettable {
         if (instanceIds.isEmpty()) {
             throw new AwsException("InvalidInstanceId", "At least one InstanceId is required.", 400);
         }
+        if (instanceIds.size() > MAX_INSTANCE_IDS) {
+            throw SmithyValidationErrors.validationException(
+                    "Value at 'instanceIds' failed to satisfy constraint: Member must have length less than or equal to " + MAX_INSTANCE_IDS);
+        }
 
-        Map<String, List<String>> parameters = parseParameters(request.path("Parameters"));
+        boolean publicShell = "AWS-RunShellScript".equals(documentName);
+        Map<String, List<String>> parameters = publicShell
+                ? parseShellParameters(request.path("Parameters")) : parseParameters(request.path("Parameters"));
         String comment = request.path("Comment").asText("");
-        int timeoutSeconds = request.path("TimeoutSeconds").asInt(3600);
+        int timeoutSeconds = SsmJsonDeserialization.optionalInteger(request.path("TimeoutSeconds"), 3600);
         validateTimeoutSeconds(timeoutSeconds);
+        int executionTimeoutSeconds = publicShell ? shellExecutionTimeout(parameters) : timeoutSeconds;
+        int documentTimeoutDefault = publicShell ? DEFAULT_SHELL_EXECUTION_TIMEOUT_SECONDS : timeoutSeconds;
         String documentVersion = request.path("DocumentVersion").asText("$DEFAULT");
         String outputS3Bucket = request.path("OutputS3BucketName").asText("");
         String outputS3Prefix = request.path("OutputS3KeyPrefix").asText("");
@@ -180,7 +194,8 @@ public class SsmCommandService implements Resettable {
         command.setOutputS3KeyPrefix(outputS3Prefix.isEmpty() ? null : outputS3Prefix);
         command.setOutputS3Region(region);
         command.setRegion(region);
-        command.setExpiresAfter(now.plusSeconds(timeoutSeconds));
+        command.setExpiresAfter(now.plusSeconds((long) timeoutSeconds
+                + (publicShell ? executionTimeoutSeconds : 0)));
 
         command.setStatus("InProgress");
         command.setStatusDetails(statusDetails("InProgress"));
@@ -199,15 +214,16 @@ public class SsmCommandService implements Resettable {
             inv.setStatusDetails(statusDetails("Pending"));
             inv.setRegion(region);
 
-            if (directCommandExecutor.supports(instanceId, documentName)) {
+            String callerAccountId = regionResolver != null ? regionResolver.getAccountId() : null;
+            if (directCommandExecutor.supports(callerAccountId, instanceId, documentName)) {
                 inv.setStatus("InProgress");
                 inv.setStatusDetails(statusDetails("InProgress"));
                 invocationStore.put(invocationKey(region, commandId, instanceId), inv);
-                directExecutionRequests.add(new DirectExecutionRequest(instanceId, documentName, parameters));
+                directExecutionRequests.add(new DirectExecutionRequest(callerAccountId, instanceId, documentName, parameters));
             }
             else {
                 invocationStore.put(invocationKey(region, commandId, instanceId), inv);
-                queueMessage(commandId, instanceId, documentName, parameters, timeoutSeconds, region);
+                queueMessage(commandId, instanceId, documentName, parameters, documentTimeoutDefault, region);
             }
         }
 
@@ -215,22 +231,75 @@ public class SsmCommandService implements Resettable {
         Command response = copyCommand(command);
         for (DirectExecutionRequest directExecutionRequest : directExecutionRequests) {
             runDirectCommandAsync(
+                    directExecutionRequest.accountId(),
                     commandId,
                     directExecutionRequest.instanceId(),
                     directExecutionRequest.documentName(),
                     directExecutionRequest.parameters(),
-                    timeoutSeconds,
+                    executionTimeoutSeconds,
+                    documentTimeoutDefault,
                     region);
         }
         return response;
     }
 
+    private static int shellExecutionTimeout(Map<String, List<String>> parameters) {
+        if (!parameters.containsKey("executionTimeout")) {
+            return DEFAULT_SHELL_EXECUTION_TIMEOUT_SECONDS;
+        }
+        List<String> values = parameters.get("executionTimeout");
+        if (values.size() != 1 || !values.getFirst().matches("[1-9][0-9]{0,5}")) {
+            throw invalidShellParameters();
+        }
+        int seconds = Integer.parseInt(values.getFirst());
+        if (seconds > MAX_SHELL_EXECUTION_TIMEOUT_SECONDS) {
+            throw invalidShellParameters();
+        }
+        return seconds;
+    }
+
+    private static Map<String, List<String>> parseShellParameters(JsonNode node) {
+        if (node.isMissingNode() || node.isNull()) {
+            throw invalidShellParameters();
+        }
+        if (!node.isObject()) {
+            throw invalidShellParameters();
+        }
+        Map<String, List<String>> parameters = new LinkedHashMap<>();
+        for (Map.Entry<String, JsonNode> field : node.properties()) {
+            if (!field.getValue().isArray()) {
+                throw invalidShellParameters();
+            }
+            List<String> values = new ArrayList<>();
+            for (JsonNode value : field.getValue()) {
+                if (!value.isTextual()) {
+                    throw invalidShellParameters();
+                }
+                values.add(value.textValue());
+            }
+            parameters.put(field.getKey(), values);
+        }
+        List<String> commands = parameters.get("commands");
+        if (commands == null || commands.isEmpty()) {
+            throw invalidShellParameters();
+        }
+        return parameters;
+    }
+
+    private static AwsException invalidShellParameters() {
+        return new AwsException("InvalidParameters",
+                "AWS-RunShellScript requires at least one command and string-list parameters; "
+                        + "executionTimeout must contain one integer from 1 to 172800.", 400);
+    }
+
     private static void validateTimeoutSeconds(int timeoutSeconds) {
         if (timeoutSeconds < MIN_TIMEOUT_SECONDS) {
-            throw new AwsException(
-                    "ValidationException",
-                    "1 validation error detected: Value '" + timeoutSeconds + "' at 'timeoutSeconds' failed to satisfy constraint: Member must have value greater than or equal to 30",
-                    400);
+            throw SmithyValidationErrors.validationException(
+                    "Value '" + timeoutSeconds + "' at 'timeoutSeconds' failed to satisfy constraint: Member must have value greater than or equal to 30");
+        }
+        if (timeoutSeconds > MAX_TIMEOUT_SECONDS) {
+            throw SmithyValidationErrors.validationException(
+                    "Value '" + timeoutSeconds + "' at 'timeoutSeconds' failed to satisfy constraint: Member must have value less than or equal to 2592000");
         }
     }
 
@@ -287,7 +356,7 @@ public class SsmCommandService implements Resettable {
                     }
                 }
                 // Remove any queued (not-yet-polled) messages for this instance
-                Queue<PendingMessage> q = messageQueues.get(instanceId);
+                Queue<PendingMessage> q = messageQueues.get(messageOwner(region, instanceId));
                 if (q != null) {
                     q.removeIf(m -> m.commandId().equals(commandId));
                 }
@@ -336,16 +405,15 @@ public class SsmCommandService implements Resettable {
         }
 
         for (String instanceId : instanceIds) {
-            Queue<PendingMessage> queue = messageQueues.remove(instanceId);
+            Queue<PendingMessage> queue = messageQueues.remove(messageOwner(region, instanceId));
             if (queue != null) {
                 queue.clear();
             }
         }
         messageIndex.entrySet().removeIf(entry -> {
-            String[] meta = entry.getValue();
-            return meta.length == 3
-                    && instanceIds.contains(meta[1])
-                    && region.equals(meta[2]);
+            MessageOwner owner = entry.getValue().owner();
+            return instanceIds.contains(owner.instanceId())
+                    && owner.equals(messageOwner(region, owner.instanceId()));
         });
         commandIds.forEach(commandId -> updateCommandStatus(commandId, region));
         return failed;
@@ -354,7 +422,8 @@ public class SsmCommandService implements Resettable {
     // ── ec2messages agent protocol ──────────────────────────────────────────
 
     public List<Map<String, Object>> getMessages(String instanceId, String messagesRequestId, int visibilityTimeout) {
-        Queue<PendingMessage> queue = messageQueues.get(instanceId);
+        MessageOwner owner = messageOwner(regionResolver.getRegion(), instanceId);
+        Queue<PendingMessage> queue = messageQueues.get(owner);
         List<Map<String, Object>> result = new ArrayList<>();
         if (queue == null || queue.isEmpty()) {
             return result;
@@ -366,7 +435,7 @@ public class SsmCommandService implements Resettable {
         }
 
         // Track for AcknowledgeMessage / SendReply correlation
-        messageIndex.put(msg.messageId(), new String[]{msg.commandId(), instanceId, msg.region()});
+        messageIndex.put(msg.messageId(), new MessageCorrelation(owner, msg.commandId()));
 
         result.add(Map.of(
                 "MessageId", msg.messageId(),
@@ -382,13 +451,13 @@ public class SsmCommandService implements Resettable {
 
     public void acknowledgeMessage(String messageId) {
         // Message was already removed from queue on GetMessages. Just update invocation to InProgress.
-        String[] meta = messageIndex.get(messageId);
+        MessageCorrelation meta = ownedCorrelation(messageId, false);
         if (meta == null) {
             return;
         }
-        String commandId = meta[0];
-        String instanceId = meta[1];
-        String region = meta[2];
+        String commandId = meta.commandId();
+        String instanceId = meta.owner().instanceId();
+        String region = meta.owner().region();
 
         String invKey = invocationKey(region, commandId, instanceId);
         invocationStore.get(invKey).ifPresent(inv -> {
@@ -405,14 +474,14 @@ public class SsmCommandService implements Resettable {
     }
 
     public void sendReply(String messageId, String payloadBase64) {
-        String[] meta = messageIndex.remove(messageId);
+        MessageCorrelation meta = ownedCorrelation(messageId, true);
         if (meta == null) {
             LOG.warnv("SendReply: unknown messageId={0}", messageId);
             return;
         }
-        String commandId = meta[0];
-        String instanceId = meta[1];
-        String region = meta[2];
+        String commandId = meta.commandId();
+        String instanceId = meta.owner().instanceId();
+        String region = meta.owner().region();
 
         try {
             byte[] decoded = Base64.getDecoder().decode(payloadBase64);
@@ -469,13 +538,13 @@ public class SsmCommandService implements Resettable {
     }
 
     public void failMessage(String messageId, String failureType) {
-        String[] meta = messageIndex.remove(messageId);
+        MessageCorrelation meta = ownedCorrelation(messageId, true);
         if (meta == null) {
             return;
         }
-        String commandId = meta[0];
-        String instanceId = meta[1];
-        String region = meta[2];
+        String commandId = meta.commandId();
+        String instanceId = meta.owner().instanceId();
+        String region = meta.owner().region();
 
         String invKey = invocationKey(region, commandId, instanceId);
         invocationStore.get(invKey).ifPresent(inv -> {
@@ -491,7 +560,20 @@ public class SsmCommandService implements Resettable {
     }
 
     public void deleteMessage(String messageId) {
-        messageIndex.remove(messageId);
+        ownedCorrelation(messageId, true);
+    }
+
+    private MessageOwner messageOwner(String region, String instanceId) {
+        return new MessageOwner(regionResolver.getAccountId(), region, instanceId);
+    }
+
+    private MessageCorrelation ownedCorrelation(String messageId, boolean remove) {
+        MessageCorrelation correlation = messageIndex.get(messageId);
+        if (correlation == null || !correlation.owner().equals(
+                messageOwner(regionResolver.getRegion(), correlation.owner().instanceId()))) {
+            return null;
+        }
+        return !remove || messageIndex.remove(messageId, correlation) ? correlation : null;
     }
 
     // ── CodeDeploy integration helpers ─────────────────────────────────────
@@ -545,13 +627,15 @@ public class SsmCommandService implements Resettable {
     // ── Internal helpers ────────────────────────────────────────────────────
 
     private void runDirectCommandAsync(
+            String accountId,
             String commandId,
             String instanceId,
             String documentName,
             Map<String, List<String>> parameters,
             int timeoutSeconds,
+            int documentTimeoutDefault,
             String region) {
-        CompletableFuture.runAsync(() -> {
+        CompletableFuture.runAsync(() -> RequestScopes.runAs(accountId, region, () -> {
             String invKey = invocationKey(region, commandId, instanceId);
             CommandInvocation invocation = invocationStore.get(invKey).orElse(null);
             if (invocation == null || "Cancelled".equals(invocation.getStatus())) {
@@ -559,24 +643,30 @@ public class SsmCommandService implements Resettable {
             }
 
             SsmDirectCommandExecutor.ExecutionResult result = directCommandExecutor
-                    .executeIfSupported(instanceId, documentName, parameters, timeoutSeconds)
+                    .executeIfSupported(accountId, instanceId, documentName, parameters, timeoutSeconds)
                     .orElse(null);
             if (result == null) {
                 synchronized (invocation) {
+                    if (!"InProgress".equals(invocation.getStatus())) {
+                        return;
+                    }
                     invocation.setStatus("Pending");
                     invocation.setStatusDetails(statusDetails("Pending"));
                     invocationStore.put(invKey, invocation);
                 }
-                queueMessage(commandId, instanceId, documentName, parameters, timeoutSeconds, region);
+                queueMessage(commandId, instanceId, documentName, parameters, documentTimeoutDefault, region);
                 updateCommandStatus(commandId, region);
                 return;
             }
             synchronized (invocation) {
+                if (!"InProgress".equals(invocation.getStatus())) {
+                    return;
+                }
                 applyDirectResult(invocation, result);
                 invocationStore.put(invKey, invocation);
             }
             updateCommandStatus(commandId, region);
-        }, directExecutionExecutor);
+        }), directExecutionExecutor);
     }
 
     private void applyDirectResult(CommandInvocation invocation, SsmDirectCommandExecutor.ExecutionResult result) {
@@ -604,7 +694,7 @@ public class SsmCommandService implements Resettable {
         String messageId = UUID.randomUUID().toString();
         String payload = buildCommandPayload(commandId, documentName, documentVersion(parameters), parameters, timeoutSeconds, region);
         PendingMessage msg = new PendingMessage(messageId, commandId, region, Instant.now(), payload);
-        messageQueues.computeIfAbsent(instanceId, k -> new ConcurrentLinkedQueue<>()).add(msg);
+        messageQueues.computeIfAbsent(messageOwner(region, instanceId), k -> new ConcurrentLinkedQueue<>()).add(msg);
     }
 
     private String buildCommandPayload(String commandId, String documentName, String docVersion,
@@ -801,6 +891,7 @@ public class SsmCommandService implements Resettable {
     }
 
     private record DirectExecutionRequest(
+            String accountId,
             String instanceId,
             String documentName,
             Map<String, List<String>> parameters) {}
@@ -829,6 +920,9 @@ public class SsmCommandService implements Resettable {
     private static String invocationKey(String region, String commandId, String instanceId) {
         return region + "::" + commandId + "::" + instanceId;
     }
+
+    private record MessageOwner(String accountId, String region, String instanceId) {}
+    private record MessageCorrelation(MessageOwner owner, String commandId) {}
 
     record PendingMessage(String messageId, String commandId, String region, Instant createdDate, String payload) {}
 }

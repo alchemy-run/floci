@@ -51,8 +51,9 @@ public class AwsRestJsonErrorHeaderFilter implements ContainerResponseFilter {
         if (claimValue instanceof ProtocolClaim claim && claim.service() != null) {
             return Optional.of(claim.service());
         }
-        if (resourceInfo != null && resourceInfo.getResourceClass() != null) {
-            Optional<ServiceDescriptor> descriptor = catalog.byResourceClass(resourceInfo.getResourceClass());
+        Class<?> resourceClass = RoutedResource.resourceClass(resourceInfo);
+        if (resourceClass != null) {
+            Optional<ServiceDescriptor> descriptor = catalog.byResourceClass(resourceClass);
             if (descriptor.isPresent()) {
                 return descriptor;
             }

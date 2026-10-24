@@ -53,8 +53,8 @@ class LegacyBasePathMappingIntegrationTest {
     void eachRecordKeepsItsOwnIdAndDeletesItself() {
         seedLegacyState();
 
-        String canonicalId = ApiGatewayController.apiMappingId("(none)");
-        String legacyId = ApiGatewayController.apiMappingId("");
+        String canonicalId = ApiGatewayService.apiMappingId("(none)");
+        String legacyId = ApiGatewayService.apiMappingId("");
         assertNotEquals(canonicalId, legacyId);
 
         given()

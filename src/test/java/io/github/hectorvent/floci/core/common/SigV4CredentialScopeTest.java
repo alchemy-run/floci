@@ -34,12 +34,29 @@ class SigV4CredentialScopeTest {
     }
 
     @Test
-    void ignoresSigV4aBecauseItsCredentialOmitsTheRegion() {
+    void readsTheServiceOfASigV4aCredentialThatOmitsTheRegion() {
         // SigV4a carries the region in X-Amz-Region-Set, so its credential is
-        // <key>/<date>/<service>/aws4_request — one segment shorter than SigV4.
-        assertTrue(SigV4CredentialScope.serviceName(
+        // <key>/<date>/<service>/aws4_request, one segment shorter than SigV4.
+        assertEquals(Optional.of("s3"), SigV4CredentialScope.serviceName(
                 "AWS4-ECDSA-P256-SHA256 Credential=AKID/20260707/s3/aws4_request,"
-                        + " SignedHeaders=host;x-amz-region-set, Signature=deadbeef").isEmpty());
+                        + " SignedHeaders=host;x-amz-region-set, Signature=deadbeef"));
+        assertEquals(Optional.of("s3"), SigV4CredentialScope.serviceNameFromCredential(
+                "AKID/20260707/s3/aws4_request"));
+    }
+
+    @Test
+    void parsesNestedCredentials() {
+        assertEquals(Optional.of("monitoring"), SigV4CredentialScope.serviceName(
+                "AWS4-HMAC-SHA256 Credential=AKID/20261015/us-east-1/20261015/eu-west-1/monitoring/aws4_request,"
+                        + " SignedHeaders=host, Signature=deadbeef"));
+    }
+
+    @Test
+    void parsesFirstCredentialWhenDuplicateCredentialComponentsPresent() {
+        assertEquals(Optional.of("s3"), SigV4CredentialScope.serviceName(
+                "AWS4-ECDSA-P256-SHA256 Credential=test/20260101/s3/aws4_request, "
+                        + "SignedHeaders=host;x-amz-date;x-amz-region-set, Signature=3006020101020101, "
+                        + "Credential=test2/20260101/s3/aws4_request"));
     }
 
     @Test

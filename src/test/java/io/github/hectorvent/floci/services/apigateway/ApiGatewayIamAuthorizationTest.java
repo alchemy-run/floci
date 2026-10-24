@@ -1,6 +1,10 @@
 package io.github.hectorvent.floci.services.apigateway;
 
+import io.github.hectorvent.floci.testing.EnforcementFixtures;
+import io.github.hectorvent.floci.testing.EnforcementFixtures.UserCredentials;
+import io.github.hectorvent.floci.testing.PartitionCleanup;
 import io.github.hectorvent.floci.testutil.ExecuteApiRequestSigner;
+import io.quarkus.test.common.http.TestHTTPResource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.RestAssured;
 import io.restassured.http.ContentType;
@@ -8,9 +12,12 @@ import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
+import java.net.URI;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
@@ -38,6 +45,12 @@ class ApiGatewayIamAuthorizationTest {
 
     private static String apiId;
     private static String iamResourceId;
+
+    @RegisterExtension
+    final PartitionCleanup cleanup = new PartitionCleanup();
+
+    @TestHTTPResource("/")
+    URI baseUri;
 
     @Test
     @Order(0)
@@ -159,11 +172,32 @@ class ApiGatewayIamAuthorizationTest {
         given().headers(headers)
                 .when().get(userRequestPath("iam"))
                 .then().statusCode(403)
-                .header("x-amzn-ErrorType", "UnrecognizedClientException");
+                .header("x-amzn-ErrorType", "UnrecognizedClientException")
+                .body("message", equalTo("The security token included in the request is invalid."));
     }
 
     @Test
     @Order(16)
+    void longTermKeyWithASessionTokenIsRejected() throws Exception {
+        UserCredentials user = EnforcementFixtures.createUser(cleanup, baseUri.getPort(),
+                EnforcementFixtures.auth(ACCESS_KEY, "iam"), "rest-iam-token-user");
+        Map<String, String> headers = new LinkedHashMap<>(ExecuteApiRequestSigner.signedHeaders(
+                "GET", userRequestPath("iam"), Map.of(), host(), null,
+                user.accessKeyId(), user.secretAccessKey(), REGION, Instant.now()));
+        given().headers(headers)
+                .when().get(userRequestPath("iam"))
+                .then().statusCode(200);
+
+        headers.put("X-Amz-Security-Token", "bogus");
+        given().headers(headers)
+                .when().get(userRequestPath("iam"))
+                .then().statusCode(403)
+                .header("x-amzn-ErrorType", "UnrecognizedClientException")
+                .body("message", equalTo("The security token included in the request is invalid"));
+    }
+
+    @Test
+    @Order(17)
     void methodWithoutIamAuthorizationStillAcceptsUnsignedRequests() {
         given().when().get(userRequestPath("open"))
                 .then().statusCode(200)

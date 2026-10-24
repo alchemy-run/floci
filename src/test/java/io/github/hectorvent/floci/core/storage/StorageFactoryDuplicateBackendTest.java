@@ -1,10 +1,11 @@
 package io.github.hectorvent.floci.core.storage;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import io.github.hectorvent.floci.testing.PerServicePersistentStorageProfile;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -13,18 +14,22 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 
+import static io.github.hectorvent.floci.testing.PerServicePersistentStorageProfile.STORAGE_DIR;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * Reproduces issue #1921: two components request the same storage file, the factory hands out
  * two independent backends, and on graceful shutdown the stale duplicate flushes last and
  * clobbers the persisted state written by the active instance.
+ *
+ * <p>DynamoDB on persistent storage comes from {@link PerServicePersistentStorageProfile}, which
+ * this class shares with other classes that each call a different service. The placeholder
+ * entries it writes go into DynamoDB's table store, so it clears them again after the test.
  */
 @QuarkusTest
-@TestProfile(StorageFactoryDuplicateBackendTest.PersistentProfile.class)
+@TestProfile(PerServicePersistentStorageProfile.class)
 class StorageFactoryDuplicateBackendTest {
 
-    private static final String STORAGE_PATH = "/tmp/floci-dedupe-backend-test";
     private static final String FILE_NAME = "dynamodb-tables.json";
 
     @Inject
@@ -36,7 +41,12 @@ class StorageFactoryDuplicateBackendTest {
         // exist and hold in-memory state from app startup. Clear all backends (wipes memory + disk),
         // then remove the file so both create() calls below start from an empty store.
         storageFactory.clearAll();
-        Files.deleteIfExists(Path.of(STORAGE_PATH, FILE_NAME));
+        Files.deleteIfExists(Path.of(STORAGE_DIR, FILE_NAME));
+    }
+
+    @AfterEach
+    void clearPlaceholders() throws IOException {
+        reset();
     }
 
     @Test
@@ -59,21 +69,10 @@ class StorageFactoryDuplicateBackendTest {
 
         // Read the persisted file back with an independent reader.
         PersistentStorage<String, String> reader =
-                new PersistentStorage<>(Path.of(STORAGE_PATH, FILE_NAME), typeRef);
+                new PersistentStorage<>(Path.of(STORAGE_DIR, FILE_NAME), typeRef);
         reader.load();
 
         assertEquals(60, reader.keys().size(),
                 "persisted table definitions should survive flushAll despite the duplicate backend");
-    }
-
-    public static final class PersistentProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of(
-                    "floci.storage.mode", "memory",
-                    "floci.storage.services.dynamodb.mode", "persistent",
-                    "floci.storage.persistent-path", STORAGE_PATH
-            );
-        }
     }
 }

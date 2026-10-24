@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.dynamodb;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.ws.rs.core.MediaType;
@@ -14,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 class DynamoDbResponsesTest {
 
@@ -111,5 +113,44 @@ class DynamoDbResponsesTest {
     @Test
     void withCrc32_nullResponse_returnsNull() {
         assertNull(DynamoDbResponses.withCrc32(null, mapper));
+    }
+
+    @Test
+    void withCrc32_serializationFailurePreservesOriginalResponse() {
+        ObjectMapper failingMapper = new ObjectMapper() {
+            @Override
+            public byte[] writeValueAsBytes(Object value) throws JsonProcessingException {
+                throw new JsonProcessingException("expected serialization failure") {};
+            }
+        };
+        Response original = Response.status(202).entity(new Object())
+                .header("x-amzn-requestid", "request-123").build();
+
+        assertSame(original, DynamoDbResponses.withCrc32(original, failingMapper));
+        assertNull(original.getHeaderString("X-Amz-Crc32"));
+    }
+
+    @Test
+    void legacyErrorsRetainMessageHeadersAndOriginalBackendBody() {
+        ObjectNode entity = mapper.createObjectNode()
+                .put("__type", "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
+                .put("message", "Table not found");
+        Response input = Response.status(400).entity(entity).header("x-request-id", "probe").build();
+        Response legacy = DynamoDbResponses.withLegacyErrorNamespace(input, mapper);
+        ObjectNode body = (ObjectNode) legacy.getEntity();
+        assertEquals("com.amazonaws.dynamodb.v20111205#ResourceNotFoundException", body.path("__type").asText());
+        assertEquals("Table not found", body.path("message").asText());
+        assertEquals("probe", legacy.getHeaderString("x-request-id"));
+        assertEquals(400, legacy.getStatus());
+        assertEquals("com.amazonaws.dynamodb.v20120810#ResourceNotFoundException", entity.path("__type").asText());
+    }
+
+    @Test
+    void legacyResponsesPreserveCoralValidationAndSuccessfulBodies() {
+        Response validation = Response.status(400).entity(mapper.createObjectNode()
+                .put("__type", "com.amazon.coral.validate#ValidationException")).build();
+        assertSame(validation, DynamoDbResponses.withLegacyErrorNamespace(validation, mapper));
+        Response success = Response.ok(mapper.createObjectNode().put("Count", 1)).build();
+        assertSame(success, DynamoDbResponses.withLegacyErrorNamespace(success, mapper));
     }
 }

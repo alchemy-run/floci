@@ -118,6 +118,7 @@ public class AccountController {
             throw new WebApplicationException(JsonErrorResponseUtils.createSerializationErrorResponse());
         }
         return request;
+        return Response.ok().build();
     }
 
     private JsonNode readTree(String body) {

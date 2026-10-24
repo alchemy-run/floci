@@ -3,12 +3,14 @@ package io.github.hectorvent.floci.services.pipes;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.Resettable;
-import io.github.hectorvent.floci.services.dynamodb.DynamoDbStreamService;
+import io.github.hectorvent.floci.services.dynamodb.DynamoDbTtlIdentity;
+import io.github.hectorvent.floci.services.dynamodb.backend.DynamoDbStreamReader;
 import io.github.hectorvent.floci.services.kinesis.KinesisService;
 import io.github.hectorvent.floci.services.pipes.model.DesiredState;
 import io.github.hectorvent.floci.services.pipes.model.Pipe;
@@ -43,16 +45,18 @@ public class PipesPoller implements Resettable {
     private final Vertx vertx;
     private final SqsService sqsService;
     private final KinesisService kinesisService;
-    private final DynamoDbStreamService dynamoDbStreamService;
+    private final DynamoDbStreamReader streamReader;
     private final PipesKafkaConsumerManager kafkaConsumerManager;
     private final PipesTargetInvoker targetInvoker;
     private final PipesFilterMatcher filterMatcher;
     private final ObjectMapper objectMapper;
     private final String baseUrl;
+    private final String defaultRegion;
     private final ConcurrentHashMap<String, Long> timerIds = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Boolean> activePolls = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, String> kinesisIterators = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, String> dynamoDbIterators = new ConcurrentHashMap<>();
+    /** Per pipe, its DynamoDB Stream progress, which a poll only starts while the pipe polls. */
+    private final ConcurrentHashMap<String, DynamoDbProgress> dynamoDbProgress = new ConcurrentHashMap<>();
     private final ExecutorService pollExecutor = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r, "pipes-poller");
         t.setDaemon(true);
@@ -63,7 +67,7 @@ public class PipesPoller implements Resettable {
     public PipesPoller(Vertx vertx,
                        SqsService sqsService,
                        KinesisService kinesisService,
-                       DynamoDbStreamService dynamoDbStreamService,
+                       DynamoDbStreamReader streamReader,
                        PipesKafkaConsumerManager kafkaConsumerManager,
                        PipesTargetInvoker targetInvoker,
                        PipesFilterMatcher filterMatcher,
@@ -72,12 +76,13 @@ public class PipesPoller implements Resettable {
         this.vertx = vertx;
         this.sqsService = sqsService;
         this.kinesisService = kinesisService;
-        this.dynamoDbStreamService = dynamoDbStreamService;
+        this.streamReader = streamReader;
         this.kafkaConsumerManager = kafkaConsumerManager;
         this.targetInvoker = targetInvoker;
         this.filterMatcher = filterMatcher;
         this.objectMapper = objectMapper;
         this.baseUrl = config.effectiveBaseUrl();
+        this.defaultRegion = config.defaultRegion();
     }
 
     @PreDestroy
@@ -93,7 +98,7 @@ public class PipesPoller implements Resettable {
         timerIds.clear();
         activePolls.clear();
         kinesisIterators.clear();
-        dynamoDbIterators.clear();
+        dynamoDbProgress.clear();
     }
 
     public void startPolling(Pipe pipe) {
@@ -112,7 +117,6 @@ public class PipesPoller implements Resettable {
         if (timerId != null) {
             vertx.cancelTimer(timerId);
             kinesisIterators.remove(pipeKey);
-            dynamoDbIterators.remove(pipeKey);
             kafkaConsumerManager.close(pipe);
             LOG.infov("Pipe {0}: stopped polling", pipe.getName());
         }
@@ -120,6 +124,11 @@ public class PipesPoller implements Resettable {
 
     public boolean isPolling(Pipe pipe) {
         return timerIds.containsKey(pipeKey(pipe));
+    }
+
+    /** Drops the pipe's DynamoDB Stream progress, which a stop keeps so a restart resumes from it. */
+    public void forget(Pipe pipe) {
+        dynamoDbProgress.remove(pipeKey(pipe));
     }
 
     private void pollAndInvoke(Pipe pipe) {
@@ -298,46 +307,77 @@ public class PipesPoller implements Resettable {
         }
     }
 
-    private void pollDynamoDbStreams(Pipe pipe, String region) {
-        String pipeKey = pipeKey(pipe);
-        String streamArn = pipe.getSource();
-        int batchSize = getBatchSize(pipe, "DynamoDBStreamParameters");
-        String iterator = dynamoDbIterators.get(pipeKey);
-        if (iterator == null) {
-            iterator = initDynamoDbIterator(streamArn);
-            if (iterator == null) {
-                return;
-            }
+    /**
+     * Reads every readable shard once. A LATEST pipe is pinned after each shard's newest record on
+     * its first poll, so only later writes are delivered.
+     */
+    void pollDynamoDbStreams(Pipe pipe, String region) {
+        DynamoDbStreamReader.Stream stream = DynamoDbStreamReader.Stream.of(pipe.getSource());
+        JsonNode sp = pipe.getSourceParameters();
+        boolean latest = sp != null
+                && "LATEST".equals(sp.path("DynamoDBStreamParameters").path("StartingPosition").asText());
+        // A delete stops polling before it forgets, so a poll it raced finds no timer for its pipe's lifetime and
+        // cannot start progress again, nor touch a pipe recreated under the same ARN.
+        DynamoDbProgress progress = dynamoDbProgress.computeIfAbsent(pipeKey(pipe), key -> timerIds.containsKey(key)
+                ? new DynamoDbProgress(latest
+                        ? new ConcurrentHashMap<>(streamReader.newestSequenceNumbers(stream))
+                        : new ConcurrentHashMap<>(), ConcurrentHashMap.newKeySet())
+                : null);
+        if (progress == null) {
+            return;
         }
+        // ponytail: a shard whose read throws ends the tick for the shards after it; the next tick
+        // starts over from committed progress, so it only delays them.
+        for (DynamoDbStreamReader.Shard shard
+                : DynamoDbStreamReader.readable(streamReader.shards(stream), progress.finished())) {
+            pollDynamoDbShard(pipe, region, stream, shard.shardId(), progress.committed(), progress.finished());
+        }
+    }
+
+    /** The newest sequence delivered or sent to the DLQ by shard, and the shards read to their end. */
+    private record DynamoDbProgress(Map<String, String> committed, Set<String> finished) {}
+
+    /**
+     * Reads one batch after the shard's committed sequence and commits it only once the batch is
+     * filtered out, delivered, or sent to the DLQ, so an undisposed batch is read again next poll.
+     */
+    private void pollDynamoDbShard(Pipe pipe, String region, DynamoDbStreamReader.Stream stream, String shardId,
+                                   Map<String, String> committed, Set<String> finished) {
+        String sequence = committed.get(shardId);
+        DynamoDbStreamReader.RecordsPage page;
         try {
-            var result = dynamoDbStreamService.getRecords(iterator, batchSize);
-            String nextIterator = result.nextShardIterator();
-            if (nextIterator != null) {
-                dynamoDbIterators.put(pipeKey, nextIterator);
-            }
-            var records = result.records();
-            if (records == null || records.isEmpty()) {
-                return;
-            }
-            LOG.infov("Pipe {0}: received {1} DynamoDB Stream record(s)", pipe.getName(), records.size());
-            List<ObjectNode> recordNodes = buildDynamoDbRecordNodes(records, pipe, region);
-            List<JsonNode> filtered = filterMatcher.applyFilterCriteria(
-                    new ArrayList<>(recordNodes), pipe.getSourceParameters());
-            if (filtered.isEmpty()) {
-                return;
-            }
-            int failed = deliverRecords(pipe, filtered, region);
-            if (failed > 0) {
-                LOG.warnv("Pipe {0}: {1} DynamoDB Stream record(s) dropped — delivery and DLQ both failed",
-                        pipe.getName(), failed);
-            }
+            page = streamReader.readAfter(stream, shardId, sequence, getBatchSize(pipe, "DynamoDBStreamParameters"));
         } catch (AwsException e) {
-            if ("ExpiredIteratorException".equals(e.getErrorCode()) ||
-                "TrimmedDataAccessException".equals(e.getErrorCode())) {
-                dynamoDbIterators.remove(pipeKey);
+            if (!"TrimmedDataAccessException".equals(e.getErrorCode())) {
+                throw e;
             }
-            throw e;
+            LOG.warnv("Pipe {0}: DynamoDB Stream checkpoint {1} on {2} was trimmed, restarting at the trim "
+                    + "horizon; records between were dropped from the stream", pipe.getName(), sequence, shardId);
+            committed.remove(shardId);
+            return;
         }
+        List<DynamoDbStreamReader.Record> records = page.records();
+        if (records.isEmpty()) {
+            if (page.closed()) {
+                finished.add(shardId);
+            }
+            return;
+        }
+        LOG.infov("Pipe {0}: received {1} DynamoDB Stream record(s)", pipe.getName(), records.size());
+        List<JsonNode> recordNodes = new ArrayList<>(records.size());
+        for (DynamoDbStreamReader.Record record : records) {
+            ObjectNode node = DynamoDbTtlIdentity.toEventRecord(record.awsRecord());
+            node.put("eventSourceARN", pipe.getSource());
+            recordNodes.add(node);
+        }
+        List<JsonNode> filtered = filterMatcher.applyFilterCriteria(recordNodes, pipe.getSourceParameters());
+        // ponytail: a partially delivered non-Lambda batch is redelivered whole (at-least-once).
+        if (!filtered.isEmpty() && deliverRecords(pipe, filtered, region) > 0) {
+            LOG.warnv("Pipe {0}: DynamoDB Stream batch on {1} was neither delivered nor sent to a DLQ, "
+                    + "retrying it next poll", pipe.getName(), shardId);
+            return;
+        }
+        committed.put(shardId, records.get(records.size() - 1).sequenceNumber());
     }
 
     void pollKafka(Pipe pipe, String region) {
@@ -511,20 +551,6 @@ public class PipesPoller implements Resettable {
         return failed;
     }
 
-    /**
-     * Opens an iterator on the stream's first shard, under the same single-shard limit as
-     * {@link #initKinesisIterator}.
-     */
-    private String initDynamoDbIterator(String streamArn) {
-        try {
-            return dynamoDbStreamService.getShardIterator(
-                    streamArn, DynamoDbStreamService.SHARD_ID, "TRIM_HORIZON", null);
-        } catch (Exception e) {
-            LOG.warnv("Failed to get DynamoDB stream iterator for {0}: {1}", streamArn, e.getMessage());
-            return null;
-        }
-    }
-
     // ──────────────────────────── Invocation & DLQ ────────────────────────────
 
     private int deliverRecords(Pipe pipe, List<JsonNode> records, String region) {
@@ -601,7 +627,7 @@ public class PipesPoller implements Resettable {
     }
 
     private String bareArray(List<JsonNode> records) {
-        var arr = objectMapper.createArrayNode();
+        ArrayNode arr = objectMapper.createArrayNode();
         records.forEach(arr::add);
         return arr.toString();
     }
@@ -676,7 +702,7 @@ public class PipesPoller implements Resettable {
 
     static String wrapPipeBatch(ObjectMapper mapper, List<JsonNode> records) {
         try {
-            var recordsArray = mapper.createArrayNode();
+            ArrayNode recordsArray = objectMapper.createArrayNode();
             records.forEach(recordsArray::add);
             return mapper.writeValueAsString(recordsArray);
         } catch (Exception e) {
@@ -744,18 +770,6 @@ public class PipesPoller implements Resettable {
         return nodes;
     }
 
-    private List<ObjectNode> buildDynamoDbRecordNodes(List<?> records, Pipe pipe, String region) {
-        List<ObjectNode> nodes = new ArrayList<>();
-        for (Object record : records) {
-            ObjectNode node = objectMapper.valueToTree(record);
-            node.put("eventSource", "aws:dynamodb");
-            node.put("eventSourceARN", pipe.getSource());
-            node.put("awsRegion", region);
-            nodes.add(node);
-        }
-        return nodes;
-    }
-
     private List<ObjectNode> buildKafkaRecordNodes(List<KafkaRecordDto> records, Pipe pipe) {
         List<ObjectNode> nodes = new ArrayList<>();
         String eventSource = pipe.getSource().contains(":kafka:") ? "aws:kafka" : "SelfManagedKafka";
@@ -776,14 +790,14 @@ public class PipesPoller implements Resettable {
             putKafkaBinaryField(node, "key", record.key());
             putKafkaBinaryField(node, "value", record.value());
 
-            var headersNode = node.putArray("headers");
+            ArrayNode headersNode = node.putArray("headers");
             for (KafkaHeaderDto header : record.headers()) {
                 ObjectNode headerNode = objectMapper.createObjectNode();
                 byte[] headerValue = header.value();
                 if (headerValue == null) {
                     headerNode.putNull(header.key());
                 } else {
-                    var values = headerNode.putArray(header.key());
+                    ArrayNode values = headerNode.putArray(header.key());
                     for (byte b : headerValue) {
                         values.add(b & 0xFF);
                     }
@@ -898,12 +912,14 @@ public class PipesPoller implements Resettable {
         return partitions;
     }
 
+    /** Keys polling state by pipe lifetime, so a pipe recreated under the same ARN starts afresh. */
     private static String pipeKey(Pipe pipe) {
-        return pipe.getArn();
+        return pipe.getArn() + "@" + pipe.getCreationTime();
     }
 
-    private static String extractRegionFromArn(String arn) {
-        return AwsArnUtils.regionOrDefault(arn, "us-east-1");
+    /** The region a source ARN names; a source with none, such as a self-managed Kafka URI, polls in the default. */
+    String extractRegionFromArn(String arn) {
+        return AwsArnUtils.regionOrDefault(arn, defaultRegion);
     }
 
     private static String extractResourceName(String arn) {

@@ -1,45 +1,5 @@
 package io.github.hectorvent.floci.services.stepfunctions;
 
-import io.github.hectorvent.floci.config.EmulatorConfig;
-import io.github.hectorvent.floci.core.common.AwsArnUtils;
-import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.core.common.AwsErrorResponse;
-import io.github.hectorvent.floci.core.common.CsvParser;
-import io.github.hectorvent.floci.core.common.CustomResourceLiveness;
-import io.github.hectorvent.floci.core.common.RequestContext;
-import io.github.hectorvent.floci.core.common.XmlParser;
-import io.github.hectorvent.floci.services.cloudformation.CloudFormationQueryHandler;
-import io.github.hectorvent.floci.services.dynamodb.DynamoDbJsonHandler;
-import io.github.hectorvent.floci.services.dynamodb.DynamoDbService;
-import io.github.hectorvent.floci.services.ec2.Ec2Service;
-import io.github.hectorvent.floci.services.eventbridge.EventBridgeHandler;
-import io.github.hectorvent.floci.services.ecs.EcsJsonHandler;
-import io.github.hectorvent.floci.services.ecs.EcsService;
-import io.github.hectorvent.floci.services.ecs.model.ContainerDefinition;
-import io.github.hectorvent.floci.services.ecs.model.ContainerOverride;
-import io.github.hectorvent.floci.services.ecs.model.EcsTask;
-import io.github.hectorvent.floci.services.ecs.model.NetworkConfiguration;
-import io.github.hectorvent.floci.services.ecs.model.TaskDefinition;
-import io.github.hectorvent.floci.services.ecs.model.LaunchType;
-import io.github.hectorvent.floci.services.s3.S3Service;
-import io.github.hectorvent.floci.services.scheduler.SchedulerController;
-import io.github.hectorvent.floci.services.scheduler.SchedulerService;
-import io.github.hectorvent.floci.services.scheduler.model.Schedule;
-import io.github.hectorvent.floci.services.scheduler.model.ScheduleRequest;
-import io.github.hectorvent.floci.services.lambda.LambdaExecutorService;
-import io.github.hectorvent.floci.services.lambda.LambdaFunctionStore;
-import io.github.hectorvent.floci.services.lambda.model.InvocationType;
-import io.github.hectorvent.floci.services.lambda.model.InvokeResult;
-import io.github.hectorvent.floci.services.lambda.model.LambdaFunction;
-import io.github.hectorvent.floci.services.s3.model.S3Object;
-import io.github.hectorvent.floci.services.sns.SnsJsonHandler;
-import io.github.hectorvent.floci.services.sqs.SqsJsonHandler;
-import io.github.hectorvent.floci.services.stepfunctions.model.Execution;
-import io.github.hectorvent.floci.services.stepfunctions.model.HistoryEvent;
-import io.github.hectorvent.floci.services.stepfunctions.model.MapRun;
-import io.github.hectorvent.floci.services.stepfunctions.model.MockedResponseStep;
-import io.github.hectorvent.floci.services.stepfunctions.model.MockedTestCase;
-import io.github.hectorvent.floci.services.stepfunctions.model.StateMachine;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -54,18 +14,67 @@ import com.jayway.jsonpath.JsonPath;
 import com.jayway.jsonpath.PathNotFoundException;
 import com.jayway.jsonpath.spi.json.JacksonJsonNodeJsonProvider;
 import com.jayway.jsonpath.spi.mapper.JacksonMappingProvider;
-
+import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
+import io.github.hectorvent.floci.core.common.AwsErrorResponse;
+import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.AwsPartition;
+import io.github.hectorvent.floci.core.common.AwsPartitions;
+import io.github.hectorvent.floci.core.common.CsvParser;
+import io.github.hectorvent.floci.core.common.CustomResourceLiveness;
+import io.github.hectorvent.floci.core.common.RequestContext;
+import io.github.hectorvent.floci.core.common.RequestScopes;
+import io.github.hectorvent.floci.core.common.ServiceRegistry;
+import io.github.hectorvent.floci.core.common.XmlParser;
+import io.github.hectorvent.floci.services.cloudformation.CloudFormationQueryHandler;
+import io.github.hectorvent.floci.services.dynamodb.DynamoDbFacade;
+import io.github.hectorvent.floci.services.dynamodb.DynamoDbJsonHandler;
+import io.github.hectorvent.floci.services.dynamodb.backend.DynamoDbItemAccess;
+import io.github.hectorvent.floci.services.dynamodb.backend.DynamoDbOperations.Scope;
+import io.github.hectorvent.floci.services.ec2.Ec2Service;
+import io.github.hectorvent.floci.services.ecs.EcsJsonHandler;
+import io.github.hectorvent.floci.services.ecs.EcsService;
+import io.github.hectorvent.floci.services.ecs.model.Container;
+import io.github.hectorvent.floci.services.ecs.model.ContainerDefinition;
+import io.github.hectorvent.floci.services.ecs.model.ContainerOverride;
+import io.github.hectorvent.floci.services.ecs.model.EcsTask;
+import io.github.hectorvent.floci.services.ecs.model.LaunchType;
+import io.github.hectorvent.floci.services.ecs.model.NetworkConfiguration;
+import io.github.hectorvent.floci.services.ecs.model.TaskDefinition;
+import io.github.hectorvent.floci.services.eventbridge.EventBridgeHandler;
+import io.github.hectorvent.floci.services.lambda.LambdaArnUtils;
+import io.github.hectorvent.floci.services.lambda.LambdaExecutorService;
+import io.github.hectorvent.floci.services.lambda.LambdaFunctionStore;
+import io.github.hectorvent.floci.services.lambda.LambdaTargetResolver;
+import io.github.hectorvent.floci.services.lambda.model.InvocationType;
+import io.github.hectorvent.floci.services.lambda.model.InvokeResult;
+import io.github.hectorvent.floci.services.lambda.model.LambdaFunction;
+import io.github.hectorvent.floci.services.rdsdata.RdsDataService;
+import io.github.hectorvent.floci.services.redshiftdata.RedshiftDataJsonHandler;
+import io.github.hectorvent.floci.services.s3.S3Service;
+import io.github.hectorvent.floci.services.s3.model.S3Object;
+import io.github.hectorvent.floci.services.scheduler.SchedulerController;
+import io.github.hectorvent.floci.services.scheduler.SchedulerService;
+import io.github.hectorvent.floci.services.scheduler.model.Schedule;
+import io.github.hectorvent.floci.services.scheduler.model.ScheduleRequest;
+import io.github.hectorvent.floci.services.sns.SnsJsonHandler;
+import io.github.hectorvent.floci.services.sqs.SqsJsonHandler;
+import io.github.hectorvent.floci.services.stepfunctions.StepFunctionsService.TokenTimeout;
+import io.github.hectorvent.floci.services.stepfunctions.StepFunctionsService.TokenWait;
+import io.github.hectorvent.floci.services.stepfunctions.model.Execution;
+import io.github.hectorvent.floci.services.stepfunctions.model.HistoryEvent;
+import io.github.hectorvent.floci.services.stepfunctions.model.MapRun;
+import io.github.hectorvent.floci.services.stepfunctions.model.MockedResponseStep;
+import io.github.hectorvent.floci.services.stepfunctions.model.MockedTestCase;
+import io.github.hectorvent.floci.services.stepfunctions.model.StateMachine;
 import io.vertx.core.http.HttpMethod;
 import io.vertx.core.impl.NoStackTraceTimeoutException;
 import io.vertx.mutiny.core.MultiMap;
-import io.vertx.mutiny.core.buffer.Buffer;
 import io.vertx.mutiny.core.Vertx;
+import io.vertx.mutiny.core.buffer.Buffer;
 import io.vertx.mutiny.ext.web.client.HttpRequest;
 import io.vertx.mutiny.ext.web.client.HttpResponse;
 import io.vertx.mutiny.ext.web.client.WebClient;
-import io.quarkus.arc.Arc;
-import io.quarkus.arc.ArcContainer;
-import io.quarkus.arc.ManagedContext;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -97,14 +106,17 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionService;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -113,6 +125,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
+import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 @ApplicationScoped
@@ -120,6 +135,7 @@ public class AslExecutor {
 
     /** AWS starts no child execution with an input over 256 KiB, batched or not. */
     private static final int MAX_BATCH_INPUT_BYTES = 256 * 1024;
+    private static final int ITEM_READER_MAX_ITEMS = 100_000_000;
 
     private enum MapItemsSource {
         DEFAULT,
@@ -147,9 +163,12 @@ public class AslExecutor {
     }
 
     private static final Logger LOG = Logger.getLogger(AslExecutor.class);
-    // How long a Task waits for its token when the state declares no TimeoutSeconds. AWS lets it
-    // run for a year; the emulator would rather free the worker thread.
-    private static final int DEFAULT_TASK_TOKEN_TIMEOUT_SECONDS = 300;
+    // How long a Task waits for its token, or for a .sync job to end, when the state declares no
+    // TimeoutSeconds. AWS lets it run for a year; the emulator would rather free the worker thread.
+    private static final int DEFAULT_TASK_TIMEOUT_SECONDS = 300;
+    // AWS's hard quota on an Express execution, synchronous or not.
+    private static final Duration EXPRESS_MAX_EXECUTION_TIME = Duration.ofMinutes(5);
+    private static final Set<String> TERMINAL_STATUSES = Set.of("SUCCEEDED", "FAILED", "TIMED_OUT", "ABORTED");
 
     /**
      * AWS ends an execution once its history reaches this many events. The count is neither reset
@@ -167,9 +186,10 @@ public class AslExecutor {
     private static final int INLINE_MAP_MAX_CONCURRENCY = 40;
     private static final int DISTRIBUTED_MAP_MAX_CONCURRENCY = 10_000;
 
-    // ecs:runTask.sync polling — wait up to ~60s for the task to reach STOPPED.
-    private static final int ECS_SYNC_POLL_ATTEMPTS = 600;
-    private static final long ECS_SYNC_POLL_INTERVAL_MS = 100;
+    // How often a .sync integration (ecs:runTask, elasticmapreduce, emr-serverless, states:startExecution)
+    // re-reads the job it waits on. The wait itself is bounded by the Task's TimeoutSeconds and the
+    // execution's budget.
+    private static final long SYNC_POLL_INTERVAL_MS = 100;
 
     // AWS caps the string input of States.Base64Encode/Base64Decode/Hash at 10,000 characters
     // (measured here in Unicode code points).
@@ -182,8 +202,6 @@ public class AslExecutor {
             Set.of("MD5", "SHA-1", "SHA-256", "SHA-384", "SHA-512");
 
     private static final String QUERY_LANGUAGE_JSONATA = "JSONata";
-    private static final String AWS_SDK_SFN_PREFIX = "arn:aws:states:::aws-sdk:sfn:";
-    private static final String AWS_SDK_SCHEDULER_PREFIX = "arn:aws:states:::aws-sdk:scheduler:";
 
     /**
      * A timestamp inside an {@code aws-sdk:} Task result is the SDK's ISO-8601 rendering of an
@@ -230,8 +248,8 @@ public class AslExecutor {
             "warning");
 
     private final LambdaExecutorService lambdaExecutor;
-    private final LambdaFunctionStore functionStore;
-    private final DynamoDbService dynamoDbService;
+    private final LambdaTargetResolver targetResolver;
+    private final DynamoDbFacade dynamoDb;
     private final DynamoDbJsonHandler dynamoDbJsonHandler;
     private final SqsJsonHandler sqsJsonHandler;
     private final SnsJsonHandler snsJsonHandler;
@@ -243,17 +261,28 @@ public class AslExecutor {
     private final EventBridgeHandler eventBridgeHandler;
     private final SchedulerService schedulerService;
     private final SchedulerController schedulerController;
+    private final RdsDataService rdsDataService;
+    private final RedshiftDataJsonHandler redshiftDataHandler;
+    private final ServiceRegistry serviceRegistry;
+    private final LambdaTaskAuthorizer lambdaTaskAuthorizer;
     private final ObjectMapper objectMapper;
     private final Configuration jsonPathConfiguration;
     private final JsonataEvaluator jsonataEvaluator;
     private final Instance<StepFunctionsService> sfnService;
     private final WebClient webClient;
+    private final ApiGatewayTaskInvoker apiGatewayTaskInvoker;
+    private final EmrTaskInvoker emrTaskInvoker;
+    private final EmrServerlessTaskInvoker emrServerlessTaskInvoker;
     private final EmulatorConfig config;
+    private final NestedTaskCredentials nestedTaskCredentials;
     private final CustomResourceLiveness customResourceLiveness;
     private final Clock clock;
     private final Sleeper sleeper;
     // Null in production, where the ceiling comes from the Step Functions config. Tests pin it.
     private final Integer maxWaitSecondsOverride;
+    private final Duration expressMaxExecutionTime;
+    // The monotonic clock every execution and task deadline is measured on. Tests move it forward.
+    private final LongSupplier nanoTime;
     private final Map<String, ActiveMockExecution> activeMocks = new ConcurrentHashMap<>();
     private final ExecutorService executor = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r, "sfn-executor");
@@ -262,41 +291,58 @@ public class AslExecutor {
     });
 
     @Inject
-    public AslExecutor(LambdaExecutorService lambdaExecutor, LambdaFunctionStore functionStore,
-                       DynamoDbService dynamoDbService, DynamoDbJsonHandler dynamoDbJsonHandler,
+    public AslExecutor(LambdaExecutorService lambdaExecutor, LambdaTargetResolver targetResolver,
+                       DynamoDbFacade dynamoDb, DynamoDbJsonHandler dynamoDbJsonHandler,
                        SqsJsonHandler sqsJsonHandler, SnsJsonHandler snsJsonHandler,
                        CloudFormationQueryHandler cloudFormationHandler,
                        Ec2Service ec2Service, S3Service s3Service,
                        EcsService ecsService, EcsJsonHandler ecsJsonHandler,
                        EventBridgeHandler eventBridgeHandler, SchedulerService schedulerService,
-                       SchedulerController schedulerController,
+                       SchedulerController schedulerController, RdsDataService rdsDataService,
                        ObjectMapper objectMapper, JsonataEvaluator jsonataEvaluator,
                        Instance<StepFunctionsService> sfnService, EmulatorConfig config, Vertx vertx,
-                       CustomResourceLiveness customResourceLiveness) {
-        this(lambdaExecutor, functionStore, dynamoDbService, dynamoDbJsonHandler,
+                       CustomResourceLiveness customResourceLiveness, RedshiftDataJsonHandler redshiftDataHandler,
+                       ServiceRegistry serviceRegistry, NestedTaskCredentials nestedTaskCredentials,
+                       LambdaTaskAuthorizer lambdaTaskAuthorizer, ApiGatewayTaskInvoker apiGatewayTaskInvoker,
+                       EmrTaskInvoker emrTaskInvoker, EmrServerlessTaskInvoker emrServerlessTaskInvoker) {
+        this(lambdaExecutor, targetResolver, dynamoDb, dynamoDbJsonHandler,
                 sqsJsonHandler, snsJsonHandler, cloudFormationHandler,
                 ec2Service, s3Service, ecsService, ecsJsonHandler,
-                eventBridgeHandler, schedulerService, schedulerController,
+                eventBridgeHandler, schedulerService, schedulerController, rdsDataService,
                 objectMapper, jsonataEvaluator, sfnService, config, vertx, customResourceLiveness,
-                Clock.systemUTC(), TimeUnit.NANOSECONDS::sleep, null);
+                Clock.systemUTC(), TimeUnit.NANOSECONDS::sleep, null, redshiftDataHandler, serviceRegistry,
+                nestedTaskCredentials, lambdaTaskAuthorizer, null, null, apiGatewayTaskInvoker, emrTaskInvoker,
+                emrServerlessTaskInvoker);
     }
 
-    AslExecutor(LambdaExecutorService lambdaExecutor, LambdaFunctionStore functionStore,
-                DynamoDbService dynamoDbService, DynamoDbJsonHandler dynamoDbJsonHandler,
+    AslExecutor(LambdaExecutorService lambdaExecutor, LambdaTargetResolver targetResolver,
+                DynamoDbFacade dynamoDb, DynamoDbJsonHandler dynamoDbJsonHandler,
                 SqsJsonHandler sqsJsonHandler, SnsJsonHandler snsJsonHandler,
                 CloudFormationQueryHandler cloudFormationHandler,
                 Ec2Service ec2Service, S3Service s3Service,
                 EcsService ecsService, EcsJsonHandler ecsJsonHandler,
                 EventBridgeHandler eventBridgeHandler, SchedulerService schedulerService,
-                SchedulerController schedulerController,
+                SchedulerController schedulerController, RdsDataService rdsDataService,
                 ObjectMapper objectMapper, JsonataEvaluator jsonataEvaluator,
                 Instance<StepFunctionsService> sfnService, EmulatorConfig config, Vertx vertx,
                 CustomResourceLiveness customResourceLiveness,
-                Clock clock, Sleeper sleeper, Integer maxWaitSecondsOverride) {
+                Clock clock, Sleeper sleeper, Integer maxWaitSecondsOverride,
+                RedshiftDataJsonHandler redshiftDataHandler, ServiceRegistry serviceRegistry,
+                NestedTaskCredentials nestedTaskCredentials, LambdaTaskAuthorizer lambdaTaskAuthorizer,
+                Duration expressMaxExecutionTimeOverride, LongSupplier nanoTimeOverride,
+                ApiGatewayTaskInvoker apiGatewayTaskInvoker, EmrTaskInvoker emrTaskInvoker,
+                EmrServerlessTaskInvoker emrServerlessTaskInvoker) {
+        this.apiGatewayTaskInvoker = apiGatewayTaskInvoker;
+        this.emrTaskInvoker = emrTaskInvoker;
+        this.emrServerlessTaskInvoker = emrServerlessTaskInvoker;
+        this.nestedTaskCredentials = nestedTaskCredentials;
+        this.serviceRegistry = serviceRegistry;
+        this.lambdaTaskAuthorizer = lambdaTaskAuthorizer;
         this.customResourceLiveness = customResourceLiveness;
+        this.redshiftDataHandler = redshiftDataHandler;
         this.lambdaExecutor = lambdaExecutor;
-        this.functionStore = functionStore;
-        this.dynamoDbService = dynamoDbService;
+        this.targetResolver = targetResolver;
+        this.dynamoDb = dynamoDb;
         this.dynamoDbJsonHandler = dynamoDbJsonHandler;
         this.sqsJsonHandler = sqsJsonHandler;
         this.snsJsonHandler = snsJsonHandler;
@@ -308,6 +354,7 @@ public class AslExecutor {
         this.eventBridgeHandler = eventBridgeHandler;
         this.schedulerService = schedulerService;
         this.schedulerController = schedulerController;
+        this.rdsDataService = rdsDataService;
         this.objectMapper = objectMapper;
         this.jsonPathConfiguration = objectMapper == null
                 ? null
@@ -321,19 +368,101 @@ public class AslExecutor {
         this.clock = clock;
         this.sleeper = sleeper;
         this.maxWaitSecondsOverride = maxWaitSecondsOverride;
+        this.nanoTime = nanoTimeOverride != null ? nanoTimeOverride : System::nanoTime;
+        this.expressMaxExecutionTime = expressMaxExecutionTimeOverride != null
+                ? expressMaxExecutionTimeOverride
+                : EXPRESS_MAX_EXECUTION_TIME;
         if (vertx != null) {
             // This can be optimized further
-            // TODO Set WebclientOptions useragent to Amazon|StepFunctions|HttpInvoke|{{{{region}}}}
             this.webClient = WebClient.wrap(vertx.createHttpClient());
         } else {
             webClient = null;
         }
     }
 
+    // Kept for tests that do not exercise the Redshift Data API integration.
+    AslExecutor(LambdaExecutorService lambdaExecutor, LambdaTargetResolver targetResolver,
+                DynamoDbFacade dynamoDb, DynamoDbJsonHandler dynamoDbJsonHandler,
+                SqsJsonHandler sqsJsonHandler, SnsJsonHandler snsJsonHandler,
+                CloudFormationQueryHandler cloudFormationHandler,
+                Ec2Service ec2Service, S3Service s3Service,
+                EcsService ecsService, EcsJsonHandler ecsJsonHandler,
+                EventBridgeHandler eventBridgeHandler, SchedulerService schedulerService,
+                SchedulerController schedulerController, RdsDataService rdsDataService,
+                ObjectMapper objectMapper, JsonataEvaluator jsonataEvaluator,
+                Instance<StepFunctionsService> sfnService, EmulatorConfig config, Vertx vertx,
+                CustomResourceLiveness customResourceLiveness) {
+        this(lambdaExecutor, targetResolver, dynamoDb, dynamoDbJsonHandler,
+                sqsJsonHandler, snsJsonHandler, cloudFormationHandler,
+                ec2Service, s3Service, ecsService, ecsJsonHandler,
+                eventBridgeHandler, schedulerService, schedulerController, rdsDataService,
+                objectMapper, jsonataEvaluator, sfnService, config, vertx, customResourceLiveness,
+                Clock.systemUTC(), TimeUnit.NANOSECONDS::sleep, null, null, null, null, null, null, null, null, null,
+                null);
+    }
+
+    // Kept for tests that do not exercise the Redshift Data API integration.
+    AslExecutor(LambdaExecutorService lambdaExecutor, LambdaTargetResolver targetResolver,
+                DynamoDbFacade dynamoDb, DynamoDbJsonHandler dynamoDbJsonHandler,
+                SqsJsonHandler sqsJsonHandler, SnsJsonHandler snsJsonHandler,
+                CloudFormationQueryHandler cloudFormationHandler,
+                Ec2Service ec2Service, S3Service s3Service,
+                EcsService ecsService, EcsJsonHandler ecsJsonHandler,
+                EventBridgeHandler eventBridgeHandler, SchedulerService schedulerService,
+                SchedulerController schedulerController, RdsDataService rdsDataService,
+                ObjectMapper objectMapper, JsonataEvaluator jsonataEvaluator,
+                Instance<StepFunctionsService> sfnService, EmulatorConfig config, Vertx vertx,
+                CustomResourceLiveness customResourceLiveness,
+                Clock clock, Sleeper sleeper, Integer maxWaitSecondsOverride) {
+        this(lambdaExecutor, targetResolver, dynamoDb, dynamoDbJsonHandler,
+                sqsJsonHandler, snsJsonHandler, cloudFormationHandler,
+                ec2Service, s3Service, ecsService, ecsJsonHandler,
+                eventBridgeHandler, schedulerService, schedulerController, rdsDataService,
+                objectMapper, jsonataEvaluator, sfnService, config, vertx, customResourceLiveness,
+                clock, sleeper, maxWaitSecondsOverride, null, null, null, null, null, null, null, null, null);
+    }
+
+    AslExecutor(LambdaExecutorService lambdaExecutor, LambdaFunctionStore functionStore,
+                DynamoDbFacade dynamoDb, DynamoDbJsonHandler dynamoDbJsonHandler,
+                SqsJsonHandler sqsJsonHandler, SnsJsonHandler snsJsonHandler,
+                CloudFormationQueryHandler cloudFormationHandler,
+                Ec2Service ec2Service, S3Service s3Service,
+                EcsService ecsService, EcsJsonHandler ecsJsonHandler,
+                EventBridgeHandler eventBridgeHandler, SchedulerService schedulerService,
+                SchedulerController schedulerController,
+                ObjectMapper objectMapper, JsonataEvaluator jsonataEvaluator,
+                Instance<StepFunctionsService> sfnService, EmulatorConfig config, Vertx vertx,
+                CustomResourceLiveness customResourceLiveness,
+                Clock clock, Sleeper sleeper, Integer maxWaitSecondsOverride) {
+        this(lambdaExecutor, new LambdaTargetResolver(functionStore, null), dynamoDb, dynamoDbJsonHandler,
+                sqsJsonHandler, snsJsonHandler, cloudFormationHandler, ec2Service, s3Service,
+                ecsService, ecsJsonHandler, eventBridgeHandler, schedulerService,
+                schedulerController, null, objectMapper, jsonataEvaluator, sfnService, config,
+                vertx, customResourceLiveness, clock, sleeper, maxWaitSecondsOverride);
+    }
+
     /** Test seam: lets Wait states be exercised without real time passing. */
     @FunctionalInterface
     interface Sleeper {
         void sleep(long nanos) throws InterruptedException;
+    }
+
+    AslExecutor(LambdaExecutorService lambdaExecutor, LambdaFunctionStore functionStore,
+                DynamoDbFacade dynamoDb, DynamoDbJsonHandler dynamoDbJsonHandler,
+                SqsJsonHandler sqsJsonHandler, SnsJsonHandler snsJsonHandler,
+                CloudFormationQueryHandler cloudFormationHandler,
+                Ec2Service ec2Service, S3Service s3Service,
+                EcsService ecsService, EcsJsonHandler ecsJsonHandler,
+                EventBridgeHandler eventBridgeHandler, SchedulerService schedulerService,
+                SchedulerController schedulerController,
+                ObjectMapper objectMapper, JsonataEvaluator jsonataEvaluator,
+                Instance<StepFunctionsService> sfnService, EmulatorConfig config, Vertx vertx,
+                CustomResourceLiveness customResourceLiveness) {
+        this(lambdaExecutor, new LambdaTargetResolver(functionStore, null), dynamoDb, dynamoDbJsonHandler,
+                sqsJsonHandler, snsJsonHandler, cloudFormationHandler, ec2Service, s3Service,
+                ecsService, ecsJsonHandler, eventBridgeHandler, schedulerService,
+                schedulerController, null, objectMapper, jsonataEvaluator, sfnService, config,
+                vertx, customResourceLiveness);
     }
 
     @PreDestroy
@@ -358,9 +487,15 @@ public class AslExecutor {
                              MockedTestCase mockedTestCase,
                              BiConsumer<Execution, List<HistoryEvent>> onUpdate) {
         registerMocks(exec, mockedTestCase);
+        // An Express execution has the same maximum execution time however it was started; a
+        // Standard one is allowed a year, which the emulator does not enforce.
+        long maxExecutionDeadlineNanos = "EXPRESS".equals(sm.getType())
+                ? nanoTime.getAsLong() + expressMaxExecutionTime.toNanos()
+                : Long.MAX_VALUE;
         executor.submit(() -> {
             try {
-                runUnderExecutionAccount(sm, () -> doExecute(sm, exec, history, onUpdate));
+                runUnderExecutionAccount(sm,
+                        () -> doExecute(sm, exec, history, onUpdate, maxExecutionDeadlineNanos));
             } catch (RuntimeException | Error e) {
                 // submit() parks whatever the task throws in a Future nobody reads, so without this
                 // the worker dies silently. doExecute has already published the terminal status by
@@ -386,14 +521,15 @@ public class AslExecutor {
                             MockedTestCase mockedTestCase,
                             BiConsumer<Execution, List<HistoryEvent>> onUpdate) {
         registerMocks(exec, mockedTestCase);
+        // The execution itself ends at this deadline, as it does at its TimeoutSeconds, so it runs
+        // no further state once the caller has been answered TIMED_OUT.
+        long maxExecutionDeadlineNanos = nanoTime.getAsLong() + expressMaxExecutionTime.toNanos();
         try {
-            Future<?> f = executor.submit(() ->
-                    runUnderExecutionAccount(sm, () -> doExecute(sm, exec, history, onUpdate)));
-            f.get(300, TimeUnit.SECONDS);
+            Future<?> f = executor.submit(() -> runUnderExecutionAccount(sm,
+                    () -> doExecute(sm, exec, history, onUpdate, maxExecutionDeadlineNanos)));
+            f.get(maxExecutionDeadlineNanos - nanoTime.getAsLong(), TimeUnit.NANOSECONDS);
         } catch (java.util.concurrent.TimeoutException e) {
-            exec.setStopDate(System.currentTimeMillis() / 1000.0);
-            exec.setStatus("TIMED_OUT");
-            onUpdate.accept(exec, history);
+            answerTimedOutUnlessEnded(exec, history, onUpdate);
         } catch (Exception e) {
             FailStateException fail = unwrapFail(e);
             if (fail != null && "RUNNING".equals(exec.getStatus())) {
@@ -405,6 +541,23 @@ public class AslExecutor {
                 LOG.warnv("Sync execution wait failed for {0}: {1}", exec.getExecutionArn(), e.getMessage());
             }
         }
+    }
+
+    /**
+     * Answers a synchronous caller whose wait ran out. The worker ends itself at the same deadline;
+     * this publishes TIMED_OUT when it has not yet, and never replaces an outcome the worker already
+     * published.
+     */
+    void answerTimedOutUnlessEnded(Execution exec, List<HistoryEvent> history,
+                                   BiConsumer<Execution, List<HistoryEvent>> onUpdate) {
+        synchronized (exec) {
+            if (hasEnded(exec)) {
+                return;
+            }
+            exec.setStopDate(System.currentTimeMillis() / 1000.0);
+            exec.setStatus("TIMED_OUT");
+        }
+        onUpdate.accept(exec, history);
     }
 
     /**
@@ -440,38 +593,18 @@ public class AslExecutor {
      * pool would otherwise run with no active scope and resolve its Task integrations against the
      * default account instead of the execution's. Each branch thread therefore activates its own
      * scope here, mirroring how {@link #executeAsync}/{@link #executeSync} wrap {@code doExecute}.
+     * Delegates to {@link RequestScopes#callAsChecked}, which restores a previously active scope's
+     * account so a reused thread does not keep the execution's account.
      */
     private <T> T callUnderExecutionAccount(StateMachine sm, Callable<T> body) throws Exception {
         String accountId = AwsArnUtils.accountOrDefault(sm.getStateMachineArn(), null);
-        ArcContainer container = Arc.container();
-        if (accountId == null || accountId.isBlank() || container == null || !container.isRunning()) {
-            return body.call();
-        }
-        ManagedContext requestContext = container.requestContext();
-        boolean alreadyActive = requestContext.isActive();
-        if (!alreadyActive) {
-            requestContext.activate();
-        }
-        // Execution runs on a background worker that normally has no active scope. If it did run
-        // inside an already-active scope, restore its previous account afterwards so we don't leave
-        // the execution's account behind on a reused thread.
-        RequestContext ctx = container.instance(RequestContext.class).get();
-        String previousAccountId = alreadyActive ? ctx.getAccountId() : null;
-        try {
-            ctx.setAccountId(accountId);
-            return body.call();
-        } finally {
-            if (!alreadyActive) {
-                requestContext.terminate();
-            } else {
-                ctx.setAccountId(previousAccountId);
-            }
-        }
+        return RequestScopes.callAsChecked(accountId == null || accountId.isBlank() ? null : accountId, body);
     }
 
     private void doExecute(StateMachine sm, Execution exec, List<HistoryEvent> history,
-                           BiConsumer<Execution, List<HistoryEvent>> onUpdate) {
-        var chain = HistoryChain.of(history);
+                           BiConsumer<Execution, List<HistoryEvent>> onUpdate, long maxExecutionDeadlineNanos) {
+        HistoryChain chain = HistoryChain.of(history);
+        long executionDeadlineNanos = maxExecutionDeadlineNanos;
         try {
             JsonNode definition = objectMapper.readTree(sm.getDefinition());
             JsonNode states = definition.path("States");
@@ -479,11 +612,13 @@ public class AslExecutor {
             String topLevelQueryLanguage = definition.path("QueryLanguage").asText("JSONPath");
             JsonNode currentInput = parseInput(exec.getInput());
             // The state machine's total budget, computed once so every state measures against the
-            // same instant. Long.MAX_VALUE stands for a definition with no TimeoutSeconds.
+            // same instant: the earlier of its TimeoutSeconds and the maximum execution time its
+            // workflow type allows. Long.MAX_VALUE stands for neither.
             int timeoutSeconds = definition.path("TimeoutSeconds").asInt(0);
-            long executionDeadlineNanos = timeoutSeconds > 0
-                    ? System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds)
-                    : Long.MAX_VALUE;
+            if (timeoutSeconds > 0) {
+                executionDeadlineNanos = Math.min(
+                        nanoTime.getAsLong() + TimeUnit.SECONDS.toNanos(timeoutSeconds), maxExecutionDeadlineNanos);
+            }
             JsonNode execContext = buildContext(exec, sm);
             // Execution-scoped JSONata variables (the Assign field). Mutated in place as states
             // assign, so later states observe earlier assignments.
@@ -491,7 +626,7 @@ public class AslExecutor {
 
             String currentStateName = startAt;
             while (currentStateName != null && !abortedByCaller(exec)) {
-                if (System.nanoTime() >= executionDeadlineNanos) {
+                if (nanoTime.getAsLong() >= executionDeadlineNanos) {
                     throw new ExecutionTimedOutException();
                 }
                 JsonNode stateDef = states.path(currentStateName);
@@ -504,12 +639,22 @@ public class AslExecutor {
                     stateResult = runState(chain, currentStateName, stateDef, currentInput, sm,
                             topLevelQueryLanguage, execContext, variables, executionDeadlineNanos);
                 } catch (FailStateException e) {
+                    // A failure that came back after the deadline, like a late success, ends the
+                    // execution as timed out.
+                    if (nanoTime.getAsLong() >= executionDeadlineNanos) {
+                        throw new ExecutionTimedOutException();
+                    }
                     failExecution(exec, chain, e);
                     onUpdate.accept(exec, history);
                     return;
                 }
                 currentInput = stateResult.output();
                 currentStateName = stateResult.nextState();
+            }
+            // A last state that outran the deadline, such as an integration call that does not
+            // watch it, ends the execution as timed out rather than succeeded.
+            if (nanoTime.getAsLong() >= executionDeadlineNanos) {
+                throw new ExecutionTimedOutException();
             }
 
             succeedExecution(exec, chain, currentInput);
@@ -518,7 +663,16 @@ public class AslExecutor {
         } catch (ExecutionTimedOutException e) {
             timeOutExecution(exec, chain);
             onUpdate.accept(exec, history);
+        } catch (ExecutionAbortedException e) {
+            // StopExecution already wrote ABORTED and sealed the history; the worker only stops.
+            onUpdate.accept(exec, history);
         } catch (Exception e) {
+            if (nanoTime.getAsLong() >= executionDeadlineNanos) {
+                // Past the deadline the execution has timed out, whatever broke on the way there.
+                timeOutExecution(exec, chain);
+                onUpdate.accept(exec, history);
+                return;
+            }
             LOG.warnv("ASL execution failed for {0}: {1}", exec.getExecutionArn(), e.getMessage());
             // This path previously set only the status, leaving error and cause null forever on an
             // execution DescribeExecution reports as FAILED.
@@ -543,11 +697,24 @@ public class AslExecutor {
     private StateResult runState(HistoryChain chain, String name, JsonNode stateDef, JsonNode input,
                                  StateMachine sm, String topLevelQueryLanguage, JsonNode context,
                                  ObjectNode variables, long executionDeadlineNanos) throws Exception {
-        var type = stateDef.path("Type").asText();
-        var enteredEventId = chain.publish(stateEnteredEventType(type),
+        String type = stateDef.path("Type").asText();
+        long enteredEventId = chain.publishStateEntered(type, stateEnteredEventType(type),
                 Map.of("name", name, "input", input.toString(), "inputDetails", Map.of("truncated", false)));
+        try {
+            return runEnteredState(chain, name, enteredEventId, type, stateDef, input, sm, topLevelQueryLanguage,
+                    context, variables, executionDeadlineNanos);
+        } finally {
+            // A state that ends by throwing publishes no Exited event, so the chain leaves it here.
+            chain.leaveState();
+        }
+    }
+
+    private StateResult runEnteredState(HistoryChain chain, String name, long enteredEventId, String type,
+                                        JsonNode stateDef, JsonNode input, StateMachine sm,
+                                        String topLevelQueryLanguage, JsonNode context, ObjectNode variables,
+                                        long executionDeadlineNanos) throws Exception {
         updateStateContext(context, name);
-        var jsonata = isJsonata(stateDef, topLevelQueryLanguage);
+        boolean jsonata = isJsonata(stateDef, topLevelQueryLanguage);
         StateResult result;
         try {
             result = executeStateWithRetry(name, enteredEventId, type, stateDef, input, chain, sm, jsonata,
@@ -556,14 +723,14 @@ public class AslExecutor {
                 result = new StateResult(result.output(), null);
             }
         } catch (FailStateException failure) {
-            var beforeFailed = chain.lastEventId();
+            long beforeFailed = chain.lastEventId();
             publishStateFailedEvent(chain, type, failure);
             try {
                 result = handleCatch(stateDef, input, failure, jsonata, context, variables);
             } catch (FailStateException catchClauseFailure) {
                 // AWS reports a failure inside the Catch clause itself, and no later clause catches
                 // it. The clause's EvaluationFailed is recorded from before the state's Failed event.
-                var clauseFailure = catchClauseFailure.attributedTo(name, enteredEventId);
+                FailStateException clauseFailure = catchClauseFailure.attributedTo(name, enteredEventId);
                 chain.continueFrom(beforeFailed);
                 publishEvaluationFailedEvent(chain, name, clauseFailure);
                 publishStateFailedEvent(chain, type, clauseFailure);
@@ -572,12 +739,12 @@ public class AslExecutor {
             if (result == null) {
                 if (chain.isBranch() && "Task".equals(type) && !failure.isRuntimeError()) {
                     // AWS records this after TaskFailed when the failure ends the branch.
-                    chain.publishAside("TaskStateAborted", null);
+                    chain.leaveStateAside("TaskStateAborted", null);
                 }
                 throw failure;
             }
         }
-        chain.publish(stateExitedEventType(type),
+        chain.publishStateExited(stateExitedEventType(type),
                 Map.of("name", name, "output", result.output().toString(),
                        "outputDetails", Map.of("truncated", false)));
         return result;
@@ -595,7 +762,7 @@ public class AslExecutor {
         if (!"States.QueryEvaluationError".equals(failure.error)) {
             return;
         }
-        var details = failureDetails(failure);
+        Map<String, Object> details = failureDetails(failure);
         if (failure.location != null) {
             details.put("location", failure.location);
         }
@@ -620,24 +787,24 @@ public class AslExecutor {
                                               String topLevelQueryLanguage, JsonNode context,
                                               ObjectNode variables, long executionDeadlineNanos)
             throws Exception {
-        var retriers = stateDef.path("Retry");
-        var attemptsPerRetrier = new HashMap<Integer, Integer>();
-        var attempt = 0;
+        JsonNode retriers = stateDef.path("Retry");
+        HashMap<Integer, Integer> attemptsPerRetrier = new HashMap<>();
+        int attempt = 0;
         while (true) {
             try {
                 return executeState(name, type, stateDef, input, chain, sm, jsonata,
                         topLevelQueryLanguage, context, variables, executionDeadlineNanos);
             } catch (FailStateException raised) {
-                var e = raised.attributedTo(name, enteredEventId);
+                FailStateException e = raised.attributedTo(name, enteredEventId);
                 if (!raised.hasFinalCause()) {
                     publishEvaluationFailedEvent(chain, name, e);
                 }
-                var retrierIndex = findMatchingRetrier(retriers, e);
+                int retrierIndex = findMatchingRetrier(retriers, e);
                 if (retrierIndex < 0) {
                     throw e;
                 }
-                var retrier = retriers.get(retrierIndex);
-                var attemptsUsed = attemptsPerRetrier.merge(retrierIndex, 1, Integer::sum);
+                JsonNode retrier = retriers.get(retrierIndex);
+                Integer attemptsUsed = attemptsPerRetrier.merge(retrierIndex, 1, Integer::sum);
                 if (attemptsUsed > retrier.path("MaxAttempts").asInt(3)) {
                     throw e;
                 }
@@ -652,7 +819,7 @@ public class AslExecutor {
         if (!retriers.isArray()) {
             return -1;
         }
-        for (var i = 0; i < retriers.size(); i++) {
+        for (int i = 0; i < retriers.size(); i++) {
             if (catchMatches(retriers.get(i), failure)) {
                 return i;
             }
@@ -680,9 +847,9 @@ public class AslExecutor {
      * zero and the computed delay. Jitter applies after the caps, matching AWS.
      */
     static double retryDelaySeconds(JsonNode retrier, int attemptsUsed, double random, int maxWaitSeconds) {
-        var interval = retrier.path("IntervalSeconds").asDouble(1.0);
-        var backoffRate = retrier.path("BackoffRate").asDouble(2.0);
-        var delaySeconds = interval * Math.pow(backoffRate, attemptsUsed - 1.0);
+        double interval = retrier.path("IntervalSeconds").asDouble(1.0);
+        double backoffRate = retrier.path("BackoffRate").asDouble(2.0);
+        double delaySeconds = interval * Math.pow(backoffRate, attemptsUsed - 1.0);
         double maxDelay = retrier.path("MaxDelaySeconds").asDouble(maxWaitSeconds);
         // Like the Wait state, cap the delay at the configured ceiling to keep emulated runs fast.
         delaySeconds = Math.min(delaySeconds, Math.min(maxDelay, maxWaitSeconds));
@@ -726,7 +893,7 @@ public class AslExecutor {
             return new StateResult(output, stateDef.path("Next").asText(null));
         }
 
-        JsonNode effectiveInput = applyInputPath(stateDef, input);
+        JsonNode effectiveInput = applyInputPath(stateDef, input, context);
 
         // Pass states transform their input through Parameters (with intrinsics), then a static
         // Result overrides if present.
@@ -739,7 +906,7 @@ public class AslExecutor {
         }
 
         JsonNode output = mergeResult(stateDef, input, result);
-        output = applyOutputPath(stateDef, input, output);
+        output = applyOutputPath(stateDef, output, context);
         return new StateResult(output, stateDef.path("Next").asText(null));
     }
 
@@ -747,16 +914,16 @@ public class AslExecutor {
                                          HistoryChain chain, StateMachine sm, boolean jsonata,
                                          JsonNode context, ObjectNode variables,
                                          long executionDeadlineNanos) throws Exception {
-        var resource = stateDef.path("Resource").asText();
-        var isWaitForToken = resource.endsWith(".waitForTaskToken");
-        var effectiveResource = isWaitForToken
+        String resource = stateDef.path("Resource").asText();
+        boolean isWaitForToken = resource.endsWith(".waitForTaskToken");
+        String effectiveResource = isWaitForToken
                 ? resource.substring(0, resource.length() - ".waitForTaskToken".length())
                 : resource;
-        var isActivity = isActivityArn(effectiveResource);
-        var mockedInvocation = findMockedInvocation(context, stateName);
+        boolean isActivity = isActivityArn(effectiveResource);
+        MockedTaskInvocation mockedInvocation = findMockedInvocation(context, stateName);
         // A mocked task never calls the integrated service, so it neither registers a task token
         // nor waits for one; the mocked response stands in for the whole interaction.
-        var needsToken = mockedInvocation == null && (isWaitForToken || isActivity);
+        boolean needsToken = mockedInvocation == null && (isWaitForToken || isActivity);
 
         String taskToken = null;
         if (needsToken) {
@@ -765,34 +932,67 @@ public class AslExecutor {
         }
 
         JsonNode effectiveInput;
+        // Read Credentials for IAM checks and nested account routing.
+        boolean nestedTask = NestedTaskCredentials.isNested(StatesIntegration.parse(resource).orElse(null));
+        JsonNode credentials = null;
+        boolean readCredentials = stateDef.has("Credentials")
+                && (iamEnforcementEnabled() || (mockedInvocation == null && nestedTask));
         if (jsonata) {
             effectiveInput = input;
             if (stateDef.has("Arguments")) {
-                var statesVar = buildStatesVar(input, null, context);
+                JsonNode statesVar = buildStatesVar(input, null, context);
                 effectiveInput = jsonataEvaluator.resolveTemplate(
                         stateDef.get("Arguments"), "Arguments", statesVar, variables);
             }
+            if (readCredentials) {
+                credentials = jsonataEvaluator.resolveTemplate(stateDef.get("Credentials"), "Credentials",
+                        buildStatesVar(input, null, context), variables);
+            }
         } else {
-            effectiveInput = applyInputPath(stateDef, input);
+            effectiveInput = applyInputPath(stateDef, input, context);
+            if (readCredentials) {
+                credentials = resolveParameters(stateDef.get("Credentials"), effectiveInput, context);
+            }
             if (stateDef.has("Parameters")) {
                 effectiveInput = resolveParameters(stateDef.get("Parameters"), effectiveInput, context);
             }
         }
+        String credentialsRoleArn = credentials == null ? null : credentials.path("RoleArn").asText(null);
 
         // Registered after the input template resolved, so a template failure leaves no token behind.
-        var tokenFuture = needsToken ? sfnService.get().registerPendingToken(taskToken) : null;
-        var profile = taskEventProfile(resource, isActivity);
+        CompletableFuture<JsonNode> tokenFuture = needsToken ? sfnService.get().registerPendingToken(taskToken,
+                AwsArnUtils.parse(sm.getStateMachineArn()).accountId()) : null;
+        TaskEventProfile profile = taskEventProfile(resource, isActivity);
         JsonNode taskResult;
+        // Read before the scheduled event is built, so a large input or a slow history callback
+        // does not extend the Task's own TimeoutSeconds.
+        long taskDeadlineNanos = taskDeadlineNanos(stateDef);
         try {
             addTaskScheduledEvent(chain, profile, stateDef, effectiveInput, sm);
             addTaskStartedEvent(chain, profile);
             try {
+                String taskAccount = null;
+                if (mockedInvocation == null && credentials != null && nestedTask) {
+                    taskAccount = nestedTaskCredentials.account(credentials, resource, effectiveInput, sm);
+                }
+                if (mockedInvocation == null) {
+                    NestedTaskCredentials.validateTargetAccount(resource, effectiveInput, sm, taskAccount);
+                }
+                JsonNode resourceInput = effectiveInput;
+                String resourceToken = taskToken;
                 taskResult = mockedInvocation != null
                         ? mockedTaskResult(mockedInvocation.steps(), stateName, mockedInvocation.responseIndex())
-                        : invokeResource(effectiveResource, effectiveInput, sm, taskToken,
-                                executionDeadlineNanos, jsonata ? null : stateDef.path("Parameters"));
+                        : RequestScopes.callAsChecked(taskAccount, () -> invokeResource(
+                                effectiveResource, resourceInput, sm, resourceToken,
+                                context.path("Execution").path("Id").asText(null),
+                                executionDeadlineNanos, taskDeadlineNanos,
+                                jsonata ? null : stateDef.path("Parameters"), credentialsRoleArn,
+                                jobResponse -> RequestScopes.runAs(
+                                        AwsArnUtils.parse(sm.getStateMachineArn()).accountId(),
+                                        () -> addTaskSubmittedEvent(chain, profile, jobResponse))));
                 if (tokenFuture != null) {
-                    taskResult = awaitToken(tokenFuture, stateDef, taskToken, executionDeadlineNanos);
+                    taskResult = awaitToken(tokenFuture, stateDef, taskToken, executionDeadlineNanos,
+                            taskDeadlineNanos);
                 }
             } catch (ExecutionTimedOutException e) {
                 // The state machine's TimeoutSeconds budget ran out while this task was waiting. AWS
@@ -803,11 +1003,16 @@ public class AslExecutor {
             } catch (TaskTimedOutException e) {
                 addTaskTimedOutEvent(chain, profile);
                 throw e;
+            } catch (ExecutionAbortedException e) {
+                // StopExecution ended the execution while this task waited on its job. The history
+                // was sealed by the abort; nothing more is written about the state.
+                throw e;
             } catch (InterruptedException e) {
-                // The task of a branch that was cut. AWS records nothing for it.
+                // The task of a branch that was cut. The branch records nothing more; the Parallel
+                // that cut it records its TaskStateAborted.
                 throw e;
             } catch (Exception e) {
-                var failure = e instanceof FailStateException f ? f : null;
+                FailStateException failure = e instanceof FailStateException f ? f : null;
                 addTaskFailedEvent(chain, profile,
                         failure != null && failure.error != null ? failure.error : "States.Runtime",
                         failure != null ? failure.cause : e.getMessage());
@@ -835,7 +1040,7 @@ public class AslExecutor {
                 taskResult = resolveParameters(stateDef.get("ResultSelector"), taskResult, context);
             }
             JsonNode output = mergeResult(stateDef, input, taskResult);
-            output = applyOutputPath(stateDef, input, output);
+            output = applyOutputPath(stateDef, output, context);
             return new StateResult(output, stateDef.path("Next").asText(null));
         }
     }
@@ -844,22 +1049,22 @@ public class AslExecutor {
         if (activeMocks.isEmpty()) {
             return null;
         }
-        var executionArn = context.path("Execution").path("Id").asText(null);
+        String executionArn = context.path("Execution").path("Id").asText(null);
         if (executionArn == null) {
             return null;
         }
-        var activeMock = activeMocks.get(executionArn);
+        ActiveMockExecution activeMock = activeMocks.get(executionArn);
         if (activeMock == null) {
             return null;
         }
-        var steps = activeMock.testCase().stateResponses().get(stateName);
+        List<MockedResponseStep> steps = activeMock.testCase().stateResponses().get(stateName);
         return steps != null
                 ? new MockedTaskInvocation(steps, activeMock.nextResponseIndex(stateName))
                 : null;
     }
 
     private JsonNode mockedTaskResult(List<MockedResponseStep> steps, String stateName, int responseIndex) {
-        for (var step : steps) {
+        for (MockedResponseStep step : steps) {
             if (step.covers(responseIndex)) {
                 if (step.isThrow()) {
                     // The mocked Error and Cause must reach Retry/Catch unchanged; routing them
@@ -885,37 +1090,30 @@ public class AslExecutor {
      * picks the task up, which is the instant it emits ActivityStarted; Floci emits that event at
      * schedule time, so there is no later instant to anchor on here.
      */
-    private JsonNode awaitToken(CompletableFuture<JsonNode> future, JsonNode stateDef, String taskToken,
-                                long executionDeadlineNanos) throws Exception {
-        int timeoutSeconds = stateDef.path("TimeoutSeconds").asInt(0);
-        if (timeoutSeconds <= 0) {
-            timeoutSeconds = DEFAULT_TASK_TOKEN_TIMEOUT_SECONDS;
-        }
+    JsonNode awaitToken(CompletableFuture<JsonNode> future, JsonNode stateDef, String taskToken,
+                                long executionDeadlineNanos, long timeoutDeadlineNanos) throws Exception {
         int heartbeatSeconds = stateDef.path("HeartbeatSeconds").asInt(0);
-        long timeoutDeadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
         try {
             while (true) {
                 long wakeAtNanos = Math.min(executionDeadlineNanos, Math.min(timeoutDeadlineNanos,
                         heartbeatDeadlineNanos(taskToken, heartbeatSeconds)));
                 try {
-                    return future.get(wakeAtNanos - System.nanoTime(), TimeUnit.NANOSECONDS);
+                    return future.get(wakeAtNanos - nanoTime.getAsLong(), TimeUnit.NANOSECONDS);
                 } catch (java.util.concurrent.TimeoutException e) {
-                    // The execution's budget is read first: when it is the clock that ran out, the
-                    // execution ends as TIMED_OUT and the task's own timeout never applies.
-                    if (System.nanoTime() >= executionDeadlineNanos) {
-                        future.cancel(true);
-                        throw new ExecutionTimedOutException();
+                    TokenWait decision = sfnService.get().expirePendingToken(taskToken, nanoTime.getAsLong(),
+                            executionDeadlineNanos, timeoutDeadlineNanos, heartbeatSeconds);
+                    if (decision.timeout() == TokenTimeout.CLAIMED) {
+                        return decision.result().get();
                     }
-                    if (System.nanoTime() >= timeoutDeadlineNanos) {
+                    RuntimeException timeout = switch (decision.timeout()) {
+                        case EXECUTION -> new ExecutionTimedOutException();
+                        case TASK -> new TaskTimedOutException("States.Timeout");
+                        case HEARTBEAT -> new TaskTimedOutException("States.HeartbeatTimeout");
+                        case NONE, CLAIMED -> null;
+                    };
+                    if (timeout != null) {
                         future.cancel(true);
-                        throw new TaskTimedOutException("States.Timeout");
-                    }
-                    // Read the gap again rather than trusting the one this thread parked on: a
-                    // heartbeat that landed meanwhile has already moved it past now, and the task
-                    // goes back to waiting on the later deadline.
-                    if (System.nanoTime() >= heartbeatDeadlineNanos(taskToken, heartbeatSeconds)) {
-                        future.cancel(true);
-                        throw new TaskTimedOutException("States.HeartbeatTimeout");
+                        throw timeout;
                     }
                 }
             }
@@ -932,6 +1130,19 @@ public class AslExecutor {
     }
 
     /**
+     * The instant a Task's own {@code TimeoutSeconds} runs out, counted from now: the bound on a
+     * task-token wait and on a {@code .sync} job wait alike. A state that declares none gets the
+     * emulator's default rather than the year AWS allows.
+     */
+    private long taskDeadlineNanos(JsonNode stateDef) {
+        int timeoutSeconds = stateDef.path("TimeoutSeconds").asInt(0);
+        if (timeoutSeconds <= 0) {
+            timeoutSeconds = DEFAULT_TASK_TIMEOUT_SECONDS;
+        }
+        return nanoTime.getAsLong() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
+    }
+
+    /**
      * When the worker's silence becomes too long: its last heartbeat plus the state's
      * {@code HeartbeatSeconds}, or never for a state that declares none.
      */
@@ -945,7 +1156,7 @@ public class AslExecutor {
      * Extracts the Lambda function name from a reference that may be a bare name, a name with a
      * version/alias qualifier (e.g. "name:$LATEST"), or a full/partial function ARN
      * (e.g. "arn:aws:lambda:region:acct:function:name[:qualifier]"). The qualifier is dropped
-     * because the function store is keyed by name. Taking the last ':'-segment is wrong for a
+     * here and read by {@link #extractLambdaQualifier}. Taking the last ':'-segment is wrong for a
      * qualified ARN — it yields the qualifier (e.g. "$LATEST") instead of the function name.
      */
     static String extractLambdaFunctionName(String ref) {
@@ -963,6 +1174,35 @@ public class AslExecutor {
             fn = fn.substring(0, colon);
         }
         return fn;
+    }
+
+    static String extractLambdaQualifier(String ref) {
+        if (ref == null) {
+            return null;
+        }
+        int fi = ref.indexOf(":function:");
+        String fn = fi >= 0 ? ref.substring(fi + ":function:".length()) : ref;
+        int colon = fn.indexOf(':');
+        return colon >= 0 ? fn.substring(colon + 1) : null;
+    }
+
+    private boolean iamEnforcementEnabled() {
+        return config != null && config.services() != null && config.services().iam() != null
+                && config.services().iam().enforcementEnabled();
+    }
+
+    /** {@code accountId} is null for the state machine's own account, the account the execution runs in. */
+    private LambdaFunction resolveLambdaFunction(String accountId, String region, String name, String qualifier) {
+        try {
+            return accountId == null
+                    ? targetResolver.resolveInvokeTarget(region, name, qualifier)
+                    : targetResolver.resolveInvokeTargetForAccount(accountId, region, name, qualifier);
+        } catch (AwsException e) {
+            if ("ResourceNotFoundException".equals(e.getErrorCode())) {
+                return null;
+            }
+            throw e;
+        }
     }
 
     /**
@@ -1005,21 +1245,33 @@ public class AslExecutor {
         return new FailStateException("Exception", cause);
     }
 
+    /**
+     * @param credentialsRoleArn the role the task's {@code Credentials} name, read only under IAM
+     *                           enforcement, or null when the task runs as the execution role
+     * @param jobSubmitted called with the response of the call that started a {@code .sync} job,
+     *                     once it has returned and before the job is waited on
+     */
     private JsonNode invokeResource(String resource, JsonNode input, StateMachine sm, String taskToken,
-                                    long executionDeadlineNanos, JsonNode rawParameters) throws Exception {
+                                    String executionArn, long executionDeadlineNanos, long taskDeadlineNanos,
+                                    JsonNode rawParameters, String credentialsRoleArn,
+                                    Consumer<JsonNode> jobSubmitted) throws Exception {
         // Support Lambda resources: direct ARN or optimized integration
         String functionName = null;
+        String functionRef = null;
         JsonNode lambdaPayload = input;
         boolean optimizedLambdaInvoke = false;
+        StatesIntegration integration = StatesIntegration.parse(resource).orElse(null);
 
         if (resource.contains(":lambda:") && resource.contains(":function:")) {
-            // Direct Lambda ARN: arn:aws:lambda:region:account:function:name[:qualifier]
+            // Direct Lambda ARN: arn:<partition>:lambda:region:account:function:name[:qualifier]
+            functionRef = resource;
             functionName = extractLambdaFunctionName(resource);
-        } else if (resource.startsWith("arn:aws:states:::lambda:invoke")) {
+        } else if (integration != null && integration.is("lambda", "invoke")) {
             // Optimized Lambda integration — function name and payload come from resolved input
             optimizedLambdaInvoke = true;
             String fnRef = input.path("FunctionName").asText(null);
             if (fnRef != null) {
+                functionRef = fnRef;
                 functionName = extractLambdaFunctionName(fnRef);
             }
             JsonNode payload = input.path("Payload");
@@ -1029,9 +1281,46 @@ public class AslExecutor {
         }
 
         if (functionName != null) {
-            // Extract region from the state machine ARN: arn:aws:states:REGION:...
-            String region = extractRegionFromArn(sm.getStateMachineArn());
-            LambdaFunction fn = functionStore.get(region, functionName).orElse(null);
+            AwsArnUtils.Arn stateMachineArn = AwsArnUtils.parse(sm.getStateMachineArn());
+            LambdaArnUtils.ResolvedFunctionRef ref;
+            try {
+                ref = LambdaArnUtils.resolve(functionRef);
+            } catch (AwsException e) {
+                throw new FailStateException("Lambda." + e.getErrorCode(), e.getMessage());
+            }
+            // The optimized integration calls Lambda's Invoke in the state machine's region, which
+            // refuses a function ARN from another region. A function ARN otherwise names its own
+            // account and region, never a same-named function of the state machine's.
+            if (optimizedLambdaInvoke && ref.region() != null && !ref.region().equals(stateMachineArn.region())) {
+                throw new FailStateException("Lambda.InvalidParameterValueException",
+                        "Region '" + ref.region() + "' in ARN does not match request region '"
+                                + stateMachineArn.region() + "'");
+            }
+            String region = ref.region() != null ? ref.region() : stateMachineArn.region();
+            String accountId = ref.account() == null || ref.account().equals(stateMachineArn.accountId())
+                    ? null : ref.account();
+            // The task invokes the function as its role: the execution role, or the role its
+            // Credentials name once the execution role has assumed it. The role's policies or the
+            // function's have to allow the call, and both when the function is in another account.
+            if (iamEnforcementEnabled()) {
+                String invokingRoleArn = sm.getRoleArn();
+                if (credentialsRoleArn != null) {
+                    Optional<String> assumeRefusal = lambdaTaskAuthorizer.assumeRefusal(sm.getRoleArn(),
+                            credentialsRoleArn, sm.getStateMachineArn());
+                    if (assumeRefusal.isPresent()) {
+                        throw new FailStateException("States.Permissions", assumeRefusal.get());
+                    }
+                    invokingRoleArn = credentialsRoleArn;
+                }
+                String functionArn = LambdaArnUtils.functionArn(functionRef, stateMachineArn.partition(), region,
+                        stateMachineArn.accountId());
+                Optional<String> refusal = lambdaTaskAuthorizer.refusal(invokingRoleArn, functionArn);
+                if (refusal.isPresent()) {
+                    throw new FailStateException("Lambda.AccessDeniedException", refusal.get());
+                }
+            }
+            LambdaFunction fn = resolveLambdaFunction(accountId, region, functionName,
+                    extractLambdaQualifier(functionRef));
             if (fn == null) {
                 // A missing function is a task failure on AWS, so it must stay reachable for
                 // Retry and Catch instead of surfacing as States.Runtime.
@@ -1041,7 +1330,12 @@ public class AslExecutor {
 
             byte[] payloadBytes = objectMapper.writeValueAsString(lambdaPayload).getBytes();
             reportCustomResourceLiveness(payloadBytes);
-            InvokeResult result = lambdaExecutor.invoke(fn, payloadBytes, InvocationType.RequestResponse);
+            InvokeResult result;
+            try {
+                result = lambdaExecutor.invoke(fn, payloadBytes, InvocationType.RequestResponse);
+            } catch (AwsException e) {
+                throw new FailStateException("Lambda." + e.getErrorCode(), e.getMessage());
+            }
 
             if (result.getFunctionError() != null) {
                 throw lambdaFunctionFailure(functionName, result);
@@ -1064,9 +1358,21 @@ public class AslExecutor {
             return invokeResponse;
         }
 
+        if (integration == null) {
+            return invokeNonIntegrationResource(resource, input, taskToken);
+        }
+
+        if (integration.is("apigateway", "invoke") && integration.suffix().isEmpty()) {
+            try {
+                return apiGatewayTaskInvoker.invoke(input, sm, credentialsRoleArn);
+            } catch (AwsException error) {
+                throw new FailStateException("ApiGateway." + error.getHttpStatus(), error.getMessage());
+            }
+        }
+
         // DynamoDB optimized integrations (4 actions)
-        if (resource.startsWith("arn:aws:states:::dynamodb:")) {
-            String operation = resource.substring("arn:aws:states:::dynamodb:".length());
+        if (integration.isOptimizedService("dynamodb")) {
+            String operation = integration.api();
             String region = extractRegionFromArn(sm.getStateMachineArn());
             try {
                 return invokeDynamoDb(operation, input, region);
@@ -1076,103 +1382,138 @@ public class AslExecutor {
         }
 
         // AWS SDK service integrations: DynamoDB
-        if (resource.startsWith("arn:aws:states:::aws-sdk:dynamodb:")) {
-            String camelCaseAction = resource.substring("arn:aws:states:::aws-sdk:dynamodb:".length());
+        if (integration.isSdkService("dynamodb")) {
+            String camelCaseAction = integration.api();
             String region = extractRegionFromArn(sm.getStateMachineArn());
             return invokeAwsSdkDynamoDb(camelCaseAction, input, region);
         }
 
+        // AWS SDK service integrations: Redshift Data API (provisioned clusters and Serverless workgroups)
+        if (integration.isSdkService("redshiftdata") && integration.suffix().isEmpty()) {
+            String region = extractRegionFromArn(sm.getStateMachineArn());
+            return invokeAwsSdkRedshiftData(integration, input, region);
+        }
+
+        // AWS SDK service integration: RDS Data API ExecuteStatement
+        if (integration.isSdkService("rdsdata")) {
+            String region = extractRegionFromArn(sm.getStateMachineArn());
+            return invokeAwsSdkRdsData(integration, input, region);
+        }
+
         // SQS optimized integration
-        if (resource.equals("arn:aws:states:::sqs:sendMessage")) {
+        if (integration.is("sqs", "sendMessage")) {
             String region = extractRegionFromArn(sm.getStateMachineArn());
             return invokeOptimizedSqsSendMessage(input, region);
         }
 
         // HTTP optimized integration
-        if (resource.equals("arn:aws:states:::http:invoke")) {
+        if (integration.is("http", "invoke")) {
             String region = extractRegionFromArn(sm.getStateMachineArn());
             return invokeHttp(input, region);
         }
 
         // AWS SDK service integration: SQS SendMessage
-        if (resource.equals("arn:aws:states:::aws-sdk:sqs:sendMessage")) {
+        if (integration.isSdk("sqs", "sendMessage")) {
             String region = extractRegionFromArn(sm.getStateMachineArn());
             return invokeAwsSdkSqsSendMessage(input, region);
         }
 
         // SNS optimized integration
-        if (resource.equals("arn:aws:states:::sns:publish")) {
+        if (integration.is("sns", "publish")) {
             String region = extractRegionFromArn(sm.getStateMachineArn());
             return invokeSnsPublish(input, region, "SNS.");
         }
 
         // AWS SDK service integration: SNS Publish
-        if (resource.equals("arn:aws:states:::aws-sdk:sns:publish")) {
+        if (integration.isSdk("sns", "publish")) {
             String region = extractRegionFromArn(sm.getStateMachineArn());
             return invokeSnsPublish(input, region, "Sns.");
         }
 
         // AWS SDK service integration: CloudFormation (query protocol → JSON)
-        if (resource.startsWith("arn:aws:states:::aws-sdk:cloudformation:")) {
-            String action = resource.substring("arn:aws:states:::aws-sdk:cloudformation:".length());
+        if (integration.isSdkService("cloudformation")) {
+            String action = integration.api();
             String region = extractRegionFromArn(sm.getStateMachineArn());
             return invokeAwsSdkCloudFormation(action, input, region);
         }
 
         // AWS SDK service integration: EC2 DescribeRegions
-        if (resource.equals("arn:aws:states:::aws-sdk:ec2:describeRegions")) {
-            return invokeAwsSdkEc2DescribeRegions();
+        if (integration.isSdk("ec2", "describeRegions")) {
+            return invokeAwsSdkEc2DescribeRegions(sm.getStateMachineArn());
         }
 
         // S3 PutObject — optimized and aws-sdk integrations
-        if (resource.equals("arn:aws:states:::s3:putObject")
-                || resource.equals("arn:aws:states:::aws-sdk:s3:putObject")) {
+        if (integration.is("s3", "putObject") || integration.isSdk("s3", "putObject")) {
             return invokeS3PutObject(input);
         }
 
-        // ECS optimized integration: arn:aws:states:::ecs:runTask (request-response, .sync, .waitForTaskToken).
+        // ECS optimized integration: arn:<partition>:states:::ecs:runTask (request-response, .sync, .waitForTaskToken).
         // The .waitForTaskToken suffix is already stripped by executeTaskState, so a waitForTaskToken
         // variant arrives here as the bare runTask resource and simply launches the task while the token
         // future blocks for SendTaskSuccess.
-        if (resource.startsWith("arn:aws:states:::ecs:runTask")) {
+        if (integration.isAnySuffix("ecs", "runTask")) {
             // A non-null taskToken means the original resource ended with .waitForTaskToken (stripped
             // upstream). Its failure semantics match .sync — a task placement failure fails the state —
             // whereas request-response returns the {Tasks,Failures} envelope without failing the state.
             String mode = taskToken != null
                     ? ".waitForTaskToken"
-                    : resource.substring("arn:aws:states:::ecs:runTask".length());
+                    : integration.suffix();
             String region = extractRegionFromArn(sm.getStateMachineArn());
-            return invokeEcsRunTask(mode, input, region, executionDeadlineNanos);
+            return invokeEcsRunTask(mode, input, region, executionArn, executionDeadlineNanos, taskDeadlineNanos,
+                    jobSubmitted);
+        }
+
+        // EMR optimized integrations: request-response and .sync. AWS supports no .waitForTaskToken
+        // variant, so one carrying a token falls through to Unsupported resource.
+        if (integration.isOptimizedService("elasticmapreduce") && taskToken == null) {
+            String region = extractRegionFromArn(sm.getStateMachineArn());
+            return invokeEmr(integration, input, region, executionArn, executionDeadlineNanos, taskDeadlineNanos,
+                    jobSubmitted);
+        }
+
+        // EMR Serverless optimized integrations: request-response and .sync, with no .waitForTaskToken
+        // variant either.
+        if (integration.isOptimizedService("emr-serverless") && taskToken == null) {
+            String region = extractRegionFromArn(sm.getStateMachineArn());
+            return invokeEmrServerless(integration, input, region, executionArn, executionDeadlineNanos,
+                    taskDeadlineNanos, jobSubmitted);
         }
 
         // AWS SDK service integrations: Step Functions
-        if (resource.startsWith(AWS_SDK_SFN_PREFIX)) {
-            String action = resource.substring(AWS_SDK_SFN_PREFIX.length());
+        if (integration.isSdkService("sfn")) {
             String region = extractRegionFromArn(sm.getStateMachineArn());
-            return invokeAwsSdkSfn(action, input, region);
+            return invokeAwsSdkSfn(integration, input, region);
         }
 
         // AWS SDK service integrations: EventBridge Scheduler
-        if (resource.startsWith(AWS_SDK_SCHEDULER_PREFIX)) {
-            String action = resource.substring(AWS_SDK_SCHEDULER_PREFIX.length());
+        if (integration.isSdkService("scheduler")) {
             String region = extractRegionFromArn(sm.getStateMachineArn());
-            return invokeAwsSdkScheduler(action, input, region);
+            return invokeAwsSdkScheduler(integration, input, region);
         }
 
         // EventBridge optimized integration
-        if (resource.equals("arn:aws:states:::events:putEvents")) {
+        if (integration.is("events", "putEvents")) {
             String region = extractRegionFromArn(sm.getStateMachineArn());
             return invokeOptimizedPutEvents(input, region);
         }
 
         // Nested state machine integration
-        if (resource.startsWith("arn:aws:states:::states:startExecution")) {
-            String mode = resource.substring("arn:aws:states:::states:startExecution".length());
+        if (integration.isAnySuffix("states", "startExecution")) {
+            String mode = integration.suffix();
             String region = extractRegionFromArn(sm.getStateMachineArn());
-            return invokeNestedStateMachine(mode, input, region, executionDeadlineNanos, rawParameters);
+            return invokeNestedStateMachine(mode, input, region, executionArn, executionDeadlineNanos,
+                    taskDeadlineNanos, rawParameters, jobSubmitted);
         }
 
-        // Activity resource: arn:aws:states:{region}:{account}:activity:{name}
+        throw new FailStateException("States.TaskFailed", "Unsupported resource: " + resource);
+    }
+
+    /**
+     * A Task resource that is not a service-integration id: an activity ARN, or something this
+     * emulator does not implement.
+     */
+    private JsonNode invokeNonIntegrationResource(String resource, JsonNode input, String taskToken) throws Exception {
+        // Activity resource: arn:<partition>:states:{region}:{account}:activity:{name}
         if (isActivityArn(resource)) {
             if (taskToken == null) {
                 throw new FailStateException("States.TaskFailed",
@@ -1221,13 +1562,21 @@ public class AslExecutor {
         }
     }
 
-    private JsonNode invokeAwsSdkEc2DescribeRegions() {
+    /**
+     * The regions of the partition the state machine lives in. The partition is read from its ARN,
+     * so a state machine in a region no partition publishes (allowed by
+     * {@code floci.partitions.allow-unknown-regions}) lists the regions of the partition its ARN
+     * was minted in.
+     */
+    private JsonNode invokeAwsSdkEc2DescribeRegions(String stateMachineArn) {
         ObjectNode result = objectMapper.createObjectNode();
         ArrayNode regions = objectMapper.createArrayNode();
-        for (String name : ec2Service.describeRegions()) {
+        AwsPartition partition = AwsPartitions.find(AwsArnUtils.parse(stateMachineArn).partition())
+                .orElseGet(() -> AwsPartitions.forRegionOrCommercial(extractRegionFromArn(stateMachineArn)));
+        for (AwsPartition.Region name : ec2Service.describeRegions(partition, false)) {
             ObjectNode region = objectMapper.createObjectNode();
-            region.put("RegionName", name);
-            region.put("Endpoint", "ec2." + name + ".amazonaws.com");
+            region.put("RegionName", name.id());
+            region.put("Endpoint", partition.regionalHostname("ec2", name.id()));
             region.put("OptInStatus", "opt-in-not-required");
             regions.add(region);
         }
@@ -1251,7 +1600,7 @@ public class AslExecutor {
             data = body.toString().getBytes(StandardCharsets.UTF_8);
         }
         try {
-            var stored = s3Service.putObject(bucket, key, data, "application/octet-stream", new HashMap<>());
+            S3Object stored = s3Service.putObject(bucket, key, data, "application/octet-stream", new HashMap<>());
             ObjectNode result = objectMapper.createObjectNode();
             if (stored != null && stored.getETag() != null) {
                 result.put("ETag", stored.getETag());
@@ -1295,15 +1644,15 @@ public class AslExecutor {
      * {@code aws-sdk:sfn:startExecution} from the optimized {@code states:startExecution}
      * handled by {@link #invokeNestedStateMachine}.
      */
-    private JsonNode invokeAwsSdkSfn(String action, JsonNode input, String region) throws Exception {
-        return switch (action) {
+    private JsonNode invokeAwsSdkSfn(StatesIntegration integration, JsonNode input, String region) throws Exception {
+        return switch (integration.api()) {
             case "startExecution" -> invokeAwsSdkSfnStartExecution(input, region);
             case "startSyncExecution" -> invokeAwsSdkSfnStartSyncExecution(input, region);
             case "sendTaskSuccess" -> invokeAwsSdkSfnSendTaskSuccess(input);
             case "sendTaskFailure" -> invokeAwsSdkSfnSendTaskFailure(input);
             case "describeMapRun" -> invokeAwsSdkSfnDescribeMapRun(input);
             default -> throw new FailStateException("States.TaskFailed",
-                    "Unsupported resource: " + AWS_SDK_SFN_PREFIX + action);
+                    "Unsupported resource: " + integration.withoutSuffix());
         };
     }
 
@@ -1346,10 +1695,10 @@ public class AslExecutor {
     }
 
     /**
-     * AWS SDK integration for {@code sfn:startExecution}. Unlike the optimized
-     * {@code states:startExecution}, which returns {@code executionArn} and {@code startDate} in
-     * the casing of the wire response, this one returns the SDK's own {@code ExecutionArn} and an
-     * ISO-8601 {@code StartDate}. Neither waits for the child.
+     * AWS SDK integration for {@code sfn:startExecution}. Both this and the optimized
+     * {@code states:startExecution} return {@code ExecutionArn} and {@code StartDate}; the
+     * optimized one carries {@code StartDate} in epoch milliseconds, this one as an ISO-8601
+     * string. Neither waits for the child.
      */
     private JsonNode invokeAwsSdkSfnStartExecution(JsonNode input, String region) throws Exception {
         String smArn = input.path("StateMachineArn").asText(null);
@@ -1401,8 +1750,10 @@ public class AslExecutor {
      */
     private JsonNode invokeAwsSdkSfnSendTaskSuccess(JsonNode input) throws Exception {
         String taskToken = input.path("TaskToken").asText(null);
-        if (!sfnService.get().sendTaskSuccess(taskToken, sdkPayload(input.path("Output")))) {
-            throw new FailStateException("Sfn.InvalidTokenException", "Invalid Token: 'Invalid token'");
+        try {
+            sfnService.get().sendTaskSuccess(taskToken, sdkPayload(input.path("Output")));
+        } catch (AwsException e) {
+            throw new FailStateException(sdkExceptionName("Sfn", e.getErrorCode()), e.getMessage());
         }
         return objectMapper.createObjectNode();
     }
@@ -1410,9 +1761,11 @@ public class AslExecutor {
     /** AWS SDK integration for {@code sfn:sendTaskFailure}, token semantics as in SendTaskSuccess. */
     private JsonNode invokeAwsSdkSfnSendTaskFailure(JsonNode input) {
         String taskToken = input.path("TaskToken").asText(null);
-        if (!sfnService.get().sendTaskFailure(taskToken, input.path("Cause").asText(null),
-                input.path("Error").asText(null))) {
-            throw new FailStateException("Sfn.InvalidTokenException", "Invalid Token: 'Invalid token'");
+        try {
+            sfnService.get().sendTaskFailure(taskToken, input.path("Cause").asText(null),
+                    input.path("Error").asText(null));
+        } catch (AwsException e) {
+            throw new FailStateException(sdkExceptionName("Sfn", e.getErrorCode()), e.getMessage());
         }
         return objectMapper.createObjectNode();
     }
@@ -1423,12 +1776,13 @@ public class AslExecutor {
      * Service and parsing failures stay inside the translation that makes them reachable for
      * {@code Retry} and {@code Catch}.
      */
-    private JsonNode invokeAwsSdkScheduler(String action, JsonNode input, String region) {
+    private JsonNode invokeAwsSdkScheduler(StatesIntegration integration, JsonNode input, String region) {
+        String action = integration.api();
         boolean deleting = "deleteSchedule".equals(action);
         boolean creating = "createSchedule".equals(action);
         if (!creating && !deleting && !"updateSchedule".equals(action)) {
             throw new FailStateException("States.TaskFailed",
-                    "Unsupported resource: " + AWS_SDK_SCHEDULER_PREFIX + action);
+                    "Unsupported resource: " + integration.withoutSuffix());
         }
         try {
             if (deleting) {
@@ -1458,6 +1812,27 @@ public class AslExecutor {
             normalizeAwsSdkSchedulerTimestamp(object, "EndDate");
         }
         return normalized;
+    /** Converts SDK task values to the representations used by the Scheduler wire parser. */
+    private JsonNode normalizeAwsSdkSchedulerInput(JsonNode input) {
+        JsonNode normalized = input.deepCopy();
+        if (normalized instanceof ObjectNode object) {
+            normalizeAwsSdkSchedulerTimestamp(object, "StartDate");
+            normalizeAwsSdkSchedulerTimestamp(object, "EndDate");
+            normalizeAwsSdkSchedulerTargetInput(object);
+        }
+        return normalized;
+    }
+
+    private void normalizeAwsSdkSchedulerTargetInput(ObjectNode input) {
+        JsonNode target = input.get("Target");
+        if (!(target instanceof ObjectNode targetObject)) {
+            return;
+        }
+        JsonNode value = targetObject.get("Input");
+        if (value == null || value.isNull() || value.isTextual()) {
+            return;
+        }
+        targetObject.put("Input", value.toString());
     }
 
     private void normalizeAwsSdkSchedulerTimestamp(ObjectNode input, String field) {
@@ -1520,9 +1895,9 @@ public class AslExecutor {
     /**
      * AWS SDK integration for {@code sfn:startSyncExecution}, the way an EXPRESS child workflow is
      * called. It differs from the optimized {@code states:startExecution.sync} integration in three
-     * ways: the child must be EXPRESS, the response envelope uses PascalCase field names with
-     * {@code Output} as a JSON string, and a child execution that fails is reported through
-     * {@code Status} rather than failing the calling task.
+     * ways: the child must be EXPRESS, the response envelope is the SDK's StartSyncExecution
+     * response rather than the DescribeExecution one, and a child execution that fails is reported
+     * through {@code Status} rather than failing the calling task.
      */
     private JsonNode invokeAwsSdkSfnStartSyncExecution(JsonNode input, String region) throws Exception {
         String smArn = input.path("StateMachineArn").asText(null);
@@ -1562,8 +1937,10 @@ public class AslExecutor {
         return envelope;
     }
 
-    private JsonNode invokeNestedStateMachine(String mode, JsonNode input, String region,
-                                              long executionDeadlineNanos, JsonNode rawParameters) throws Exception {
+    private JsonNode invokeNestedStateMachine(String mode, JsonNode input, String region, String executionArn,
+                                              long executionDeadlineNanos, long taskDeadlineNanos,
+                                              JsonNode rawParameters, Consumer<JsonNode> jobSubmitted)
+            throws Exception {
         String smArn = input.path("StateMachineArn").asText(null);
         if (smArn == null || smArn.isBlank()) {
             throw new FailStateException("States.TaskFailed",
@@ -1601,54 +1978,123 @@ public class AslExecutor {
         }
         String execArn = exec.getExecutionArn();
 
+        // The StartExecution response as this integration reports it (measured: PascalCase,
+        // StartDate in epoch milliseconds). Request-response returns it as the Task result.
+        ObjectNode startResponse = objectMapper.createObjectNode();
+        startResponse.put("ExecutionArn", execArn);
+        startResponse.put("StartDate", Math.round(exec.getStartDate() * 1000));
         if ("".equals(mode)) {
-            // Fire-and-forget: return { executionArn, startDate }
-            ObjectNode result = objectMapper.createObjectNode();
-            result.put("executionArn", execArn);
-            result.put("startDate", exec.getStartDate());
-            return result;
+            return startResponse;
         }
 
-        // .sync or .sync:2 — poll until terminal, or until the parent execution's TimeoutSeconds
-        // budget runs out, which ends the parent as TIMED_OUT and leaves the child running.
-        for (int i = 0; i < 600; i++) {
-            sleepOrTimeOutExecution(TimeUnit.MILLISECONDS.toNanos(100), executionDeadlineNanos);
+        // The job is submitted: AWS records the same response here, before the wait.
+        try {
+            jobSubmitted.accept(startResponse);
+        } catch (RuntimeException e) {
+            // The event could not be recorded (the history-event limit): the child has started and
+            // the wait that would abort it is never entered, so it is aborted here.
+            abortChildExecution(execArn, executionArn);
+            throw e;
+        }
+
+        // .sync or .sync:2 polls until terminal. Whatever else ends the wait aborts the child, the way
+        // AWS does (measured: child ABORTED, no error, the cause below): the Task's own TimeoutSeconds,
+        // which fails the state with States.Timeout; the parent execution's budget, which ends it
+        // TIMED_OUT; a failure in a sibling Parallel branch, which interrupts this one; and a
+        // StopExecution on the parent, so a stopped execution does not keep a polling worker.
+        while (true) {
+            try {
+                sleepOrTimeOutTask(TimeUnit.MILLISECONDS.toNanos(SYNC_POLL_INTERVAL_MS),
+                        executionDeadlineNanos, taskDeadlineNanos);
+            } catch (TaskTimedOutException | ExecutionTimedOutException | InterruptedException e) {
+                abortChildExecution(execArn, executionArn);
+                throw e;
+            }
+            if (abortedByCaller(executionArn)) {
+                abortChildExecution(execArn, executionArn);
+                throw new ExecutionAbortedException();
+            }
             io.github.hectorvent.floci.services.stepfunctions.model.Execution current =
                     sfnService.get().describeExecution(execArn);
-            String status = current.getStatus();
+            String status;
+            // The child's worker and StopExecution write its terminal fields under this monitor,
+            // status last. Reading the status under it makes everything written before it visible,
+            // so a terminal status is never seen without the error, cause and stop date behind it.
+            synchronized (current) {
+                status = current.getStatus();
+            }
             if ("RUNNING".equals(status)) {
                 continue;
             }
             if ("SUCCEEDED".equals(status)) {
-                if (".sync:2".equals(mode)) {
-                    String out = current.getOutput();
-                    return objectMapper.readTree(out != null ? out : "null");
-                }
-                // .sync — full execution envelope; output field is a JSON string
-                ObjectNode envelope = objectMapper.createObjectNode();
-                envelope.put("executionArn", current.getExecutionArn());
-                envelope.put("stateMachineArn", current.getStateMachineArn());
-                envelope.put("name", current.getName());
-                envelope.put("status", current.getStatus());
-                envelope.put("startDate", current.getStartDate());
-                if (current.getStopDate() != null) {
-                    envelope.put("stopDate", current.getStopDate());
-                }
-                if (current.getInput() != null) {
-                    envelope.put("input", current.getInput());
-                }
-                if (current.getOutput() != null) {
-                    envelope.put("output", current.getOutput());
-                }
-                return envelope;
+                // Both modes return the envelope (measured); .sync:2 differs only in carrying
+                // Input and Output as JSON values where .sync carries them as JSON strings.
+                return nestedExecutionEnvelope(current, true, ".sync:2".equals(mode));
             }
-            throw new FailStateException(
-                    current.getError() != null ? current.getError() : "States.TaskFailed",
-                    current.getCause() != null ? current.getCause()
-                            : "Nested execution ended with status: " + status);
+            // However the child ended, FAILED, TIMED_OUT or ABORTED, and whatever its own error, the
+            // parent sees States.TaskFailed (measured), so a Catch on the child's error never fires.
+            throw new FailStateException("States.TaskFailed",
+                    nestedExecutionEnvelope(current, false, false).toString());
         }
-        throw new FailStateException("States.TaskFailed",
-                "Nested execution timed out: " + execArn);
+    }
+
+    /**
+     * The child's DescribeExecution response as a {@code .sync} or {@code .sync:2} Task reports it
+     * (measured on AWS): PascalCase with its keys in alphabetical order, dates in epoch
+     * milliseconds, {@code StateMachineAliasArn} and {@code StateMachineVersionArn} only when the
+     * child was started through an alias or a version (an alias carries both).
+     *
+     * <p>A child that SUCCEEDED is the Task result: it carries {@code Output}, {@code OutputDetails}
+     * and {@code RedriveStatusReason}, and {@code .sync:2} carries {@code Input} and {@code Output}
+     * as JSON values ({@code payloadsAsJson}) where {@code .sync} carries JSON strings. A child that
+     * ended any other way is the cause of the failed Task, the same for both modes: {@code Cause}
+     * and {@code Error} only when the child has them, and no {@code Output}. Floci does not
+     * implement redrive, so the redrive fields carry what AWS reports for a child never redriven.
+     */
+    private ObjectNode nestedExecutionEnvelope(Execution child, boolean succeeded, boolean payloadsAsJson)
+            throws JsonProcessingException {
+        ObjectNode envelope = objectMapper.createObjectNode();
+        if (!succeeded && child.getCause() != null) {
+            envelope.put("Cause", child.getCause());
+        }
+        if (!succeeded && child.getError() != null) {
+            envelope.put("Error", child.getError());
+        }
+        envelope.put("ExecutionArn", child.getExecutionArn());
+        String input = child.getInput() != null ? child.getInput() : "{}";
+        if (payloadsAsJson) {
+            envelope.set("Input", objectMapper.readTree(input));
+        } else {
+            envelope.put("Input", input);
+        }
+        envelope.putObject("InputDetails").put("Included", true);
+        envelope.put("Name", child.getName());
+        if (succeeded && child.getOutput() != null) {
+            if (payloadsAsJson) {
+                envelope.set("Output", objectMapper.readTree(child.getOutput()));
+            } else {
+                envelope.put("Output", child.getOutput());
+            }
+            envelope.putObject("OutputDetails").put("Included", true);
+        }
+        envelope.put("RedriveCount", 0);
+        envelope.put("RedriveStatus", succeeded ? "NOT_REDRIVABLE" : "REDRIVABLE");
+        if (succeeded) {
+            envelope.put("RedriveStatusReason", "Execution is SUCCEEDED and cannot be redriven");
+        }
+        envelope.put("StartDate", Math.round(child.getStartDate() * 1000));
+        if (child.getStateMachineAliasArn() != null) {
+            envelope.put("StateMachineAliasArn", child.getStateMachineAliasArn());
+        }
+        envelope.put("StateMachineArn", child.getStateMachineArn());
+        if (child.getStateMachineVersionArn() != null) {
+            envelope.put("StateMachineVersionArn", child.getStateMachineVersionArn());
+        }
+        envelope.put("Status", child.getStatus());
+        if (child.getStopDate() != null) {
+            envelope.put("StopDate", Math.round(child.getStopDate() * 1000));
+        }
+        return envelope;
     }
 
     /**
@@ -1662,8 +2108,9 @@ public class AslExecutor {
      *             STOPPED, or ".waitForTaskToken" to launch and let the token future carry the result
      *             (both ".sync" and ".waitForTaskToken" fail the state on a placement failure).
      */
-    private JsonNode invokeEcsRunTask(String mode, JsonNode input, String region,
-                                      long executionDeadlineNanos) throws Exception {
+    private JsonNode invokeEcsRunTask(String mode, JsonNode input, String region, String executionArn,
+                                      long executionDeadlineNanos, long taskDeadlineNanos,
+                                      Consumer<JsonNode> jobSubmitted) throws Exception {
         String taskDefinition = input.path("TaskDefinition").asText(null);
         if (taskDefinition == null || taskDefinition.isBlank()) {
             throw new FailStateException("States.TaskFailed",
@@ -1732,11 +2179,41 @@ public class AslExecutor {
 
         // .sync — wait until every launched task reaches STOPPED, then surface success or failure.
         // All tasks must be polled (not just the first): with Count > 1, a failure in any task must
-        // fail the state, otherwise tasks beyond the first would run unmonitored.
+        // fail the state, otherwise tasks beyond the first would run unmonitored. The wait is bounded
+        // by the Task's TimeoutSeconds and by the execution's budget, never by a poll count of its own.
+        // Whatever ends the wait before the tasks stop also stops the tasks it launched, the way AWS
+        // does (measured: the ECS task reads stopCode UserInitiated with the cause below): either
+        // clock, a failure in a sibling Parallel branch, which interrupts this one, and a
+        // StopExecution on the execution, which otherwise would leave this worker polling.
         List<String> taskArns = launched.stream().map(EcsTask::getTaskArn).toList();
-        for (int i = 0; i < ECS_SYNC_POLL_ATTEMPTS; i++) {
-            sleepOrTimeOutExecution(TimeUnit.MILLISECONDS.toNanos(ECS_SYNC_POLL_INTERVAL_MS),
-                    executionDeadlineNanos);
+        // The job is submitted: AWS records the RunTask response here, before the wait (measured:
+        // Failures then Tasks, PascalCase).
+        ObjectNode runTaskResponse = objectMapper.createObjectNode();
+        runTaskResponse.putArray("Failures");
+        ArrayNode submittedTasks = runTaskResponse.putArray("Tasks");
+        for (EcsTask t : launched) {
+            submittedTasks.add(recaseKeys(objectMapper, ecsJsonHandler.taskNode(t), true));
+        }
+        try {
+            jobSubmitted.accept(runTaskResponse);
+        } catch (RuntimeException e) {
+            // Same as the nested case: the tasks are running and the wait that would stop them is
+            // never entered, so they are stopped here.
+            stopEcsTasks(cluster, taskArns, executionArn, region);
+            throw e;
+        }
+        while (true) {
+            try {
+                sleepOrTimeOutTask(TimeUnit.MILLISECONDS.toNanos(SYNC_POLL_INTERVAL_MS),
+                        executionDeadlineNanos, taskDeadlineNanos);
+            } catch (TaskTimedOutException | ExecutionTimedOutException | InterruptedException e) {
+                stopEcsTasks(cluster, taskArns, executionArn, region);
+                throw e;
+            }
+            if (abortedByCaller(executionArn)) {
+                stopEcsTasks(cluster, taskArns, executionArn, region);
+                throw new ExecutionAbortedException();
+            }
             List<EcsTask> described = ecsService.describeTasks(cluster, taskArns, region);
             boolean allStopped = described.size() == taskArns.size()
                     && described.stream().allMatch(t -> "STOPPED".equals(t.getLastStatus()));
@@ -1761,8 +2238,97 @@ public class AslExecutor {
             }
             return arr;
         }
-        throw new FailStateException("States.Timeout",
-                "ecs:runTask.sync timed out waiting for tasks to stop: " + taskArns);
+    }
+
+    /** The {@code elasticmapreduce:} integrations; a {@code .sync} Task waits on its cluster or step. */
+    private JsonNode invokeEmr(StatesIntegration integration, JsonNode input, String region, String executionArn,
+                               long executionDeadlineNanos, long taskDeadlineNanos,
+                               Consumer<JsonNode> jobSubmitted) throws Exception {
+        EmrTaskInvoker.Job job = emrTaskInvoker.start(integration, input, region);
+        if (integration.suffix().isEmpty()) {
+            return job.response();
+        }
+        return awaitSyncJob(job.response(), () -> emrTaskInvoker.poll(job, region),
+                () -> emrTaskInvoker.abandon(job, region), executionArn, executionDeadlineNanos, taskDeadlineNanos,
+                jobSubmitted);
+    }
+
+    /** The {@code emr-serverless:} integrations; a {@code .sync} Task waits on its application or job run. */
+    private JsonNode invokeEmrServerless(StatesIntegration integration, JsonNode input, String region,
+                                         String executionArn, long executionDeadlineNanos, long taskDeadlineNanos,
+                                         Consumer<JsonNode> jobSubmitted) throws Exception {
+        EmrServerlessTaskInvoker.Job job = emrServerlessTaskInvoker.start(integration, input, region);
+        if (integration.suffix().isEmpty()) {
+            return job.response();
+        }
+        return awaitSyncJob(job.response(), () -> emrServerlessTaskInvoker.poll(job, region),
+                () -> emrServerlessTaskInvoker.abandon(job, region), executionArn, executionDeadlineNanos,
+                taskDeadlineNanos, jobSubmitted);
+    }
+
+    /**
+     * The wait of a {@code .sync} Task whose job has started: records the call's response as submitted
+     * and polls the job as {@code ecs:runTask.sync} polls its tasks, bounded by the same two clocks;
+     * whatever ends the wait first abandons the job.
+     */
+    private JsonNode awaitSyncJob(JsonNode submitted, Supplier<Optional<JsonNode>> poll, Runnable abandon,
+                                  String executionArn, long executionDeadlineNanos, long taskDeadlineNanos,
+                                  Consumer<JsonNode> jobSubmitted) throws Exception {
+        try {
+            jobSubmitted.accept(submitted);
+        } catch (RuntimeException e) {
+            abandon.run();
+            throw e;
+        }
+        while (true) {
+            try {
+                sleepOrTimeOutTask(TimeUnit.MILLISECONDS.toNanos(SYNC_POLL_INTERVAL_MS),
+                        executionDeadlineNanos, taskDeadlineNanos);
+            } catch (TaskTimedOutException | ExecutionTimedOutException | InterruptedException e) {
+                abandon.run();
+                throw e;
+            }
+            if (abortedByCaller(executionArn)) {
+                abandon.run();
+                throw new ExecutionAbortedException();
+            }
+            Optional<JsonNode> result = poll.get();
+            if (result.isPresent()) {
+                return result.get();
+            }
+        }
+    }
+
+    /**
+     * The reason AWS writes on a job it stops because the {@code .sync} Task waiting on it ended
+     * first, whichever way it ended: verbatim, as the ECS task's {@code stoppedReason} and the child
+     * execution's {@code cause}.
+     */
+    private static String syncAbortCause(String executionArn) {
+        return "The Task state in AWS Step Functions execution [" + executionArn
+                + "] which was managing this resource was aborted";
+    }
+
+    /** Best effort, like AWS: a task that is already gone does not change how the state ends. */
+    private void stopEcsTasks(String cluster, List<String> taskArns, String executionArn, String region) {
+        for (String taskArn : taskArns) {
+            try {
+                ecsService.stopTask(cluster, taskArn, syncAbortCause(executionArn), region);
+            } catch (RuntimeException e) {
+                LOG.warnv("ecs:runTask.sync ended before its task {0} did, and the task could not be stopped: {1}",
+                        taskArn, e.getMessage());
+            }
+        }
+    }
+
+    /** Best effort, like AWS: a child that already ended does not change how the state ends. */
+    private void abortChildExecution(String childExecutionArn, String executionArn) {
+        try {
+            sfnService.get().stopExecution(childExecutionArn, syncAbortCause(executionArn), null);
+        } catch (RuntimeException e) {
+            LOG.warnv("states:startExecution.sync ended before its child {0} did, and the child could not be stopped: {1}",
+                    childExecutionArn, e.getMessage());
+        }
     }
 
     /** A failure cause if the ECS task did not complete cleanly (non-zero exit or no container ran), or null on success. */
@@ -1771,7 +2337,7 @@ public class AslExecutor {
         Integer nonZeroExit = null;
         boolean hasNullExitCode = false;
         if (ranAContainer) {
-            for (var c : task.getContainers()) {
+            for (Container c : task.getContainers()) {
                 // Only essential containers decide the task outcome, like real Step Functions; a
                 // non-essential sidecar (log shipper, metrics agent) exiting non-zero is ignored.
                 // Anything not explicitly marked non-essential defaults to essential.
@@ -1884,6 +2450,7 @@ public class AslExecutor {
 
     private JsonNode invokeDynamoDb(String operation, JsonNode input, String region) {
         String tableName = input.path("TableName").asText();
+        Scope scope = dynamoDb.scope(region);
         switch (operation) {
             case "putItem" -> {
                 JsonNode item = input.path("Item");
@@ -1893,12 +2460,12 @@ public class AslExecutor {
                         ? input.get("ExpressionAttributeNames") : null;
                 JsonNode exprAttrValues = input.has("ExpressionAttributeValues")
                         ? input.get("ExpressionAttributeValues") : null;
-                dynamoDbService.putItem(tableName, item, conditionExpr, exprAttrNames, exprAttrValues, region, "NONE");
+                dynamoDb.items().putItem(scope, tableName, item, conditionExpr, exprAttrNames, exprAttrValues);
                 return objectMapper.createObjectNode();
             }
             case "getItem" -> {
                 JsonNode key = input.path("Key");
-                JsonNode item = dynamoDbService.getItem(tableName, key, region);
+                JsonNode item = dynamoDb.items().getItem(scope, tableName, key);
                 ObjectNode result = objectMapper.createObjectNode();
                 if (item != null) {
                     result.set("Item", item);
@@ -1913,7 +2480,7 @@ public class AslExecutor {
                         ? input.get("ExpressionAttributeNames") : null;
                 JsonNode exprAttrValues = input.has("ExpressionAttributeValues")
                         ? input.get("ExpressionAttributeValues") : null;
-                dynamoDbService.deleteItem(tableName, key, conditionExpr, exprAttrNames, exprAttrValues, region, "NONE");
+                dynamoDb.items().deleteItem(scope, tableName, key, conditionExpr, exprAttrNames, exprAttrValues);
                 return objectMapper.createObjectNode();
             }
             case "scan" -> {
@@ -1925,10 +2492,10 @@ public class AslExecutor {
                         ? input.get("ExpressionAttributeValues") : null;
                 Integer limit = input.has("Limit") ? input.get("Limit").asInt() : null;
                 JsonNode scanFilter = input.has("ScanFilter") ? input.get("ScanFilter") : null;
-                DynamoDbService.ScanResult scanResult = dynamoDbService.scan(
-                        tableName, filterExpression, exprAttrNames, exprAttrValues, scanFilter, limit, null, null, region);
+                DynamoDbItemAccess.ScanPage scanResult = dynamoDb.items().scan(
+                        scope, tableName, filterExpression, exprAttrNames, exprAttrValues, scanFilter, limit, null);
                 ObjectNode response = objectMapper.createObjectNode();
-                com.fasterxml.jackson.databind.node.ArrayNode items = objectMapper.createArrayNode();
+                ArrayNode items = objectMapper.createArrayNode();
                 scanResult.items().forEach(items::add);
                 response.set("Items", items);
                 response.put("Count", scanResult.items().size());
@@ -1949,16 +2516,13 @@ public class AslExecutor {
                         ? input.get("ConditionExpression").asText() : null;
                 String returnValues = input.path("ReturnValues").asText("NONE");
 
-                DynamoDbService.UpdateResult result = dynamoDbService.updateItem(
-                        tableName, key, attributeUpdates, updateExpression,
-                        exprAttrNames, exprAttrValues, returnValues,
-                        conditionExpression, region, "NONE");
+                JsonNode attributes = dynamoDb.items().updateItem(
+                        scope, tableName, key, attributeUpdates, updateExpression,
+                        exprAttrNames, exprAttrValues, returnValues, conditionExpression);
 
                 ObjectNode response = objectMapper.createObjectNode();
-                if ("ALL_NEW".equals(returnValues) && result.newItem() != null) {
-                    response.set("Attributes", result.newItem());
-                } else if ("ALL_OLD".equals(returnValues) && result.oldItem() != null) {
-                    response.set("Attributes", result.oldItem());
+                if (attributes != null) {
+                    response.set("Attributes", attributes);
                 }
                 return response;
             }
@@ -1985,9 +2549,6 @@ public class AslExecutor {
         int status = response.getStatus();
 
         if (status >= 400) {
-            if (entity instanceof AwsErrorResponse err) {
-                throw new FailStateException("DynamoDb." + err.type(), err.message());
-            }
             if (entity instanceof JsonNode errorNode) {
                 String errorName = errorNode.path("__type").asText("UnknownError");
                 String errorMessage = errorNode.path("message").asText(
@@ -2001,6 +2562,63 @@ public class AslExecutor {
             return jsonNode;
         }
         return objectMapper.createObjectNode();
+    }
+
+    /**
+     * The Data API is a JSON 1.1 service, so the Task input is already the PascalCase wire request and
+     * the response needs no re-casing. Only the timestamps differ: the wire carries epoch seconds where
+     * the {@code aws-sdk:} integration renders the SDK's ISO-8601 {@code Instant}.
+     */
+    private JsonNode invokeAwsSdkRedshiftData(StatesIntegration integration, JsonNode input, String region) {
+        if (!serviceRegistry.isServiceEnabled("redshift-data")) {
+            throw new FailStateException(sdkExceptionName("RedshiftData", "ServiceNotAvailableException"),
+                    "Service redshift-data is not enabled.");
+        }
+        if (input != null && !input.isObject()) {
+            throw new FailStateException(sdkExceptionName("RedshiftData", "ValidationException"),
+                    "The task input must be a JSON object.");
+        }
+        JsonNode request = input != null ? input : objectMapper.createObjectNode();
+        Response response;
+        try {
+            response = redshiftDataHandler.handle(capitalizeFirst(integration.api()), request, region);
+        } catch (AwsException e) {
+            throw new FailStateException(sdkExceptionName("RedshiftData", e.getErrorCode()), e.getMessage());
+        }
+        if (!(response.getEntity() instanceof JsonNode body)) {
+            return objectMapper.createObjectNode();
+        }
+        JsonNode rendered = body.deepCopy();
+        renderRedshiftDataTimestamps(rendered);
+        return rendered;
+    }
+
+    private static void renderRedshiftDataTimestamps(JsonNode node) {
+        if (node instanceof ObjectNode object) {
+            for (String field : List.of("CreatedAt", "UpdatedAt")) {
+                JsonNode value = object.get(field);
+                if (value != null && value.isNumber()) {
+                    object.put(field, sdkTimestamp(value.asDouble()));
+                }
+            }
+            object.elements().forEachRemaining(AslExecutor::renderRedshiftDataTimestamps);
+        } else if (node instanceof ArrayNode array) {
+            array.elements().forEachRemaining(AslExecutor::renderRedshiftDataTimestamps);
+        }
+    }
+
+    private JsonNode invokeAwsSdkRdsData(StatesIntegration integration, JsonNode input, String region) {
+        if (!"executeStatement".equals(integration.api())) {
+            throw new FailStateException("States.TaskFailed",
+                    "Unsupported resource: " + integration.withoutSuffix());
+        }
+        try {
+            JsonNode request = recaseKeys(objectMapper, input, false);
+            JsonNode response = rdsDataService.executeStatement(request, region);
+            return recaseKeys(objectMapper, response, true);
+        } catch (AwsException e) {
+            throw new FailStateException(sdkExceptionName("RdsData", e.getErrorCode()), e.getMessage());
+        }
     }
 
     private JsonNode invokeOptimizedSqsSendMessage(JsonNode input, String region) {
@@ -2162,18 +2780,18 @@ public class AslExecutor {
             throw new FailStateException("States.Runtime", NO_NEXT_STATE_CAUSE);
         }
 
-        JsonNode effectiveInput = applyInputPath(stateDef, input);
+        JsonNode effectiveInput = applyInputPath(stateDef, input, context);
         JsonNode choices = stateDef.path("Choices");
         for (JsonNode choice : choices) {
             if (evaluateCondition(choice, effectiveInput, context)) {
-                JsonNode output = applyOutputPath(stateDef, input, effectiveInput);
+                JsonNode output = applyOutputPath(stateDef, effectiveInput, context);
                 return new StateResult(output, choice.path("Next").asText());
             }
         }
         // Default branch
         String defaultState = stateDef.path("Default").asText(null);
         if (defaultState != null) {
-            JsonNode output = applyOutputPath(stateDef, input, effectiveInput);
+            JsonNode output = applyOutputPath(stateDef, effectiveInput, context);
             return new StateResult(output, defaultState);
         }
         throw new FailStateException("States.Runtime", NO_NEXT_STATE_CAUSE);
@@ -2219,16 +2837,16 @@ public class AslExecutor {
                 }
             }
         } else {
-            effectiveInput = applyInputPath(stateDef, input);
+            effectiveInput = applyInputPath(stateDef, input, context);
             if (stateDef.has("Seconds")) {
                 waitNanos = secondsToNanos(stateDef.get("Seconds").asLong());
             } else if (stateDef.has("SecondsPath")) {
-                JsonNode val = resolvePath(stateDef.get("SecondsPath").asText(), effectiveInput);
+                JsonNode val = resolvePath(stateDef.get("SecondsPath").asText(), effectiveInput, context);
                 waitNanos = secondsToNanos(val.asLong());
             } else if (stateDef.has("Timestamp")) {
                 waitNanos = nanosUntil(stateDef.get("Timestamp").asText());
             } else if (stateDef.has("TimestampPath")) {
-                JsonNode val = resolvePath(stateDef.get("TimestampPath").asText(), effectiveInput);
+                JsonNode val = resolvePath(stateDef.get("TimestampPath").asText(), effectiveInput, context);
                 waitNanos = nanosUntil(val.asText());
             }
         }
@@ -2239,7 +2857,7 @@ public class AslExecutor {
             JsonNode output = applyJsonataOutput(stateDef, input, null, context, variables);
             return new StateResult(output, stateDef.path("Next").asText(null));
         }
-        JsonNode output = applyOutputPath(stateDef, input, effectiveInput);
+        JsonNode output = applyOutputPath(stateDef, effectiveInput, context);
         return new StateResult(output, stateDef.path("Next").asText(null));
     }
 
@@ -2284,13 +2902,29 @@ public class AslExecutor {
      */
     private void sleepOrTimeOutExecution(long pauseNanos, long executionDeadlineNanos)
             throws InterruptedException {
-        long remainingNanos = executionDeadlineNanos - System.nanoTime();
+        sleepOrTimeOutTask(pauseNanos, executionDeadlineNanos, Long.MAX_VALUE);
+    }
+
+    /**
+     * One poll interval of a {@code .sync} job wait, under the same two clocks {@link #awaitToken}
+     * parks on. The execution's budget is read first: when it is the clock that ran out, the
+     * execution ends TIMED_OUT and the Task's own timeout never applies; otherwise the Task's
+     * {@code TimeoutSeconds} ends the state as {@code States.Timeout} with no cause.
+     */
+    private void sleepOrTimeOutTask(long pauseNanos, long executionDeadlineNanos, long taskDeadlineNanos)
+            throws InterruptedException {
+        long remainingNanos = Math.min(executionDeadlineNanos, taskDeadlineNanos) - nanoTime.getAsLong();
         if (pauseNanos < remainingNanos) {
             sleeper.sleep(pauseNanos);
             return;
         }
         sleeper.sleep(Math.max(remainingNanos, 0));
-        throw new ExecutionTimedOutException();
+        // The execution's budget wins when it is the clock that was parked on, and also when a late
+        // wake finds it spent: the execution ends TIMED_OUT and the Task's own timeout never applies.
+        if (executionDeadlineNanos <= taskDeadlineNanos || nanoTime.getAsLong() >= executionDeadlineNanos) {
+            throw new ExecutionTimedOutException();
+        }
+        throw new TaskTimedOutException("States.Timeout");
     }
 
     private StateResult executeSucceedState(JsonNode stateDef, JsonNode input, boolean jsonata, JsonNode context,
@@ -2299,8 +2933,8 @@ public class AslExecutor {
             JsonNode output = applyJsonataOutput(stateDef, input, input, context, variables);
             return new StateResult(output, null);
         }
-        JsonNode effectiveInput = applyInputPath(stateDef, input);
-        return new StateResult(applyOutputPath(stateDef, input, effectiveInput), null);
+        JsonNode effectiveInput = applyInputPath(stateDef, input, context);
+        return new StateResult(applyOutputPath(stateDef, effectiveInput, context), null);
     }
 
     private StateResult executeFail(JsonNode stateDef, JsonNode input, boolean jsonata, JsonNode context,
@@ -2349,10 +2983,15 @@ public class AslExecutor {
                                               String topLevelQueryLanguage, JsonNode context,
                                               ObjectNode variables, long executionDeadlineNanos)
             throws Exception {
-        JsonNode effectiveInput = jsonata ? input : applyInputPath(stateDef, input);
+        JsonNode effectiveInput = jsonata ? input : applyInputPath(stateDef, input, context);
         JsonNode branches = stateDef.path("Branches");
         chain.publish("ParallelStateStarted", null);
-        var branchChains = new ArrayList<HistoryChain>();
+        ArrayList<HistoryChain> branchChains = new ArrayList<>();
+        // The branches are joined in the order they complete, not the order they are declared, so
+        // a failure in any branch ends the Parallel while the others are still running, as on AWS
+        // (measured: the Parallel fails within about 0.1 s of the failing branch, whichever branch
+        // is listed first). The outputs still land in declaration order.
+        CompletionService<JsonNode> completions = new ExecutorCompletionService<>(executor);
         List<Future<JsonNode>> futures = new ArrayList<>();
 
         for (JsonNode branch : branches) {
@@ -2364,8 +3003,8 @@ public class AslExecutor {
             ObjectNode branchVariables = variables.deepCopy();
             // Each branch also gets its own copy of the context object so State.RetryCount and
             // Task.Token writes cannot race across concurrent branches.
-            var branchContext = ((ObjectNode) context).deepCopy();
-            var branchChain = chain.fork();
+            ObjectNode branchContext = ((ObjectNode) context).deepCopy();
+            HistoryChain branchChain = chain.fork();
             branchChains.add(branchChain);
 
             // Run each branch on its own worker thread under the execution's account: the request
@@ -2374,41 +3013,48 @@ public class AslExecutor {
             // A branch state that declares no QueryLanguage defaults to the state machine's, not to
             // this Parallel's: the ASL specification calls the two independent, so what travels
             // into the branch is topLevelQueryLanguage. https://states-language.net/spec.html
-            futures.add(executor.submit(() -> callUnderExecutionAccount(sm,
+            futures.add(completions.submit(() -> callUnderExecutionAccount(sm,
                     () -> executeBranch(startAt, branchStates, capturedInput, branchChain, sm,
                             topLevelQueryLanguage, branchContext, branchVariables))));
         }
 
         int timeoutSeconds = stateDef.path("TimeoutSeconds").asInt(0);
         long stateDeadlineNanos = timeoutSeconds > 0
-                ? System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds)
+                ? nanoTime.getAsLong() + TimeUnit.SECONDS.toNanos(timeoutSeconds)
                 : Long.MAX_VALUE;
         // Two clocks can end this wait, and the join stops at whichever comes first: the state's
         // own TimeoutSeconds, and the state machine's budget for the whole execution.
         long joinDeadlineNanos = Math.min(stateDeadlineNanos, executionDeadlineNanos);
 
-        ArrayNode results = objectMapper.createArrayNode();
-        var joined = 0;
+        JsonNode[] outputs = new JsonNode[futures.size()];
+        // The branch whose future was last taken from the completion queue: the failed one when
+        // the join ends in ExecutionException.
+        int current = -1;
         try {
-            for (Future<JsonNode> future : futures) {
-                long remainingNanos = joinDeadlineNanos - System.nanoTime();
+            for (int joined = 0; joined < futures.size(); joined++) {
+                long remainingNanos = joinDeadlineNanos - nanoTime.getAsLong();
                 if (remainingNanos <= 0) {
                     throw parallelJoinExpired(stateDeadlineNanos, timeoutSeconds);
                 }
-                try {
-                    results.add(future.get(remainingNanos, TimeUnit.NANOSECONDS));
-                } catch (java.util.concurrent.TimeoutException e) {
+                Future<JsonNode> done = completions.poll(remainingNanos, TimeUnit.NANOSECONDS);
+                if (done == null) {
                     throw parallelJoinExpired(stateDeadlineNanos, timeoutSeconds);
                 }
-                joined++;
+                current = futures.indexOf(done);
+                outputs[current] = done.get();
             }
         } catch (InterruptedException e) {
             abandon(branchChains, futures);
             Thread.currentThread().interrupt();
             throw e;
         } catch (ExecutionException e) {
-            abandon(branchChains, futures);
-            chain.continueFrom(branchChains.get(joined).lastEventId());
+            List<String> abortedEventTypes = cutAfterFailure(branchChains, futures);
+            chain.continueFrom(branchChains.get(current).lastEventId());
+            if (e.getCause() instanceof FailStateException failure && !failure.isRuntimeError()) {
+                for (String abortedEventType : abortedEventTypes) {
+                    chain.publishBeside(abortedEventType, null);
+                }
+            }
             // Unwrap so a branch's FailStateException reaches the Parallel state's own Retry and
             // Catch handling instead of surfacing as States.Runtime, and so an Error reaches the
             // execution-level handler as itself rather than as an ExecutionException wrapper. The
@@ -2430,6 +3076,10 @@ public class AslExecutor {
         chain.continueAfter(branchChains);
         chain.publishAside("ParallelStateSucceeded", null);
 
+        ArrayNode results = objectMapper.createArrayNode();
+        for (JsonNode output : outputs) {
+            results.add(output);
+        }
         if (jsonata) {
             JsonNode output = applyJsonataOutput(stateDef, input, results, context, variables);
             return new StateResult(output, stateDef.path("Next").asText(null));
@@ -2440,8 +3090,30 @@ public class AslExecutor {
                 ? resolveParameters(stateDef.get("ResultSelector"), results, context)
                 : results;
         JsonNode output = mergeResult(stateDef, input, selected);
-        output = applyOutputPath(stateDef, input, output);
+        output = applyOutputPath(stateDef, output, context);
         return new StateResult(output, stateDef.path("Next").asText(null));
+    }
+
+    /**
+     * Cuts every branch after one of them failed, like {@link #abandon}, and returns one
+     * {@code *StateAborted} event type per branch it cut inside a Task or a Wait: the two state
+     * types AWS was measured recording it for (a {@code .sync} Task waiting on its job, and a Wait).
+     * A branch between states, or inside any other state, gets no event. Each branch is read and cut
+     * in one step, so a state that exits before its cut is not reported, and one that is reported
+     * records no Exited event afterwards. The state alone decides: a branch that has finished, the
+     * failed one included, has left every state it entered, and reading its future as well would
+     * reopen the gap between the cut and that read.
+     */
+    private static List<String> cutAfterFailure(List<HistoryChain> chains, List<? extends Future<?>> futures) {
+        List<String> abortedEventTypes = new ArrayList<>();
+        for (HistoryChain branch : chains) {
+            String stateType = branch.abandonInState();
+            if ("Task".equals(stateType) || "Wait".equals(stateType)) {
+                abortedEventTypes.add(stateType + "StateAborted");
+            }
+        }
+        futures.forEach(future -> future.cancel(true));
+        return abortedEventTypes;
     }
 
     private static void abandon(List<HistoryChain> chains, List<? extends Future<?>> futures) {
@@ -2455,7 +3127,7 @@ public class AslExecutor {
      * execution and no Catch sees it.
      */
     private RuntimeException parallelJoinExpired(long stateDeadlineNanos, int timeoutSeconds) {
-        if (System.nanoTime() < stateDeadlineNanos) {
+        if (nanoTime.getAsLong() < stateDeadlineNanos) {
             return new ExecutionTimedOutException();
         }
         return new FailStateException("States.Timeout",
@@ -2480,7 +3152,7 @@ public class AslExecutor {
 
         // Map input-processing fields, including ItemsPath and MaxConcurrencyPath, resolve against
         // the effective state input after InputPath has been applied.
-        JsonNode mapInput = applyInputPath(stateDef, input);
+        JsonNode mapInput = applyInputPath(stateDef, input, context);
         ResolvedMapItems resolvedItems = resolveMapItems(stateDef, mapInput, jsonata, context, variables);
         JsonNode items = resolvedItems.items();
 
@@ -2531,19 +3203,19 @@ public class AslExecutor {
             sfnService.get().recordMapRun(mapRunRecord);
             chain.publish("MapRunStarted", Map.of("mapRunArn", mapRun.arn()));
         }
-        var succeededItems = new AtomicInteger();
-        var failedItems = new AtomicInteger();
+        AtomicInteger succeededItems = new AtomicInteger();
+        AtomicInteger failedItems = new AtomicInteger();
         AtomicInteger succeededExecutions = new AtomicInteger();
         AtomicInteger failedExecutions = new AtomicInteger();
         List<Integer> succeededChildren = new ArrayList<>(childCount);
         FailedChild[] failedByIndex = hasResultWriter ? new FailedChild[childCount] : null;
-        var iterationChains = new ArrayList<HistoryChain>(childCount);
-        for (var i = 0; i < childCount; i++) {
+        ArrayList<HistoryChain> iterationChains = new ArrayList<>(childCount);
+        for (int i = 0; i < childCount; i++) {
             iterationChains.add(distributed ? HistoryChain.ofChildExecution() : chain.fork());
         }
 
         java.util.function.IntFunction<Callable<JsonNode>> makeTask = (i) -> () -> {
-            var iterationChain = iterationChains.get(i);
+            HistoryChain iterationChain = iterationChains.get(i);
             boolean batchedChild = batches != null;
             JsonNode item = batchedChild ? batches.get(i) : items.get(i);
             int itemsInChild = batchedChild ? item.path("Items").size() : 1;
@@ -2566,7 +3238,7 @@ public class AslExecutor {
                             : resolveParameters(itemTransform, mapInput, iterContext);
                 }
                 if (!distributed) {
-                    iterationChain.publish("MapIterationStarted", Map.of("name", name, "index", i));
+                    iterationChain.publishIterationStart("MapIterationStarted", Map.of("name", name, "index", i));
                 }
                 iterationStarted = true;
                 if (hasResultWriter) {
@@ -2582,17 +3254,20 @@ public class AslExecutor {
             } catch (FailStateException e) {
                 int failedSoFar = failedItems.addAndGet(itemsInChild);
                 failedExecutions.incrementAndGet();
-                if (iterationStarted && !distributed && !e.isRuntimeError()) {
-                    iterationChain.publishAside("MapIterationFailed", Map.of("name", name, "index", i));
-                }
+                boolean recordFailed = iterationStarted && !distributed && !e.isRuntimeError();
+                // A failure that ends the Map records its MapIterationFailed only once the other
+                // iterations have been cut, since AWS records what it cut first.
                 if (!tolerated.declared()) {
-                    throw new IterationFailure(i, e);
+                    throw new IterationFailure(i, e, recordFailed);
                 }
                 if (failedSoFar > tolerated.threshold()) {
                     throw new IterationFailure(i, new FailStateException(
                             "States.ExceedToleratedFailureThreshold",
                             "The map run failed because a tolerated failure threshold was exceeded. "
-                                    + failedSoFar + " of " + itemCount + " items failed."));
+                                    + failedSoFar + " of " + itemCount + " items failed."), recordFailed);
+                }
+                if (recordFailed) {
+                    iterationChain.publishIterationEndAside("MapIterationFailed", Map.of("name", name, "index", i));
                 }
                 if (hasResultWriter) {
                     failedByIndex[i] = new FailedChild(childInputsByIndex[i],
@@ -2603,7 +3278,7 @@ public class AslExecutor {
             succeededItems.addAndGet(itemsInChild);
             succeededExecutions.incrementAndGet();
             if (!distributed) {
-                iterationChain.publish("MapIterationSucceeded", Map.of("name", name, "index", i));
+                iterationChain.publishIterationEnd("MapIterationSucceeded", Map.of("name", name, "index", i));
             }
             if (hasResultWriter) {
                 childTimingsByIndex[i] = new long[]{startMs, System.currentTimeMillis()};
@@ -2613,11 +3288,17 @@ public class AslExecutor {
 
         if (childCount > 0) {
             List<JsonNode> itemOutputs;
+            // The iterations a failure cuts, each read and cut in one step before it is cancelled,
+            // as a Parallel does with its branches (cutAfterFailure). Filled on this thread. Only an
+            // iteration whose start is recorded and whose end is not gets recorded: the scheduler
+            // names every iteration it has not yet taken off its queue, started or ended or not.
+            List<CutIteration> cutIterations = new ArrayList<>();
             try {
                 itemOutputs = MapIterationScheduler.execute(
                         childCount, Math.max(1, effectiveConcurrency),
                         i -> () -> callUnderExecutionAccount(sm, makeTask.apply(i)),
-                        executionDeadlineNanos);
+                        executionDeadlineNanos,
+                        i -> cutIteration(iterationChains.get(i), i, cutIterations));
             } catch (java.util.concurrent.TimeoutException e) {
                 // The only deadline the scheduler is given is the state machine's budget, so its
                 // expiry ends the execution rather than failing the Map state.
@@ -2626,6 +3307,19 @@ public class AslExecutor {
                 // A Distributed Map's chain stays at MapRunStarted, as on AWS.
                 if (!distributed) {
                     chain.continueFrom(iterationChains.get(e.index).lastEventId());
+                    // Each event follows the rule of the one it accompanies. The cut iterations are
+                    // recorded right before MapStateFailed and follow its rule: the failure that ends
+                    // the Map is not States.Runtime. MapIterationFailed follows the iteration's own:
+                    // it started, and its own error is not States.Runtime. The two differ for an
+                    // ItemSelector that fails before the iteration starts, which cuts the others but
+                    // has no iteration to report, and for a States.Runtime failure that exceeds a
+                    // declared tolerance, where the Map ends with the tolerance error instead.
+                    if (!e.failure.isRuntimeError()) {
+                        publishCutIterations(chain, name, cutIterations);
+                    }
+                    if (e.recordFailed) {
+                        chain.publishBeside("MapIterationFailed", Map.of("name", name, "index", e.index));
+                    }
                 } else {
                     publishMapRunFailedEvent(chain, e.failure);
                     recordMapRun(mapRunRecord, "FAILED", succeededItems.get(), failedItems.get(),
@@ -2690,7 +3384,7 @@ public class AslExecutor {
                 ? resolveParameters(stateDef.get("ResultSelector"), mapResult, context)
                 : mapResult;
         JsonNode output = mergeResult(stateDef, input, selected);
-        output = applyOutputPath(stateDef, input, output);
+        output = applyOutputPath(stateDef, output, context);
         return new StateResult(output, stateDef.path("Next").asText(null));
     }
 
@@ -2698,14 +3392,16 @@ public class AslExecutor {
      * Resolves an integer Map field from its literal, {@code <field>Path} or JSONata expression form,
      * as MaxConcurrency and the ItemBatcher limits all take. An absent field is 0. {@code minimum} is
      * the smallest accepted value, which is what separates MaxConcurrency, where 0 means the service
-     * ceiling, from a batch limit, where it is meaningless.
+     * ceiling, from a batch limit, where it is meaningless. The {@code <field>Path} form is a
+     * Reference Path, so it reads the Context Object as readily as the state input and the resolver
+     * is given both.
      */
     private int resolveMapIntegerField(JsonNode container, String field, int minimum, JsonNode mapInput,
                                        boolean jsonata, JsonNode context, ObjectNode variables) {
         JsonNode value;
         boolean jsonataExpression = false;
         if (container.has(field + "Path")) {
-            value = resolvePath(container.get(field + "Path").asText(), mapInput);
+            value = resolvePath(container.get(field + "Path").asText(), mapInput, context);
         } else if (container.has(field)) {
             value = container.get(field);
             if (jsonata && value.isTextual() && JsonataEvaluator.isExpression(value.asText())) {
@@ -2749,7 +3445,7 @@ public class AslExecutor {
      */
     private static MapRun newMapRun(MapRunIdentity identity, JsonNode context, int itemCount,
                                     int executionCount, int requestedConcurrency) {
-        var mapRun = new MapRun();
+        MapRun mapRun = new MapRun();
         mapRun.setMapRunArn(identity.arn());
         mapRun.setExecutionArn(context.path("Execution").path("Id").asText(null));
         mapRun.setStartDate(System.currentTimeMillis() / 1000.0);
@@ -2951,16 +3647,16 @@ public class AslExecutor {
     }
 
     private MapRunIdentity newMapRunIdentity(JsonNode stateDef, StateMachine sm, JsonNode context) {
-        var region = extractRegionFromArn(sm.getStateMachineArn());
-        var account = AwsArnUtils.accountOrDefault(sm.getStateMachineArn(), null);
-        var smName = context.path("StateMachine").path("Name").asText(sm.getName());
-        var label = stateDef.path("Label").asText(null);
+        String region = extractRegionFromArn(sm.getStateMachineArn());
+        String account = AwsArnUtils.accountOrDefault(sm.getStateMachineArn(), null);
+        String smName = context.path("StateMachine").path("Name").asText(sm.getName());
+        String label = stateDef.path("Label").asText(null);
         if (label == null || label.isBlank()) {
             label = UUID.randomUUID().toString();
         }
-        var id = UUID.randomUUID().toString();
-        return new MapRunIdentity(label, id, "arn:aws:states:" + region + ":" + account + ":mapRun:"
-                + smName + "/" + label + ":" + id);
+        String id = UUID.randomUUID().toString();
+        return new MapRunIdentity(label, id, AwsArnUtils.Arn.of("states", region, account,
+                "mapRun:" + smName + "/" + label + ":" + id).toString());
     }
 
     private JsonNode applyResultWriter(String mapStateName, JsonNode stateDef, JsonNode input,
@@ -3041,8 +3737,8 @@ public class AslExecutor {
             }
 
             // The run id alone keys the exported result set under the user-supplied S3 prefix.
-            var mapRunId = mapRun.id();
-            var mapRunArn = mapRun.arn();
+            String mapRunId = mapRun.id();
+            String mapRunArn = mapRun.arn();
             String base = prefix.isEmpty()
                     ? mapRunId + "/"
                     : prefix + (prefix.endsWith("/") ? "" : "/") + mapRunId + "/";
@@ -3111,15 +3807,15 @@ public class AslExecutor {
         }
         // NONE: emit an execution record per child, mirroring the AWS export format. The child
         // executions run under a derived state machine "<parentName>/<mapRunLabel>".
-        String childSmArn = "arn:aws:states:" + region + ":" + account + ":stateMachine:"
-                + smName + "/" + mapRunLabel;
+        String childSmArn = AwsArnUtils.Arn.of("states", region, account,
+                "stateMachine:" + smName + "/" + mapRunLabel).toString();
         for (int i = 0; i < results.size(); i++) {
             String childId = UUID.randomUUID().toString();
             long start = childTimings != null && i < childTimings.size() ? childTimings.get(i)[0] : 0L;
             long stop = childTimings != null && i < childTimings.size() ? childTimings.get(i)[1] : 0L;
             ObjectNode record = out.addObject();
-            record.put("ExecutionArn", "arn:aws:states:" + region + ":" + account + ":execution:"
-                    + smName + "/" + mapRunLabel + ":" + childId);
+            record.put("ExecutionArn", AwsArnUtils.Arn.of("states", region, account,
+                    "execution:" + smName + "/" + mapRunLabel + ":" + childId).toString());
             record.put("Input", stringifyResult(childInputs != null && i < childInputs.size()
                     ? childInputs.get(i) : NullNode.getInstance()));
             record.putObject("InputDetails").put("Included", true);
@@ -3145,13 +3841,13 @@ public class AslExecutor {
     private ArrayNode formatFailedChildren(List<FailedChild> failedChildren, String region, String account,
                                            String smName, String mapRunLabel) {
         ArrayNode out = objectMapper.createArrayNode();
-        String childSmArn = "arn:aws:states:" + region + ":" + account + ":stateMachine:"
-                + smName + "/" + mapRunLabel;
+        String childSmArn = AwsArnUtils.Arn.of("states", region, account,
+                "stateMachine:" + smName + "/" + mapRunLabel).toString();
         for (FailedChild child : failedChildren) {
             String childId = UUID.randomUUID().toString();
             ObjectNode record = out.addObject();
-            record.put("ExecutionArn", "arn:aws:states:" + region + ":" + account + ":execution:"
-                    + smName + "/" + mapRunLabel + ":" + childId);
+            record.put("ExecutionArn", AwsArnUtils.Arn.of("states", region, account,
+                    "execution:" + smName + "/" + mapRunLabel + ":" + childId).toString());
             record.put("Input", stringifyResult(child.input()));
             record.putObject("InputDetails").put("Included", true);
             record.put("Name", childId);
@@ -3214,11 +3910,16 @@ public class AslExecutor {
                                                     JsonNode context, boolean jsonata,
                                                     ObjectNode variables) throws Exception {
         String resource = itemReader.path("Resource").asText(null);
-        if ("arn:aws:states:::s3:listObjectsV2".equals(resource)) {
-            return resolveListObjectsItems(itemReader, input, context, jsonata, variables);
-        }
-        if (!"arn:aws:states:::s3:getObject".equals(resource)) {
+        StatesIntegration integration = StatesIntegration.parse(resource).orElse(null);
+        boolean listObjects = integration != null && integration.is("s3", "listObjectsV2");
+        boolean getObject = integration != null && integration.is("s3", "getObject");
+        if (!listObjects && !getObject) {
             throw new FailStateException("States.Runtime", "Unsupported ItemReader resource: " + resource);
+        }
+
+        int maxItems = resolveItemReaderMaxItems(itemReader, input, jsonata, context, variables);
+        if (listObjects) {
+            return resolveListObjectsItems(itemReader, input, context, jsonata, variables, maxItems);
         }
 
         String inputType = itemReader.path("ReaderConfig").path("InputType").asText(null);
@@ -3237,24 +3938,24 @@ public class AslExecutor {
         try {
             S3Object object = s3Service.getObject(bucket, key);
             if ("JSONL".equals(inputType)) {
-                return new ResolvedMapItems(applyMaxItems(itemReader, readJsonLines(object.getData())),
+                return new ResolvedMapItems(applyMaxItems(maxItems, readJsonLines(object.getData())),
                         MapItemsSource.ITEM_READER_ARRAY);
             }
             if ("CSV".equals(inputType)) {
-                return new ResolvedMapItems(applyMaxItems(itemReader, readCsvRows(itemReader, object.getData())),
+                return new ResolvedMapItems(applyMaxItems(maxItems, readCsvRows(itemReader, object.getData())),
                         MapItemsSource.ITEM_READER_ARRAY);
             }
             JsonNode items = objectMapper.readTree(object.getData());
             items = applyItemsPointer(itemReader, items);
             if (items.isObject()) {
-                return new ResolvedMapItems(applyMaxItems(itemReader, normalizeObjectItems(items)),
+                return new ResolvedMapItems(applyMaxItems(maxItems, normalizeObjectItems(items)),
                         MapItemsSource.ITEM_READER_OBJECT);
             }
             if (!items.isArray()) {
                 throw new FailStateException("States.ItemReaderFailed",
                         "Attempting to map over non-iterable node.");
             }
-            return new ResolvedMapItems(applyMaxItems(itemReader, items), MapItemsSource.ITEM_READER_ARRAY);
+            return new ResolvedMapItems(applyMaxItems(maxItems, items), MapItemsSource.ITEM_READER_ARRAY);
         } catch (AwsException e) {
             throw new FailStateException("States.ItemReaderFailed", e.getMessage());
         } catch (FailStateException e) {
@@ -3329,6 +4030,54 @@ public class AslExecutor {
         };
     }
 
+    private int resolveItemReaderMaxItems(JsonNode itemReader, JsonNode mapInput, boolean jsonata,
+                                          JsonNode context, ObjectNode variables) {
+        JsonNode readerConfig = itemReader.path("ReaderConfig");
+        boolean hasMaxItems = readerConfig.has("MaxItems");
+        boolean hasMaxItemsPath = readerConfig.has("MaxItemsPath");
+        if (hasMaxItems && hasMaxItemsPath) {
+            throw new FailStateException("States.Runtime",
+                    "ReaderConfig cannot specify both MaxItems and MaxItemsPath", "MaxItems");
+        }
+        if (jsonata && hasMaxItemsPath) {
+            throw new FailStateException("States.Runtime",
+                    "ReaderConfig.MaxItemsPath is not supported by JSONata state machines", "MaxItemsPath");
+        }
+
+        boolean jsonataExpression = hasMaxItems
+                && jsonata
+                && readerConfig.get("MaxItems").isTextual()
+                && JsonataEvaluator.isExpression(readerConfig.get("MaxItems").asText());
+        if (hasMaxItemsPath) {
+            JsonNode value = resolvePath(readerConfig.get("MaxItemsPath").asText(), mapInput, context);
+            long maxItems;
+            try {
+                maxItems = Long.parseLong(value.asText());
+            } catch (NumberFormatException e) {
+                throw new FailStateException("States.Runtime",
+                        "MaxItems must resolve to an integer of 0 or more", "MaxItems");
+            }
+            if (maxItems < 0) {
+                throw new FailStateException(
+                        "States.ItemReaderFailed", "field MaxItems must be positive", true);
+            }
+            return (int) Math.min(maxItems, ITEM_READER_MAX_ITEMS);
+        }
+
+        int maxItems = resolveMapIntegerField(
+                readerConfig, "MaxItems", 0, mapInput, jsonata, context, variables);
+        if (maxItems > ITEM_READER_MAX_ITEMS) {
+            if (jsonataExpression) {
+                return ITEM_READER_MAX_ITEMS;
+            }
+            throw new FailStateException(
+                    "States.Runtime",
+                    "MaxItems must resolve to an integer of " + ITEM_READER_MAX_ITEMS + " or less",
+                    "MaxItems");
+        }
+        return maxItems;
+    }
+
     private JsonNode resolveItemReaderParameters(JsonNode itemReader, JsonNode input, JsonNode context,
                                                  boolean jsonata, ObjectNode variables) throws Exception {
         if (jsonata && itemReader.has("Arguments")) {
@@ -3340,7 +4089,8 @@ public class AslExecutor {
     }
 
     private ResolvedMapItems resolveListObjectsItems(JsonNode itemReader, JsonNode input, JsonNode context,
-                                                     boolean jsonata, ObjectNode variables) throws Exception {
+                                                     boolean jsonata, ObjectNode variables,
+                                                     int maxItems) throws Exception {
         JsonNode parameters = resolveItemReaderParameters(itemReader, input, context, jsonata, variables);
         String bucket = parameters.path("Bucket").asText(null);
         if (bucket == null) {
@@ -3349,7 +4099,6 @@ public class AslExecutor {
         String prefix = parameters.path("Prefix").asText(null);
 
         ArrayNode items = objectMapper.createArrayNode();
-        int maxItems = maxItems(itemReader);
         try {
             // MaxItems keeps the first keys in order, so the listing itself is capped.
             for (S3Object object : s3Service.listObjects(bucket, prefix, null,
@@ -3404,12 +4153,7 @@ public class AslExecutor {
         return pointedItems;
     }
 
-    private int maxItems(JsonNode itemReader) {
-        return itemReader.path("ReaderConfig").path("MaxItems").asInt(0);
-    }
-
-    private JsonNode applyMaxItems(JsonNode itemReader, JsonNode items) {
-        int maxItems = maxItems(itemReader);
+    private JsonNode applyMaxItems(int maxItems, JsonNode items) {
         if (maxItems <= 0 || !items.isArray() || items.size() <= maxItems) {
             return items;
         }
@@ -3442,7 +4186,7 @@ public class AslExecutor {
             // A Parallel or Map branch runs on its own thread and is not cut mid-state by the
             // execution's TimeoutSeconds: the state loop that resumes once the branch returns
             // is where the budget is enforced.
-            var result = runState(chain, currentState, stateDef, currentInput, sm, topLevelQueryLanguage,
+            StateResult result = runState(chain, currentState, stateDef, currentInput, sm, topLevelQueryLanguage,
                     context, variables, Long.MAX_VALUE);
             currentInput = result.output();
             currentState = result.nextState();
@@ -3584,7 +4328,12 @@ public class AslExecutor {
 
     // ──────────────────────────── Path resolution ────────────────────────────
 
-    private JsonNode applyInputPath(JsonNode stateDef, JsonNode input) {
+    /**
+     * {@code InputPath} is a Reference Path, so it may be rooted at the Context Object as well as
+     * at the state input; {@code context} is what makes a {@code $$} path resolve instead of
+     * narrowing the input to null.
+     */
+    private JsonNode applyInputPath(JsonNode stateDef, JsonNode input, JsonNode context) {
         if (!stateDef.has("InputPath")) {
             return input;
         }
@@ -3592,7 +4341,7 @@ public class AslExecutor {
         if (path == null || path.equals("null")) {
             return objectMapper.createObjectNode();
         }
-        return resolvePath(path, input);
+        return resolvePath(path, input, context);
     }
 
     private JsonNode mergeResult(JsonNode stateDef, JsonNode input, JsonNode result) throws Exception {
@@ -3609,7 +4358,8 @@ public class AslExecutor {
         }
     }
 
-    private JsonNode applyOutputPath(JsonNode stateDef, JsonNode input, JsonNode output) {
+    /** {@code OutputPath} is a Reference Path, so it reads the Context Object as InputPath does. */
+    private JsonNode applyOutputPath(JsonNode stateDef, JsonNode output, JsonNode context) {
         if (!stateDef.has("OutputPath")) {
             return output;
         }
@@ -3617,7 +4367,7 @@ public class AslExecutor {
         if (path == null || path.equals("null")) {
             return objectMapper.createObjectNode();
         }
-        return resolvePath(path, output);
+        return resolvePath(path, output, context);
     }
 
     JsonNode resolveParameters(JsonNode parameters, JsonNode input, JsonNode context) throws Exception {
@@ -4145,20 +4895,20 @@ public class AslExecutor {
      * TODO: Add HTTP Task coverage for unsupported binary/media response content types.
      */
     private JsonNode invokeHttp(JsonNode input, String region) {
-        var rawUri = input.path("ApiEndpoint").asText(null);
-        var method = input.path("Method").asText(null);
-        var timeoutMillis = input.path("TimeoutSeconds").asLong(60) * 1_000;
-        var headers = input.path("Headers");
-        var queryParameters = input.path("QueryParameters");
-        var requestBody = input.path("RequestBody");
-        var requestBodyEncoding = input.path("Transform").path("RequestBodyEncoding").asText("NONE");
+        String rawUri = input.path("ApiEndpoint").asText(null);
+        String method = input.path("Method").asText(null);
+        long timeoutMillis = input.path("TimeoutSeconds").asLong(60) * 1_000;
+        JsonNode headers = input.path("Headers");
+        JsonNode queryParameters = input.path("QueryParameters");
+        JsonNode requestBody = input.path("RequestBody");
+        String requestBodyEncoding = input.path("Transform").path("RequestBodyEncoding").asText("NONE");
 
         if (rawUri == null || rawUri.isBlank()) {
             throw new FailStateException("States.Runtime", "ApiEndpoint is required for HTTP task");
         }
-        var uri = URI.create(rawUri);
-        var isHttps = "https".equalsIgnoreCase(uri.getScheme());
-        var allowPlainHttp = config.services().stepfunctions().allowPlaintextHttp();
+        URI uri = URI.create(rawUri);
+        boolean isHttps = "https".equalsIgnoreCase(uri.getScheme());
+        boolean allowPlainHttp = config.services().stepfunctions().allowPlaintextHttp();
         if (!allowPlainHttp && !isHttps) {
             throw new FailStateException("States.Runtime", "The value for the 'ApiEndpoint' field must have the scheme 'https'. " +
                                                            "You can enable plaintext http via 'floci.services.stepfunctions.allow-plaintext-http=true'.");
@@ -4168,18 +4918,20 @@ public class AslExecutor {
         validateConnectionArn(input);
         validateHttpHeaders(headers);
 
-        var requestPayload = requestPayload(requestBody, requestBodyEncoding);
-        var requestHeaders = requestHeaders(headers, requestPayload.contentType());
-        var requestQueryParameters = queryParameters(queryParameters);
+        HttpRequestPayload requestPayload = requestPayload(requestBody, requestBodyEncoding,
+                input.path("Transform").path("RequestEncodingOptions"));
+        MultiMap requestHeaders = requestHeaders(headers, requestPayload.contentType());
+        MultiMap requestQueryParameters = queryParameters(queryParameters);
 
         try {
-            var request = webClient.requestAbs(HttpMethod.valueOf(method), rawUri)
+            HttpRequest<Buffer> request = webClient.requestAbs(HttpMethod.valueOf(method), rawUri)
                 .timeout(timeoutMillis)
-                .putHeaders(requestHeaders);
+                .putHeaders(requestHeaders)
+                .putHeader("User-Agent", "Amazon|StepFunctions|HttpInvoke|" + region);
             request.queryParams().addAll(requestQueryParameters);
 
             LOG.infov("Step Functions HTTP task sending request: method={0}, uri={1}", method, uri);
-            var response = sendHttpRequest(request, requestPayload);
+            HttpResponse<Buffer> response = sendHttpRequest(request, requestPayload);
             validateHttpStatus(response);
             validateHttpResponse(response);
             return httpResultJson(response);
@@ -4197,9 +4949,6 @@ public class AslExecutor {
     }
 
     private HttpResponse<Buffer> sendHttpRequest(HttpRequest<Buffer> request, HttpRequestPayload payload) throws NoStackTraceTimeoutException {
-        if (payload.form() != null) {
-            return request.sendFormAndAwait(payload.form());
-        }
         if (payload.body() != null) {
             return request.sendBufferAndAwait(payload.body());
         }
@@ -4237,7 +4986,7 @@ public class AslExecutor {
     }
 
     private JsonNode httpResultJson(HttpResponse<Buffer> response) {
-       var stepHttpResponse = new HttpTaskResponse(
+       HttpTaskResponse stepHttpResponse = new HttpTaskResponse(
             response.statusCode(),
             response.statusMessage(),
             httpResponseHeaders(response),
@@ -4293,19 +5042,22 @@ public class AslExecutor {
         }
     }
 
-    private HttpRequestPayload requestPayload(JsonNode requestBody, String requestBodyEncoding) {
+    private HttpRequestPayload requestPayload(JsonNode requestBody, String requestBodyEncoding, JsonNode options) {
         if ("URL_ENCODED".equalsIgnoreCase(requestBodyEncoding)) {
-            // TODO: Implement Transform.RequestBodyEncoding URL_ENCODED with AWS-compatible array formats.
-            throw new FailStateException("States.TaskFailed", "URL-encoded request bodies are not supported yet");
+            try {
+                return new HttpRequestPayload(Buffer.buffer(HttpTaskFormEncoder.encode(requestBody, options)),
+                        "application/x-www-form-urlencoded");
+            } catch (IllegalArgumentException e) {
+                throw new FailStateException("States.TaskFailed", e.getMessage());
+            }
         } else if ("NONE".equalsIgnoreCase(requestBodyEncoding)) {
             try {
                 if (requestBody.isMissingNode() || requestBody.isNull()) {
-                    return new HttpRequestPayload(null, null, null);
+                    return new HttpRequestPayload(null, null);
                 }
 
                 return new HttpRequestPayload(
                     Buffer.buffer(objectMapper.writeValueAsString(requestBody)),
-                    null,
                     "application/json");
             } catch (Exception e) {
                 throw new FailStateException("States.TaskFailed",
@@ -4317,7 +5069,7 @@ public class AslExecutor {
         }
     }
 
-    private record HttpRequestPayload(Buffer body, MultiMap form, String contentType) {
+    private record HttpRequestPayload(Buffer body, String contentType) {
     }
 
     private record HttpTaskResponse(
@@ -4571,7 +5323,7 @@ public class AslExecutor {
                             "States.JsonMerge supports only shallow merge (third argument must be false)");
                 }
                 // Shallow merge: second object's top-level fields override the first's.
-                var merged = objectMapper.createObjectNode();
+                ObjectNode merged = objectMapper.createObjectNode();
                 a.fields().forEachRemaining(e -> merged.set(e.getKey(), e.getValue()));
                 b.fields().forEachRemaining(e -> merged.set(e.getKey(), e.getValue()));
                 yield merged;
@@ -5000,7 +5752,7 @@ public class AslExecutor {
      */
     private JsonNode resolveIntrinsicReference(String path, JsonNode searchRoot, JsonNode context,
                                                JsonNode input) {
-        var value = resolvePathNode(path, searchRoot, context);
+        JsonNode value = resolvePathNode(path, searchRoot, context);
         if (value.isMissingNode()) {
             throw new MissingIntrinsicArgumentException(path, input);
         }
@@ -5077,9 +5829,17 @@ public class AslExecutor {
         if (resource.contains(":lambda:") && resource.contains(":function:")) {
             return new TaskEventProfile("LambdaFunction", null, resource);
         }
-        if (resource.startsWith("arn:aws:states:::")) {
-            var tail = resource.substring("arn:aws:states:::".length());
-            var idx = tail.lastIndexOf(':');
+        // A well-formed integration id splits at its service: AWS reports states / startExecution.sync:2,
+        // and a split at the last colon would report startExecution.sync / 2 for it.
+        StatesIntegration integration = StatesIntegration.parse(resource).orElse(null);
+        if (integration != null) {
+            return new TaskEventProfile("Task",
+                    (integration.sdk() ? "aws-sdk:" : "") + integration.service(),
+                    integration.api() + integration.suffix());
+        }
+        String tail = StatesIntegration.tail(resource).orElse(null);
+        if (tail != null) {
+            int idx = tail.lastIndexOf(':');
             if (idx < 0) {
                 return new TaskEventProfile("Task", tail, tail);
             }
@@ -5090,7 +5850,7 @@ public class AslExecutor {
 
     private void addTaskScheduledEvent(HistoryChain chain, TaskEventProfile profile, JsonNode stateDef,
                                        JsonNode effectiveInput, StateMachine sm) {
-        var details = new LinkedHashMap<String, Object>();
+        LinkedHashMap<String, Object> details = new LinkedHashMap<>();
         if (profile.resourceType() != null) {
             details.put("resourceType", profile.resourceType());
         }
@@ -5120,8 +5880,22 @@ public class AslExecutor {
         }
     }
 
+    /**
+     * Recorded for a {@code .sync} Task once the call that started its job has returned, carrying
+     * that response as {@code output}. AWS also folds the SDK's {@code SdkHttpMetadata} and
+     * {@code SdkResponseMetadata} into it; Floci records the response fields alone.
+     */
+    private void addTaskSubmittedEvent(HistoryChain chain, TaskEventProfile profile, JsonNode jobResponse) {
+        LinkedHashMap<String, Object> details = new LinkedHashMap<>();
+        details.put("resourceType", profile.resourceType());
+        details.put("resource", profile.resource());
+        details.put("output", jobResponse.toString());
+        details.put("outputDetails", Map.of("truncated", false));
+        chain.publish("TaskSubmitted", details);
+    }
+
     private void addTaskSucceededEvent(HistoryChain chain, TaskEventProfile profile, JsonNode taskResult) {
-        var output = taskResult.toString();
+        String output = taskResult.toString();
         if ("Task".equals(profile.prefix())) {
             chain.publish(profile.prefix() + "Succeeded",
                     Map.of("resourceType", profile.resourceType(), "resource", profile.resource(),
@@ -5133,7 +5907,7 @@ public class AslExecutor {
     }
 
     private void addTaskFailedEvent(HistoryChain chain, TaskEventProfile profile, String error, String cause) {
-        var details = new LinkedHashMap<String, Object>();
+        LinkedHashMap<String, Object> details = new LinkedHashMap<>();
         if ("Task".equals(profile.prefix())) {
             details.put("resourceType", profile.resourceType());
             details.put("resource", profile.resource());
@@ -5152,7 +5926,7 @@ public class AslExecutor {
      * both {@code TimeoutSeconds} and {@code HeartbeatSeconds}, and carries no cause.
      */
     private void addTaskTimedOutEvent(HistoryChain chain, TaskEventProfile profile) {
-        var details = new LinkedHashMap<String, Object>();
+        LinkedHashMap<String, Object> details = new LinkedHashMap<>();
         if ("Task".equals(profile.prefix())) {
             details.put("resourceType", profile.resourceType());
             details.put("resource", profile.resource());
@@ -5176,7 +5950,7 @@ public class AslExecutor {
      */
     private void failExecution(Execution exec, HistoryChain chain, String error, String cause) {
         synchronized (exec) {
-            if (abortedByCaller(exec)) {
+            if (hasEnded(exec)) {
                 return;
             }
             exec.setError(error);
@@ -5198,7 +5972,7 @@ public class AslExecutor {
     }
 
     private static Map<String, Object> failureDetails(String error, String cause) {
-        var details = new LinkedHashMap<String, Object>();
+        LinkedHashMap<String, Object> details = new LinkedHashMap<>();
         details.put("error", error);
         if (cause != null) {
             details.put("cause", cause);
@@ -5215,11 +5989,15 @@ public class AslExecutor {
      */
     private void timeOutExecution(Execution exec, HistoryChain chain) {
         synchronized (exec) {
-            if (abortedByCaller(exec)) {
-                return;
+            // A synchronous caller may have published the timeout already; the event still ends
+            // the history. Any other outcome already published stands.
+            if (!"TIMED_OUT".equals(exec.getStatus())) {
+                if (hasEnded(exec)) {
+                    return;
+                }
+                exec.setStopDate(System.currentTimeMillis() / 1000.0);
+                exec.setStatus("TIMED_OUT");
             }
-            exec.setStopDate(System.currentTimeMillis() / 1000.0);
-            exec.setStatus("TIMED_OUT");
         }
         chain.end("ExecutionTimedOut", 0L, Map.of("error", "States.Timeout"));
     }
@@ -5233,7 +6011,7 @@ public class AslExecutor {
      */
     private void succeedExecution(Execution exec, HistoryChain chain, JsonNode output) {
         synchronized (exec) {
-            if (abortedByCaller(exec)) {
+            if (hasEnded(exec)) {
                 return;
             }
             exec.setOutput(output.toString());
@@ -5246,13 +6024,42 @@ public class AslExecutor {
 
     /**
      * True once StopExecution published ABORTED on this execution. The state loop reads it between
-     * states and every terminal write here reads it before publishing, so the worker's own status
-     * loses the race against a stop that arrived while it was still stepping: what a caller has
-     * already read back from DescribeExecution is what stands.
+     * states, so the worker stops stepping once a caller has stopped it.
      */
     private static boolean abortedByCaller(Execution exec) {
         synchronized (exec) {
             return "ABORTED".equals(exec.getStatus());
+        }
+    }
+
+    /**
+     * True once any outcome has been published on this execution: a stop from StopExecution, a
+     * synchronous caller answered with TIMED_OUT, or the worker's own. Every terminal write reads
+     * it before publishing, so the first outcome stands: what a caller has already read back from
+     * DescribeExecution or StartSyncExecution is never replaced.
+     */
+    private static boolean hasEnded(Execution exec) {
+        synchronized (exec) {
+            return TERMINAL_STATUSES.contains(exec.getStatus());
+        }
+    }
+
+    /**
+     * The same read for a wait that has only the execution's ARN: a {@code .sync} poll loop. An
+     * execution the store no longer holds is treated as stopped, since nothing is waiting for the
+     * result either way.
+     */
+    private boolean abortedByCaller(String executionArn) {
+        if (executionArn == null) {
+            return false;
+        }
+        try {
+            return RequestScopes.callAs(AwsArnUtils.parse(executionArn).accountId(),
+                    () -> abortedByCaller(sfnService.get().describeExecution(executionArn)));
+        } catch (AwsException e) {
+            LOG.warnv("Execution {0} vanished while a .sync task was waiting on its job; ending the wait ({1})",
+                    executionArn, e.getMessage());
+            return true;
         }
     }
 
@@ -5291,18 +6098,18 @@ public class AslExecutor {
     }
 
     private boolean catchMatches(JsonNode catcher, FailStateException failure) {
-        var errors = catcher.path("ErrorEquals");
+        JsonNode errors = catcher.path("ErrorEquals");
         if (!errors.isArray()) {
             return false;
         }
-        var error = failure.error != null ? failure.error : "States.Runtime";
+        String error = failure.error != null ? failure.error : "States.Runtime";
         // States.Runtime is never retried or caught, even when named explicitly in
         // ErrorEquals. Verified against real AWS: the execution fails immediately.
         if ("States.Runtime".equals(error)) {
             return false;
         }
         for (JsonNode candidate : errors) {
-            var expected = candidate.asText();
+            String expected = candidate.asText();
             if (failure.isNamedBy(expected)) {
                 return true;
             }
@@ -5338,11 +6145,11 @@ public class AslExecutor {
     }
 
     private String extractRegionFromArn(String arn) {
-        return AwsArnUtils.regionOrDefault(arn, "us-east-1");
+        return AwsArnUtils.regionOrDefault(arn, config.defaultRegion());
     }
 
-    private static String normalizeS3Region(String region) {
-        return region == null || region.isBlank() ? "us-east-1" : region;
+    private String normalizeS3Region(String region) {
+        return region == null || region.isBlank() ? config.defaultRegion() : region;
     }
 
     record StateResult(JsonNode output, String nextState) {}
@@ -5366,6 +6173,17 @@ public class AslExecutor {
     static class ExecutionTimedOutException extends RuntimeException {
         ExecutionTimedOutException() {
             super("States.Timeout");
+        }
+    }
+
+    /**
+     * Thrown when a wait finds that StopExecution has already ended the execution. Not a
+     * {@link FailStateException}: no Catch sees it, no Retry re-runs the state, and nothing is
+     * written, because the abort sealed the history and ABORTED is the status that stands.
+     */
+    static class ExecutionAbortedException extends RuntimeException {
+        ExecutionAbortedException() {
+            super("Execution aborted by StopExecution");
         }
     }
 
@@ -5439,11 +6257,40 @@ public class AslExecutor {
     private static final class IterationFailure extends RuntimeException {
         final int index;
         final FailStateException failure;
+        /** Whether the Map records the iteration's MapIterationFailed once the others are cut. */
+        final boolean recordFailed;
 
-        IterationFailure(int index, FailStateException failure) {
+        IterationFailure(int index, FailStateException failure, boolean recordFailed) {
             super(failure.getMessage(), failure, false, false);
             this.index = index;
             this.failure = failure;
+            this.recordFailed = recordFailed;
+        }
+    }
+
+    /** An iteration a failure cut, and the state it was in, or null when it was between states. */
+    private record CutIteration(int index, String stateType) {}
+
+    private static void cutIteration(HistoryChain iteration, int index, List<CutIteration> cutIterations) {
+        HistoryChain.IterationCut cut = iteration.abandonIteration();
+        if (cut.recorded()) {
+            cutIterations.add(new CutIteration(index, cut.stateType()));
+        }
+    }
+
+    /**
+     * Records the iterations a failure cut, the way AWS was measured recording them: for each, a
+     * {@code MapIterationAborted} and then the {@code *StateAborted} of the Task or Wait it was in,
+     * all chained to the failing iteration's last event, ahead of {@code MapIterationFailed} and
+     * {@code MapStateFailed}. An iteration between states, or inside any other state type, records
+     * only the {@code MapIterationAborted}.
+     */
+    private static void publishCutIterations(HistoryChain chain, String name, List<CutIteration> cutIterations) {
+        for (CutIteration cut : cutIterations) {
+            chain.publishBeside("MapIterationAborted", Map.of("name", name, "index", cut.index()));
+            if ("Task".equals(cut.stateType()) || "Wait".equals(cut.stateType())) {
+                chain.publishBeside(cut.stateType() + "StateAborted", null);
+            }
         }
     }
 

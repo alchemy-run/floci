@@ -2,7 +2,9 @@ package io.github.hectorvent.floci.services.iot;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.FlociCertificateAuthority;
+import io.github.hectorvent.floci.core.common.Pem;
 import io.github.hectorvent.floci.services.acm.CertificateGenerator;
+import io.github.hectorvent.floci.services.acm.model.KeyAlgorithm;
 import io.github.hectorvent.floci.services.iot.IotService.RegisteredDevice;
 import io.github.hectorvent.floci.services.iot.model.IotCertificate;
 import io.github.hectorvent.floci.services.iot.model.IotPolicy;
@@ -38,7 +40,6 @@ class IotServiceDeviceAuthTest {
     private static final String REGION = "us-east-1";
     private static final String ACCOUNT = IotServiceTestSupport.ACCOUNT;
     private static final String OTHER_ACCOUNT = "111111111111";
-    private static final CertificateGenerator GENERATOR = new CertificateGenerator();
 
     private static final String CONNECT_ANY_CLIENT = statement("Allow", "arn:aws:iot:*:*:client/*", null);
     private static final String CONNECT_AS_THING =
@@ -76,7 +77,7 @@ class IotServiceDeviceAuthTest {
     @Test
     void unknownCertificateIsNotFoundEvenWhenTheFlociCaSignedIt() {
         service.createKeysAndCertificate(true, REGION);
-        X509Certificate stranger = GENERATOR.parseCertificate(ca.issueClientCertificate("stranger").certificatePem());
+        X509Certificate stranger = Pem.parseCertificate(ca.issueClientCertificate("stranger").certificatePem());
 
         assertTrue(service.findRegisteredCertificate(stranger).isEmpty());
     }
@@ -96,6 +97,37 @@ class IotServiceDeviceAuthTest {
     }
 
     @Test
+    void aCertificateRegisteredInTwoAccountsIsRefused() {
+        IotCertificate registered = service.registerCertificateWithoutCa(selfSignedPem(), "ACTIVE", REGION);
+        support.certificates.putForAccount(OTHER_ACCOUNT, "cert:" + REGION + ":" + registered.getCertificateId(),
+                service.describeCertificate(registered.getCertificateId(), REGION));
+
+        assertTrue(service.findRegisteredCertificate(parse(registered)).isEmpty());
+    }
+
+    @Test
+    void aSecondAccountRegisteringAKnownDeviceRefusesItsNextConnect() {
+        String pem = selfSignedPem();
+        IotCertificate elsewhere = service.registerCertificateWithoutCa(pem, "ACTIVE", "eu-west-1");
+        support.certificates.delete("cert:eu-west-1:" + elsewhere.getCertificateId());
+        support.certificates.putForAccount(OTHER_ACCOUNT, "cert:eu-west-1:" + elsewhere.getCertificateId(), elsewhere);
+        assertEquals(OTHER_ACCOUNT, service.findRegisteredCertificate(parse(elsewhere)).orElseThrow().accountId());
+
+        service.registerCertificateWithoutCa(pem, "ACTIVE", REGION);
+
+        assertTrue(service.findRegisteredCertificate(parse(elsewhere)).isEmpty());
+    }
+
+    @Test
+    void aCertificateRegisteredInTwoRegionsOfOneAccountIsFound() {
+        String pem = selfSignedPem();
+        service.registerCertificateWithoutCa(pem, "ACTIVE", "eu-west-1");
+        IotCertificate registered = service.registerCertificateWithoutCa(pem, "ACTIVE", REGION);
+
+        assertEquals(ACCOUNT, service.findRegisteredCertificate(parse(registered)).orElseThrow().accountId());
+    }
+
+    @Test
     void plainStoresWithoutAccountPartitionsWorkTheSameWay() {
         IotService plain = new IotServiceTestSupport(REGION, ca, false).service;
         IotCertificate created = plain.createKeysAndCertificate(true, REGION);
@@ -108,7 +140,7 @@ class IotServiceDeviceAuthTest {
         assertEquals(REGION, device.region());
         assertTrue(plain.isConnectAllowed(device, "sensor-1", "127.0.0.1", null));
         assertTrue(plain.findRegisteredCertificate(
-                GENERATOR.parseCertificate(ca.issueClientCertificate("stranger").certificatePem())).isEmpty());
+                Pem.parseCertificate(ca.issueClientCertificate("stranger").certificatePem())).isEmpty());
     }
 
     /**
@@ -379,6 +411,52 @@ class IotServiceDeviceAuthTest {
     }
 
     @Test
+    void aVariableOutsideResourceAndConditionIsNotAVariable() {
+        RegisteredDevice device = registeredDevice(true);
+        createAndAttach("p", "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"${iot:Certificate.Subject.CommonName}\","
+                + "\"Effect\":\"Allow\",\"Action\":\"iot:Connect\",\"Resource\":\"arn:aws:iot:*:*:client/*\"}]}", device);
+
+        assertTrue(connect(device, "sensor-1"),
+                "a variable has meaning in the Resource or Condition block, so a Sid is text like any other");
+    }
+
+    @Test
+    void theAsteriskVariableStandsForALiteralAsterisk() {
+        RegisteredDevice device = registeredDevice(true);
+        createAndAttach("p", statement("Allow", "arn:aws:iot:*:*:client/${*}", null), device);
+
+        assertTrue(connect(device, "*"), "the one client id the pattern names");
+        assertFalse(connect(device, "sensor-1"), "the predefined variable is the character, not a wildcard");
+    }
+
+    @Test
+    void aVariableResolvesWhateverCaseItsKeyIsWrittenIn() {
+        RegisteredDevice device = registeredDevice(true);
+        createAndAttach("p", statement("Allow", "arn:aws:iot:*:*:client/${IOT:clientid}", null), device);
+
+        assertTrue(connect(device, "sensor-1"), "key names are case-insensitive, aws:CurrentTime being AWS:currenttime");
+    }
+
+    @Test
+    void aDocumentWithoutTheVersionThatIntroducedVariablesReadsThemLiterally() {
+        RegisteredDevice device = registeredDevice(true);
+        createAndAttach("p", "{\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"iot:Connect\","
+                + "\"Resource\":\"arn:aws:iot:*:*:client/${iot:ClientId}\"}]}", device);
+
+        assertFalse(connect(device, "sensor-1"), "variables arrived with 2012-10-17 and are literal text without it");
+        assertTrue(connect(device, "${iot:ClientId}"), "which leaves the pattern naming that client id and no other");
+    }
+
+    @Test
+    void anUnresolvedConditionValueIsNullRatherThanAStatementThatVanishes() {
+        RegisteredDevice device = registeredDevice(true);
+        createAndAttach("p", statement("Allow", "arn:aws:iot:*:*:client/*",
+                "{\"StringNotEquals\":{\"iot:ClientId\":\"${iot:Connection.Thing.ThingName}\"}}"), device);
+
+        assertTrue(connect(device, "sensor-1"), "no thing is attached, so the client id is neither equal to nor like a null");
+    }
+
+    @Test
     void aClientIdCarryingJsonSyntaxIsDataNotPolicy() {
         RegisteredDevice device = registeredDevice(true);
         createAndAttach("allow", CONNECT_ANY_CLIENT, device);
@@ -397,6 +475,27 @@ class IotServiceDeviceAuthTest {
         assertFalse(connect(device, "sensor-1"));
     }
 
+    @Test
+    void customAuthorizerPoliciesAllowTheClientArnOfTheDefaultAccountAndRegion() {
+        String onlySensor1 = statement("Allow", "arn:aws:iot:" + REGION + ":" + ACCOUNT + ":client/sensor-1", null);
+
+        assertTrue(service.isConnectAllowedBy(List.of(onlySensor1), "sensor-1", "127.0.0.1", null));
+        assertFalse(service.isConnectAllowedBy(List.of(onlySensor1), "sensor-2", "127.0.0.1", null));
+        assertFalse(service.isConnectAllowedBy(List.of(statement("Allow", "arn:aws:iot:eu-west-1:" + ACCOUNT + ":client/sensor-1",
+                null)), "sensor-1", "127.0.0.1", null), "a client ARN in another region");
+        assertFalse(service.isConnectAllowedBy(List.of(), "sensor-1", "127.0.0.1", null), "no policy means deny");
+    }
+
+    @Test
+    void customAuthorizerPoliciesResolveTheConnectionVariables() {
+        String policy = statement("Allow", "arn:aws:iot:*:*:client/${iot:ClientId}",
+                "{\"StringEquals\":{\"iot:DomainName\":\"iot.example.com\"},\"IpAddress\":{\"aws:SourceIp\":\"10.0.0.0/8\"}}");
+
+        assertTrue(service.isConnectAllowedBy(List.of(policy), "sensor-1", "10.1.2.3", "iot.example.com"));
+        assertFalse(service.isConnectAllowedBy(List.of(policy), "sensor-1", "127.0.0.1", "iot.example.com"));
+        assertFalse(service.isConnectAllowedBy(List.of(policy), "sensor-1", "10.1.2.3", null));
+    }
+
     private RegisteredDevice registeredDevice(boolean active) {
         IotCertificate created = service.createKeysAndCertificate(active, REGION);
         return service.findRegisteredCertificate(parse(created)).orElseThrow();
@@ -411,8 +510,14 @@ class IotServiceDeviceAuthTest {
         return service.isConnectAllowed(device, clientId, "127.0.0.1", null);
     }
 
+    private static String selfSignedPem() {
+        return new CertificateGenerator()
+                .generateSelfSignedCertificate("device", List.of(), KeyAlgorithm.RSA_2048)
+                .certificatePem();
+    }
+
     private static X509Certificate parse(IotCertificate certificate) {
-        return GENERATOR.parseCertificate(certificate.getCertificatePem());
+        return Pem.parseCertificate(certificate.getCertificatePem());
     }
 
     private static String statement(String effect, String resource, String condition) {

@@ -12,12 +12,16 @@ import jakarta.ws.rs.ext.Provider;
 @Priority(Priorities.HEADER_DECORATOR)
 public class AwsCborContentTypeFilter implements ContainerRequestFilter {
 
-    static final String ORIGINAL_CONTENT_TYPE_HEADER = "X-Floci-Original-Content-Type";
+    public static final String ORIGINAL_CONTENT_TYPE_HEADER = "X-Floci-Original-Content-Type";
     private static final String AWS_CBOR_1_1_MEDIA_TYPE = "application/x-amz-cbor-1.1";
     private static final String GENERIC_CBOR_MEDIA_TYPE = "application/cbor";
 
     @Override
     public void filter(ContainerRequestContext ctx) {
+        // The header is this filter's own record of what it replaced. A client could send it too,
+        // and every reader (the protocol claim, the CBOR error encoding, SigV4 verification of a
+        // signed Content-Type) would then trust a value the client chose, so it never gets through.
+        ctx.getHeaders().keySet().removeIf(name -> name.equalsIgnoreCase(ORIGINAL_CONTENT_TYPE_HEADER));
         String contentType = ctx.getHeaderString("Content-Type");
         if (contentType != null && contentType.startsWith(AWS_CBOR_1_1_MEDIA_TYPE)) {
             normalize(ctx, contentType);

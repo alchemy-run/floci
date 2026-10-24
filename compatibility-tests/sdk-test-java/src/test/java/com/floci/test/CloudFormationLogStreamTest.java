@@ -20,7 +20,6 @@ import software.amazon.awssdk.services.cloudwatchlogs.model.ResourceNotFoundExce
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.BooleanSupplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -214,20 +213,20 @@ class CloudFormationLogStreamTest {
     private void assertWritable(String group, String stream, String message) throws InterruptedException {
         logs.putLogEvents(r -> r.logGroupName(group).logStreamName(stream)
                 .logEvents(InputLogEvent.builder().timestamp(Instant.now().toEpochMilli()).message(message).build()));
-        await(() -> logs.getLogEvents(r -> r.logGroupName(group).logStreamName(stream).startFromHead(true))
+        TestFixtures.await(() -> logs.getLogEvents(r -> r.logGroupName(group).logStreamName(stream).startFromHead(true))
                 .events().stream().map(OutputLogEvent::message).toList().equals(List.of(message)),
-                "the event written to " + group + "/" + stream);
+                stackName, "the event written to " + group + "/" + stream, 60_000_000_000L, 100);
     }
 
     private void awaitStatus(String expected) throws InterruptedException {
-        await(() -> {
+        TestFixtures.await(() -> {
             Stack stack = cfn.describeStacks(r -> r.stackName(stackName)).stacks().get(0);
             String status = stack.stackStatusAsString();
             if (status.endsWith("_FAILED") || status.contains("ROLLBACK")) {
                 throw new AssertionError(stackName + " reached " + status + ": " + stack.stackStatusReason());
             }
             return expected.equals(status);
-        }, expected);
+        }, stackName, expected, 60_000_000_000L, 100);
     }
 
     private void deleteStack() throws InterruptedException {
@@ -235,7 +234,7 @@ class CloudFormationLogStreamTest {
             return;
         }
         cfn.deleteStack(r -> r.stackName(stackName));
-        await(() -> {
+        TestFixtures.await(() -> {
             try {
                 List<Stack> stacks = cfn.describeStacks(r -> r.stackName(stackName)).stacks();
                 if (stacks.isEmpty()) {
@@ -253,18 +252,9 @@ class CloudFormationLogStreamTest {
                 }
                 throw e;
             }
-        }, "stack deletion");
+        }, stackName, "stack deletion", 60_000_000_000L, 100);
         stackCreated = false;
     }
 
-    private void await(BooleanSupplier condition, String expected) throws InterruptedException {
-        long deadline = System.nanoTime() + 60_000_000_000L;
-        while (System.nanoTime() < deadline) {
-            if (condition.getAsBoolean()) {
-                return;
-            }
-            Thread.sleep(100);
-        }
-        throw new AssertionError(stackName + " timed out waiting for " + expected);
-    }
+
 }

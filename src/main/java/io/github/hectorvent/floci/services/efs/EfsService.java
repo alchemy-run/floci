@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.efs;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.AvailabilityZoneIds;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.Resettable;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
@@ -129,11 +130,7 @@ public class EfsService implements Resettable {
         fs.setKmsKeyId(request.getKmsKeyId());
         if (request.getAvailabilityZoneName() != null) {
             fs.setAvailabilityZoneName(request.getAvailabilityZoneName());
-            fs.setAvailabilityZoneId(ec2Service.describeAvailabilityZones(region).stream()
-                    .filter(zone -> request.getAvailabilityZoneName().equals(zone.get("zoneName")))
-                    .map(zone -> zone.get("zoneId"))
-                    .findFirst()
-                    .orElseThrow(() -> EfsException.badRequest("Invalid AvailabilityZoneName")));
+            fs.setAvailabilityZoneId(AvailabilityZoneIds.forZoneName(region, request.getAvailabilityZoneName()));
         }
         
         if (request.getTags() != null) {
@@ -430,13 +427,15 @@ public class EfsService implements Resettable {
             mt.setSubnetId(subnet.getSubnetId());
             mt.setIpAddress(networkInterface.getPrivateIpAddress());
             mt.setLifeCycleState(LifeCycleState.available);
-            mt.setVpcId(subnet.getVpcId());
-            mt.setAvailabilityZoneName(subnet.getAvailabilityZone());
-            mt.setAvailabilityZoneId(subnet.getAvailabilityZoneId());
-            mt.setOwnerId(networkInterface.getOwnerId());
-            mt.setNetworkInterfaceId(networkInterface.getNetworkInterfaceId());
-            mt.setSecurityGroups(new ArrayList<>(networkInterface.getGroups().stream()
-                    .map(GroupIdentifier::getGroupId).toList()));
+            mt.setVpcId("vpc-12345678");
+            mt.setAvailabilityZoneName(region + "a");
+            mt.setAvailabilityZoneId(AvailabilityZoneIds.forZoneName(region, region + "a"));
+        mt.setNetworkInterfaceId("eni-" + UUID.randomUUID().toString().replace("-", "").substring(0, 17));
+        if (request.getSecurityGroups() != null) {
+            mt.setSecurityGroups(new ArrayList<>(request.getSecurityGroups()));
+        } else {
+            mt.setSecurityGroups(new ArrayList<>());
+        }
 
             mountTargetStore.put(regionKey(region, mtId), mt);
             fs.setNumberOfMountTargets(fs.getNumberOfMountTargets() + 1);

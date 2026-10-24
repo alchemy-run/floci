@@ -18,8 +18,8 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -96,6 +96,35 @@ class LambdaAddressingCfnProvisionerTest {
         verify(lambda, never()).removePermission(anyString(), anyString(), any(), anyString());
         verify(lambda, never()).restorePermissionStatement(anyString(), anyString(), anyMap());
         assertEquals("app-fn|InvokePermission", r.getPhysicalId());
+    }
+
+    @Test
+    void everyConditionPropertyReachesAddPermission() {
+        // Catches: a template's PrincipalOrgID, FunctionUrlAuthType, EventSourceToken or
+        // InvokedViaFunctionUrl dropped, which widens the statement to every caller its principal names
+        ObjectNode props = props("app-fn")
+                .put("Principal", "*")
+                .put("SourceArn", "arn:aws:s3:::test-bucket")
+                .put("SourceAccount", "111111111111")
+                .put("PrincipalOrgID", "o-1234567890")
+                .put("FunctionUrlAuthType", "NONE")
+                .put("EventSourceToken", "amzn1.ask.skill.12345678-1234-1234-1234-123456789012")
+                .put("InvokedViaFunctionUrl", true);
+
+        provisioner.provision(resource(), props, ctx());
+
+        ArgumentCaptor<Map<String, Object>> request = ArgumentCaptor.captor();
+        verify(lambda).addPermission(eq(REGION), eq("app-fn"), isNull(), request.capture());
+        assertEquals(Map.of(
+                "StatementId", "InvokePermission",
+                "Action", "lambda:InvokeFunction",
+                "Principal", "*",
+                "SourceArn", "arn:aws:s3:::test-bucket",
+                "SourceAccount", "111111111111",
+                "PrincipalOrgID", "o-1234567890",
+                "FunctionUrlAuthType", "NONE",
+                "EventSourceToken", "amzn1.ask.skill.12345678-1234-1234-1234-123456789012",
+                "InvokedViaFunctionUrl", true), request.getValue());
     }
 
     private ProvisionContext ctx() {

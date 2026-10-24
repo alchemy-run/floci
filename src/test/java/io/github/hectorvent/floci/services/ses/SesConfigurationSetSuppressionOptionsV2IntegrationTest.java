@@ -202,6 +202,30 @@ class SesConfigurationSetSuppressionOptionsV2IntegrationTest {
                 .body("SuppressionOptions.SuppressedReasons", empty());
     }
 
+    @Test
+    @Order(11)
+    void putSuppressionOptions_nullSuppressedReasons_treatedAsEmptyList() {
+        // Start from a non-empty override so an ignored null would leave BOUNCE behind.
+        configSetService.putSuppressionOptions(CS, List.of("BOUNCE"), REGION);
+
+        given()
+                .contentType("application/json")
+                .header("Authorization", AUTH)
+                .body("{\"SuppressedReasons\":null}")
+        .when()
+                .put("/v2/email/configuration-sets/" + CS + "/suppression-options")
+        .then()
+                .statusCode(200);
+
+        given()
+                .header("Authorization", AUTH)
+        .when()
+                .get("/v2/email/configuration-sets/" + CS)
+        .then()
+                .statusCode(200)
+                .body("SuppressionOptions.SuppressedReasons", empty());
+    }
+
     // ─── getEffectiveSuppressedReasons helper (forward-looking integration with #1109) ───
 
     @Test

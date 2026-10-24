@@ -169,6 +169,8 @@ class FirehoseParquetConverterTest {
                 record("{\"ticker\": \"MISSING_FIELDS\"}")), DELIVERY_TIME);
 
         assertEquals(2, outcome.convertedRecords());
+        verify(s3Service).createInternalBucket(STAGING, "us-east-1");
+        verify(s3Service, never()).createBucket(STAGING, "us-east-1");
         assertEquals(0, outcome.failedRecords());
         assertTrue(outcome.dataKey().startsWith("data/2026/01/01/00/stream-1-2026-01-01-00-00-00-"));
         assertTrue(outcome.dataKey().endsWith(".parquet"));

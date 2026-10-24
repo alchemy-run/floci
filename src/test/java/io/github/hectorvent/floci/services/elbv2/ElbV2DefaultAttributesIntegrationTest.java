@@ -1,13 +1,13 @@
 package io.github.hectorvent.floci.services.elbv2;
 
+import io.quarkus.test.junit.QuarkusTest;
+import org.junit.jupiter.api.Test;
+
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
-
-import org.junit.jupiter.api.Test;
-
-import io.quarkus.test.junit.QuarkusTest;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * A load balancer or target group that has never been modified used to answer with an empty
@@ -62,6 +62,31 @@ class ElbV2DefaultAttributesIntegrationTest {
         .when().post("/")
         .then().statusCode(200)
             .extract().path("CreateLoadBalancerResponse.CreateLoadBalancerResult.LoadBalancers.member.LoadBalancerArn");
+    }
+
+    /**
+     * Network load balancers have their own hosted zone per region (the ELB table in the AWS
+     * General Reference, as the Terraform provider transcribes it); floci reported the ALB zone
+     * for every type before the per-region facts landed.
+     */
+    @Test
+    void eachLoadBalancerTypeReportsItsOwnHostedZone() {
+        String albArn = createLoadBalancer("zone-alb", "application", "10.101.");
+        String nlbArn = createLoadBalancer("zone-nlb", "network", "10.102.");
+
+        assertEquals("Z35SXDOTRQ7X7K", canonicalHostedZoneId(albArn));
+        assertEquals("Z26RNL4JYFTOTI", canonicalHostedZoneId(nlbArn));
+    }
+
+    private String canonicalHostedZoneId(String arn) {
+        return given()
+            .formParam("Action", "DescribeLoadBalancers")
+            .formParam("Version", "2015-12-01")
+            .formParam("LoadBalancerArns.member.1", arn)
+            .header("Authorization", AUTH)
+        .when().post("/")
+        .then().statusCode(200)
+            .extract().path("DescribeLoadBalancersResponse.DescribeLoadBalancersResult.LoadBalancers.member.CanonicalHostedZoneId");
     }
 
     @Test
@@ -130,6 +155,35 @@ class ElbV2DefaultAttributesIntegrationTest {
                     not(hasItem("access_logs.s3.enabled")))
             .body("DescribeLoadBalancerAttributesResponse.DescribeLoadBalancerAttributesResult.Attributes.member.Key",
                     not(hasItem("idle_timeout.timeout_seconds")));
+    }
+
+    @Test
+    void aGatewayListenerRetainsItsControlPlaneWithoutAPort() {
+        String arn = createLoadBalancer("attrs-gwlb-listener", "gateway", "10.120.");
+        try {
+            String listener = given().header("Authorization", AUTH).formParam("Action", "CreateListener")
+                    .formParam("LoadBalancerArn", arn).formParam("Protocol", "GENEVE")
+                    .formParam("DefaultActions.member.1.Type", "fixed-response")
+                    .formParam("DefaultActions.member.1.FixedResponseConfig.StatusCode", "200")
+                    .when().post("/").then().statusCode(200).extract()
+                    .path("CreateListenerResponse.CreateListenerResult.Listeners.member.ListenerArn");
+            given().header("Authorization", AUTH).formParam("Action", "ModifyListener")
+                    .formParam("ListenerArn", listener)
+                    .formParam("DefaultActions.member.1.Type", "fixed-response")
+                    .formParam("DefaultActions.member.1.FixedResponseConfig.StatusCode", "201")
+                    .when().post("/").then().statusCode(200);
+            given().header("Authorization", AUTH).formParam("Action", "DescribeListeners")
+                    .formParam("ListenerArns.member.1", listener).when().post("/").then().statusCode(200)
+                    .body("DescribeListenersResponse.DescribeListenersResult.Listeners.member.Protocol", equalTo("GENEVE"))
+                    .body("DescribeListenersResponse.DescribeListenersResult.Listeners.member.Port.text()", equalTo(""))
+                    .body("DescribeListenersResponse.DescribeListenersResult.Listeners.member.DefaultActions.member.FixedResponseConfig.StatusCode",
+                            equalTo("201"));
+            given().header("Authorization", AUTH).formParam("Action", "DeleteListener")
+                    .formParam("ListenerArn", listener).when().post("/").then().statusCode(200);
+        } finally {
+            given().header("Authorization", AUTH).formParam("Action", "DeleteLoadBalancer")
+                    .formParam("LoadBalancerArn", arn).when().post("/").then().statusCode(200);
+        }
     }
 
     @Test

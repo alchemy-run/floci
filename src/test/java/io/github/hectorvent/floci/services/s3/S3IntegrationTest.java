@@ -1,16 +1,16 @@
 package io.github.hectorvent.floci.services.s3;
 
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.config.DecoderConfig;
+import io.restassured.config.RestAssuredConfig;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
-import io.restassured.config.DecoderConfig;
-import io.restassured.config.RestAssuredConfig;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
@@ -441,14 +441,30 @@ class S3IntegrationTest {
             .statusCode(204);
     }
 
+    /**
+     * A regional endpoint requires a LocationConstraint naming its region (moto's
+     * {@code aws_verified} matrix); only the us-east-1 endpoint accepts an empty body. The
+     * signing region alone never places a bucket.
+     */
     @Test
     @Order(21)
-    void createBucketUsesSigningRegionWhenBodyEmpty() {
+    void createBucketWithoutConstraintOnARegionalEndpointIsRejected() {
         String bucket = "signed-region-bucket";
+        String regionalAuth =
+                "AWS4-HMAC-SHA256 Credential=test/20260325/eu-west-1/s3/aws4_request, SignedHeaders=host;x-amz-date, Signature=test";
 
         given()
-            .header("Authorization",
-                    "AWS4-HMAC-SHA256 Credential=test/20260325/eu-west-1/s3/aws4_request, SignedHeaders=host;x-amz-date, Signature=test")
+            .header("Authorization", regionalAuth)
+        .when()
+            .put("/" + bucket)
+        .then()
+            .statusCode(400)
+            .body(containsString("<Code>IllegalLocationConstraintException</Code>"));
+
+        given()
+            .header("Authorization", regionalAuth)
+            .contentType("application/xml")
+            .body("<CreateBucketConfiguration><LocationConstraint>eu-west-1</LocationConstraint></CreateBucketConfiguration>")
         .when()
             .put("/" + bucket)
         .then()
@@ -457,10 +473,10 @@ class S3IntegrationTest {
 
         given()
         .when()
-            .head("/" + bucket)
+            .get("/" + bucket + "?location")
         .then()
             .statusCode(200)
-            .header("x-amz-bucket-region", equalTo("eu-west-1"));
+            .body(containsString(">eu-west-1</LocationConstraint>"));
 
         given()
         .when()
@@ -489,6 +505,64 @@ class S3IntegrationTest {
     }
 
     @Test
+    void createBucketRejectsUnknownLocationConstraintWithoutCreatingBucket() {
+        for (String invalidRegion : List.of("polygondwanaland-west-1", "us-fake-9")) {
+            String bucket = "unknown-region-" + invalidRegion;
+            String createBucketConfiguration = """
+                    <CreateBucketConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                        <LocationConstraint>%s</LocationConstraint>
+                    </CreateBucketConfiguration>
+                    """.formatted(invalidRegion);
+
+            given()
+                .contentType("application/xml")
+                .body(createBucketConfiguration)
+            .when()
+                .put("/" + bucket)
+            .then()
+                .statusCode(400)
+                .body(containsString("InvalidLocationConstraint"));
+
+            given()
+            .when()
+                .head("/" + bucket)
+            .then()
+                .statusCode(404);
+        }
+    }
+
+    @Test
+    void createBucketAcceptsKnownRegionOutsideAdvertisedRegionList() {
+        String bucket = "ap-south-two-bucket";
+        String createBucketConfiguration = """
+                <CreateBucketConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                    <LocationConstraint>ap-south-2</LocationConstraint>
+                </CreateBucketConfiguration>
+                """;
+
+        given()
+            .contentType("application/xml")
+            .body(createBucketConfiguration)
+        .when()
+            .put("/" + bucket)
+        .then()
+            .statusCode(200);
+
+        given()
+        .when()
+            .head("/" + bucket)
+        .then()
+            .statusCode(200)
+            .header("x-amz-bucket-region", equalTo("ap-south-2"));
+
+        given()
+        .when()
+            .delete("/" + bucket)
+        .then()
+            .statusCode(204);
+    }
+
+    @Test
     void createBucketRejectsOverlyLongBucketName() {
         String longBucketName = "30388849b0eaef3dfba3aa83849d28987be6fb7920bdbf3233bdc8e966f73870.json";
         given()
@@ -509,6 +583,117 @@ class S3IntegrationTest {
         .then()
             .statusCode(400)
             .body(containsString("MalformedXML"));
+    }
+
+    @Test
+    @Order(208)
+    void createBucketRejectsMalformedCreateBucketConfigurationAndCreatesNoBucket() {
+        String bucket = "malformed-config-bucket";
+        given()
+            .contentType("application/xml")
+            .body("<CreateBucketConfiguration><LocationConstraint>eu-central-1</LocationConstraint>")
+        .when()
+            .put("/" + bucket)
+        .then()
+            .statusCode(400)
+            .body(containsString("MalformedXML"));
+
+        assertBucketDoesNotExist(bucket);
+    }
+
+    @Test
+    @Order(209)
+    void createBucketRejectsUnknownCreateBucketConfigurationFieldAndCreatesNoBucket() {
+        String bucket = "unknown-config-field-bucket";
+        given()
+            .contentType("application/xml")
+            .body("""
+                <CreateBucketConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                    <Foo>bar</Foo>
+                </CreateBucketConfiguration>
+                """)
+        .when()
+            .put("/" + bucket)
+        .then()
+            .statusCode(400)
+            .body(containsString("MalformedXML"));
+
+        assertBucketDoesNotExist(bucket);
+    }
+
+    @Test
+    @Order(210)
+    void createBucketRejectsWrongCreateBucketConfigurationRootAndCreatesNoBucket() {
+        String bucket = "wrong-config-root-bucket";
+        given()
+            .contentType("application/xml")
+            .body("""
+                <CreateBucketConfigurationFoo xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                    <LocationConstraint>eu-central-1</LocationConstraint>
+                </CreateBucketConfigurationFoo>
+                """)
+        .when()
+            .put("/" + bucket)
+        .then()
+            .statusCode(400)
+            .body(containsString("MalformedXML"));
+
+        assertBucketDoesNotExist(bucket);
+    }
+
+    @Test
+    @Order(211)
+    void createBucketRejectsInvalidLocationConstraintAndCreatesNoBucket() {
+        String bucket = "invalid-constraint-bucket";
+        given()
+            .contentType("application/xml")
+            .body("""
+                <CreateBucketConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                    <LocationConstraint>not-a-region</LocationConstraint>
+                </CreateBucketConfiguration>
+                """)
+        .when()
+            .put("/" + bucket)
+        .then()
+            .statusCode(400)
+            .body(containsString("InvalidLocationConstraint"));
+
+        assertBucketDoesNotExist(bucket);
+    }
+
+    @Test
+    @Order(212)
+    void createBucketAcceptsDirectoryBucketConfiguration() {
+        String bucket = "directory-config-bucket";
+        given()
+            .contentType("application/xml")
+            .body("""
+                <CreateBucketConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                    <Location>us-west-2</Location>
+                    <Bucket>
+                        <Type>Directory</Type>
+                    </Bucket>
+                </CreateBucketConfiguration>
+                """)
+        .when()
+            .put("/" + bucket)
+        .then()
+            .statusCode(200);
+
+        given()
+        .when()
+            .get("/" + bucket)
+        .then()
+            .statusCode(200);
+    }
+
+    private static void assertBucketDoesNotExist(String bucket) {
+        given()
+        .when()
+            .get("/" + bucket)
+        .then()
+            .statusCode(404)
+            .body(containsString("NoSuchBucket"));
     }
 
     @Test
@@ -847,6 +1032,118 @@ class S3IntegrationTest {
     }
 
     @Test
+    @Order(123)
+    void getObjectWithARangeUnitInAnyCase() {
+        putGreeting("range-unit-bucket");
+        try {
+            // Range unit names are case-insensitive (RFC 9110, section 14.1).
+            given()
+                .header("Range", "Bytes=0-4")
+            .when()
+                .get("/range-unit-bucket/greeting.txt")
+            .then()
+                .statusCode(206)
+                .header("Content-Range", equalTo("bytes 0-4/20"))
+                .body(equalTo("Hello"));
+        } finally {
+            deleteGreeting("range-unit-bucket");
+        }
+    }
+
+    @Test
+    @Order(124)
+    void getObjectWithIfRangeServesTheRangeOnlyWhileItsValidatorMatches() {
+        putGreeting("if-range-bucket");
+        try {
+            String etag = given().when().head("/if-range-bucket/greeting.txt").then().extract().header("ETag");
+            String lastModified = given().when().head("/if-range-bucket/greeting.txt").then().extract()
+                    .header("Last-Modified");
+
+            for (String current : List.of(etag, lastModified)) {
+                given()
+                    .header("Range", "bytes=0-4")
+                    .header("If-Range", current)
+                .when()
+                    .get("/if-range-bucket/greeting.txt")
+                .then()
+                    .statusCode(206)
+                    .header("Content-Range", equalTo("bytes 0-4/20"))
+                    .body(equalTo("Hello"));
+            }
+            given()
+                .header("Range", "bytes=0-4")
+                .header("If-Range", "\"stale\"")
+            .when()
+                .get("/if-range-bucket/greeting.txt")
+            .then()
+                .statusCode(200)
+                .header("Content-Range", nullValue())
+                .header("Content-Length", equalTo("20"));
+        } finally {
+            deleteGreeting("if-range-bucket");
+        }
+    }
+
+    @Test
+    @Order(125)
+    void headObjectWithRangeReportsTheRangeLengthOr416() {
+        putGreeting("head-range-bucket");
+        try {
+            // "If the Range is satisfiable, only the ContentLength is affected in the response. If the
+            // Range is not satisfiable, S3 returns a 416".
+            given()
+                .header("Range", "bytes=0-4")
+                .header("x-amz-checksum-mode", "ENABLED")
+            .when()
+                .head("/head-range-bucket/greeting.txt")
+            .then()
+                .statusCode(200)
+                .header("Content-Length", equalTo("5"))
+                .header("Content-Range", nullValue())
+                .header("x-amz-checksum-crc64nvme", nullValue())
+                .header("x-amz-checksum-type", nullValue());
+            given()
+                .header("Range", "bytes=0-4")
+                .header("If-Range", "\"stale\"")
+                .header("x-amz-checksum-mode", "ENABLED")
+            .when()
+                .head("/head-range-bucket/greeting.txt")
+            .then()
+                .statusCode(200)
+                .header("Content-Length", equalTo("20"))
+                .header("x-amz-checksum-crc64nvme", notNullValue());
+            given()
+                .header("Range", "bytes=0-")
+                .header("x-amz-checksum-mode", "ENABLED")
+            .when()
+                .head("/head-range-bucket/greeting.txt")
+            .then()
+                .statusCode(200)
+                .header("Content-Length", equalTo("20"))
+                .header("x-amz-checksum-crc64nvme", notNullValue())
+                .header("x-amz-checksum-type", equalTo("FULL_OBJECT"));
+            given()
+                .header("Range", "bytes=50-")
+            .when()
+                .head("/head-range-bucket/greeting.txt")
+            .then()
+                .statusCode(416);
+            // A Range that is not one valid range is not one that cannot be satisfied, so it is ignored.
+            for (String invalid : List.of("bytes=0-1,4-5", "bytes=5-2", "bytes=abc")) {
+                given()
+                    .header("Range", invalid)
+                .when()
+                    .head("/head-range-bucket/greeting.txt")
+                .then()
+                    .statusCode(200)
+                    .header("Content-Length", equalTo("20"));
+            }
+        } finally {
+            deleteGreeting("head-range-bucket");
+        }
+    }
+
+    @Test
     @Order(27)
     void getObjectWithFullRange() {
         given()
@@ -897,55 +1194,85 @@ class S3IntegrationTest {
         .then()
             .statusCode(416)
             .header("Content-Range", equalTo("bytes */20"))
-            .body(containsString("InvalidRange"));
+            .body(hasXPath("/Error/Code", equalTo("InvalidRange")))
+            .body(hasXPath("/Error/Message", equalTo("The requested range is not satisfiable")))
+            .body(hasXPath("/Error/RangeRequested", equalTo("bytes=50-100")))
+            .body(hasXPath("/Error/ActualObjectSize", equalTo("20")));
+
+        // A suffix of no bytes cannot be satisfied either.
+        given()
+            .header("Range", "bytes=-0")
+        .when()
+            .get("/test-bucket/greeting.txt")
+        .then()
+            .statusCode(416)
+            .header("Content-Range", equalTo("bytes */20"))
+            .body(hasXPath("/Error/Code", equalTo("InvalidRange")))
+            .body(hasXPath("/Error/RangeRequested", equalTo("bytes=-0")));
     }
 
     @Test
     @Order(31)
-    void getObjectWithMalformedRangeNoDash() {
-        given()
-            .header("Range", "bytes=0")
-        .when()
-            .get("/test-bucket/greeting.txt")
-        .then()
-            .statusCode(416)
-            .body(containsString("InvalidRange"));
+    void getObjectIgnoresARangeThatIsNotOneValidRange() {
+        // S3 answers each of these as a GetObject without a Range, with the whole object and 200.
+        for (String invalid : List.of("bytes=0", "bytes=-", "bytes=abc-def", "bytes=-1-4", "bytes=1-0",
+                "bytes=-1-", "bytes=0--1", "bytes=0-1,3-4,7-9", "0-1")) {
+            given()
+                .header("Range", invalid)
+            .when()
+                .get("/test-bucket/greeting.txt")
+            .then()
+                .statusCode(200)
+                .header("Content-Length", equalTo("20"))
+                .header("Content-Range", nullValue())
+                .header("Accept-Ranges", equalTo("bytes"))
+                .body(equalTo("Hello World from S3!"));
+        }
     }
 
     @Test
     @Order(32)
-    void getObjectWithMalformedRangeEmptySuffix() {
-        given()
-            .header("Range", "bytes=-")
+    void getObjectRangeCoveringTheWholeObjectCarriesItsChecksum() {
+        String wholeChecksum = given()
+            .header("x-amz-checksum-mode", "ENABLED")
         .when()
             .get("/test-bucket/greeting.txt")
         .then()
-            .statusCode(416)
-            .body(containsString("InvalidRange"));
-    }
+            .statusCode(200)
+            .extract().header("x-amz-checksum-crc64nvme");
+        assertNotNull(wholeChecksum);
 
-    @Test
-    @Order(33)
-    void getObjectWithMalformedRangeNonNumeric() {
+        // The whole of an object stored in one request is its one part, so a range covering it gets
+        // the object's checksum, as a range aligned with a single part gets that part's.
+        for (String whole : List.of("bytes=0-19", "bytes=0-100", "bytes=-50", "bytes=0-")) {
+            given()
+                .header("Range", whole)
+                .header("x-amz-checksum-mode", "ENABLED")
+            .when()
+                .get("/test-bucket/greeting.txt")
+            .then()
+                .statusCode(206)
+                .header("Content-Range", equalTo("bytes 0-19/20"))
+                .header("x-amz-checksum-crc64nvme", equalTo(wholeChecksum))
+                .header("x-amz-checksum-type", equalTo("FULL_OBJECT"))
+                .body(equalTo("Hello World from S3!"));
+        }
         given()
-            .header("Range", "bytes=abc-def")
+            .header("Range", "bytes=0-19")
         .when()
             .get("/test-bucket/greeting.txt")
         .then()
-            .statusCode(416)
-            .body(containsString("InvalidRange"));
-    }
-
-    @Test
-    @Order(34)
-    void getObjectWithMalformedRangeNegativeStart() {
+            .statusCode(206)
+            .header("x-amz-checksum-crc64nvme", nullValue());
         given()
-            .header("Range", "bytes=-1-4")
+            .header("Range", "bytes=0-18")
+            .header("x-amz-checksum-mode", "ENABLED")
         .when()
             .get("/test-bucket/greeting.txt")
         .then()
-            .statusCode(416)
-            .body(containsString("InvalidRange"));
+            .statusCode(206)
+            .header("x-amz-checksum-crc64nvme", nullValue())
+            .header("x-amz-checksum-type", nullValue());
     }
 
     @Test
@@ -2034,6 +2361,7 @@ class S3IntegrationTest {
                 """;
 
         given()
+            .header("x-amz-skip-destination-validation", "true")
             .contentType("application/xml")
             .queryParam("notification", "")
             .body(xml)
@@ -2081,6 +2409,7 @@ class S3IntegrationTest {
                 """;
 
         given()
+            .header("x-amz-skip-destination-validation", "true")
             .contentType("application/xml")
             .queryParam("notification", "")
             .body(xml)
@@ -2128,6 +2457,7 @@ class S3IntegrationTest {
                 """;
 
         given()
+            .header("x-amz-skip-destination-validation", "true")
             .contentType("application/xml")
             .queryParam("notification", "")
             .body(xml)
@@ -2154,7 +2484,7 @@ class S3IntegrationTest {
     @Test
     @Order(95)
     void notificationDeliveredToQueueInDifferentRegion() {
-        String sqsAuth = "Credential=AKID/20260507/ap-southeast-2/s3/aws4_request";
+        String sqsAuth = "AWS4-HMAC-SHA256 Credential=AKID/20260507/ap-southeast-2/s3/aws4_request";
 
         String queueUrl = given()
             .header("Authorization", sqsAuth)
@@ -2186,6 +2516,19 @@ class S3IntegrationTest {
                 .put("/notif-test-bucket")
             .then()
                 .statusCode(200);
+
+            given()
+                .header("Authorization", sqsAuth)
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "ReceiveMessage")
+                .formParam("QueueUrl", queueUrl)
+                .formParam("MaxNumberOfMessages", "1")
+            .when()
+                .post("/")
+            .then()
+                .statusCode(200)
+                .body("ReceiveMessageResponse.ReceiveMessageResult.Message.Body",
+                    containsString("s3:TestEvent"));
 
             given()
                 .contentType("text/plain")
@@ -2998,6 +3341,17 @@ class S3IntegrationTest {
         catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("MD5 is not available", e);
         }
+    }
+
+    /** Creates {@code bucket} holding {@code greeting.txt}, the 20 bytes "Hello World from S3!". */
+    private static void putGreeting(String bucket) {
+        given().when().put("/" + bucket).then().statusCode(200);
+        given().body("Hello World from S3!").when().put("/" + bucket + "/greeting.txt").then().statusCode(200);
+    }
+
+    private static void deleteGreeting(String bucket) {
+        given().delete("/" + bucket + "/greeting.txt");
+        given().delete("/" + bucket);
     }
 
     private static byte[] alphabetBytes(int size) {

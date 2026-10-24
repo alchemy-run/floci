@@ -6,8 +6,8 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
+import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -179,8 +179,8 @@ public class BedrockAgentCoreToolsService {
         if ("aws.codeinterpreter.v1".equals(codeInterpreterId)) {
             ObjectNode interpreter = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
             interpreter.put("codeInterpreterId", codeInterpreterId);
-            interpreter.put("codeInterpreterArn", "arn:aws:bedrock-agentcore:" + region
-                    + ":aws:code-interpreter/aws.codeinterpreter.v1");
+            interpreter.put("codeInterpreterArn", AwsArnUtils.Arn.of("bedrock-agentcore", region, "aws",
+                    "code-interpreter/aws.codeinterpreter.v1").toString());
             interpreter.put("name", codeInterpreterId);
             interpreter.put("status", "READY");
             interpreter.put("createdAt", "1970-01-01T00:00:00Z");
@@ -434,7 +434,7 @@ public class BedrockAgentCoreToolsService {
             }
             String arn = executionRoleArn.asText();
             if (arn.length() < 1 || arn.length() > 2048
-                    || !arn.matches("arn:aws(-[^:]+)?:iam::([0-9]{12})?:role/.+")) {
+                    || !arn.matches("arn:" + AwsArnUtils.PARTITION_REGEX + ":iam::([0-9]{12})?:role/.+")) {
                 throw new AwsException("ValidationException", "executionRoleArn is invalid", 400);
             }
         }

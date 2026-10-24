@@ -1,6 +1,7 @@
 # Elastic Load Balancing (Classic, v1)
 
-**Protocol:** Query (XML) — `POST http://localhost:4566/` with `Action=` and `Version=2012-06-01`
+**Protocol:** Query (XML), form `POST` or SigV4-signed `GET` at `http://localhost:4566/`
+with `Action=` and `Version=2012-06-01`.
 
 Classic Elastic Load Balancing is the 2012-06-01 API behind `aws elb` and Terraform's `aws_elb`
 resource. It is a **different API** from [ELB v2](elb.md) (ALB/NLB, 2015-12-01), even though both
@@ -9,7 +10,7 @@ scope.
 
 ## How Floci tells the two apart
 
-Every Query-protocol request carries the API version it is speaking as the `Version` form
+Every Query-protocol request carries the API version it is speaking as the `Version` request
 parameter, and that is what Floci routes on:
 
 | `Version` | Answered by |
@@ -77,6 +78,10 @@ opened and no traffic is forwarded. Only the control plane and health checking a
 - An Auto Scaling group that names Classic load balancers in `LoadBalancerNames` has its instances
   registered and deregistered automatically, so a Terraform `min_elb_capacity` wait can be
   satisfied.
+- A listener's `SSLCertificateId` must name an existing certificate: an IAM server certificate ARN
+  or an ACM certificate ARN. `CreateLoadBalancer` and `CreateLoadBalancerListeners` reject a
+  missing one with `CertificateNotFound`. An IAM server certificate a listener references cannot
+  be deleted: `DeleteServerCertificate` returns `DeleteConflict` until the listener is removed.
 
 ## Configuration
 

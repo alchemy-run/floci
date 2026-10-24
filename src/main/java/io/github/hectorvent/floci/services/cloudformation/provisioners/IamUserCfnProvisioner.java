@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.cloudformation.model.StackResource;
 import io.github.hectorvent.floci.services.iam.IamService;
+import io.github.hectorvent.floci.services.iam.IamService.InlinePolicyChange;
 import io.github.hectorvent.floci.services.iam.model.AccessKey;
 import io.github.hectorvent.floci.services.iam.model.IamUser;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -15,14 +16,16 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
  * CloudFormation provisioning for {@code AWS::IAM::User}, moved out of the
- * {@code CloudFormationResourceProvisioner} switch.
+ * former CloudFormation monolith's switch.
  */
 @ApplicationScoped
 public class IamUserCfnProvisioner implements CfnResourceProvisioner {
@@ -40,6 +43,8 @@ public class IamUserCfnProvisioner implements CfnResourceProvisioner {
     public IamUserCfnProvisioner(IamService iamService) {
         this.iamService = iamService;
     }
+
+    private record InlinePolicyUndo(String name, InlinePolicyChange change) {}
 
     @Override
     public Set<String> resourceTypes() {
@@ -65,13 +70,16 @@ public class IamUserCfnProvisioner implements CfnResourceProvisioner {
         List<String> managedPolicyArns = ctx.resolveStringList(props, "ManagedPolicyArns");
         List<String> groups = ctx.resolveStringList(props, "Groups");
         Map<String, String> tags = ctx.resolveTags(props, "Tags");
+        // Blank means absent: Fn::If with Ref AWS::NoValue resolves to "" (CDK bootstrap does this).
+        String permissionsBoundary = ctx.resolveOrDefault(props, "PermissionsBoundary", null);
 
         IamUser user;
         boolean createdUser = false;
         String priorPath = null;
         String priorUserId = null;
+        String priorPermissionsBoundary = null;
         try {
-            user = iamService.createUser(resolvedUserName, resolvedPath);
+            user = iamService.createUser(resolvedUserName, resolvedPath, permissionsBoundary);
             createdUser = true;
             r.getAttributes().put(CfnRollback.ROLLBACK_OWNED_ATTR, "true");
         } catch (AwsException e) {
@@ -87,6 +95,7 @@ public class IamUserCfnProvisioner implements CfnResourceProvisioner {
             }
             priorPath = user.getPath();
             priorUserId = existingUserId;
+            priorPermissionsBoundary = user.getPermissionsBoundaryArn();
             if (!resolvedPath.equals(user.getPath())) {
                 iamService.updateUser(resolvedUserName, null, resolvedPath, existingUserId);
                 user = iamService.getUser(resolvedUserName);
@@ -125,13 +134,27 @@ public class IamUserCfnProvisioner implements CfnResourceProvisioner {
         LinkedHashSet<String> attachedByThisAttempt = new LinkedHashSet<>();
         LinkedHashSet<String> detachedByThisAttempt = new LinkedHashSet<>();
         LinkedHashSet<String> inlineWrittenByThisAttempt = new LinkedHashSet<>();
-        LinkedHashSet<String> inlineRemovedByThisAttempt = new LinkedHashSet<>();
+        List<InlinePolicyUndo> inlineChanges = new ArrayList<>();
         boolean tagMutationStarted = false;
 
         final String pathToRestore = priorPath;
         final String userIdToRestore = priorUserId;
+        final String boundaryToRestore = priorPermissionsBoundary;
+        boolean boundaryChangedByThisAttempt = false;
 
         try {
+            // createUser() only applies PermissionsBoundary on first create. On adoption, set a
+            // changed boundary, and remove one only if the user has one and the template dropped it.
+            // ID-verified like the path write, here and in the rollback restore.
+            if (!createdUser && !Objects.equals(permissionsBoundary, boundaryToRestore)) {
+                if (permissionsBoundary != null) {
+                    iamService.putUserPermissionsBoundary(resolvedUserName, permissionsBoundary, userIdToRestore);
+                } else {
+                    iamService.deleteUserPermissionsBoundary(resolvedUserName, userIdToRestore);
+                }
+                boundaryChangedByThisAttempt = true;
+            }
+
             for (String groupName : groups) {
                 iamService.addUserToGroup(groupName, resolvedUserName);
                 if (!originalGroups.contains(groupName)) {
@@ -146,6 +169,7 @@ public class IamUserCfnProvisioner implements CfnResourceProvisioner {
                 }
             }
 
+            Map<String, String> desiredInlinePolicies = new LinkedHashMap<>();
             if (props != null && props.has("Policies")) {
                 for (JsonNode policy : props.get("Policies")) {
                     String declaredName = ctx.resolveOptional(policy, "PolicyName");
@@ -160,18 +184,22 @@ public class IamUserCfnProvisioner implements CfnResourceProvisioner {
                                 "Inline policy '" + policyName + "' on user " + resolvedUserName
                                         + " has no PolicyDocument.", 400);
                     }
-                    iamService.putUserPolicy(resolvedUserName, policyName,
-                            ctx.engine().resolveJsonAttributeStrict(document));
-                    inlineWrittenByThisAttempt.add(policyName);
+                    desiredInlinePolicies.put(policyName, ctx.engine().resolveJsonAttributeStrict(document));
                 }
             }
 
             for (String stale : previousInlineNames) {
-                if (!inlineWrittenByThisAttempt.contains(stale)
-                        && originalInlinePolicies.containsKey(stale)) {
-                    iamService.deleteUserPolicy(resolvedUserName, stale);
-                    inlineRemovedByThisAttempt.add(stale);
+                if (originalInlinePolicies.containsKey(stale)
+                        && !originalInlinePolicies.get(stale).equals(desiredInlinePolicies.get(stale))) {
+                    inlineChanges.add(new InlinePolicyUndo(stale,
+                            iamService.deleteUserPolicyWithRollback(resolvedUserName, stale)));
                 }
+            }
+            // Release replaced documents before writing, including policies that retain their names.
+            for (Map.Entry<String, String> policy : desiredInlinePolicies.entrySet()) {
+                inlineChanges.add(new InlinePolicyUndo(policy.getKey(), iamService.putUserPolicyWithRollback(
+                        resolvedUserName, policy.getKey(), policy.getValue())));
+                inlineWrittenByThisAttempt.add(policy.getKey());
             }
             for (String stale : previousManagedArns) {
                 if (!managedPolicyArns.contains(stale) && originalPolicyArns.contains(stale)) {
@@ -221,17 +249,6 @@ public class IamUserCfnProvisioner implements CfnResourceProvisioner {
                     cleanupSucceeded = false;
                 }
             }
-            for (String policyName : inlineRemovedByThisAttempt) {
-                String prior = originalInlinePolicies.get(policyName);
-                if (prior == null) {
-                    continue;
-                }
-                if (!CfnRollback.attemptIamCleanup(failure,
-                        "restore inline policy " + policyName + " on user " + resolvedUserName,
-                        () -> iamService.putUserPolicy(resolvedUserName, policyName, prior))) {
-                    cleanupSucceeded = false;
-                }
-            }
             for (String policyArn : detachedByThisAttempt) {
                 if (!CfnRollback.attemptIamCleanup(failure,
                         "reattach policy " + policyArn + " to user " + resolvedUserName,
@@ -240,19 +257,11 @@ public class IamUserCfnProvisioner implements CfnResourceProvisioner {
                 }
             }
 
-            List<String> inlineRollback = new ArrayList<>(inlineWrittenByThisAttempt);
-            Collections.reverse(inlineRollback);
-            for (String policyName : inlineRollback) {
-                String prior = originalInlinePolicies.get(policyName);
-                String cleanupDescription = (prior == null ? "remove" : "restore")
-                        + " inline policy " + policyName + " on user " + resolvedUserName;
-                if (!CfnRollback.attemptIamCleanup(failure, cleanupDescription, () -> {
-                    if (prior == null) {
-                        iamService.deleteUserPolicy(resolvedUserName, policyName);
-                    } else {
-                        iamService.putUserPolicy(resolvedUserName, policyName, prior);
-                    }
-                })) {
+            for (InlinePolicyUndo undo : inlineChanges.reversed()) {
+                String operation = undo.change().previousDocument() == null ? "remove" : "restore";
+                if (!CfnRollback.attemptIamCleanup(failure,
+                        operation + " inline policy " + undo.name() + " on user " + resolvedUserName,
+                        undo.change().rollback())) {
                     cleanupSucceeded = false;
                 }
             }
@@ -277,6 +286,19 @@ public class IamUserCfnProvisioner implements CfnResourceProvisioner {
                 }
             }
 
+            if (boundaryChangedByThisAttempt) {
+                if (!CfnRollback.attemptIamCleanup(failure,
+                        "restore prior permissions boundary on user " + resolvedUserName, () -> {
+                            if (boundaryToRestore == null) {
+                                iamService.deleteUserPermissionsBoundary(resolvedUserName, userIdToRestore);
+                            } else {
+                                iamService.putUserPermissionsBoundary(resolvedUserName, boundaryToRestore, userIdToRestore);
+                            }
+                        })) {
+                    cleanupSucceeded = false;
+                }
+            }
+
             if (pathToRestore != null) {
                 if (!CfnRollback.attemptIamCleanup(failure, "restore prior path on user " + resolvedUserName,
                         () -> iamService.updateUser(resolvedUserName, null, pathToRestore, userIdToRestore))) {
@@ -292,6 +314,11 @@ public class IamUserCfnProvisioner implements CfnResourceProvisioner {
                 if (cleanupSucceeded) {
                     r.getAttributes().remove(CfnRollback.ROLLBACK_OWNED_ATTR);
                 }
+            }
+            if (!createdUser && !cleanupSucceeded) {
+                r.getAttributes().remove(CfnRollback.UPDATE_ROLLBACK_RESTORED_ATTR);
+                r.getAttributes().put(CfnRollback.UPDATE_ROLLBACK_FAILURE_ATTR,
+                        "Could not restore user after failed update: " + failure.getMessage());
             }
             throw failure;
         }

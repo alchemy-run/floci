@@ -3,9 +3,13 @@ package io.github.hectorvent.floci.services.iot;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.hasKey;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
 
 @QuarkusTest
@@ -35,6 +39,15 @@ class IotDataIntegrationTest {
             .body("{\"state\":{\"reported\":{\"color\":\"green\"}}}")
         .when()
             .post("/things/phase-five-thing/shadow")
+        .then()
+            .statusCode(200)
+            .body("state.desired", nullValue())
+            .body("state.reported.color", equalTo("green"))
+            .body("version", equalTo(2));
+
+        given()
+        .when()
+            .get("/things/phase-five-thing/shadow")
         .then()
             .statusCode(200)
             .body("state.desired.color", equalTo("blue"))
@@ -183,6 +196,14 @@ class IotDataIntegrationTest {
         .then()
             .statusCode(200)
             .body("state.desired.color", nullValue())
+            .body("version", equalTo(2));
+
+        given()
+        .when()
+            .get("/things/mvp1-shadow/shadow")
+        .then()
+            .statusCode(200)
+            .body("state.desired.color", nullValue())
             .body("state.desired.mode", equalTo("auto"))
             .body("version", equalTo(2));
 
@@ -193,7 +214,9 @@ class IotDataIntegrationTest {
             .post("/things/mvp1-shadow/shadow")
         .then()
             .statusCode(409)
-            .body("__type", equalTo("VersionConflictException"));
+            .header("x-amzn-ErrorType", equalTo("ConflictException"))
+            .body("__type", equalTo("ConflictException"))
+            .body("message", equalTo("Version conflict"));
 
         given()
             .contentType("application/json")
@@ -253,5 +276,107 @@ class IotDataIntegrationTest {
             .post("/topics/devices/described-endpoint/route")
         .then()
             .statusCode(200);
+    @Test
+    void namedShadowVersionConflictUsesIotDataErrorCode() {
+        given()
+            .contentType("application/json")
+            .queryParam("name", "settings")
+            .body("{\"state\":{\"desired\":{\"mode\":\"auto\"}}}")
+        .when()
+            .post("/things/mvp1-versioned-named/shadow")
+        .then()
+            .statusCode(200)
+            .body("version", equalTo(1));
+
+        given()
+            .contentType("application/json")
+            .queryParam("name", "settings")
+            .body("{\"version\":0,\"state\":{\"desired\":{\"mode\":\"manual\"}}}")
+        .when()
+            .post("/things/mvp1-versioned-named/shadow")
+        .then()
+            .statusCode(409)
+            .header("x-amzn-ErrorType", equalTo("ConflictException"))
+            .body("__type", equalTo("ConflictException"))
+            .body("message", equalTo("Version conflict"));
+
+        given()
+            .queryParam("name", "settings")
+        .when()
+            .get("/things/mvp1-versioned-named/shadow")
+        .then()
+            .statusCode(200)
+            .body("version", equalTo(1))
+            .body("state.desired.mode", equalTo("auto"));
+    }
+
+    @Test
+    void nestedShadowUpdateMergesKeyByKey() {
+        int first = given()
+            .contentType("application/json")
+            .body("{\"state\":{\"reported\":{\"sensors\":{\"IDT_O1\":22.3,\"ODT\":-14.1},\"cfg\":{\"modes\":[\"eco\",\"boost\"]}}}}")
+        .when()
+            .post("/things/teos-merge-shadow/shadow")
+        .then()
+            .statusCode(200)
+            .body("version", equalTo(1))
+            .extract().path("timestamp");
+
+        int second = given()
+            .contentType("application/json")
+            .body("{\"state\":{\"reported\":{\"sensors\":{\"IDT_O1\":26.3},\"tz\":\"Europe/Stockholm\"}}}")
+        .when()
+            .post("/things/teos-merge-shadow/shadow")
+        .then()
+            .statusCode(200)
+            .body("state.reported.sensors", not(hasKey("ODT")))
+            .body("version", equalTo(2))
+            .extract().path("timestamp");
+
+        given()
+        .when()
+            .get("/things/teos-merge-shadow/shadow")
+        .then()
+            .statusCode(200)
+            .body("state.reported.sensors.ODT", equalTo(-14.1f))
+            .body("state.reported.sensors.IDT_O1", equalTo(26.3f))
+            .body("state.reported.tz", equalTo("Europe/Stockholm"))
+            .body("state.reported.cfg.modes", equalTo(List.of("eco", "boost")))
+            .body("metadata.reported.sensors.ODT.timestamp", equalTo(first))
+            .body("metadata.reported.sensors.IDT_O1.timestamp", equalTo(second))
+            .body("metadata.reported.tz.timestamp", equalTo(second))
+            .body("version", equalTo(2));
+
+        given()
+            .contentType("application/json")
+            .body("{\"version\":2,\"state\":{\"reported\":{\"sensors\":{\"ODT\":null},\"cfg\":{\"modes\":[\"off\"]}}}}")
+        .when()
+            .post("/things/teos-merge-shadow/shadow")
+        .then()
+            .statusCode(200)
+            .body("version", equalTo(3));
+
+        given()
+            .contentType("application/json")
+            .body("{\"version\":2,\"state\":{\"reported\":{\"tz\":null}}}")
+        .when()
+            .post("/things/teos-merge-shadow/shadow")
+        .then()
+            .statusCode(409)
+            .header("x-amzn-ErrorType", equalTo("ConflictException"))
+            .body("__type", equalTo("ConflictException"));
+
+        given()
+        .when()
+            .get("/things/teos-merge-shadow/shadow")
+        .then()
+            .statusCode(200)
+            .body("state.reported.sensors", not(hasKey("ODT")))
+            .body("metadata.reported.sensors", not(hasKey("ODT")))
+            .body("state.reported.sensors.IDT_O1", equalTo(26.3f))
+            .body("state.reported.cfg.modes", equalTo(List.of("off")))
+            .body("metadata.reported.cfg.modes.size()", equalTo(1))
+            .body("state.reported.tz", equalTo("Europe/Stockholm"))
+            .body("version", equalTo(3));
     }
 }

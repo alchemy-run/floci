@@ -8,7 +8,9 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.ServicePrincipals;
 import io.github.hectorvent.floci.services.iam.IamService;
+import io.github.hectorvent.floci.services.iam.ServiceLinkedRoles;
 import io.github.hectorvent.floci.services.organizations.OrganizationsService;
 import io.github.hectorvent.floci.services.ram.model.PrincipalAssociation;
 import io.github.hectorvent.floci.services.ram.model.RamPermission;
@@ -16,6 +18,7 @@ import io.github.hectorvent.floci.services.ram.model.RamPermission.PermissionVer
 import io.github.hectorvent.floci.services.ram.model.ResourceShare;
 import io.github.hectorvent.floci.services.ram.model.ResourceShareInvitation;
 import io.github.hectorvent.floci.services.ram.model.ShareAssociation;
+import io.github.hectorvent.floci.services.ram.model.SharePermission;
 import io.github.hectorvent.floci.services.ram.model.SharedResource;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
@@ -74,9 +77,10 @@ public class RamController {
     @Consumes(MediaType.WILDCARD)
     public Response enableSharingWithAwsOrganization() {
         String callerAccountId = regionResolver.getAccountId();
-        organizationsService.enableAWSServiceAccess(callerAccountId, "ram.amazonaws.com");
-        if (iamService.findRole(callerAccountId, "AWSServiceRoleForResourceAccessManager").isEmpty()) {
-            iamService.createServiceLinkedRole("ram.amazonaws.com", null,
+        organizationsService.enableAWSServiceAccess(callerAccountId, ServicePrincipals.of("ram"));
+        String ramRoleName = ServiceLinkedRoles.roleName(ServicePrincipals.of("ram")).orElseThrow();
+        if (iamService.findRole(callerAccountId, ramRoleName).isEmpty()) {
+            iamService.createServiceLinkedRole(ServicePrincipals.of("ram"), null,
                     "Allows AWS Resource Access Manager to access AWS Organizations on your behalf.");
         }
         ObjectNode response = objectMapper.createObjectNode();
@@ -122,7 +126,8 @@ public class RamController {
                 request.hasNonNull("name") ? request.path("name").asText() : null,
                 stringList(request.path("resourceShareArns")),
                 request.hasNonNull("resourceShareStatus")
-                        ? request.path("resourceShareStatus").asText() : null);
+                        ? request.path("resourceShareStatus").asText() : null,
+                regionResolver.getRegion());
 
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode array = objectMapper.createArrayNode();
@@ -136,7 +141,7 @@ public class RamController {
     @Consumes(MediaType.WILDCARD)
     public Response deleteResourceShare(@QueryParam("resourceShareArn") String resourceShareArn,
                                         @QueryParam("clientToken") String clientToken) {
-        service.deleteResourceShare(resourceShareArn, regionResolver.getAccountId());
+        service.deleteResourceShare(resourceShareArn, regionResolver.getAccountId(), regionResolver.getRegion());
 
         ObjectNode response = objectMapper.createObjectNode();
         response.put("returnValue", true);
@@ -158,7 +163,7 @@ public class RamController {
                 request.hasNonNull("name") ? request.path("name").asText() : null,
                 request.hasNonNull("allowExternalPrincipals")
                         ? request.path("allowExternalPrincipals").asBoolean() : null,
-                regionResolver.getAccountId());
+                regionResolver.getAccountId(), regionResolver.getRegion());
 
         ObjectNode response = objectMapper.createObjectNode();
         response.set("resourceShare", shareNode(updated));
@@ -175,7 +180,8 @@ public class RamController {
         List<String> principals = stringList(request.path("principals"));
         List<String> sources = stringList(request.path("sources"));
         ResourceShare updated = service.associateResourceShare(
-                resourceShareArn, resourceArns, principals, sources, regionResolver.getAccountId());
+                resourceShareArn, resourceArns, principals, regionResolver.getAccountId(),
+                regionResolver.getRegion());
 
         ObjectNode response = objectMapper.createObjectNode();
         response.set("resourceShareAssociations",
@@ -194,7 +200,8 @@ public class RamController {
         List<String> principals = stringList(request.path("principals"));
         List<String> sources = stringList(request.path("sources"));
         ResourceShare updated = service.disassociateResourceShare(
-                resourceShareArn, resourceArns, principals, sources, regionResolver.getAccountId());
+                resourceShareArn, resourceArns, principals, regionResolver.getAccountId(),
+                regionResolver.getRegion());
 
         ObjectNode response = objectMapper.createObjectNode();
         response.set("resourceShareAssociations",
@@ -421,7 +428,8 @@ public class RamController {
         String resourceOwner = request.hasNonNull("resourceOwner")
                 ? request.path("resourceOwner").asText() : null;
         List<PrincipalAssociation> principals = service.listPrincipals(
-                regionResolver.getAccountId(), resourceOwner, stringList(request.path("resourceShareArns")));
+                regionResolver.getAccountId(), resourceOwner, stringList(request.path("resourceShareArns")),
+                regionResolver.getRegion());
 
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode array = objectMapper.createArrayNode();
@@ -439,19 +447,45 @@ public class RamController {
     }
 
     @POST
+    @Path("/listresourcesharepermissions")
+    @Consumes(MediaType.WILDCARD)
+    public Response listResourceSharePermissions(String body) {
+        JsonNode request = readTree(body);
+        List<SharePermission> permissions = service.listResourceSharePermissions(
+                request.hasNonNull("resourceShareArn") ? request.path("resourceShareArn").asText() : null,
+                regionResolver.getAccountId(), regionResolver.getRegion());
+
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode array = objectMapper.createArrayNode();
+        for (SharePermission permission : permissions) {
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put("arn", permission.arn());
+            node.put("version", "1");
+            node.put("defaultVersion", true);
+            node.put("name", permission.name());
+            node.put("resourceType", permission.resourceType());
+            node.put("status", "ATTACHABLE");
+            node.put("creationTime", permission.creationTime().toEpochMilli() / 1000.0);
+            node.put("lastUpdatedTime", permission.lastUpdatedTime().toEpochMilli() / 1000.0);
+            node.put("isResourceTypeDefault", true);
+            node.put("permissionType", "AWS_MANAGED");
+            node.put("featureSet", "STANDARD");
+            node.set("tags", objectMapper.createArrayNode());
+            array.add(node);
+        }
+        response.set("permissions", array);
+        return Response.ok(response).build();
+    }
+
+    @POST
     @Path("/tagresource")
     @Consumes(MediaType.WILDCARD)
     public Response tagResource(String body) {
         JsonNode request = readTree(body);
-        Map<String, String> tags = tagMap(request.path("tags"));
-        String resourceArn = optionalText(request, "resourceArn");
-        if (resourceArn != null) {
-            requireSingleTagTarget(request);
-            service.tagPermission(resourceArn, tags, regionResolver.getAccountId());
-        } else {
-            service.tagResource(request.path("resourceShareArn").asText(), tags,
-                    regionResolver.getAccountId());
-        }
+        Map<String, String> tags = new LinkedHashMap<>();
+        request.path("tags").forEach(tag -> tags.put(tag.path("key").asText(), tag.path("value").asText()));
+        service.tagResource(request.path("resourceShareArn").asText(), tags,
+                regionResolver.getAccountId(), regionResolver.getRegion());
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
@@ -460,15 +494,8 @@ public class RamController {
     @Consumes(MediaType.WILDCARD)
     public Response untagResource(String body) {
         JsonNode request = readTree(body);
-        List<String> tagKeys = stringList(request.path("tagKeys"));
-        String resourceArn = optionalText(request, "resourceArn");
-        if (resourceArn != null) {
-            requireSingleTagTarget(request);
-            service.untagPermission(resourceArn, tagKeys, regionResolver.getAccountId());
-        } else {
-            service.untagResource(request.path("resourceShareArn").asText(), tagKeys,
-                    regionResolver.getAccountId());
-        }
+        service.untagResource(request.path("resourceShareArn").asText(),
+                stringList(request.path("tagKeys")), regionResolver.getAccountId(), regionResolver.getRegion());
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
@@ -488,7 +515,8 @@ public class RamController {
         List<ResourceShareInvitation> invitations = service.getResourceShareInvitations(
                 regionResolver.getAccountId(),
                 stringList(request.path("resourceShareArns")),
-                stringList(request.path("resourceShareInvitationArns")));
+                stringList(request.path("resourceShareInvitationArns")),
+                regionResolver.getRegion());
 
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode array = objectMapper.createArrayNode();
@@ -504,7 +532,8 @@ public class RamController {
         JsonNode request = readTree(body);
         String clientToken = request.hasNonNull("clientToken") ? request.path("clientToken").asText() : null;
         ResourceShareInvitation invitation = service.acceptResourceShareInvitation(
-                request.path("resourceShareInvitationArn").asText(), regionResolver.getAccountId());
+                request.path("resourceShareInvitationArn").asText(), regionResolver.getAccountId(),
+                regionResolver.getRegion());
         return invitationResponse(invitation, clientToken);
     }
 
@@ -515,7 +544,8 @@ public class RamController {
         JsonNode request = readTree(body);
         String clientToken = request.hasNonNull("clientToken") ? request.path("clientToken").asText() : null;
         ResourceShareInvitation invitation = service.rejectResourceShareInvitation(
-                request.path("resourceShareInvitationArn").asText(), regionResolver.getAccountId());
+                request.path("resourceShareInvitationArn").asText(), regionResolver.getAccountId(),
+                regionResolver.getRegion());
         return invitationResponse(invitation, clientToken);
     }
 
@@ -550,7 +580,8 @@ public class RamController {
         String resourceOwner = request.hasNonNull("resourceOwner")
                 ? request.path("resourceOwner").asText() : null;
         List<SharedResource> resources = service.listResources(
-                regionResolver.getAccountId(), resourceOwner, stringList(request.path("resourceShareArns")));
+                regionResolver.getAccountId(), resourceOwner, stringList(request.path("resourceShareArns")),
+                regionResolver.getRegion());
 
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode array = objectMapper.createArrayNode();

@@ -24,6 +24,24 @@ final class S3AclPublicAccessEvaluator {
         }
     }
 
+    /**
+     * Whether Block Public Access considers this ACL public: it grants any permission to the
+     * AllUsers or AuthenticatedUsers predefined groups. {@code BlockPublicAcls} rejects a write
+     * that submits such an ACL, and {@code IgnorePublicAcls} suppresses one already stored.
+     */
+    static boolean aclIsPublic(String acl) {
+        if (acl == null || acl.isBlank()) {
+            return false;
+        }
+        try {
+            S3AclPolicy policy = S3AclPolicy.parse(acl);
+            return policy.grants().stream().anyMatch(S3AclPolicy.Grant::grantsToPublicGroup);
+        } catch (S3AclPolicy.AclParseException e) {
+            LOG.debugv(e, "Failed to parse S3 ACL for public status evaluation");
+            return false;
+        }
+    }
+
     static boolean aclAllowsPublicWrite(String acl) {
         if (acl == null || acl.isBlank()) {
             return false;
@@ -34,6 +52,20 @@ final class S3AclPublicAccessEvaluator {
         } catch (S3AclPolicy.AclParseException e) {
             LOG.debugv(e, "Failed to parse S3 ACL for public write evaluation");
             return false;
+        }
+    }
+
+    static boolean aclGrantsNonOwner(String acl, String ownerId) {
+        if (acl == null || acl.isBlank()) {
+            return false;
+        }
+        try {
+            S3AclPolicy policy = S3AclPolicy.parse(acl);
+            return policy.grants().isEmpty() || policy.grants().stream()
+                    .anyMatch(grant -> !grant.grantee().isCanonicalUser(ownerId));
+        } catch (S3AclPolicy.AclParseException e) {
+            LOG.debugv(e, "Failed to parse S3 ACL for ownership enforcement");
+            return true;
         }
     }
 }

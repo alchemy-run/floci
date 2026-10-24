@@ -1,6 +1,6 @@
 package io.github.hectorvent.floci.services.kms.model;
 
-import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 @RegisterForReflection
@@ -11,9 +11,9 @@ public enum KmsMessageType {
         try {
             return KmsMessageType.valueOf(messageType);
         } catch (IllegalArgumentException _) {
-            throw new AwsException("ValidationException", "1 validation error detected: Value '" + messageType
+            throw SmithyValidationErrors.validationException("Value '" + messageType
                     + "' at 'messageType' failed to satisfy constraint: Member must satisfy enum value set: "
-                    + "[RAW, DIGEST, EXTERNAL_MU]", 400);
+                    + "[RAW, DIGEST, EXTERNAL_MU]");
         }
     }
 }

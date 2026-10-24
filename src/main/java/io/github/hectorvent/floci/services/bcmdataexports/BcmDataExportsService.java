@@ -6,6 +6,7 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.S3DestinationValidation;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
+import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.bcmdataexports.model.DataQuery;
@@ -388,8 +389,8 @@ public class BcmDataExportsService {
 
     private static void requireNonEmpty(String value, String field) {
         if (value == null || value.isEmpty()) {
-            throw new AwsException("ValidationException",
-                    "1 validation error detected: Value at '" + field + "' failed to satisfy constraint: Member must not be null.", 400);
+            throw SmithyValidationErrors.validationException(
+                    "Value at '" + field + "' failed to satisfy constraint: Member must not be null.");
         }
     }
 

@@ -3,19 +3,23 @@ package io.github.hectorvent.floci.services.glue;
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.core.storage.PersistentStorage;
 import io.github.hectorvent.floci.services.glue.model.SecurityConfiguration;
+import io.github.hectorvent.floci.testing.PartitionCleanup;
+import io.github.hectorvent.floci.testing.PersistentStorageProfile;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.UUID;
 
+import static io.github.hectorvent.floci.testing.PersistentStorageProfile.STORAGE_DIR;
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.anyOf;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
@@ -23,18 +27,29 @@ import static org.hamcrest.Matchers.instanceOf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Glue security configurations: create, read, list and delete, the errors for a duplicate or a
+ * missing one, isolation by account and region, and the copy written to
+ * {@code security_configurations.json}.
+ *
+ * <p>Persistent storage comes from {@link PersistentStorageProfile}, which this class shares with
+ * other classes that each read their own service's file, so it deletes the configurations it
+ * creates.
+ */
 @QuarkusTest
-@TestProfile(GlueSecurityConfigurationIntegrationTest.PersistentStorageProfile.class)
+@TestProfile(PersistentStorageProfile.class)
 class GlueSecurityConfigurationIntegrationTest {
 
     private static final String CONTENT_TYPE = "application/x-amz-json-1.1";
-    private static final String STORAGE_DIR = "target/glue-security-configuration-it";
     private static final Path STORAGE_FILE = Path.of(STORAGE_DIR, "security_configurations.json");
     private static final String NAME = "security-" + UUID.randomUUID().toString().substring(0, 8);
     private static final String ENCRYPTION = """
             {"S3Encryption":[{"S3EncryptionMode":"SSE-KMS","KmsKeyArn":"arn:aws:kms:us-east-1:000000000000:key/test"}],
              "JobBookmarksEncryption":{"JobBookmarksEncryptionMode":"CSE-KMS"}}
             """;
+
+    @RegisterExtension
+    final PartitionCleanup cleanup = new PartitionCleanup();
 
     @BeforeAll
     static void setup() throws Exception {
@@ -45,6 +60,7 @@ class GlueSecurityConfigurationIntegrationTest {
     @Test
     void securityConfigurationCrudAndEncryptionRoundTrip() {
         create(NAME, "us-east-1", "000000000000");
+        cleanup.register(() -> deleteIfPresent(NAME, "us-east-1", "000000000000"));
 
         given().contentType(CONTENT_TYPE)
                 .header("X-Amz-Target", "AWSGlue.GetSecurityConfiguration")
@@ -77,6 +93,7 @@ class GlueSecurityConfigurationIntegrationTest {
     @Test
     void duplicateAndMissingConfigurationsUseAwsErrors() {
         create(NAME, "us-east-1", "000000000000");
+        cleanup.register(() -> deleteIfPresent(NAME, "us-east-1", "000000000000"));
 
         given().contentType(CONTENT_TYPE)
                 .header("X-Amz-Target", "AWSGlue.CreateSecurityConfiguration")
@@ -98,6 +115,7 @@ class GlueSecurityConfigurationIntegrationTest {
     @Test
     void accountAndRegionAreIsolatedAndConfigurationIsPersisted() throws Exception {
         create(NAME, "us-east-1", "000000000001");
+        cleanup.register(() -> delete(NAME, "us-east-1", "000000000001"));
 
         given().contentType(CONTENT_TYPE)
                 .header("X-Amz-Target", "AWSGlue.GetSecurityConfiguration")
@@ -142,17 +160,18 @@ class GlueSecurityConfigurationIntegrationTest {
         .then().statusCode(200);
     }
 
+    /** For cleanup: each test deletes its configuration itself, unless an assertion stops it. */
+    private static void deleteIfPresent(String name, String region, String account) {
+        given().contentType(CONTENT_TYPE)
+                .header("X-Amz-Target", "AWSGlue.DeleteSecurityConfiguration")
+                .header("Authorization", authorization(account, region))
+                .body("{\"Name\":\"" + name + "\"}")
+        .when().post("/")
+        .then().statusCode(anyOf(equalTo(200), equalTo(400)));
+    }
+
     private static String authorization(String account, String region) {
         return "AWS4-HMAC-SHA256 Credential=" + account
                 + "/20260918/" + region + "/glue/aws4_request, SignedHeaders=host, Signature=abc";
-    }
-
-    public static final class PersistentStorageProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of(
-                    "floci.storage.mode", "persistent",
-                    "floci.storage.persistent-path", STORAGE_DIR);
-        }
     }
 }

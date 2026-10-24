@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.core.common.auth;
 
+import io.github.hectorvent.floci.core.common.Digests;
 import io.github.hectorvent.floci.services.iam.IamService;
 import org.jboss.logging.Logger;
 
@@ -8,10 +9,14 @@ import javax.crypto.spec.SecretKeySpec;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.DateTimeException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
-import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -70,17 +75,47 @@ public final class SigV4RequestValidator {
      */
     public boolean validate(String rawQuery, String canonicalHostHeaderValue, String identityParamName,
                              boolean identityRequired, String expectedIdentityValue, String logLabel) {
-        try {
-            String[] rawPairs = rawQuery.split("&");
-            String action = findRawParam(rawPairs, "Action");
-            String identity = findRawParam(rawPairs, identityParamName);
-            String dateTime = findRawParam(rawPairs, "X-Amz-Date");
-            String expires = findRawParam(rawPairs, "X-Amz-Expires");
-            String credential = findRawParam(rawPairs, "X-Amz-Credential");
-            String signedHeaders = findRawParam(rawPairs, "X-Amz-SignedHeaders");
-            String signature = findRawParam(rawPairs, "X-Amz-Signature");
+        return validate(rawQuery, canonicalHostHeaderValue, identityParamName, identityRequired,
+                expectedIdentityValue, logLabel, null);
+    }
 
-            if (!"connect".equals(action) || (identityRequired && identity == null) || dateTime == null
+    /**
+     * As above, for a caller that knows which account owns the target: a long-term access key is
+     * accepted only when that account holds it. A proxy checks tokens on its own thread, outside
+     * any request, where the plain lookup sees the default account rather than the owner's.
+     *
+     * @param ownerAccountId the account that owns the target, or null to look the key up in the
+     *                       calling request's account
+     */
+    public boolean validate(String rawQuery, String canonicalHostHeaderValue, String identityParamName,
+                             boolean identityRequired, String expectedIdentityValue, String logLabel,
+                             String ownerAccountId) {
+        return validate(rawQuery, canonicalHostHeaderValue, "connect", identityParamName, identityRequired,
+                expectedIdentityValue, logLabel, ownerAccountId, Duration.ZERO);
+    }
+
+    /**
+     * As above, for a token whose {@code Action} is not {@code connect} and whose service accepts
+     * it for a while after it expires: Aurora DSQL signs {@code DbConnect} and
+     * {@code DbConnectAdmin}, and takes a token up to 5 seconds past its expiry.
+     *
+     * @param expectedAction the {@code Action} the token must carry
+     * @param expiryGrace how long after its expiry the token is still accepted
+     */
+    public boolean validate(String rawQuery, String canonicalHostHeaderValue, String expectedAction,
+                             String identityParamName, boolean identityRequired, String expectedIdentityValue,
+                             String logLabel, String ownerAccountId, Duration expiryGrace) {
+        try {
+            List<QueryParameter> parameters = decodeQuery(rawQuery);
+            String action = findParam(parameters, "Action");
+            String identity = findParam(parameters, identityParamName);
+            String dateTime = findParam(parameters, "X-Amz-Date");
+            String expires = findParam(parameters, "X-Amz-Expires");
+            String credential = findParam(parameters, "X-Amz-Credential");
+            String signedHeaders = findParam(parameters, "X-Amz-SignedHeaders");
+            String signature = findParam(parameters, "X-Amz-Signature");
+
+            if (!expectedAction.equals(action) || (identityRequired && identity == null) || dateTime == null
                     || expires == null || credential == null || signedHeaders == null || signature == null) {
                 LOG.debugv("{0} missing required SigV4 parameters", logLabel);
                 return false;
@@ -92,15 +127,17 @@ public final class SigV4RequestValidator {
                 return false;
             }
 
-            Instant tokenTime = Instant.from(DATETIME_FMT.parse(dateTime));
-            int expirySeconds = Integer.parseInt(expires);
-            if (Instant.now().isAfter(tokenTime.plusSeconds(expirySeconds))) {
+            Optional<Instant> expiry = expiry(dateTime, expires);
+            if (expiry.isEmpty()) {
+                LOG.debugv("{0} has a date or expiry that does not parse", logLabel);
+                return false;
+            }
+            if (Instant.now().minus(expiryGrace).isAfter(expiry.get())) {
                 LOG.debugv("{0} expired", logLabel);
                 return false;
             }
 
-            String decodedCredential = urlDecode(credential);
-            String[] credParts = decodedCredential.split("/");
+            String[] credParts = credential.split("/");
             if (credParts.length < 5) {
                 return false;
             }
@@ -114,9 +151,8 @@ public final class SigV4RequestValidator {
             if (LEGACY_ACCESS_KEY_ID.equals(accessKeyId)) {
                 secretKey = LEGACY_SECRET_KEY;
             } else {
-                String sessionToken = findRawParam(rawPairs, "X-Amz-Security-Token");
-                Optional<String> registeredSecretKey = iamService.findSecretKey(
-                        accessKeyId, sessionToken == null ? null : urlDecode(sessionToken));
+                Optional<String> registeredSecretKey = registeredSecretKey(
+                        accessKeyId, findParam(parameters, "X-Amz-Security-Token"), ownerAccountId);
                 if (registeredSecretKey.isEmpty()) {
                     LOG.debugv("{0} references unregistered access key={1}", logLabel, sanitizeForLog(accessKeyId));
                     return false;
@@ -124,13 +160,8 @@ public final class SigV4RequestValidator {
                 secretKey = registeredSecretKey.get();
             }
 
-            String canonicalQueryString = Arrays.stream(rawPairs)
-                    .filter(p -> !rawParamName(p).equals("X-Amz-Signature"))
-                    .sorted((a, b) -> rawParamName(a).compareTo(rawParamName(b)))
-                    .collect(Collectors.joining("&"));
-
             String canonicalRequest = "GET\n/\n"
-                    + canonicalQueryString + "\n"
+                    + canonicalQueryString(parameters) + "\n"
                     + "host:" + canonicalHostHeaderValue + "\n\n"
                     + "host\n"
                     + "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
@@ -138,7 +169,7 @@ public final class SigV4RequestValidator {
             String stringToSign = "AWS4-HMAC-SHA256\n"
                     + dateTime + "\n"
                     + credentialScope + "\n"
-                    + sha256Hex(canonicalRequest);
+                    + Digests.sha256Hex(canonicalRequest);
 
             byte[] signingKey = deriveSigningKey(secretKey, date, region, service);
             String expectedSignature = hexEncode(hmacSha256(signingKey, stringToSign));
@@ -157,23 +188,127 @@ public final class SigV4RequestValidator {
         }
     }
 
-    private static String rawParamName(String rawPair) {
-        int eq = rawPair.indexOf('=');
-        return eq >= 0 ? rawPair.substring(0, eq) : rawPair;
+    /**
+     * A temporary key's owner is null: its session is found whichever account issued it, as
+     * {@link IamService#findSecretKey(String, String)} finds it.
+     */
+    private Optional<String> registeredSecretKey(String accessKeyId, String sessionToken, String ownerAccountId) {
+        if (ownerAccountId == null) {
+            return iamService.findSecretKey(accessKeyId, sessionToken);
+        }
+        return iamService.findSecretKeyInAnyAccount(accessKeyId, sessionToken)
+                .filter(key -> key.accountId() == null || ownerAccountId.equals(key.accountId()))
+                .map(IamService.OwnedSecretKey::secretAccessKey);
     }
 
-    private static String findRawParam(String[] rawPairs, String name) {
-        for (String pair : rawPairs) {
+    private record QueryParameter(String name, String value) {}
+
+    /**
+     * When a token stops being valid, before any grace its service allows: its {@code X-Amz-Date}
+     * plus {@code X-Amz-Expires} seconds, or empty when either is missing or does not parse, the
+     * seconds as an {@code int}. A caller that reports the expiry, as Aurora DSQL's hint does, reads
+     * it here, so it reports the one {@link #validate} judged.
+     */
+    public static Optional<Instant> expiry(String rawQuery) {
+        List<QueryParameter> parameters = decodeQuery(rawQuery);
+        return expiry(findParam(parameters, "X-Amz-Date"), findParam(parameters, "X-Amz-Expires"));
+    }
+
+    private static Optional<Instant> expiry(String dateTime, String expires) {
+        if (dateTime == null || expires == null) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(Instant.from(DATETIME_FMT.parse(dateTime)).plusSeconds(Integer.parseInt(expires)));
+        } catch (DateTimeException | NumberFormatException ignored) {
+            // A date or an expiry that does not parse sets no expiry, so the token it came with is
+            // refused: one of more seconds than an int holds included, as validate always refused it.
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * The value of {@code name} in a token's query string, read as {@link #validate} reads it: the
+     * first parameter whose percent-decoded name matches, its value decoded once. A caller that acts
+     * on a parameter after validating the token reads it here, so it acts on what was verified: a
+     * name spelled with a percent-encoded character, or a parameter given twice, cannot make it read
+     * a different credential than the one the signature was checked with.
+     */
+    public static String queryParameter(String rawQuery, String name) {
+        return findParam(decodeQuery(rawQuery), name);
+    }
+
+    /**
+     * Every parameter of the token's query string, its name and value percent-decoded exactly once.
+     * A session token is drawn from an alphabet that includes {@code +}, {@code /} and {@code =}, and
+     * the presigner writes it percent-encoded once; decoding it again would turn every {@code +}
+     * into a space, and a literal {@code %2B} into a {@code +}.
+     */
+    private static List<QueryParameter> decodeQuery(String rawQuery) {
+        List<QueryParameter> parameters = new ArrayList<>();
+        for (String pair : rawQuery.split("&")) {
+            if (pair.isEmpty()) {
+                continue;
+            }
             int eq = pair.indexOf('=');
-            if (eq >= 0 && name.equals(pair.substring(0, eq))) {
-                return urlDecode(pair.substring(eq + 1));
+            parameters.add(new QueryParameter(
+                    decodeQueryComponent(eq >= 0 ? pair.substring(0, eq) : pair),
+                    decodeQueryComponent(eq >= 0 ? pair.substring(eq + 1) : "")));
+        }
+        return parameters;
+    }
+
+    private static String findParam(List<QueryParameter> parameters, String name) {
+        for (QueryParameter parameter : parameters) {
+            if (parameter.name().equals(name)) {
+                return parameter.value();
             }
         }
         return null;
     }
 
-    private static String urlDecode(String value) {
-        return URLDecoder.decode(value, StandardCharsets.UTF_8);
+    /**
+     * SigV4's canonical query string: every parameter but {@code X-Amz-Signature}, its name and
+     * value each URI-encoded, sorted by encoded name and then by encoded value. Built from the
+     * decoded parameters rather than the bytes on the wire, so it is the string the signer hashed
+     * whichever valid percent-encoding the token travelled in.
+     */
+    private static String canonicalQueryString(List<QueryParameter> parameters) {
+        return parameters.stream()
+                .filter(parameter -> !"X-Amz-Signature".equals(parameter.name()))
+                .map(parameter -> new QueryParameter(uriEncode(parameter.name()), uriEncode(parameter.value())))
+                .sorted(Comparator.comparing(QueryParameter::name).thenComparing(QueryParameter::value))
+                .map(parameter -> parameter.name() + "=" + parameter.value())
+                .collect(Collectors.joining("&"));
+    }
+
+    /**
+     * Percent-decodes a query-string component without {@code URLDecoder}'s form-encoding rule that
+     * a literal {@code +} means a space: SigV4 signers escape a space as {@code %20}, so a raw
+     * {@code +} on the wire is a plus sign.
+     */
+    private static String decodeQueryComponent(String value) {
+        return URLDecoder.decode(value.replace("+", "%2B"), StandardCharsets.UTF_8);
+    }
+
+    /**
+     * SigV4's UriEncode: every byte of the UTF-8 form except {@code A-Z a-z 0-9 - . _ ~} becomes
+     * {@code %XY} with uppercase hex, a space included ({@code %20}, never {@code +}) and {@code /}
+     * included.
+     */
+    private static String uriEncode(String value) {
+        StringBuilder encoded = new StringBuilder(value.length());
+        for (byte raw : value.getBytes(StandardCharsets.UTF_8)) {
+            int unsigned = Byte.toUnsignedInt(raw);
+            if ((unsigned >= 'A' && unsigned <= 'Z') || (unsigned >= 'a' && unsigned <= 'z')
+                    || (unsigned >= '0' && unsigned <= '9') || unsigned == '-' || unsigned == '.'
+                    || unsigned == '_' || unsigned == '~') {
+                encoded.append((char) unsigned);
+            } else {
+                encoded.append('%').append(String.format("%02X", unsigned));
+            }
+        }
+        return encoded.toString();
     }
 
     /**
@@ -230,16 +365,6 @@ public final class SigV4RequestValidator {
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec(key, "HmacSHA256"));
         return mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
-    }
-
-    public static String sha256Hex(String input) throws Exception {
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        return hexEncode(digest.digest(input.getBytes(StandardCharsets.UTF_8)));
-    }
-
-    public static String sha256Hex(byte[] input) throws Exception {
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        return hexEncode(digest.digest(input));
     }
 
     public static String hexEncode(byte[] bytes) {

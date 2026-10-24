@@ -18,10 +18,10 @@ import io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescript
 import io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.ParquetSerDe;
 import io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.S3Destination;
 import io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.SchemaConfiguration;
+import io.github.hectorvent.floci.services.floci.duck.FlociDuckClient;
 import io.github.hectorvent.floci.services.glue.GlueService;
 import io.github.hectorvent.floci.services.glue.model.Column;
 import io.github.hectorvent.floci.services.glue.model.Table;
-import io.github.hectorvent.floci.services.floci.duck.FlociDuckClient;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -36,10 +36,10 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
-import java.time.temporal.ChronoField;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.time.format.SignStyle;
+import java.time.temporal.ChronoField;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashSet;
@@ -357,9 +357,9 @@ public class FirehoseParquetConverter {
                 // schema over a 128 MiB batch would otherwise cost columns x fields.
                 // First occurrence wins, as the per-column scan it replaces did.
                 Map<String, JsonNode> byLowerKey = new LinkedHashMap<>();
-                var fields = record.fields();
+                Iterator<Map.Entry<String, JsonNode>> fields = record.fields();
                 while (fields.hasNext()) {
-                    var field = fields.next();
+                    Map.Entry<String, JsonNode> field = fields.next();
                     byLowerKey.putIfAbsent(field.getKey().toLowerCase(Locale.ROOT), field.getValue());
                 }
                 return byLowerKey;
@@ -518,10 +518,9 @@ public class FirehoseParquetConverter {
 
     private void ensureStagingBucket() {
         try {
-            s3Service.createBucket(stagingBucket, regionResolver.getDefaultRegion());
+            s3Service.createInternalBucket(stagingBucket, regionResolver.getDefaultRegion());
         } catch (AwsException e) {
-            if (!"BucketAlreadyOwnedByYou".equals(e.getErrorCode())
-                    && !"BucketAlreadyExists".equals(e.getErrorCode())) {
+            if (!"BucketAlreadyOwnedByYou".equals(e.getErrorCode())) {
                 throw e;
             }
         }

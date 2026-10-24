@@ -6,12 +6,14 @@ setup() {
     DB_ID="bats-rds-$(unique_name)"
     DB_ID_2="bats-rds-2-$(unique_name)"
     RDS_CLUSTER_ID="bats-rds-cluster-$(unique_name)"
+    PROXY_NAME="bats-proxy-$(unique_name)"
 }
 
 teardown() {
     aws_cmd rds delete-db-instance --db-instance-identifier "$DB_ID" --skip-final-snapshot >/dev/null 2>&1 || true
     aws_cmd rds delete-db-instance --db-instance-identifier "$DB_ID_2" --skip-final-snapshot >/dev/null 2>&1 || true
     aws_cmd rds delete-db-cluster --db-cluster-identifier "$RDS_CLUSTER_ID" --skip-final-snapshot >/dev/null 2>&1 || true
+    aws_cmd rds delete-db-proxy --db-proxy-name "$PROXY_NAME" >/dev/null 2>&1 || true
     if [ -n "${MANAGED_SECRET_ARN:-}" ]; then
         aws_cmd secretsmanager delete-secret --secret-id "$MANAGED_SECRET_ARN" \
             --force-delete-without-recovery >/dev/null 2>&1 || true
@@ -431,4 +433,42 @@ teardown() {
         --master-user-password "secret99password"
     assert_failure
     assert_output --partial 'InvalidParameterValue'
+}
+
+@test "rds: a proxy endpoint is added, renamed and deleted" {
+    run aws_cmd ec2 describe-subnets --query 'Subnets[?DefaultForAz].SubnetId'
+    assert_success
+    subnet_a=$(json_get "$output" '.[0]')
+    subnet_b=$(json_get "$output" '.[1]')
+
+    run aws_cmd rds create-db-proxy --db-proxy-name "$PROXY_NAME" --engine-family POSTGRESQL \
+        --role-arn arn:aws:iam::000000000000:role/rds-proxy \
+        --vpc-subnet-ids "$subnet_a" "$subnet_b" \
+        --auth AuthScheme=SECRETS,SecretArn=arn:aws:secretsmanager:us-east-1:000000000000:secret:db-AbCdEf
+    assert_success
+
+    reader="$PROXY_NAME-reader"
+    run aws_cmd rds create-db-proxy-endpoint --db-proxy-name "$PROXY_NAME" \
+        --db-proxy-endpoint-name "$reader" --vpc-subnet-ids "$subnet_a" "$subnet_b" --target-role READ_ONLY
+    assert_success
+    [ "$(json_get "$output" '.DBProxyEndpoint.TargetRole')" = "READ_ONLY" ]
+    [ "$(json_get "$output" '.DBProxyEndpoint.IsDefault')" = "false" ]
+
+    run aws_cmd rds describe-db-proxy-endpoints --db-proxy-name "$PROXY_NAME"
+    assert_success
+    [ "$(json_get "$output" '.DBProxyEndpoints[0].DBProxyEndpointName')" = "default" ]
+    [ "$(json_get "$output" '.DBProxyEndpoints[0].IsDefault')" = "true" ]
+    [ "$(json_get "$output" '.DBProxyEndpoints[1].DBProxyEndpointName')" = "$reader" ]
+
+    renamed="$PROXY_NAME-analytics"
+    run aws_cmd rds modify-db-proxy-endpoint --db-proxy-endpoint-name "$reader" \
+        --new-db-proxy-endpoint-name "$renamed"
+    assert_success
+    [ "$(json_get "$output" '.DBProxyEndpoint.DBProxyEndpointName')" = "$renamed" ]
+
+    run aws_cmd rds delete-db-proxy-endpoint --db-proxy-endpoint-name "$renamed"
+    assert_success
+    run aws_cmd rds delete-db-proxy-endpoint --db-proxy-endpoint-name "$renamed"
+    assert_failure
+    assert_output --partial 'DBProxyEndpointNotFoundFault'
 }

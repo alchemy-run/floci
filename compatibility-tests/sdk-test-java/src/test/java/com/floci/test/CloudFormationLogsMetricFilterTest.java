@@ -28,7 +28,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -141,7 +140,7 @@ class CloudFormationLogsMetricFilterTest {
         assertThat(filters()).hasSize(1);
         List<StackEvent> events = newEvents();
         int changed = indexOf(events, "Filter", "UPDATE_COMPLETE", target);
-        int failed = indexOf(events, "BadSecret", "UPDATE_FAILED", null);
+        int failed = indexOf(events, "BadSecret", "CREATE_FAILED", null);
         assertThat(changed).as("filter update completed before dependent failure").isGreaterThanOrEqualTo(0);
         assertThat(failed).isGreaterThan(changed);
         assertSample("WARN", 2, null);
@@ -271,27 +270,18 @@ class CloudFormationLogsMetricFilterTest {
     }
 
     private void awaitStatus(String status) throws InterruptedException {
-        await(() -> status.equals(cfn.describeStacks(r -> r.stackName(stack)).stacks().get(0).stackStatusAsString())
+        TestFixtures.await(() -> status.equals(cfn.describeStacks(r -> r.stackName(stack)).stacks().get(0).stackStatusAsString())
                 && newEvents().stream().anyMatch(e -> stack.equals(e.logicalResourceId())
-                && status.equals(e.resourceStatusAsString())), "new operation " + status);
+                && status.equals(e.resourceStatusAsString())), stack, "new operation " + status, 60_000_000_000L, 100, () -> "; events: " + newEvents());
     }
 
-    private void await(BooleanSupplier condition, String expected) throws InterruptedException {
-        long deadline = System.nanoTime() + 60_000_000_000L;
-        while (System.nanoTime() < deadline) {
-            if (condition.getAsBoolean()) {
-                return;
-            }
-            Thread.sleep(100);
-        }
-        throw new AssertionError(stack + " timed out waiting for " + expected + "; events: " + newEvents());
-    }
+
 
     private void assertSample(String message, double expected, String route) throws InterruptedException {
         Instant timestamp = Instant.now();
         logs.putLogEvents(r -> r.logGroupName(group).logStreamName("events")
                 .logEvents(InputLogEvent.builder().timestamp(timestamp.toEpochMilli()).message(message).build()));
-        await(() -> {
+        TestFixtures.await(() -> {
             List<Datapoint> data = metrics.getMetricStatistics(r -> {
                 r.namespace(stack).metricName("Count").period(60).startTime(timestamp.minusSeconds(60))
                         .endTime(timestamp.plusSeconds(60)).statistics(Statistic.SUM, Statistic.SAMPLE_COUNT);
@@ -302,13 +292,13 @@ class CloudFormationLogsMetricFilterTest {
             }).datapoints();
             return data.stream().mapToDouble(Datapoint::sum).sum() == expected
                     && data.stream().mapToDouble(Datapoint::sampleCount).sum() == 1;
-        }, "one published sample of " + expected);
+        }, stack, "one published sample of " + expected, 60_000_000_000L, 100, () -> "; events: " + newEvents());
     }
 
     private void deleteStack() throws InterruptedException {
         try {
             cfn.deleteStack(r -> r.stackName(stack));
-            await(() -> {
+            TestFixtures.await(() -> {
                 try {
                     return "DELETE_COMPLETE".equals(cfn.describeStacks(r -> r.stackName(stack)).stacks().get(0)
                             .stackStatusAsString());
@@ -318,7 +308,7 @@ class CloudFormationLogsMetricFilterTest {
                     }
                     throw e;
                 }
-            }, "stack deletion");
+            }, stack, "stack deletion", 60_000_000_000L, 100, () -> "; events: " + newEvents());
         } catch (CloudFormationException e) {
             if (!"ValidationError".equals(e.awsErrorDetails().errorCode()) || !e.getMessage().contains("does not exist")) {
                 throw e;

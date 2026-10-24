@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.ecs.model;
 
+import io.github.hectorvent.floci.services.ecs.EcsServiceDiscoveryRegistrar;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
@@ -25,7 +26,7 @@ public class EcsServiceModel {
     private Instant lastDeploymentAt;
     /** Current deployment identifier ("ecs-svc/<hex>"). Rolls on a task-definition change or forceNewDeployment. */
     private String deploymentId;
-    /** The deploymentId last observed to reach steady state; guards against re-emitting COMPLETED. */
+    /** The deployment whose completion event has been emitted. */
     private String lastCompletedDeploymentId;
     /** The task definition of {@link #lastCompletedDeploymentId}, which a circuit-breaker rollback returns to. */
     private String lastCompletedTaskDefinition;
@@ -39,6 +40,12 @@ public class EcsServiceModel {
     private List<Deployment> failedDeployments = new ArrayList<>();
     /** Scheduler events recorded for the service, newest first. */
     private List<ServiceEvent> events = new ArrayList<>();
+    /** Last deployment to reach steady state, persisted to avoid resuming it after a restart. */
+    private String lastSettledDeploymentId;
+    /** The deploymentId the circuit breaker failed; persisted so a restart does not resume it. */
+    private String failedDeploymentId;
+    /** Last completed revision, retained so a rollback can survive a process restart. */
+    private ServiceRevision lastSuccessfulServiceRevision;
     private String namespace;
     private String deploymentController;
     private String schedulingStrategy;
@@ -66,6 +73,12 @@ public class EcsServiceModel {
      */
     private Map<String, Object> deploymentConfiguration;
     /** {@code serviceRegistries}, kept raw: Cloud Map registration is not emulated. */
+    /** {@code deploymentConfiguration}, kept raw; only its {@code deploymentCircuitBreaker} is acted on. */
+    private Map<String, Object> deploymentConfiguration;
+    /**
+     * {@code serviceRegistries}, kept raw. {@link EcsServiceDiscoveryRegistrar}
+     * reads the three members AWS uses to place the instance; nothing else in ECS acts on it.
+     */
     private List<Map<String, Object>> serviceRegistries;
     /** Members Floci does not act on, kept verbatim so DescribeServices round-trips. */
     private Map<String, Object> unparsed;
@@ -137,6 +150,18 @@ public class EcsServiceModel {
     public void setEvents(List<ServiceEvent> events) {
         this.events = events != null ? events : new ArrayList<>();
     }
+    public String getLastSettledDeploymentId() { return lastSettledDeploymentId; }
+    public void setLastSettledDeploymentId(String lastSettledDeploymentId) {
+        this.lastSettledDeploymentId = lastSettledDeploymentId;
+    }
+
+    public ServiceRevision getLastSuccessfulServiceRevision() { return lastSuccessfulServiceRevision; }
+    public void setLastSuccessfulServiceRevision(ServiceRevision lastSuccessfulServiceRevision) {
+        this.lastSuccessfulServiceRevision = lastSuccessfulServiceRevision;
+    }
+
+    public String getFailedDeploymentId() { return failedDeploymentId; }
+    public void setFailedDeploymentId(String failedDeploymentId) { this.failedDeploymentId = failedDeploymentId; }
 
     public String getNamespace() { return namespace; }
     public void setNamespace(String namespace) { this.namespace = namespace; }

@@ -1,9 +1,11 @@
 package io.github.hectorvent.floci.services.lambda;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.lambda.model.LambdaLayerVersion;
-import com.fasterxml.jackson.core.type.TypeReference;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -35,6 +37,16 @@ public class LambdaLayerStore {
     }
 
     public Optional<LambdaLayerVersion> get(String region, String layerName, long version) {
+        return backend.get(key(region, layerName, version));
+    }
+
+    /** Resolves an owned layer from an async worker without a request account context. */
+    public Optional<LambdaLayerVersion> getForAccount(
+            String accountId, String region, String layerName, long version) {
+        if (backend instanceof AccountAwareStorageBackend<LambdaLayerVersion> aware) {
+            return aware.getForAccountMigratingLegacy(accountId, key(region, layerName, version),
+                    layer -> accountId.equals(AwsArnUtils.accountOrDefault(layer.getLayerVersionArn(), "")));
+        }
         return backend.get(key(region, layerName, version));
     }
 

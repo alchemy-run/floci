@@ -18,7 +18,7 @@ class EventSourceMappingSerializationTest {
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper();
-        controller = new LambdaController(null, null, null, objectMapper);
+        controller = new LambdaController(null, null, objectMapper, null);
     }
 
     @Test
@@ -73,6 +73,7 @@ class EventSourceMappingSerializationTest {
     @Test
     void testBuildEsmResponseIncludesKafkaFieldsAndOmitsNullEventSourceArn() {
         EventSourceMapping esm = new EventSourceMapping();
+        esm.setRegion("us-east-1");
         esm.setUuid("esm-kafka-001");
         esm.setFunctionArn("arn:aws:lambda:us-east-1:123456789012:function:kafkaConsumer");
         // Self-managed Kafka does not have EventSourceArn
@@ -112,6 +113,7 @@ class EventSourceMappingSerializationTest {
     @Test
     void buildEsmResponseEmitsMaximumBatchingWindowOnlyWhenSet() {
         EventSourceMapping esm = new EventSourceMapping();
+        esm.setRegion("us-east-1");
         esm.setUuid("esm-window-002");
         esm.setFunctionArn("arn:aws:lambda:us-east-1:123456789012:function:sqsConsumer");
         esm.setEventSourceArn("arn:aws:sqs:us-east-1:123456789012:my-queue");
@@ -131,6 +133,7 @@ class EventSourceMappingSerializationTest {
     @Test
     void testBuildEsmResponseWithEventSourceArnPresent() {
         EventSourceMapping esm = new EventSourceMapping();
+        esm.setRegion("us-east-1");
         esm.setUuid("esm-sqs-001");
         esm.setFunctionArn("arn:aws:lambda:us-east-1:123456789012:function:sqsConsumer");
         esm.setEventSourceArn("arn:aws:sqs:us-east-1:123456789012:my-queue");

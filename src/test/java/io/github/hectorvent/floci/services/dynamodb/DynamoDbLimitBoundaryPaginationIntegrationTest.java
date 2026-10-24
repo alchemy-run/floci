@@ -471,12 +471,13 @@ class DynamoDbLimitBoundaryPaginationIntegrationTest {
         .then().statusCode(200);
         // pk=1: full index keys. pk=2: index HASH only (missing the index RANGE —
         // the case a partition-key-only sparse check would miss). pk=3: no index
-        // keys at all. pk=4: full index keys.
+        // keys at all. pk=4: full index keys. pk=5: index RANGE only (floci-io/floci#2275).
         String[] items = {
             "{\"pk\": {\"N\": \"1\"}, \"category\": {\"S\": \"a\"}, \"gsisort\": {\"N\": \"10\"}}",
             "{\"pk\": {\"N\": \"2\"}, \"category\": {\"S\": \"a\"}}",
             "{\"pk\": {\"N\": \"3\"}}",
-            "{\"pk\": {\"N\": \"4\"}, \"category\": {\"S\": \"a\"}, \"gsisort\": {\"N\": \"20\"}}"
+            "{\"pk\": {\"N\": \"4\"}, \"category\": {\"S\": \"a\"}, \"gsisort\": {\"N\": \"20\"}}",
+            "{\"pk\": {\"N\": \"5\"}, \"gsisort\": {\"N\": \"30\"}}"
         };
         for (String item : items) {
             given()

@@ -19,6 +19,9 @@ public class BackupJob {
     @JsonProperty("BackupVaultArn")
     private String backupVaultArn;
 
+    @JsonProperty("FlociVaultId")
+    private String vaultId;
+
     @JsonProperty("RecoveryPointArn")
     private String recoveryPointArn;
 
@@ -71,6 +74,9 @@ public class BackupJob {
 
     public String getBackupVaultArn() { return backupVaultArn; }
     public void setBackupVaultArn(String backupVaultArn) { this.backupVaultArn = backupVaultArn; }
+
+    public String getVaultId() { return vaultId; }
+    public void setVaultId(String vaultId) { this.vaultId = vaultId; }
 
     public String getRecoveryPointArn() { return recoveryPointArn; }
     public void setRecoveryPointArn(String recoveryPointArn) { this.recoveryPointArn = recoveryPointArn; }

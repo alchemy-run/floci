@@ -6,8 +6,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
+import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.cloudformation.CloudFormationTemplateEngine;
 import io.github.hectorvent.floci.services.cloudformation.model.StackResource;
@@ -19,10 +19,10 @@ import io.github.hectorvent.floci.services.cloudwatch.metrics.CloudWatchMetricsS
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -82,6 +82,8 @@ class LogsMetricFilterCfnProvisionerTest {
                 "cwlogs-metric-filters.json".equals(i.getArgument(1))
                         ? canonicalStore
                         : AccountAwareStorageBackend.inMemory("000000000000"));
+        when(storage.create(any(), any(), any(), any())).thenAnswer(i ->
+                AccountAwareStorageBackend.inMemory("000000000000"));
         EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
         when(config.services().cloudwatchlogs().maxStoredEvents()).thenReturn(Integer.MAX_VALUE);
         logs = new CloudWatchLogsService(storage, config, resolver, null, null);
@@ -955,7 +957,6 @@ class LogsMetricFilterCfnProvisionerTest {
         service.deleteMetricFilter(GROUP, "errors", REGION);
         create(props().put("FilterPattern", "UNRELATED"));
         JsonNode otherOwner = MAPPER.valueToTree(filter(GROUP, "errors"));
-        assertTrue(provisioner.hasPendingRollbackCleanup(resource), "untracked identity must reach safe cleanup inspection");
         assertThrows(IllegalStateException.class, () -> provisioner.delete(resource, REGION));
         assertEquals("UNKNOWN", mutationState(resource, false).path("ownership").asText());
         assertEquals(otherOwner, MAPPER.valueToTree(filter(GROUP, "errors")));

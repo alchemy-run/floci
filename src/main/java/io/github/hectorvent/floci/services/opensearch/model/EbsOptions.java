@@ -9,21 +9,21 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
 public class EbsOptions {
 
     @JsonProperty("EBSEnabled")
-    private boolean ebsEnabled = true;
+    private Boolean ebsEnabled = true;
 
     @JsonProperty("VolumeType")
     private String volumeType = "gp2";
 
     @JsonProperty("VolumeSize")
-    private int volumeSize = 10;
+    private Integer volumeSize = 10;
 
     public EbsOptions() {}
 
-    public boolean isEbsEnabled() {
+    public Boolean isEbsEnabled() {
         return ebsEnabled;
     }
 
-    public void setEbsEnabled(boolean ebsEnabled) {
+    public void setEbsEnabled(Boolean ebsEnabled) {
         this.ebsEnabled = ebsEnabled;
     }
 
@@ -35,11 +35,11 @@ public class EbsOptions {
         this.volumeType = volumeType;
     }
 
-    public int getVolumeSize() {
+    public Integer getVolumeSize() {
         return volumeSize;
     }
 
-    public void setVolumeSize(int volumeSize) {
+    public void setVolumeSize(Integer volumeSize) {
         this.volumeSize = volumeSize;
     }
 }

@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.cloudformation.provisioners;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.cloudformation.CloudFormationTemplateEngine;
@@ -16,7 +17,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static io.github.hectorvent.floci.testing.InlineMocks.inlineMock;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -32,10 +35,27 @@ import static org.mockito.Mockito.when;
 
 class LambdaEventSourceMappingCfnProvisionerTest {
 
+    private static final List<String> CLEARABLE_OPTIONS = List.of(
+            "MaximumBatchingWindowInSeconds", "MaximumRetryAttempts", "MaximumRecordAgeInSeconds",
+            "BisectBatchOnFunctionError", "FilterCriteria", "DestinationConfig", "ScalingConfig");
+
     private final LambdaService lambdaService = mock(LambdaService.class);
     private final LambdaEventSourceMappingCfnProvisioner provisioner =
             new LambdaEventSourceMappingCfnProvisioner(lambdaService);
     private final ObjectMapper mapper = new ObjectMapper();
+
+    LambdaEventSourceMappingCfnProvisionerTest() {
+        when(lambdaService.updateEventSourceMapping(anyString(), any()))
+                .thenAnswer(inv -> storedMapping(inv.getArgument(0), "us-east-1"));
+    }
+
+    private static EventSourceMapping storedMapping(String uuid, String region) {
+        EventSourceMapping esm = new EventSourceMapping();
+        esm.setUuid(uuid);
+        esm.setRegion(region);
+        esm.setAccountId("000000000000");
+        return esm;
+    }
 
     private ProvisionContext ctx() {
         return ctx(false, null);
@@ -51,11 +71,15 @@ class LambdaEventSourceMappingCfnProvisionerTest {
             if (node.isObject() && node.has("Ref")) {
                 return "resolved-" + node.get("Ref").asText();
             }
+            if (node.isObject() && node.has("Fn::GetAtt")) {
+                JsonNode getAtt = node.get("Fn::GetAtt");
+                return "resolved-" + getAtt.get(0).asText() + "." + getAtt.get(1).asText();
+            }
             return node.asText();
         });
         when(engine.resolveNode(any())).thenAnswer(inv -> resolveMockNode((JsonNode) inv.getArgument(0), engine));
 
-        ProvisionContext context = mock(ProvisionContext.class);
+        ProvisionContext context = inlineMock(ProvisionContext.class);
         when(context.engine()).thenReturn(engine);
         when(context.region()).thenReturn("us-east-1");
         when(context.accountId()).thenReturn("000000000000");
@@ -89,7 +113,7 @@ class LambdaEventSourceMappingCfnProvisionerTest {
             return node;
         }
         if (node.isObject()) {
-            if (node.has("Ref")) {
+            if (node.has("Ref") || node.has("Fn::GetAtt")) {
                 return mapper.getNodeFactory().textNode(engine.resolve(node));
             }
             ObjectNode resolved = mapper.createObjectNode();
@@ -97,7 +121,7 @@ class LambdaEventSourceMappingCfnProvisionerTest {
             return resolved;
         }
         if (node.isArray()) {
-            var arr = mapper.createArrayNode();
+            ArrayNode arr = mapper.createArrayNode();
             for (JsonNode item : node) {
                 arr.add(resolveMockNode(item, engine));
             }
@@ -123,8 +147,7 @@ class LambdaEventSourceMappingCfnProvisionerTest {
         props.put("Enabled", "true");
         props.put("StartingPosition", "TRIM_HORIZON");
 
-        EventSourceMapping esm = new EventSourceMapping();
-        esm.setUuid("test-esm-uuid-1234");
+        EventSourceMapping esm = storedMapping("test-esm-uuid-1234", "us-east-1");
         when(lambdaService.createEventSourceMapping(eq("us-east-1"), any())).thenReturn(esm);
 
         provisioner.provision(r, props, ctx());
@@ -143,6 +166,24 @@ class LambdaEventSourceMappingCfnProvisionerTest {
         assertEquals(5, req.get("BatchSize"));
         assertEquals(true, req.get("Enabled"));
         assertEquals("TRIM_HORIZON", req.get("StartingPosition"));
+    }
+
+    @Test
+    void eventSourceMappingArnUsesTheRegionTheMappingIsStoredIn() {
+        StackResource r = new StackResource();
+        r.setResourceType("AWS::Lambda::EventSourceMapping");
+
+        ObjectNode props = mapper.createObjectNode();
+        props.put("FunctionName", "my-function");
+        props.put("EventSourceArn", "arn:aws:sqs:eu-west-1:000000000000:my-queue");
+
+        EventSourceMapping esm = storedMapping("cross-region-esm-uuid", "eu-west-1");
+        when(lambdaService.createEventSourceMapping(eq("us-east-1"), any())).thenReturn(esm);
+
+        provisioner.provision(r, props, ctx());
+
+        assertEquals("arn:aws:lambda:eu-west-1:000000000000:event-source-mapping:cross-region-esm-uuid",
+                r.getAttributes().get("EventSourceMappingArn"));
     }
 
     @Test
@@ -165,8 +206,7 @@ class LambdaEventSourceMappingCfnProvisionerTest {
 
         props.set("Topics", mapper.createArrayNode().add("my-topic"));
 
-        EventSourceMapping esm = new EventSourceMapping();
-        esm.setUuid("kafka-esm-uuid");
+        EventSourceMapping esm = storedMapping("kafka-esm-uuid", "us-east-1");
         when(lambdaService.createEventSourceMapping(eq("us-east-1"), any())).thenReturn(esm);
 
         provisioner.provision(r, props, ctx());
@@ -279,6 +319,268 @@ class LambdaEventSourceMappingCfnProvisionerTest {
         AwsException ex = assertThrows(AwsException.class, () -> provisioner.provision(r, props, ctx()));
         assertEquals("ValidationError", ex.getErrorCode());
         assertEquals("Value of property BatchSize must be an integer.", ex.getMessage());
+    }
+
+    private Map<String, Object> provisionAndCaptureCreateRequest(ObjectNode props) {
+        StackResource r = new StackResource();
+        r.setResourceType("AWS::Lambda::EventSourceMapping");
+        EventSourceMapping esm = storedMapping("options-esm-uuid", "us-east-1");
+        when(lambdaService.createEventSourceMapping(eq("us-east-1"), any())).thenReturn(esm);
+
+        provisioner.provision(r, props, ctx());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(lambdaService).createEventSourceMapping(eq("us-east-1"), captor.capture());
+        return captor.getValue();
+    }
+
+    @Test
+    void provisionForwardsBatchingRetryAndStructureOptionsOnCreate() {
+        String pattern = "{\"body\":{\"kind\":[\"order\"]}}";
+        ObjectNode props = mapper.createObjectNode();
+        props.put("FunctionName", "my-function");
+        props.put("EventSourceArn", "arn:aws:sqs:us-east-1:000000000000:my-queue");
+        props.put("MaximumBatchingWindowInSeconds", 10);
+        props.put("MaximumRetryAttempts", 3);
+        props.put("MaximumRecordAgeInSeconds", 120);
+        props.put("BisectBatchOnFunctionError", true);
+        props.putObject("FilterCriteria").putArray("Filters").addObject().put("Pattern", pattern);
+        props.putObject("DestinationConfig").putObject("OnFailure")
+                .put("Destination", "arn:aws:sqs:us-east-1:000000000000:my-dlq");
+        props.putObject("ScalingConfig").put("MaximumConcurrency", 5);
+
+        Map<String, Object> req = provisionAndCaptureCreateRequest(props);
+
+        assertEquals(Integer.valueOf(10), req.get("MaximumBatchingWindowInSeconds"));
+        assertEquals(Integer.valueOf(3), req.get("MaximumRetryAttempts"));
+        assertEquals(Integer.valueOf(120), req.get("MaximumRecordAgeInSeconds"));
+        assertEquals(Boolean.TRUE, req.get("BisectBatchOnFunctionError"));
+        assertEquals(Map.of("Filters", List.of(Map.of("Pattern", pattern))), req.get("FilterCriteria"));
+        assertEquals(Map.of("OnFailure", Map.of("Destination", "arn:aws:sqs:us-east-1:000000000000:my-dlq")),
+                req.get("DestinationConfig"));
+        assertEquals(Map.of("MaximumConcurrency", 5), req.get("ScalingConfig"));
+    }
+
+    @Test
+    void provisionResolvesGetAttInDestinationConfig() {
+        ObjectNode props = mapper.createObjectNode();
+        props.put("FunctionName", "my-function");
+        ObjectNode getAtt = mapper.createObjectNode();
+        getAtt.set("Fn::GetAtt", mapper.createArrayNode().add("MyDlq").add("Arn"));
+        props.putObject("DestinationConfig").putObject("OnFailure").set("Destination", getAtt);
+
+        Map<String, Object> req = provisionAndCaptureCreateRequest(props);
+
+        assertEquals(Map.of("OnFailure", Map.of("Destination", "resolved-MyDlq.Arn")), req.get("DestinationConfig"));
+    }
+
+    @Test
+    void provisionOmitsAbsentOptionsOnCreate() {
+        ObjectNode props = mapper.createObjectNode();
+        props.put("FunctionName", "my-function");
+        props.put("EventSourceArn", "arn:aws:sqs:us-east-1:000000000000:my-queue");
+
+        Map<String, Object> req = provisionAndCaptureCreateRequest(props);
+
+        for (String option : CLEARABLE_OPTIONS) {
+            assertFalse(req.containsKey(option), option + " must not be sent when absent");
+        }
+    }
+
+    @Test
+    void provisionTreatsNoValueStructureAsAbsentOnCreate() {
+        ObjectNode props = mapper.createObjectNode();
+        props.put("FunctionName", "my-function");
+        props.put("DestinationConfig", "");
+
+        Map<String, Object> req = provisionAndCaptureCreateRequest(props);
+
+        assertFalse(req.containsKey("DestinationConfig"));
+    }
+
+    @Test
+    void provisionClearsNoValueStructureOnUpdate() {
+        StackResource r = new StackResource();
+        r.setResourceType("AWS::Lambda::EventSourceMapping");
+        r.setPhysicalId("existing-esm-uuid");
+
+        ObjectNode props = mapper.createObjectNode();
+        props.put("FunctionName", "my-function");
+        props.put("DestinationConfig", "");
+
+        provisioner.provision(r, props, ctx(true, "existing-esm-uuid"));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(lambdaService).updateEventSourceMapping(eq("existing-esm-uuid"), captor.capture());
+        assertTrue(captor.getValue().containsKey("DestinationConfig"));
+        assertNull(captor.getValue().get("DestinationConfig"));
+    }
+
+    @Test
+    void provisionTreatsNoValueScalarsAsAbsentOnCreate() {
+        ObjectNode props = mapper.createObjectNode();
+        props.put("FunctionName", "my-function");
+        props.put("MaximumRetryAttempts", "");
+        props.put("BisectBatchOnFunctionError", "");
+
+        Map<String, Object> req = provisionAndCaptureCreateRequest(props);
+
+        assertFalse(req.containsKey("MaximumRetryAttempts"));
+        assertFalse(req.containsKey("BisectBatchOnFunctionError"));
+    }
+
+    @Test
+    void provisionRejectsWhitespaceBatchSize() {
+        StackResource r = new StackResource();
+        r.setResourceType("AWS::Lambda::EventSourceMapping");
+
+        ObjectNode props = mapper.createObjectNode();
+        props.put("FunctionName", "my-function");
+        props.put("BatchSize", " ");
+
+        AwsException ex = assertThrows(AwsException.class, () -> provisioner.provision(r, props, ctx()));
+        assertEquals("ValidationError", ex.getErrorCode());
+        assertEquals("Value of property BatchSize must be an integer.", ex.getMessage());
+    }
+
+    @Test
+    void provisionRejectsNonBooleanBisectBatchOnFunctionError() {
+        StackResource r = new StackResource();
+        r.setResourceType("AWS::Lambda::EventSourceMapping");
+
+        ObjectNode props = mapper.createObjectNode();
+        props.put("FunctionName", "my-function");
+        props.put("BisectBatchOnFunctionError", "yes");
+
+        AwsException ex = assertThrows(AwsException.class, () -> provisioner.provision(r, props, ctx()));
+        assertEquals("ValidationError", ex.getErrorCode());
+        assertEquals("BisectBatchOnFunctionError must be a boolean", ex.getMessage());
+    }
+
+    @Test
+    void provisionRejectsNonObjectDestinationConfig() {
+        StackResource r = new StackResource();
+        r.setResourceType("AWS::Lambda::EventSourceMapping");
+
+        ObjectNode props = mapper.createObjectNode();
+        props.put("FunctionName", "my-function");
+        props.put("DestinationConfig", "arn:aws:sqs:us-east-1:000000000000:my-dlq");
+
+        AwsException ex = assertThrows(AwsException.class, () -> provisioner.provision(r, props, ctx()));
+        assertEquals("ValidationError", ex.getErrorCode());
+        assertEquals("DestinationConfig must be an object", ex.getMessage());
+    }
+
+    @Test
+    void provisionKeepsWhitespaceMemberForLambdaValidation() {
+        ObjectNode props = mapper.createObjectNode();
+        props.put("FunctionName", "my-function");
+        props.putObject("DestinationConfig").put("OnFailure", " ");
+
+        Map<String, Object> req = provisionAndCaptureCreateRequest(props);
+
+        assertEquals(Map.of("OnFailure", " "), req.get("DestinationConfig"));
+    }
+
+    @Test
+    void provisionDropsNestedNoValueFromDestinationConfig() {
+        ObjectNode props = mapper.createObjectNode();
+        props.put("FunctionName", "my-function");
+        props.putObject("DestinationConfig").put("OnFailure", "");
+
+        Map<String, Object> req = provisionAndCaptureCreateRequest(props);
+
+        // LambdaService treats a DestinationConfig without OnFailure as no destination.
+        assertEquals(Map.of(), req.get("DestinationConfig"));
+    }
+
+    @Test
+    void provisionDropsNoValueFilterElement() {
+        String pattern = "{\"body\":{\"kind\":[\"order\"]}}";
+        ObjectNode props = mapper.createObjectNode();
+        props.put("FunctionName", "my-function");
+        ArrayNode filters = props.putObject("FilterCriteria").putArray("Filters");
+        filters.addObject().put("Pattern", pattern);
+        filters.add("");
+
+        Map<String, Object> req = provisionAndCaptureCreateRequest(props);
+
+        assertEquals(Map.of("Filters", List.of(Map.of("Pattern", pattern))), req.get("FilterCriteria"));
+    }
+
+    @Test
+    void provisionDropsNestedNoValueMaximumConcurrency() {
+        ObjectNode props = mapper.createObjectNode();
+        props.put("FunctionName", "my-function");
+        props.put("EventSourceArn", "arn:aws:sqs:us-east-1:000000000000:my-queue");
+        props.putObject("ScalingConfig").put("MaximumConcurrency", "");
+
+        Map<String, Object> req = provisionAndCaptureCreateRequest(props);
+
+        // LambdaService treats an empty ScalingConfig on an SQS mapping as clearing the cap.
+        assertEquals(Map.of(), req.get("ScalingConfig"));
+    }
+
+    @Test
+    void provisionCoercesTextMaximumConcurrencyToInteger() {
+        ObjectNode props = mapper.createObjectNode();
+        props.put("FunctionName", "my-function");
+        props.putObject("ScalingConfig").put("MaximumConcurrency", "5");
+
+        Map<String, Object> req = provisionAndCaptureCreateRequest(props);
+
+        assertEquals(Map.of("MaximumConcurrency", 5), req.get("ScalingConfig"));
+    }
+
+    @Test
+    void provisionRejectsInvalidMaximumConcurrency() {
+        StackResource r = new StackResource();
+        r.setResourceType("AWS::Lambda::EventSourceMapping");
+
+        ObjectNode props = mapper.createObjectNode();
+        props.put("FunctionName", "my-function");
+        props.putObject("ScalingConfig").put("MaximumConcurrency", "many");
+
+        AwsException ex = assertThrows(AwsException.class, () -> provisioner.provision(r, props, ctx()));
+        assertEquals("ValidationError", ex.getErrorCode());
+        assertEquals("Value of property ScalingConfig.MaximumConcurrency must be an integer.", ex.getMessage());
+    }
+
+    @Test
+    void provisionRejectsInvalidMaximumRetryAttempts() {
+        StackResource r = new StackResource();
+        r.setResourceType("AWS::Lambda::EventSourceMapping");
+
+        ObjectNode props = mapper.createObjectNode();
+        props.put("FunctionName", "my-function");
+        props.put("MaximumRetryAttempts", "not-a-number");
+
+        AwsException ex = assertThrows(AwsException.class, () -> provisioner.provision(r, props, ctx()));
+        assertEquals("ValidationError", ex.getErrorCode());
+        assertEquals("Value of property MaximumRetryAttempts must be an integer.", ex.getMessage());
+    }
+
+    @Test
+    void provisionUpdateClearsRemovedBatchingRetryAndStructureOptions() {
+        StackResource r = new StackResource();
+        r.setResourceType("AWS::Lambda::EventSourceMapping");
+        r.setPhysicalId("existing-esm-uuid");
+
+        ObjectNode props = mapper.createObjectNode();
+        props.put("FunctionName", "my-function");
+
+        provisioner.provision(r, props, ctx(true, "existing-esm-uuid"));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(lambdaService).updateEventSourceMapping(eq("existing-esm-uuid"), captor.capture());
+        Map<String, Object> req = captor.getValue();
+        for (String option : CLEARABLE_OPTIONS) {
+            assertTrue(req.containsKey(option), option + " must be sent so the update clears it");
+            assertNull(req.get(option), option + " must be cleared");
+        }
     }
 
     @Test

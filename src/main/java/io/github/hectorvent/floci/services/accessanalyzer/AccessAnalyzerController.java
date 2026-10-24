@@ -363,6 +363,12 @@ public class AccessAnalyzerController {
 
     private Response empty() {
         return Response.ok(objectMapper.createObjectNode()).build();
+    public Response getAnalyzer(@Context HttpHeaders headers, @PathParam("analyzerName") String analyzerName) {
+        String region = regionResolver.resolveRegion(headers);
+        Analyzer analyzer = accessAnalyzerService.getAnalyzer(region, analyzerName);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("analyzer", analyzerSummary(analyzer));
+        return Response.ok(response).build();
     }
 
     private ObjectNode analyzerSummary(Analyzer analyzer) {

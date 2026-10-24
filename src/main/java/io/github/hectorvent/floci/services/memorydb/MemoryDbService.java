@@ -1107,9 +1107,13 @@ public class MemoryDbService {
         requireText(resourceArn, "ResourceArn");
         AwsArnUtils.Arn arn;
         try {
-            arn = AwsArnUtils.parse(resourceArn);
-        } catch (IllegalArgumentException exception) {
-            throw invalid("Invalid ResourceArn.");
+            AwsArnUtils.Arn arn = AwsArnUtils.parse(resourceArn);
+            if (!"memorydb".equals(arn.service()) || !currentRegion().equals(arn.region())
+                    || !regionResolver.getAccountId().equals(arn.accountId())) {
+                throw new IllegalArgumentException("ARN owner mismatch");
+            }
+        } catch (IllegalArgumentException e) {
+            throw new AwsException("ClusterNotFoundFault", "Cluster not found.", 404);
         }
         String[] resource = arn.resource().split("/", 2);
         if (!"memorydb".equals(arn.service()) || resource.length != 2 || resource[1].isBlank()) {
@@ -1245,7 +1249,7 @@ public class MemoryDbService {
             return region;
         }
         String defaultRegion = regionResolver.getDefaultRegion();
-        return defaultRegion != null ? defaultRegion : "us-east-1";
+        return defaultRegion != null ? defaultRegion : "us-east-1"; // partition-literal: reached only when the resolver has no default region (test constructors)
     }
 
     private String identityName(String accountId, String region, String name) {

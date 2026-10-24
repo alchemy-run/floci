@@ -20,6 +20,7 @@ import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriBuilder;
+import jakarta.ws.rs.core.UriInfo;
 
 import java.io.IOException;
 import java.net.URLDecoder;
@@ -51,9 +52,10 @@ public class SigninController {
                               @QueryParam("response_type") String responseType,
                               @QueryParam("scope") String scope,
                               @QueryParam("state") String state,
-                              @QueryParam("resource") String resource) {
+                              @QueryParam("resource") String resource,
+                              @Context UriInfo uriInfo) {
         String requestId = signinService.beginAuthorization(clientId, codeChallenge, codeChallengeMethod,
-                redirectUri, responseType, scope, state, resource);
+                redirectUri, responseType, scope, state, resource, uriInfo.getBaseUri());
         String location = UriBuilder.fromPath("/_floci/signin/consent")
                 .queryParam("request_id", requestId)
                 .build()
@@ -126,6 +128,54 @@ public class SigninController {
                     ? signinService.denyAuthorization(requestId)
                     : signinService.completeAuthorization(requestId);
             return redirect(location);
+        } catch (SigninException e) {
+            return htmlError(e);
+        }
+    }
+
+    /**
+     * The page AWS Sign-In lands on at the end of a cross-device login. It shows the verification
+     * code the user pastes back into {@code aws login --remote}.
+     */
+    @GET
+    @Path(SigninService.CONFIRMATION_PATH)
+    @Produces(MediaType.TEXT_HTML)
+    public Response confirmationPage(@QueryParam("code") String code,
+                                     @QueryParam("state") String state,
+                                     @QueryParam("error") String error) {
+        try {
+            if (error != null) {
+                throw new SigninException(error, "The sign-in request was cancelled. Run aws login again to retry.");
+            }
+            String verificationCode = escape(signinService.verificationCode(code, state));
+            String page = """
+                    <!doctype html>
+                    <html lang="en">
+                    <head>
+                      <meta charset="utf-8">
+                      <meta name="viewport" content="width=device-width, initial-scale=1">
+                      <meta name="theme-color" content="#5559a7">
+                      <link rel="icon" href="/_floci/signin/floci.svg" type="image/svg+xml">
+                      <link rel="stylesheet" href="/_floci/signin/signin.css">
+                      <title>Floci local sign-in</title>
+                    </head>
+                    <body>
+                      <main class="shell">
+                        <header class="brand">
+                          <img src="/_floci/signin/floci-header.svg" alt="Floci" width="190" height="56">
+                          <span class="local-badge">Local only</span>
+                        </header>
+                        <section class="content">
+                          <span class="eyebrow">AWS CLI access</span>
+                          <h1>Verification code</h1>
+                          <p>Copy this code and paste it into the AWS CLI to finish signing in.</p>
+                          <p class="verification-code">%s</p>
+                        </section>
+                      </main>
+                    </body>
+                    </html>
+                    """.formatted(verificationCode);
+            return secureHtml(Response.ok(page)).build();
         } catch (SigninException e) {
             return htmlError(e);
         }

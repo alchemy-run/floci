@@ -12,24 +12,26 @@ class LambdaArnUtilsTest {
 
     @ParameterizedTest
     @CsvSource({
-            // input, expectedName, expectedQualifier, expectedRegion
-            "my-fn, my-fn, , ",
-            "my-fn:prod, my-fn, prod, ",
-            "my-fn:$LATEST, my-fn, $LATEST, ",
-            "my-fn:42, my-fn, 42, ",
-            "000000000000:function:my-fn, my-fn, , ",
-            "000000000000:function:my-fn:prod, my-fn, prod, ",
-            "arn:aws:lambda:us-east-1:000000000000:function:my-fn, my-fn, , us-east-1",
-            "arn:aws:lambda:eu-west-1:123456789012:function:my-fn, my-fn, , eu-west-1",
-            "arn:aws:lambda:us-east-1:000000000000:function:my-fn:prod, my-fn, prod, us-east-1",
-            "arn:aws:lambda:us-east-1:000000000000:function:my-fn:$LATEST, my-fn, $LATEST, us-east-1",
-            "arn:aws:lambda:us-east-1:000000000000:function:my_fn-1, my_fn-1, , us-east-1",
+            // input, expectedName, expectedQualifier, expectedRegion, expectedAccount
+            "my-fn, my-fn, , , ",
+            "my-fn:prod, my-fn, prod, , ",
+            "my-fn:$LATEST, my-fn, $LATEST, , ",
+            "my-fn:42, my-fn, 42, , ",
+            "000000000000:function:my-fn, my-fn, , , 000000000000",
+            "111122223333:function:my-fn:prod, my-fn, prod, , 111122223333",
+            "arn:aws:lambda:us-east-1:000000000000:function:my-fn, my-fn, , us-east-1, 000000000000",
+            "arn:aws:lambda:eu-west-1:123456789012:function:my-fn, my-fn, , eu-west-1, 123456789012",
+            "arn:aws:lambda:us-east-1:000000000000:function:my-fn:prod, my-fn, prod, us-east-1, 000000000000",
+            "arn:aws:lambda:us-east-1:000000000000:function:my-fn:$LATEST, my-fn, $LATEST, us-east-1, 000000000000",
+            "arn:aws:lambda:us-east-1:000000000000:function:my_fn-1, my_fn-1, , us-east-1, 000000000000",
     })
-    void resolveAcceptsValidForms(String input, String expectedName, String expectedQualifier, String expectedRegion) {
+    void resolveAcceptsValidForms(String input, String expectedName, String expectedQualifier, String expectedRegion,
+                                  String expectedAccount) {
         LambdaArnUtils.ResolvedFunctionRef ref = LambdaArnUtils.resolve(input);
         assertEquals(expectedName, ref.name());
         assertEquals(emptyToNull(expectedQualifier), ref.qualifier());
         assertEquals(emptyToNull(expectedRegion), ref.region());
+        assertEquals(emptyToNull(expectedAccount), ref.account());
     }
 
     @ParameterizedTest
@@ -81,6 +83,15 @@ class LambdaArnUtilsTest {
         String maxLen = "a".repeat(64);
         LambdaArnUtils.ResolvedFunctionRef ref = LambdaArnUtils.resolve(maxLen);
         assertEquals(maxLen, ref.name());
+    }
+
+    @Test
+    void aBadNameQuotesTheModelsFunctionNamePattern() {
+        AwsException ex = assertThrows(AwsException.class, () -> LambdaArnUtils.resolve("bad.name"));
+
+        assertEquals("ValidationException", ex.getErrorCode());
+        assertTrue(ex.getMessage().contains("((eusc-)?[a-z]{2}((-gov)|(-iso([a-z]?)))?-[a-z]+-\\d{1}:)?"),
+                ex.getMessage());
     }
 
     @Test
@@ -165,75 +176,109 @@ class LambdaArnUtilsTest {
         return (s == null || s.isEmpty()) ? null : s;
     }
 
-    // ──────────────────────────── extractFunctionNameFromUri tests ────────────────────────────
+    // ──────────────────────────── extractFunctionReferenceFromUri tests ────────────────────────────
 
     @ParameterizedTest
     @CsvSource({
             // input URI, expected function name
-            "arn:aws:lambda:us-east-1:000000000000:function:myFn/invocations, myFn",
-            "arn:aws:lambda:us-east-1:000000000000:function:myFn, myFn",
-            "arn:aws:lambda:eu-west-1:123456789012:function:my-handler/invocations, my-handler",
-            "arn:aws:lambda:us-east-1:000000000000:function:my_fn-2/invocations, my_fn-2",
+            "arn:aws:lambda:us-east-1:000000000000:function:myFn/invocations, arn:aws:lambda:us-east-1:000000000000:function:myFn",
+            "arn:aws:lambda:us-east-1:000000000000:function:myFn, arn:aws:lambda:us-east-1:000000000000:function:myFn",
+            "arn:aws:lambda:eu-west-1:123456789012:function:my-handler/invocations, arn:aws:lambda:eu-west-1:123456789012:function:my-handler",
+            "arn:aws:lambda:us-east-1:000000000000:function:my_fn-2/invocations, arn:aws:lambda:us-east-1:000000000000:function:my_fn-2",
             "myFn, myFn",
             "my-handler, my-handler",
     })
-    void extractFunctionNameFromUri_validInputs(String uri, String expectedName) {
-        assertEquals(expectedName, LambdaArnUtils.extractFunctionNameFromUri(uri));
+    void extractFunctionReferenceFromUri_validInputs(String uri, String expectedName) {
+        assertEquals(expectedName, LambdaArnUtils.extractFunctionReferenceFromUri(uri));
     }
 
     @Test
-    void extractFunctionNameFromUri_nullReturnsNull() {
-        assertNull(LambdaArnUtils.extractFunctionNameFromUri(null));
+    void extractFunctionReferenceFromUri_nullReturnsNull() {
+        assertNull(LambdaArnUtils.extractFunctionReferenceFromUri(null));
     }
 
     @Test
-    void extractFunctionNameFromUri_noFunctionPrefixReturnsFull() {
+    void extractFunctionReferenceFromUri_noFunctionPrefixReturnsFull() {
         // When no "function:" prefix, the entire URI is treated as the function name
-        assertEquals("just-a-name", LambdaArnUtils.extractFunctionNameFromUri("just-a-name"));
+        assertEquals("just-a-name", LambdaArnUtils.extractFunctionReferenceFromUri("just-a-name"));
     }
 
     @Test
-    void extractFunctionNameFromUri_stripsInvocationsSuffix() {
+    void extractFunctionReferenceFromUri_stripsInvocationsSuffix() {
         String uri = "arn:aws:lambda:us-east-1:000000000000:function:handler/invocations";
-        assertEquals("handler", LambdaArnUtils.extractFunctionNameFromUri(uri));
+        assertEquals("arn:aws:lambda:us-east-1:000000000000:function:handler",
+                LambdaArnUtils.extractFunctionReferenceFromUri(uri));
     }
 
     @Test
-    void extractFunctionNameFromUri_handlesStageVariableSubstitutedUri() {
+    void extractFunctionReferenceFromUri_handlesStageVariableSubstitutedUri() {
         // After stage variable substitution, the URI looks like a normal ARN
         String uri = "arn:aws:lambda:us-east-1:000000000000:function:ws-stage-var-fn/invocations";
-        assertEquals("ws-stage-var-fn", LambdaArnUtils.extractFunctionNameFromUri(uri));
+        assertEquals("arn:aws:lambda:us-east-1:000000000000:function:ws-stage-var-fn",
+                LambdaArnUtils.extractFunctionReferenceFromUri(uri));
     }
 
     @Test
-    void extractFunctionNameFromUri_handlesApiGatewayStyleUri() {
+    void extractFunctionReferenceFromUri_handlesApiGatewayStyleUri() {
         // API Gateway v1 uses a longer URI format
         String uri = "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:000000000000:function:myFn/invocations";
-        assertEquals("myFn", LambdaArnUtils.extractFunctionNameFromUri(uri));
+        assertEquals("arn:aws:lambda:us-east-1:000000000000:function:myFn",
+                LambdaArnUtils.extractFunctionReferenceFromUri(uri));
     }
 
     @ParameterizedTest
     @CsvSource({
             // Qualified targets (alias / numbered version) must preserve the :qualifier
             // so downstream invoke resolves the configured target instead of $LATEST.
-            "arn:aws:lambda:us-east-1:000000000000:function:myFn:PROD/invocations, myFn:PROD",
-            "arn:aws:lambda:us-east-1:000000000000:function:myFn:PROD, myFn:PROD",
-            "arn:aws:lambda:us-east-1:000000000000:function:myFn:1/invocations, myFn:1",
-            "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:000000000000:function:myFn:PROD/invocations, myFn:PROD",
-            "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:000000000000:function:myFn:42/invocations, myFn:42",
+            "arn:aws:lambda:us-east-1:000000000000:function:myFn:PROD/invocations, arn:aws:lambda:us-east-1:000000000000:function:myFn:PROD",
+            "arn:aws:lambda:us-east-1:000000000000:function:myFn:PROD, arn:aws:lambda:us-east-1:000000000000:function:myFn:PROD",
+            "arn:aws:lambda:us-east-1:000000000000:function:myFn:1/invocations, arn:aws:lambda:us-east-1:000000000000:function:myFn:1",
+            "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:000000000000:function:myFn:PROD/invocations, arn:aws:lambda:us-east-1:000000000000:function:myFn:PROD",
+            "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:000000000000:function:myFn:42/invocations, arn:aws:lambda:us-east-1:000000000000:function:myFn:42",
     })
-    void extractFunctionNameFromUri_preservesQualifier(String uri, String expected) {
-        assertEquals(expected, LambdaArnUtils.extractFunctionNameFromUri(uri));
+    void extractFunctionReferenceFromUri_preservesQualifier(String uri, String expected) {
+        assertEquals(expected, LambdaArnUtils.extractFunctionReferenceFromUri(uri));
     }
 
     @Test
-    void extractFunctionNameFromUri_qualifiedRef_resolvesToNameAndQualifier() {
-        // The extracted "myFn:PROD" must resolve into a distinct name + qualifier,
-        // which is what invoke() relies on to target the alias/version.
-        String extracted = LambdaArnUtils.extractFunctionNameFromUri(
+    void extractFunctionReferenceFromUri_qualifiedRef_resolvesToNameAndQualifier() {
+        // The complete target identity survives extraction and Lambda validation.
+        String extracted = LambdaArnUtils.extractFunctionReferenceFromUri(
                 "arn:aws:lambda:us-east-1:000000000000:function:myFn:PROD/invocations");
         LambdaArnUtils.ResolvedFunctionRef ref = LambdaArnUtils.resolve(extracted);
         assertEquals("myFn", ref.name());
         assertEquals("PROD", ref.qualifier());
+        assertEquals("000000000000", ref.account());
+        assertEquals("us-east-1", ref.region());
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            // reference, expected full ARN (partition aws, region us-east-1, default account 000000000000)
+            "rotator, arn:aws:lambda:us-east-1:000000000000:function:rotator",
+            "rotator:live, arn:aws:lambda:us-east-1:000000000000:function:rotator:live",
+            "111122223333:function:rotator, arn:aws:lambda:us-east-1:111122223333:function:rotator",
+            "111122223333:function:rotator:7, arn:aws:lambda:us-east-1:111122223333:function:rotator:7",
+            "arn:aws:lambda:eu-west-1:111122223333:function:rotator, arn:aws:lambda:eu-west-1:111122223333:function:rotator",
+    })
+    void functionArnCompletesAReferenceTheWayLambdaReadsIt(String reference, String expected) {
+        assertEquals(expected, LambdaArnUtils.functionArn(reference, "aws", "us-east-1", "000000000000"));
+    }
+
+    @Test
+    void functionArnUsesThePartitionItIsGiven() {
+        assertEquals("arn:aws-cn:lambda:cn-north-1:000000000000:function:rotator",
+                LambdaArnUtils.functionArn("rotator", "aws-cn", "cn-north-1", "000000000000"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "us-east-1:111122223333:function:rotator",
+            "arn:aws:lambda:us-east-1:abc:function:rotator",
+    })
+    void functionArnRefusesAReferenceLambdaCannotRead(String reference) {
+        AwsException ex = assertThrows(AwsException.class,
+                () -> LambdaArnUtils.functionArn(reference, "aws", "us-east-1", "000000000000"));
+        assertEquals("InvalidParameterValueException", ex.getErrorCode());
     }
 }

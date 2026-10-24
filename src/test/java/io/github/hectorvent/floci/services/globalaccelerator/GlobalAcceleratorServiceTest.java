@@ -2,7 +2,6 @@ package io.github.hectorvent.floci.services.globalaccelerator;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
@@ -42,9 +41,10 @@ class GlobalAcceleratorServiceTest {
         StorageFactory storageFactory = mock(StorageFactory.class);
         RegionResolver regionResolver = mock(RegionResolver.class);
         when(regionResolver.getAccountId()).thenReturn(ACCOUNT);
+        RegionResolver realResolver = new RegionResolver("us-east-1", ACCOUNT);
         when(regionResolver.buildArn(anyString(), anyString(), anyString())).thenAnswer(invocation ->
-                AwsArnUtils.Arn.of(invocation.getArgument(0), invocation.getArgument(1),
-                        ACCOUNT, invocation.getArgument(2)).toString());
+                realResolver.buildArn(invocation.getArgument(0), invocation.getArgument(1),
+                        ACCOUNT, invocation.getArgument(2)));
         when(storageFactory.create(anyString(), anyString(), any()))
                 .thenAnswer(invocation -> AccountAwareStorageBackend.inMemory(ACCOUNT));
 

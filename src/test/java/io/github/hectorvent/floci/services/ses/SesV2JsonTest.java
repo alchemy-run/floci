@@ -2,13 +2,16 @@ package io.github.hectorvent.floci.services.ses;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.ses.model.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 
-import java.util.Arrays;
+import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -18,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Unit tests for the request-parsing helpers shared by the SES v2 controllers. Each helper's
+ * Unit tests for the helpers shared by the SES v2 controllers. Each helper's
  * accept / reject split and its wording were previously pinned only through the controller
  * integration tests; these pin them directly so the controllers can move without re-proving them.
  */
@@ -67,9 +70,14 @@ class SesV2JsonTest {
 
     @Test
     void requireJsonObject_rejectsNullAndNonObjects() {
-        assertEquals("Request body must be a JSON object.", assertAws("BadRequestException", 400,
+        assertNull(assertAws("SerializationException", 400,
                 () -> SesV2Json.requireJsonObject(null)).getMessage());
-        assertAws("BadRequestException", 400, () -> SesV2Json.requireJsonObject(json("[]")));
+        assertEquals("Start of list found where not expected", assertAws("SerializationException", 400,
+                () -> SesV2Json.requireJsonObject(json("[]"))).getMessage());
+        for (String body : List.of("\"x\"", "1", "true", "null")) {
+            assertNull(assertAws("SerializationException", 400,
+                    () -> SesV2Json.requireJsonObject(json(body))).getMessage(), body);
+        }
         SesV2Json.requireJsonObject(json("{}"));
     }
 
@@ -108,14 +116,18 @@ class SesV2JsonTest {
     }
 
     @Test
-    void readOptionBody_blankIsEmptyObject_badShapesAre400() {
+    void readOptionBody_onlyEmptyIsEmptyObject_unreadableBodiesAreSerializationExceptions() {
         assertTrue(SesV2Json.readOptionBody(MAPPER, null).isObject());
-        assertTrue(SesV2Json.readOptionBody(MAPPER, "  ").isObject());
+        assertTrue(SesV2Json.readOptionBody(MAPPER, "").isObject());
+        assertTrue(SesV2Json.readOptionBody(MAPPER, " {} \n").isObject());
         assertEquals("REQUIRE", SesV2Json.readOptionBody(MAPPER, "{\"HttpsPolicy\":\"REQUIRE\"}")
                 .path("HttpsPolicy").asText());
-        assertEquals("Request body must be a JSON object.", assertAws("BadRequestException", 400,
+        assertEquals("Start of list found where not expected", assertAws("SerializationException", 400,
                 () -> SesV2Json.readOptionBody(MAPPER, "[1]")).getMessage());
-        assertAws("BadRequestException", 400, () -> SesV2Json.readOptionBody(MAPPER, "{not json"));
+        for (String body : List.of("null", "  ", "{not json", "{", "{\"a\":}", "{} x", "{}{}")) {
+            assertNull(assertAws("SerializationException", 400,
+                    () -> SesV2Json.readOptionBody(MAPPER, body)).getMessage(), body);
+        }
     }
 
     @Test
@@ -128,13 +140,11 @@ class SesV2JsonTest {
     }
 
     @Test
-    void coerceBoolean_matchesAwsJacksonCoercion() {
+    void coerceBoolean_matchesAwsCoercion() {
         JsonNode node = json(
-                "{\"t\":true,\"f\":false,\"s\":\"no\",\"z\":null,\"n\":0,\"a\":[],\"o\":{}}");
+                "{\"t\":true,\"f\":false,\"z\":null,\"n\":0,\"a\":[],\"o\":{}}");
         assertTrue(SesV2Json.coerceBoolean(node.path("t")));
         assertFalse(SesV2Json.coerceBoolean(node.path("f")));
-        // A JSON string coerces to true regardless of its text (probe-confirmed).
-        assertTrue(SesV2Json.coerceBoolean(node.path("s")));
         assertNull(assertAws("SerializationException", 400,
                 () -> SesV2Json.coerceBoolean(node.path("z"))).getMessage());
         assertEquals("NUMBER_VALUE can not be converted to a Boolean",
@@ -146,6 +156,53 @@ class SesV2JsonTest {
         assertEquals("Start of structure or map found where not expected.",
                 assertAws("SerializationException", 400,
                         () -> SesV2Json.coerceBoolean(node.path("o"))).getMessage());
+    }
+
+    @Test
+    void coerceBoolean_coercesOnlyStringsThatNameABoolean() {
+        // Probe-confirmed: the match is case-insensitive and exact, so padding is not trimmed.
+        for (String text : List.of("true", "TRUE", "Yes", "y", "T", "1")) {
+            assertTrue(SesV2Json.coerceBoolean(json("\"" + text + "\"")), text);
+        }
+        for (String text : List.of("false", "FALSE", "No", "n", "F", "0")) {
+            assertFalse(SesV2Json.coerceBoolean(json("\"" + text + "\"")), text);
+        }
+        for (String text : List.of("abc", "", "on", "off", " true", "2")) {
+            assertEquals("STRING_VALUE can not be converted to an Boolean",
+                    assertAws("SerializationException", 400,
+                            () -> SesV2Json.coerceBoolean(json("\"" + text + "\""))).getMessage(), text);
+        }
+    }
+
+    @Test
+    void stringMapMemberOrAbsent_rejectsANonObjectTheWayAwsDoes() {
+        JsonNode node = json("{\"n\":null,\"a\":[],\"s\":\"x\",\"i\":1}");
+        assertNull(SesV2Json.stringMapMemberOrAbsent(node, "n"));
+        assertNull(SesV2Json.stringMapMemberOrAbsent(node, "missing"));
+        assertEquals("Start of list found where not expected", assertAws("SerializationException", 400,
+                () -> SesV2Json.stringMapMemberOrAbsent(node, "a")).getMessage());
+        assertEquals("Expected map or null", assertAws("SerializationException", 400,
+                () -> SesV2Json.stringMapMemberOrAbsent(node, "s")).getMessage());
+        assertEquals("Expected map or null", assertAws("SerializationException", 400,
+                () -> SesV2Json.stringMapMemberOrAbsent(node, "i")).getMessage());
+    }
+
+    @Test
+    void stringMapMemberOrAbsent_keepsNullValues_andNamesTheWrongValueType() {
+        Map<String, String> expected = new LinkedHashMap<>();
+        expected.put("s", "x");
+        expected.put("n", null);
+        assertEquals(expected, SesV2Json.stringMapMemberOrAbsent(json("{\"m\":{\"s\":\"x\",\"n\":null}}"), "m"));
+        assertEquals("NUMBER_VALUE can not be converted to a String", assertAws("SerializationException", 400,
+                () -> SesV2Json.stringMapMemberOrAbsent(json("{\"m\":{\"i\":1}}"), "m")).getMessage());
+        assertEquals("TRUE_VALUE can not be converted to a String", assertAws("SerializationException", 400,
+                () -> SesV2Json.stringMapMemberOrAbsent(json("{\"m\":{\"t\":true}}"), "m")).getMessage());
+        assertEquals("FALSE_VALUE can not be converted to a String", assertAws("SerializationException", 400,
+                () -> SesV2Json.stringMapMemberOrAbsent(json("{\"m\":{\"f\":false}}"), "m")).getMessage());
+        assertEquals("Start of structure or map found where not expected.", assertAws("SerializationException",
+                400, () -> SesV2Json.stringMapMemberOrAbsent(json("{\"m\":{\"o\":{}}}"), "m")).getMessage());
+        assertEquals("Start of list found where not expected", assertAws("SerializationException", 400,
+                () -> SesV2Json.stringMapMemberOrAbsent(json("{\"m\":{\"a\":[]}}"), "m")).getMessage());
     }
 
     @Test
@@ -169,24 +226,40 @@ class SesV2JsonTest {
 
     @Test
     void stringArrayOrAbsent_keepsEmptyListDistinctFromAbsent() {
-        JsonNode node = json("{\"a\":[\"x\",\"y\"],\"e\":[],\"z\":null,\"s\":\"x\",\"m\":[1]}");
+        JsonNode node = json("{\"a\":[\"x\",\"y\"],\"e\":[],\"z\":null,\"s\":\"x\",\"m\":[1],\"n\":[null]}");
         assertEquals(List.of("x", "y"), SesV2Json.stringArrayOrAbsent(node, "a"));
         assertEquals(List.of(), SesV2Json.stringArrayOrAbsent(node, "e"));
         assertNull(SesV2Json.stringArrayOrAbsent(node, "z"));
         assertNull(SesV2Json.stringArrayOrAbsent(node, "missing"));
         assertAws("SerializationException", 400, () -> SesV2Json.stringArrayOrAbsent(node, "s"));
         assertAws("SerializationException", 400, () -> SesV2Json.stringArrayOrAbsent(node, "m"));
+        assertAws("SerializationException", 400, () -> SesV2Json.stringArrayOrAbsent(node, "n"));
     }
 
     @Test
-    void intMemberOrAbsent_rejectsNonIntegralAndOutOfRange() {
-        JsonNode node = json("{\"i\":5,\"f\":1.5,\"big\":1099511627776,\"s\":\"5\",\"z\":null}");
+    void intMemberOrAbsent_truncatesAFractionAndSaturatesOutOfRange() {
+        JsonNode node = json("{\"i\":5,\"f\":1.5,\"big\":4294967296,\"neg\":-4294967296,\"z\":null}");
         assertEquals(5, SesV2Json.intMemberOrAbsent(node, "i"));
+        assertEquals(1, SesV2Json.intMemberOrAbsent(node, "f"));
+        assertEquals(Integer.MAX_VALUE, SesV2Json.intMemberOrAbsent(node, "big"));
+        assertEquals(Integer.MIN_VALUE, SesV2Json.intMemberOrAbsent(node, "neg"));
         assertNull(SesV2Json.intMemberOrAbsent(node, "z"));
         assertNull(SesV2Json.intMemberOrAbsent(node, "missing"));
-        assertAws("SerializationException", 400, () -> SesV2Json.intMemberOrAbsent(node, "f"));
-        assertAws("SerializationException", 400, () -> SesV2Json.intMemberOrAbsent(node, "big"));
-        assertAws("SerializationException", 400, () -> SesV2Json.intMemberOrAbsent(node, "s"));
+    }
+
+    @Test
+    void intMemberOrAbsent_namesTheWrongJsonType() {
+        JsonNode node = json("{\"s\":\"5\",\"t\":true,\"f\":false,\"o\":{},\"a\":[]}");
+        assertEquals("STRING_VALUE can not be converted to an Integer", assertAws("SerializationException", 400,
+                () -> SesV2Json.intMemberOrAbsent(node, "s")).getMessage());
+        assertEquals("TRUE_VALUE can not be converted to an Integer", assertAws("SerializationException", 400,
+                () -> SesV2Json.intMemberOrAbsent(node, "t")).getMessage());
+        assertEquals("FALSE_VALUE can not be converted to an Integer", assertAws("SerializationException", 400,
+                () -> SesV2Json.intMemberOrAbsent(node, "f")).getMessage());
+        assertEquals("Start of structure or map found where not expected.", assertAws("SerializationException",
+                400, () -> SesV2Json.intMemberOrAbsent(node, "o")).getMessage());
+        assertEquals("Start of list found where not expected", assertAws("SerializationException", 400,
+                () -> SesV2Json.intMemberOrAbsent(node, "a")).getMessage());
     }
 
     @Test
@@ -200,34 +273,39 @@ class SesV2JsonTest {
     }
 
     @Test
-    void parseSuppressedReasons_absentIsEmpty_elementsFollowAwsCoercion() {
-        assertEquals(List.of(),
-                SesV2Json.parseSuppressedReasons(json("{}").path("SuppressedReasons")));
-        assertEquals(List.of(), SesV2Json.parseSuppressedReasons(json("null")));
-        assertEquals(List.of("BOUNCE", "COMPLAINT"),
-                SesV2Json.parseSuppressedReasons(json("[\"BOUNCE\",\"COMPLAINT\"]")));
-        // A null element passes deserialization and is left to the service-layer value check.
-        assertEquals(Arrays.asList("BOUNCE", null),
-                SesV2Json.parseSuppressedReasons(json("[\"BOUNCE\",null]")));
-        assertEquals("Expected list or null", assertAws("SerializationException", 400,
-                () -> SesV2Json.parseSuppressedReasons(json("\"BOUNCE\""))).getMessage());
-        assertEquals("NUMBER_VALUE can not be converted to a String",
-                assertAws("SerializationException", 400,
-                        () -> SesV2Json.parseSuppressedReasons(json("[1]"))).getMessage());
-        assertEquals("TRUE_VALUE can not be converted to a String",
-                assertAws("SerializationException", 400,
-                        () -> SesV2Json.parseSuppressedReasons(json("[true]"))).getMessage());
-        assertEquals("Start of structure or map found where not expected.",
-                assertAws("SerializationException", 400,
-                        () -> SesV2Json.parseSuppressedReasons(json("[{}]"))).getMessage());
+    void coerceBooleanOrFalse_missingIsFalse_otherwiseCoerces() {
+        assertFalse(SesV2Json.coerceBooleanOrFalse(json("{}").path("SendingEnabled")));
+        assertTrue(SesV2Json.coerceBooleanOrFalse(json("true")));
+        assertTrue(SesV2Json.coerceBooleanOrFalse(json("\"yes\"")));
+        assertFalse(SesV2Json.coerceBooleanOrFalse(json("\"no\"")));
+        assertAws("SerializationException", 400, () -> SesV2Json.coerceBooleanOrFalse(json("null")));
+        assertAws("SerializationException", 400, () -> SesV2Json.coerceBooleanOrFalse(json("0")));
     }
 
     @Test
-    void parseSendingEnabled_missingIsFalse_otherwiseCoerces() {
-        assertFalse(SesV2Json.parseSendingEnabled(json("{}").path("SendingEnabled")));
-        assertTrue(SesV2Json.parseSendingEnabled(json("true")));
-        assertTrue(SesV2Json.parseSendingEnabled(json("\"yes\"")));
-        assertAws("SerializationException", 400, () -> SesV2Json.parseSendingEnabled(json("null")));
-        assertAws("SerializationException", 400, () -> SesV2Json.parseSendingEnabled(json("0")));
+    void epochSeconds_keepsMillisecondFraction() {
+        assertEquals(1_790_312_384.592, SesV2Json.epochSeconds(Instant.ofEpochMilli(1_790_312_384_592L)));
+    }
+
+    @Test
+    void epochSeconds_dropsSubMillisecondPrecision() {
+        assertEquals(1_790_312_384.592,
+                SesV2Json.epochSeconds(Instant.ofEpochSecond(1_790_312_384L, 592_999_999L)));
+    }
+
+    @Test
+    void putTimestamp_writesDecimalNumber() {
+        ObjectNode node = MAPPER.createObjectNode();
+        SesV2Json.putTimestamp(node, "CreatedTimestamp", Instant.ofEpochMilli(1_790_312_384_592L));
+
+        assertEquals("{\"CreatedTimestamp\":1.790312384592E9}", node.toString());
+    }
+
+    @Test
+    void putTimestamp_skipsNull() {
+        ObjectNode node = MAPPER.createObjectNode();
+        SesV2Json.putTimestamp(node, "CompletedTimestamp", null);
+
+        assertFalse(node.has("CompletedTimestamp"));
     }
 }

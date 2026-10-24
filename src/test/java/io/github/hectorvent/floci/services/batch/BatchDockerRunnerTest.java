@@ -37,6 +37,7 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.RETURNS_SELF;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -92,7 +93,7 @@ class BatchDockerRunnerTest {
         ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
         ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-        when(builder.build()).thenReturn(mock(ContainerSpec.class));
+        when(builder.build()).thenReturn(new ContainerSpec("test-image"));
 
         BatchDockerRunner runner = new BatchDockerRunner(containerBuilder, lifecycleManager,
                 mock(ContainerLogStreamer.class), config, detector);
@@ -389,6 +390,130 @@ class BatchDockerRunnerTest {
         when(builder.build()).thenReturn(mock(ContainerSpec.class));
         return new BatchDockerRunner(containerBuilder, lifecycleManager,
                 mock(ContainerLogStreamer.class), config, mock(ContainerDetector.class));
+        when(lifecycleManager.createAndStart(any())).thenAnswer(invocation -> {
+            containerStarted.countDown();
+            return new ContainerLifecycleManager.ContainerInfo("container-id", Map.of());
+        });
+        DockerClient dockerClient = mock(DockerClient.class, RETURNS_DEEP_STUBS);
+        when(lifecycleManager.getDockerClient()).thenReturn(dockerClient);
+        when(dockerClient.inspectContainerCmd("container-id").exec().getState().getRunning())
+                .thenAnswer(invocation -> !stopped.get());
+        when(dockerClient.inspectContainerCmd("container-id").exec().getState().getExitCodeLong()).thenReturn(137L);
+        doAnswer(invocation -> {
+            stopped.set(true);
+            return null;
+        }).when(lifecycleManager).stopAndRemove(eq("container-id"), isNull());
+
+        ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
+        ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
+        when(containerBuilder.newContainer(anyString())).thenReturn(builder);
+        when(builder.build()).thenReturn(new ContainerSpec("test-image"));
+        BatchDockerRunner runner = new BatchDockerRunner(containerBuilder, lifecycleManager,
+                mock(ContainerLogStreamer.class), config, mock(ContainerDetector.class));
+        BatchJob job = job();
+        AtomicReference<BatchRunResult> result = new AtomicReference<>();
+
+        Thread runThread = Thread.startVirtualThread(() -> result.set(runner.run(job, 1)));
+        assertTrue(containerStarted.await(2, TimeUnit.SECONDS));
+        runner.requestStop(job.getJobId());
+        runner.stopJob(job.getJobId());
+        runThread.join(2000);
+
+        assertFalse(runThread.isAlive());
+        assertEquals(137, result.get().exitCode());
+        verify(lifecycleManager).stopAndRemove("container-id", null);
+    }
+
+    @Test
+    void stopJobAfterRequestIsClearedDoesNotRecreateStopMarker() {
+        EmulatorConfig config = config(Optional.empty());
+        EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.BatchServiceConfig batch = mock(EmulatorConfig.BatchServiceConfig.class);
+        when(config.services()).thenReturn(services);
+        when(services.batch()).thenReturn(batch);
+        when(batch.dockerNetwork()).thenReturn(Optional.empty());
+        when(config.port()).thenReturn(4566);
+
+        ContainerLifecycleManager lifecycleManager = mock(ContainerLifecycleManager.class);
+        when(lifecycleManager.createAndStart(any())).thenReturn(
+                new ContainerLifecycleManager.ContainerInfo("container-id", Map.of()));
+        DockerClient dockerClient = mock(DockerClient.class, RETURNS_DEEP_STUBS);
+        when(lifecycleManager.getDockerClient()).thenReturn(dockerClient);
+        when(dockerClient.inspectContainerCmd("container-id").exec().getState().getRunning()).thenReturn(false);
+        when(dockerClient.inspectContainerCmd("container-id").exec().getState().getExitCodeLong()).thenReturn(0L);
+        ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
+        ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
+        when(containerBuilder.newContainer(anyString())).thenReturn(builder);
+        when(builder.build()).thenReturn(new ContainerSpec("test-image"));
+        BatchDockerRunner runner = new BatchDockerRunner(containerBuilder, lifecycleManager,
+                mock(ContainerLogStreamer.class), config, mock(ContainerDetector.class));
+
+        runner.requestStop("job-1");
+        runner.clearStopRequest("job-1");
+        runner.stopJob("job-1");
+        BatchRunResult result = runner.run(job(), 1);
+
+        assertEquals(0, result.exitCode());
+        verify(lifecycleManager).createAndStart(any());
+    }
+
+    @Test
+    void stopJobStopsEveryInFlightNodeContainer() throws Exception {
+        EmulatorConfig config = config(Optional.empty());
+        EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.BatchServiceConfig batch = mock(EmulatorConfig.BatchServiceConfig.class);
+        when(config.services()).thenReturn(services);
+        when(services.batch()).thenReturn(batch);
+        when(batch.dockerNetwork()).thenReturn(Optional.empty());
+        when(config.port()).thenReturn(4566);
+
+        CountDownLatch containersStarted = new CountDownLatch(2);
+        AtomicInteger containerSequence = new AtomicInteger();
+        Set<String> stoppedContainers = ConcurrentHashMap.newKeySet();
+        ContainerLifecycleManager lifecycleManager = mock(ContainerLifecycleManager.class);
+        when(lifecycleManager.createAndStart(any())).thenAnswer(invocation -> {
+            String containerId = "container-" + containerSequence.getAndIncrement();
+            containersStarted.countDown();
+            return new ContainerLifecycleManager.ContainerInfo(containerId, Map.of());
+        });
+        DockerClient dockerClient = mock(DockerClient.class, RETURNS_DEEP_STUBS);
+        when(lifecycleManager.getDockerClient()).thenReturn(dockerClient);
+        for (int i = 0; i < 2; i++) {
+            String containerId = "container-" + i;
+            when(dockerClient.inspectContainerCmd(containerId).exec().getState().getRunning())
+                    .thenAnswer(invocation -> !stoppedContainers.contains(containerId));
+            when(dockerClient.inspectContainerCmd(containerId).exec().getState().getExitCodeLong()).thenReturn(137L);
+            doAnswer(invocation -> {
+                stoppedContainers.add(containerId);
+                return null;
+            }).when(lifecycleManager).stopAndRemove(eq(containerId), isNull());
+        }
+        ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
+        ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
+        when(containerBuilder.newContainer(anyString())).thenReturn(builder);
+        when(builder.build()).thenReturn(new ContainerSpec("test-image"));
+        BatchDockerRunner runner = new BatchDockerRunner(containerBuilder, lifecycleManager,
+                mock(ContainerLogStreamer.class), config, mock(ContainerDetector.class));
+        BatchJob job = job();
+        BatchNodeExecution firstNode = node(0);
+        BatchNodeExecution secondNode = node(1);
+        AtomicReference<BatchRunResult> firstResult = new AtomicReference<>();
+        AtomicReference<BatchRunResult> secondResult = new AtomicReference<>();
+
+        Thread firstThread = Thread.startVirtualThread(() -> firstResult.set(runner.run(job, 1, firstNode)));
+        Thread secondThread = Thread.startVirtualThread(() -> secondResult.set(runner.run(job, 1, secondNode)));
+        assertTrue(containersStarted.await(2, TimeUnit.SECONDS));
+        runner.requestStop(job.getJobId());
+        runner.stopJob(job.getJobId());
+        firstThread.join(2000);
+        secondThread.join(2000);
+
+        assertFalse(firstThread.isAlive());
+        assertFalse(secondThread.isAlive());
+        assertEquals(137, firstResult.get().exitCode());
+        assertEquals(137, secondResult.get().exitCode());
+        verify(lifecycleManager).stopAndRemove("container-0", null);
+        verify(lifecycleManager).stopAndRemove("container-1", null);
     }
 
     private BatchJob job() {

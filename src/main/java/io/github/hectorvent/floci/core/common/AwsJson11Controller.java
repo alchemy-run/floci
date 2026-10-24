@@ -6,9 +6,17 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectReader;
 import io.github.hectorvent.floci.services.acm.AcmJsonHandler;
+import io.github.hectorvent.floci.services.apigatewayv2.ApiGatewayV2JsonHandler;
+import io.github.hectorvent.floci.services.applicationautoscaling.ApplicationAutoScalingJsonHandler;
 import io.github.hectorvent.floci.services.athena.AthenaJsonHandler;
-import io.github.hectorvent.floci.services.redshiftdata.RedshiftDataJsonHandler;
+import io.github.hectorvent.floci.services.bcmdataexports.BcmDataExportsJsonHandler;
+import io.github.hectorvent.floci.services.budgets.BudgetsJsonHandler;
+import io.github.hectorvent.floci.services.ce.CostExplorerJsonHandler;
+import io.github.hectorvent.floci.services.cloudcontrol.CloudControlJsonHandler;
 import io.github.hectorvent.floci.services.cloudhsmv2.CloudHsmV2JsonHandler;
+import io.github.hectorvent.floci.services.cloudmap.CloudMapHandler;
+import io.github.hectorvent.floci.services.cloudtrail.CloudTrailJsonHandler;
+import io.github.hectorvent.floci.services.cloudwatch.logs.CloudWatchLogsHandler;
 import io.github.hectorvent.floci.services.codebuild.CodeBuildJsonHandler;
 import io.github.hectorvent.floci.services.codedeploy.CodeDeployJsonHandler;
 import io.github.hectorvent.floci.services.codepipeline.CodePipelineJsonHandler;
@@ -28,44 +36,54 @@ import io.github.hectorvent.floci.services.cloudcontrol.CloudControlJsonHandler;
 import io.github.hectorvent.floci.services.ssoadmin.SsoAdminJsonHandler;
 import io.github.hectorvent.floci.services.identitystore.IdentityStoreJsonHandler;
 import io.github.hectorvent.floci.services.budgets.BudgetsJsonHandler;
+import io.github.hectorvent.floci.services.cognito.CognitoJsonHandler;
+import io.github.hectorvent.floci.services.cognitoidentity.CognitoIdentityJsonHandler;
+import io.github.hectorvent.floci.services.comprehend.ComprehendJsonHandler;
 import io.github.hectorvent.floci.services.configservice.ConfigServiceJsonHandler;
 import io.github.hectorvent.floci.services.cur.CurJsonHandler;
-import io.github.hectorvent.floci.services.pricing.PricingJsonHandler;
-import io.github.hectorvent.floci.services.textract.TextractJsonHandler;
-import io.github.hectorvent.floci.services.comprehend.ComprehendJsonHandler;
-import io.github.hectorvent.floci.services.rekognition.RekognitionJsonHandler;
-import io.github.hectorvent.floci.services.transcribe.TranscribeJsonHandler;
-import io.github.hectorvent.floci.services.translate.TranslateJsonHandler;
-import io.github.hectorvent.floci.services.apigatewayv2.ApiGatewayV2JsonHandler;
-import io.github.hectorvent.floci.services.cloudwatch.logs.CloudWatchLogsHandler;
-import io.github.hectorvent.floci.services.cognito.CognitoJsonHandler;
-import io.github.hectorvent.floci.services.cloudmap.CloudMapHandler;
-import io.github.hectorvent.floci.services.eventbridge.EventBridgeHandler;
+import io.github.hectorvent.floci.services.datasync.DataSyncJsonHandler;
+import io.github.hectorvent.floci.services.dms.DmsJsonHandler;
+import io.github.hectorvent.floci.services.ecr.EcrJsonHandler;
+import io.github.hectorvent.floci.services.ecs.EcsJsonHandler;
 import io.github.hectorvent.floci.services.emr.EmrHandler;
-import io.github.hectorvent.floci.services.memorydb.MemoryDbHandler;
-import io.github.hectorvent.floci.services.marketplace.MarketplaceEntitlementController;
-import io.github.hectorvent.floci.services.marketplace.MarketplaceMeteringController;
-import io.github.hectorvent.floci.services.wafv2.WafV2Handler;
+import io.github.hectorvent.floci.services.eventbridge.EventBridgeHandler;
+import io.github.hectorvent.floci.services.firehose.FirehoseJsonHandler;
+import io.github.hectorvent.floci.services.globalaccelerator.GlobalAcceleratorJsonHandler;
+import io.github.hectorvent.floci.services.glue.GlueJsonHandler;
+import io.github.hectorvent.floci.services.identitystore.IdentityStoreJsonHandler;
 import io.github.hectorvent.floci.services.kinesis.KinesisJsonHandler;
 import io.github.hectorvent.floci.services.kinesisanalytics.KinesisAnalyticsV2JsonHandler;
 import io.github.hectorvent.floci.services.kms.KmsJsonHandler;
-import io.github.hectorvent.floci.services.secretsmanager.SecretsManagerJsonHandler;
-import io.github.hectorvent.floci.services.organizations.OrganizationsJsonHandler;
-import io.github.hectorvent.floci.services.cognitoidentity.CognitoIdentityJsonHandler;
-import io.github.hectorvent.floci.services.globalaccelerator.GlobalAcceleratorJsonHandler;
-import io.github.hectorvent.floci.services.datasync.DataSyncJsonHandler;
-import io.github.hectorvent.floci.services.route53resolver.Route53ResolverJsonHandler;
+import io.github.hectorvent.floci.services.lightsail.LightsailJsonHandler;
+import io.github.hectorvent.floci.services.marketplace.MarketplaceEntitlementController;
+import io.github.hectorvent.floci.services.marketplace.MarketplaceMeteringController;
+import io.github.hectorvent.floci.services.memorydb.MemoryDbHandler;
 import io.github.hectorvent.floci.services.networkfirewall.NetworkFirewallJsonHandler;
+import io.github.hectorvent.floci.services.organizations.OrganizationsJsonHandler;
+import io.github.hectorvent.floci.services.pricing.PricingJsonHandler;
+import io.github.hectorvent.floci.services.redshiftdata.RedshiftDataJsonHandler;
+import io.github.hectorvent.floci.services.redshiftserverless.RedshiftServerlessJsonHandler;
+import io.github.hectorvent.floci.services.rekognition.RekognitionJsonHandler;
+import io.github.hectorvent.floci.services.resourcegroupstagging.ResourceGroupsTaggingJsonHandler;
+import io.github.hectorvent.floci.services.route53resolver.Route53ResolverJsonHandler;
+import io.github.hectorvent.floci.services.sagemaker.SageMakerJsonHandler;
+import io.github.hectorvent.floci.services.secretsmanager.SecretsManagerJsonHandler;
 import io.github.hectorvent.floci.services.servicecatalog.ServiceCatalogJsonHandler;
 import io.github.hectorvent.floci.services.servicequotas.ServiceQuotasJsonHandler;
-import io.github.hectorvent.floci.services.sagemaker.SageMakerJsonHandler;
 import io.github.hectorvent.floci.services.ssm.Ec2MessagesJsonHandler;
 import io.github.hectorvent.floci.services.ssm.SsmJsonHandler;
+import io.github.hectorvent.floci.services.ssoadmin.SsoAdminJsonHandler;
+import io.github.hectorvent.floci.services.textract.TextractJsonHandler;
+import io.github.hectorvent.floci.services.transcribe.TranscribeJsonHandler;
+import io.github.hectorvent.floci.services.transfer.TransferHandler;
+import io.github.hectorvent.floci.services.translate.TranslateJsonHandler;
+import io.github.hectorvent.floci.services.wafv2.WafV2Handler;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriInfo;
 import org.jboss.logging.Logger;
 
 /**
@@ -106,6 +124,7 @@ public class AwsJson11Controller {
     private final GlueJsonHandler glueJsonHandler;
     private final AthenaJsonHandler athenaJsonHandler;
     private final RedshiftDataJsonHandler redshiftDataJsonHandler;
+    private final RedshiftServerlessJsonHandler redshiftServerlessJsonHandler;
     private final FirehoseJsonHandler firehoseJsonHandler;
     private final ResourceGroupsTaggingJsonHandler resourceGroupsTaggingJsonHandler;
     private final CodeBuildJsonHandler codeBuildJsonHandler;
@@ -162,6 +181,7 @@ public class AwsJson11Controller {
                                EcrJsonHandler ecrJsonHandler, GlueJsonHandler glueJsonHandler,
                                AthenaJsonHandler athenaJsonHandler,
                                RedshiftDataJsonHandler redshiftDataJsonHandler,
+                               RedshiftServerlessJsonHandler redshiftServerlessJsonHandler,
                                FirehoseJsonHandler firehoseJsonHandler,
                                ResourceGroupsTaggingJsonHandler resourceGroupsTaggingJsonHandler,
                                CodeBuildJsonHandler codeBuildJsonHandler,
@@ -222,6 +242,7 @@ public class AwsJson11Controller {
         this.glueJsonHandler = glueJsonHandler;
         this.athenaJsonHandler = athenaJsonHandler;
         this.redshiftDataJsonHandler = redshiftDataJsonHandler;
+        this.redshiftServerlessJsonHandler = redshiftServerlessJsonHandler;
         this.firehoseJsonHandler = firehoseJsonHandler;
         this.resourceGroupsTaggingJsonHandler = resourceGroupsTaggingJsonHandler;
         this.codeBuildJsonHandler = codeBuildJsonHandler;
@@ -267,6 +288,7 @@ public class AwsJson11Controller {
     public Response handle(
             @HeaderParam("X-Amz-Target") String target,
             @Context HttpHeaders httpHeaders,
+            @Context UriInfo uriInfo,
             String body) {
 
         if (target == null) {
@@ -298,28 +320,35 @@ public class AwsJson11Controller {
         }
 
         try {
-            String region = regionResolver.resolveRegion(httpHeaders);
+            String region = regionResolver.getRegion();
+            String authorization = httpHeaders.getHeaderString("Authorization");
+            if (authorization == null || authorization.isBlank()) {
+                authorization = IamEnforcementFilter.requestAuthorization(null, uriInfo.getQueryParameters());
+            }
 
             Response delegated = switch (serviceKey) {
-                case "ssm" -> ssmJsonHandler.handle(action, request, region);
+                case "ssm" -> ssmJsonHandler.handle(
+                        action, request, region, authorization);
                 case "events" -> eventBridgeHandler.handle(action, request, region);
                 case "servicediscovery" -> cloudMapHandler.handle(action, request, region);
                 case "elasticmapreduce" -> emrHandler.handle(action, request, region);
                 case "wafv2" -> wafV2Handler.handle(action, request, region);
                 case "memorydb" -> memoryDbHandler.handle(action, request, region);
                 case "logs" -> cloudWatchLogsHandler.handle(action, request, region);
-                case "secretsmanager" -> secretsManagerJsonHandler.handle(action, request, region);
+                case "secretsmanager" -> secretsManagerJsonHandler.handle(action, request, region, authorization);
                 case "kinesis" -> kinesisJsonHandler.handle(action, request, region);
                 case "kinesisanalytics" -> kinesisAnalyticsV2JsonHandler.handle(action, request, region);
                 case "apigatewayv2" -> apigwV2JsonHandler.handle(action, request, region);
                 case "kms" -> kmsJsonHandler.handle(action, request, region);
                 case "cognito-idp" -> cognitoJsonHandler.handle(action, request, region);
                 case "acm" -> acmJsonHandler.handle(action, request, region);
-                case "ecs" -> ecsJsonHandler.handle(action, request, region);
+                case "ecs" -> ecsJsonHandler.handle(action, request, region, uriInfo.getBaseUri());
                 case "ecr" -> ecrJsonHandler.handle(action, request, region);
                 case "glue" -> glueJsonHandler.handle(action, request, region);
                 case "athena" -> athenaJsonHandler.handle(action, request, region);
                 case "redshift-data" -> redshiftDataJsonHandler.handle(action, request, region);
+                case "redshift-serverless" -> redshiftServerlessJsonHandler.handle(
+                        action, request, region, authorization);
                 case "firehose" -> firehoseJsonHandler.handle(action, request, region);
                 case "tagging" -> resourceGroupsTaggingJsonHandler.handle(action, request, region);
                 case "codebuild" -> codeBuildJsonHandler.handle(action, request, region, regionResolver.getAccountId());

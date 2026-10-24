@@ -675,6 +675,78 @@ class DynamoDbPartiQLEdgeCaseIntegrationTest {
         getItem("ranges").body("Item.t", nullValue());
     }
 
+    @Test
+    @Order(30)
+    void filtersAnUnkeyedIndexReadOnTheIndexView() {
+        request("DynamoDB_20120810.CreateTable", """
+                {
+                  "TableName": "partiql-edge-cases-index-view",
+                  "AttributeDefinitions": [
+                    {"AttributeName":"pk","AttributeType":"S"},
+                    {"AttributeName":"sk","AttributeType":"S"},
+                    {"AttributeName":"gsiPk","AttributeType":"S"},
+                    {"AttributeName":"lsiSk","AttributeType":"S"}
+                  ],
+                  "KeySchema": [
+                    {"AttributeName":"pk","KeyType":"HASH"},
+                    {"AttributeName":"sk","KeyType":"RANGE"}
+                  ],
+                  "GlobalSecondaryIndexes": [{
+                    "IndexName": "gsi-inc",
+                    "KeySchema": [{"AttributeName":"gsiPk","KeyType":"HASH"}],
+                    "Projection": {"ProjectionType":"INCLUDE","NonKeyAttributes":["projattr"]}
+                  }],
+                  "LocalSecondaryIndexes": [{
+                    "IndexName": "lsi-keys",
+                    "KeySchema": [
+                      {"AttributeName":"pk","KeyType":"HASH"},
+                      {"AttributeName":"lsiSk","KeyType":"RANGE"}
+                    ],
+                    "Projection": {"ProjectionType":"KEYS_ONLY"}
+                  }],
+                  "BillingMode": "PAY_PER_REQUEST"
+                }
+                """)
+            .statusCode(200);
+        for (String item : List.of(
+                "\"sk\":{\"S\":\"s1\"},\"gsiPk\":{\"S\":\"y\"},\"lsiSk\":{\"S\":\"k1\"},\"nonproj\":{\"S\":\"np1\"}",
+                "\"sk\":{\"S\":\"s2\"},\"gsiPk\":{\"S\":\"y2\"},\"lsiSk\":{\"S\":\"k2\"},\"nonproj\":{\"S\":\"np2\"}")) {
+            request("DynamoDB_20120810.PutItem",
+                    "{\"TableName\":\"partiql-edge-cases-index-view\",\"Item\":{\"pk\":{\"S\":\"p\"}," + item + "}}")
+                .statusCode(200);
+        }
+        String gsi = "SELECT sk FROM \"partiql-edge-cases-index-view\".\"gsi-inc\" WHERE ";
+        String lsi = "SELECT sk FROM \"partiql-edge-cases-index-view\".\"lsi-keys\" WHERE ";
+
+        statement(gsi + "nonproj='np1'").statusCode(200).body("Items.size()", equalTo(0));
+        statement(lsi + "nonproj='np1'").statusCode(200).body("Items.size()", equalTo(0));
+        statement(gsi + "NOT nonproj='np1'").statusCode(200).body("Items.sk.S", containsInAnyOrder("s1", "s2"));
+        statement(gsi + "(gsiPk='y' AND nonproj='np1') OR (gsiPk='y2')")
+            .statusCode(200)
+            .body("Items.sk.S", containsInAnyOrder("s2"));
+        statement("SELECT sk FROM \"partiql-edge-cases-index-view\" WHERE nonproj='np1'")
+            .statusCode(200)
+            .body("Items.sk.S", containsInAnyOrder("s1"));
+    }
+
+    @Test
+    @Order(31)
+    void checksSelectedColumnsAgainstAGsiProjectionAfterTheWhereClause() {
+        String select = "SELECT zz.a, zz.b, aa FROM \"partiql-edge-cases-index\".\"gsi-inc\"";
+
+        statement(select)
+            .statusCode(400)
+            .body("message", equalTo("One or more parameter values were invalid: "
+                    + "Global secondary index gsi-inc does not project [zz, aa]"));
+        statement(select + " WHERE gsiPk='y' AND yy='1'")
+            .statusCode(400)
+            .body("message", equalTo("One or more parameter values were invalid: Secondary index gsi-inc"
+                    + " does not project one or more filter attributes: [yy]"));
+        statement(select + " WHERE gsiPk = 1")
+            .statusCode(400)
+            .body("message", equalTo("Key attribute's data type should match its data type in table's schema: Key gsiPk"));
+    }
+
     private static ValidatableResponse getItem(String pk) {
         return request("DynamoDB_20120810.GetItem", """
                 {"TableName":"%s","Key":{"pk":{"S":"%s"},"sk":{"S":"1"}},"ConsistentRead":true}

@@ -5,8 +5,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RequestScopes;
+import io.github.hectorvent.floci.core.common.Base64Url;
 import io.github.hectorvent.floci.core.common.Resettable;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -387,7 +389,7 @@ public class MacieService implements Resettable {
 
         boolean organizationAdministrator = callerAccountId.equals(callerState.getAdminAccountId());
         String now = Instant.now().toString();
-        String arn = "arn:aws:macie2:" + region + ":" + callerAccountId + ":member/" + memberAccountId;
+        String arn = AwsArnUtils.Arn.of("macie2", region, callerAccountId, "member/" + memberAccountId).toString();
         MacieMember member = new MacieMember(
                 memberAccountId,
                 callerAccountId,
@@ -510,8 +512,7 @@ public class MacieService implements Resettable {
     }
 
     private static String encodeOffset(int offset) {
-        return Base64.getUrlEncoder().withoutPadding()
-                .encodeToString(Integer.toString(offset).getBytes(StandardCharsets.UTF_8));
+        return Base64Url.encode(Integer.toString(offset));
     }
 
     private static String memberKey(String region, String accountId) {

@@ -80,10 +80,18 @@ public class TransferService {
         server.setTags(tags != null ? tags : new HashMap<>());
         server.setCreationTime(Instant.now());
 
-        putServer(server);
-
-        if (tags != null && !tags.isEmpty()) {
-            putTags("server/" + serverId, tags);
+        try {
+            putServer(server);
+            if (tags != null && !tags.isEmpty()) {
+                putTags("server/" + serverId, tags);
+            }
+        } catch (RuntimeException failure) {
+            try {
+                deleteServerRecord(server);
+            } catch (RuntimeException cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            throw failure;
         }
 
         return server;
@@ -180,6 +188,25 @@ public class TransferService {
         return server;
     }
 
+    /** Reconciles mutable server properties, including ones removed from a CloudFormation template. */
+    public Server replaceServerConfiguration(String serverId,
+                                             List<String> protocols,
+                                             String endpointType,
+                                             Map<String, Object> endpointDetails,
+                                             Map<String, String> identityProviderDetails,
+                                             String loggingRole,
+                                             String securityPolicyName) {
+        Server server = getServer(serverId);
+        server.setProtocols(protocols);
+        server.setEndpointType(endpointType);
+        server.setEndpointDetails(endpointDetails);
+        server.setIdentityProviderDetails(identityProviderDetails);
+        server.setLoggingRole(loggingRole);
+        server.setSecurityPolicyName(securityPolicyName);
+        putServer(server);
+        return server;
+    }
+
     // ── Users ─────────────────────────────────────────────────────────────────
 
     public User createUser(String serverId, String region, String userName, String role,
@@ -270,6 +297,21 @@ public class TransferService {
         user.setSshPublicKeys(keys);
         putUser(user);
         return key;
+    }
+
+    /**
+     * Puts back a key exactly as it was, keeping its id and import date, so a CloudFormation rollback
+     * does not hand callers a new id for a key they already hold. A key already present is left alone.
+     */
+    public void restoreSshPublicKey(String serverId, String userName, SshPublicKey key) {
+        User user = getUser(serverId, userName);
+        List<SshPublicKey> keys = new ArrayList<>(user.getSshPublicKeys() != null ? user.getSshPublicKeys() : List.of());
+        if (keys.stream().anyMatch(k -> k.getSshPublicKeyId().equals(key.getSshPublicKeyId()))) {
+            return;
+        }
+        keys.add(key);
+        user.setSshPublicKeys(keys);
+        putUser(user);
     }
 
     public void deleteSshPublicKey(String serverId, String userName, String sshPublicKeyId) {

@@ -9,8 +9,12 @@ import io.github.hectorvent.floci.lifecycle.inithook.InitializationHook;
 import io.github.hectorvent.floci.lifecycle.inithook.InitializationHooksRunner;
 import io.github.hectorvent.floci.services.appsync.graphql.SchemaCreationWorker;
 import io.github.hectorvent.floci.services.docdb.container.DocDbContainerManager;
+import io.github.hectorvent.floci.services.dynamodb.DynamoDbRuntime;
 import io.github.hectorvent.floci.services.ec2.Ec2MetadataServer;
 import io.github.hectorvent.floci.services.ecr.registry.EcrRegistryManager;
+import io.github.hectorvent.floci.services.ecs.EcsService;
+import io.github.hectorvent.floci.services.ecs.container.EcsTaskRoleCredentialsServer;
+import io.github.hectorvent.floci.services.eks.EksService;
 import io.github.hectorvent.floci.services.elasticache.ElastiCacheMemcachedService;
 import io.github.hectorvent.floci.services.elasticache.ElastiCacheService;
 import io.github.hectorvent.floci.services.elasticache.container.ElastiCacheContainerManager;
@@ -21,14 +25,17 @@ import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.lambda.DynamoDbStreamsEventSourcePoller;
 import io.github.hectorvent.floci.services.lambda.KinesisEventSourcePoller;
 import io.github.hectorvent.floci.services.lambda.SqsEventSourcePoller;
+import io.github.hectorvent.floci.services.lambda.durable.DurableExecutionService;
 import io.github.hectorvent.floci.services.neptune.container.NeptuneContainerManager;
 import io.github.hectorvent.floci.services.neptune.proxy.NeptuneProxyManager;
 import io.github.hectorvent.floci.services.pipes.PipesService;
 import io.github.hectorvent.floci.services.rds.RdsService;
 import io.github.hectorvent.floci.services.rds.container.RdsContainerManager;
 import io.github.hectorvent.floci.services.rds.proxy.RdsProxyManager;
+import io.github.hectorvent.floci.services.redshift.RedshiftDynamoDbZeroEtlConsumer;
 import io.github.hectorvent.floci.services.stepfunctions.StepFunctionsService;
 import io.github.hectorvent.floci.services.timestreaminfluxdb.TimestreamInfluxDbService;
+import io.quarkus.runtime.Quarkus;
 import io.quarkus.runtime.ShutdownDelayInitiatedEvent;
 import io.quarkus.runtime.ShutdownEvent;
 import io.quarkus.runtime.StartupEvent;
@@ -41,6 +48,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
 import org.mockito.Mock;
+import org.mockito.MockMakers;
+import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -51,8 +60,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
@@ -67,7 +76,10 @@ class EmulatorLifecycleTest {
     @Mock private EmulatorConfig config;
     @Mock private EmulatorConfig.StorageConfig storageConfig;
     @Mock private EmulatorConfig.ServicesConfig servicesConfig;
+    @Mock private EmulatorConfig.LambdaServiceConfig lambdaServiceConfig;
     @Mock private EmulatorConfig.Ec2ServiceConfig ec2ServiceConfig;
+    @Mock private EmulatorConfig.EcsServiceConfig ecsServiceConfig;
+    @Mock private EmulatorConfig.EcsTaskRoleCredentialsConfig ecsTaskRoleCredentialsConfig;
     @Mock private EmulatorConfig.EksServiceConfig eksServiceConfig;
     @Mock private EmulatorConfig.ElbV2ServiceConfig elbv2ServiceConfig;
     @Mock private EmulatorConfig.ElbServiceConfig elbServiceConfig;
@@ -92,12 +104,15 @@ class EmulatorLifecycleTest {
     @Mock private EmulatorConfig.TimestreamInfluxDbServiceConfig timestreamInfluxDbServiceConfig;
     @Mock private io.github.hectorvent.floci.services.elbv2.ElbV2Service elbV2Service;
     @Mock private io.github.hectorvent.floci.services.elb.ElbClassicService elbClassicService;
+    @Mock private EcsService ecsService;
+    @Mock private EksService eksService;
     @Mock private InitializationHooksRunner initializationHooksRunner;
     @Mock private SqsEventSourcePoller sqsPoller;
     @Mock private KinesisEventSourcePoller kinesisPoller;
     @Mock private DynamoDbStreamsEventSourcePoller dynamodbStreamsPoller;
     @Mock private PipesService pipesService;
     @Mock private Ec2MetadataServer ec2MetadataServer;
+    @Mock private EcsTaskRoleCredentialsServer ecsTaskRoleCredentialsServer;
     @Mock private EcrRegistryManager ecrRegistryManager;
     @Mock private FlociUiManager flociUiManager;
     @Mock private InitLifecycleState initLifecycleState;
@@ -106,7 +121,10 @@ class EmulatorLifecycleTest {
     @Mock private EmulatorConfig.IamServiceConfig iamServiceConfig;
     @Mock private SchemaCreationWorker schemaCreationWorker;
     @Mock private StepFunctionsService stepFunctionsService;
+    @Mock private DurableExecutionService durableExecutionService;
     @Mock private Instance<ContainerTeardown> containerTeardowns;
+    @Mock private DynamoDbRuntime dynamoDbRuntime;
+    @Mock private RedshiftDynamoDbZeroEtlConsumer redshiftZeroEtlConsumer;
 
     private EmulatorLifecycle emulatorLifecycle;
 
@@ -114,6 +132,10 @@ class EmulatorLifecycleTest {
     void setUp() {
         Mockito.lenient().when(config.services()).thenReturn(servicesConfig);
         Mockito.lenient().when(servicesConfig.ec2()).thenReturn(ec2ServiceConfig);
+        Mockito.lenient().when(servicesConfig.ecs()).thenReturn(ecsServiceConfig);
+        Mockito.lenient().when(ecsServiceConfig.taskRoleCredentials()).thenReturn(ecsTaskRoleCredentialsConfig);
+        Mockito.lenient().when(ecsTaskRoleCredentialsConfig.enabled()).thenReturn(false);
+        Mockito.lenient().when(ecsServiceConfig.enabled()).thenReturn(false);
         Mockito.lenient().when(ec2ServiceConfig.enabled()).thenReturn(false);
         Mockito.lenient().when(servicesConfig.elbv2()).thenReturn(elbv2ServiceConfig);
         Mockito.lenient().when(elbv2ServiceConfig.enabled()).thenReturn(false);
@@ -121,6 +143,8 @@ class EmulatorLifecycleTest {
         Mockito.lenient().when(elastiCacheServiceConfig.enabled()).thenReturn(false);
         Mockito.lenient().when(servicesConfig.elb()).thenReturn(elbServiceConfig);
         Mockito.lenient().when(elbServiceConfig.enabled()).thenReturn(false);
+        Mockito.lenient().when(servicesConfig.lambda()).thenReturn(lambdaServiceConfig);
+        Mockito.lenient().when(lambdaServiceConfig.enabled()).thenReturn(false);
         Mockito.lenient().when(servicesConfig.eks()).thenReturn(eksServiceConfig);
         Mockito.lenient().when(eksServiceConfig.enabled()).thenReturn(false);
         Mockito.lenient().when(servicesConfig.timestreamInfluxdb()).thenReturn(timestreamInfluxDbServiceConfig);
@@ -139,10 +163,12 @@ class EmulatorLifecycleTest {
                 memoryDbContainerManager, memoryDbProxyManager,
                 docDbContainerManager, neptuneContainerManager, neptuneProxyManager,
                 rabbitMqManager, flinkContainerManager, rdsService, timestreamInfluxDbService,
-                elbV2Service, elbClassicService,
+                elbV2Service, elbClassicService, ecsService,
                 initializationHooksRunner, sqsPoller, kinesisPoller, dynamodbStreamsPoller,
-                pipesService, ec2MetadataServer, ecrRegistryManager, flociUiManager, initLifecycleState,
-                schemaCreationWorker, stepFunctionsService, containerTeardowns, persistentPathValidator);
+                pipesService, ec2MetadataServer, ecsTaskRoleCredentialsServer, ecrRegistryManager, flociUiManager, initLifecycleState,
+                schemaCreationWorker, stepFunctionsService, durableExecutionService, containerTeardowns,
+                persistentPathValidator,
+                dynamoDbRuntime, redshiftZeroEtlConsumer, eksService);
         Mockito.lenient().when(containerTeardowns.iterator())
                 .thenReturn(java.util.Collections.emptyIterator());
     }
@@ -162,7 +188,7 @@ class EmulatorLifecycleTest {
 
         emulatorLifecycle.onStart(Mockito.mock(StartupEvent.class));
 
-        var inOrder = Mockito.inOrder(initializationHooksRunner, storageFactory, initLifecycleState,
+        InOrder inOrder = Mockito.inOrder(initializationHooksRunner, storageFactory, initLifecycleState,
                 iamService, rdsService);
         inOrder.verify(initializationHooksRunner).run(InitializationHook.BOOT);
         inOrder.verify(initLifecycleState).markBootCompleted();
@@ -170,6 +196,46 @@ class EmulatorLifecycleTest {
         inOrder.verify(iamService).sweepOrphanedLambdaExecutionRoleSessions();
         inOrder.verify(iamService).sweepOrphanedEc2InstanceSessions();
         inOrder.verify(rdsService).restorePersistedRuntime();
+    }
+
+    @Test
+    void startsTheDynamoDbBackendAfterStorageLoadAndBeforeItsStreamConsumers() {
+        stubStorageConfig();
+        when(initializationHooksRunner.hasHooks(InitializationHook.START)).thenReturn(false);
+        when(initializationHooksRunner.hasHooks(InitializationHook.READY)).thenReturn(false);
+
+        emulatorLifecycle.onStart(Mockito.mock(StartupEvent.class));
+
+        InOrder inOrder = Mockito.inOrder(storageFactory, dynamoDbRuntime, dynamodbStreamsPoller, pipesService,
+                redshiftZeroEtlConsumer);
+        inOrder.verify(storageFactory).loadAll();
+        inOrder.verify(dynamoDbRuntime).start();
+        inOrder.verify(dynamodbStreamsPoller).startPersistedPollers();
+        inOrder.verify(pipesService).startPersistedPollers();
+        inOrder.verify(redshiftZeroEtlConsumer).startPersistedIntegrations();
+    }
+
+    @Test
+    void stopsDynamoDbStreamConsumersBeforeTheFlushAndTheBackendBeforeStorageShutdown() {
+        emulatorLifecycle.onStop(Mockito.mock(ShutdownEvent.class));
+
+        InOrder inOrder = Mockito.inOrder(dynamodbStreamsPoller, redshiftZeroEtlConsumer, storageFactory,
+                flociUiManager, dynamoDbRuntime);
+        inOrder.verify(dynamodbStreamsPoller).shutdown();
+        inOrder.verify(redshiftZeroEtlConsumer).shutdown();
+        inOrder.verify(storageFactory).flushAll();
+        inOrder.verify(flociUiManager).shutdown();
+        inOrder.verify(dynamoDbRuntime).stop();
+        inOrder.verify(storageFactory).shutdownAll();
+    }
+
+    @Test
+    void stopsTheZeroEtlConsumerWhenTheStreamsPollerShutdownFails() {
+        doThrow(new IllegalStateException("poller shutdown failed")).when(dynamodbStreamsPoller).shutdown();
+
+        emulatorLifecycle.onStop(Mockito.mock(ShutdownEvent.class));
+
+        verify(redshiftZeroEtlConsumer).shutdown();
     }
 
     @Test
@@ -185,7 +251,7 @@ class EmulatorLifecycleTest {
 
         emulatorLifecycle.onStart(Mockito.mock(StartupEvent.class));
 
-        var inOrder = Mockito.inOrder(storageFactory, elbV2Service);
+        InOrder inOrder = Mockito.inOrder(storageFactory, elbV2Service);
         inOrder.verify(storageFactory).loadAll();
         inOrder.verify(elbV2Service).restorePersistedRuntime();
     }
@@ -200,6 +266,130 @@ class EmulatorLifecycleTest {
         emulatorLifecycle.onStart(Mockito.mock(StartupEvent.class));
 
         Mockito.verify(elbV2Service, Mockito.never()).restorePersistedRuntime();
+    }
+
+    @Test
+    void restoresPersistedEcsServicesAtBootAfterStorageAndLoadBalancers() {
+        // EcsService is created lazily, and creating it is what loads its stores and starts the
+        // reconciler. Without this call a restart leaves every persisted service without tasks
+        // until the first ECS request.
+        stubStorageConfig();
+        when(elbv2ServiceConfig.enabled()).thenReturn(true);
+        when(ecsServiceConfig.enabled()).thenReturn(true);
+        when(initializationHooksRunner.hasHooks(InitializationHook.START)).thenReturn(false);
+        when(initializationHooksRunner.hasHooks(InitializationHook.READY)).thenReturn(false);
+
+        emulatorLifecycle.onStart(Mockito.mock(StartupEvent.class));
+
+        InOrder inOrder = Mockito.inOrder(storageFactory, elbV2Service, ecsService);
+        inOrder.verify(storageFactory).loadAll();
+        inOrder.verify(elbV2Service).restorePersistedRuntime();
+        inOrder.verify(ecsService).restorePersistedRuntime();
+    }
+
+    @Test
+    void restoresPersistedEksClustersOnceTheHttpPortListens() throws Exception {
+        stubStorageConfig();
+        when(eksServiceConfig.enabled()).thenReturn(true);
+        when(eksServiceConfig.mock()).thenReturn(false);
+        when(initializationHooksRunner.hasHooks(InitializationHook.START)).thenReturn(false);
+        when(initializationHooksRunner.hasHooks(InitializationHook.READY)).thenReturn(false);
+
+        emulatorLifecycle.onStart(Mockito.mock(StartupEvent.class));
+        verify(eksService, never()).restorePersistedRuntime();
+
+        emulatorLifecycle.onHttpStart(new HttpServerStart(new HttpServerOptions().setPort(4566)));
+        verify(eksService).restorePersistedRuntime();
+    }
+
+    @Test
+    void restoresPersistedEksClustersOnlyOnceTheImdsServerHasStarted() throws Exception {
+        stubStorageConfig();
+        when(eksServiceConfig.enabled()).thenReturn(true);
+        when(eksServiceConfig.mock()).thenReturn(false);
+        when(eksServiceConfig.imds()).thenReturn(true);
+        CompletableFuture<Void> imdsStarted = new CompletableFuture<>();
+        when(ec2MetadataServer.start()).thenReturn(imdsStarted);
+        when(initializationHooksRunner.hasHooks(InitializationHook.START)).thenReturn(false);
+        when(initializationHooksRunner.hasHooks(InitializationHook.READY)).thenReturn(false);
+        emulatorLifecycle.onStart(Mockito.mock(StartupEvent.class));
+
+        Thread httpStart = Thread.ofVirtual().start(() ->
+                emulatorLifecycle.onHttpStart(new HttpServerStart(new HttpServerOptions().setPort(4566))));
+        verify(eksService, Mockito.after(300).never()).restorePersistedRuntime();
+
+        imdsStarted.complete(null);
+        httpStart.join(5000);
+        verify(eksService).restorePersistedRuntime();
+    }
+
+    @Test
+    void restoresPersistedEksClustersAfterTheStartAndReadyHooks() throws Exception {
+        when(eksServiceConfig.enabled()).thenReturn(true);
+        when(eksServiceConfig.mock()).thenReturn(false);
+        when(initializationHooksRunner.hasHooks(InitializationHook.START)).thenReturn(true);
+        when(initializationHooksRunner.hasHooks(InitializationHook.READY)).thenReturn(true);
+
+        emulatorLifecycle.onHttpStart(new HttpServerStart(new HttpServerOptions().setPort(4566)));
+
+        InOrder inOrder = Mockito.inOrder(initializationHooksRunner, initLifecycleState, eksService);
+        inOrder.verify(initializationHooksRunner).run(InitializationHook.START);
+        inOrder.verify(initializationHooksRunner).run(InitializationHook.READY);
+        inOrder.verify(initLifecycleState).markReadyCompleted();
+        inOrder.verify(eksService).restorePersistedRuntime();
+    }
+
+    @Test
+    void aFailedEksRestoreLeavesTheEmulatorReady() throws Exception {
+        when(eksServiceConfig.enabled()).thenReturn(true);
+        when(eksServiceConfig.mock()).thenReturn(false);
+        when(initializationHooksRunner.hasHooks(InitializationHook.START)).thenReturn(true);
+        when(initializationHooksRunner.hasHooks(InitializationHook.READY)).thenReturn(false);
+        doThrow(new IllegalStateException("corrupt cluster record")).when(eksService).restorePersistedRuntime();
+
+        try (MockedStatic<Quarkus> quarkus = Mockito.mockStatic(Quarkus.class,
+                Mockito.withSettings().mockMaker(MockMakers.INLINE))) {
+            emulatorLifecycle.onHttpStart(new HttpServerStart(new HttpServerOptions().setPort(4566)));
+            quarkus.verify(Quarkus::asyncExit, never());
+        }
+        verify(initLifecycleState).markReadyCompleted();
+    }
+
+    @Test
+    void leavesEksUntouchedAtBootWhenEksIsDisabled() throws Exception {
+        stubStorageConfig();
+        when(initializationHooksRunner.hasHooks(InitializationHook.START)).thenReturn(false);
+        when(initializationHooksRunner.hasHooks(InitializationHook.READY)).thenReturn(false);
+
+        emulatorLifecycle.onStart(Mockito.mock(StartupEvent.class));
+        emulatorLifecycle.onHttpStart(new HttpServerStart(new HttpServerOptions().setPort(4566)));
+
+        verify(eksService, Mockito.never()).restorePersistedRuntime();
+    }
+
+    @Test
+    void leavesEksUntouchedAtBootInMockMode() throws Exception {
+        stubStorageConfig();
+        when(eksServiceConfig.enabled()).thenReturn(true);
+        when(eksServiceConfig.mock()).thenReturn(true);
+        when(initializationHooksRunner.hasHooks(InitializationHook.START)).thenReturn(false);
+        when(initializationHooksRunner.hasHooks(InitializationHook.READY)).thenReturn(false);
+
+        emulatorLifecycle.onStart(Mockito.mock(StartupEvent.class));
+        emulatorLifecycle.onHttpStart(new HttpServerStart(new HttpServerOptions().setPort(4566)));
+
+        verify(eksService, Mockito.never()).restorePersistedRuntime();
+    }
+
+    @Test
+    void leavesEcsUntouchedAtBootWhenEcsIsDisabled() {
+        stubStorageConfig();
+        when(initializationHooksRunner.hasHooks(InitializationHook.START)).thenReturn(false);
+        when(initializationHooksRunner.hasHooks(InitializationHook.READY)).thenReturn(false);
+
+        emulatorLifecycle.onStart(Mockito.mock(StartupEvent.class));
+
+        verify(ecsService, never()).restorePersistedRuntime();
     }
 
     @Test
@@ -244,7 +434,7 @@ class EmulatorLifecycleTest {
 
         emulatorLifecycle.onStart(Mockito.mock(StartupEvent.class));
 
-        var inOrder = Mockito.inOrder(storageFactory, schemaCreationWorker);
+        InOrder inOrder = Mockito.inOrder(storageFactory, schemaCreationWorker);
         inOrder.verify(storageFactory).loadAll();
         inOrder.verify(schemaCreationWorker).recoverOrphans();
         inOrder.verify(schemaCreationWorker).rehydrateSchemas();
@@ -259,7 +449,7 @@ class EmulatorLifecycleTest {
 
         emulatorLifecycle.onStart(Mockito.mock(StartupEvent.class));
 
-        var inOrder = Mockito.inOrder(storageFactory, stepFunctionsService);
+        InOrder inOrder = Mockito.inOrder(storageFactory, stepFunctionsService);
         inOrder.verify(storageFactory).loadAll();
         inOrder.verify(stepFunctionsService).abortAbandonedExecutions();
     }
@@ -273,7 +463,7 @@ class EmulatorLifecycleTest {
 
         emulatorLifecycle.onStart(Mockito.mock(StartupEvent.class));
 
-        var inOrder = Mockito.inOrder(initLifecycleState, persistentPathValidator, storageFactory);
+        InOrder inOrder = Mockito.inOrder(initLifecycleState, persistentPathValidator, storageFactory);
         inOrder.verify(initLifecycleState).markBootCompleted();
         inOrder.verify(persistentPathValidator).validateAtBoot();
         inOrder.verify(storageFactory).loadAll();
@@ -324,7 +514,6 @@ class EmulatorLifecycleTest {
     @Test
     @DisplayName("onHttpStart on port 4566 (non-TLS) triggers hook execution and marks lifecycle completed")
     void onHttpStart_nonTls_triggersHooksOnPort4566() throws IOException, InterruptedException {
-        when(tlsConfig.enabled()).thenReturn(false);
         when(initializationHooksRunner.hasHooks(InitializationHook.START)).thenReturn(true);
         when(initializationHooksRunner.hasHooks(InitializationHook.READY)).thenReturn(false);
 
@@ -338,7 +527,7 @@ class EmulatorLifecycleTest {
     @DisplayName("onHttpStart on a non-default floci.port (non-TLS) triggers hook execution (#2437)")
     void onHttpStart_nonTls_triggersHooksOnCustomPort() throws IOException, InterruptedException {
         Mockito.lenient().when(config.port()).thenReturn(4577);
-        when(tlsConfig.enabled()).thenReturn(false);
+        emulatorLifecycle.httpPort = 4577;
         when(initializationHooksRunner.hasHooks(InitializationHook.START)).thenReturn(true);
         when(initializationHooksRunner.hasHooks(InitializationHook.READY)).thenReturn(true);
 
@@ -351,9 +540,22 @@ class EmulatorLifecycleTest {
     }
 
     @Test
+    @DisplayName("onHttpStart on quarkus.http.port overridden alone (non-TLS) triggers hook execution")
+    void onHttpStart_nonTls_triggersHooksOnHttpPortOverride() throws IOException, InterruptedException {
+        // QUARKUS_HTTP_PORT=4811 with floci.port left at 4566: the server listens on 4811.
+        emulatorLifecycle.httpPort = 4811;
+        when(initializationHooksRunner.hasHooks(InitializationHook.START)).thenReturn(true);
+        when(initializationHooksRunner.hasHooks(InitializationHook.READY)).thenReturn(false);
+
+        emulatorLifecycle.onHttpStart(new HttpServerStart(new HttpServerOptions().setPort(4811)));
+
+        verify(initializationHooksRunner).run(InitializationHook.START);
+        verify(initLifecycleState).markStartCompleted();
+    }
+
+    @Test
     @DisplayName("onHttpStart on wrong port (non-TLS) is ignored")
     void onHttpStart_nonTls_ignoresWrongPort() throws IOException, InterruptedException {
-        when(tlsConfig.enabled()).thenReturn(false);
 
         emulatorLifecycle.onHttpStart(new HttpServerStart(new HttpServerOptions().setPort(4510)));
 
@@ -364,7 +566,8 @@ class EmulatorLifecycleTest {
     @Test
     @DisplayName("onHttpStart on port 4510 (TLS mode) triggers hook execution and marks lifecycle completed")
     void onHttpStart_tls_triggersHooksOnBackendPort4510() throws IOException, InterruptedException {
-        when(tlsConfig.enabled()).thenReturn(true);
+        // TlsConfigSource pins quarkus.http.port to the internal HTTP backend.
+        emulatorLifecycle.httpPort = 4510;
         when(initializationHooksRunner.hasHooks(InitializationHook.START)).thenReturn(true);
         when(initializationHooksRunner.hasHooks(InitializationHook.READY)).thenReturn(false);
 
@@ -377,12 +580,36 @@ class EmulatorLifecycleTest {
     @Test
     @DisplayName("onHttpStart on port 4566 (TLS mode) is ignored — public port is not the backend port")
     void onHttpStart_tls_ignoresPublicPort4566() throws IOException, InterruptedException {
-        when(tlsConfig.enabled()).thenReturn(true);
+        // TlsConfigSource pins quarkus.http.port to the internal HTTP backend.
+        emulatorLifecycle.httpPort = 4510;
 
         emulatorLifecycle.onHttpStart(new HttpServerStart(new HttpServerOptions().setPort(4566)));
 
         verify(initializationHooksRunner, never()).run(InitializationHook.START);
         verify(initLifecycleState, never()).markStartCompleted();
+    }
+
+    @Test
+    @DisplayName("onHttpStart exits the process when a startup hook is interrupted")
+    void onHttpStart_hookInterrupted_exitsProcess() throws IOException, InterruptedException {
+        when(initializationHooksRunner.hasHooks(InitializationHook.START)).thenReturn(true);
+        when(initializationHooksRunner.hasHooks(InitializationHook.READY)).thenReturn(false);
+        doThrow(new InterruptedException("interrupted"))
+                .when(initializationHooksRunner).run(InitializationHook.START);
+
+        Thread.interrupted();
+        try (MockedStatic<Quarkus> quarkus = Mockito.mockStatic(Quarkus.class,
+                Mockito.withSettings().mockMaker(MockMakers.INLINE))) {
+            try {
+                emulatorLifecycle.onHttpStart(new HttpServerStart(new HttpServerOptions().setPort(4566)));
+
+                assertTrue(Thread.currentThread().isInterrupted(),
+                        "Interrupt flag must be restored so the JVM sees the request to stop");
+            } finally {
+                Thread.interrupted();
+            }
+            quarkus.verify(Quarkus::asyncExit);
+        }
     }
 
     @Test
@@ -462,7 +689,7 @@ class EmulatorLifecycleTest {
         // shutdown can't be cut off by the SIGTERM grace window before data is persisted
         // (regression guard for issue #1521). shutdownAll() still runs last to stop the flush
         // schedulers and capture any shutdown-time writes.
-        var inOrder = Mockito.inOrder(storageFactory, rdsContainerManager, elastiCacheContainerManager);
+        InOrder inOrder = Mockito.inOrder(storageFactory, rdsContainerManager, elastiCacheContainerManager);
         inOrder.verify(storageFactory).flushAll();
         inOrder.verify(elastiCacheContainerManager).stopAll();
         inOrder.verify(rdsContainerManager).stopAll();
@@ -623,7 +850,6 @@ class EmulatorLifecycleTest {
     @Test
     @DisplayName("Should emit the parity \"Ready.\" line on the deferred onHttpStart ready path too")
     void shouldEmitParityReadyLineOnHttpStartPath() throws IOException, InterruptedException {
-        when(tlsConfig.enabled()).thenReturn(false);
         when(initializationHooksRunner.hasHooks(InitializationHook.START)).thenReturn(true);
         when(initializationHooksRunner.hasHooks(InitializationHook.READY)).thenReturn(false);
 
@@ -664,5 +890,44 @@ class EmulatorLifecycleTest {
 
         emulatorLifecycle.onStart(Mockito.mock(StartupEvent.class));
         verify(ec2MetadataServer, never()).start();
+    }
+
+    @Test
+    void shouldStartAndStopEcsTaskRoleCredentialsServerWhenEnabled() {
+        stubStorageConfig();
+        when(ecsTaskRoleCredentialsConfig.enabled()).thenReturn(true);
+        when(ecsTaskRoleCredentialsServer.start()).thenReturn(CompletableFuture.completedFuture(null));
+        when(initializationHooksRunner.hasHooks(InitializationHook.START)).thenReturn(false);
+        when(initializationHooksRunner.hasHooks(InitializationHook.READY)).thenReturn(false);
+
+        emulatorLifecycle.onStart(Mockito.mock(StartupEvent.class));
+        verify(ecsTaskRoleCredentialsServer).start();
+
+        emulatorLifecycle.onStop(Mockito.mock(ShutdownEvent.class));
+        verify(ecsTaskRoleCredentialsServer).stop();
+    }
+
+    @Test
+    void shouldNotStartEcsTaskRoleCredentialsServerWhenDisabled() {
+        stubStorageConfig();
+        when(initializationHooksRunner.hasHooks(InitializationHook.START)).thenReturn(false);
+        when(initializationHooksRunner.hasHooks(InitializationHook.READY)).thenReturn(false);
+
+        emulatorLifecycle.onStart(Mockito.mock(StartupEvent.class));
+        verify(ecsTaskRoleCredentialsServer, never()).start();
+
+        emulatorLifecycle.onStop(Mockito.mock(ShutdownEvent.class));
+        verify(ecsTaskRoleCredentialsServer, never()).stop();
+    }
+
+    @Test
+    void shouldSweepOrphanedEcsTaskRoleSessionsOnStartup() {
+        stubStorageConfig();
+        when(initializationHooksRunner.hasHooks(InitializationHook.START)).thenReturn(false);
+        when(initializationHooksRunner.hasHooks(InitializationHook.READY)).thenReturn(false);
+
+        emulatorLifecycle.onStart(Mockito.mock(StartupEvent.class));
+
+        verify(iamService).sweepOrphanedEcsTaskRoleSessions();
     }
 }

@@ -14,9 +14,13 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Precomputes denied field coordinates for the GraphQL sidecar using the same directive
- * requirements as in-process authorization. Resolver requests use {@link AuthorizationDataFetcher}
- * so denied fields never invoke their data-source callbacks.
+ * Precomputes which {@code (typeName, fieldName)} coordinates a query must have redacted
+ * before it reaches the (AWS-agnostic) GraphQL sidecar's {@code /v1/execute}, what used to be
+ * live per-field checks made during in-process execution, back when execution happened in
+ * Floci's own process (issue #2917). Takes the {@link PlanResult} from {@code
+ * GraphqlSidecarClient#plan} (the caller fetches it once and reuses it for the subscription
+ * check too) and hands its fields to {@link AppSyncAuthRequirements} for the actual "what does
+ * {@code @aws_auth} mean" interpretation.
  */
 @ApplicationScoped
 public class SidecarFieldAuthorizationPlanner {

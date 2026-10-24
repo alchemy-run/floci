@@ -1,20 +1,10 @@
 package io.github.hectorvent.floci.services.floci.ui;
 
-import java.io.Closeable;
-import java.net.HttpURLConnection;
-import java.net.URI;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.regex.Pattern;
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.dockerjava.api.exception.DockerClientException;
+import com.github.dockerjava.api.exception.NotFoundException;
+import com.github.dockerjava.api.model.Container;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
@@ -30,12 +20,23 @@ import io.github.hectorvent.floci.core.common.docker.CurrentContainerNetworkReso
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
 import io.github.hectorvent.floci.core.common.docker.LaunchedContainerAwsEnv;
 import io.github.hectorvent.floci.services.iam.model.SessionCreds;
-import com.github.dockerjava.api.exception.DockerClientException;
-import com.github.dockerjava.api.exception.NotFoundException;
-import com.github.dockerjava.api.model.Container;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
+
+import java.io.Closeable;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URI;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Pattern;
 
 /**
  * Manages the lifecycle of the web-console sidecar container, the browser-facing Floci console.
@@ -174,10 +175,20 @@ public class FlociUiManager {
         this.lastError = null;
         String image = config.services().ui().image();
         try {
+            // Before the image pull: a rejected bind address is a configuration error, and
+            // downloading a console that is not going to be published is wasted work.
+            String bindAddress = resolveBindAddress(config.services().ui().bindAddress());
             this.profile = resolveProfile(image);
             String name = ContainerStorageHelper.dockerName(config, config.services().ui().containerName());
 
+            // The UI container survives shutdown by design and is adopted BY NAME, so look up the
+            // pre-migration name too. Otherwise an upgraded emulator orphans the old container
+            // while it still holds the fixed UI host port, and the new one cannot bind.
             Optional<Container> existing = lifecycleManager.findByName(name);
+            if (existing.isEmpty()) {
+                existing = lifecycleManager.findByName(ContainerStorageHelper.legacyDockerName(
+                        config, config.services().ui().containerName()));
+            }
             if (existing.isPresent()
                     && !replaceIfNotRunning(existing.get())
                     && !replaceIfEndpointDrifted(existing.get())) {
@@ -190,7 +201,7 @@ public class FlociUiManager {
             ContainerBuilder.Builder specBuilder = containerBuilder.newContainer(image)
                     .withName(name)
                     .withEnv(injectedEnv(profile))
-                    .withPortBinding(internalPort, chosenPort)
+                    .withPortBinding(internalPort, chosenPort, bindAddress)
                     .withDockerNetwork(resolveDockerNetwork())
                     .withLogRotation();
             if (!containerDetector.isRunningInContainer()) {
@@ -205,8 +216,13 @@ public class FlociUiManager {
             this.probeUrl = resolveProbeUrl(profile, endpoint, hostPort);
             this.started = true;
             this.lastError = null;
-            LOG.infov("Started web console sidecar {0} from {1} on host port {2}",
-                    name, image, String.valueOf(hostPort));
+            if (bindAddress == null) {
+                LOG.infov("Started web console sidecar {0} from {1} on host port {2}",
+                        name, image, String.valueOf(hostPort));
+            } else {
+                LOG.infov("Started web console sidecar {0} from {1} on {2}:{3}",
+                        name, image, bindAddress, String.valueOf(hostPort));
+            }
             attachLogStream(false);
         } catch (IllegalStateException e) {
             // replaceIfEndpointDrifted() records its own specific message for a container with an
@@ -500,6 +516,31 @@ public class FlociUiManager {
     }
 
     /**
+     * The host interface the console is published on, or null to publish on every interface.
+     *
+     * <p>Unset is the default and is Docker's own behaviour, which is what the console has always
+     * had. Setting it is how an operator who keeps Floci's own port on loopback keeps the console
+     * there too: the console is unauthenticated and drives every emulated service, so a wildcard
+     * publish would hand out an authority the API mapping deliberately withholds.
+     *
+     * <p>A blank value is an error rather than a silent fall back to the wildcard: an operator who
+     * set the key meant to choose an address, and substituting a different one is how a binding
+     * ends up somewhere nobody intended.
+     */
+    static String resolveBindAddress(Optional<String> configured) {
+        if (configured.isEmpty()) {
+            return null;
+        }
+        String value = configured.get().trim();
+        if (value.isEmpty()) {
+            throw new IllegalStateException(
+                    "floci.services.ui.bind-address is set but blank: remove it to publish the "
+                            + "console on every interface, or give it a host address to bind.");
+        }
+        return value;
+    }
+
+    /**
      * Whether an adoption candidate must be destroyed and recreated rather than adopted.
      *
      * <p>Separate from {@link #endpointDrifted} because the two "no endpoint here" cases are not
@@ -618,7 +659,7 @@ public class FlociUiManager {
                 return new RuntimeProbe(true, null);
             }
             JsonNode health;
-            try (var input = conn.getInputStream()) {
+            try (InputStream input = conn.getInputStream()) {
                 health = objectMapper.readTree(input);
             }
             String reported = health.path(console.healthReadyField()).asText("");
@@ -738,7 +779,8 @@ public class FlociUiManager {
         this.containerId = existing.getId();
         try {
             int internalPort = profile.internalPort();
-            ContainerInfo info = lifecycleManager.adopt(containerId, List.of(internalPort));
+            ContainerInfo info = lifecycleManager.adopt(containerId, List.of(internalPort),
+                    containerBuilder.resolveDockerNetwork(resolveDockerNetwork()));
             EndpointInfo endpoint = info.getEndpoint(internalPort);
             this.hostPort = resolveHostPort(endpoint, config.services().ui().port());
             this.probeUrl = resolveProbeUrl(profile, endpoint, hostPort);

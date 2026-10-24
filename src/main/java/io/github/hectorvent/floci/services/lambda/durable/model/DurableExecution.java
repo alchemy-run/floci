@@ -1,80 +1,150 @@
 package io.github.hectorvent.floci.services.lambda.durable.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
- * A Lambda Durable Execution: one named, checkpointed run of a durable
- * function. The operation log (EXECUTION operation first, then every
- * checkpointed STEP / WAIT / CALLBACK / CONTEXT operation) is the source of
- * truth the client SDK replays against on each (re-)invocation.
+ * A durable execution with its checkpointed operations and history. One stored object per
+ * execution, so a checkpoint persists operations, history and the invocation lane together.
+ * Timestamps are epoch millis.
  */
 @RegisterForReflection
+@JsonIgnoreProperties(ignoreUnknown = true)
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class DurableExecution {
 
-    public static final String STATUS_RUNNING = "RUNNING";
-    public static final String STATUS_SUCCEEDED = "SUCCEEDED";
-    public static final String STATUS_FAILED = "FAILED";
-    public static final String STATUS_TIMED_OUT = "TIMED_OUT";
-    public static final String STATUS_STOPPED = "STOPPED";
-
     private String executionArn;
-    private String executionName;
-    private String region;
+    /** Last ARN segment and the id of the EXECUTION operation. The SDK finds that operation by it. */
+    private String executionId;
+    private String name;
     private String accountId;
-    /** Short function name (no qualifier). */
+    private String region;
     private String functionName;
-    /** Version or alias captured at start, or null. */
-    private String qualifier;
-    /** Qualified function ARN reported by Get/List APIs. */
+    /** Version qualified, as reported in FunctionArn. */
     private String functionArn;
-
-    private String status = STATUS_RUNNING;
-    /** Raw customer input payload (the Invoke request body). */
+    private String version;
+    private DurableExecutionStatus status = DurableExecutionStatus.RUNNING;
+    private long startTimestamp;
+    private Long endTimestamp;
     private String inputPayload;
-    /** Final result payload when SUCCEEDED. */
     private String result;
-    /** AWS ErrorObject shape when FAILED / STOPPED / TIMED_OUT. */
-    private Map<String, Object> error;
+    private DurableErrorObject error;
+    private int executionTimeoutSeconds;
+    private int retentionPeriodInDays;
+    private Long executionDeadline;
+    private Long retentionDeadline;
+    private int maxResultBytes;
+    /** Creation order. The EXECUTION operation is first. */
+    private LinkedHashMap<String, DurableOperation> operations = new LinkedHashMap<>();
+    private List<DurableHistoryEvent> history = new ArrayList<>();
+    private long changeSequence;
+    /** Change position the handler has been shown. NewExecutionState carries everything newer. */
+    private long seenSequence;
+    private long checkpointSequence;
+    private String currentInvocationId;
+    private Long currentInvocationStartedAt;
+    private boolean reinvokeRequested;
+    private int consecutiveInvocationFailures;
+    private Long nextInvocationAttemptAt;
+    private DurableCheckpointReplay lastCheckpoint;
+    /** Set on an execution a chained invoke started. Its close completes that operation of the parent. */
+    private String parentExecutionArn;
+    private String parentOperationId;
 
-    private long startTimestampMillis;
-    private Long endTimestampMillis;
+    public DurableExecution() {
+    }
 
-    /** Token the currently-outstanding invocation must checkpoint with. */
-    private String checkpointToken;
+    @JsonIgnore
+    public boolean isClosed() {
+        return status.isClosed();
+    }
 
-    /** Consecutive invocation-level failures (reset on a clean PENDING/terminal). */
-    private int invocationFailures;
+    @JsonIgnore
+    public boolean hasUnseenChanges() {
+        return changeSequence > seenSequence;
+    }
 
-    /** Ordered operation log; the EXECUTION operation is always first. */
-    private List<DurableOperation> operations = new ArrayList<>();
+    /** True while a wait, a step retry, a callback or a chained invoke is still pending. */
+    @JsonIgnore
+    public boolean hasPendingOperations() {
+        for (DurableOperation operation : operations.values()) {
+            DurableOperationStatus operationStatus = operation.getStatus();
+            switch (operation.getType()) {
+                case WAIT -> {
+                    if (operationStatus == DurableOperationStatus.STARTED) {
+                        return true;
+                    }
+                }
+                case STEP -> {
+                    if (operationStatus == DurableOperationStatus.PENDING
+                            || operationStatus == DurableOperationStatus.READY) {
+                        return true;
+                    }
+                }
+                case CALLBACK, CHAINED_INVOKE -> {
+                    if (operationStatus == DurableOperationStatus.STARTED) {
+                        return true;
+                    }
+                }
+                default -> {
+                }
+            }
+        }
+        return false;
+    }
+
+    public long nextChangeSequence() {
+        changeSequence++;
+        return changeSequence;
+    }
+
+    public DurableHistoryEvent appendEvent(String eventType, long timestamp) {
+        DurableHistoryEvent event = new DurableHistoryEvent();
+        event.setEventId(history.size() + 1L);
+        event.setEventType(eventType);
+        event.setEventTimestamp(timestamp);
+        history.add(event);
+        return event;
+    }
 
     public String getExecutionArn() { return executionArn; }
     public void setExecutionArn(String executionArn) { this.executionArn = executionArn; }
 
-    public String getExecutionName() { return executionName; }
-    public void setExecutionName(String executionName) { this.executionName = executionName; }
+    public String getExecutionId() { return executionId; }
+    public void setExecutionId(String executionId) { this.executionId = executionId; }
 
-    public String getRegion() { return region; }
-    public void setRegion(String region) { this.region = region; }
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
 
     public String getAccountId() { return accountId; }
     public void setAccountId(String accountId) { this.accountId = accountId; }
 
+    public String getRegion() { return region; }
+    public void setRegion(String region) { this.region = region; }
+
     public String getFunctionName() { return functionName; }
     public void setFunctionName(String functionName) { this.functionName = functionName; }
-
-    public String getQualifier() { return qualifier; }
-    public void setQualifier(String qualifier) { this.qualifier = qualifier; }
 
     public String getFunctionArn() { return functionArn; }
     public void setFunctionArn(String functionArn) { this.functionArn = functionArn; }
 
-    public String getStatus() { return status; }
-    public void setStatus(String status) { this.status = status; }
+    public String getVersion() { return version; }
+    public void setVersion(String version) { this.version = version; }
+
+    public DurableExecutionStatus getStatus() { return status; }
+    public void setStatus(DurableExecutionStatus status) { this.status = status; }
+
+    public long getStartTimestamp() { return startTimestamp; }
+    public void setStartTimestamp(long startTimestamp) { this.startTimestamp = startTimestamp; }
+
+    public Long getEndTimestamp() { return endTimestamp; }
+    public void setEndTimestamp(Long endTimestamp) { this.endTimestamp = endTimestamp; }
 
     public String getInputPayload() { return inputPayload; }
     public void setInputPayload(String inputPayload) { this.inputPayload = inputPayload; }
@@ -82,34 +152,68 @@ public class DurableExecution {
     public String getResult() { return result; }
     public void setResult(String result) { this.result = result; }
 
-    public Map<String, Object> getError() { return error; }
-    public void setError(Map<String, Object> error) { this.error = error; }
+    public DurableErrorObject getError() { return error; }
+    public void setError(DurableErrorObject error) { this.error = error; }
 
-    public long getStartTimestampMillis() { return startTimestampMillis; }
-    public void setStartTimestampMillis(long startTimestampMillis) { this.startTimestampMillis = startTimestampMillis; }
-
-    public Long getEndTimestampMillis() { return endTimestampMillis; }
-    public void setEndTimestampMillis(Long endTimestampMillis) { this.endTimestampMillis = endTimestampMillis; }
-
-    public String getCheckpointToken() { return checkpointToken; }
-    public void setCheckpointToken(String checkpointToken) { this.checkpointToken = checkpointToken; }
-
-    public int getInvocationFailures() { return invocationFailures; }
-    public void setInvocationFailures(int invocationFailures) { this.invocationFailures = invocationFailures; }
-
-    public List<DurableOperation> getOperations() { return operations; }
-    public void setOperations(List<DurableOperation> operations) { this.operations = operations; }
-
-    public boolean isRunning() {
-        return STATUS_RUNNING.equals(status);
+    public int getExecutionTimeoutSeconds() { return executionTimeoutSeconds; }
+    public void setExecutionTimeoutSeconds(int executionTimeoutSeconds) {
+        this.executionTimeoutSeconds = executionTimeoutSeconds;
     }
 
-    public DurableOperation findOperation(String id) {
-        for (DurableOperation op : operations) {
-            if (op.getId().equals(id)) {
-                return op;
-            }
-        }
-        return null;
+    public int getRetentionPeriodInDays() { return retentionPeriodInDays; }
+    public void setRetentionPeriodInDays(int retentionPeriodInDays) { this.retentionPeriodInDays = retentionPeriodInDays; }
+
+    public Long getExecutionDeadline() { return executionDeadline; }
+    public void setExecutionDeadline(Long executionDeadline) { this.executionDeadline = executionDeadline; }
+
+    public Long getRetentionDeadline() { return retentionDeadline; }
+    public void setRetentionDeadline(Long retentionDeadline) { this.retentionDeadline = retentionDeadline; }
+
+    public int getMaxResultBytes() { return maxResultBytes; }
+    public void setMaxResultBytes(int maxResultBytes) { this.maxResultBytes = maxResultBytes; }
+
+    public LinkedHashMap<String, DurableOperation> getOperations() { return operations; }
+    public void setOperations(LinkedHashMap<String, DurableOperation> operations) { this.operations = operations; }
+
+    public List<DurableHistoryEvent> getHistory() { return history; }
+    public void setHistory(List<DurableHistoryEvent> history) { this.history = history; }
+
+    public long getChangeSequence() { return changeSequence; }
+    public void setChangeSequence(long changeSequence) { this.changeSequence = changeSequence; }
+
+    public long getSeenSequence() { return seenSequence; }
+    public void setSeenSequence(long seenSequence) { this.seenSequence = seenSequence; }
+
+    public long getCheckpointSequence() { return checkpointSequence; }
+    public void setCheckpointSequence(long checkpointSequence) { this.checkpointSequence = checkpointSequence; }
+
+    public String getCurrentInvocationId() { return currentInvocationId; }
+    public void setCurrentInvocationId(String currentInvocationId) { this.currentInvocationId = currentInvocationId; }
+
+    public Long getCurrentInvocationStartedAt() { return currentInvocationStartedAt; }
+    public void setCurrentInvocationStartedAt(Long currentInvocationStartedAt) {
+        this.currentInvocationStartedAt = currentInvocationStartedAt;
     }
+
+    public boolean isReinvokeRequested() { return reinvokeRequested; }
+    public void setReinvokeRequested(boolean reinvokeRequested) { this.reinvokeRequested = reinvokeRequested; }
+
+    public int getConsecutiveInvocationFailures() { return consecutiveInvocationFailures; }
+    public void setConsecutiveInvocationFailures(int consecutiveInvocationFailures) {
+        this.consecutiveInvocationFailures = consecutiveInvocationFailures;
+    }
+
+    public Long getNextInvocationAttemptAt() { return nextInvocationAttemptAt; }
+    public void setNextInvocationAttemptAt(Long nextInvocationAttemptAt) {
+        this.nextInvocationAttemptAt = nextInvocationAttemptAt;
+    }
+
+    public String getParentExecutionArn() { return parentExecutionArn; }
+    public void setParentExecutionArn(String parentExecutionArn) { this.parentExecutionArn = parentExecutionArn; }
+
+    public String getParentOperationId() { return parentOperationId; }
+    public void setParentOperationId(String parentOperationId) { this.parentOperationId = parentOperationId; }
+
+    public DurableCheckpointReplay getLastCheckpoint() { return lastCheckpoint; }
+    public void setLastCheckpoint(DurableCheckpointReplay lastCheckpoint) { this.lastCheckpoint = lastCheckpoint; }
 }

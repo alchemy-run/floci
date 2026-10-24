@@ -8,6 +8,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 
 import java.io.IOException;
 import java.net.BindException;
@@ -26,13 +28,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.SubmissionPublisher;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
-
-import org.junit.jupiter.api.condition.EnabledOnOs;
-import org.junit.jupiter.api.condition.OS;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -116,6 +118,31 @@ class RuntimeApiServerTest {
         assertTrue(elapsed >= 1500, "should have blocked ~2s waiting for invocation");
         assertEquals("req-1", response.headers().firstValue("Lambda-Runtime-Aws-Request-Id").orElse(""));
         assertTrue(response.body().contains("key"));
+    }
+
+    @Test
+    @Timeout(10)
+    void nextEndpoint_emitsClientContextHeaderOnlyWhenPresent() throws Exception {
+        String clientContext = "{\"custom\":{\"traceparent\":\"00-abc-def-01\"}}";
+        PendingInvocation withContext = new PendingInvocation(
+                "req-ctx", "{}".getBytes(), System.currentTimeMillis() + 60_000,
+                "arn:aws:lambda:us-east-1:000000000000:function:test",
+                new CompletableFuture<>());
+        withContext.setClientContext(clientContext);
+        server.enqueue(withContext);
+
+        HttpRequest next = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + port + "/2018-06-01/runtime/invocation/next"))
+                .GET().build();
+        HttpResponse<String> first = httpClient.send(next, HttpResponse.BodyHandlers.ofString());
+        assertEquals(clientContext, first.headers().firstValue("Lambda-Runtime-Client-Context").orElse(null));
+
+        server.enqueue(new PendingInvocation(
+                "req-noctx", "{}".getBytes(), System.currentTimeMillis() + 60_000,
+                "arn:aws:lambda:us-east-1:000000000000:function:test",
+                new CompletableFuture<>()));
+        HttpResponse<String> second = httpClient.send(next, HttpResponse.BodyHandlers.ofString());
+        assertTrue(second.headers().firstValue("Lambda-Runtime-Client-Context").isEmpty());
     }
 
     @Test
@@ -2274,52 +2301,35 @@ class RuntimeApiServerTest {
         return response.headers().firstValue("Lambda-Extension-Identifier").orElseThrow();
     }
 
-    /**
-     * Lowest port used by {@link #findFreePort()}. Deliberately below the OS ephemeral range
-     * (49152-65535 on macOS, 32768-60999 on typical Linux) — see {@link #findFreePort()}.
-     */
+    @Test
+    void findFreePort_skipsOccupiedLoopbackPort() throws IOException {
+        int occupiedPort = findFreePort();
+        try (ServerSocket listener = new ServerSocket()) {
+            listener.setReuseAddress(true);
+            listener.bind(new InetSocketAddress("127.0.0.1", occupiedPort));
+            NEXT_PORT_OFFSET.set(occupiedPort - TEST_PORT_BASE);
+
+            assertNotEquals(occupiedPort, findFreePort());
+        }
+    }
+
     private static final int TEST_PORT_BASE = 20000;
-    /**
-     * Wide enough that the rotation does not wrap back onto a port still in TIME_WAIT: one run of
-     * this class performs ~1600 port draws, and a closed listener's port stays unusable for tens of
-     * seconds afterwards. Running several test classes in the same JVM multiplies that count, which
-     * is when a narrower window started producing sporadic connect failures.
-     */
     private static final int TEST_PORT_RANGE = 25000;
 
-    /** Rotates across the range so consecutive calls don't retry a port still in TIME_WAIT. */
-    private static final java.util.concurrent.atomic.AtomicInteger NEXT_PORT_OFFSET =
-            new java.util.concurrent.atomic.AtomicInteger(
-                    java.util.concurrent.ThreadLocalRandom.current().nextInt(TEST_PORT_RANGE));
+    // Rotate ports to avoid immediately reusing connections from the stress tests.
+    private static final AtomicInteger NEXT_PORT_OFFSET =
+            new AtomicInteger(ThreadLocalRandom.current().nextInt(TEST_PORT_RANGE));
 
-    /**
-     * Returns a port that is free <em>and</em> outside the OS ephemeral range.
-     *
-     * <p>Binding port 0 (the obvious implementation) draws from the ephemeral range, which is
-     * exactly where the OS and background applications allocate their own listeners. Long-running
-     * desktop agents routinely hold stable ports in that range — on the machine this was diagnosed
-     * on, {@code LogiPlugin} (49200-49204), {@code rapportd} (56698, 63091-63092) and
-     * {@code CommCenter} (65000-65001) all sit inside it. The stress tests below perform well over
-     * a thousand port draws per run, so a collision is near-certain: the probe socket closes, the
-     * other process (or the OS) claims the port before Vert.x binds it, and the test's request is
-     * answered by a stranger — observed as a spurious {@code 501} from an unrelated HTTP daemon, or
-     * as a bind failure/start() timeout. Neither has anything to do with the concurrency under test.
-     *
-     * <p>Ports 20000-29999 sit below every common ephemeral range, so nothing else on the host is
-     * handing them out. The bind check still guards against a genuinely occupied port.
-     */
     private static int findFreePort() throws IOException {
         for (int attempt = 0; attempt < TEST_PORT_RANGE; attempt++) {
             int candidate = TEST_PORT_BASE
                     + Math.floorMod(NEXT_PORT_OFFSET.getAndIncrement(), TEST_PORT_RANGE);
             try (ServerSocket socket = new ServerSocket()) {
-                // Without SO_REUSEADDR the probe leaves the port in TIME_WAIT, which would block
-                // the server that is about to bind it for real.
-                socket.setReuseAddress(true);
+                socket.setReuseAddress(false);
                 socket.bind(new InetSocketAddress("0.0.0.0", candidate));
                 return candidate;
-            } catch (IOException inUse) {
-                // Occupied — try the next port in the rotation.
+            } catch (IOException expected) {
+                // An occupied port is skipped.
             }
         }
         throw new IOException("no free port in " + TEST_PORT_BASE + "-" + (TEST_PORT_BASE + TEST_PORT_RANGE));

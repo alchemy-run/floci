@@ -22,6 +22,7 @@ public class DbCluster {
     private DbEndpoint endpoint;
     private DbEndpoint readerEndpoint;
     private boolean iamDatabaseAuthenticationEnabled;
+    private boolean httpEndpointEnabled;
     private List<String> dbClusterMembers = new ArrayList<>();
     // The member that holds the writer role. Null on a cluster persisted before the role was
     // modelled, in which case the first member is the writer, as it always was reported.
@@ -42,6 +43,7 @@ public class DbCluster {
     private Instant createdAt;
     private int proxyPort;
     private Map<String, String> tags = new LinkedHashMap<>();
+    private List<DbRoleAssociation> associatedRoles = new ArrayList<>();
     private String engineMode;
     private boolean storageEncrypted;
     // The listener port clients connect to. 0 on a record persisted before it was modelled,
@@ -126,6 +128,10 @@ public class DbCluster {
         this.iamDatabaseAuthenticationEnabled = iamDatabaseAuthenticationEnabled;
     }
 
+    /** Whether the Data API endpoint is on; EnableHttpEndpoint and DisableHttpEndpoint set it. */
+    public boolean isHttpEndpointEnabled() { return httpEndpointEnabled; }
+    public void setHttpEndpointEnabled(boolean httpEndpointEnabled) { this.httpEndpointEnabled = httpEndpointEnabled; }
+
     public List<String> getDbClusterMembers() { return dbClusterMembers; }
     public void setDbClusterMembers(List<String> dbClusterMembers) { this.dbClusterMembers = dbClusterMembers; }
 
@@ -187,6 +193,11 @@ public class DbCluster {
 
     public int getProxyPort() { return proxyPort; }
     public void setProxyPort(int proxyPort) { this.proxyPort = proxyPort; }
+
+    public List<DbRoleAssociation> getAssociatedRoles() { return associatedRoles; }
+    public void setAssociatedRoles(List<DbRoleAssociation> associatedRoles) {
+        this.associatedRoles = associatedRoles != null ? new ArrayList<>(associatedRoles) : new ArrayList<>();
+    }
 
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags != null ? new LinkedHashMap<>(tags) : new LinkedHashMap<>(); }

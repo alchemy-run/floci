@@ -4,10 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.JsonErrorResponseUtils;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.services.codegurureviewer.model.RepositoryAssociation;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
@@ -179,9 +179,9 @@ public class CodeGuruReviewerController {
         try {
             return Integer.valueOf(maxResults);
         } catch (NumberFormatException e) {
-            throw new AwsException("ValidationException",
-                    "1 validation error detected: Value '" + maxResults
-                            + "' at 'maxResults' failed to satisfy constraint: Member must be an integer.", 400);
+            throw SmithyValidationErrors.validationException(
+                    "Value '" + maxResults
+                            + "' at 'maxResults' failed to satisfy constraint: Member must be an integer.");
         }
     }
 

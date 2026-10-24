@@ -3,13 +3,19 @@ package io.github.hectorvent.floci.services.configservice;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.configservice.model.AggregationAuthorization;
+import io.github.hectorvent.floci.services.configservice.model.ComplianceByConfigRule;
+import io.github.hectorvent.floci.services.configservice.model.ComplianceByResource;
 import io.github.hectorvent.floci.services.configservice.model.ConfigEvaluation;
 import io.github.hectorvent.floci.services.configservice.model.ConfigRule;
+import io.github.hectorvent.floci.services.configservice.model.ConfigRuleEvaluationStatus;
 import io.github.hectorvent.floci.services.configservice.model.ConfigurationRecorder;
 import io.github.hectorvent.floci.services.configservice.model.ConfigurationRecorderStatus;
 import io.github.hectorvent.floci.services.configservice.model.ConformancePack;
+import io.github.hectorvent.floci.services.configservice.model.ConformancePackStatusDetail;
 import io.github.hectorvent.floci.services.configservice.model.DeliveryChannel;
+import io.github.hectorvent.floci.services.configservice.model.EvaluationResult;
 import io.github.hectorvent.floci.services.configservice.model.RetentionConfiguration;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -79,9 +85,9 @@ public class ConfigServiceJsonHandler {
             case "PutAggregationAuthorization" -> putAggregationAuthorization(request, region);
             case "DescribeAggregationAuthorizations" -> describeAggregationAuthorizations(request, region);
             case "DeleteAggregationAuthorization" -> deleteAggregationAuthorization(request, region);
-            case "TagResource" -> tagResource(request);
-            case "UntagResource" -> untagResource(request);
-            case "ListTagsForResource" -> listTagsForResource(request);
+            case "TagResource" -> tagResource(request, region);
+            case "UntagResource" -> untagResource(request, region);
+            case "ListTagsForResource" -> listTagsForResource(request, region);
             default -> throw new io.github.hectorvent.floci.core.common.AwsException(
                     "InvalidAction", "Could not find operation " + action, 400);
         };
@@ -92,7 +98,7 @@ public class ConfigServiceJsonHandler {
     private Response putConfigRule(JsonNode req, String region) throws Exception {
         JsonNode ruleNode = req.path("ConfigRule");
         ConfigRule rule = ruleNode.isObject() ? mapper.treeToValue(ruleNode, ConfigRule.class) : null;
-        service.putConfigRule(region, rule);
+        service.putConfigRule(region, rule, extractCreationTags(req));
         return Response.ok(mapper.createObjectNode()).build();
     }
 
@@ -109,7 +115,7 @@ public class ConfigServiceJsonHandler {
     }
 
     private Response describeComplianceByConfigRule(JsonNode req, String region) {
-        var page = service.describeComplianceByConfigRule(region,
+        AwsConfigService.Paged<ComplianceByConfigRule> page = service.describeComplianceByConfigRule(region,
                 extractStringList(req, "ConfigRuleNames"),
                 extractStringList(req, "ComplianceTypes"),
                 extractNextToken(req));
@@ -117,7 +123,7 @@ public class ConfigServiceJsonHandler {
     }
 
     private Response describeComplianceByResource(JsonNode req, String region) {
-        var page = service.describeComplianceByResource(region,
+        AwsConfigService.Paged<ComplianceByResource> page = service.describeComplianceByResource(region,
                 req.path("ResourceType").asText(null),
                 req.path("ResourceId").asText(null),
                 extractStringList(req, "ComplianceTypes"),
@@ -126,7 +132,7 @@ public class ConfigServiceJsonHandler {
     }
 
     private Response describeConfigRuleEvaluationStatus(JsonNode req, String region) {
-        var page = service.describeConfigRuleEvaluationStatus(region,
+        AwsConfigService.Paged<ConfigRuleEvaluationStatus> page = service.describeConfigRuleEvaluationStatus(region,
                 extractStringList(req, "ConfigRuleNames"),
                 extractLimit(req, "Limit"), extractNextToken(req));
         return Response.ok(pagedResponse("ConfigRulesEvaluationStatus", page)).build();
@@ -169,7 +175,7 @@ public class ConfigServiceJsonHandler {
     }
 
     private Response getComplianceDetailsByConfigRule(JsonNode req, String region) {
-        var page = service.getComplianceDetailsByConfigRule(region,
+        AwsConfigService.Paged<EvaluationResult> page = service.getComplianceDetailsByConfigRule(region,
                 req.path("ConfigRuleName").asText(null),
                 extractStringList(req, "ComplianceTypes"),
                 extractLimit(req, "Limit"), extractNextToken(req));
@@ -177,7 +183,7 @@ public class ConfigServiceJsonHandler {
     }
 
     private Response getComplianceDetailsByResource(JsonNode req, String region) {
-        var page = service.getComplianceDetailsByResource(region,
+        AwsConfigService.Paged<EvaluationResult> page = service.getComplianceDetailsByResource(region,
                 req.path("ResourceType").asText(null),
                 req.path("ResourceId").asText(null),
                 extractStringList(req, "ComplianceTypes"),
@@ -302,14 +308,14 @@ public class ConfigServiceJsonHandler {
     }
 
     private Response describeConformancePacks(JsonNode req, String region) {
-        var page = service.describeConformancePacksPaged(region,
+        AwsConfigService.Paged<ConformancePack> page = service.describeConformancePacksPaged(region,
                 extractStringList(req, "ConformancePackNames"),
                 extractLimit(req, "Limit"), extractNextToken(req));
         return Response.ok(pagedResponse("ConformancePackDetails", page)).build();
     }
 
     private Response describeConformancePackStatus(JsonNode req, String region) {
-        var page = service.describeConformancePackStatus(region,
+        AwsConfigService.Paged<ConformancePackStatusDetail> page = service.describeConformancePackStatus(region,
                 extractStringList(req, "ConformancePackNames"),
                 extractLimit(req, "Limit"), extractNextToken(req));
         return Response.ok(pagedResponse("ConformancePackStatusDetails", page)).build();
@@ -321,7 +327,7 @@ public class ConfigServiceJsonHandler {
         AggregationAuthorization authorization = service.putAggregationAuthorization(region,
                 req.path("AuthorizedAccountId").asText(null),
                 req.path("AuthorizedAwsRegion").asText(null),
-                extractTags(req));
+                extractCreationTags(req));
         ObjectNode resp = mapper.createObjectNode();
         resp.set("AggregationAuthorization", mapper.valueToTree(authorization));
         return Response.ok(resp).build();
@@ -342,23 +348,23 @@ public class ConfigServiceJsonHandler {
 
     // --- Tagging ---
 
-    private Response tagResource(JsonNode req) {
+    private Response tagResource(JsonNode req, String region) {
         String arn = req.path("ResourceArn").asText(null);
-        service.tagResource(arn, extractTags(req));
+        service.tagResource(region, arn, extractTags(req));
         return Response.ok(mapper.createObjectNode()).build();
     }
 
-    private Response untagResource(JsonNode req) {
+    private Response untagResource(JsonNode req, String region) {
         String arn = req.path("ResourceArn").asText(null);
         List<String> tagKeys = new ArrayList<>();
         req.path("TagKeys").forEach(k -> tagKeys.add(k.asText()));
-        service.untagResource(arn, tagKeys);
+        service.untagResource(region, arn, tagKeys);
         return Response.ok(mapper.createObjectNode()).build();
     }
 
-    private Response listTagsForResource(JsonNode req) {
+    private Response listTagsForResource(JsonNode req, String region) {
         String arn = req.path("ResourceArn").asText(null);
-        List<Map<String, String>> tagList = service.listTagsForResource(arn);
+        List<Map<String, String>> tagList = service.listTagsForResource(region, arn);
         ObjectNode resp = mapper.createObjectNode();
         resp.set("Tags", mapper.valueToTree(tagList));
         return Response.ok(resp).build();
@@ -372,6 +378,36 @@ public class ConfigServiceJsonHandler {
                 "Key", t.path("Key").asText(),
                 "Value", t.path("Value").asText())));
         return tagList;
+    }
+
+    /** PutConfigRule and PutAggregationAuthorization take a {@code TagsList} (config/2014-11-12:
+     *  at most 50 {@code Tag}s, Key 1-128 characters, optional Value of at most 256) and model
+     *  {@code InvalidParameterValueException} as their only parameter error. Checked before the
+     *  service stores anything, so a rejected request leaves no resource behind. An absent Value
+     *  is optional in the model and is stored as the empty string. */
+    private List<Map<String, String>> extractCreationTags(JsonNode req) {
+        JsonNode tags = req.path("Tags");
+        if (tags.isMissingNode() || tags.isNull()) {
+            return List.of();
+        }
+        if (!tags.isArray()) {
+            throw new AwsException("InvalidParameterValueException", "Tags must be a list.", 400);
+        }
+        if (tags.size() > 50) {
+            throw new AwsException("InvalidParameterValueException",
+                    "Tags must contain at most 50 tags.", 400);
+        }
+        for (JsonNode tag : tags) {
+            JsonNode key = tag.path("Key");
+            JsonNode value = tag.path("Value");
+            boolean valueOk = value.isMissingNode() || value.isNull()
+                    || (value.isTextual() && value.asText().length() <= 256);
+            if (!key.isTextual() || key.asText().isEmpty() || key.asText().length() > 128 || !valueOk) {
+                throw new AwsException("InvalidParameterValueException",
+                        "Each tag needs a Key of 1-128 characters and a Value of at most 256 characters.", 400);
+            }
+        }
+        return extractTags(req);
     }
 
     private List<String> extractStringList(JsonNode req, String fieldName) {

@@ -17,6 +17,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.*;
 import java.util.Base64;
 import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 
 class DynamoDbPartiQLHandler {
@@ -29,7 +30,9 @@ class DynamoDbPartiQLHandler {
         this.mapper = mapper;
     }
 
-    JsonNode execute(Stmt stmt, PartiQLExecuteContext ctx, String region) {
+    record Result(ObjectNode body, DynamoDbWriteCapacity.Cost capacity) {}
+
+    Result execute(Stmt stmt, PartiQLExecuteContext ctx, String region) {
         return switch (stmt) {
             case Stmt.Select s -> executeSelect(s, ctx, region);
             case Stmt.Insert s -> executeInsert(s, region);
@@ -42,8 +45,14 @@ class DynamoDbPartiQLHandler {
 
     // --- SELECT ---
 
-    private JsonNode executeSelect(Stmt.Select stmt, PartiQLExecuteContext ctx, String region) {
+    private Result executeSelect(Stmt.Select stmt, PartiQLExecuteContext ctx, String region) {
         TableDefinition table = service.describeTable(stmt.table(), region);
+        // A vector index is reachable through SearchVectors alone, and PartiQL says so
+        // rather than reporting the index as missing.
+        if (table.findVectorIndex(stmt.index()).isPresent()) {
+            throw new AwsException("ValidationException",
+                    "Scan operation not supported on this index type", 400);
+        }
         // ExecuteStatement omits the index name from the missing-index message,
         // unlike Query/Scan (characterised on real AWS, eu-west-1, 2026-09-02).
         DynamoDbAccessPath accessPath = DynamoDbAccessPath.resolve(table, stmt.index(),
@@ -57,31 +66,12 @@ class DynamoDbPartiQLHandler {
                     "Strongly consistent read is not supported on Global Secondary Indexes", 400);
         }
 
-        // A GSI-qualified statement can only select attributes the index
-        // projects; the message preserves statement order (characterised on
-        // real AWS, eu-west-1, 2026-09-02). An LSI read reaches the co-located
-        // base item, so non-projected columns stay legal there.
-        if (accessPath.isGlobalSecondaryIndex() && !"ALL".equals(accessPath.projectionType())
-                && !stmt.columns().isEmpty()) {
-            Set<String> projected = accessPath.projectedAttributeNames(table);
-            List<String> unprojected = stmt.columns().stream()
-                    .map(Path::root)
-                    .filter(c -> !"*".equals(c))
-                    .filter(c -> !projected.contains(c))
-                    .toList();
-            if (!unprojected.isEmpty()) {
-                throw new AwsException("ValidationException",
-                        "One or more parameter values were invalid: Global secondary index "
-                                + accessPath.indexName() + " does not project ["
-                                + String.join(", ", unprojected) + "]", 400);
-            }
-        }
-
         DynamoDbPartiQLKeyPlan keys = new DynamoDbPartiQLKeyPlan(stmt.where(), accessPath, table);
         keys.requireKeyTypesMatchSchema();
         keys.requireNoOverlap();
         keys.requireReadsWithinLimit();
         requireFilterAttributesProjected(keys, accessPath, table);
+        requireColumnsProjected(stmt, accessPath, table);
 
         Routing routing = routingOf(stmt.where(), keys, accessPath.partitionKeyName(), accessPath.sortKeyName());
         Supplier<JsonNode> startKey = () -> decodeNextToken(ctx.nextToken(), ctx.tokenBinding());
@@ -118,7 +108,265 @@ class DynamoDbPartiQLHandler {
         if (lastEvaluatedKey != null) {
             resp.put("NextToken", encodeNextToken(lastEvaluatedKey, ctx.tokenBinding()));
         }
-        return resp;
+        return new Result(resp, readCapacity(stmt, table, accessPath, page, ctx.consistentRead()));
+    }
+
+    private static DynamoDbWriteCapacity.Cost readCapacity(Stmt.Select stmt, TableDefinition table,
+                                                           DynamoDbAccessPath accessPath, Page page,
+                                                           boolean consistentRead) {
+        double units = NativeDynamoDbJsonHandler.readCapacityUnits(page.scannedBytes(), consistentRead);
+        if (!accessPath.isIndex()) {
+            return new DynamoDbWriteCapacity.Cost(units, Map.of(), Map.of());
+        }
+        double tableUnits = 0;
+        if (fetchesFromTable(stmt, table, accessPath)) {
+            for (JsonNode item : page.scannedItems()) {
+                tableUnits += NativeDynamoDbJsonHandler.readCapacityUnits(
+                        DynamoDbItemSize.calculateItemSize(item), consistentRead);
+            }
+        }
+        Map<String, Double> indexUnits = Map.of(accessPath.indexName(), units);
+        return accessPath.isGlobalSecondaryIndex()
+                ? new DynamoDbWriteCapacity.Cost(tableUnits, indexUnits, Map.of())
+                : new DynamoDbWriteCapacity.Cost(tableUnits, Map.of(), indexUnits);
+    }
+
+    // An LSI read that selects an attribute the index does not project fetches every row it
+    // walks from the base table, and each fetch is charged on its own.
+    private static boolean fetchesFromTable(Stmt.Select stmt, TableDefinition table,
+                                            DynamoDbAccessPath accessPath) {
+        if (accessPath.isGlobalSecondaryIndex() || "ALL".equals(accessPath.projectionType())) {
+            return false;
+        }
+        Set<String> projected = accessPath.projectedAttributeNames(table);
+        return stmt.columns().stream()
+                .map(Path::root)
+                .anyMatch(column -> !projected.contains(column));
+    }
+
+    private record Routing(Cond.Eq pkEq, Cond skCond, List<Cond> filterConds, PVal partition) {}
+
+    private static Routing routingOf(List<Cond> where, DynamoDbPartiQLKeyPlan keys, String pkName, String skName) {
+        Optional<PVal> partition = keys.singlePartition();
+        if (partition.isEmpty()) {
+            return new Routing(null, null, where, null);
+        }
+        Cond.Eq pkEq = null;
+        Cond skCond = null;
+        List<Cond> filterConds = new ArrayList<>();
+        for (Cond c : where) {
+            if (c instanceof Cond.Eq eq && isKeyCondition(eq, pkName)) {
+                pkEq = eq;
+            } else if (skCond == null && DynamoDbPartiQLKeyPlan.isSortKeyRange(c, skName)) {
+                skCond = c;
+            } else if (DynamoDbPartiQLKeyPlan.attributePaths(c).map(Path::root)
+                    .anyMatch(root -> root.equals(pkName) || root.equals(skName))) {
+                return new Routing(null, null, where, partition.get());
+            } else {
+                filterConds.add(c);
+            }
+        }
+        return new Routing(pkEq, skCond, filterConds, null);
+    }
+
+    private record Page(List<JsonNode> items, JsonNode lastEvaluatedKey, long scannedBytes,
+                        List<JsonNode> scannedItems) {}
+
+    private Page readPage(Stmt.Select stmt, TableDefinition table, DynamoDbAccessPath accessPath,
+                          Routing routing, Supplier<JsonNode> startKey, Integer limit, String region) {
+        if (routing.partition() != null) {
+            return readPartition(stmt, table, accessPath, routing, startKey, limit, region);
+        }
+        String pkName = accessPath.partitionKeyName();
+        String skName = accessPath.sortKeyName();
+        Cond.Eq pkEq = routing.pkEq();
+        Cond skCond = routing.skCond();
+        List<Cond> filterConds = routing.filterConds();
+
+        if (pkEq == null) {
+            // No equality on the selected source's partition key: AWS performs
+            // a full scan of the table or index and applies the remaining
+            // conditions as a filter (characterised on real AWS, eu-west-1,
+            // 2026-09-02).
+            ExprAttrBuilder eav = new ExprAttrBuilder();
+            ExprAttrNameBuilder ean = new ExprAttrNameBuilder();
+            List<Cond> scanFilters = new ArrayList<>(filterConds);
+            if (skCond != null) {
+                scanFilters.add(skCond);
+            }
+            boolean partialProjection = !"ALL".equals(accessPath.projectionType());
+            String fe = partialProjection ? null : buildFe(scanFilters, eav, ean);
+            JsonNode exclusiveStartKey = startKey.get();
+            DynamoDbAccessPathValidator.validateExclusiveStartKey(exclusiveStartKey, table, accessPath);
+            DynamoDbService.ScanResult result = service.scan(stmt.table(), fe,
+                    ean.isEmpty() ? null : ean.toNode(mapper),
+                    eav.isEmpty() ? null : eav.toNode(mapper),
+                    null, limit, exclusiveStartKey, accessPath.indexName(), region);
+            List<JsonNode> matching = partialProjection
+                    ? matchingIndexView(result.items(), scanFilters, accessPath, table)
+                    : result.items();
+            return new Page(matching, result.lastEvaluatedKey(), result.scannedBytes(), result.scannedItems());
+        }
+        if (accessPath.kind() == DynamoDbAccessPath.Kind.TABLE && skName == null
+                && skCond == null && filterConds.isEmpty()) {
+            ObjectNode key = mapper.createObjectNode();
+            key.set(pkName, toTypedNode(pkEq.val()));
+            JsonNode item = service.getItem(stmt.table(), key, region);
+            if (item == null) {
+                return new Page(Collections.emptyList(), null, 0, List.of());
+            }
+            return new Page(List.of(item), null, DynamoDbItemSize.calculateItemSize(item), List.of(item));
+        }
+        ExprAttrBuilder eav = new ExprAttrBuilder();
+        ExprAttrNameBuilder ean = new ExprAttrNameBuilder();
+        String kce = buildKce(pkEq, skCond, pkName, skName, eav, ean);
+        String fe = buildFe(filterConds, eav, ean);
+        JsonNode exclusiveStartKey = startKey.get();
+        DynamoDbAccessPathValidator.validateExclusiveStartKey(exclusiveStartKey, table, accessPath);
+        DynamoDbService.QueryResult result = service.query(
+                stmt.table(), null, eav.toNode(mapper), kce, fe,
+                limit, null, accessPath.indexName(), exclusiveStartKey,
+                ean.isEmpty() ? null : ean.toNode(mapper), region);
+        return new Page(result.items(), result.lastEvaluatedKey(), result.scannedBytes(), result.scannedItems());
+    }
+
+    private Page readPartition(Stmt.Select stmt, TableDefinition table, DynamoDbAccessPath accessPath,
+                               Routing routing, Supplier<JsonNode> startKey, Integer limit, String region) {
+        ExprAttrBuilder eav = new ExprAttrBuilder();
+        ExprAttrNameBuilder ean = new ExprAttrNameBuilder();
+        String kce = ean.alias(accessPath.partitionKeyName()) + " = " + eav.add(toTypedNode(routing.partition()));
+        JsonNode exclusiveStartKey = startKey.get();
+        DynamoDbAccessPathValidator.validateExclusiveStartKey(exclusiveStartKey, table, accessPath);
+        DynamoDbService.QueryResult result = service.query(stmt.table(), null, eav.toNode(mapper), kce, null,
+                limit, null, accessPath.indexName(), exclusiveStartKey, ean.toNode(mapper), region);
+        List<JsonNode> matching = matchingIndexView(result.items(), routing.filterConds(), accessPath, table);
+        return new Page(matching, result.lastEvaluatedKey(), result.scannedBytes(), result.items());
+    }
+
+    // The WHERE clause of an index read sees only what the index stores, so an
+    // attribute it does not project is missing even though the base item has it.
+    private List<JsonNode> matchingIndexView(List<JsonNode> items, List<Cond> conds,
+                                             DynamoDbAccessPath accessPath, TableDefinition table) {
+        ExprAttrBuilder filterValues = new ExprAttrBuilder();
+        ExprAttrNameBuilder filterNames = new ExprAttrNameBuilder();
+        ExpressionEvaluator.Expr filter = ExpressionEvaluator.parse(buildFe(conds, filterValues, filterNames));
+        JsonNode names = filterNames.isEmpty() ? null : filterNames.toNode(mapper);
+        JsonNode values = filterValues.isEmpty() ? null : filterValues.toNode(mapper);
+        UnaryOperator<JsonNode> view = indexView(accessPath, table);
+        return items.stream()
+                .filter(item -> ExpressionEvaluator.evaluate(filter, view.apply(item), names, values))
+                .toList();
+    }
+
+    private static UnaryOperator<JsonNode> indexView(DynamoDbAccessPath accessPath, TableDefinition table) {
+        if ("ALL".equals(accessPath.projectionType())) {
+            return UnaryOperator.identity();
+        }
+        Set<String> projected = accessPath.projectedAttributeNames(table);
+        return item -> ProjectionEvaluator.trimToAttributes((ObjectNode) item, projected);
+    }
+
+    private Page readOrdered(Stmt.Select stmt, TableDefinition table, DynamoDbAccessPath accessPath,
+                             Routing routing, JsonNode after, Integer limit, String region) {
+        requireOrderByShape(stmt, accessPath);
+        List<JsonNode> rows = new ArrayList<>();
+        long scannedBytes = 0;
+        List<JsonNode> scannedItems = new ArrayList<>();
+        JsonNode lastKey = null;
+        do {
+            JsonNode from = lastKey;
+            Page page = readPage(stmt, table, accessPath, routing, () -> from, null, region);
+            rows.addAll(page.items());
+            scannedBytes += page.scannedBytes();
+            scannedItems.addAll(page.scannedItems());
+            lastKey = page.lastEvaluatedKey();
+        } while (lastKey != null);
+
+        Comparator<JsonNode> order = orderByComparator(stmt.orderBy(), accessPath, table);
+        rows.sort(order);
+        int start = 0;
+        if (after != null) {
+            while (start < rows.size() && order.compare(rows.get(start), after) <= 0) {
+                start++;
+            }
+        }
+        int end = limit == null ? rows.size() : Math.min(rows.size(), start + limit);
+        JsonNode resumeAfter = start < end && end < rows.size() ? orderingKey(rows.get(end - 1), accessPath, table) : null;
+        return new Page(new ArrayList<>(rows.subList(start, end)), resumeAfter, scannedBytes, scannedItems);
+    }
+
+    private static void requireOrderByShape(Stmt.Select stmt, DynamoDbAccessPath accessPath) {
+        if (stmt.where().isEmpty()) {
+            throw new AwsException("ValidationException",
+                    "Must have WHERE clause in the statement when using ORDER BY clause.", 400);
+        }
+        Set<String> keys = accessPath.keyAttributeNames();
+        for (OrderTerm term : stmt.orderBy()) {
+            if (!keys.contains(term.attribute())) {
+                throw new AwsException("ValidationException",
+                        "Attribute " + term.attribute() + " in ORDER BY clause must be part of the primary key", 400);
+            }
+        }
+        String pkName = accessPath.partitionKeyName();
+        int hashKeyConditions = stmt.where().stream().mapToInt(c -> hashKeyConditionCount(c, pkName)).sum();
+        if (hashKeyConditions == 0) {
+            throw new AwsException("ValidationException",
+                    "Must have at least one non-optional hash key condition in WHERE clause when using ORDER BY clause.",
+                    400);
+        }
+        boolean ordersByHashKey = stmt.orderBy().stream().anyMatch(term -> term.attribute().equals(pkName));
+        if (hashKeyConditions > 1 && !ordersByHashKey) {
+            throw new AwsException("ValidationException",
+                    "Must have hash key in ORDER BY clause when more than one hash key condition specified in WHERE clause.",
+                    400);
+        }
+    }
+
+    private static int hashKeyConditionCount(Cond cond, String pkName) {
+        return switch (cond) {
+            case Cond.Eq eq when isKeyCondition(eq, pkName) -> 1;
+            case Cond.In in when isKeyCondition(in, pkName) -> in.values().size();
+            case Cond.Or or when or.operands().stream()
+                    .allMatch(o -> o instanceof Cond.Eq && isKeyCondition(o, pkName)) -> or.operands().size();
+            default -> 0;
+        };
+    }
+
+    private static Comparator<JsonNode> orderByComparator(List<OrderTerm> terms, DynamoDbAccessPath accessPath,
+                                                          TableDefinition table) {
+        String pkName = accessPath.partitionKeyName();
+        String skName = accessPath.sortKeyName();
+        boolean pkDescending = directionOf(terms, pkName).orElse(false);
+        Comparator<JsonNode> order = byAttribute(pkName, pkDescending);
+        if (skName != null) {
+            order = order.thenComparing(byAttribute(skName, directionOf(terms, skName).orElse(true)));
+        }
+        for (String tableKey : List.of(table.getPartitionKeyName(), Objects.toString(table.getSortKeyName(), ""))) {
+            if (!tableKey.isEmpty() && !tableKey.equals(pkName) && !tableKey.equals(skName)) {
+                order = order.thenComparing(byAttribute(tableKey, false));
+            }
+        }
+        return order;
+    }
+
+    private static Optional<Boolean> directionOf(List<OrderTerm> terms, String attribute) {
+        return terms.stream().filter(term -> term.attribute().equals(attribute)).findFirst().map(OrderTerm::descending);
+    }
+
+    private static Comparator<JsonNode> byAttribute(String attribute, boolean descending) {
+        Comparator<JsonNode> ascending = (a, b) -> ExpressionEvaluator.compareAttributeValues(a.path(attribute), b.path(attribute));
+        return descending ? ascending.reversed() : ascending;
+    }
+
+    private JsonNode orderingKey(JsonNode row, DynamoDbAccessPath accessPath, TableDefinition table) {
+        ObjectNode key = mapper.createObjectNode();
+        Set<String> names = new LinkedHashSet<>(accessPath.keyAttributeNames());
+        names.add(table.getPartitionKeyName());
+        if (table.getSortKeyName() != null) {
+            names.add(table.getSortKeyName());
+        }
+        names.forEach(name -> key.set(name, row.get(name)));
+        return key;
     }
 
     private record Routing(Cond.Eq pkEq, Cond skCond, List<Cond> filterConds, PVal partition) {}
@@ -433,6 +681,25 @@ class DynamoDbPartiQLHandler {
         }
     }
 
+    // An LSI read reaches the co-located base item, so non-projected columns stay legal there.
+    // AWS lists each root once, in an order of its own that is not the statement order.
+    private static void requireColumnsProjected(Stmt.Select stmt, DynamoDbAccessPath accessPath,
+                                                TableDefinition table) {
+        if (!accessPath.isGlobalSecondaryIndex() || "ALL".equals(accessPath.projectionType())) {
+            return;
+        }
+        Set<String> projected = accessPath.projectedAttributeNames(table);
+        List<String> unprojected = stmt.columns().stream()
+                .map(Path::root)
+                .filter(c -> !"*".equals(c))
+                .filter(c -> !projected.contains(c))
+                .distinct()
+                .toList();
+        if (!unprojected.isEmpty()) {
+            throw DynamoDbAccessPathValidator.unprojectedGsiAttributes(accessPath.indexName(), unprojected);
+        }
+    }
+
     private static boolean isKeyCondition(Cond cond, String keyName) {
         return cond.bareAttribute().filter(keyName::equals).isPresent();
     }
@@ -473,24 +740,26 @@ class DynamoDbPartiQLHandler {
 
     // --- INSERT ---
 
-    private JsonNode executeInsert(Stmt.Insert stmt, String region) {
+    private Result executeInsert(Stmt.Insert stmt, String region) {
         TableDefinition table = service.describeTable(stmt.table(), region);
         String pkName = table.getPartitionKeyName();
 
         ObjectNode item = mapper.createObjectNode();
         stmt.item().forEach((k, v) -> item.set(k, toTypedNode(v)));
 
+        JsonNode previousItem;
         try {
-            service.putItem(stmt.table(), item, "attribute_not_exists(" + pkName + ")", null, null, region, "NONE");
+            previousItem = service.putItem(stmt.table(), item, "attribute_not_exists(" + pkName + ")",
+                    null, null, region, "NONE");
         } catch (ConditionalCheckFailedException e) {
             throw new AwsException("DuplicateItemException", "Duplicate primary key exists in table", 400);
         }
-        return itemsResponse(null);
+        return new Result(itemsResponse(null), writeCapacity(table, previousItem, item));
     }
 
     // --- UPDATE ---
 
-    private JsonNode executeUpdate(Stmt.Update stmt, String region) {
+    private Result executeUpdate(Stmt.Update stmt, String region) {
         requireNoIndexQualifier(stmt.index());
         TableDefinition table = service.describeTable(stmt.table(), region);
         requireOneValuePerKey(table, stmt.where());
@@ -506,7 +775,14 @@ class DynamoDbPartiQLHandler {
                 ean.isEmpty() ? null : ean.toNode(mapper),
                 eav.isEmpty() ? null : eav.toNode(mapper), returnValues, ce, region, "NONE",
                 UpdateSizeRule.FINISHED_ITEM);
-        return itemsResponse(returnedAttributes(stmt.returning(), result));
+        return new Result(itemsResponse(returnedAttributes(stmt.returning(), result)),
+                writeCapacity(table, result.oldItem(), result.newItem()));
+    }
+
+    private static DynamoDbWriteCapacity.Cost writeCapacity(TableDefinition table, JsonNode oldItem,
+                                                            JsonNode newItem) {
+        return DynamoDbWriteCapacity.forWrite(table, oldItem,
+                newItem != null ? DynamoDbNumberUtils.normalizeNumbersInItem(newItem) : null);
     }
 
     private static void requireNoIndexQualifier(String index) {
@@ -538,7 +814,7 @@ class DynamoDbPartiQLHandler {
 
     // --- DELETE ---
 
-    private JsonNode executeDelete(Stmt.Delete stmt, String region) {
+    private Result executeDelete(Stmt.Delete stmt, String region) {
         requireNoIndexQualifier(stmt.index());
         TableDefinition table = service.describeTable(stmt.table(), region);
         requireOneValuePerKey(table, stmt.where());
@@ -551,7 +827,8 @@ class DynamoDbPartiQLHandler {
         JsonNode oldItem = service.deleteItem(stmt.table(), key, ce,
                 ean.isEmpty() ? null : ean.toNode(mapper),
                 eav.isEmpty() ? null : eav.toNode(mapper), region, "NONE");
-        return itemsResponse(stmt.returning() == Returning.ALL_OLD ? oldItem : null);
+        return new Result(itemsResponse(stmt.returning() == Returning.ALL_OLD ? oldItem : null),
+                writeCapacity(table, oldItem, null));
     }
 
     // --- Transaction item builder ---

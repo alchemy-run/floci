@@ -7,13 +7,22 @@ import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.services.emrserverless.model.Application;
 import io.github.hectorvent.floci.services.emrserverless.model.ApplicationSummary;
+import io.github.hectorvent.floci.services.emrserverless.model.CancelJobRunResponse;
 import io.github.hectorvent.floci.services.emrserverless.model.CreateApplicationRequest;
 import io.github.hectorvent.floci.services.emrserverless.model.CreateApplicationResponse;
 import io.github.hectorvent.floci.services.emrserverless.model.DeleteApplicationResponse;
 import io.github.hectorvent.floci.services.emrserverless.model.GetApplicationResponse;
+import io.github.hectorvent.floci.services.emrserverless.model.GetJobRunResponse;
+import io.github.hectorvent.floci.services.emrserverless.model.JobRun;
+import io.github.hectorvent.floci.services.emrserverless.model.JobRunAttemptSummary;
+import io.github.hectorvent.floci.services.emrserverless.model.JobRunSummary;
 import io.github.hectorvent.floci.services.emrserverless.model.ListApplicationsRequest;
 import io.github.hectorvent.floci.services.emrserverless.model.ListApplicationsResponse;
+import io.github.hectorvent.floci.services.emrserverless.model.ListJobRunAttemptsResponse;
+import io.github.hectorvent.floci.services.emrserverless.model.ListJobRunsResponse;
 import io.github.hectorvent.floci.services.emrserverless.model.StartApplicationResponse;
+import io.github.hectorvent.floci.services.emrserverless.model.StartJobRunRequest;
+import io.github.hectorvent.floci.services.emrserverless.model.StartJobRunResponse;
 import io.github.hectorvent.floci.services.emrserverless.model.StopApplicationResponse;
 import io.github.hectorvent.floci.services.emrserverless.model.UpdateApplicationRequest;
 import io.github.hectorvent.floci.services.emrserverless.model.UpdateApplicationResponse;
@@ -41,10 +50,12 @@ import java.util.Map;
 public class EmrServerlessController {
 
     private final EmrServerlessService service;
+    private final EmrServerlessJobRunService jobRuns;
 
     @Inject
-    public EmrServerlessController(EmrServerlessService service) {
+    public EmrServerlessController(EmrServerlessService service, EmrServerlessJobRunService jobRuns) {
         this.service = service;
+        this.jobRuns = jobRuns;
     }
 
     @POST
@@ -212,6 +223,73 @@ public class EmrServerlessController {
     public StopApplicationResponse stopApplication(@PathParam("applicationId") String applicationId) {
         service.stopApplication(applicationId);
         StopApplicationResponse response = new StopApplicationResponse();
+        return response;
+    }
+
+    @POST
+    @Path("/{applicationId}/jobruns")
+    public StartJobRunResponse startJobRun(@PathParam("applicationId") String applicationId,
+                                           StartJobRunRequest request) {
+        JobRun run = jobRuns.startJobRun(applicationId, request);
+        StartJobRunResponse response = new StartJobRunResponse();
+        response.setApplicationId(run.getApplicationId());
+        response.setJobRunId(run.getJobRunId());
+        response.setArn(run.getArn());
+        return response;
+    }
+
+    @GET
+    @Path("/{applicationId}/jobruns")
+    public ListJobRunsResponse listJobRuns(@PathParam("applicationId") String applicationId,
+                                           @QueryParam("states") List<String> states,
+                                           @QueryParam("createdAtAfter") String createdAtAfter,
+                                           @QueryParam("createdAtBefore") String createdAtBefore,
+                                           @QueryParam("mode") String mode,
+                                           @QueryParam("maxResults") String maxResults,
+                                           @QueryParam("nextToken") String nextToken) {
+        PaginatedResult<JobRunSummary> page = jobRuns.listJobRuns(applicationId, states,
+                EmrServerlessJobRunService.parseTimestamp(createdAtAfter, "createdAtAfter"),
+                EmrServerlessJobRunService.parseTimestamp(createdAtBefore, "createdAtBefore"),
+                mode, Pagination.parseMaxResults(maxResults, "ValidationException"), nextToken);
+        ListJobRunsResponse response = new ListJobRunsResponse();
+        response.setJobRuns(page.items());
+        response.setNextToken(page.nextToken());
+        return response;
+    }
+
+    @GET
+    @Path("/{applicationId}/jobruns/{jobRunId}")
+    public GetJobRunResponse getJobRun(@PathParam("applicationId") String applicationId,
+                                       @PathParam("jobRunId") String jobRunId,
+                                       @QueryParam("attempt") String attempt) {
+        GetJobRunResponse response = new GetJobRunResponse();
+        response.setJobRun(jobRuns.getJobRun(applicationId, jobRunId,
+                EmrServerlessJobRunService.parseAttempt(attempt)));
+        return response;
+    }
+
+    @GET
+    @Path("/{applicationId}/jobruns/{jobRunId}/attempts")
+    public ListJobRunAttemptsResponse listJobRunAttempts(@PathParam("applicationId") String applicationId,
+                                                         @PathParam("jobRunId") String jobRunId,
+                                                         @QueryParam("maxResults") String maxResults,
+                                                         @QueryParam("nextToken") String nextToken) {
+        PaginatedResult<JobRunAttemptSummary> page = jobRuns.listJobRunAttempts(applicationId, jobRunId,
+                Pagination.parseMaxResults(maxResults, "ValidationException"), nextToken);
+        ListJobRunAttemptsResponse response = new ListJobRunAttemptsResponse();
+        response.setJobRunAttempts(page.items());
+        response.setNextToken(page.nextToken());
+        return response;
+    }
+
+    @DELETE
+    @Path("/{applicationId}/jobruns/{jobRunId}")
+    public CancelJobRunResponse cancelJobRun(@PathParam("applicationId") String applicationId,
+                                             @PathParam("jobRunId") String jobRunId) {
+        JobRun run = jobRuns.cancelJobRun(applicationId, jobRunId);
+        CancelJobRunResponse response = new CancelJobRunResponse();
+        response.setApplicationId(run.getApplicationId());
+        response.setJobRunId(run.getJobRunId());
         return response;
     }
 }

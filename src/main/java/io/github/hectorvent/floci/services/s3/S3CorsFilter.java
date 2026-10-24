@@ -4,8 +4,11 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerResponseContext;
 import jakarta.ws.rs.container.ContainerResponseFilter;
+import jakarta.ws.rs.container.ResourceInfo;
+import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.ext.Provider;
+
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -21,12 +24,21 @@ import java.util.Optional;
 @Provider
 public class S3CorsFilter implements ContainerResponseFilter {
 
+    private final S3Service s3Service;
+    private final ResourceInfo resourceInfo;
+
     @Inject
-    S3Service s3Service;
+    public S3CorsFilter(S3Service s3Service, @Context ResourceInfo resourceInfo) {
+        this.s3Service = s3Service;
+        this.resourceInfo = resourceInfo;
+    }
 
     @Override
     public void filter(ContainerRequestContext requestContext,
                        ContainerResponseContext responseContext) {
+
+        // Only apply CORS headers when the request is routed to the S3 controller
+        if (!S3SignatureFilterScope.routedToS3(resourceInfo)) return;
 
         // Only handle actual requests — preflights are processed by the OPTIONS endpoints
         if ("OPTIONS".equalsIgnoreCase(requestContext.getMethod())) return;
@@ -47,6 +59,9 @@ public class S3CorsFilter implements ContainerResponseFilter {
         // putSingle replaces any value already set by a resource method or earlier filter,
         // preventing duplicate Access-Control-Allow-Origin / Expose-Headers entries.
         headers.putSingle("Access-Control-Allow-Origin", cors.allowedOrigin());
+        if (!"*".equals(cors.allowedOrigin())) {
+            headers.putSingle("Access-Control-Allow-Credentials", "true");
+        }
 
         // Merge "Origin" into Vary without duplicating it; Vary may already carry other
         // tokens (e.g. "Accept-Encoding") added by the JAX-RS runtime or other filters.

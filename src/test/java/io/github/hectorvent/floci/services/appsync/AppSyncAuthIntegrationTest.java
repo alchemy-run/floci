@@ -5,16 +5,24 @@ import io.github.hectorvent.floci.services.appsync.graphql.AppSyncExecutionContr
 import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.iam.IamService.RoleSessionCredentials;
 import io.github.hectorvent.floci.services.iam.model.IamRole;
+import io.github.hectorvent.floci.testing.EnforcementFixtures;
+import io.github.hectorvent.floci.testing.EnforcementFixtures.UserCredentials;
+import io.github.hectorvent.floci.testing.PartitionCleanup;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
+import io.github.hectorvent.floci.testing.SidecarContainersProfile;
 import io.github.hectorvent.floci.testutil.AppSyncRequestSigner;
-import io.restassured.RestAssured;
+import io.quarkus.test.common.http.TestHTTPResource;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.TestProfile;
+import io.restassured.RestAssured;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -35,7 +43,9 @@ import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/** Runs against the real GraphQL sidecar image, started by {@link GraphqlSidecarManager}. */
 @QuarkusTest
+@TestProfile(SidecarContainersProfile.class)
 class AppSyncAuthIntegrationTest {
 
     private static final String MGMT_AUTH =
@@ -198,9 +208,15 @@ class AppSyncAuthIntegrationTest {
         mac.init(new SecretKeySpec(key, "HmacSHA256"));
         return mac.doFinal(value.getBytes(StandardCharsets.UTF_8));
     }
+    @RegisterExtension
+    final PartitionCleanup cleanup = new PartitionCleanup();
+
+    @TestHTTPResource("/")
+    URI baseUri;
 
     @BeforeAll
     static void configureRestAssured() {
+        SidecarContainersProfile.requireDockerAndImage("floci.services.appsync.graphql-image");
         RestAssuredJsonUtils.configureAwsContentTypes();
     }
 
@@ -370,6 +386,42 @@ class AppSyncAuthIntegrationTest {
             .body("errors[0].errorType", equalTo("Unauthorized"))
             .body("errors[0].message", equalTo("Not Authorized to access hello on type Query"))
             .body("errors[0].path", equalTo(java.util.List.of("hello")));
+    }
+
+    @Test
+    void longTermKeyWithASessionTokenIsRefused() throws Exception {
+        String apiId = given()
+            .header("Authorization", MGMT_AUTH)
+            .contentType("application/json")
+            .body("""
+                {"name": "token-%s", "authenticationType": "AWS_IAM"}
+                """.formatted(UUID.randomUUID().toString().substring(0, 8)))
+        .when()
+            .post("/v1/apis")
+        .then()
+            .statusCode(200)
+            .extract().path("graphqlApi.apiId");
+        startSchema(apiId, "type Query { hello: String }");
+        awaitSchemaSuccess(apiId);
+        UserCredentials user = EnforcementFixtures.createUser(cleanup, baseUri.getPort(),
+                EnforcementFixtures.auth("test", "iam"), "appsync-token-user");
+
+        String body = "{\"query\":\"{ hello }\"}";
+        Map<String, String> headers = new LinkedHashMap<>(AppSyncRequestSigner.signedHeaders(apiId,
+                "localhost:" + RestAssured.port, body, user.accessKeyId(), user.secretAccessKey(), "us-east-1",
+                Instant.now()));
+        headers.put("X-Amz-Security-Token", "bogus");
+        given()
+            .contentType("application/json")
+            .headers(headers)
+            .body(body)
+        .when()
+            .post("/v1/apis/" + apiId + "/graphql")
+        .then()
+            .statusCode(403)
+            .header("x-amzn-errortype", equalTo("UnrecognizedClientException"))
+            .body("errors[0].errorType", equalTo("UnrecognizedClientException"))
+            .body("errors[0].message", equalTo("The security token included in the request is invalid"));
     }
 
     @Test

@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.amazonmq.container;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
 import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
@@ -82,8 +83,8 @@ public class RabbitMqManager {
     }
 
     /** Deterministic container name for a broker, stable across emulator restarts. */
-    private static String containerName(String brokerId) {
-        return "floci-amazonmq-" + brokerId;
+    private String containerName(String brokerId) {
+        return ContainerStorageHelper.dockerName(config, "amazonmq-" + brokerId);
     }
 
     public void startContainer(Broker broker) {
@@ -93,7 +94,7 @@ public class RabbitMqManager {
                 broker.getBrokerName(), image);
 
         // Remove any stale container with the same name (e.g. leftover from a crash).
-        lifecycleManager.removeIfExists(containerName);
+        ContainerStorageHelper.removeStaleContainer(config, lifecycleManager, containerName);
 
         ContainerBuilder.Builder specBuilder = containerBuilder.newContainer(image)
                 .withName(containerName)
@@ -101,7 +102,7 @@ public class RabbitMqManager {
                 .withLogRotation()
                 .withLabels(ContainerStorageHelper.resourceIdentityLabels(
                         "amazonmq", broker.getBrokerId(), regionResolver.getAccountId(),
-                        regionResolver.getDefaultRegion()));
+                        brokerRegion(broker)));
 
         // Seed the broker's admin user. RabbitMQ's built-in `guest` user is
         // loopback-only, so it cannot authenticate over the mapped host port; a user
@@ -135,9 +136,8 @@ public class RabbitMqManager {
         ContainerInfo info;
         try {
             if (ContainerStorageHelper.isNamedVolumeMode(config)) {
-                ContainerStorageHelper.applyStorage(specBuilder, lifecycleManager, config,
-                        "amazonmq", broker.getVolumeId(), broker.getBrokerId(),
-                        "/var/lib/rabbitmq");
+                ContainerStorageHelper.applyNamedVolume(specBuilder, lifecycleManager,
+                        resolveVolumeName(broker), "/var/lib/rabbitmq");
             } else {
                 String hostDataPath = ContainerStorageHelper.hostResourcePath(config, "amazonmq", broker.getBrokerId())
                         .toAbsolutePath().toString();
@@ -176,14 +176,19 @@ public class RabbitMqManager {
         String shortId = info.containerId().length() >= 8
                 ? info.containerId().substring(0, 8)
                 : info.containerId();
-        String logGroup = "/aws/amazonmq/broker/" + broker.getBrokerId();
+        String logGroup = broker.generalLogGroup();
         String logStream = logStreamer.generateLogStreamName(shortId);
-        String region = regionResolver.getDefaultRegion();
+        String region = brokerRegion(broker);
         Closeable logHandle = logStreamer.attach(
                 info.containerId(), logGroup, logStream, region, "amazonmq:" + broker.getBrokerId());
         if (logHandle != null) {
             logStreams.put(broker.getBrokerId(), logHandle);
         }
+    }
+
+    /** The region in the broker's ARN; a broker recorded without one counts as the default region's. */
+    private String brokerRegion(Broker broker) {
+        return AwsArnUtils.regionOrDefault(broker.getBrokerArn(), regionResolver.getDefaultRegion());
     }
 
     /**
@@ -234,7 +239,7 @@ public class RabbitMqManager {
             // restart (it is intentionally not persisted; see Broker). Fall back to
             // the deterministic container name so an explicit DeleteBroker still
             // removes a container left running from a previous run.
-            lifecycleManager.removeIfExists(containerName(broker.getBrokerId()));
+            ContainerStorageHelper.removeStaleContainer(config, lifecycleManager, containerName(broker.getBrokerId()));
         }
     }
 
@@ -280,7 +285,21 @@ public class RabbitMqManager {
     }
 
     public void removeBrokerStorage(Broker broker) {
-        ContainerStorageHelper.removeStorage(config, lifecycleManager,
-                "amazonmq", broker.getVolumeId(), broker.getBrokerId());
+        ContainerStorageHelper.removeNamedVolume(config, lifecycleManager, resolveVolumeName(broker));
     }
+
+    /**
+     * The broker's Docker volume name, backfilled once for records written before the field existed:
+     * those predate the {@code floci-aws-} migration, so their data is in the legacy-named volume
+     * and must keep resolving there. Never use the live helper here, which would strand that data
+     * under a freshly created volume.
+     */
+    private String resolveVolumeName(Broker broker) {
+        if (broker.getDockerVolumeName() == null || broker.getDockerVolumeName().isBlank()) {
+            broker.setDockerVolumeName(ContainerStorageHelper.legacyResourceName(
+                    config, "amazonmq", broker.getVolumeId(), broker.getBrokerId()));
+        }
+        return broker.getDockerVolumeName();
+    }
+
 }

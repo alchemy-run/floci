@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.AwsPartition;
+import io.github.hectorvent.floci.core.common.AwsPartitions;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -279,11 +281,8 @@ public class WafV2Service {
     // ──────────────────────────── Association ────────────────────────────
 
     public void associateWebAcl(String webAclArn, String resourceArn) {
-        boolean known = webAclStore.scan(k -> true).stream()
-                .anyMatch(a -> a.getArn().equals(webAclArn));
-        if (!known) {
-            throw new AwsException("WAFNonexistentItemException",
-                    "AWS WAF couldn't perform the operation because your resource doesn't exist.", 400);
+        if (scanArn(webAclStore, webAclArn) == null) {
+            throw nonexistentItem();
         }
         associationStore.put(resourceArn, webAclArn);
     }
@@ -315,6 +314,9 @@ public class WafV2Service {
     // ──────────────────────────── Logging ────────────────────────────
 
     public String putLoggingConfiguration(String resourceArn, String loggingConfigJson) {
+        if (scanArn(webAclStore, resourceArn) == null) {
+            throw nonexistentItem();
+        }
         loggingStore.put(resourceArn, loggingConfigJson);
         return loggingConfigJson;
     }
@@ -542,14 +544,16 @@ public class WafV2Service {
         if (name == null || name.isBlank()) {
             throw new AwsException("WAFInvalidParameterException", "Name is required.", 400);
         }
-        V resource = store.get(key(scope, id)).orElseThrow(() -> new AwsException(
-                "WAFNonexistentItemException",
-                "AWS WAF couldn't perform the operation because your resource doesn't exist.", 400));
+        V resource = store.get(key(scope, id)).orElseThrow(WafV2Service::nonexistentItem);
         if (!name.equals(nameOf(resource))) {
-            throw new AwsException("WAFNonexistentItemException",
-                    "AWS WAF couldn't perform the operation because your resource doesn't exist.", 400);
+            throw nonexistentItem();
         }
         return resource;
+    }
+
+    private static AwsException nonexistentItem() {
+        return new AwsException("WAFNonexistentItemException",
+                "AWS WAF couldn't perform the operation because your resource doesn't exist.", 400);
     }
 
     private <V> V findByName(StorageBackend<String, V> store, String scope, String name) {
@@ -653,16 +657,25 @@ public class WafV2Service {
     }
 
     /**
+     * The single IPV4/IPV6 rule for a set's {@code IPAddressVersion}, also called by
+     * {@code WafV2CfnProvisioner}: an in-place update never sends the member to
+     * {@code UpdateIPSet}, so the provisioner would otherwise accept a value WAFv2 never sees.
+     */
+    public static void requireIpAddressVersion(String ipAddressVersion) {
+        if (!"IPV4".equals(ipAddressVersion) && !"IPV6".equals(ipAddressVersion)) {
+            throw invalidParameter("IP_ADDRESS_VERSION", ipAddressVersion, "must be IPV4 or IPV6.");
+        }
+    }
+
+    /**
      * Validates that every entry in an IPSet's {@code Addresses} is a CIDR block matching
      * the declared {@code IPAddressVersion}, per the {@code CreateIPSet}/{@code UpdateIPSet}
      * contract: a bare IP address with no prefix is rejected, as is a prefix outside
      * 1-32 for IPv4 or 1-128 for IPv6 (AWS WAF supports all CIDR ranges except {@code /0}).
      */
     private void validateAddresses(List<String> addresses, String ipAddressVersion) {
+        requireIpAddressVersion(ipAddressVersion);
         boolean ipv6 = "IPV6".equals(ipAddressVersion);
-        if (!ipv6 && !"IPV4".equals(ipAddressVersion)) {
-            throw invalidParameter("IP_ADDRESS_VERSION", ipAddressVersion, "must be IPV4 or IPV6.");
-        }
         if (addresses == null || addresses.isEmpty()) {
             return;
         }
@@ -711,7 +724,7 @@ public class WafV2Service {
      * carried as structured extendedData, matching the real WAFV2 {@code ParameterExceptionField}
      * enum (e.g. {@code IP_ADDRESS}, {@code IP_ADDRESS_VERSION}) rather than a free-text message.
      */
-    private AwsException invalidParameter(String field, String parameter, String reason) {
+    private static AwsException invalidParameter(String field, String parameter, String reason) {
         Map<String, Object> extendedData = new LinkedHashMap<>();
         extendedData.put("Field", field);
         extendedData.put("Parameter", parameter);
@@ -726,8 +739,34 @@ public class WafV2Service {
 
     private String buildArn(String scope, String type, String name, String id, String region) {
         String prefix = "CLOUDFRONT".equals(scope) ? "global" : "regional";
-        String arnRegion = "CLOUDFRONT".equals(scope) ? "us-east-1" : region;
+        String arnRegion = "CLOUDFRONT".equals(scope) ? cloudFrontScopeRegion(region) : region;
         return regionResolver.buildArn("wafv2", arnRegion, prefix + "/" + type + "/" + name + "/" + id);
+    }
+
+    /** A CLOUDFRONT-scoped resource lives in the partition's implicit global region (us-east-1, cn-northwest-1). */
+    private String cloudFrontScopeRegion(String region) {
+        return cloudFrontPartition(region).implicitGlobalRegion();
+    }
+
+    /**
+     * Refuses the CLOUDFRONT scope for a request sent to a partition without CloudFront, for every
+     * operation, so a List or Get answers the same error a Create does.
+     */
+    public void requireCloudFrontScope(String region) {
+        cloudFrontPartition(region);
+    }
+
+    /**
+     * The partition of {@code region}, provided it has CloudFront: GovCloud and the ISO partitions
+     * do not, so the CLOUDFRONT scope is invalid there.
+     */
+    private AwsPartition cloudFrontPartition(String region) {
+        AwsPartition partition = AwsPartitions.forRegionOrCommercial(region);
+        if (!partition.offers("cloudfront")) {
+            throw invalidParameter("SCOPE_VALUE", "CLOUDFRONT",
+                    "The CLOUDFRONT scope is not available in partition " + partition.id() + ".");
+        }
+        return partition;
     }
 
     /**

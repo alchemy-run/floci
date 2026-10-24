@@ -1,17 +1,16 @@
 package io.github.hectorvent.floci.services.ec2;
 
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.not;
-
+import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
-import io.quarkus.test.junit.QuarkusTest;
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.not;
 
 /**
  * ReplaceRoute swaps the target of an existing route. AWS takes exactly one target per call, so
@@ -355,5 +354,52 @@ class Ec2ReplaceRouteIntegrationTest {
         .then()
             .statusCode(400)
             .body("Response.Errors.Error.Code", equalTo("InvalidRouteTableID.NotFound"));
+    }
+
+    @Test
+    @Order(12)
+    void dryRunValidReplacementReportsSuccessWithoutChangingTheRoute() {
+        given()
+            .formParam("Action", "ReplaceRoute")
+            .formParam("RouteTableId", routeTableId)
+            .formParam("DestinationCidrBlock", DEFAULT_ROUTE)
+            .formParam("NatGatewayId", NAT_GATEWAY)
+            .formParam("DryRun", "true")
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(412)
+            .body("Response.Errors.Error.Code", equalTo("DryRunOperation"));
+
+        String table = given()
+            .formParam("Action", "DescribeRouteTables")
+            .formParam("RouteTableId.1", routeTableId)
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body(DEFAULT_ROUTE_NODE + ".gatewayId", equalTo(INTERNET_GATEWAY))
+            .extract().asString();
+
+        assertThat(table, not(containsString(NAT_GATEWAY)));
+    }
+
+    @Test
+    @Order(13)
+    void dryRunStillRejectsAnUnknownDestination() {
+        given()
+            .formParam("Action", "ReplaceRoute")
+            .formParam("RouteTableId", routeTableId)
+            .formParam("DestinationCidrBlock", UNROUTED_CIDR)
+            .formParam("NatGatewayId", NAT_GATEWAY)
+            .formParam("DryRun", "true")
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("Response.Errors.Error.Code", equalTo("InvalidRoute.NotFound"));
     }
 }

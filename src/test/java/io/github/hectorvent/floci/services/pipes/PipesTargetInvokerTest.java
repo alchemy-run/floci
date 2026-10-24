@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.pipes;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
@@ -18,6 +19,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -100,6 +103,17 @@ class PipesTargetInvokerTest {
         invoker.invoke(pipe, payload, region);
 
         verify(sqsService).sendMessage(anyString(), eq(payload), eq(0), eq(region));
+    }
+
+    @Test
+    void invoke_keepsTheQualifierOfTheTargetFunctionArn() {
+        Pipe pipe = createPipe("arn:aws:lambda:us-east-1:000000000000:function:my-fn:PROD", null);
+        when(lambdaService.invoke(anyString(), anyString(), any(byte[].class), any(InvocationType.class)))
+                .thenReturn(new io.github.hectorvent.floci.services.lambda.model.InvokeResult(200, null, "{}".getBytes(), null, "req"));
+
+        invoker.invoke(pipe, "{}", "us-east-1");
+
+        verify(lambdaService).invoke(eq("us-east-1"), eq("my-fn:PROD"), any(byte[].class), eq(InvocationType.RequestResponse));
     }
 
     @Test
@@ -203,6 +217,90 @@ class PipesTargetInvokerTest {
         assertEquals("{\"count\": 42}", result);
     }
 
+    @Test
+    void inputTemplate_quotedStringPlaceholderIsNotQuotedTwice() throws Exception {
+        String result = invoker.applyInputTemplate("{\"messageId\": \"<$.messageId>\"}",
+                "{\"messageId\": \"abc-123\"}");
+
+        assertEquals("abc-123", MAPPER.readTree(result).path("messageId").asText());
+    }
+
+    @Test
+    void inputTemplate_missingPathBecomesEmptyJsonString() throws Exception {
+        String result = invoker.applyInputTemplate("{\"taskType\": <$.body.missing>}",
+                "{\"body\": \"{\\\"taskType\\\":\\\"x\\\"}\"}");
+
+        assertEquals("", MAPPER.readTree(result).path("taskType").asText());
+    }
+
+    @Test
+    void inputTemplate_decodesJsonSqsBodyAtItsRoot() throws Exception {
+        String result = invoker.applyInputTemplate("{\"body\": <$.body>}",
+                "{\"body\": \"{\\\"taskType\\\":\\\"x\\\"}\"}");
+
+        JsonNode body = MAPPER.readTree(result).path("body");
+        assertTrue(body.isObject());
+        assertEquals("x", body.path("taskType").asText());
+    }
+
+    @Test
+    void inputTemplate_ingestionTimeIsAnIsoInstant() throws Exception {
+        Instant before = Instant.now().minusSeconds(1);
+        String result = invoker.applyInputTemplate("{\"t\": <aws.pipes.event.ingestion-time>}", "{}");
+        Instant after = Instant.now().plusSeconds(1);
+
+        Instant ingestionTime = Instant.parse(MAPPER.readTree(result).path("t").asText());
+        assertFalse(ingestionTime.isBefore(before));
+        assertFalse(ingestionTime.isAfter(after));
+    }
+
+    @Test
+    void extractJsonPath_messageAttributeJsonLookingStringRemainsString() throws Exception {
+        String result = invoker.extractJsonPath("$.messageAttributes.traceId.stringValue",
+                "{\"messageAttributes\":{\"traceId\":{\"stringValue\":\"{\\\"nested\\\":true}\"}}}");
+
+        JsonNode value = MAPPER.readTree(result);
+        assertTrue(value.isTextual());
+        assertEquals("{\"nested\":true}", value.asText());
+    }
+
+    @Test
+    void extractJsonPath_nestedBodyValueRemainsString() throws Exception {
+        ObjectNode body = MAPPER.createObjectNode();
+        body.put("Message", "{\"role\":\"admin\"}");
+        ObjectNode payload = MAPPER.createObjectNode();
+        payload.put("body", body.toString());
+        String result = invoker.extractJsonPath("$.body.Message",
+                payload.toString());
+
+        JsonNode value = MAPPER.readTree(result);
+        assertTrue(value.isTextual());
+        assertEquals("{\"role\":\"admin\"}", value.asText());
+    }
+
+    @Test
+    void extractJsonPath_doesNotDecodeNestedBodyValueTwice() throws Exception {
+        ObjectNode body = MAPPER.createObjectNode();
+        body.put("key", "{\"id\":1}");
+        ObjectNode payload = MAPPER.createObjectNode();
+        payload.put("body", body.toString());
+        String result = invoker.extractJsonPath("$.body.key", payload.toString());
+
+        JsonNode value = MAPPER.readTree(result);
+        assertTrue(value.isTextual());
+        assertEquals("{\"id\":1}", value.asText());
+    }
+
+    @Test
+    void inputTemplate_reusesIngestionTimeForRepeatedPlaceholders() throws Exception {
+        String result = invoker.applyInputTemplate(
+                "{\"first\": <aws.pipes.event.ingestion-time>, "
+                        + "\"second\": <aws.pipes.event.ingestion-time>}", "{}");
+
+        JsonNode document = MAPPER.readTree(result);
+        assertEquals(document.path("first").asText(), document.path("second").asText());
+    }
+
     // ──────────────────────────── nested JSON string resolution ────────────────────────────
 
     @Test
@@ -275,15 +373,15 @@ class PipesTargetInvokerTest {
     }
 
     @Test
-    void applyEnrichment_qualifiedArnResolvesFunctionName() {
+    void applyEnrichment_keepsTheQualifierOfTheFunctionArn() {
         String region = "us-east-1";
-        Pipe pipe = enrichmentPipe(region, "arn:aws:lambda:" + region + ":000000000000:function:enrich-fn:$LATEST");
-        when(lambdaService.invoke(eq(region), eq("enrich-fn"), any(byte[].class), eq(InvocationType.RequestResponse)))
+        Pipe pipe = enrichmentPipe(region, "arn:aws:lambda:" + region + ":000000000000:function:enrich-fn:PROD");
+        when(lambdaService.invoke(eq(region), eq("enrich-fn:PROD"), any(byte[].class), eq(InvocationType.RequestResponse)))
                 .thenReturn(new io.github.hectorvent.floci.services.lambda.model.InvokeResult(200, null, "{}".getBytes(), null, "req"));
 
         invoker.applyEnrichment(pipe, "[]", region);
 
-        verify(lambdaService).invoke(eq(region), eq("enrich-fn"), any(byte[].class), eq(InvocationType.RequestResponse));
+        verify(lambdaService).invoke(eq(region), eq("enrich-fn:PROD"), any(byte[].class), eq(InvocationType.RequestResponse));
     }
 
     @Test
@@ -356,5 +454,46 @@ class PipesTargetInvokerTest {
         when(lambdaService.invoke(eq(region), eq("my-fn"), any(byte[].class), eq(InvocationType.RequestResponse)))
                 .thenReturn(new io.github.hectorvent.floci.services.lambda.model.InvokeResult(200, "Unhandled", "boom".getBytes(), null, "req"));
         assertThrows(RuntimeException.class, () -> invoker.invoke(pipe, "{}", region));
+    }
+
+    @Test
+    void eventBridgeTarget_succeedsWhenPutEventsReportsNoFailures() {
+        String region = "us-east-1";
+        String busArn = "arn:aws:events:" + region + ":000000000000:event-bus/test-bus";
+
+        Pipe pipe = createPipe(busArn, null);
+        String payload = "{\"key\":\"value\"}";
+
+        EventBridgeService.PutEventsResult success = new EventBridgeService.PutEventsResult(
+                0,
+                List.of(Map.of("EventId", "evt-123")));
+
+        when(eventBridgeService.putEvents(anyList(), eq(region))).thenReturn(success);
+
+        assertDoesNotThrow(() -> invoker.invoke(pipe, payload, region));
+
+        verify(eventBridgeService).putEvents(anyList(), eq(region));
+    }
+
+    @Test
+    void eventBridgeTarget_throwsWhenPutEventsReportsFailure() {
+        String region = "us-east-1";
+        String busArn = "arn:aws:events:" + region + ":000000000000:event-bus/test-bus";
+
+        Pipe pipe = createPipe(busArn, null);
+        String payload = "not json at all";
+
+        Map<String, String> failedEntry = new HashMap<>();
+        failedEntry.put("ErrorCode", "MalformedDetail");
+        failedEntry.put("ErrorMessage", "The JSON provided is not valid.");
+        EventBridgeService.PutEventsResult failure = new EventBridgeService.PutEventsResult(1, List.of(failedEntry));
+
+        when(eventBridgeService.putEvents(anyList(), eq(region))).thenReturn(failure);
+
+        RuntimeException ex = assertThrows(RuntimeException.class,
+                () -> invoker.invoke(pipe, payload, region));
+
+        assertTrue(ex.getMessage().contains("MalformedDetail"),
+                "error message should surface the EventBridge failure code; was: " + ex.getMessage());
     }
 }

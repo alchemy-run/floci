@@ -2,9 +2,11 @@ package io.github.hectorvent.floci.services.lambda;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.CookieHeaders;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.RequestContext;
 import io.github.hectorvent.floci.core.common.RequestHost;
@@ -312,6 +314,12 @@ public class LambdaUrlInvocationController {
         root.put("rawPath", rawPath);
         root.put("rawQueryString", target.query());
 
+        List<String> cookies = CookieHeaders.cookiePairs(headers.getRequestHeaders());
+        if (!cookies.isEmpty()) {
+            ArrayNode cookiesNode = root.putArray("cookies");
+            cookies.forEach(cookiesNode::add);
+        }
+
         ObjectNode headersNode = root.putObject("headers");
         headers.getRequestHeaders().forEach((k, v) -> headersNode.put(k.toLowerCase(), String.join(",", v)));
 
@@ -326,7 +334,8 @@ public class LambdaUrlInvocationController {
         ctx.put("requestId", requestId);
         ctx.put("routeKey", "$default");
         ctx.put("stage", "$default");
-        ctx.put("time", DateTimeFormatter.ofPattern("dd/MMM/yyyy:HH:mm:ss Z").withZone(ZoneOffset.UTC).format(Instant.now()));
+        ctx.put("time", DateTimeFormatter.ofPattern("dd/MMM/yyyy:HH:mm:ss Z", Locale.ENGLISH)
+                .withZone(ZoneOffset.UTC).format(Instant.now()));
         ctx.put("timeEpoch", System.currentTimeMillis());
 
         ObjectNode httpNode = ctx.putObject("http");

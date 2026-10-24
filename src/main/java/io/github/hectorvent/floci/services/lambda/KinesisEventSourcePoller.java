@@ -3,10 +3,12 @@ package io.github.hectorvent.floci.services.lambda;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.AwsRegions;
 import io.github.hectorvent.floci.core.common.Resettable;
 import io.github.hectorvent.floci.services.kinesis.KinesisService;
 import io.github.hectorvent.floci.services.kinesis.model.KinesisRecord;
@@ -26,8 +28,11 @@ import org.jboss.logging.Logger;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -40,7 +45,7 @@ public class KinesisEventSourcePoller implements Resettable {
     private final Vertx vertx;
     private final KinesisService kinesisService;
     private final LambdaExecutorService executorService;
-    private final LambdaFunctionStore functionStore;
+    private final LambdaTargetResolver targetResolver;
     private final EsmStore esmStore;
     private final long pollIntervalMs;
     private final ObjectMapper objectMapper;
@@ -56,14 +61,14 @@ public class KinesisEventSourcePoller implements Resettable {
     @Inject
     public KinesisEventSourcePoller(Vertx vertx, KinesisService kinesisService,
                                      LambdaExecutorService executorService,
-                                     LambdaFunctionStore functionStore,
+                                     LambdaTargetResolver targetResolver,
                                      EsmStore esmStore, EmulatorConfig config,
                                      ObjectMapper objectMapper,
                                      PipesFilterMatcher filterMatcher) {
         this.vertx = vertx;
         this.kinesisService = kinesisService;
         this.executorService = executorService;
-        this.functionStore = functionStore;
+        this.targetResolver = targetResolver;
         this.esmStore = esmStore;
         this.pollIntervalMs = config.services().lambda().pollIntervalMs();
         this.objectMapper = objectMapper;
@@ -115,22 +120,26 @@ public class KinesisEventSourcePoller implements Resettable {
         if (activePolls.putIfAbsent(esm.getUuid(), Boolean.TRUE) != null) return;
         pollExecutor.submit(() -> {
             try {
-                LambdaFunction fn = functionStore.getForAccount(esm.getAccountId(), esm.getRegion(), esm.getFunctionName()).orElse(null);
+                LambdaFunction fn = targetResolver.resolveMappingTarget(esm).orElse(null);
                 if (fn == null) return;
 
                 String streamName = streamNameFromArn(esm.getEventSourceArn());
-                KinesisStream stream = kinesisService.describeStream(streamName, esm.getRegion());
+                KinesisStream stream = kinesisService.describeStreamForAccount(
+                        esm.getAccountId(), streamName, esm.getRegion());
 
                 for (KinesisShard shard : stream.getShards()) {
                     String lastSeq = esm.getShardSequenceNumbers().get(shard.getShardId());
                     String iterator;
                     if (lastSeq == null) {
-                        iterator = kinesisService.getShardIterator(streamName, shard.getShardId(), "TRIM_HORIZON", null, esm.getRegion());
+                        iterator = kinesisService.getShardIteratorForAccount(esm.getAccountId(),
+                                streamName, shard.getShardId(), "TRIM_HORIZON", null, esm.getRegion());
                     } else {
-                        iterator = kinesisService.getShardIterator(streamName, shard.getShardId(), "AFTER_SEQUENCE_NUMBER", lastSeq, esm.getRegion());
+                        iterator = kinesisService.getShardIteratorForAccount(esm.getAccountId(),
+                                streamName, shard.getShardId(), "AFTER_SEQUENCE_NUMBER", lastSeq, esm.getRegion());
                     }
 
-                    Map<String, Object> result = kinesisService.getRecords(iterator, esm.getBatchSize(), esm.getRegion());
+                    Map<String, Object> result = kinesisService.getRecordsForAccount(
+                            esm.getAccountId(), iterator, esm.getBatchSize(), esm.getRegion());
                     List<KinesisRecord> records = (List<KinesisRecord>) result.get("Records");
 
                     if (records.isEmpty()) {
@@ -140,7 +149,8 @@ public class KinesisEventSourcePoller implements Resettable {
                     // The checkpoint must advance to the newest FETCHED record whenever the batch is
                     // disposed of, whether by a successful invoke or because a filter matched nothing,
                     // so filtered-out records are consumed, not re-read forever. Only an invoke that was
-                    // attempted and failed leaves the checkpoint unmoved (the whole window retries).
+                    // attempted and failed leaves the checkpoint unmoved (the whole window retries), and
+                    // reported batch item failures move it only up to the lowest failed record.
                     String newestFetchedSeq = records.get(records.size() - 1).getSequenceNumber();
 
                     List<KinesisRecord> matched = records;
@@ -163,7 +173,10 @@ public class KinesisEventSourcePoller implements Resettable {
                     String eventJson = buildKinesisEvent(matched, esm, shard.getShardId());
                     InvokeResult invokeResult;
                     try {
-                        invokeResult = executorService.invoke(fn, eventJson.getBytes(), InvocationType.RequestResponse);
+                        String qualifier = LambdaTargetResolver.mappingQualifier(esm);
+                        invokeResult = qualifier == null
+                                ? executorService.invoke(fn, eventJson.getBytes(), InvocationType.RequestResponse)
+                                : executorService.invoke(fn, eventJson.getBytes(), InvocationType.RequestResponse, 0, qualifier);
                     } catch (AwsException e) {
                         if ("TooManyRequestsException".equals(e.getErrorCode())) {
                             LOG.infov("Kinesis ESM {0}: function {1} throttled, shard iterator not advanced",
@@ -174,7 +187,11 @@ public class KinesisEventSourcePoller implements Resettable {
                     }
 
                     if (invokeResult.getFunctionError() == null) {
-                        advanceCheckpoint(esm, shard.getShardId(), newestFetchedSeq);
+                        String checkpoint = successfulInvocationCheckpoint(
+                                esm, invokeResult.getPayload(), lastSeq, records, matched);
+                        if (checkpoint != null && !checkpoint.equals(lastSeq)) {
+                            advanceCheckpoint(esm, shard.getShardId(), checkpoint);
+                        }
                     }
                 }
             } catch (Exception e) {
@@ -187,7 +204,7 @@ public class KinesisEventSourcePoller implements Resettable {
 
     private String buildKinesisEvent(List<KinesisRecord> records, EventSourceMapping esm, String shardId) {
         try {
-            var recordsArray = objectMapper.createArrayNode();
+            ArrayNode recordsArray = objectMapper.createArrayNode();
             for (KinesisRecord rec : records) {
                 ObjectNode kinesisNode = objectMapper.createObjectNode();
                 kinesisNode.put("kinesisSchemaVersion", "1.0");
@@ -202,7 +219,8 @@ public class KinesisEventSourcePoller implements Resettable {
                 record.put("eventVersion", "1.0");
                 record.put("eventID", shardId + ":" + rec.getSequenceNumber());
                 record.put("eventName", "aws:kinesis:record");
-                record.put("invokeIdentityArn", AwsArnUtils.Arn.of("iam", "", esm.getAccountId(), "role/lambda-role").toString());
+                record.put("invokeIdentityArn", AwsArnUtils.Arn.global(AwsRegions.partitionFor(esm.getRegion()), "iam",
+                        esm.getAccountId(), "role/lambda-role").toString());
                 record.put("awsRegion", esm.getRegion());
                 record.put("eventSourceARN", esm.getEventSourceArn());
                 recordsArray.add(record);
@@ -239,12 +257,90 @@ public class KinesisEventSourcePoller implements Resettable {
         return node;
     }
 
+    /**
+     * The sequence number to checkpoint after a successful invocation. With
+     * {@code ReportBatchItemFailures} the shard resumes at the lowest reported failure; Floci
+     * resumes {@code AFTER_SEQUENCE_NUMBER}, so that is the fetched record just before it. A
+     * malformed {@code batchItemFailures} response retries the whole batch, as on AWS.
+     */
+    private String successfulInvocationCheckpoint(EventSourceMapping esm, byte[] payload, String previousCheckpoint,
+                                                  List<KinesisRecord> fetched, List<KinesisRecord> delivered) {
+        String newestFetchedSeq = fetched.get(fetched.size() - 1).getSequenceNumber();
+        if (!esm.isReportBatchItemFailures() || payload == null || payload.length == 0) {
+            return newestFetchedSeq;
+        }
+
+        try {
+            JsonNode failures = objectMapper.readTree(payload).get("batchItemFailures");
+            if (failures == null || failures.isNull()) {
+                return newestFetchedSeq;
+            }
+            if (!failures.isArray()) {
+                return retryWholeBatch(esm, previousCheckpoint, "batchItemFailures is not an array");
+            }
+
+            Map<String, Integer> fetchedIndexes = new HashMap<>();
+            for (int i = 0; i < fetched.size(); i++) {
+                fetchedIndexes.put(fetched.get(i).getSequenceNumber(), i);
+            }
+            Set<String> deliveredSequences = new HashSet<>();
+            for (KinesisRecord rec : delivered) {
+                deliveredSequences.add(rec.getSequenceNumber());
+            }
+
+            int lowestFailedIndex = fetched.size();
+            for (JsonNode item : failures) {
+                JsonNode identifier = item.get("itemIdentifier");
+                if (identifier == null || identifier.isNull() || identifier.asText().isEmpty()) {
+                    return retryWholeBatch(esm, previousCheckpoint,
+                            "entry has a missing, null or empty itemIdentifier");
+                }
+                String sequenceNumber = identifier.asText();
+                Integer index = fetchedIndexes.get(sequenceNumber);
+                if (index == null || !deliveredSequences.contains(sequenceNumber)) {
+                    return retryWholeBatch(esm, previousCheckpoint,
+                            "itemIdentifier " + sequenceNumber + " is not in the delivered batch");
+                }
+                lowestFailedIndex = Math.min(lowestFailedIndex, index);
+            }
+
+            if (lowestFailedIndex == fetched.size()) {
+                return newestFetchedSeq;
+            }
+            LOG.warnv("Kinesis ESM {0}: function reported batch item failures, resuming at {1}",
+                    esm.getUuid(), fetched.get(lowestFailedIndex).getSequenceNumber());
+            return lowestFailedIndex == 0
+                    ? previousCheckpoint
+                    : fetched.get(lowestFailedIndex - 1).getSequenceNumber();
+        } catch (Exception e) {
+            return retryWholeBatch(esm, previousCheckpoint, "response is not valid JSON: " + e.getMessage());
+        }
+    }
+
+    private String retryWholeBatch(EventSourceMapping esm, String previousCheckpoint, String reason) {
+        LOG.warnv("Kinesis ESM {0}: malformed batchItemFailures response ({1}), retrying the whole batch",
+                esm.getUuid(), reason);
+        return previousCheckpoint;
+    }
+
     private void advanceCheckpoint(EventSourceMapping esm, String shardId, String newestSeq) {
         esm.getShardSequenceNumbers().put(shardId, newestSeq);
         esmStore.saveForAccount(esm.getAccountId(), esm);
     }
 
-    private static String streamNameFromArn(String arn) {
-        return arn.substring(arn.lastIndexOf("/") + 1);
+    /**
+     * The stream name from a stream ARN ({@code .../stream/S}) or a stream-consumer ARN
+     * ({@code .../stream/S/consumer/C:123}): the segment right after {@code stream/}. Only a
+     * {@code /consumer/} suffix is dropped; any other suffix stays part of the name, so a
+     * malformed ARN names no stream rather than a real one.
+     */
+    static String streamNameFromArn(String arn) {
+        int streamIdx = arn.indexOf(":stream/");
+        if (streamIdx < 0) {
+            return arn.substring(arn.lastIndexOf("/") + 1);
+        }
+        String after = arn.substring(streamIdx + ":stream/".length());
+        int consumer = after.indexOf("/consumer/");
+        return consumer >= 0 ? after.substring(0, consumer) : after;
     }
 }

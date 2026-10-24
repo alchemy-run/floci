@@ -7,9 +7,8 @@ import java.util.Locale;
  * carried by a {@code Credential} parameter, whether that parameter arrived in an
  * {@code Authorization} header or an {@code X-Amz-Credential} query/token component. Shared by
  * every SigV4 verifier in this codebase that checks an Authorization-header-signed request
- * against this exact five-part shape: {@code ExecuteApiSigV4Authorizer} (API Gateway) and
- * {@code IamAuthValidator} (AppSync) both parsed and rebuilt this independently before this class
- * existed.
+ * against this exact five-part shape. AppSync's {@code IamAuthValidator} splits the scope itself,
+ * because it names each fault the way AppSync does.
  */
 public record CredentialScope(String accessKeyId, String date, String region, String service) {
 

@@ -1,9 +1,5 @@
 package io.github.hectorvent.floci.services.apigateway;
 
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
@@ -19,6 +15,10 @@ import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -53,7 +53,7 @@ class ApiGatewayRootResourceLookupTest {
             };
         });
         service = new ApiGatewayService(storageFactory, mock(EmulatorConfig.class),
-                mock(TlsCertificateManager.class));
+                mock(TlsCertificateManager.class), new RegionResolver(REGION, "000000000000"));
     }
 
     @Test
@@ -99,7 +99,7 @@ class ApiGatewayRootResourceLookupTest {
         ObjectMapper objectMapper = new ObjectMapper();
         ApiGatewayController controller = new ApiGatewayController(mockedService,
                 mock(ApiGatewayV2Service.class), mock(ApiGatewayV2OpenApiImporter.class),
-                regionResolver, objectMapper);
+                regionResolver, objectMapper, null);
 
         Response response = controller.getRestApis(headers);
         JsonNode body = objectMapper.readTree((String) response.getEntity());

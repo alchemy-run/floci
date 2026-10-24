@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.Base64Url;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.apigateway.ApiGatewayExecuteApiRoutingFilter;
 import io.github.hectorvent.floci.services.apigateway.ApiGatewayExecuteApiHostFilter;
@@ -27,6 +28,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Vert.x-based WebSocket handler for API Gateway v2 WebSocket APIs.
@@ -207,6 +209,7 @@ public class WebSocketHandler {
         String sourceIp = ctx.request().remoteAddress() != null
                 ? ctx.request().remoteAddress().host() : "127.0.0.1";
         String userAgent = ctx.request().getHeader("User-Agent");
+        boolean secureTransport = ctx.request().isSSL();
 
         // Load stage variables (default to empty map if null)
         Map<String, String> stageVariables = stage.getStageVariables() != null
@@ -235,7 +238,7 @@ public class WebSocketHandler {
                 vertx.<WebSocketAuthorizerService.AuthorizerResult>executeBlocking(() -> {
                     return authorizerService.invokeAndEvaluate(region, apiId, stageName,
                             connectRoute.getAuthorizerId(), finalConnectionId, finalConnectedAt,
-                            headers, queryParams, finalSourceIp, finalUserAgent, finalStageVariables);
+                            headers, queryParams, finalSourceIp, secureTransport, finalUserAgent, finalStageVariables);
                 }).onSuccess(authResult -> {
                     if (!authResult.allowed()) {
                         ctx.response().setStatusCode(authResult.statusCode()).end();
@@ -703,8 +706,8 @@ public class WebSocketHandler {
      */
     private static String generateConnectionId() {
         byte[] bytes = new byte[9];
-        java.util.concurrent.ThreadLocalRandom.current().nextBytes(bytes);
-        return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+        ThreadLocalRandom.current().nextBytes(bytes);
+        return Base64Url.encode(bytes);
     }
 
     /**

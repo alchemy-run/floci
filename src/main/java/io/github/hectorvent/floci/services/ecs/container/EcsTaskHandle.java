@@ -2,8 +2,11 @@ package io.github.hectorvent.floci.services.ecs.container;
 
 import java.io.Closeable;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Holds the runtime Docker container IDs for a running ECS task.
@@ -27,6 +30,7 @@ public class EcsTaskHandle {
     private final String firelensVolumeName;
     private final String networkInterfaceId;
     private final String region;
+    private final Set<String> taskVolumeNames;
     /** Per-container {@code stopTimeout}, so teardown waits as long as the task definition asked. */
     private final Map<String, Integer> stopTimeouts;
     /**
@@ -34,6 +38,10 @@ public class EcsTaskHandle {
      * removed, so the time has to be kept here for the caller that stamps the task's containers.
      */
     private final Map<String, Instant> finishedAt = new LinkedHashMap<>();
+    /** Exit codes read before Docker removes a container, retained across teardown retries. */
+    private final Map<String, Integer> exitCodes = new LinkedHashMap<>();
+    /** Container names confirmed removed, including those whose exit code was unavailable. */
+    private final Set<String> removedContainers = new HashSet<>();
 
     public EcsTaskHandle(String taskArn, Map<String, String> containerIds,
                          Map<String, Closeable> logStreamsByContainerId) {
@@ -51,12 +59,21 @@ public class EcsTaskHandle {
                          Map<String, Closeable> logStreamsByContainerId,
                          String firelensVolumeName, String networkInterfaceId, String region,
                          Map<String, Integer> stopTimeouts) {
+        this(taskArn, containerIds, logStreamsByContainerId, firelensVolumeName,
+                networkInterfaceId, region, stopTimeouts, Set.of());
+    }
+
+    public EcsTaskHandle(String taskArn, Map<String, String> containerIds,
+                         Map<String, Closeable> logStreamsByContainerId,
+                         String firelensVolumeName, String networkInterfaceId, String region,
+                         Map<String, Integer> stopTimeouts, Set<String> taskVolumeNames) {
         this.taskArn = taskArn;
         this.containerIds = new LinkedHashMap<>(containerIds);
         this.logStreamsByContainerId = new LinkedHashMap<>(logStreamsByContainerId);
         this.firelensVolumeName = firelensVolumeName;
         this.networkInterfaceId = networkInterfaceId;
         this.region = region;
+        this.taskVolumeNames = new LinkedHashSet<>(taskVolumeNames);
         this.stopTimeouts = new LinkedHashMap<>(stopTimeouts);
     }
 
@@ -66,6 +83,55 @@ public class EcsTaskHandle {
     public String getFirelensVolumeName() { return firelensVolumeName; }
     public String getNetworkInterfaceId() { return networkInterfaceId; }
     public String getRegion() { return region; }
+    public Set<String> getTaskVolumeNames() { return Set.copyOf(taskVolumeNames); }
+
+    public void recordTaskVolumeRemoved(String volumeName) {
+        taskVolumeNames.remove(volumeName);
+    }
+
+    public boolean hasTaskVolumes() {
+        return !taskVolumeNames.isEmpty();
+    }
+
+    /** The container's {@code stopTimeout} in seconds, or {@link #DEFAULT_STOP_TIMEOUT_SECONDS}. */
+    public int stopTimeoutFor(String containerName) {
+        Integer configured = stopTimeouts.get(containerName);
+        return configured != null ? configured : DEFAULT_STOP_TIMEOUT_SECONDS;
+    }
+
+    /** Notes when a container finished. A null is ignored, so a failed read leaves no entry. */
+    public void recordFinishedAt(String containerName, Instant instant) {
+        if (instant != null) {
+            finishedAt.put(containerName, instant);
+        }
+    }
+
+    /** When each container finished, for the containers teardown could read a time for. */
+    public Map<String, Instant> getFinishedAt() {
+        return finishedAt;
+    }
+
+    public Integer getRecordedExitCode(String containerName) {
+        return exitCodes.get(containerName);
+    }
+
+    public void recordExitCode(String containerName, Integer exitCode) {
+        if (exitCode != null) {
+            exitCodes.putIfAbsent(containerName, exitCode);
+        }
+    }
+
+    public void recordContainerRemoved(String containerName) {
+        removedContainers.add(containerName);
+    }
+
+    public boolean isContainerRemoved(String containerName) {
+        return removedContainers.contains(containerName);
+    }
+
+    public boolean allContainersRemoved() {
+        return removedContainers.containsAll(containerIds.keySet());
+    }
 
     /** The container's {@code stopTimeout} in seconds, or {@link #DEFAULT_STOP_TIMEOUT_SECONDS}. */
     public int stopTimeoutFor(String containerName) {

@@ -187,11 +187,18 @@ public final class XmlParser {
         return extractAll(xml, elementName).stream().anyMatch(value::equals);
     }
 
-    /** A key paired with an optional version id, extracted from a {@code Delete} request's {@code <Object>} block. */
-    public record KeyVersion(String key, String versionId) {}
+    /**
+     * A key paired with an optional version id and an optional {@code If-Match} ETag, extracted from a
+     * {@code Delete} request's {@code <Object>} block.
+     */
+    public record KeyVersion(String key, String versionId, String eTag) {
+        public KeyVersion(String key, String versionId) {
+            this(key, versionId, null);
+        }
+    }
 
     /**
-     * Extracts {@code (Key, VersionId)} pairs from an S3 {@code DeleteObjects} request body,
+     * Extracts {@code (Key, VersionId, ETag)} entries from an S3 {@code DeleteObjects} request body,
      * one entry per {@code <Object>} block.
      *
      * <p>Unlike {@link #extractAll(String, String)}, which flattens every {@code <Key>} across
@@ -199,8 +206,9 @@ public final class XmlParser {
      * {@code <Object>} block. This is needed so a batch delete can target the exact version named,
      * rather than discarding it and always falling back to "no version specified".
      *
-     * <p>{@code <VersionId>} is optional per the {@code Delete} request schema; an {@code <Object>}
-     * block that omits it yields an entry with a {@code null} versionId.
+     * <p>{@code <VersionId>} and {@code <ETag>} are optional per the {@code Delete} request schema; an
+     * {@code <Object>} block that omits one yields an entry with {@code null} in its place. The ETag is a
+     * conditional-delete precondition, checked like an {@code If-Match} header on DeleteObject.
      *
      * <pre>{@code
      * List<XmlParser.KeyVersion> entries = XmlParser.extractDeleteObjectEntries(body);
@@ -216,6 +224,7 @@ public final class XmlParser {
             boolean inObject = false;
             String key = null;
             String versionId = null;
+            String eTag = null;
             while (r.hasNext()) {
                 int event = r.next();
                 if (event == XMLStreamConstants.START_ELEMENT) {
@@ -224,15 +233,18 @@ public final class XmlParser {
                         inObject = true;
                         key = null;
                         versionId = null;
+                        eTag = null;
                     } else if (inObject && "Key".equals(local)) {
                         key = r.getElementText();
                     } else if (inObject && "VersionId".equals(local)) {
                         versionId = r.getElementText();
+                    } else if (inObject && "ETag".equals(local)) {
+                        eTag = r.getElementText();
                     }
                 } else if (event == XMLStreamConstants.END_ELEMENT
                         && inObject && "Object".equals(r.getLocalName())) {
                     if (key != null) {
-                        result.add(new KeyVersion(key, versionId));
+                        result.add(new KeyVersion(key, versionId, eTag));
                     }
                     inObject = false;
                 }
@@ -440,6 +452,37 @@ public final class XmlParser {
             LOG.debugv("Ignoring malformed XML during structured parse: {0}", e.getMessage());
         }
         return null;
+    }
+
+    /**
+     * Parses a whole document into its document element's tree, or returns {@code null} when the
+     * document is empty or not well-formed anywhere, after its document element included.
+     *
+     * <p>For a stored document whose every part has effect, where {@link #extractElementTree}
+     * would return a complete element followed by content that never parsed.
+     */
+    public static XmlElement parseDocumentElementTree(String xml) {
+        if (xml == null || xml.isEmpty()) {
+            return null;
+        }
+        try {
+            XMLStreamReader r = FACTORY.createXMLStreamReader(new StringReader(xml));
+            try {
+                XmlElement root = null;
+                while (r.hasNext()) {
+                    int event = r.next();
+                    if (root == null && event == XMLStreamConstants.START_ELEMENT) {
+                        root = readElementTree(r);
+                    }
+                }
+                return root;
+            } finally {
+                r.close();
+            }
+        } catch (XMLStreamException e) {
+            LOG.debugv("Ignoring malformed XML document: {0}", e.getMessage());
+            return null;
+        }
     }
 
     private static XmlElement readElementTree(XMLStreamReader r) throws XMLStreamException {

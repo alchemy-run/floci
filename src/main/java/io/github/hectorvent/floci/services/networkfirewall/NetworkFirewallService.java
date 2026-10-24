@@ -6,8 +6,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
+import io.github.hectorvent.floci.core.common.Digests;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -39,6 +41,16 @@ public class NetworkFirewallService {
     private static final Set<String> LOG_TYPES = Set.of("ALERT", "FLOW", "TLS");
     private static final Set<String> LOG_DESTINATION_TYPES =
             Set.of("S3", "CloudWatchLogs", "KinesisDataFirehose");
+
+    /**
+     * The response members an UpdateRuleGroup or UpdateFirewallPolicy request can set (botocore
+     * 2020-11-12). Capacity and Tags have no update member, and the name and a rule group's type
+     * can't change, so everything outside these sets carries over from the stored resource.
+     */
+    private static final Set<String> RULE_GROUP_UPDATE_FIELDS =
+            Set.of("Description", "EncryptionConfiguration", "SourceMetadata", "SummaryConfiguration");
+    private static final Set<String> FIREWALL_POLICY_UPDATE_FIELDS =
+            Set.of("Description", "EncryptionConfiguration");
 
     private final ObjectMapper objectMapper;
     private final StorageBackend<String, ObjectNode> ruleGroups;
@@ -150,63 +162,51 @@ public class NetworkFirewallService {
     }
 
     /**
-     * UpdateRuleGroup modifies the rule group in place (ARN, id, capacity and tags are
-     * retained) and requires the caller's UpdateToken to match the current one.
-     * Description is part of the replaced definition; the optional configuration blocks
-     * are preserved when omitted.
+     * Rule group and firewall policy create, update and delete share the service lock. An update
+     * reads the stored resource, checks the request and its UpdateToken against it and writes the
+     * replacement back, so without a common lock a delete landing in between is undone by that
+     * write, and two updates carrying the same token can both pass the token check.
      */
-    public synchronized ObjectNode updateRuleGroup(JsonNode request, String region, String accountId) {
-        requireObject(request);
-        String requestedType = textOrNull(request, "Type");
-        if (requestedType != null) {
-            requireEnum(requestedType, RULE_GROUP_TYPES, "Type");
+    public synchronized ObjectNode updateRuleGroup(JsonNode request) {
+        String type = textOrNull(request, "Type");
+        if (type != null) {
+            requireEnum(type, RULE_GROUP_TYPES, "Type");
         }
-        String token = requiredText(request, "UpdateToken");
-        ObjectNode stored = requireRuleGroup(request, region, accountId);
-        requireMatchingToken(stored, token);
-        ObjectNode current = (ObjectNode) stored.get("RuleGroupResponse");
-        String type = current.path("Type").asText("STATEFUL");
-        ObjectNode definition = ruleGroupDefinition(request, type);
-
-        ObjectNode updated = stored.deepCopy();
-        ObjectNode response = (ObjectNode) updated.get("RuleGroupResponse");
-        updated.set("RuleGroup", definition);
-        replaceOrRemove(request, response, "Description");
-        copyIfPresent(request, response, "SummaryConfiguration");
-        copyIfPresent(request, response, "SourceMetadata");
-        if (request.has("EncryptionConfiguration")) {
-            response.set("EncryptionConfiguration",
-                    encryptionConfiguration(request, response.get("EncryptionConfiguration")));
+        ObjectNode existing = requireForUpdate(ruleGroups, request, "RuleGroupArn", "RuleGroupName",
+                "RuleGroup", "RuleGroupResponse");
+        String storedType = existing.path("RuleGroupResponse").path("Type").asText(null);
+        if (type != null && storedType != null && !storedType.equals(type)) {
+            throw new AwsException("InvalidRequestException",
+                    "You can't change the type of a rule group after you create it.", 400);
         }
-        response.put("LastModifiedTime", nowEpochSeconds());
-        ObjectNode result = objectMapper.createObjectNode();
-        if (isDryRun(request)) {
-            result.put("UpdateToken", token);
-            result.set("RuleGroupResponse", ruleGroupResponseView(updated));
-            return result;
+        boolean hasRules = request.hasNonNull("Rules");
+        if (request.hasNonNull("RuleGroup") == hasRules) {
+            throw new AwsException("InvalidRequestException",
+                    "You must provide either RuleGroup or Rules, but not both.", 400);
         }
-        String newToken = UUID.randomUUID().toString();
-        updated.put("UpdateToken", newToken);
-        ruleGroups.put(ruleGroupArnOf(updated), updated);
-        result.put("UpdateToken", newToken);
-        result.set("RuleGroupResponse", ruleGroupResponseView(updated));
-        return result;
+        ObjectNode replacement = replacementOf(existing, request, "RuleGroup", "RuleGroupResponse",
+                RULE_GROUP_UPDATE_FIELDS);
+        // CreateRuleGroup keeps a Suricata Rules string on the response in place of a RuleGroup,
+        // so the update replaces whichever of the two the rule group was stored with.
+        if (replacement.path("RuleGroupResponse") instanceof ObjectNode response) {
+            if (hasRules) {
+                response.put("Rules", textOrNull(request, "Rules"));
+            } else {
+                response.remove("Rules");
+            }
+        }
+        if (request.path("DryRun").asBoolean(false)) {
+            replacement.put("UpdateToken", existing.path("UpdateToken").asText());
+        } else {
+            ruleGroups.put(resourceArn(existing), replacement);
+        }
+        return replacement.deepCopy();
     }
 
-    /** A rule group referenced by a firewall policy can't be deleted (InvalidOperationException). */
-    public synchronized ObjectNode deleteRuleGroup(JsonNode request, String region, String accountId) {
-        ObjectNode stored = requireRuleGroup(request, region, accountId);
-        String arn = ruleGroupArnOf(stored);
-        if (ruleGroupAssociations(arn) > 0) {
-            throw new AwsException("InvalidOperationException",
-                    "Unable to delete the object because it is still in use: " + arn, 400);
-        }
-        ObjectNode view = ruleGroupResponseView(stored);
-        view.put("RuleGroupStatus", "DELETING");
-        ruleGroups.delete(arn);
-        ObjectNode result = objectMapper.createObjectNode();
-        result.set("RuleGroupResponse", view);
-        return result;
+    /** @see #updateRuleGroup for why this is synchronized. */
+    public synchronized ObjectNode deleteRuleGroup(String arn, String name) {
+        deleteRequired(ruleGroups, arn, name, "RuleGroup");
+        return objectMapper.createObjectNode();
     }
 
     /**
@@ -326,85 +326,24 @@ public class NetworkFirewallService {
         return result;
     }
 
-    /** In-place update guarded by UpdateToken; ARN, id and tags are retained. */
-    public synchronized ObjectNode updateFirewallPolicy(JsonNode request, String region, String accountId) {
-        requireObject(request);
-        String token = requiredText(request, "UpdateToken");
-        ObjectNode stored = requireFirewallPolicy(request, region, accountId);
-        requireMatchingToken(stored, token);
-        ObjectNode definition = firewallPolicyDefinition(request);
-
-        ObjectNode updated = stored.deepCopy();
-        ObjectNode response = (ObjectNode) updated.get("FirewallPolicyResponse");
-        updated.set("FirewallPolicy", definition);
-        replaceOrRemove(request, response, "Description");
-        if (request.has("EncryptionConfiguration")) {
-            response.set("EncryptionConfiguration",
-                    encryptionConfiguration(request, response.get("EncryptionConfiguration")));
+    /** @see #updateRuleGroup for why this is synchronized. */
+    public synchronized ObjectNode updateFirewallPolicy(JsonNode request) {
+        ObjectNode existing = requireForUpdate(firewallPolicies, request, "FirewallPolicyArn",
+                "FirewallPolicyName", "FirewallPolicy", "FirewallPolicyResponse");
+        requireObject(request, "FirewallPolicy");
+        ObjectNode replacement = replacementOf(existing, request, "FirewallPolicy", "FirewallPolicyResponse",
+                FIREWALL_POLICY_UPDATE_FIELDS);
+        if (request.path("DryRun").asBoolean(false)) {
+            replacement.put("UpdateToken", existing.path("UpdateToken").asText());
+        } else {
+            firewallPolicies.put(resourceArn(existing), replacement);
         }
-        response.put("LastModifiedTime", nowEpochSeconds());
-        ObjectNode result = objectMapper.createObjectNode();
-        if (isDryRun(request)) {
-            result.put("UpdateToken", token);
-            result.set("FirewallPolicyResponse", firewallPolicyResponseView(updated));
-            return result;
-        }
-        String newToken = UUID.randomUUID().toString();
-        updated.put("UpdateToken", newToken);
-        firewallPolicies.put(firewallPolicyArnOf(updated), updated);
-        result.put("UpdateToken", newToken);
-        result.set("FirewallPolicyResponse", firewallPolicyResponseView(updated));
-        return result;
+        return replacement.deepCopy();
     }
 
-    /** A policy still associated with a firewall can't be deleted (InvalidOperationException). */
-    public synchronized ObjectNode deleteFirewallPolicy(JsonNode request, String region, String accountId) {
-        ObjectNode stored = requireFirewallPolicy(request, region, accountId);
-        String arn = firewallPolicyArnOf(stored);
-        if (firewallPolicyAssociations(arn) > 0) {
-            throw new AwsException("InvalidOperationException",
-                    "Unable to delete the object because it is still in use: " + arn, 400);
-        }
-        ObjectNode view = firewallPolicyResponseView(stored);
-        view.put("FirewallPolicyStatus", "DELETING");
-        firewallPolicies.delete(arn);
-        ObjectNode result = objectMapper.createObjectNode();
-        result.set("FirewallPolicyResponse", view);
-        return result;
-    }
-
-    public ObjectNode listFirewallPolicies(JsonNode request) {
-        List<ObjectNode> items = firewallPolicies.scan(key -> true).stream()
-                .map(stored -> (ObjectNode) stored.path("FirewallPolicyResponse"))
-                .sorted(Comparator.comparing(response -> response.path("FirewallPolicyName").asText()))
-                .map(response -> objectMapper.createObjectNode()
-                        .put("Name", response.path("FirewallPolicyName").asText())
-                        .put("Arn", response.path("FirewallPolicyArn").asText()))
-                .toList();
-        return paginate(items, request, "FirewallPolicies");
-    }
-
-    // ----------------------------------------------------------------------- tags
-
-    private static final int MAX_TAGS = 200;
-
-    public synchronized ObjectNode tagResource(JsonNode request) {
-        requireObject(request);
-        String arn = requiredText(request, "ResourceArn");
-        ArrayNode requested = validatedTags(request.get("Tags"), true);
-        TagTarget target = requireTagTarget(arn);
-        ArrayNode tags = target.tags();
-        for (JsonNode tag : requested) {
-            String key = tag.path("Key").asText();
-            removeTag(tags, key);
-            tags.add(tag.deepCopy());
-        }
-        if (tags.size() > MAX_TAGS) {
-            throw new AwsException("InvalidRequestException",
-                    "A resource can have at most " + MAX_TAGS + " tags.", 400);
-        }
-        target.holder().set("Tags", tags);
-        target.store().put(arn, target.stored());
+    /** @see #updateRuleGroup for why this is synchronized. */
+    public synchronized ObjectNode deleteFirewallPolicy(String arn, String name) {
+        deleteRequired(firewallPolicies, arn, name, "FirewallPolicy");
         return objectMapper.createObjectNode();
     }
 
@@ -619,11 +558,13 @@ public class NetworkFirewallService {
      */
     private void requireCurrentToken(ObjectNode firewall, JsonNode request) {
         String providedToken = textOrNull(request, "UpdateToken");
-        if (providedToken == null) {
-            return;
+        if (providedToken != null) {
+            requireMatchingToken(firewall, providedToken);
         }
-        String currentToken = firewall.path("UpdateToken").asText(null);
-        if (!providedToken.equals(currentToken)) {
+    }
+
+    private static void requireMatchingToken(JsonNode stored, String providedToken) {
+        if (!providedToken.equals(stored.path("UpdateToken").asText(null))) {
             throw new AwsException("InvalidTokenException",
                     "The token you provided is stale or isn't valid for the operation.", 400);
         }
@@ -773,53 +714,85 @@ public class NetworkFirewallService {
         return firewalls.get(arn).map(ObjectNode::deepCopy).orElse(null);
     }
 
-    // ---------------------------------------------------------------- flow operations
-
-    private static final int MAX_FLOW_FILTERS = 20;
-    private static final Set<String> FLOW_OPERATION_TYPES = Set.of("FLOW_CAPTURE", "FLOW_FLUSH");
-    private static final Set<String> ANALYSIS_TYPES = Set.of("TLS_SNI", "HTTP_HOST");
-
-    public ObjectNode startFlowCapture(JsonNode request, String region) {
-        return startFlowOperation(request, region, "FLOW_CAPTURE");
-    }
-
-    public ObjectNode startFlowFlush(JsonNode request, String region) {
-        return startFlowOperation(request, region, "FLOW_FLUSH");
+    private ObjectNode createNamed(JsonNode request, String nameField, String requestBodyField,
+                                   String responseField, String arnField, String idField,
+                                   String resourceArn, StorageBackend<String, ObjectNode> store) {
+        String name = requiredText(request, nameField);
+        ensureUnique(store, resourceArn, name, requestBodyField);
+        ObjectNode responseInfo = copyObject(request);
+        JsonNode body = responseInfo.remove(requestBodyField);
+        responseInfo.remove("UpdateToken");
+        responseInfo.remove("DryRun");
+        responseInfo.put(arnField, resourceArn);
+        responseInfo.put(idField, deterministicHex(resourceArn, 32));
+        responseInfo.put(nameField, name);
+        responseInfo.put("ResourceArn", resourceArn);
+        responseInfo.put("ResourceName", name);
+        ObjectNode stored = objectMapper.createObjectNode();
+        if (body != null && !body.isMissingNode()) {
+            stored.set(requestBodyField, body.deepCopy());
+        }
+        stored.set(responseField, responseInfo);
+        stored.put("UpdateToken", UUID.randomUUID().toString());
+        if (!request.path("DryRun").asBoolean(false)) {
+            store.put(resourceArn, stored);
+        }
+        return stored.deepCopy();
     }
 
     /**
-     * Floci has no data plane behind a firewall endpoint, so its flow table is always empty: a
-     * capture or flush runs against the real firewall record, finds no tracked flows, and
-     * completes with an empty result set. The start response reports IN_PROGRESS as AWS does;
-     * the stored operation has already settled to COMPLETED.
+     * Resolves the rule group or firewall policy an update targets. The ARN alone is enough, which
+     * is how Terraform updates; a name sent alongside it must be the stored one, since the name
+     * can't change. The required UpdateToken must match the stored token, or the resource has
+     * changed since the caller read it.
      */
-    private synchronized ObjectNode startFlowOperation(JsonNode request, String region, String type) {
-        requireObject(request);
-        ObjectNode firewall = requireFirewallByArn(request);
-        ObjectNode scope = flowOperationScope(firewall, request, region);
-        ArrayNode filters = validatedFlowFilters(request.get("FlowFilters"));
-        JsonNode minimumAge = request.get("MinimumFlowAgeInSeconds");
-        if (minimumAge != null && !minimumAge.isNull() && (!minimumAge.canConvertToInt() || minimumAge.asInt() < 0)) {
+    private ObjectNode requireForUpdate(StorageBackend<String, ObjectNode> store, JsonNode request,
+                                        String arnField, String nameField, String kind, String responseField) {
+        String requestedName = textOrNull(request, nameField);
+        ObjectNode existing = require(store, textOrNull(request, arnField), requestedName, kind,
+                "ResourceArn", "ResourceName");
+        String storedName = existing.path(responseField).path(nameField).asText(null);
+        if (requestedName != null && !requestedName.isBlank() && !requestedName.equals(storedName)) {
             throw new AwsException("InvalidRequestException",
-                    "MinimumFlowAgeInSeconds must be a non-negative integer.", 400);
+                    "The " + kind + " ARN does not match the requested name.", 400);
         }
+        requireMatchingToken(existing, requiredText(request, "UpdateToken"));
+        return existing;
+    }
 
-        String firewallArn = firewall.path("FirewallArn").asText();
-        String flowOperationId = UUID.randomUUID().toString();
-        ObjectNode operation = objectMapper.createObjectNode();
-        operation.put("FirewallArn", firewallArn);
-        operation.setAll(scope);
-        operation.put("FlowOperationId", flowOperationId);
-        operation.put("FlowOperationType", type);
-        operation.put("FlowOperationStatus", "COMPLETED");
-        operation.put("FlowRequestTimestamp", nowEpochSeconds());
-        ObjectNode definition = operation.putObject("FlowOperation");
-        if (minimumAge != null && !minimumAge.isNull()) {
-            definition.put("MinimumFlowAgeInSeconds", minimumAge.asInt());
+    /**
+     * Builds the replacement without touching the store, so a request rejected after this point
+     * still leaves the stored resource as it was. The request replaces the definition in
+     * {@code bodyField} and whichever of {@code updateFields} it carries; everything else, the
+     * ARN, name, type, capacity and tags included, carries over from {@code existing}.
+     */
+    private ObjectNode replacementOf(ObjectNode existing, JsonNode request, String bodyField,
+                                     String responseField, Set<String> updateFields) {
+        ObjectNode replacement = existing.deepCopy();
+        JsonNode body = request.get(bodyField);
+        if (body == null || body.isNull()) {
+            replacement.remove(bodyField);
+        } else {
+            replacement.set(bodyField, body.deepCopy());
         }
-        definition.set("FlowFilters", filters);
-        operation.putArray("Flows");
-        flowOperations.put(flowOperationId, operation);
+        ObjectNode response = replacement.path(responseField) instanceof ObjectNode stored
+                ? stored
+                : replacement.putObject(responseField);
+        for (String field : updateFields) {
+            JsonNode value = request.get(field);
+            if (value != null && !value.isNull()) {
+                response.set(field, value.deepCopy());
+            }
+        }
+        replacement.put("UpdateToken", UUID.randomUUID().toString());
+        return replacement;
+    }
+
+    private ObjectNode describeNamed(StorageBackend<String, ObjectNode> store, String arn, String name,
+                                     String bodyField) {
+        ObjectNode stored = require(store, arn, name, bodyField, "ResourceArn", "ResourceName");
+        return stored.deepCopy();
+    }
 
         ObjectNode response = objectMapper.createObjectNode();
         response.put("FirewallArn", firewallArn);
@@ -1589,6 +1562,23 @@ public class NetworkFirewallService {
         return false;
     }
 
+    private void deleteRequired(StorageBackend<String, ObjectNode> store, String arn, String name, String kind) {
+        ObjectNode stored = require(store, arn, name, kind, "ResourceArn", "ResourceName");
+        store.delete(resourceArn(stored));
+    }
+
+    private String resourceArn(JsonNode stored) {
+        if (stored.hasNonNull("ResourceArn")) {
+            return stored.path("ResourceArn").asText();
+        }
+        for (JsonNode child : stored) {
+            if (child.isObject() && child.hasNonNull("ResourceArn")) {
+                return child.path("ResourceArn").asText();
+            }
+        }
+        throw new IllegalStateException("Stored Network Firewall resource has no ARN");
+    }
+
     /**
      * The model enumerates {@code Type} as STATELESS, STATEFUL or STATEFUL_DOMAIN, and the value is
      * both persisted and folded into the ARN. Only STATELESS gets the stateless ARN prefix; the two
@@ -1641,6 +1631,13 @@ public class NetworkFirewallService {
         return (ArrayNode) value;
     }
 
+    private static void requireObject(JsonNode request, String field) {
+        JsonNode value = request == null ? null : request.get(field);
+        if (!(value instanceof ObjectNode)) {
+            throw new AwsException("InvalidRequestException", field + " is required.", 400);
+        }
+    }
+
     private static void requireIdentifier(String arn, String name) {
         if ((arn == null || arn.isBlank()) && (name == null || name.isBlank())) {
             throw new AwsException("InvalidRequestException",
@@ -1653,7 +1650,7 @@ public class NetworkFirewallService {
     }
 
     private static String arn(String region, String accountId, String type, String name) {
-        return "arn:aws:network-firewall:" + region + ":" + accountId + ":" + type + "/" + name;
+        return AwsArnUtils.Arn.of("network-firewall", region, accountId, type + "/" + name).toString();
     }
 
     static String textOrNull(JsonNode request, String field) {
@@ -1662,13 +1659,7 @@ public class NetworkFirewallService {
     }
 
     static String deterministicHex(String value, int length) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(value.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest).substring(0, length);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 unavailable", e);
-        }
+        return Digests.sha256Hex(value).substring(0, length);
     }
 
     /** @see #associateSubnets for why this is synchronized. */

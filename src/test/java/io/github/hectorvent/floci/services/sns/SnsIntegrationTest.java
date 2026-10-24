@@ -682,6 +682,66 @@ class SnsIntegrationTest {
     }
 
     @Test
+    @Order(19)
+    void filterPolicy_messageBodyMatchesS3RecordsArray() {
+        String queueUrl = given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateQueue")
+            .formParam("QueueName", "sns-records-filter-" + UUID.randomUUID())
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .extract().xmlPath().getString("CreateQueueResponse.CreateQueueResult.QueueUrl");
+
+        String subscription = given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "Subscribe")
+            .formParam("TopicArn", topicArn)
+            .formParam("Protocol", "sqs")
+            .formParam("Endpoint", queueUrl)
+            .formParam("Attributes.entry.1.key", "FilterPolicyScope")
+            .formParam("Attributes.entry.1.value", "MessageBody")
+            .formParam("Attributes.entry.2.key", "FilterPolicy")
+            .formParam("Attributes.entry.2.value",
+                    "{\"Records\":{\"s3\":{\"bucket\":{\"name\":[\"mybucket\"]}}}}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .extract().xmlPath().getString("SubscribeResponse.SubscribeResult.SubscriptionArn");
+
+        try {
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "Publish")
+                .formParam("TopicArn", topicArn)
+                .formParam("Message", "{\"Records\":[{\"s3\":{\"bucket\":{\"name\":\"mybucket\"}}}]}")
+            .when()
+                .post("/")
+            .then()
+                .statusCode(200);
+
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "ReceiveMessage")
+                .formParam("QueueUrl", queueUrl)
+            .when()
+                .post("/")
+            .then()
+                .statusCode(200)
+                .body(containsString("mybucket"));
+        } finally {
+            given().contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "Unsubscribe").formParam("SubscriptionArn", subscription)
+                .when().post("/");
+            given().contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "DeleteQueue").formParam("QueueUrl", queueUrl)
+                .when().post("/");
+        }
+    }
+
+    @Test
     @Order(50)
     void rawDelivery_createQueuesAndSubscribe() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
@@ -801,7 +861,7 @@ class SnsIntegrationTest {
             .formParam("Action", "ReceiveMessage")
             .formParam("QueueUrl", rawDeliveryQueueUrl)
             .formParam("MaxNumberOfMessages", "1")
-            .formParam("MessageAttributeNames.member.1", "All")
+            .formParam("MessageAttributeName.1", "All")
         .when()
             .post("/")
         .then()
@@ -1148,6 +1208,76 @@ class SnsIntegrationTest {
         }
     }
 
+    @Test
+    @Order(69)
+    void publish_toQueueWithDelaySeconds_withholdsTheMessage() {
+        String delayQueueUrl = given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateQueue")
+            .formParam("QueueName", "sns-delay-fanout-queue")
+            .formParam("Attribute.1.Name", "DelaySeconds")
+            .formParam("Attribute.1.Value", "2")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .extract().xmlPath().getString("CreateQueueResponse.CreateQueueResult.QueueUrl");
+
+        String delayTopicArn = given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateTopic")
+            .formParam("Name", "sns-delay-fanout-topic")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .extract().xmlPath().getString("CreateTopicResponse.CreateTopicResult.TopicArn");
+
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "Subscribe")
+            .formParam("TopicArn", delayTopicArn)
+            .formParam("Protocol", "sqs")
+            .formParam("Endpoint", delayQueueUrl)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "Publish")
+            .formParam("TopicArn", delayTopicArn)
+            .formParam("Message", "delayed fanout")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "ReceiveMessage")
+            .formParam("QueueUrl", delayQueueUrl)
+            .formParam("MaxNumberOfMessages", "1")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body(not(containsString("<Message>")));
+
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "GetQueueAttributes")
+            .formParam("QueueUrl", delayQueueUrl)
+            .formParam("AttributeName.1", "ApproximateNumberOfMessagesDelayed")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("GetQueueAttributesResponse.GetQueueAttributesResult.Attribute.Value",
+                    equalTo("1"));
+    }
+
     /**
      * Drains all pending messages from the given SQS queue using PurgeQueue.
      */
@@ -1160,5 +1290,55 @@ class SnsIntegrationTest {
             .post("/")
         .then()
             .statusCode(200);
+    }
+
+    @Test
+    @Order(150)
+    void smsAttributesRoundTripAcrossQueryAndJsonProtocols() {
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "SetSMSAttributes")
+            .formParam("attributes.entry.1.key", "DefaultSMSType")
+            .formParam("attributes.entry.1.value", "Transactional")
+            .formParam("attributes.entry.2.key", "MonthlySpendLimit")
+            .formParam("attributes.entry.2.value", "10")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body(containsString("<SetSMSAttributesResult>"));
+
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "GetSMSAttributes")
+            .formParam("attributes.member.1", "DefaultSMSType")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body(containsString("<key>DefaultSMSType</key>"))
+            .body(containsString("<value>Transactional</value>"))
+            .body(not(containsString("MonthlySpendLimit")));
+
+        given()
+            .contentType(SNS_CONTENT_TYPE)
+            .header("X-Amz-Target", "SNS_20100331.SetSMSAttributes")
+            .body("{\"attributes\":{\"DefaultSMSType\":\"Promotional\",\"DefaultSenderID\":\"Brand123\"}}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .contentType(SNS_CONTENT_TYPE)
+            .header("X-Amz-Target", "SNS_20100331.GetSMSAttributes")
+            .body("{}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("attributes.DefaultSMSType", equalTo("Promotional"))
+            .body("attributes.DefaultSenderID", equalTo("Brand123"))
+            .body("attributes.MonthlySpendLimit", equalTo("10"));
     }
 }

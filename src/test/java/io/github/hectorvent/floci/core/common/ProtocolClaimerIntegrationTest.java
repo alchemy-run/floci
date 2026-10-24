@@ -1,8 +1,13 @@
 package io.github.hectorvent.floci.core.common;
 
+import io.github.hectorvent.floci.services.s3.S3Controller;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.core.MultivaluedHashMap;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Optional;
 
@@ -22,7 +27,8 @@ class ProtocolClaimerIntegrationTest {
 
     private Optional<ProtocolClaim> claim(String method, String path, String contentType,
                                           String smithyProtocol, String xAmzTarget, String authorization) {
-        return claimer.claim(new ClaimSignals(method, path, contentType, smithyProtocol, xAmzTarget, authorization));
+        return claimer.claim(new ClaimSignals(method, path, contentType, smithyProtocol, xAmzTarget,
+                authorization, null, new MultivaluedHashMap<>()));
     }
 
     @Test
@@ -118,6 +124,30 @@ class ProtocolClaimerIntegrationTest {
     }
 
     @Test
+    void botoSwfJsonClaimsOnlyTheDocumentedRootTarget() {
+        String target = "com.amazonaws.swf.service.model.SimpleWorkflowService.RegisterActivityType";
+        ProtocolClaim legacy = claim("POST", "/", "Application/JSON; charset=UTF-8",
+                null, target, null).orElseThrow();
+        assertEquals(WireProtocol.AWS_JSON_1_0, legacy.protocol());
+        assertEquals("swf", legacy.service().externalKey());
+        assertEquals("RegisterActivityType", legacy.operation());
+        assertEquals(target, legacy.target());
+
+        assertTrue(claim("POST", "/", "text/plain", null, target, null).isEmpty());
+        assertTrue(claim("POST", "/", "application/json", "rpc-v2-json", target, null).isEmpty());
+        assertEquals("swf", claim("POST", "/", "application/json", null,
+                "SimpleWorkflowService.RegisterActivityType", null).orElseThrow().service().externalKey());
+        assertTrue(claim("POST", "/", "application/json", null,
+                "com.amazonaws.swf.service.model.SimpleWorkflowServiceOther.RegisterActivityType", null).isEmpty());
+        assertTrue(claim("POST", "/", "application/json", null,
+                "AmazonSSM.DescribeParameters", null).isEmpty());
+        assertEquals(WireProtocol.REST, claim("GET", "/", "application/json",
+                null, target, null).orElseThrow().protocol());
+        assertEquals(WireProtocol.REST, claim("POST", "/other", "application/json",
+                null, target, null).orElseThrow().protocol());
+    }
+
+    @Test
     void unknownTargetStillClaimsProtocolWithoutService() {
         ProtocolClaim claim = claim("POST", "/", "application/x-amz-json-1.1",
                 null, "NoSuchService.DoThing", null).orElseThrow();
@@ -138,6 +168,34 @@ class ProtocolClaimerIntegrationTest {
                 "application/x-www-form-urlencoded", null, null, null).orElseThrow();
         assertEquals(WireProtocol.AWS_QUERY, withoutAuth.protocol());
         assertNull(withoutAuth.service());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Action", "Operation"})
+    void cloudWatchGetsUseTheQueryClaimWithOrWithoutASignature(String actionParameter) {
+        MultivaluedHashMap<String, String> query = new MultivaluedHashMap<>();
+        query.putSingle(actionParameter, "GetMetricStatistics");
+        query.putSingle("Version", "2010-08-01");
+        for (String authorization : new String[] {null, SQS_AUTH.replace("/sqs/", "/monitoring/")}) {
+            ProtocolClaim claim = claimer.claim(new ClaimSignals("GET", "/", null, null, null,
+                    authorization, null, query)).orElseThrow();
+            assertEquals(WireProtocol.AWS_QUERY, claim.protocol());
+            assertEquals("monitoring", claim.service().externalKey());
+            assertEquals("GetMetricStatistics", claim.operation());
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "GET, /bucket",
+            "POST, /"
+    })
+    void cloudWatchGetClaimRequiresARootGet(String method, String path) {
+        MultivaluedHashMap<String, String> query = new MultivaluedHashMap<>();
+        query.putSingle("Action", "GetMetricStatistics");
+        ProtocolClaim claim = claimer.claim(new ClaimSignals(method, path, null, null, null,
+                SQS_AUTH.replace("/sqs/", "/monitoring/"), null, query)).orElseThrow();
+        assertEquals(WireProtocol.REST, claim.protocol());
     }
 
     @Test
@@ -163,5 +221,56 @@ class ProtocolClaimerIntegrationTest {
                 "application/x-www-form-urlencoded", null, null, null).orElseThrow();
 
         assertEquals(WireProtocol.REST, claim.protocol());
+    }
+
+    @Test
+    void anUnclaimedRequestIsClaimedAsTheEndpointItReachedServesIt() {
+        ClaimSignals signals = new ClaimSignals("POST", "/", "application/x-amz-json-1.0", "unrecognised",
+                "AmazonSQS.ListQueues", SQS_AUTH, null, new MultivaluedHashMap<>());
+        MultivaluedHashMap<String, String> noPathParameters = new MultivaluedHashMap<>();
+
+        ProtocolClaim json = claimer.routeClaim(AwsJsonController.class, signals, noPathParameters);
+        assertEquals(WireProtocol.AWS_JSON_1_0, json.protocol());
+        assertEquals("sqs", json.service().externalKey());
+        assertEquals("ListQueues", json.operation());
+
+        assertEquals(WireProtocol.AWS_JSON_1_1,
+                claimer.routeClaim(AwsJson11Controller.class, signals, noPathParameters).protocol());
+        assertEquals(WireProtocol.AWS_CBOR_TARGET,
+                claimer.routeClaim(AwsJsonCborController.class, signals, noPathParameters).protocol());
+
+        ProtocolClaim query = claimer.routeClaim(AwsQueryController.class, signals, noPathParameters);
+        assertEquals(WireProtocol.AWS_QUERY, query.protocol());
+        assertEquals("sqs", query.service().externalKey());
+    }
+
+    @Test
+    void anUnclaimedRequestOnTheRpcV2RouteIsClaimedByThePathItDispatches() {
+        MultivaluedHashMap<String, String> pathParameters = new MultivaluedHashMap<>();
+        pathParameters.putSingle(AwsJsonCborController.RPC_V2_SERVICE_PARAMETER, "DynamoDB_20120810");
+        pathParameters.putSingle(AwsJsonCborController.RPC_V2_OPERATION_PARAMETER, "ListTables");
+
+        ProtocolClaim claim = claimer.routeClaim(AwsJsonCborController.class,
+                new ClaimSignals("POST", "/service/DynamoDB_20120810/operation/ListTables", "application/cbor",
+                        "unrecognised", "AmazonSQS.ListQueues", null, null, new MultivaluedHashMap<>()),
+                pathParameters);
+
+        assertEquals(WireProtocol.RPCV2_CBOR, claim.protocol());
+        assertEquals("dynamodb", claim.service().externalKey());
+        assertEquals("ListTables", claim.operation());
+    }
+
+    @Test
+    void anUnclaimedRequestOnAnyOtherRouteIsRest() {
+        MultivaluedHashMap<String, String> noPathParameters = new MultivaluedHashMap<>();
+        ClaimSignals delete = new ClaimSignals("DELETE", "/bucket/key", null, "unrecognised",
+                "AmazonS3.GetObject", null, null, new MultivaluedHashMap<>());
+        assertEquals(WireProtocol.REST, claimer.routeClaim(S3Controller.class, delete, noPathParameters).protocol());
+
+        // The Query endpoint's GET route is reached as a Query call only through the Query GET
+        // rewrite, which only a claimed request gets.
+        ClaimSignals get = new ClaimSignals("GET", AwsQueryController.QUERY_GET_PATH, null, "unrecognised",
+                null, null, null, new MultivaluedHashMap<>());
+        assertEquals(WireProtocol.REST, claimer.routeClaim(AwsQueryController.class, get, noPathParameters).protocol());
     }
 }

@@ -47,17 +47,13 @@ public class CloudFrontController {
 
     /**
      * Origin timeout constraints from the CloudFront {@code CustomOriginConfig} and
-     * {@code Origin} API references. {@code OriginReadTimeout} accepts 1-120 seconds, default 30.
-     * {@code OriginKeepaliveTimeout} accepts 1-300 seconds, default 5. {@code ResponseCompletionTimeout}
-     * has no enforced maximum when unset (represented here as 0), but when set must be at least
-     * {@code OriginReadTimeout}.
+     * {@code Origin} API references. The range checks for the origin timeout settings live in
+     * {@link CloudFrontService#createDistribution} so the CloudFormation path shares one copy;
+     * the parser only rejects non-numeric values. {@code ResponseCompletionTimeout} has no
+     * enforced maximum when unset (represented here as 0), but when set must be at least
+     * {@code OriginReadTimeout}. The timeout bounds live in {@link CloudFrontOriginTimeouts},
+     * shared with the serving layer that applies them.
      */
-    private static final int DEFAULT_ORIGIN_READ_TIMEOUT_SECONDS = 30;
-    private static final int MIN_ORIGIN_READ_TIMEOUT_SECONDS = 1;
-    private static final int MAX_ORIGIN_READ_TIMEOUT_SECONDS = 120;
-    private static final int DEFAULT_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS = 5;
-    private static final int MIN_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS = 1;
-    private static final int MAX_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS = 300;
     private static final int DEFAULT_RESPONSE_COMPLETION_TIMEOUT_SECONDS = 0;
 
     private final CloudFrontService service;
@@ -478,7 +474,7 @@ public class CloudFrontController {
                                               @QueryParam("Type") String type) {
         try {
             Page<OriginRequestPolicy> page = page(
-                    service.listOriginRequestPolicies(marker, paginationFetchLimit(maxItems)),
+                    service.listOriginRequestPolicies(marker, paginationFetchLimit(maxItems), type),
                     maxItems, OriginRequestPolicy::getId);
 
             XmlBuilder xml = new XmlBuilder()
@@ -489,7 +485,8 @@ public class CloudFrontController {
                     .start("Items");
             for (OriginRequestPolicy p : page.items()) {
                 xml.start("OriginRequestPolicySummary")
-                        .elem("Type", "custom")
+                        .elem("Type", CloudFrontService.isManagedOriginRequestPolicy(p.getId())
+                                ? "managed" : "custom")
                         .raw(xmlOriginRequestPolicyResponse(p))
                         .end("OriginRequestPolicySummary");
             }
@@ -1047,8 +1044,7 @@ public class CloudFrontController {
                         .raw(xmlKeyValueStoreAssociations(fn.getKeyValueStoreArns()))
                         .end("FunctionConfig")
                         .start("FunctionMetadata")
-                        .elem("FunctionARN", AwsArnUtils.Arn.of("cloudfront", "", service.getAccountId(),
-                                "function/" + fn.getName()).toString())
+                        .elem("FunctionARN", service.arn("function/" + fn.getName()))
                         .elem("Stage", fn.getStage())
                         .elem("CreatedTime", fn.getCreatedTime() != null ? fn.getCreatedTime().toString() : "")
                         .elem("LastModifiedTime",
@@ -2226,10 +2222,11 @@ public class CloudFrontController {
                     .elem("HTTPSPort", coc.getOrDefault("HTTPSPort", "443").toString())
                     .elem("OriginProtocolPolicy",
                             coc.getOrDefault("OriginProtocolPolicy", "https-only").toString())
-                    .elem("OriginReadTimeout",
-                            coc.getOrDefault("OriginReadTimeout", DEFAULT_ORIGIN_READ_TIMEOUT_SECONDS).toString())
+                    .elem("OriginReadTimeout", coc.getOrDefault("OriginReadTimeout",
+                            CloudFrontOriginTimeouts.DEFAULT_ORIGIN_READ_TIMEOUT_SECONDS).toString())
                     .elem("OriginKeepaliveTimeout",
-                            coc.getOrDefault("OriginKeepaliveTimeout", DEFAULT_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS)
+                            coc.getOrDefault("OriginKeepaliveTimeout",
+                                    CloudFrontOriginTimeouts.DEFAULT_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS)
                                     .toString())
                     .raw(xmlOriginSslProtocols(coc.get("OriginSslProtocols")))
                     .end("CustomOriginConfig");
@@ -2693,8 +2690,7 @@ public class CloudFrontController {
                 .raw(xmlKeyValueStoreAssociations(fn.getKeyValueStoreArns()))
                 .end("FunctionConfig")
                 .start("FunctionMetadata")
-                .elem("FunctionARN",
-                        AwsArnUtils.Arn.of("cloudfront", "", service.getAccountId(), "function/" + fn.getName()).toString())
+                .elem("FunctionARN", service.arn("function/" + fn.getName()))
                 .elem("Stage", fn.getStage())
                 .elem("CreatedTime", fn.getCreatedTime() != null ? fn.getCreatedTime().toString() : "")
                 .elem("LastModifiedTime",
@@ -3170,21 +3166,15 @@ public class CloudFrontController {
                         case "ConnectionAttempts" -> {
                             if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig
                                     && !inVpcOriginConfig && current != null) {
-                                try {
-                                    current.setConnectionAttempts(Integer.parseInt(r.getElementText()));
-                                } catch (NumberFormatException e) {
-                                    LOG.debugv("Ignoring malformed ConnectionAttempts during parse: {0}", e.getMessage());
-                                }
+                                current.setConnectionAttempts(parseNonNegativeTimeout(
+                                        "ConnectionAttempts", r.getElementText()));
                             }
                         }
                         case "ConnectionTimeout" -> {
                             if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig
                                     && !inVpcOriginConfig && current != null) {
-                                try {
-                                    current.setConnectionTimeout(Integer.parseInt(r.getElementText()));
-                                } catch (NumberFormatException e) {
-                                    LOG.debugv("Ignoring malformed ConnectionTimeout during parse: {0}", e.getMessage());
-                                }
+                                current.setConnectionTimeout(parseNonNegativeTimeout(
+                                        "ConnectionTimeout", r.getElementText()));
                             }
                         }
                         case "VpcOriginId" -> {
@@ -3224,10 +3214,9 @@ public class CloudFrontController {
                                 continue;
                             }
                             if (inCustomOriginConfig && customConfig != null) {
-                                customConfig.put("OriginKeepaliveTimeout", parseBoundedTimeout(
+                                customConfig.put("OriginKeepaliveTimeout", parseNonNegativeTimeout(
                                         "InvalidOriginKeepaliveTimeout", "OriginKeepaliveTimeout",
-                                        r.getElementText(), MIN_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS,
-                                        MAX_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS));
+                                        r.getElementText()));
                             }
                         }
                         case "OriginReadTimeout" -> {
@@ -3236,10 +3225,9 @@ public class CloudFrontController {
                                 continue;
                             }
                             if (inCustomOriginConfig && customConfig != null) {
-                                originReadTimeoutSeconds = parseBoundedTimeout(
+                                originReadTimeoutSeconds = parseNonNegativeTimeout(
                                         "InvalidOriginReadTimeout", "OriginReadTimeout",
-                                        r.getElementText(), MIN_ORIGIN_READ_TIMEOUT_SECONDS,
-                                        MAX_ORIGIN_READ_TIMEOUT_SECONDS);
+                                        r.getElementText());
                                 customConfig.put("OriginReadTimeout", originReadTimeoutSeconds);
                             }
                         }
@@ -3361,7 +3349,7 @@ public class CloudFrontController {
                                 Integer completionTimeout = current.getResponseCompletionTimeout();
                                 int effectiveReadTimeout = originReadTimeoutSeconds != null
                                         ? originReadTimeoutSeconds
-                                        : DEFAULT_ORIGIN_READ_TIMEOUT_SECONDS;
+                                        : CloudFrontOriginTimeouts.DEFAULT_ORIGIN_READ_TIMEOUT_SECONDS;
                                 if (completionTimeout != null && completionTimeout > 0
                                         && completionTimeout < effectiveReadTimeout) {
                                     throw new AwsException(
@@ -3407,17 +3395,6 @@ public class CloudFrontController {
                 "InvalidArgument",
                 "The origin custom headers structure is invalid.",
                 400);
-    }
-
-    private static int parseBoundedTimeout(String errorCode, String field, String rawValue, int min, int max) {
-        int value = parseNonNegativeTimeout(errorCode, field, rawValue);
-        if (value < min || value > max) {
-            throw new AwsException(
-                    errorCode,
-                    "The parameter " + field + " must be between " + min + " and " + max + " seconds.",
-                    400);
-        }
-        return value;
     }
 
     private static int parseNonNegativeTimeout(String field, String rawValue) {

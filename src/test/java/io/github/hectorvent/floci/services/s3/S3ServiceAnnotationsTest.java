@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -395,7 +396,7 @@ class S3ServiceAnnotationsTest {
         // root is empty for every account partition.
         Path accountsRoot = tempDir.resolve("s3").resolve(".accounts");
         if (Files.isDirectory(accountsRoot)) {
-            try (var accounts = Files.list(accountsRoot)) {
+            try (Stream<Path> accounts = Files.list(accountsRoot)) {
                 for (Path account : accounts.toList()) {
                     Path annotationsRoot = account.resolve(".annotations");
                     assertFalse(Files.exists(annotationsRoot),
@@ -467,15 +468,26 @@ class S3ServiceAnnotationsTest {
     }
 
     @Test
-    void deleteMarkerOnPreVersioningObjectRemovesItsAnnotations() throws Exception {
+    void deleteMarkerOnPreVersioningObjectPreservesItsAnnotationsUntilPermanentDeletion() throws Exception {
         putAnnotation("pre-versioning", "payload");
         s3Service.putBucketVersioning(BUCKET, "Enabled");
-        s3Service.deleteObject(BUCKET, "docs/readme.txt");
+        S3Object marker = s3Service.deleteObject(BUCKET, "docs/readme.txt");
 
-        // The annotations are gone, including the payload files on disk.
-        try (var stream = Files.walk(tempDir.resolve("s3").resolve(".accounts")
+        ObjectAnnotation annotation = s3Service.getObjectAnnotation(
+                BUCKET, "docs/readme.txt", "pre-versioning", "null");
+        assertEquals("payload", new String(
+                s3Service.readObjectAnnotationPayload(annotation), StandardCharsets.UTF_8));
+        try (Stream<Path> stream = Files.walk(tempDir.resolve("s3").resolve(".accounts")
                 .resolve("000000000000").resolve(".annotations"))) {
-            List<java.nio.file.Path> files = stream.filter(Files::isRegularFile).toList();
+            List<Path> files = stream.filter(Files::isRegularFile).toList();
+            assertEquals(1, files.size());
+        }
+
+        s3Service.deleteObject(BUCKET, "docs/readme.txt", marker.getVersionId());
+        s3Service.deleteObject(BUCKET, "docs/readme.txt", "null");
+        try (Stream<Path> stream = Files.walk(tempDir.resolve("s3").resolve(".accounts")
+                .resolve("000000000000").resolve(".annotations"))) {
+            List<Path> files = stream.filter(Files::isRegularFile).toList();
             assertTrue(files.isEmpty(), "annotation payload files should be removed, found: " + files);
         }
     }
@@ -492,6 +504,7 @@ class S3ServiceAnnotationsTest {
 
     @Test
     void governanceRetentionBlocksAnnotationDeleteWithoutBypass() {
+        s3Service.setBucketObjectLockEnabled(BUCKET);
         s3Service.putObject(BUCKET, "locked.txt", "body".getBytes(StandardCharsets.UTF_8),
                 null, null, new io.github.hectorvent.floci.services.s3.model.PutObjectOptions()
                         .withObjectLockMode("GOVERNANCE")
@@ -522,6 +535,7 @@ class S3ServiceAnnotationsTest {
 
     @Test
     void complianceRetentionBlocksAnnotationPutAndDelete() {
+        s3Service.setBucketObjectLockEnabled(BUCKET);
         s3Service.putObject(BUCKET, "compliance.txt", "body".getBytes(StandardCharsets.UTF_8),
                 null, null, new io.github.hectorvent.floci.services.s3.model.PutObjectOptions()
                         .withObjectLockMode("COMPLIANCE")
@@ -558,7 +572,7 @@ class S3ServiceAnnotationsTest {
                 "disk-backed", null);
         assertEquals("on disk", readPayload("disk-backed"));
         // The .s3ann file exists under the account-scoped .annotations root.
-        try (var stream = Files.walk(tempDir.resolve("s3").resolve(".accounts")
+        try (Stream<Path> stream = Files.walk(tempDir.resolve("s3").resolve(".accounts")
                 .resolve("000000000000").resolve(".annotations"))) {
             List<java.nio.file.Path> files = stream.filter(Files::isRegularFile).toList();
             assertEquals(1, files.size());

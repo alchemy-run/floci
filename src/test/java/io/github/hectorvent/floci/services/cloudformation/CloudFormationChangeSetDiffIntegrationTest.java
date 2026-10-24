@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.cloudformation;
 
+import io.github.hectorvent.floci.core.common.XmlParser;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.AfterEach;
@@ -8,10 +9,13 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /**
  * Covers three ways {@code computeChangeSetChanges} previously misreported a change set's diff:
@@ -226,7 +230,7 @@ class CloudFormationChangeSetDiffIntegrationTest {
     }
 
     @Test
-    void omittedParameterWithNoDefault_isReportedAsAChange() {
+    void omittedParameterWithNoDefault_isRefused() {
         String stackName = "cs-diff-omitted-param-no-default-stack";
         stacksToDelete.add(stackName);
 
@@ -258,9 +262,9 @@ class CloudFormationChangeSetDiffIntegrationTest {
         .then()
             .statusCode(200);
 
-        // Same template, but the update omits Suffix entirely and the template has no Default -
-        // resolveDefaultParameters drops the parameter, and ExecuteChangeSet would apply the
-        // resulting (missing) value. The preview must flag the resource as changed too.
+        // Same template, but the update omits Suffix entirely and the template has no Default. An
+        // update does not carry the deployed value over, so CloudFormation refuses the change set
+        // rather than preview, or apply, the parameter without a value.
         given()
             .contentType("application/x-www-form-urlencoded")
             .formParam("Action", "CreateChangeSet")
@@ -271,19 +275,9 @@ class CloudFormationChangeSetDiffIntegrationTest {
         .when()
             .post("/")
         .then()
-            .statusCode(200);
-
-        given()
-            .contentType("application/x-www-form-urlencoded")
-            .formParam("Action", "DescribeChangeSet")
-            .formParam("StackName", stackName)
-            .formParam("ChangeSetName", "omitted-param-no-default-cs")
-        .when()
-            .post("/")
-        .then()
-            .statusCode(200)
-            .body(containsString("<LogicalResourceId>Q</LogicalResourceId>"))
-            .body(containsString("<Action>Modify</Action>"));
+            .statusCode(400)
+            .body(containsString("<Code>ValidationError</Code>"))
+            .body(containsString("<Message>Parameters: [Suffix] must have values</Message>"));
     }
 
     @Test
@@ -707,5 +701,169 @@ class CloudFormationChangeSetDiffIntegrationTest {
             .statusCode(200)
             .body(containsString("<LogicalResourceId>Q</LogicalResourceId>"))
             .body(containsString("<Action>Remove</Action>"));
+    }
+
+    @Test
+    void inPlaceAttributeChangePullsInDependentResourceInChangeSet() {
+        String stackName = "cs-diff-attr-change-stack";
+        stacksToDelete.add(stackName);
+
+        String template1 = """
+            {
+              "Resources": {
+                "Lt": {
+                  "Type": "AWS::EC2::LaunchTemplate",
+                  "Properties": {
+                    "LaunchTemplateName": "cs-diff-lt",
+                    "LaunchTemplateData": {
+                      "ImageId": "ami-12345678",
+                      "InstanceType": "t3.micro"
+                    }
+                  }
+                },
+                "Asg": {
+                  "Type": "AWS::AutoScaling::AutoScalingGroup",
+                  "Properties": {
+                    "AutoScalingGroupName": "cs-diff-asg",
+                    "LaunchTemplate": {
+                      "LaunchTemplateId": {"Ref": "Lt"},
+                      "Version": {"Fn::GetAtt": ["Lt", "LatestVersionNumber"]}
+                    },
+                    "MinSize": 0,
+                    "MaxSize": 0,
+                    "DesiredCapacity": 0,
+                    "AvailabilityZones": ["us-east-1a"]
+                  }
+                },
+                "DefaultAsg": {
+                  "Type": "AWS::AutoScaling::AutoScalingGroup",
+                  "Properties": {
+                    "AutoScalingGroupName": "cs-diff-default-asg",
+                    "LaunchTemplate": {
+                      "LaunchTemplateId": {"Ref": "Lt"},
+                      "Version": {"Fn::GetAtt": ["Lt", "DefaultVersionNumber"]}
+                    },
+                    "MinSize": 0,
+                    "MaxSize": 0,
+                    "DesiredCapacity": 0,
+                    "AvailabilityZones": ["us-east-1a"]
+                  }
+                },
+                "UnchangedQueue": {
+                  "Type": "AWS::SQS::Queue",
+                  "Properties": {
+                    "QueueName": "cs-diff-unchanged-q"
+                  }
+                }
+              }
+            }
+            """;
+
+        String template2 = """
+            {
+              "Resources": {
+                "Lt": {
+                  "Type": "AWS::EC2::LaunchTemplate",
+                  "Properties": {
+                    "LaunchTemplateName": "cs-diff-lt",
+                    "LaunchTemplateData": {
+                      "ImageId": "ami-87654321",
+                      "InstanceType": "t3.small"
+                    }
+                  }
+                },
+                "Asg": {
+                  "Type": "AWS::AutoScaling::AutoScalingGroup",
+                  "Properties": {
+                    "AutoScalingGroupName": "cs-diff-asg",
+                    "LaunchTemplate": {
+                      "LaunchTemplateId": {"Ref": "Lt"},
+                      "Version": {"Fn::GetAtt": ["Lt", "LatestVersionNumber"]}
+                    },
+                    "MinSize": 0,
+                    "MaxSize": 0,
+                    "DesiredCapacity": 0,
+                    "AvailabilityZones": ["us-east-1a"]
+                  }
+                },
+                "DefaultAsg": {
+                  "Type": "AWS::AutoScaling::AutoScalingGroup",
+                  "Properties": {
+                    "AutoScalingGroupName": "cs-diff-default-asg",
+                    "LaunchTemplate": {
+                      "LaunchTemplateId": {"Ref": "Lt"},
+                      "Version": {"Fn::GetAtt": ["Lt", "DefaultVersionNumber"]}
+                    },
+                    "MinSize": 0,
+                    "MaxSize": 0,
+                    "DesiredCapacity": 0,
+                    "AvailabilityZones": ["us-east-1a"]
+                  }
+                },
+                "UnchangedQueue": {
+                  "Type": "AWS::SQS::Queue",
+                  "Properties": {
+                    "QueueName": "cs-diff-unchanged-q"
+                  }
+                }
+              }
+            }
+            """;
+
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateStack")
+            .formParam("StackName", stackName)
+            .formParam("TemplateBody", template1)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateChangeSet")
+            .formParam("StackName", stackName)
+            .formParam("ChangeSetName", "attr-change-cs")
+            .formParam("ChangeSetType", "UPDATE")
+            .formParam("TemplateBody", template2)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        String desc = given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "DescribeChangeSet")
+            .formParam("StackName", stackName)
+            .formParam("ChangeSetName", "attr-change-cs")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .extract().body().asString();
+
+        List<Map<String, String>> changes = XmlParser.extractGroups(desc, "ResourceChange");
+        Map<String, String> ltChange = changes.stream()
+                .filter(m -> "Lt".equals(m.get("LogicalResourceId")))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("Modify", ltChange.get("Action"));
+        assertEquals("False", ltChange.get("Replacement"));
+
+        Map<String, String> asgChange = changes.stream()
+                .filter(m -> "Asg".equals(m.get("LogicalResourceId")))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("Modify", asgChange.get("Action"));
+        assertEquals("False", asgChange.get("Replacement"));
+
+        boolean unchangedDefaultDependentIncluded = changes.stream()
+                .anyMatch(m -> "DefaultAsg".equals(m.get("LogicalResourceId")));
+        assertFalse(unchangedDefaultDependentIncluded);
+
+        boolean unchangedQueueIncluded = changes.stream()
+                .anyMatch(m -> "UnchangedQueue".equals(m.get("LogicalResourceId")));
+        assertFalse(unchangedQueueIncluded);
     }
 }

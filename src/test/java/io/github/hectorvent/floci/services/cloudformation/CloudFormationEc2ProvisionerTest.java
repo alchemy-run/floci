@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.cloudformation.model.StackResource;
+import io.github.hectorvent.floci.services.cloudformation.provisioners.CfnResourceDispatcher;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.CfnRollback;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
 import io.github.hectorvent.floci.services.ec2.model.Instance;
@@ -19,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -31,7 +33,7 @@ class CloudFormationEc2ProvisionerTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
     private Ec2Service ec2Service;
-    private CloudFormationResourceProvisioner provisioner;
+    private CfnResourceDispatcher provisioner;
 
     @BeforeEach
     void setUp() {
@@ -50,7 +52,9 @@ class CloudFormationEc2ProvisionerTest {
         Reservation reservation = new Reservation();
         reservation.getInstances().add(instance);
         when(ec2Service.runInstances(anyString(), anyString(), anyString(), anyInt(), anyInt(), any(), anyList(),
-                any(), any(), anyList(), any(), any(), any())).thenReturn(reservation);
+                any(), any(), anyList(), any(), any(), any(),
+                any(), anyInt(), any(), any(), any(), any(), anyBoolean(), any(), any(), any(), anyBoolean(), any()))
+                .thenReturn(reservation);
         doThrow(new AwsException("InternalError", "EC2 instance i-launch-failed failed to launch because its container terminated during launch", 500))
                 .when(ec2Service).awaitContainerLaunch(instance);
 
@@ -72,7 +76,9 @@ class CloudFormationEc2ProvisionerTest {
         Reservation reservation = new Reservation();
         reservation.getInstances().add(instance);
         when(ec2Service.runInstances(anyString(), anyString(), anyString(), anyInt(), anyInt(), any(), anyList(),
-                any(), any(), anyList(), any(), any(), any())).thenReturn(reservation);
+                any(), any(), anyList(), any(), any(), any(),
+                any(), anyInt(), any(), any(), any(), any(), anyBoolean(), any(), any(), any(), anyBoolean(), any()))
+                .thenReturn(reservation);
         doThrow(new AwsException("InternalError",
                 "EC2 instance i-launch-timed-out failed to launch because it did not reach running state before the launch timeout",
                 500)).when(ec2Service).awaitContainerLaunch(instance);
@@ -95,7 +101,9 @@ class CloudFormationEc2ProvisionerTest {
         Reservation reservation = new Reservation();
         reservation.getInstances().add(instance);
         when(ec2Service.runInstances(anyString(), anyString(), anyString(), anyInt(), anyInt(), any(), anyList(),
-                any(), any(), anyList(), any(), any(), any())).thenReturn(reservation);
+                any(), any(), anyList(), any(), any(), any(),
+                any(), anyInt(), any(), any(), any(), any(), anyBoolean(), any(), any(), any(), anyBoolean(), any()))
+                .thenReturn(reservation);
 
         StackResource resource = provisioner.provision("Server", "AWS::EC2::Instance", properties(), engine(),
                 "us-east-1", "000000000000", "test-stack");

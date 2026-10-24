@@ -22,7 +22,9 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -80,7 +82,7 @@ class HttpApiRequestAuthorizerTest {
         given()
                 .contentType(ContentType.JSON)
                 .body("""
-                        {"stageName":"test"}
+                        {"stageName":"test","stageVariables":{"environment":"review"}}
                         """)
                 .when().post("/v2/apis/" + httpApiId + "/stages")
                 .then()
@@ -531,6 +533,57 @@ class HttpApiRequestAuthorizerTest {
                 .then().statusCode(200);
     }
 
+    // ──────────────────────────── Test: The refusals carry the API's CORS headers ────────────────────────────
+
+    /**
+     * Measured on AWS (eu-west-1, 2026-10-18): once the API has a CORS configuration, a Lambda
+     * authorizer's refusals, 401 without the identity source and 403 when it denies, carry
+     * {@code Access-Control-Allow-Origin} and {@code Access-Control-Expose-Headers} for an allowed
+     * origin, and no CORS header for another.
+     */
+    @Test
+    @Order(62)
+    void refusalsCarryTheCorsHeadersOfTheApi() {
+        given()
+                .contentType(ContentType.JSON)
+                .body("""
+                        {"corsConfiguration":{"allowOrigins":["https://app.example.com"],"allowMethods":["GET"],
+                         "allowHeaders":["authorization"],"exposeHeaders":["x-probe"],"maxAge":300}}
+                        """)
+                .when().patch("/v2/apis/" + httpApiId)
+                .then().statusCode(200);
+        try {
+            // Route still has identitySourceAuthorizerId from the previous tests
+            given()
+                    .header("Origin", "https://app.example.com")
+                    .when().get("/execute-api/" + httpApiId + "/test/hello")
+                    .then().statusCode(401)
+                    .header("Access-Control-Allow-Origin", equalTo("https://app.example.com"))
+                    .header("Access-Control-Expose-Headers", equalTo("x-probe"));
+
+            given()
+                    .contentType(ContentType.JSON)
+                    .body("""
+                            {"authorizationType":"CUSTOM","authorizerId":"%s"}
+                            """.formatted(simpleDenyAuthorizerId))
+                    .when().patch("/v2/apis/" + httpApiId + "/routes/" + routeId)
+                    .then().statusCode(200);
+            given()
+                    .header("Origin", "https://app.example.com")
+                    .when().get("/execute-api/" + httpApiId + "/test/hello")
+                    .then().statusCode(403)
+                    .header("Access-Control-Allow-Origin", equalTo("https://app.example.com"))
+                    .header("Access-Control-Expose-Headers", equalTo("x-probe"));
+            given()
+                    .header("Origin", "https://evil.example")
+                    .when().get("/execute-api/" + httpApiId + "/test/hello")
+                    .then().statusCode(403)
+                    .header("Access-Control-Allow-Origin", nullValue());
+        } finally {
+            given().when().delete("/v2/apis/" + httpApiId + "/cors").then().statusCode(204);
+        }
+    }
+
     // ──────────────────────────── Test: Query string identity source validation ────────────────────────────
 
     @Test
@@ -578,8 +631,6 @@ class HttpApiRequestAuthorizerTest {
                 .when().patch("/v2/apis/" + httpApiId + "/routes/" + routeId)
                 .then().statusCode(200);
 
-        // The echo authorizer embeds the event it received in its context, so assert that shape
-        // by invoking the echo function directly rather than unwrapping it through two hops.
         String response = given()
                 .header("X-Custom-Header", "test-value")
                 .queryParam("foo", "bar")
@@ -587,23 +638,10 @@ class HttpApiRequestAuthorizerTest {
                 .then().statusCode(200)
                 .extract().body().asString();
 
-        // Backend received the request — authorizer allowed it
         JsonNode backendResponse = MAPPER.readTree(response);
         assertEquals("Hello from backend", backendResponse.path("message").asText());
-
-        // Verify format by invoking echo function with a v1-shaped event
-        String testEvent = """
-                {"version":"1.0","type":"REQUEST","methodArn":"arn:aws:execute-api:us-east-1:000000000000:%s/test/GET/hello","resource":"/hello","path":"/hello","httpMethod":"GET","headers":{"X-Custom-Header":"test-value"},"queryStringParameters":{"foo":"bar"}}
-                """.formatted(httpApiId);
-        String echoResponse = given()
-                .contentType(ContentType.JSON)
-                .body(testEvent)
-                .when().post("/2015-03-31/functions/" + ECHO_FN + "/invocations")
-                .then().statusCode(200)
-                .extract().body().asString();
-
-        JsonNode echoResult = MAPPER.readTree(echoResponse);
-        String authEventStr = echoResult.path("context").path("receivedEvent").asText(null);
+        String authEventStr = backendResponse.path("authorizer").path("lambda")
+                .path("receivedEvent").asText(null);
         assertNotNull(authEventStr, "Echo authorizer should embed receivedEvent in context");
         JsonNode authEvent = MAPPER.readTree(authEventStr);
 
@@ -612,6 +650,7 @@ class HttpApiRequestAuthorizerTest {
         assertNotNull(authEvent.path("methodArn").asText(null), "Event should have methodArn");
         assertEquals("/hello", authEvent.path("resource").asText(), "Event should have resource");
         assertEquals("GET", authEvent.path("httpMethod").asText(), "Event should have httpMethod");
+        assertEquals("review", authEvent.path("stageVariables").path("environment").asText());
     }
 
     // ──────────────────────────── Test: Payload format 2.0 event shape ────────────────────────────
@@ -634,23 +673,10 @@ class HttpApiRequestAuthorizerTest {
                 .then().statusCode(200)
                 .extract().body().asString();
 
-        // Backend received the request — authorizer allowed it
         JsonNode backendResponse = MAPPER.readTree(response);
         assertEquals("Hello from backend", backendResponse.path("message").asText());
-
-        // Verify format by invoking echo function with a v2-shaped event
-        String testEvent = """
-                {"version":"2.0","type":"REQUEST","routeArn":"arn:aws:execute-api:us-east-1:000000000000:%s/test/GET/hello","routeKey":"GET /hello","rawPath":"/hello","rawQueryString":"key=value","headers":{"x-custom-header":"test-value-v2"},"queryStringParameters":{"key":"value"},"requestContext":{"accountId":"000000000000","apiId":"%s","http":{"method":"GET","path":"/hello"}}}
-                """.formatted(httpApiId, httpApiId);
-        String echoResponse = given()
-                .contentType(ContentType.JSON)
-                .body(testEvent)
-                .when().post("/2015-03-31/functions/" + ECHO_FN + "/invocations")
-                .then().statusCode(200)
-                .extract().body().asString();
-
-        JsonNode echoResult = MAPPER.readTree(echoResponse);
-        String authEventStr = echoResult.path("context").path("receivedEvent").asText(null);
+        String authEventStr = backendResponse.path("authorizer").path("lambda")
+                .path("receivedEvent").asText(null);
         assertNotNull(authEventStr, "Echo authorizer should embed receivedEvent in context");
         JsonNode authEvent = MAPPER.readTree(authEventStr);
 
@@ -659,6 +685,7 @@ class HttpApiRequestAuthorizerTest {
         assertNotNull(authEvent.path("routeArn").asText(null), "Event should have routeArn");
         assertEquals("GET /hello", authEvent.path("routeKey").asText(), "Event should have routeKey");
         assertEquals("/hello", authEvent.path("rawPath").asText(), "Event should have rawPath");
+        assertEquals("review", authEvent.path("stageVariables").path("environment").asText());
     }
 
     // ──────────────────────────── Test: No authorizer (NONE) allows request ────────────────────────────
@@ -757,6 +784,14 @@ class HttpApiRequestAuthorizerTest {
             }
         } finally {
             executor.shutdown();
+        try (ExecutorService executor = Executors.newFixedThreadPool(functionNames.length)) {
+            List<Future<?>> deletions = new ArrayList<>();
+            for (String functionName : functionNames) {
+                deletions.add(executor.submit(() -> deleteFunction(functionName)));
+            }
+            for (Future<?> deletion : deletions) {
+                deletion.get();
+            }
         }
     }
 

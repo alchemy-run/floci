@@ -1,6 +1,9 @@
 package io.github.hectorvent.floci.services.firehose;
 
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
+import io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription;
+import io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.CloudWatchLoggingOptions;
 import io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.OpenXJsonSerDe;
 import io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.OrcSerDe;
 import io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.ParquetSerDe;
@@ -13,8 +16,8 @@ import io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescript
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -35,7 +38,7 @@ import java.util.regex.Pattern;
  * Smithy layer does (probe 2026-09-07: both ParquetSerDe bounds violated at
  * once report "2 validation errors detected: ...; ...").
  */
-final class S3DestinationValidator {
+public final class S3DestinationValidator {
 
     /** Listed in the order AWS prints it, which is neither declaration order nor alphabetical. */
     private static final String ENUM_VALUE_SET = "[ZIP, HADOOP_SNAPPY, Snappy, GZIP, UNCOMPRESSED]";
@@ -74,9 +77,15 @@ final class S3DestinationValidator {
     private static final String NOT_BLANK_PATTERN = "^(?!\\s*$).+";
     private static final Pattern NOT_BLANK = Pattern.compile(NOT_BLANK_PATTERN);
 
+    private static final int LOG_NAME_MAX_LENGTH = 512;
+    private static final String LOG_GROUP_NAME_REGEX = "[\\.\\-_/#A-Za-z0-9]*";
+    private static final Pattern LOG_GROUP_NAME = Pattern.compile(LOG_GROUP_NAME_REGEX);
+    private static final String LOG_STREAM_NAME_REGEX = "[^:*]*";
+    private static final Pattern LOG_STREAM_NAME = Pattern.compile(LOG_STREAM_NAME_REGEX);
+
     private S3DestinationValidator() {}
 
-    static void validateWireShape(S3Destination config, String shapeName) {
+    public static void validateWireShape(S3Destination config, String shapeName) {
         if (config == null) {
             return;
         }
@@ -108,9 +117,42 @@ final class S3DestinationValidator {
         // violations sit in more than one of them.
         collectOpenXMappingViolations(config, shapeName, violations);
         collectSchemaViolations(config, shapeName, violations);
+        collectLoggingViolations(config, shapeName, violations);
         collectProcessingViolations(config, shapeName, violations);
         if (!violations.isEmpty()) {
             throw constraintViolations(violations);
+        }
+    }
+
+    /**
+     * Both log names are bounded at 512 characters and carry a pattern. Unlike
+     * FileExtension, an overlong name with a bad character reports both rules, the
+     * length one first, and the group's violations precede the stream's (probed
+     * 2026-10-22, where AWS also printed them before any processingConfiguration one).
+     */
+    private static void collectLoggingViolations(S3Destination config, String shapeName,
+                                                 List<String> violations) {
+        CloudWatchLoggingOptions logging = config.getCloudWatchLoggingOptions();
+        if (logging == null) {
+            return;
+        }
+        collectLogName(logging.getLogGroupName(), shapeName, "cloudWatchLoggingOptions.logGroupName",
+                LOG_GROUP_NAME, LOG_GROUP_NAME_REGEX, violations);
+        collectLogName(logging.getLogStreamName(), shapeName, "cloudWatchLoggingOptions.logStreamName",
+                LOG_STREAM_NAME, LOG_STREAM_NAME_REGEX, violations);
+    }
+
+    private static void collectLogName(String value, String shapeName, String member, Pattern pattern,
+                                       String regex, List<String> violations) {
+        if (value == null) {
+            return;
+        }
+        if (value.length() > LOG_NAME_MAX_LENGTH) {
+            violations.add(violation(shapeName, member,
+                    "Member must have length less than or equal to " + LOG_NAME_MAX_LENGTH));
+        }
+        if (!pattern.matcher(value).matches()) {
+            violations.add(violation(shapeName, member, "Member must satisfy regular expression pattern: " + regex));
         }
     }
 
@@ -128,7 +170,7 @@ final class S3DestinationValidator {
      */
     private static void collectSchemaViolations(S3Destination config, String shapeName,
                                                 List<String> violations) {
-        var conversion = config.getDataFormatConversionConfiguration();
+        DeliveryStreamDescription.DataFormatConversionConfiguration conversion = config.getDataFormatConversionConfiguration();
         if (conversion == null || conversion.getSchemaConfiguration() == null) {
             return;
         }
@@ -168,7 +210,7 @@ final class S3DestinationValidator {
      */
     private static void collectOpenXMappingViolations(S3Destination config, String shapeName,
                                                       List<String> violations) {
-        var conversion = config.getDataFormatConversionConfiguration();
+        DeliveryStreamDescription.DataFormatConversionConfiguration conversion = config.getDataFormatConversionConfiguration();
         if (conversion == null || conversion.getInputFormatConfiguration() == null
                 || conversion.getInputFormatConfiguration().getDeserializer() == null) {
             return;
@@ -214,7 +256,7 @@ final class S3DestinationValidator {
     }
 
     private static Serializer serializer(S3Destination config) {
-        var conversion = config.getDataFormatConversionConfiguration();
+        DeliveryStreamDescription.DataFormatConversionConfiguration conversion = config.getDataFormatConversionConfiguration();
         if (conversion == null || conversion.getOutputFormatConfiguration() == null) {
             return null;
         }
@@ -417,9 +459,6 @@ final class S3DestinationValidator {
     }
 
     private static AwsException constraintViolations(List<String> violations) {
-        String header = violations.size() == 1
-                ? "1 validation error detected: "
-                : violations.size() + " validation errors detected: ";
-        return new AwsException("ValidationException", header + String.join("; ", violations), 400);
+        return SmithyValidationErrors.validationException(violations);
     }
 }

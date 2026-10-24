@@ -129,6 +129,12 @@ class S3DeleteObjectsIntegrationTest {
     void deleteObjects_governanceRetentionVersionIdHonorsBypassHeader() {
         String bucket = createBucket();
         enableVersioning(bucket);
+        given()
+            .body("<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>")
+        .when()
+            .put("/" + bucket + "?object-lock")
+        .then()
+            .statusCode(200);
 
         String key = "governance.txt";
         String versionId = putGovernanceLockedObject(bucket, key);

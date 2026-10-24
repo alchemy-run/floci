@@ -26,11 +26,23 @@ public class Image {
     private String creationDate;
     private String region;
     /**
-     * For images produced by CreateImage: the AMI the source instance was launched from. Not an
-     * EC2 field — Floci uses it to resolve the guest image to run, since a generated ami-* id is
-     * not in the catalog and would otherwise fall back to the default guest.
+     * For images produced by CreateImage or CopyImage: the launchable ancestor, the catalog or
+     * registered image the chain of sources ends at. Floci uses it to resolve the guest image to
+     * run, since a generated ami-* id is not in the catalog and would otherwise fall back to the
+     * default guest. This is not the SourceImageId EC2 reports, which is
+     * {@link #creationSourceImageId}.
      */
     private String sourceImageId;
+
+    /**
+     * What DescribeImages reports as SourceImageId, SourceImageRegion and SourceInstanceId: the AMI
+     * a CreateImage or CopyImage image was made from, that AMI's region, and the instance a
+     * CreateImage image captured. Null for RegisterImage and catalog images, and for images saved
+     * before Floci kept them.
+     */
+    private String creationSourceImageId;
+    private String creationSourceImageRegion;
+    private String creationSourceInstanceId;
 
     /**
      * For images produced by CreateImage: the Docker image the source container was committed
@@ -92,6 +104,15 @@ public class Image {
 
     public String getSourceImageId() { return sourceImageId; }
     public void setSourceImageId(String sourceImageId) { this.sourceImageId = sourceImageId; }
+
+    public String getCreationSourceImageId() { return creationSourceImageId; }
+    public void setCreationSourceImageId(String creationSourceImageId) { this.creationSourceImageId = creationSourceImageId; }
+
+    public String getCreationSourceImageRegion() { return creationSourceImageRegion; }
+    public void setCreationSourceImageRegion(String creationSourceImageRegion) { this.creationSourceImageRegion = creationSourceImageRegion; }
+
+    public String getCreationSourceInstanceId() { return creationSourceInstanceId; }
+    public void setCreationSourceInstanceId(String creationSourceInstanceId) { this.creationSourceInstanceId = creationSourceInstanceId; }
 
     public String getDockerImage() { return dockerImage; }
     public void setDockerImage(String dockerImage) { this.dockerImage = dockerImage; }

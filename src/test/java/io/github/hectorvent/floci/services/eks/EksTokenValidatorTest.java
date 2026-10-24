@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.eks;
 
+import io.github.hectorvent.floci.core.common.Base64Url;
 import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.testutil.IamServiceTestHelper;
 import io.github.hectorvent.floci.testutil.SigV4TokenTestHelper;
@@ -58,17 +59,63 @@ class EksTokenValidatorTest {
     }
 
     @Test
+    void validateAcceptsPresignedTokenAfterSixtySecondsWithinTokenLifetime() throws Exception {
+        Instant signedAt = Instant.parse("2026-09-01T22:00:00Z");
+        Instant evaluationTime = signedAt.plusSeconds(600);
+        EksTokenValidator validator = validator(Clock.fixed(evaluationTime, ZoneOffset.UTC));
+        String token = token(CLUSTER_NAME, signedAt, 60);
+
+        assertTrue(validator.validate(token, CLUSTER_NAME));
+    }
+
+    @Test
+    void validateAcceptsPresignedTokenAtTokenLifetimeBoundary() throws Exception {
+        Instant signedAt = Instant.parse("2026-09-01T22:00:00Z");
+        Instant evaluationTime = signedAt.plusSeconds(900);
+        EksTokenValidator validator = validator(Clock.fixed(evaluationTime, ZoneOffset.UTC));
+        String token = token(CLUSTER_NAME, signedAt, 60);
+
+        assertTrue(validator.validate(token, CLUSTER_NAME));
+    }
+
+    @Test
     void validateRejectsExpiredToken() throws Exception {
-        EksTokenValidator validator = validator();
-        String token = token(CLUSTER_NAME, Instant.now().minusSeconds(61), 60);
+        Instant signedAt = Instant.parse("2026-09-01T22:00:00Z");
+        Instant evaluationTime = signedAt.plusSeconds(901);
+        EksTokenValidator validator = validator(Clock.fixed(evaluationTime, ZoneOffset.UTC));
+        String token = token(CLUSTER_NAME, signedAt, 60);
 
         assertFalse(validator.validate(token, CLUSTER_NAME));
     }
 
     @Test
-    void validateRejectsTokenWithAStretchedExpiry() throws Exception {
+    void validateAcceptsTokenWithLongerExpiryWithinAuthenticatorBound() throws Exception {
         EksTokenValidator validator = validator();
-        String token = token(CLUSTER_NAME, Instant.now(), 61);
+        String token = token(CLUSTER_NAME, Instant.now(), 900);
+
+        assertTrue(validator.validate(token, CLUSTER_NAME));
+    }
+
+    @Test
+    void validateAcceptsTokenWithZeroExpiryParameter() throws Exception {
+        EksTokenValidator validator = validator();
+        String token = token(CLUSTER_NAME, Instant.now(), 0);
+
+        assertTrue(validator.validate(token, CLUSTER_NAME));
+    }
+
+    @Test
+    void validateRejectsTokenWithExpiryExceedingAuthenticatorBound() throws Exception {
+        EksTokenValidator validator = validator();
+        String token = token(CLUSTER_NAME, Instant.now(), 901);
+
+        assertFalse(validator.validate(token, CLUSTER_NAME));
+    }
+
+    @Test
+    void validateRejectsTokenWithNegativeExpiry() throws Exception {
+        EksTokenValidator validator = validator();
+        String token = token(CLUSTER_NAME, Instant.now(), -1);
 
         assertFalse(validator.validate(token, CLUSTER_NAME));
     }
@@ -199,7 +246,6 @@ class EksTokenValidatorTest {
         String encodedRequest = token.substring(prefix.length());
         String request = new String(Base64.getUrlDecoder().decode(encodedRequest), StandardCharsets.UTF_8);
         String tamperedRequest = request.replace(target, replacement);
-        return prefix + Base64.getUrlEncoder().withoutPadding()
-                .encodeToString(tamperedRequest.getBytes(StandardCharsets.UTF_8));
+        return prefix + Base64Url.encode(tamperedRequest);
     }
 }

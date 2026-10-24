@@ -1,12 +1,15 @@
 package io.github.hectorvent.floci.services.s3;
 
+import io.github.hectorvent.floci.testing.S3IamEnforcementProfile;
 import io.github.hectorvent.floci.testutil.S3RequestSigner;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
+import io.restassured.RestAssured;
 import org.junit.jupiter.api.Test;
 
-import java.util.Map;
+import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
 import static io.restassured.RestAssured.given;
@@ -20,7 +23,7 @@ import static org.hamcrest.Matchers.containsString;
  * any object it could not otherwise read, as long as it could guess the bucket/key.
  */
 @QuarkusTest
-@TestProfile(S3CopyObjectSourcePermissionIntegrationTest.IamEnforcementProfile.class)
+@TestProfile(S3IamEnforcementProfile.class)
 class S3CopyObjectSourcePermissionIntegrationTest {
 
     /**
@@ -93,6 +96,103 @@ class S3CopyObjectSourcePermissionIntegrationTest {
                 .put("/" + destBucket + "/copied.txt")
         .then()
                 .statusCode(200);
+    }
+
+    @Test
+    void copySourceReadHonorsSignedPrincipalGlobalCondition() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String sourceBucket = "copy-global-source-" + suffix;
+        String destBucket = "copy-global-dest-" + suffix;
+        String userName = "copy-global-user-" + suffix;
+
+        createBucketAsRoot(sourceBucket);
+        createBucketAsRoot(destBucket);
+        putObjectAsRoot(sourceBucket, "source.txt", "copy source");
+
+        UserCredentials caller = createUser(userName);
+        putUserPolicy(userName, "ConditionalSourceRead", """
+                {"Version":"2012-10-17","Statement":[
+                  {"Effect":"Allow","Action":"s3:GetObject","Resource":"arn:aws:s3:::%1$s/*",
+                   "Condition":{"Bool":{"aws:PrincipalIsAWSService":"false"}}},
+                  {"Effect":"Allow","Action":"s3:PutObject","Resource":"arn:aws:s3:::%2$s/*"}
+                ]} """.formatted(sourceBucket, destBucket));
+
+        given()
+                .filter(caller.signer())
+        .when()
+                .get("/" + sourceBucket + "/source.txt")
+        .then()
+                .statusCode(200);
+
+        given()
+                .filter(caller.signer())
+                .header("x-amz-copy-source", "/" + sourceBucket + "/source.txt")
+        .when()
+                .put("/" + destBucket + "/copied.txt")
+        .then()
+                .statusCode(200);
+
+        String uploadId = initiateMultipartUploadAsRoot(destBucket, "multipart.txt");
+        given()
+                .filter(caller.signer())
+                .header("x-amz-copy-source", "/" + sourceBucket + "/source.txt")
+                .queryParam("uploadId", uploadId)
+                .queryParam("partNumber", 1)
+        .when()
+                .put("/" + destBucket + "/multipart.txt")
+        .then()
+                .statusCode(200);
+    }
+
+    @Test
+    void jsonBooleanSourcePolicyDenyAppliesToDirectAndCopiedReads() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String sourceBucket = "copy-bool-source-" + suffix;
+        String destBucket = "copy-bool-dest-" + suffix;
+        String userName = "copy-bool-user-" + suffix;
+
+        createBucketAsRoot(sourceBucket);
+        createBucketAsRoot(destBucket);
+        putObjectAsRoot(sourceBucket, "source.txt", "protected source");
+        putBucketPolicyAsRoot(sourceBucket, """
+                {"Version":"2012-10-17","Statement":[{
+                  "Effect":"Deny","Principal":"*","Action":"s3:GetObject",
+                  "Resource":"arn:aws:s3:::%s/*",
+                  "Condition":{"Bool":{"aws:PrincipalIsAWSService":false}}
+                }]}""".formatted(sourceBucket));
+
+        UserCredentials caller = createUser(userName);
+        putUserPolicy(userName, "SourceReadDestWrite", """
+                {"Version":"2012-10-17","Statement":[
+                  {"Effect":"Allow","Action":"s3:GetObject","Resource":"arn:aws:s3:::%1$s/*"},
+                  {"Effect":"Allow","Action":"s3:PutObject","Resource":"arn:aws:s3:::%2$s/*"}
+                ]}""".formatted(sourceBucket, destBucket));
+
+        given()
+                .filter(caller.signer())
+        .when()
+                .get("/" + sourceBucket + "/source.txt")
+        .then()
+                .statusCode(403);
+
+        given()
+                .filter(caller.signer())
+                .header("x-amz-copy-source", "/" + sourceBucket + "/source.txt")
+        .when()
+                .put("/" + destBucket + "/copied.txt")
+        .then()
+                .statusCode(403);
+
+        String uploadId = initiateMultipartUploadAsRoot(destBucket, "multipart.txt");
+        given()
+                .filter(caller.signer())
+                .header("x-amz-copy-source", "/" + sourceBucket + "/source.txt")
+                .queryParam("uploadId", uploadId)
+                .queryParam("partNumber", 1)
+        .when()
+                .put("/" + destBucket + "/multipart.txt")
+        .then()
+                .statusCode(403);
     }
 
     @Test
@@ -276,6 +376,9 @@ class S3CopyObjectSourcePermissionIntegrationTest {
 
         createBucketAsRoot(sourceBucket);
         createBucketAsRoot(destBucket);
+        given().filter(ROOT_SIGNER)
+                .body("<OwnershipControls><Rule><ObjectOwnership>ObjectWriter</ObjectOwnership></Rule></OwnershipControls>")
+                .when().put("/" + sourceBucket + "?ownershipControls").then().statusCode(200);
         putPublicObjectAsRoot(sourceBucket, "public.txt", "public source");
         putBucketPolicyAsRoot(destBucket, allowPublicPutObjectPolicy(destBucket));
 
@@ -337,6 +440,102 @@ class S3CopyObjectSourcePermissionIntegrationTest {
         .then()
                 .statusCode(403)
                 .body(containsString("<Code>AccessDenied</Code>"));
+    }
+
+    @Test
+    void presignedCopyObjectIsDeniedWhenCallerCannotReadTheSource() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String sourceBucket = "presigned-copy-source-" + suffix;
+        String destBucket = "presigned-copy-dest-" + suffix;
+        String userName = "presigned-copy-write-only-" + suffix;
+
+        createBucketAsRoot(sourceBucket);
+        createBucketAsRoot(destBucket);
+        putObjectAsRoot(sourceBucket, "private-secret.txt", "top secret payload");
+
+        UserCredentials caller = createUser(userName);
+        putUserPolicy(userName, "DestWriteOnly", """
+                {"Version":"2012-10-17","Statement":[
+                  {"Effect":"Allow","Action":"s3:PutObject","Resource":"arn:aws:s3:::%1$s/*"}
+                ]}""".formatted(destBucket));
+
+        String path = "/" + destBucket + "/exfiltrated.txt";
+        given()
+                .urlEncodingEnabled(false)
+                .header("x-amz-copy-source", "/" + sourceBucket + "/private-secret.txt")
+        .when()
+                .put(path + "?" + presignedPut(caller, path))
+        .then()
+                .statusCode(403)
+                .body(containsString("is not authorized to perform: s3:GetObject"));
+    }
+
+    @Test
+    void presignedCopyObjectSucceedsWhenCallerCanReadSourceAndWriteDestination() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String sourceBucket = "presigned-copy-source-ok-" + suffix;
+        String destBucket = "presigned-copy-dest-ok-" + suffix;
+        String userName = "presigned-copy-read-write-" + suffix;
+
+        createBucketAsRoot(sourceBucket);
+        createBucketAsRoot(destBucket);
+        putObjectAsRoot(sourceBucket, "allowed.txt", "not secret");
+
+        UserCredentials caller = createUser(userName);
+        putUserPolicy(userName, "SourceReadDestWrite", """
+                {"Version":"2012-10-17","Statement":[
+                  {"Effect":"Allow","Action":"s3:GetObject","Resource":"arn:aws:s3:::%1$s/*"},
+                  {"Effect":"Allow","Action":"s3:PutObject","Resource":"arn:aws:s3:::%2$s/*"}
+                ]}""".formatted(sourceBucket, destBucket));
+
+        String path = "/" + destBucket + "/copied.txt";
+        given()
+                .urlEncodingEnabled(false)
+                .header("x-amz-copy-source", "/" + sourceBucket + "/allowed.txt")
+        .when()
+                .put(path + "?" + presignedPut(caller, path))
+        .then()
+                .statusCode(200);
+    }
+
+    @Test
+    void presignedUploadPartCopyIsDeniedWhenCallerCannotReadTheSource() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String sourceBucket = "presigned-part-copy-source-" + suffix;
+        String destBucket = "presigned-part-copy-dest-" + suffix;
+        String userName = "presigned-part-copy-write-only-" + suffix;
+
+        createBucketAsRoot(sourceBucket);
+        createBucketAsRoot(destBucket);
+        putObjectAsRoot(sourceBucket, "private-secret.txt", "top secret payload");
+
+        UserCredentials caller = createUser(userName);
+        putUserPolicy(userName, "DestWriteOnly", """
+                {"Version":"2012-10-17","Statement":[
+                  {"Effect":"Allow","Action":"s3:PutObject","Resource":"arn:aws:s3:::%1$s/*"}
+                ]}""".formatted(destBucket));
+
+        String uploadId = initiateMultipartUploadAsRoot(destBucket, "exfiltrated.txt");
+
+        String path = "/" + destBucket + "/exfiltrated.txt";
+        String part = "?partNumber=1&uploadId=" + URLEncoder.encode(uploadId, StandardCharsets.UTF_8);
+        given()
+                .urlEncodingEnabled(false)
+                .header("x-amz-copy-source", "/" + sourceBucket + "/private-secret.txt")
+        .when()
+                .put(path + "?" + presignedPut(caller, path + part))
+        .then()
+                .statusCode(403)
+                .body(containsString("is not authorized to perform: s3:GetObject"));
+    }
+
+    /**
+     * The query of a URL {@code caller} presigns for a PUT to {@code pathAndQuery}, which carries the
+     * caller's credential instead of an Authorization header.
+     */
+    private static String presignedPut(UserCredentials caller, String pathAndQuery) throws Exception {
+        return caller.signer().presignedQuery(
+                "PUT", URI.create("http://localhost:" + RestAssured.port + pathAndQuery), 300);
     }
 
     private static void createBucketAsRoot(String bucket) {
@@ -520,15 +719,5 @@ class S3CopyObjectSourcePermissionIntegrationTest {
     private static String auth(String accessKeyId, String service) {
         return "AWS4-HMAC-SHA256 Credential=" + accessKeyId + "/20260629/" + REGION + "/" + service
                 + "/aws4_request, SignedHeaders=host, Signature=abc";
-    }
-
-    public static final class IamEnforcementProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of(
-                    "floci.services.iam.enforcement-enabled", "true",
-                    "floci.services.s3.enforce-auth", "true",
-                    "floci.services.s3.global-bucket-namespace", "true");
-        }
     }
 }

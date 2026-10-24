@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.controltower;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -11,6 +12,7 @@ import jakarta.inject.Inject;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -52,7 +54,7 @@ public class ControlTowerControlService {
         }
 
         String operationId = UUID.randomUUID().toString();
-        String arn = "arn:aws:controltower:" + region + ":" + accountId + ":enabledcontrol/" + shortId();
+        String arn = AwsArnUtils.Arn.of("controltower", region, accountId, "enabledcontrol/" + shortId()).toString();
         EnabledControl control = new EnabledControl(arn, controlIdentifier, targetIdentifier,
                 SUCCEEDED, IN_SYNC, operationId, parameters, tags);
         controls.put(key, control);
@@ -251,7 +253,7 @@ public class ControlTowerControlService {
                 control.getTargetIdentifier(), now, now));
         long inScope = operations.keySet().stream().filter(key -> key.startsWith(scopePrefix)).count();
         if (inScope > MAX_OPERATIONS_PER_SCOPE) {
-            var iterator = operations.keySet().iterator();
+            Iterator<String> iterator = operations.keySet().iterator();
             while (iterator.hasNext()) {
                 if (iterator.next().startsWith(scopePrefix)) {
                     iterator.remove();
@@ -296,7 +298,7 @@ public class ControlTowerControlService {
     }
 
     private static String requireArnValue(String value, String field) {
-        if (value == null || value.length() < 20 || value.length() > 2048 || !value.matches("^arn:aws[0-9a-zA-Z_\\-:\\/]+$")) {
+        if (value == null || value.length() < 20 || value.length() > 2048 || !value.matches("^arn:" + AwsArnUtils.PARTITION_REGEX + "[0-9a-zA-Z_\\-:\\/]+$")) {
             throw validation(field + " must be a valid ARN.");
         }
         return value;

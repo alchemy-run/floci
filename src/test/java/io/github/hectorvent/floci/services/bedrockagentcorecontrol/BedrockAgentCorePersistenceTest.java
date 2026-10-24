@@ -55,7 +55,7 @@ class BedrockAgentCorePersistenceTest {
                 authorizer, null, null, REGION);
         String id = created.getAgentRuntimeId();
         svc.updateAgentRuntime(id, artifact, network,
-                "arn:aws:iam::000000000000:role/agent", "v2", null, authorizer, null, REGION);
+                "arn:aws:iam::000000000000:role/agent", "v2", Map.of("K", "V"), authorizer, null, REGION);
         svc.createEndpoint(id, "prod", "1", "prod ep", null, REGION);
         AgentRuntime before = svc.getAgentRuntime(id, REGION);
         svc.tagByArn(REGION, svc.arn(before, REGION), Map.of("env", "prod"));

@@ -1,15 +1,22 @@
 package io.github.hectorvent.floci.services.s3vectors.model;
 
 import io.quarkus.runtime.annotations.RegisterForReflection;
+
+import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 @RegisterForReflection
 public class VectorIndex {
+    private Instant creationTime;
+    private Map<String, String> tags = new ConcurrentHashMap<>();
     private String indexName;
     private String indexArn;
     private String vectorBucketName;
     private long creationTime = System.currentTimeMillis() / 1000;
+    private Object encryptionConfiguration;
+    private List<String> nonFilterableMetadataKeys = List.of();
     private int dimension;
     private String dataType;
     private String distanceMetric;
@@ -28,6 +35,12 @@ public class VectorIndex {
         this.distanceMetric = distanceMetric;
     }
 
+    public Instant getCreationTime() { return creationTime; }
+    public void setCreationTime(Instant creationTime) { this.creationTime = creationTime; }
+
+    public Map<String, String> getTags() { return tags; }
+    public void setTags(Map<String, String> tags) { this.tags = tags; }
+
     public String getIndexName() { return indexName; }
     public void setIndexName(String indexName) { this.indexName = indexName; }
 
@@ -39,6 +52,11 @@ public class VectorIndex {
 
     public long getCreationTime() { return creationTime; }
     public void setCreationTime(long creationTime) { this.creationTime = creationTime; }
+    public Object getEncryptionConfiguration() { return encryptionConfiguration; }
+    public void setEncryptionConfiguration(Object encryptionConfiguration) { this.encryptionConfiguration = encryptionConfiguration; }
+
+    public List<String> getNonFilterableMetadataKeys() { return nonFilterableMetadataKeys; }
+    public void setNonFilterableMetadataKeys(List<String> keys) { this.nonFilterableMetadataKeys = keys; }
 
     public int getDimension() { return dimension; }
     public void setDimension(int dimension) { this.dimension = dimension; }

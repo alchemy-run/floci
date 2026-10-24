@@ -1,6 +1,9 @@
 package io.github.hectorvent.floci.services.redshift.proxy;
 
 import io.github.hectorvent.floci.services.iam.IamService;
+import io.github.hectorvent.floci.services.redshift.spectrum.SpectrumInterceptor;
+import io.github.hectorvent.floci.services.redshift.spectrum.SpectrumQueryPreparation;
+import io.github.hectorvent.floci.services.redshift.spectrum.SpectrumSession;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
 import org.jboss.logging.Logger;
@@ -11,13 +14,16 @@ import org.mockito.Mockito;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static io.github.hectorvent.floci.testing.InlineMocks.inlineMock;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -25,6 +31,18 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RedshiftInterceptingBridgeTest {
+
+    @Test
+    void tracksBeginCommandAcrossFragmentedBackendFrames() {
+        BackendResponseCoordinator coordinator = new BackendResponseCoordinator(new ExtendedQuerySession());
+        RedshiftInterceptingBridge.WireFrameTracker tracker =
+                new RedshiftInterceptingBridge.WireFrameTracker(coordinator::onBackendFrame);
+        byte[] begin = new byte[]{'C', 0, 0, 0, 10, 'B', 'E', 'G', 'I', 'N', 0};
+        tracker.consume(begin, 0, 7);
+        assertEquals('I', coordinator.lastReadyStatus());
+        tracker.consume(begin, 7, 4);
+        assertEquals('T', coordinator.lastReadyStatus());
+    }
 
     private static final Logger LOG = Logger.getLogger(RedshiftInterceptingBridgeTest.class);
 
@@ -39,6 +57,10 @@ class RedshiftInterceptingBridgeTest {
     private S3Service s3Stub;
 
     private void startBridge() throws IOException {
+        startBridge(null);
+    }
+
+    private void startBridge(SpectrumInterceptor spectrumInterceptor) throws IOException {
         clientListener = new ServerSocket(0);
         testClientEnd = new Socket("localhost", clientListener.getLocalPort());
         bridgeClientEnd = clientListener.accept();
@@ -49,7 +71,8 @@ class RedshiftInterceptingBridgeTest {
 
         s3Stub = Mockito.mock(S3Service.class);
         RedshiftInterceptingBridge bridge = new RedshiftInterceptingBridge(
-                bridgeClientEnd, bridgeBackendEnd, s3Stub, Mockito.mock(IamService.class));
+                bridgeClientEnd, bridgeBackendEnd, s3Stub, Mockito.mock(IamService.class), "000000000000", List.of(),
+                spectrumInterceptor, "000000000000:c", "dev");
         bridgeThread = Thread.ofVirtual().name("bridge-under-test").start(bridge::run);
     }
 
@@ -304,6 +327,65 @@ class RedshiftInterceptingBridgeTest {
             offset += value.length;
         }
         return result;
+    }
+
+    @Test
+    @Timeout(20)
+    void locallyHandledQueryInsideTransactionKeepsTheTransactionStatus() throws Exception {
+        SpectrumInterceptor interceptor = inlineMock(SpectrumInterceptor.class);
+        Mockito.when(interceptor.intercept(Mockito.anyString(), Mockito.any(), Mockito.any(Socket.class)))
+                .thenReturn(new SpectrumInterceptor.Decision.Forward(), new SpectrumInterceptor.Decision.Handled());
+        startBridge(interceptor);
+        InputStream fromBridge = testClientEnd.getInputStream();
+
+        testClientEnd.getOutputStream().write(PostgresWireDecoder.encodeQuery("BEGIN"));
+        testClientEnd.getOutputStream().flush();
+        assertEquals('Q', nextForwarded().type());
+        writeBackendFrame('C', cString("BEGIN"));
+        writeBackendFrame('Z', new byte[]{'T'});
+        assertEquals('C', fromBridge.read());
+        skipFrameBody(fromBridge);
+        assertEquals('Z', fromBridge.read());
+        skipFrameBody(fromBridge);
+
+        testClientEnd.getOutputStream().write(PostgresWireDecoder.encodeQuery("CREATE EXTERNAL TABLE lake.t (id INT)"));
+        testClientEnd.getOutputStream().flush();
+        assertEquals('C', fromBridge.read());
+        skipFrameBody(fromBridge);
+        assertEquals('Z', fromBridge.read());
+        fromBridge.readNBytes(4);
+        assertEquals('T', fromBridge.read());
+    }
+
+    @Test
+    @Timeout(20)
+    void parsingAndDescribingExternalDdlDoesNotExecuteCatalogChanges() throws Exception {
+        String sql = "ALTER TABLE lake.events ADD PARTITION (dt='today') LOCATION 's3://bucket/today/'";
+        SpectrumInterceptor interceptor = inlineMock(SpectrumInterceptor.class);
+        SpectrumQueryPreparation preparation = Mockito.mock(SpectrumQueryPreparation.class);
+        Mockito.when(interceptor.preparation()).thenReturn(preparation);
+        Mockito.when(preparation.referencesExternal(Mockito.eq(sql), Mockito.any())).thenReturn(true);
+        Mockito.when(interceptor.plan(Mockito.eq(sql), Mockito.any())).thenReturn(new SpectrumInterceptor.Plan.ExternalDdl(
+                sql, new SpectrumSession("000000000000", "000000000000:c", "dev", List.of(), false)));
+        startBridge(interceptor);
+        PostgresWireDecoder.ParseMessage parse = new PostgresWireDecoder.ParseMessage("ddl", sql, List.of());
+        testClientEnd.getOutputStream().write(PostgresWireDecoder.encodeParse(parse, sql));
+        testClientEnd.getOutputStream().write(frame('D', concat(new byte[]{'S'}, cString("ddl"))));
+        testClientEnd.getOutputStream().flush();
+        InputStream response = testClientEnd.getInputStream();
+        assertEquals('1', response.read());
+        skipFrameBody(response);
+        assertEquals('t', response.read());
+        skipFrameBody(response);
+        assertEquals('n', response.read());
+        skipFrameBody(response);
+        Mockito.verify(preparation, Mockito.never()).prepare(Mockito.anyString(), Mockito.any(), Mockito.any());
+        Mockito.verify(interceptor, Mockito.never()).execute(Mockito.any(), Mockito.anyString(), Mockito.anyString(), Mockito.any());
+    }
+
+    private static void skipFrameBody(InputStream in) throws IOException {
+        int length = ByteBuffer.wrap(in.readNBytes(4)).getInt();
+        in.readNBytes(length - 4);
     }
 
     @Test

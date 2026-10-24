@@ -4,19 +4,28 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.ServicePrincipals;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.firehose.FirehoseService;
 import io.github.hectorvent.floci.services.firehose.model.Record;
+import io.github.hectorvent.floci.services.lambda.LambdaService;
+import io.github.hectorvent.floci.services.lambda.model.InvocationType;
 import io.github.hectorvent.floci.services.sns.model.Subscription;
 import io.github.hectorvent.floci.services.sns.model.Topic;
+import io.github.hectorvent.floci.services.sqs.SqsService;
+import io.github.hectorvent.floci.services.sqs.model.Message;
 import io.github.hectorvent.floci.services.sqs.model.MessageAttributeValue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -24,12 +33,18 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.when;
 
 class SnsServiceTest {
 
     private static final String REGION = "us-east-1";
     private static final String ACCOUNT = "000000000000";
     private static final String BASE_URL = "http://localhost:4566";
+    private static final String FIREHOSE_ROLE_ARN = "arn:aws:iam::000000000000:role/firehose-role";
 
     private SnsService snsService;
 
@@ -55,6 +70,57 @@ class SnsServiceTest {
     }
 
     @Test
+    void smsAttributesAreScopedToAccountAndRegion() {
+        RegionResolver regionResolver = mock(RegionResolver.class);
+        when(regionResolver.getAccountId()).thenReturn("111122223333", "444455556666", "111122223333");
+        SnsService service = new SnsService(new InMemoryStorage<>(), new InMemoryStorage<>(),
+                new InMemoryStorage<>(), new InMemoryStorage<>(), new InMemoryStorage<>(),
+                new InMemoryStorage<>(), regionResolver, null, null, null, BASE_URL, new ObjectMapper());
+
+        service.setSmsAttributes(Map.of("DefaultSMSType", "Transactional", "MonthlySpendLimit", "10"), REGION);
+
+        assertTrue(service.getSmsAttributes(List.of(), REGION).isEmpty());
+        assertEquals(Map.of("DefaultSMSType", "Transactional", "MonthlySpendLimit", "10"),
+                service.getSmsAttributes(List.of(), REGION));
+        assertTrue(service.getSmsAttributes(List.of(), "us-west-2").isEmpty());
+        assertEquals(Map.of("DefaultSMSType", "Transactional"),
+                service.getSmsAttributes(List.of("DefaultSMSType"), REGION));
+    }
+
+    @Test
+    void smsAttributesRejectInvalidValuesWithoutChangingStoredSettings() {
+        snsService.setSmsAttributes(Map.of("DefaultSMSType", "Promotional"), REGION);
+
+        assertThrows(AwsException.class, () -> snsService.setSmsAttributes(
+                Map.of("DefaultSMSType", "Bulk"), REGION));
+        assertThrows(AwsException.class, () -> snsService.setSmsAttributes(
+                Map.of("DeliveryStatusSuccessSamplingRate", "101"), REGION));
+        assertThrows(AwsException.class, () -> snsService.setSmsAttributes(
+                Map.of("DefaultSenderID", "12345678901"), REGION));
+        assertThrows(AwsException.class, () -> snsService.setSmsAttributes(
+                Map.of("DefaultSenderID", "TooLongSender"), REGION));
+        assertThrows(AwsException.class, () -> snsService.setSmsAttributes(
+                Map.of("DefaultSenderID", "Brand-Name"), REGION));
+        assertEquals(Map.of("DefaultSMSType", "Promotional"),
+                snsService.getSmsAttributes(List.of(), REGION));
+
+        snsService.setSmsAttributes(Map.of("DefaultSenderID", "Brand123"), REGION);
+        assertEquals(Map.of("DefaultSMSType", "Promotional", "DefaultSenderID", "Brand123"),
+                snsService.getSmsAttributes(List.of(), REGION));
+    }
+
+    @Test
+    void emptySmsAttributeResetsOnlyThatPreference() {
+        snsService.setSmsAttributes(Map.of("DefaultSMSType", "Transactional",
+                "MonthlySpendLimit", "10"), REGION);
+
+        snsService.setSmsAttributes(Map.of("DefaultSMSType", ""), REGION);
+
+        assertEquals(Map.of("MonthlySpendLimit", "10"),
+                snsService.getSmsAttributes(List.of(), REGION));
+    }
+
+    @Test
     void createTopic_fifoWithContentBasedDeduplication() {
         Topic topic = snsService.createTopic("my-topic.fifo",
                 Map.of("ContentBasedDeduplication", "true"), null, REGION);
@@ -73,6 +139,60 @@ class SnsServiceTest {
     void createTopic_requiresName() {
         assertThrows(AwsException.class, () -> snsService.createTopic(null, null, null, REGION));
         assertThrows(AwsException.class, () -> snsService.createTopic("", null, null, REGION));
+    }
+
+    @Test
+    void publish_retriesTransientSqsSubscriptionDeliveryFailure() {
+        SqsService sqs = mock(SqsService.class);
+        SnsService service = new SnsService(new InMemoryStorage<>(), new InMemoryStorage<>(),
+                new RegionResolver(REGION, ACCOUNT), sqs, null);
+        Topic topic = service.createTopic("retry-topic", null, null, REGION);
+        String queueArn = "arn:aws:sqs:us-east-1:000000000000:retry-queue";
+        String queueUrl = BASE_URL + "/" + ACCOUNT + "/retry-queue";
+        service.subscribe(topic.getTopicArn(), "sqs", queueArn, REGION, Map.of());
+        doThrow(new AwsException("ServiceUnavailable", "temporarily unavailable", 503))
+                .doReturn(new Message("delivered"))
+                .when(sqs).sendMessage(eq(queueUrl), anyString(), isNull(), isNull(), isNull(), anyMap(),
+                        isNull(), eq(ServicePrincipals.of("sns")), eq(REGION));
+
+        String messageId = service.publish(topic.getTopicArn(), null, "payload", null, REGION);
+
+        assertNotNull(messageId);
+        verify(sqs, times(2)).sendMessage(eq(queueUrl), anyString(), isNull(), isNull(), isNull(), anyMap(),
+                isNull(), eq(ServicePrincipals.of("sns")), eq(REGION));
+    }
+
+    @Test
+    void publish_sendsExhaustedSqsSubscriptionDeliveryToConfiguredDlq() throws Exception {
+        SqsService sqs = mock(SqsService.class);
+        SnsService service = new SnsService(new InMemoryStorage<>(), new InMemoryStorage<>(),
+                new RegionResolver(REGION, ACCOUNT), sqs, null);
+        Topic topic = service.createTopic("dlq-topic", null, null, REGION);
+        String queueArn = "arn:aws:sqs:us-east-1:000000000000:unavailable-queue";
+        String queueUrl = BASE_URL + "/" + ACCOUNT + "/unavailable-queue";
+        String dlqArn = "arn:aws:sqs:us-east-1:000000000000:subscription-dlq";
+        String dlqUrl = BASE_URL + "/" + ACCOUNT + "/subscription-dlq";
+        service.subscribe(topic.getTopicArn(), "sqs", queueArn, REGION,
+                Map.of("RedrivePolicy", "{\"deadLetterTargetArn\":\"" + dlqArn + "\"}"));
+        doThrow(new AwsException("AWS.SimpleQueueService.NonExistentQueue", "unavailable", 400))
+                .when(sqs).sendMessage(eq(queueUrl), anyString(), isNull(), isNull(), isNull(), anyMap(),
+                        isNull(), eq(ServicePrincipals.of("sns")), eq(REGION));
+
+        String messageId = service.publish(topic.getTopicArn(), null,
+                "payload", "subject", REGION);
+
+        assertNotNull(messageId, "SNS Publish acceptance is independent of downstream SQS delivery");
+        verify(sqs, times(3)).sendMessage(eq(queueUrl), anyString(), isNull(), isNull(), isNull(), anyMap(),
+                isNull(), eq(ServicePrincipals.of("sns")), eq(REGION));
+        ArgumentCaptor<String> deadLetterBody = ArgumentCaptor.forClass(String.class);
+        verify(sqs).sendMessage(eq(dlqUrl), deadLetterBody.capture(), isNull(), isNull(), isNull(), anyMap(),
+                isNull(), eq(ServicePrincipals.of("sns")), eq(REGION));
+        JsonNode envelope = new ObjectMapper().readTree(deadLetterBody.getValue());
+        assertEquals("Notification", envelope.path("Type").asText());
+        assertEquals(topic.getTopicArn(), envelope.path("TopicArn").asText());
+        assertEquals("payload", envelope.path("Message").asText());
+        assertEquals("subject", envelope.path("Subject").asText());
+        assertTrue(envelope.hasNonNull("MessageId"));
     }
 
     @Test
@@ -128,6 +248,111 @@ class SnsServiceTest {
         assertEquals("sqs", sub.getProtocol());
         assertEquals(ACCOUNT, sub.getOwner());
         assertEquals(Map.of("attr1", "value1", "attr2", "value2"), sub.getAttributes());
+    }
+
+    @Test
+    void subscribe_firehoseRequiresValidRoleArn() {
+        Topic topic = snsService.createTopic("firehose-topic", null, null, REGION);
+        String streamArn = "arn:aws:firehose:us-east-1:000000000000:deliverystream/test-stream";
+        for (Map<String, String> attributes : List.of(
+                Map.<String, String>of(),
+                Map.of("SubscriptionRoleArn", ""),
+                Map.of("SubscriptionRoleArn", "arn:aws:iam::000000000000:user/not-a-role"))) {
+            AwsException ex = assertThrows(AwsException.class, () -> snsService.subscribe(
+                    topic.getTopicArn(), "firehose", streamArn, REGION, attributes));
+            assertEquals("InvalidParameter", ex.getErrorCode());
+            assertTrue(ex.getMessage().contains("SubscriptionRoleArn"));
+        }
+        assertTrue(snsService.listSubscriptions(REGION).isEmpty());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "http://169.254.169.254/latest/meta-data/",
+            "http://169.254.170.2/v2/credentials",
+            "https://[fe80::1]/",
+            "http://[fd00:ec2::254]/latest/meta-data/"
+    })
+    void subscribe_rejectsAnEndpointOnALinkLocalOrMetadataAddress(String endpoint) {
+        Topic topic = snsService.createTopic("ssrf-topic", null, null, REGION);
+        String protocol = endpoint.startsWith("https://") ? "https" : "http";
+
+        AwsException ex = assertThrows(AwsException.class, () -> snsService.subscribe(
+                topic.getTopicArn(), protocol, endpoint, REGION, Map.of()), endpoint);
+
+        assertEquals("InvalidParameter", ex.getErrorCode());
+        assertTrue(snsService.listSubscriptions(REGION).isEmpty(), endpoint);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "http://127.0.0.1:8080/hook",
+            "http://172.17.0.2:9000/hook",
+            "http://10.0.0.5/hook",
+            "https://example.test/hook"
+    })
+    void subscribe_stillAcceptsLoopbackPrivateAndOrdinaryEndpoints(String endpoint) {
+        Topic topic = snsService.createTopic("ok-topic", null, null, REGION);
+        String protocol = endpoint.startsWith("https://") ? "https" : "http";
+
+        Subscription sub = snsService.subscribe(topic.getTopicArn(), protocol, endpoint, REGION, Map.of());
+
+        assertEquals(endpoint, sub.getEndpoint());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "http://169.254.169.254/latest/meta-data/",
+            "http://[fd00:ec2::254]/",
+            "http://169.254.170.2/v2/credentials"
+    })
+    void delivery_refusesAnEndpointThatNamesTheAddressOutright(String endpoint) {
+        // Reaches a subscription stored before Subscribe began refusing these, and costs no lookup.
+        assertFalse(SnsService.deliverable(endpoint), endpoint);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"http://127.0.0.1:8080/hook", "http://10.0.0.5/hook", "https://example.test/x"})
+    void delivery_stillAllowsLoopbackPrivateAndOrdinaryEndpoints(String endpoint) {
+        assertTrue(SnsService.deliverable(endpoint), endpoint);
+    }
+
+    @Test
+    void delivery_doesNotResolveANameAndSoAllowsOne() {
+        // Names are screened at Subscribe. Resolving again here could not decide anything, because
+        // HttpClient resolves once more when it connects, so this deliberately does not try.
+        assertTrue(SnsService.deliverable("http://sns-endpoint-that-does-not-resolve.invalid/hook"));
+    }
+
+    @Test
+    void subscribe_rejectsAnEndpointWithNoHost() {
+        Topic topic = snsService.createTopic("nohost-topic", null, null, REGION);
+
+        AwsException ex = assertThrows(AwsException.class, () -> snsService.subscribe(
+                topic.getTopicArn(), "http", "http:///no-host", REGION, Map.of()));
+
+        assertEquals("InvalidParameter", ex.getErrorCode());
+    }
+
+    @Test
+    void subscribe_firehoseRoleArnIsReturnedAndCanBeUpdated() {
+        Topic topic = snsService.createTopic("firehose-topic", null, null, REGION);
+        Subscription sub = snsService.subscribe(topic.getTopicArn(), "firehose",
+                "arn:aws:firehose:us-east-1:000000000000:deliverystream/test-stream", REGION,
+                Map.of("SubscriptionRoleArn", FIREHOSE_ROLE_ARN));
+        assertEquals(FIREHOSE_ROLE_ARN,
+                snsService.getSubscriptionAttributes(sub.getSubscriptionArn(), REGION).get("SubscriptionRoleArn"));
+
+        AwsException ex = assertThrows(AwsException.class, () -> snsService.setSubscriptionAttribute(
+                sub.getSubscriptionArn(), "SubscriptionRoleArn", "not-an-arn", REGION));
+        assertEquals("InvalidParameter", ex.getErrorCode());
+        assertEquals(FIREHOSE_ROLE_ARN,
+                snsService.getSubscriptionAttributes(sub.getSubscriptionArn(), REGION).get("SubscriptionRoleArn"));
+
+        String updated = "arn:aws:iam::000000000000:role/updated-role";
+        snsService.setSubscriptionAttribute(sub.getSubscriptionArn(), "SubscriptionRoleArn", updated, REGION);
+        assertEquals(updated,
+                snsService.getSubscriptionAttributes(sub.getSubscriptionArn(), REGION).get("SubscriptionRoleArn"));
     }
 
     @Test
@@ -216,6 +441,12 @@ class SnsServiceTest {
     }
 
     @Test
+    void publish_smsWithInvalidSubject_throwsInvalidParameter() {
+        assertThrows(AwsException.class, () ->
+                snsService.publish(null, null, "+819012345678", "Hello phone!", "x".repeat(150), null, REGION));
+    }
+
+    @Test
     void publish_requiresTopicArn() {
         assertThrows(AwsException.class,
             () -> snsService.publish(null, null, "msg", null, REGION));
@@ -233,6 +464,48 @@ class SnsServiceTest {
         Topic topic = snsService.createTopic("my-topic", null, null, REGION);
         String messageId = snsService.publish(topic.getTopicArn(), null, "Hello!", null, REGION);
         assertNotNull(messageId);
+    }
+
+    @Test
+    void publish_subjectWithinLimits_succeeds() {
+        Topic topic = snsService.createTopic("my-topic", null, null, REGION);
+        String messageId = snsService.publish(topic.getTopicArn(), null, "Hello!", "a".repeat(100), REGION);
+        assertNotNull(messageId);
+    }
+
+    @Test
+    void publish_subjectTooLong_throwsInvalidParameter() {
+        Topic topic = snsService.createTopic("my-topic", null, null, REGION);
+        AwsException ex = assertThrows(AwsException.class, () ->
+                snsService.publish(topic.getTopicArn(), null, "Hello!", "a".repeat(101), REGION));
+        assertEquals("InvalidParameter", ex.getErrorCode());
+    }
+
+    @Test
+    void publish_subjectWithLineBreak_throwsInvalidParameter() {
+        Topic topic = snsService.createTopic("my-topic", null, null, REGION);
+        AwsException ex = assertThrows(AwsException.class, () ->
+                snsService.publish(topic.getTopicArn(), null, "Hello!", "line one\nline two", REGION));
+        assertEquals("InvalidParameter", ex.getErrorCode());
+    }
+
+    @Test
+    void publish_subjectStartingWithSpace_succeeds() {
+        Topic topic = snsService.createTopic("my-topic", null, null, REGION);
+        String messageId = snsService.publish(topic.getTopicArn(), null, "Hello!", " leading space", REGION);
+        assertNotNull(messageId);
+    }
+
+    @Test
+    void publishBatch_subjectTooLong_marksEntryFailed() {
+        Topic topic = snsService.createTopic("my-topic", null, null, REGION);
+        List<Map<String, Object>> entries = List.of(
+                Map.of("Id", "1", "Message", "Hello!", "Subject", "b".repeat(150)));
+        SnsService.BatchPublishResult result =
+                snsService.publishBatch(topic.getTopicArn(), entries, REGION);
+        assertTrue(result.successful().isEmpty());
+        assertEquals(1, result.failed().size());
+        assertEquals("InvalidParameter", result.failed().get(0)[1]);
     }
 
     @Test
@@ -384,6 +657,33 @@ class SnsServiceTest {
     }
 
     @Test
+    void filterPolicy_messageBody_nestedObjectsInsideArray() {
+        Subscription sub = subscriptionWithPolicy(
+                "{\"Records\":{\"s3\":{\"bucket\":{\"name\":[\"mybucket\"]}}}}", "MessageBody");
+        assertTrue(snsService.matchesFilterPolicy(sub, body("""
+                {"Records":[{"s3":{"bucket":{"name":"other"}}},
+                            {"s3":{"bucket":{"name":"mybucket"}}}]}
+                """), null));
+        assertFalse(snsService.matchesFilterPolicy(sub, body("""
+                {"Records":[{"s3":{"bucket":{"name":"other"}}}]}
+                """), null));
+        assertFalse(snsService.matchesFilterPolicy(sub, body("{\"Records\":[]}"), null));
+    }
+
+    @Test
+    void filterPolicy_messageBody_nestedArrayRequiresOneElementToMatchWholePolicy() {
+        Subscription sub = subscriptionWithPolicy(
+                "{\"Records\":{\"name\":[\"mybucket\"],\"region\":[\"us-east-1\"]}}", "MessageBody");
+        assertFalse(snsService.matchesFilterPolicy(sub, body("""
+                {"Records":[{"name":"mybucket","region":"us-west-2"},
+                            {"name":"other","region":"us-east-1"}]}
+                """), null));
+        assertTrue(snsService.matchesFilterPolicy(sub, body("""
+                {"Records":[{"name":"mybucket","region":"us-east-1"}]}
+                """), null));
+    }
+
+    @Test
     void filterPolicy_messageBody_numericRule() {
         Subscription sub = subscriptionWithPolicy(
                 "{\"price\":[{\"numeric\":[\">=\",100,\"<\",200]}]}", "MessageBody");
@@ -429,6 +729,172 @@ class SnsServiceTest {
                 "{\"price\":[{\"prefix\":\"1\"}]}", "MessageBody");
         assertFalse(snsService.matchesFilterPolicy(sub, body("{\"price\":100}"), null));
         assertFalse(snsService.matchesFilterPolicy(sub, body("{\"price\":true}"), null));
+    }
+
+    /**
+     * suffix, equals-ignore-case, wildcard, and cidr are string operators in the same way prefix
+     * is. A missing value or a non-textual body value does not match.
+     */
+    @Test
+    void filterPolicy_messageBody_suffixEqualsIgnoreCaseWildcardAndCidr() {
+        Subscription prefix = subscriptionWithPolicy(
+                "{\"key\":[{\"prefix\":\"images/\"}]}", "MessageBody");
+        assertTrue(snsService.matchesFilterPolicy(prefix, body("{\"key\":\"images/cat.png\"}"), null));
+
+        Subscription suffix = subscriptionWithPolicy(
+                "{\"key\":[{\"suffix\":\".png\"}]}", "MessageBody");
+        assertTrue(snsService.matchesFilterPolicy(suffix, body("{\"key\":\"images/cat.png\"}"), null));
+
+        Subscription suffixOnly = subscriptionWithPolicy(
+                "{\"f\":[{\"suffix\":\".png\"}]}", "MessageBody");
+        assertTrue(snsService.matchesFilterPolicy(suffixOnly, body("{\"f\":\"img.png\"}"), null));
+        assertFalse(snsService.matchesFilterPolicy(suffixOnly, body("{\"f\":\"img.jpg\"}"), null));
+        assertFalse(snsService.matchesFilterPolicy(suffixOnly, body("{\"f\":\"img.PNG\"}"), null));
+        assertFalse(snsService.matchesFilterPolicy(suffixOnly, body("{}"), null));
+        // A numeric property stays a number: suffix "0" does not match 100.
+        Subscription suffixOnNumber = subscriptionWithPolicy(
+                "{\"f\":[{\"suffix\":\"0\"}]}", "MessageBody");
+        assertFalse(snsService.matchesFilterPolicy(suffixOnNumber, body("{\"f\":100}"), null));
+
+        Subscription ignoreCase = subscriptionWithPolicy(
+                "{\"f\":[{\"equals-ignore-case\":\"ALERT\"}]}", "MessageBody");
+        assertTrue(snsService.matchesFilterPolicy(ignoreCase, body("{\"f\":\"alert\"}"), null));
+        assertTrue(snsService.matchesFilterPolicy(ignoreCase, body("{\"f\":\"Alert\"}"), null));
+        assertFalse(snsService.matchesFilterPolicy(ignoreCase, body("{\"f\":\"ALERT!\"}"), null));
+
+        Subscription wildcard = subscriptionWithPolicy(
+                "{\"f\":[{\"wildcard\":\"img*.png\"}]}", "MessageBody");
+        assertTrue(snsService.matchesFilterPolicy(wildcard, body("{\"f\":\"img01.png\"}"), null));
+        assertTrue(snsService.matchesFilterPolicy(wildcard, body("{\"f\":\"img.png\"}"), null));
+        assertFalse(snsService.matchesFilterPolicy(wildcard, body("{\"f\":\"IMG01.PNG\"}"), null));
+        assertFalse(snsService.matchesFilterPolicy(wildcard, body("{\"f\":\"img01.png.bak\"}"), null));
+
+        Subscription cidr = subscriptionWithPolicy(
+                "{\"ip\":[{\"cidr\":\"10.0.0.0/24\"}]}", "MessageBody");
+        assertTrue(snsService.matchesFilterPolicy(cidr, body("{\"ip\":\"10.0.0.5\"}"), null));
+        assertTrue(snsService.matchesFilterPolicy(cidr, body("{\"ip\":\"10.0.0.0\"}"), null));
+        assertTrue(snsService.matchesFilterPolicy(cidr, body("{\"ip\":\"10.0.0.255\"}"), null));
+        assertFalse(snsService.matchesFilterPolicy(cidr, body("{\"ip\":\"10.0.1.5\"}"), null));
+    }
+
+    /**
+     * anything-but of one nested operator matches a present value only when that operator does not.
+     * A number still matches anything-but of a string operator, and a string still matches
+     * anything-but of a numeric operator it fails.
+     */
+    @Test
+    void filterPolicy_messageBody_nestedAnythingBut() {
+        Subscription prefix = subscriptionWithPolicy(
+                "{\"f\":[{\"anything-but\":{\"prefix\":\"tmp\"}}]}", "MessageBody");
+        assertTrue(snsService.matchesFilterPolicy(prefix, body("{\"f\":\"img.png\"}"), null));
+        assertFalse(snsService.matchesFilterPolicy(prefix, body("{\"f\":\"tmp/a\"}"), null));
+        assertFalse(snsService.matchesFilterPolicy(prefix, body("{}"), null));
+
+        Subscription suffix = subscriptionWithPolicy(
+                "{\"f\":[{\"anything-but\":{\"suffix\":\".png\"}}]}", "MessageBody");
+        assertTrue(snsService.matchesFilterPolicy(suffix, body("{\"f\":\"img.jpg\"}"), null));
+        assertFalse(snsService.matchesFilterPolicy(suffix, body("{\"f\":\"img.png\"}"), null));
+
+        Subscription ignoreCase = subscriptionWithPolicy(
+                "{\"f\":[{\"anything-but\":{\"equals-ignore-case\":\"ALERT\"}}]}", "MessageBody");
+        assertTrue(snsService.matchesFilterPolicy(ignoreCase, body("{\"f\":\"note\"}"), null));
+        assertFalse(snsService.matchesFilterPolicy(ignoreCase, body("{\"f\":\"alert\"}"), null));
+
+        Subscription wildcard = subscriptionWithPolicy(
+                "{\"f\":[{\"anything-but\":{\"wildcard\":\"img*.png\"}}]}", "MessageBody");
+        assertTrue(snsService.matchesFilterPolicy(wildcard, body("{\"f\":\"readme\"}"), null));
+        assertFalse(snsService.matchesFilterPolicy(wildcard, body("{\"f\":\"img01.png\"}"), null));
+
+        Subscription cidr = subscriptionWithPolicy(
+                "{\"ip\":[{\"anything-but\":{\"cidr\":\"10.0.0.0/24\"}}]}", "MessageBody");
+        assertTrue(snsService.matchesFilterPolicy(cidr, body("{\"ip\":\"10.0.1.5\"}"), null));
+        assertFalse(snsService.matchesFilterPolicy(cidr, body("{\"ip\":\"10.0.0.5\"}"), null));
+
+        Subscription numeric = subscriptionWithPolicy(
+                "{\"n\":[{\"anything-but\":{\"numeric\":[\"=\",100]}}]}", "MessageBody");
+        assertTrue(snsService.matchesFilterPolicy(numeric, body("{\"n\":50}"), null));
+        assertFalse(snsService.matchesFilterPolicy(numeric, body("{\"n\":100}"), null));
+        assertTrue(snsService.matchesFilterPolicy(numeric, body("{\"n\":\"100\"}"), null));
+
+        Subscription numberVsPrefix = subscriptionWithPolicy(
+                "{\"n\":[{\"anything-but\":{\"prefix\":\"1\"}}]}", "MessageBody");
+        assertTrue(snsService.matchesFilterPolicy(numberVsPrefix, body("{\"n\":100}"), null));
+    }
+
+    /** Non-textual and malformed numeric nested operands fail closed in both filter scopes. */
+    @Test
+    void filterPolicy_nestedAnythingBut_malformedOperandDoesNotMatch() {
+        assertMalformedNestedClosed("{\"f\":[{\"anything-but\":{\"suffix\":1}}]}",
+                "f", "x1", "{\"f\":\"x1\"}");
+        assertMalformedNestedClosed("{\"n\":[{\"anything-but\":{\"numeric\":[\"=\",100,\"<\"]}}]}",
+                "n", "50", "{\"n\":50}");
+        assertMalformedNestedClosed("{\"n\":[{\"anything-but\":{\"numeric\":1}}]}",
+                "n", "1", "{\"n\":1}");
+        assertMalformedNestedClosed("{\"n\":[{\"anything-but\":{\"numeric\":[\"=\",\"100\"]}}]}",
+                "n", "50", "{\"n\":50}");
+    }
+
+    private void assertMalformedNestedClosed(String policy, String key, String attribute, String json) {
+        assertFalse(snsService.matchesFilterPolicy(
+                subscriptionWithPolicy(policy, "MessageBody"), body(json), null));
+        assertFalse(snsService.matchesFilterPolicy(
+                subscriptionWithPolicy(policy, null), null, attr(key, attribute, "String")));
+    }
+
+    /** A glob is anchored and literal; a CIDR compares addresses under the prefix and ignores names. */
+    @Test
+    void filterPolicy_messageBody_wildcardAndCidrEdges() {
+        Subscription empty = subscriptionWithPolicy("{\"f\":[{}]}", "MessageBody");
+        assertFalse(snsService.matchesFilterPolicy(empty, body("{\"f\":\"img.png\"}"), null));
+        Subscription unknown = subscriptionWithPolicy(
+                "{\"f\":[{\"nope\":\"img.png\"}]}", "MessageBody");
+        assertFalse(snsService.matchesFilterPolicy(unknown, body("{\"f\":\"img.png\"}"), null));
+        Subscription badSuffix = subscriptionWithPolicy("{\"f\":[{\"suffix\":1}]}", "MessageBody");
+        assertFalse(snsService.matchesFilterPolicy(badSuffix, body("{\"f\":\"x1\"}"), null));
+        Subscription anythingButEmpty = subscriptionWithPolicy(
+                "{\"f\":[{\"anything-but\":{}}]}", "MessageBody");
+        assertFalse(snsService.matchesFilterPolicy(anythingButEmpty, body("{\"f\":\"img.png\"}"), null));
+        Subscription anythingButUnknown = subscriptionWithPolicy(
+                "{\"f\":[{\"anything-but\":{\"nope\":\"z\"}}]}", "MessageBody");
+        assertFalse(snsService.matchesFilterPolicy(anythingButUnknown, body("{\"f\":\"img.png\"}"), null));
+
+        Subscription literalDot = subscriptionWithPolicy(
+                "{\"f\":[{\"wildcard\":\"a.b\"}]}", "MessageBody");
+        assertFalse(snsService.matchesFilterPolicy(literalDot, body("{\"f\":\"axb\"}"), null));
+        Subscription starred = subscriptionWithPolicy(
+                "{\"f\":[{\"wildcard\":\"a*b\"}]}", "MessageBody");
+        assertTrue(snsService.matchesFilterPolicy(starred, body("{\"f\":\"axb\"}"), null));
+        Subscription any = subscriptionWithPolicy("{\"f\":[{\"wildcard\":\"*\"}]}", "MessageBody");
+        assertTrue(snsService.matchesFilterPolicy(any, body("{\"f\":\"\"}"), null));
+        Subscription multiStar = subscriptionWithPolicy(
+                "{\"f\":[{\"wildcard\":\"a*b*c\"}]}", "MessageBody");
+        assertTrue(snsService.matchesFilterPolicy(multiStar, body("{\"f\":\"aXbYc\"}"), null));
+
+        Subscription hostBits = subscriptionWithPolicy(
+                "{\"ip\":[{\"cidr\":\"10.0.0.5/24\"}]}", "MessageBody");
+        assertTrue(snsService.matchesFilterPolicy(hostBits, body("{\"ip\":\"10.0.0.9\"}"), null));
+        Subscription tooWide = subscriptionWithPolicy(
+                "{\"ip\":[{\"cidr\":\"10.0.0.0/33\"}]}", "MessageBody");
+        assertFalse(snsService.matchesFilterPolicy(tooWide, body("{\"ip\":\"10.0.0.1\"}"), null));
+
+        Subscription v6 = subscriptionWithPolicy(
+                "{\"ip\":[{\"cidr\":\"2001:db8::/32\"}]}", "MessageBody");
+        assertTrue(snsService.matchesFilterPolicy(v6, body("{\"ip\":\"2001:db8::1\"}"), null));
+        Subscription v4 = subscriptionWithPolicy(
+                "{\"ip\":[{\"cidr\":\"10.0.0.0/24\"}]}", "MessageBody");
+        assertFalse(snsService.matchesFilterPolicy(v4, body("{\"ip\":\"2001:db8::1\"}"), null));
+
+        Subscription allV4 = subscriptionWithPolicy(
+                "{\"ip\":[{\"cidr\":\"0.0.0.0/0\"}]}", "MessageBody");
+        assertTrue(snsService.matchesFilterPolicy(allV4, body("{\"ip\":\"192.0.2.10\"}"), null));
+        assertFalse(snsService.matchesFilterPolicy(allV4, body("{\"ip\":\"2001:db8::1\"}"), null));
+
+        Subscription covering = subscriptionWithPolicy(
+                "{\"ip\":[{\"cidr\":\"10.0.0.0/8\"}]}", "MessageBody");
+        assertFalse(snsService.matchesFilterPolicy(covering, body("{\"ip\":\"10.0.0.5/32\"}"), null));
+        assertFalse(snsService.matchesFilterPolicy(covering, body("{\"ip\":\"example.com\"}"), null));
+        assertFalse(snsService.matchesFilterPolicy(covering, body("{\"ip\":\"010.0.0.1\"}"), null));
+        assertFalse(snsService.matchesFilterPolicy(covering, body("{\"ip\":\"10.0.0.5%eth0\"}"), null));
     }
 
     @Test
@@ -619,35 +1085,72 @@ class SnsServiceTest {
                 "arn:aws:sns:us-east-1:000000000000:ghost-topic", REGION));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {ACCOUNT, "000000000002"})
+    void topicExists_migratesLegacyTopicToArnAccount(String accountId) {
+        String arn = "arn:aws:sns:us-east-1:" + accountId + ":legacy-topic";
+        String key = "topic::" + REGION + "::" + arn;
+        Topic topic = new Topic("legacy-topic", arn);
+        InMemoryStorage<String, Topic> raw = new InMemoryStorage<>();
+        raw.put(key, topic);
+        AccountAwareStorageBackend<Topic> store = new AccountAwareStorageBackend<>(raw, null, ACCOUNT);
+        SnsService service = new SnsService(store, new InMemoryStorage<>(),
+                new RegionResolver(REGION, ACCOUNT), null, null);
 
-    /**
-     * A Lambda subscription endpoint may be a qualified ARN. Taking the segment after the last
-     * colon read the alias as the function name, so a subscription to
-     * {@code ...:function:order-processor:PROD} invoked a function called {@code PROD}: the
-     * message was accepted, reported as published, and delivered nowhere.
-     */
-    @Test
-    void extractFunctionNameIgnoresTheQualifier() {
-        String base = "arn:aws:lambda:us-east-1:000000000000:function:order-processor";
-
-        assertEquals("order-processor", SnsService.extractFunctionName(base));
-        assertEquals("order-processor", SnsService.extractFunctionName(base + ":PROD"));
-        assertEquals("order-processor", SnsService.extractFunctionName(base + ":42"));
-        assertEquals("order-processor", SnsService.extractFunctionName(base + ":$LATEST"));
+        assertTrue(service.topicExists(arn, REGION));
+        assertEquals(topic, raw.get(accountId + "/" + key).orElseThrow());
+        assertTrue(raw.get(key).isEmpty());
+        if (!ACCOUNT.equals(accountId)) {
+            assertTrue(raw.get(ACCOUNT + "/" + key).isEmpty());
+        }
     }
 
-    /** Other partitions carry the same resource grammar. */
     @Test
-    void extractFunctionNameWorksInAnyPartition() {
-        assertEquals("order-processor", SnsService.extractFunctionName(
-                "arn:aws-us-gov:lambda:us-gov-west-1:000000000000:function:order-processor:PROD"));
+    void topicExists_doesNotClaimLegacyTopicWithDifferentArn() {
+        String arn = "arn:aws:sns:us-east-1:000000000002:legacy-topic";
+        String key = "topic::" + REGION + "::" + arn;
+        Topic otherTopic = new Topic("legacy-topic", "arn:aws:sns:us-east-1:000000000003:legacy-topic");
+        InMemoryStorage<String, Topic> raw = new InMemoryStorage<>();
+        raw.put(key, otherTopic);
+        AccountAwareStorageBackend<Topic> store = new AccountAwareStorageBackend<>(raw, null, ACCOUNT);
+        SnsService service = new SnsService(store, new InMemoryStorage<>(),
+                new RegionResolver(REGION, ACCOUNT), null, null);
+
+        assertFalse(service.topicExists(arn, REGION));
+        assertEquals(otherTopic, raw.get(key).orElseThrow());
+        assertTrue(raw.get("000000000002/" + key).isEmpty());
     }
 
-    /** A bare function name is a legal endpoint too and passes through unchanged. */
     @Test
-    void extractFunctionNameLeavesABareNameAlone() {
-        assertEquals("order-processor", SnsService.extractFunctionName("order-processor"));
-        assertNull(SnsService.extractFunctionName(null));
+    void findTopicPolicy_readsTheTopicInTheAccountItsArnNames() {
+        String arn = "arn:aws:sns:us-east-1:000000000002:owned-elsewhere";
+        Topic topic = new Topic("owned-elsewhere", arn);
+        topic.getAttributes().put("Policy", "{\"Version\":\"2012-10-17\",\"Statement\":[]}");
+        AccountAwareStorageBackend<Topic> store = AccountAwareStorageBackend.inMemory(ACCOUNT);
+        store.putForAccount("000000000002", "topic::" + REGION + "::" + arn, topic);
+        SnsService service = new SnsService(store, new InMemoryStorage<>(),
+                new RegionResolver(REGION, ACCOUNT), null, null);
+
+        assertEquals(Optional.of("{\"Version\":\"2012-10-17\",\"Statement\":[]}"), service.findTopicPolicy(arn));
+    }
+
+    @Test
+    void findTopicPolicy_givesATopicWithoutOneTheDefaultForItsOwnAccount() {
+        String arn = "arn:aws:sns:us-east-1:000000000002:no-policy";
+        AccountAwareStorageBackend<Topic> store = AccountAwareStorageBackend.inMemory(ACCOUNT);
+        store.putForAccount("000000000002", "topic::" + REGION + "::" + arn, new Topic("no-policy", arn));
+        SnsService service = new SnsService(store, new InMemoryStorage<>(),
+                new RegionResolver(REGION, ACCOUNT), null, null);
+
+        String policy = service.findTopicPolicy(arn).orElseThrow();
+
+        assertTrue(policy.contains("\"AWS:SourceOwner\":\"000000000002\""), policy);
+        assertTrue(policy.contains("\"Resource\":\"" + arn + "\""), policy);
+    }
+
+    @Test
+    void findTopicPolicy_isEmptyForATopicThatDoesNotExist() {
+        assertEquals(Optional.empty(), snsService.findTopicPolicy("arn:aws:sns:us-east-1:000000000000:ghost-topic"));
     }
 
     private static Map<String, MessageAttributeValue> attr(String name, String value, String dataType) {
@@ -692,6 +1195,114 @@ class SnsServiceTest {
                 stringArray("codes", "[\"12\",\"150\"]")));
         assertFalse(snsService.matchesFilterPolicy(numeric, null,
                 stringArray("codes", "[\"12\",\"99\"]")));
+    }
+
+    /** The same string operators match a String attribute, and fail when the string does not. */
+    @Test
+    void filterPolicy_messageAttributes_suffixEqualsIgnoreCaseWildcardAndCidr() {
+        Subscription prefix = subscriptionWithPolicy("{\"name\":[{\"prefix\":\"foo\"}]}", null);
+        assertTrue(snsService.matchesFilterPolicy(prefix, null, attr("name", "foobar", "String")));
+        assertFalse(snsService.matchesFilterPolicy(prefix, null, attr("name", "bar", "String")));
+
+        Subscription suffix = subscriptionWithPolicy("{\"name\":[{\"suffix\":\".png\"}]}", null);
+        assertTrue(snsService.matchesFilterPolicy(suffix, null, attr("name", "img.png", "String")));
+        assertFalse(snsService.matchesFilterPolicy(suffix, null, attr("name", "img.jpg", "String")));
+        assertFalse(snsService.matchesFilterPolicy(suffix, null, Map.of()));
+
+        Subscription ignoreCase = subscriptionWithPolicy(
+                "{\"name\":[{\"equals-ignore-case\":\"ALERT\"}]}", null);
+        assertTrue(snsService.matchesFilterPolicy(ignoreCase, null, attr("name", "alert", "String")));
+        assertTrue(snsService.matchesFilterPolicy(ignoreCase, null, attr("name", "Alert", "String")));
+        assertFalse(snsService.matchesFilterPolicy(ignoreCase, null, attr("name", "ALERT!", "String")));
+
+        Subscription wildcard = subscriptionWithPolicy(
+                "{\"name\":[{\"wildcard\":\"img*.png\"}]}", null);
+        assertTrue(snsService.matchesFilterPolicy(wildcard, null, attr("name", "img01.png", "String")));
+        assertTrue(snsService.matchesFilterPolicy(wildcard, null, attr("name", "img.png", "String")));
+        assertFalse(snsService.matchesFilterPolicy(wildcard, null, attr("name", "IMG01.PNG", "String")));
+        assertFalse(snsService.matchesFilterPolicy(wildcard, null, attr("name", "img01.png.bak", "String")));
+
+        Subscription cidr = subscriptionWithPolicy("{\"ip\":[{\"cidr\":\"10.0.0.0/24\"}]}", null);
+        assertTrue(snsService.matchesFilterPolicy(cidr, null, attr("ip", "10.0.0.5", "String")));
+        assertFalse(snsService.matchesFilterPolicy(cidr, null, attr("ip", "10.0.1.5", "String")));
+    }
+
+    /** A String.Array matches these operators when any element does. */
+    @Test
+    void filterPolicy_stringArrayAttribute_stringOperatorsMatchAnyElement() {
+        Subscription suffix = subscriptionWithPolicy("{\"f\":[{\"suffix\":\".png\"}]}", null);
+        assertTrue(snsService.matchesFilterPolicy(suffix, null,
+                stringArray("f", "[\"img.jpg\",\"img.png\"]")));
+        assertFalse(snsService.matchesFilterPolicy(suffix, null,
+                stringArray("f", "[\"img.jpg\",\"img.gif\"]")));
+
+        Subscription ignoreCase = subscriptionWithPolicy(
+                "{\"f\":[{\"equals-ignore-case\":\"ALERT\"}]}", null);
+        assertTrue(snsService.matchesFilterPolicy(ignoreCase, null,
+                stringArray("f", "[\"note\",\"alert\"]")));
+        assertFalse(snsService.matchesFilterPolicy(ignoreCase, null,
+                stringArray("f", "[\"note\",\"warn\"]")));
+
+        Subscription wildcard = subscriptionWithPolicy("{\"f\":[{\"wildcard\":\"img*.png\"}]}", null);
+        assertTrue(snsService.matchesFilterPolicy(wildcard, null,
+                stringArray("f", "[\"readme\",\"img01.png\"]")));
+        assertFalse(snsService.matchesFilterPolicy(wildcard, null,
+                stringArray("f", "[\"readme\",\"notes\"]")));
+
+        Subscription cidr = subscriptionWithPolicy("{\"ip\":[{\"cidr\":\"10.0.0.0/24\"}]}", null);
+        assertTrue(snsService.matchesFilterPolicy(cidr, null,
+                stringArray("ip", "[\"10.0.1.5\",\"10.0.0.5\"]")));
+        assertFalse(snsService.matchesFilterPolicy(cidr, null,
+                stringArray("ip", "[\"10.0.1.5\",\"10.1.0.5\"]")));
+    }
+
+    /**
+     * anything-but on a String.Array matches only when no element is excluded. One excluded
+     * element vetoes the attribute.
+     */
+    @Test
+    void filterPolicy_stringArrayAttribute_nestedAnythingButVetoesOnAnyElement() {
+        Subscription sub = subscriptionWithPolicy(
+                "{\"f\":[{\"anything-but\":{\"prefix\":\"tmp\"}}]}", null);
+        assertTrue(snsService.matchesFilterPolicy(sub, null,
+                stringArray("f", "[\"img.png\",\"readme\"]")));
+        assertFalse(snsService.matchesFilterPolicy(sub, null,
+                stringArray("f", "[\"img.png\",\"tmp/a\"]")));
+    }
+
+    /** Nested anything-but on an attribute uses the same operators, and a missing attribute does not match. */
+    @Test
+    void filterPolicy_messageAttributes_nestedAnythingBut() {
+        Subscription prefix = subscriptionWithPolicy(
+                "{\"f\":[{\"anything-but\":{\"prefix\":\"tmp\"}}]}", null);
+        assertTrue(snsService.matchesFilterPolicy(prefix, null, attr("f", "img.png", "String")));
+        assertFalse(snsService.matchesFilterPolicy(prefix, null, attr("f", "tmp/a", "String")));
+        assertFalse(snsService.matchesFilterPolicy(prefix, null, Map.of()));
+
+        Subscription suffix = subscriptionWithPolicy(
+                "{\"f\":[{\"anything-but\":{\"suffix\":\".png\"}}]}", null);
+        assertTrue(snsService.matchesFilterPolicy(suffix, null, attr("f", "img.jpg", "String")));
+        assertFalse(snsService.matchesFilterPolicy(suffix, null, attr("f", "img.png", "String")));
+
+        Subscription ignoreCase = subscriptionWithPolicy(
+                "{\"f\":[{\"anything-but\":{\"equals-ignore-case\":\"ALERT\"}}]}", null);
+        assertTrue(snsService.matchesFilterPolicy(ignoreCase, null, attr("f", "note", "String")));
+        assertFalse(snsService.matchesFilterPolicy(ignoreCase, null, attr("f", "alert", "String")));
+
+        Subscription wildcard = subscriptionWithPolicy(
+                "{\"f\":[{\"anything-but\":{\"wildcard\":\"img*.png\"}}]}", null);
+        assertTrue(snsService.matchesFilterPolicy(wildcard, null, attr("f", "readme", "String")));
+        assertFalse(snsService.matchesFilterPolicy(wildcard, null, attr("f", "img01.png", "String")));
+
+        Subscription cidr = subscriptionWithPolicy(
+                "{\"ip\":[{\"anything-but\":{\"cidr\":\"10.0.0.0/24\"}}]}", null);
+        assertTrue(snsService.matchesFilterPolicy(cidr, null, attr("ip", "10.0.1.5", "String")));
+        assertFalse(snsService.matchesFilterPolicy(cidr, null, attr("ip", "10.0.0.5", "String")));
+
+        Subscription numeric = subscriptionWithPolicy(
+                "{\"n\":[{\"anything-but\":{\"numeric\":[\"=\",100]}}]}", null);
+        assertTrue(snsService.matchesFilterPolicy(numeric, null, attr("n", "50", "String")));
+        assertFalse(snsService.matchesFilterPolicy(numeric, null, attr("n", "100", "String")));
     }
 
     /**
@@ -763,6 +1374,10 @@ class SnsServiceTest {
 
         Subscription absent = subscriptionWithPolicy("{\"updatedFields\":[{\"exists\":false}]}", null);
         assertTrue(snsService.matchesFilterPolicy(absent, null, binary));
+
+        Subscription suffix = subscriptionWithPolicy(
+                "{\"updatedFields\":[{\"suffix\":\".png\"}]}", null);
+        assertFalse(snsService.matchesFilterPolicy(suffix, null, binary));
     }
 
     /**
@@ -822,6 +1437,11 @@ class SnsServiceTest {
         Subscription reserved = subscriptionWithPolicy(
                 "{\"$or\":[{\"prefix\":\"a\"},{\"tableName\":[\"Asset\"]}]}", null);
         assertFalse(snsService.matchesFilterPolicy(reserved, null,
+                Map.of("tableName", new MessageAttributeValue("Asset", "String"))));
+
+        Subscription suffixField = subscriptionWithPolicy(
+                "{\"$or\":[{\"suffix\":\".png\"},{\"tableName\":[\"Asset\"]}]}", null);
+        assertFalse(snsService.matchesFilterPolicy(suffixField, null,
                 Map.of("tableName", new MessageAttributeValue("Asset", "String"))));
 
         // a literal attribute named "$or" is matched as one
@@ -957,6 +1577,134 @@ class SnsServiceTest {
         Topic topic = service.createTopic("firehose-fail-topic", null, null, REGION);
         service.subscribe(topic.getTopicArn(), "firehose",
                 "arn:aws:firehose:us-east-1:000000000000:deliverystream/failing-stream", REGION, Map.of());
+    void publish_invokesTheQualifiedLambdaSubscriptionEndpoint() {
+        LambdaService lambdaService = mock(LambdaService.class);
+        SnsService service = new SnsService(
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                new RegionResolver(REGION, ACCOUNT),
+                null,
+                lambdaService
+        );
+        Topic topic = service.createTopic("lambda-topic", null, null, REGION);
+        String aliasArn = "arn:aws:lambda:us-east-1:000000000000:function:order-processor:PROD";
+        service.subscribe(topic.getTopicArn(), "lambda", aliasArn, REGION, Map.of());
+
+        service.publish(topic.getTopicArn(), null, "hello", null, REGION);
+
+        verify(lambdaService).invoke(eq(REGION), eq(aliasArn), any(byte[].class), eq(InvocationType.Event));
+    }
+
+    @Test
+    void publish_deliversToFirehoseSubscription_withJsonEnvelope() throws Exception {
+        FirehoseService firehoseService = mock(FirehoseService.class);
+        RegionResolver regionResolver = new RegionResolver(REGION, ACCOUNT);
+        SnsService service = new SnsService(
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                regionResolver,
+                null,
+                null,
+                firehoseService
+        );
+
+        Topic topic = service.createTopic("firehose-topic", null, null, REGION);
+        String streamArn = "arn:aws:firehose:us-east-1:000000000000:deliverystream/test-stream";
+        service.subscribe(topic.getTopicArn(), "firehose", streamArn, REGION,
+                Map.of("SubscriptionRoleArn", FIREHOSE_ROLE_ARN));
+
+        String messageId = service.publish(topic.getTopicArn(), null, "Hello Firehose", "Test Subject", REGION);
+        assertNotNull(messageId);
+
+        ArgumentCaptor<Record> recordCaptor = ArgumentCaptor.forClass(Record.class);
+        verify(firehoseService).putRecord(eq(ACCOUNT), eq(REGION), eq("test-stream"), recordCaptor.capture());
+
+        Record captured = recordCaptor.getValue();
+        assertNotNull(captured);
+        assertNotNull(captured.getData());
+        String payload = new String(captured.getData(), StandardCharsets.UTF_8);
+
+        JsonNode json = new ObjectMapper().readTree(payload);
+        assertEquals("Notification", json.get("Type").asText());
+        assertEquals(messageId, json.get("MessageId").asText());
+        assertEquals(topic.getTopicArn(), json.get("TopicArn").asText());
+        assertEquals("Test Subject", json.get("Subject").asText());
+        assertEquals("Hello Firehose", json.get("Message").asText());
+    }
+
+    @Test
+    void publish_deliversToFirehoseSubscription_rawMessageDelivery() {
+        FirehoseService firehoseService = mock(FirehoseService.class);
+        RegionResolver regionResolver = new RegionResolver(REGION, ACCOUNT);
+        SnsService service = new SnsService(
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                regionResolver,
+                null,
+                null,
+                firehoseService
+        );
+
+        Topic topic = service.createTopic("firehose-topic-raw", null, null, REGION);
+        String streamArn = "arn:aws:firehose:us-east-1:000000000000:deliverystream/test-stream-raw";
+        service.subscribe(topic.getTopicArn(), "firehose", streamArn, REGION,
+                Map.of("RawMessageDelivery", "true", "SubscriptionRoleArn", FIREHOSE_ROLE_ARN));
+
+        String message = "{\"raw\":\"payload\"}";
+        String messageId = service.publish(topic.getTopicArn(), null, message, null, REGION);
+        assertNotNull(messageId);
+
+        ArgumentCaptor<Record> recordCaptor = ArgumentCaptor.forClass(Record.class);
+        verify(firehoseService).putRecord(eq(ACCOUNT), eq(REGION), eq("test-stream-raw"), recordCaptor.capture());
+
+        Record captured = recordCaptor.getValue();
+        assertEquals(message, new String(captured.getData(), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void publish_deliversToFirehoseSubscription_bareStreamNameEndpoint() {
+        FirehoseService firehoseService = mock(FirehoseService.class);
+        RegionResolver regionResolver = new RegionResolver(REGION, ACCOUNT);
+        SnsService service = new SnsService(
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                regionResolver,
+                null,
+                null,
+                firehoseService
+        );
+
+        Topic topic = service.createTopic("firehose-bare-topic", null, null, REGION);
+        service.subscribe(topic.getTopicArn(), "firehose", "bare-stream", REGION,
+                Map.of("RawMessageDelivery", "true", "SubscriptionRoleArn", FIREHOSE_ROLE_ARN));
+
+        service.publish(topic.getTopicArn(), null, "bare-msg", null, REGION);
+
+        ArgumentCaptor<Record> recordCaptor = ArgumentCaptor.forClass(Record.class);
+        verify(firehoseService).putRecord(eq(ACCOUNT), eq(REGION), eq("bare-stream"), recordCaptor.capture());
+        assertEquals("bare-msg", new String(recordCaptor.getValue().getData(), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void publish_firehoseDeliveryFailure_doesNotFailPublisher() {
+        FirehoseService firehoseService = mock(FirehoseService.class);
+        doThrow(new RuntimeException("stream not found"))
+                .when(firehoseService).putRecord(any(), any(), any(), any());
+
+        RegionResolver regionResolver = new RegionResolver(REGION, ACCOUNT);
+        SnsService service = new SnsService(
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                regionResolver,
+                null,
+                null,
+                firehoseService
+        );
+
+        Topic topic = service.createTopic("firehose-fail-topic", null, null, REGION);
+        service.subscribe(topic.getTopicArn(), "firehose",
+                "arn:aws:firehose:us-east-1:000000000000:deliverystream/failing-stream", REGION,
+                Map.of("SubscriptionRoleArn", FIREHOSE_ROLE_ARN));
 
         // Delivery error is logged and tolerated; publisher receives message ID
         String messageId = service.publish(topic.getTopicArn(), null, "msg", null, REGION);

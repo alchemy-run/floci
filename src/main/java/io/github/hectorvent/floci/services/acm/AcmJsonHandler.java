@@ -6,12 +6,14 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsErrorResponse;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.services.acm.model.Certificate;
 import io.github.hectorvent.floci.services.acm.model.CertificateOptions;
 import io.github.hectorvent.floci.services.acm.model.CertificateStatus;
 import io.github.hectorvent.floci.services.acm.model.DomainValidation;
 import io.github.hectorvent.floci.services.acm.model.KeyAlgorithm;
 import io.github.hectorvent.floci.services.acm.model.ListResult;
+import io.github.hectorvent.floci.services.acm.model.ResourceRecord;
 import io.github.hectorvent.floci.services.acm.model.RevocationReason;
 import io.github.hectorvent.floci.services.acm.model.ValidationMethod;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -92,7 +94,13 @@ public class AcmJsonHandler {
                     "Value null at 'domainName' failed to satisfy constraint: Member must not be null"))
                 .build();
         }
-        List<String> sans = parseStringList(request.path("SubjectAlternativeNames"));
+        JsonNode sanNode = request.path("SubjectAlternativeNames");
+        if (sanNode.isArray() && sanNode.isEmpty()) {
+            throw SmithyValidationErrors.validationException(
+                "Value '[]' at 'subjectAlternativeNames' failed to satisfy "
+                    + "constraint: Member must have length greater than or equal to 1");
+        }
+        List<String> sans = parseStringList(sanNode);
         ValidationMethod validationMethod = parseValidationMethod(request.path("ValidationMethod").asText(null));
         String idempotencyToken = request.path("IdempotencyToken").asText(null);
         KeyAlgorithm keyAlgorithm = KeyAlgorithm.fromAwsName(request.path("KeyAlgorithm").asText(null));
@@ -122,6 +130,14 @@ public class AcmJsonHandler {
         String certificateArn = request.path("CertificateArn").asText();
         Certificate cert = service.getCertificate(certificateArn, region);
 
+        // AWS returns RequestInProgressException for certificates still pending validation
+        if (cert.getStatus() == CertificateStatus.PENDING_VALIDATION) {
+            throw new AwsException(
+                "RequestInProgressException",
+                "The certificate request is in progress. The certificate body is not yet available.",
+                400);
+        }
+
         ObjectNode response = objectMapper.createObjectNode();
         response.put("Certificate", cert.getCertificateBody());
         if (cert.getCertificateChain() != null) {
@@ -138,10 +154,11 @@ public class AcmJsonHandler {
 
         ListResult result = service.listCertificates(statuses, keyTypes, region, maxItems, nextToken);
 
+        Map<String, List<String>> consumers = service.certificateInUseBy(result.certificates());
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode summaryList = objectMapper.createArrayNode();
         for (Certificate cert : result.certificates()) {
-            summaryList.add(buildCertificateSummary(cert));
+            summaryList.add(buildCertificateSummary(cert, consumers.get(cert.getArn())));
         }
         response.set("CertificateSummaryList", summaryList);
         if (result.nextToken() != null) {
@@ -401,9 +418,7 @@ public class AcmJsonHandler {
         }
 
         ArrayNode inUseBy = objectMapper.createArrayNode();
-        if (cert.getInUseBy() != null) {
-            cert.getInUseBy().forEach(inUseBy::add);
-        }
+        service.certificateInUseBy(cert).forEach(inUseBy::add);
         node.set("InUseBy", inUseBy);
 
         if (cert.getDomainValidationOptions() != null && !cert.getDomainValidationOptions().isEmpty()) {
@@ -469,55 +484,7 @@ public class AcmJsonHandler {
         return node;
     }
 
-    private ObjectNode buildSearchResult(Certificate cert) {
-        ObjectNode node = objectMapper.createObjectNode();
-        node.put("CertificateArn", cert.getArn());
-
-        ObjectNode metadata = objectMapper.createObjectNode();
-        metadata.put("Status", cert.getStatus().name());
-        metadata.put("Type", cert.getType().name());
-        metadata.put("Exported", cert.isExported());
-        metadata.put("InUse", cert.getInUseBy() != null && !cert.getInUseBy().isEmpty());
-        metadata.put("RenewalEligibility", "INELIGIBLE");
-        if (cert.getCertOptions() != null && cert.getCertOptions().export() != null) {
-            metadata.put("ExportOption", cert.getCertOptions().export());
-        }
-        if (cert.getValidationMethod() != null) {
-            metadata.put("ValidationMethod", cert.getValidationMethod().name());
-        }
-        if (cert.getCreatedAt() != null) {
-            metadata.put("CreatedAt", cert.getCreatedAt().toEpochMilli() / 1000.0);
-        }
-        if (cert.getIssuedAt() != null) {
-            metadata.put("IssuedAt", cert.getIssuedAt().toEpochMilli() / 1000.0);
-        }
-        if (cert.getImportedAt() != null) {
-            metadata.put("ImportedAt", cert.getImportedAt().toEpochMilli() / 1000.0);
-        }
-        if (cert.getRevokedAt() != null) {
-            metadata.put("RevokedAt", cert.getRevokedAt().toEpochMilli() / 1000.0);
-        }
-        ObjectNode wrapper = objectMapper.createObjectNode();
-        wrapper.set("AcmCertificateMetadata", metadata);
-        node.set("CertificateMetadata", wrapper);
-
-        ObjectNode x509 = objectMapper.createObjectNode();
-        if (cert.getDomainName() != null) {
-            ObjectNode subject = objectMapper.createObjectNode();
-            subject.put("CommonName", cert.getDomainName());
-            x509.set("Subject", subject);
-        }
-        if (cert.getKeyAlgorithm() != null) {
-            x509.put("KeyAlgorithm", cert.getKeyAlgorithm().getAwsName());
-        }
-        if (cert.getSerial() != null) {
-            x509.put("SerialNumber", cert.getSerial());
-        }
-        node.set("X509Attributes", x509);
-        return node;
-    }
-
-    private ObjectNode buildCertificateSummary(Certificate cert) {
+    private ObjectNode buildCertificateSummary(Certificate cert, List<String> consumers) {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("CertificateArn", cert.getArn());
         node.put("DomainName", cert.getDomainName());
@@ -563,7 +530,7 @@ public class AcmJsonHandler {
         }
 
         node.put("RenewalEligibility", "INELIGIBLE");
-        node.put("InUse", cert.getInUseBy() != null && !cert.getInUseBy().isEmpty());
+        node.put("InUse", !consumers.isEmpty());
 
         return node;
     }

@@ -1,13 +1,14 @@
 package io.github.hectorvent.floci.services.lambda;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.services.lambda.model.LambdaLayerVersion;
 import io.github.hectorvent.floci.services.lambda.zip.ZipExtractor;
-import org.mockito.Answers;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.Answers;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.file.Files;
@@ -20,6 +21,7 @@ import java.util.zip.ZipOutputStream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -113,12 +115,46 @@ class LambdaLayerCodePathIsolationTest {
         assertEqualsContent(restored.getCodeLocalPath(), "persisted");
     }
 
+    @Test
+    void publishLayerVersionRejectsBareStringCompatibilityLists(@TempDir Path baseDir) throws Exception {
+        // Catches: a non-list CompatibleRuntimes/CompatibleArchitectures being ignored instead of rejected
+        LambdaLayerService service = serviceFor(baseDir, "111111111111");
+        Map<String, Object> runtimes = Map.of("Content", Map.of("ZipFile", zipBase64("r")),
+                "CompatibleRuntimes", "python3.12");
+        Map<String, Object> architectures = Map.of("Content", Map.of("ZipFile", zipBase64("a")),
+                "CompatibleArchitectures", "x86_64");
+
+        AwsException badRuntimes = assertThrows(AwsException.class,
+                () -> service.publishLayerVersion("us-east-1", LAYER_NAME, runtimes));
+        AwsException badArchitectures = assertThrows(AwsException.class,
+                () -> service.publishLayerVersion("us-east-1", LAYER_NAME, architectures));
+
+        assertEquals("SerializationException", badRuntimes.getErrorCode());
+        assertEquals("SerializationException", badArchitectures.getErrorCode());
+    }
+
     private static LambdaLayerVersion publish(LambdaLayerService service, String content) throws Exception {
         return service.publishLayerVersion("us-east-1", LAYER_NAME, request(content));
     }
 
     private static LambdaLayerService serviceFor(Path baseDir, String account) {
         return serviceFor(baseDir, account, new LambdaLayerStore(AccountAwareStorageBackend.inMemory(account)));
+    }
+
+    @Test
+    void publishLayerVersion_licenseInfoLongerThan512_isRejected(@TempDir Path baseDir) throws Exception {
+        // Catches: PublishLayerVersion storing a LicenseInfo over the model's 512-character maximum
+        LambdaLayerService service = serviceFor(baseDir, "111111111111",
+                new LambdaLayerStore(AccountAwareStorageBackend.inMemory("111111111111")));
+        Map<String, Object> request = Map.of("Content", Map.of("ZipFile", zipBase64("layer")),
+                "LicenseInfo", "l".repeat(513));
+
+        AwsException error = assertThrows(AwsException.class,
+                () -> service.publishLayerVersion("us-east-1", LAYER_NAME, request));
+
+        assertEquals("ValidationException", error.getErrorCode());
+        assertEquals("1 validation error detected: Value at 'licenseInfo' failed to satisfy constraint: "
+                + "Member must have length less than or equal to 512", error.getMessage());
     }
 
     private static LambdaLayerService serviceFor(Path baseDir, String account, LambdaLayerStore store) {

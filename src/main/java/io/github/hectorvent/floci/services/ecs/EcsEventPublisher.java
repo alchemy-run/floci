@@ -14,9 +14,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Publishes AWS-shaped {@code aws.ecs} lifecycle events to the default EventBridge bus.
@@ -102,7 +100,7 @@ public class EcsEventPublisher {
         }
     }
 
-    /** Emits one ECS Deployment State Change (eventType INFO). */
+    /** Emits one ECS Deployment State Change. */
     public void emitDeploymentStateChange(EcsServiceModel svc, String eventName, String reason, String region) {
         emitDeploymentStateChange(svc, "INFO", eventName, reason, region);
     }
@@ -115,7 +113,7 @@ public class EcsEventPublisher {
                                           String reason, String region) {
         try {
             ObjectNode detail = objectMapper.createObjectNode();
-            detail.put("eventType", eventType);
+            detail.put("eventType", "SERVICE_DEPLOYMENT_FAILED".equals(eventName) ? "ERROR" : "INFO");
             detail.put("eventName", eventName);
             detail.put("deploymentId", svc.getDeploymentId());
             detail.put("updatedAt", Instant.now().toString());
@@ -129,16 +127,8 @@ public class EcsEventPublisher {
 
     private void putEvent(String detailType, String resourceArn, ObjectNode detail, String region)
             throws Exception {
-        ArrayNode resources = objectMapper.createArrayNode();
-        if (resourceArn != null) {
-            resources.add(resourceArn);
-        }
-        Map<String, Object> entry = new HashMap<>();
-        entry.put("Source", SOURCE);
-        entry.put("DetailType", detailType);
-        entry.put("Detail", objectMapper.writeValueAsString(detail));
-        entry.put("Resources", resources);
-        eventBridgeService.putEvents(List.of(entry), effectiveRegion(region));
+        eventBridgeService.putEvents(List.of(EventBridgeService.serviceEventEntry(SOURCE, detailType,
+                objectMapper.writeValueAsString(detail), resourceArn)), effectiveRegion(region));
     }
 
     private String effectiveRegion(String region) {

@@ -137,6 +137,21 @@ aws secretsmanager validate-resource-policy \
 
 - **Rotation schedules fire.** A background sweep (see the config table) rotates any secret whose
   `NextRotationDate` has passed. `AutomaticallyAfterDays`, `rate()` and `cron()` are all honoured.
+- **`RotateSecret` also needs `lambda:InvokeFunction` under IAM enforcement.** As on AWS, the caller
+  must be allowed to invoke the rotation function as well as to call `RotateSecret`. A caller that
+  is not gets `AccessDeniedException` with HTTP 400, as Secrets Manager reports it, and the secret is
+  left as it was. A function in another account is checked as any cross-account call is: its
+  function policy must allow the caller too. Rotations started by the background sweep have no
+  caller and are not checked.
+- **A rotation function that does not exist** is reported as AWS reports it: `AccessDeniedException`
+  (HTTP 400), "Secrets Manager cannot invoke the specified Lambda function". The function is looked
+  up where the rotation runs it, in the account its ARN names and as the version or alias the ARN
+  names, so a missing alias is reported the same way. The secret's rotation settings are left as
+  they were, including any rotation function configured before.
+- **A rotation function reference Lambda refuses**, one it cannot parse or a full ARN in another
+  Region, gets `InvalidParameterException` (HTTP 400), the error `RotateSecret` declares for an
+  invalid parameter, with Lambda's reason in the message. The secret is left as it was. AWS does not
+  document which error a function in another Region gets.
 - **Replication is synchronous.** Real AWS reports `InProgress` first; floci copies the secret
   immediately, so a replica is `InSync` by the time the call returns. Replicas are read-only and
   track later writes to the primary.

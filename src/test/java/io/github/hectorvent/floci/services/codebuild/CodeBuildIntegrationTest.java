@@ -13,6 +13,7 @@ import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @QuarkusTest
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
@@ -426,5 +427,54 @@ class CodeBuildIntegrationTest {
                     .contentType(CONTENT_TYPE).body(Map.of("name", projectName))
                     .post("/").then().statusCode(200);
         }
+    }
+
+    @Test
+    @Order(14)
+    void listProjectsHonorsSortOptionsOverTheWire() {
+        List<String> names = List.of("sort-project-zeta", "sort-project-alpha", "sort-project-mu");
+        try {
+            for (String name : names) {
+                given().header("X-Amz-Target", "CodeBuild_20161006.CreateProject")
+                        .contentType(CONTENT_TYPE)
+                        .body("""
+                                {"name":"%s","source":{"type":"NO_SOURCE"},
+                                 "artifacts":{"type":"NO_ARTIFACTS"},
+                                 "environment":{"type":"LINUX_CONTAINER","image":"unused",
+                                                "computeType":"BUILD_GENERAL1_SMALL"},
+                                 "serviceRole":"arn:aws:iam::000000000000:role/codebuild-role"}
+                                """.formatted(name))
+                        .post("/").then().statusCode(200);
+            }
+            for (String direction : List.of("ASCENDING", "DESCENDING")) {
+                List<String> expected = List.of("sort-project-alpha", "sort-project-mu", "sort-project-zeta");
+                if ("DESCENDING".equals(direction)) {
+                    expected = expected.reversed();
+                }
+                List<String> projects = given()
+                        .header("X-Amz-Target", "CodeBuild_20161006.ListProjects")
+                        .contentType(CONTENT_TYPE)
+                        .body("{\"sortBy\":\"NAME\",\"sortOrder\":\"" + direction + "\"}")
+                        .post("/").then().statusCode(200)
+                        .extract().jsonPath().getList("projects", String.class);
+                assertEquals(expected,
+                        projects.stream().filter(names::contains).toList());
+            }
+        } finally {
+            for (String name : names) {
+                given().header("X-Amz-Target", "CodeBuild_20161006.DeleteProject")
+                        .contentType(CONTENT_TYPE).body("{\"name\":\"" + name + "\"}")
+                        .post("/");
+            }
+        }
+    }
+
+    @Test
+    @Order(15)
+    void listProjectsRejectsInvalidSortOptionsOverTheWire() {
+        given().header("X-Amz-Target", "CodeBuild_20161006.ListProjects")
+                .contentType(CONTENT_TYPE).body("{\"sortOrder\":\"UNKNOWN\"}")
+                .post("/").then().statusCode(400)
+                .body("__type", containsString("InvalidInputException"));
     }
 }

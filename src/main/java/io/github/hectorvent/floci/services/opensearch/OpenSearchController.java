@@ -1,5 +1,9 @@
 package io.github.hectorvent.floci.services.opensearch;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.opensearch.model.AdvancedSecurityOptions;
@@ -11,10 +15,6 @@ import io.github.hectorvent.floci.services.opensearch.model.EbsOptions;
 import io.github.hectorvent.floci.services.opensearch.model.EncryptionAtRestOptions;
 import io.github.hectorvent.floci.services.opensearch.model.NodeToNodeEncryptionOptions;
 import io.github.hectorvent.floci.services.opensearch.model.VpcOptions;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
@@ -814,19 +814,14 @@ public class OpenSearchController {
         if (node == null || node.isMissingNode() || node.isNull()) {
             return null;
         }
+        // Omitted fields stay null so the service only applies what the request supplied.
         ClusterConfig cc = new ClusterConfig();
-        if (node.has("InstanceType")) {
-            cc.setInstanceType(node.get("InstanceType").asText());
-        }
-        if (node.has("InstanceCount")) {
-            cc.setInstanceCount(node.get("InstanceCount").asInt());
-        }
-        if (node.has("DedicatedMasterEnabled")) {
-            cc.setDedicatedMasterEnabled(node.get("DedicatedMasterEnabled").asBoolean());
-        }
-        if (node.has("ZoneAwarenessEnabled")) {
-            cc.setZoneAwarenessEnabled(node.get("ZoneAwarenessEnabled").asBoolean());
-        }
+        cc.setInstanceType(node.has("InstanceType") ? node.get("InstanceType").asText() : null);
+        cc.setInstanceCount(node.has("InstanceCount") ? node.get("InstanceCount").asInt() : null);
+        cc.setDedicatedMasterEnabled(node.has("DedicatedMasterEnabled")
+                ? node.get("DedicatedMasterEnabled").asBoolean() : null);
+        cc.setZoneAwarenessEnabled(node.has("ZoneAwarenessEnabled")
+                ? node.get("ZoneAwarenessEnabled").asBoolean() : null);
         return cc;
     }
 
@@ -834,16 +829,11 @@ public class OpenSearchController {
         if (node == null || node.isMissingNode() || node.isNull()) {
             return null;
         }
+        // Omitted fields stay null so the service only applies what the request supplied.
         EbsOptions ebs = new EbsOptions();
-        if (node.has("EBSEnabled")) {
-            ebs.setEbsEnabled(node.get("EBSEnabled").asBoolean());
-        }
-        if (node.has("VolumeType")) {
-            ebs.setVolumeType(node.get("VolumeType").asText());
-        }
-        if (node.has("VolumeSize")) {
-            ebs.setVolumeSize(node.get("VolumeSize").asInt());
-        }
+        ebs.setEbsEnabled(node.has("EBSEnabled") ? node.get("EBSEnabled").asBoolean() : null);
+        ebs.setVolumeType(node.has("VolumeType") ? node.get("VolumeType").asText() : null);
+        ebs.setVolumeSize(node.has("VolumeSize") ? node.get("VolumeSize").asInt() : null);
         return ebs;
     }
 

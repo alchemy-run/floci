@@ -1,12 +1,10 @@
 package io.github.hectorvent.floci.services.cognito.verification;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import io.github.hectorvent.floci.core.common.Digests;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
@@ -41,10 +39,18 @@ public final class VerificationCodeService {
     private static final Duration RATE_LIMIT_WINDOW = Duration.ofSeconds(30);
     private static final int MAX_ATTEMPTS = 5;
     private static final int SALT_BYTES = 16;
+    private static final int CODE_LOCK_STRIPES = 256;
 
     private final StorageBackend<String, VerificationCode> store;
     private final Clock clock;
     private final SecureRandom random;
+    /**
+     * Stripes, by storage key, that make issuing, consuming and invalidating a code one step each: only
+     * codes whose keys share a stripe wait on each other. Nothing but this service's store is called under
+     * one, never a Lambda trigger or a Cognito lock, so no lock a caller holds around these methods can form
+     * a cycle with it.
+     */
+    private final Object[] codeLocks = newCodeLocks();
 
     public VerificationCodeService(StorageFactory storageFactory, Clock clock) {
         this.store = storageFactory.create(
@@ -58,11 +64,20 @@ public final class VerificationCodeService {
 
     /**
      * Issue a new code for the given user/purpose. Returns the plaintext code
-     * (caller must dispatch via SES/SNS). Subject to {@link #RATE_LIMIT_WINDOW}.
+     * (caller must dispatch via SES/SNS). Subject to {@link #RATE_LIMIT_WINDOW}. Takes turns
+     * with {@link #consume} for the same key, so redeeming the previous code cannot delete
+     * this one.
      */
     public String issue(String userPoolId, String username,
                         VerificationCode.Purpose purpose, Duration ttl) {
         String key = VerificationCode.storageKey(userPoolId, username, purpose);
+        synchronized (lockFor(key)) {
+            return issueUnderLock(key, userPoolId, username, purpose, ttl);
+        }
+    }
+
+    private String issueUnderLock(String key, String userPoolId, String username,
+                                  VerificationCode.Purpose purpose, Duration ttl) {
         Optional<VerificationCode> existing = store.get(key);
         if (existing.isPresent() && !existing.get().isConsumed()) {
             Duration since = Duration.between(existing.get().getIssuedAt(), clock.instant());
@@ -73,9 +88,13 @@ public final class VerificationCodeService {
             }
         }
 
-        String code = String.format("%06d", random.nextInt(1_000_000));
+        // Measured on AWS: the code of an email sign-in (USER_AUTH's EMAIL_OTP) has eight digits,
+        // a sign-up, forgotten-password or attribute verification code six.
+        String code = purpose == VerificationCode.Purpose.EMAIL_OTP
+            ? String.format("%08d", random.nextInt(100_000_000))
+            : String.format("%06d", random.nextInt(1_000_000));
         String salt = HexFormat.of().formatHex(randomBytes(SALT_BYTES));
-        String hash = sha256(code + salt);
+        String hash = Digests.sha256Hex(code + salt);
         Instant now = clock.instant();
 
         VerificationCode vc = new VerificationCode(
@@ -96,14 +115,19 @@ public final class VerificationCodeService {
      * {@code ConfirmSignUp} or {@code ConfirmForgotPassword}. On any failure, throws
      * {@link VerificationCodeException} with the specific {@link VerificationCodeException.Kind}.
      *
-     * <p>Note: not thread-safe under concurrent {@code consume()} of the same
-     * (poolId, username, purpose) key — two racing wrong-code calls may
-     * decrement the attempts counter by 1 instead of 2. Acceptable for the
-     * single-user local-dev profile; revisit if floci grows multi-tenant.
+     * <p>Concurrent calls for the same (poolId, username, purpose) key take turns, so a code
+     * is redeemed once however many requests present it at the same moment, and every wrong
+     * attempt counts.
      */
     public void consume(String userPoolId, String username,
                         VerificationCode.Purpose purpose, String code) {
         String key = VerificationCode.storageKey(userPoolId, username, purpose);
+        synchronized (lockFor(key)) {
+            consumeUnderLock(key, purpose, code);
+        }
+    }
+
+    private void consumeUnderLock(String key, VerificationCode.Purpose purpose, String code) {
         VerificationCode vc = store.get(key).orElseThrow(() -> new VerificationCodeException(
             VerificationCodeException.Kind.NOT_FOUND,
             "Invalid verification code provided, please try again"));
@@ -128,7 +152,7 @@ public final class VerificationCodeService {
                 "Invalid verification code provided, please try again");
         }
 
-        String expectedHash = sha256(code + vc.getSalt());
+        String expectedHash = Digests.sha256Hex(code + vc.getSalt());
         if (!constantTimeEquals(expectedHash, vc.getCodeHash())) {
             vc.decrementAttempts();
             if (vc.getAttemptsRemaining() <= 0) {
@@ -157,7 +181,7 @@ public final class VerificationCodeService {
     /** Remove any active code for the (pool, user, purpose). Idempotent. */
     public void invalidatePrevious(String userPoolId, String username,
                                    VerificationCode.Purpose purpose) {
-        store.delete(VerificationCode.storageKey(userPoolId, username, purpose));
+        invalidate(VerificationCode.storageKey(userPoolId, username, purpose));
     }
 
     /**
@@ -172,22 +196,32 @@ public final class VerificationCodeService {
             .filter(k -> k.startsWith(prefix))
             .filter(k -> store.get(k).map(c -> userPoolId.equals(c.getUserPoolId())).orElse(false))
             .toList()
-            .forEach(store::delete);
+            .forEach(this::invalidate);
+    }
+
+    /** Deletes a code in turn with {@link #consume}, which could otherwise write a wrong attempt back after it. */
+    private void invalidate(String key) {
+        synchronized (lockFor(key)) {
+            store.delete(key);
+        }
+    }
+
+    private Object lockFor(String key) {
+        return codeLocks[Math.floorMod(key.hashCode(), CODE_LOCK_STRIPES)];
+    }
+
+    private static Object[] newCodeLocks() {
+        Object[] locks = new Object[CODE_LOCK_STRIPES];
+        for (int i = 0; i < locks.length; i++) {
+            locks[i] = new Object();
+        }
+        return locks;
     }
 
     private byte[] randomBytes(int n) {
         byte[] b = new byte[n];
         random.nextBytes(b);
         return b;
-    }
-
-    private String sha256(String s) {
-        try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            return HexFormat.of().formatHex(md.digest(s.getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
     }
 
     private boolean constantTimeEquals(String a, String b) {

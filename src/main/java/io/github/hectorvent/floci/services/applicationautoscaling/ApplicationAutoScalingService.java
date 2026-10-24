@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.applicationautoscaling;
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.ServicePrincipals;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
@@ -18,6 +19,7 @@ import io.github.hectorvent.floci.services.applicationautoscaling.model.TargetTr
 import io.github.hectorvent.floci.services.cloudwatch.metrics.CloudWatchMetricsService;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.Dimension;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricAlarm;
+import io.github.hectorvent.floci.services.iam.ServiceLinkedRoles;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -654,18 +656,28 @@ public class ApplicationAutoScalingService {
      * emulator synthesizes one in the same shape to keep the Computed attribute stable.
      */
     private String serviceLinkedRoleArn(String serviceNamespace) {
+        String principal = ServicePrincipals.of(serviceNamespace + ".application-autoscaling");
+        // Application Auto Scaling has one role per scalable dimension, and AWS names five of
+        // them in evidence the table carries. The switch below is only for the namespaces nothing
+        // records, where its shape is right even when the dimension is a guess, so it carries no
+        // arm for a namespace the table covers: that would be a second copy of the same fact,
+        // unreachable and free to drift from it.
+        Optional<ServiceLinkedRoles.Entry> recorded = ServiceLinkedRoles.find(principal);
+        if (recorded.isPresent()) {
+            return regionResolver.buildGlobalArn("iam",
+                    "role/aws-service-role/" + principal + "/" + recorded.get().roleName());
+        }
         String suffix = switch (serviceNamespace) {
             case "ecs" -> "ECSService";
             case "kafka" -> "KafkaCluster";
-            case "dynamodb" -> "DynamoDBTable";
             case "lambda" -> "LambdaConcurrency";
             case "rds" -> "RDSCluster";
             case "elasticache" -> "ElastiCacheRG";
             default -> "CustomResource";
         };
-        return "arn:aws:iam::" + regionResolver.getAccountId()
-                + ":role/aws-service-role/" + serviceNamespace + ".application-autoscaling.amazonaws.com/"
-                + "AWSServiceRoleForApplicationAutoScaling_" + suffix;
+        return regionResolver.buildGlobalArn("iam",
+                "role/aws-service-role/" + ServicePrincipals.of(serviceNamespace + ".application-autoscaling") + "/"
+                + "AWSServiceRoleForApplicationAutoScaling_" + suffix);
     }
 
     private static double nowEpochSeconds() {
@@ -693,9 +705,12 @@ public class ApplicationAutoScalingService {
         return targets.get(targetKey(region, serviceNamespace, resourceId, scalableDimension));
     }
 
-    /** Looked up by {@link ScalingPolicyAlarmActionHandler} when an alarm's AlarmActions
-     * references a scaling-policy ARN. */
-    Optional<ScalingPolicy> findPolicyByArn(String policyArn, String region) {
+    /**
+     * Looked up by {@link ScalingPolicyAlarmActionHandler} when an alarm's AlarmActions references
+     * a scaling-policy ARN, and by the CloudFormation provisioner, whose physical id for a policy
+     * is that ARN while deleting one takes the triple plus the policy name.
+     */
+    public Optional<ScalingPolicy> findPolicyByArn(String policyArn, String region) {
         String prefix = region + "::";
         return policies.scan(k -> k.startsWith(prefix)).stream()
                 .filter(p -> policyArn.equals(p.getPolicyArn()))

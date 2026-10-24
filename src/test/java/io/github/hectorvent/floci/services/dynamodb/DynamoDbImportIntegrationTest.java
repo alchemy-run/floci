@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -49,7 +50,7 @@ class DynamoDbImportIntegrationTest {
         putObject("plain/data.json",
                 "{\"Item\":{\"pk\":{\"S\":\"imported1\"}}}\n{\"Item\":{\"pk\":{\"S\":\"imported2\"}}}\n");
 
-        var importArn = dynamo("ImportTable", importRequest("ImportPlain", BUCKET_NAME, "plain/", "DYNAMODB_JSON", "NONE"))
+        String importArn = dynamo("ImportTable", importRequest("ImportPlain", BUCKET_NAME, "plain/", "DYNAMODB_JSON", "NONE"))
             .then()
             .statusCode(200)
             .body("ImportTableDescription.ImportArn", containsString("/import/"))
@@ -109,19 +110,15 @@ class DynamoDbImportIntegrationTest {
     void importTable_gzip_roundTripsAnExport() {
         createCompositeTable("RoundTripSource");
         dynamo("UpdateContinuousBackups", """
-                {
-                    "TableName": "RoundTripSource",
-                    "PointInTimeRecoverySpecification": {"PointInTimeRecoveryEnabled": true}
-                }
-                """)
-            .then().statusCode(200);
-        for (var i = 1; i <= 3; i++) {
+                {"TableName": "RoundTripSource", "PointInTimeRecoverySpecification": {"PointInTimeRecoveryEnabled": true}}
+                """).then().statusCode(200);
+        for (int i = 1; i <= 3; i++) {
             dynamo("PutItem", "{\"TableName\": \"RoundTripSource\", \"Item\": {\"pk\": {\"S\": \"user-" + i
                     + "\"}, \"sk\": {\"S\": \"order-" + i + "\"}, \"total\": {\"N\": \"" + (i * 10) + "\"}}}")
                 .then().statusCode(200);
         }
 
-        var exportArn = dynamo("ExportTableToPointInTime", """
+        String exportArn = dynamo("ExportTableToPointInTime", """
                 {
                     "TableArn": "%s",
                     "S3Bucket": "%s",
@@ -132,10 +129,10 @@ class DynamoDbImportIntegrationTest {
             .extract().jsonPath().getString("ExportDescription.ExportArn");
         assertEquals("COMPLETED", pollExport(exportArn));
 
-        var exportId = exportArn.substring(exportArn.lastIndexOf('/') + 1);
-        var dataPrefix = "roundtrip/AWSDynamoDB/" + exportId + "/data/";
+        String exportId = exportArn.substring(exportArn.lastIndexOf('/') + 1);
+        String dataPrefix = "roundtrip/AWSDynamoDB/" + exportId + "/data/";
 
-        var importArn = dynamo("ImportTable", """
+        String importArn = dynamo("ImportTable", """
                 {
                     "S3BucketSource": {"S3Bucket": "%s", "S3KeyPrefix": "%s"},
                     "InputFormat": "DYNAMODB_JSON",
@@ -178,7 +175,7 @@ class DynamoDbImportIntegrationTest {
         putObject("bad/data.json",
                 "{\"Item\":{\"pk\":{\"S\":\"good\"}}}\nnot json at all\n{\"NoItem\":1}\n\n{\"Item\":{\"other\":{\"S\":\"missing key\"}}}\n");
 
-        var importArn = dynamo("ImportTable", importRequest("ImportBadLines", BUCKET_NAME, "bad/", "DYNAMODB_JSON", "NONE"))
+        String importArn = dynamo("ImportTable", importRequest("ImportBadLines", BUCKET_NAME, "bad/", "DYNAMODB_JSON", "NONE"))
             .then().statusCode(200)
             .extract().jsonPath().getString("ImportTableDescription.ImportArn");
 
@@ -194,7 +191,7 @@ class DynamoDbImportIntegrationTest {
 
     @Test
     void importTable_missingBucket_failsWithS3NoSuchBucket() {
-        var importArn = dynamo("ImportTable", importRequest("ImportNoBucket", "no-such-import-bucket", "imp/", "DYNAMODB_JSON", "NONE"))
+        String importArn = dynamo("ImportTable", importRequest("ImportNoBucket", "no-such-import-bucket", "imp/", "DYNAMODB_JSON", "NONE"))
             .then().statusCode(200)
             .body("ImportTableDescription.ImportStatus", equalTo("IN_PROGRESS"))
             .extract().jsonPath().getString("ImportTableDescription.ImportArn");
@@ -217,7 +214,7 @@ class DynamoDbImportIntegrationTest {
 
     @Test
     void importTable_bucketOfAnotherAccount_failsWithS3AccessDenied() {
-        var importArn = dynamo("ImportTable", """
+        String importArn = dynamo("ImportTable", """
                 {
                     "S3BucketSource": {"S3Bucket": "%s", "S3KeyPrefix": "plain/", "S3BucketOwner": "111111111111"},
                     "InputFormat": "DYNAMODB_JSON",
@@ -245,7 +242,7 @@ class DynamoDbImportIntegrationTest {
 
     @Test
     void importTable_emptyPrefix_fails() {
-        var importArn = dynamo("ImportTable", importRequest("ImportEmptyPrefix", BUCKET_NAME, "nothing-here/", "DYNAMODB_JSON", "NONE"))
+        String importArn = dynamo("ImportTable", importRequest("ImportEmptyPrefix", BUCKET_NAME, "nothing-here/", "DYNAMODB_JSON", "NONE"))
             .then().statusCode(200)
             .extract().jsonPath().getString("ImportTableDescription.ImportArn");
 
@@ -260,7 +257,7 @@ class DynamoDbImportIntegrationTest {
     @Test
     void importTable_sameClientToken_returnsTheSameImport() {
         putObject("token/data.json", "{\"Item\":{\"pk\":{\"S\":\"one\"}}}\n");
-        var body = """
+        String body = """
                 {
                     "ClientToken": "import-token-1",
                     "S3BucketSource": {"S3Bucket": "%s", "S3KeyPrefix": "token/"},
@@ -274,12 +271,12 @@ class DynamoDbImportIntegrationTest {
                 }
                 """.formatted(BUCKET_NAME);
 
-        var first = dynamo("ImportTable", body)
+        String first = dynamo("ImportTable", body)
             .then().statusCode(200)
             .body("ImportTableDescription.ClientToken", equalTo("import-token-1"))
             .extract().jsonPath().getString("ImportTableDescription.ImportArn");
 
-        var second = dynamo("ImportTable", body)
+        String second = dynamo("ImportTable", body)
             .then().statusCode(200)
             .extract().jsonPath().getString("ImportTableDescription.ImportArn");
 
@@ -290,7 +287,7 @@ class DynamoDbImportIntegrationTest {
     @Test
     void importTable_concurrentSameClientToken_startsOneImport() throws Exception {
         putObject("race/data.json", "{\"Item\":{\"pk\":{\"S\":\"one\"}}}\n");
-        var body = """
+        String body = """
                 {
                     "ClientToken": "import-token-race",
                     "S3BucketSource": {"S3Bucket": "%s", "S3KeyPrefix": "race/"},
@@ -303,12 +300,12 @@ class DynamoDbImportIntegrationTest {
                     }
                 }
                 """.formatted(BUCKET_NAME);
-        var threads = 8;
-        var startGate = new CountDownLatch(1);
-        var pool = Executors.newFixedThreadPool(threads);
+        int threads = 8;
+        CountDownLatch startGate = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
         try {
-            var futures = new ArrayList<Future<String>>();
-            for (var i = 0; i < threads; i++) {
+            ArrayList<Future<String>> futures = new ArrayList<>();
+            for (int i = 0; i < threads; i++) {
                 futures.add(pool.submit(() -> {
                     startGate.await();
                     return dynamo("ImportTable", body)
@@ -317,8 +314,8 @@ class DynamoDbImportIntegrationTest {
                 }));
             }
             startGate.countDown();
-            var importArns = new HashSet<String>();
-            for (var future : futures) {
+            HashSet<String> importArns = new HashSet<>();
+            for (Future<String> future : futures) {
                 importArns.add(future.get(30, TimeUnit.SECONDS));
             }
             assertEquals(1, importArns.size(), importArns.toString());
@@ -355,6 +352,51 @@ class DynamoDbImportIntegrationTest {
             .then()
             .statusCode(400)
             .body("__type", containsString("ResourceNotFoundException"));
+    }
+
+    @Test
+    void importTable_invalidBillingMode_returnsValidationException() {
+        String request = importRequest("ImportBadBilling", BUCKET_NAME, "plain/", "DYNAMODB_JSON", "NONE")
+                .replace("\"PAY_PER_REQUEST\"", "\"INVALID_MODE\"");
+        dynamo("ImportTable", request)
+            .then()
+            .statusCode(400)
+            .body("__type", containsString("ValidationException"))
+            .body("message", equalTo("1 validation error detected: Value 'INVALID_MODE' at "
+                    + "'tableCreationParameters.billingMode' failed to satisfy constraint: "
+                    + "Member must satisfy enum value set: [PROVISIONED, PAY_PER_REQUEST]"));
+
+        dynamo("DescribeTable", "{\"TableName\": \"ImportBadBilling\"}")
+            .then()
+            .statusCode(400)
+            .body("__type", containsString("ResourceNotFoundException"));
+    }
+
+    @Test
+    void importTable_invalidBillingModeOnARetry_isAValidationErrorNotAConflict() {
+        putObject("token-billing/data.json", "{\"Item\":{\"pk\":{\"S\":\"one\"}}}\n");
+        String body = """
+                {
+                    "ClientToken": "import-token-billing",
+                    "S3BucketSource": {"S3Bucket": "%s", "S3KeyPrefix": "token-billing/"},
+                    "InputFormat": "DYNAMODB_JSON",
+                    "TableCreationParameters": {
+                        "TableName": "ImportTokenBilling",
+                        "AttributeDefinitions": [{"AttributeName": "pk", "AttributeType": "S"}],
+                        "KeySchema": [{"AttributeName": "pk", "KeyType": "HASH"}],
+                        "BillingMode": "PAY_PER_REQUEST"
+                    }
+                }
+                """.formatted(BUCKET_NAME);
+        dynamo("ImportTable", body).then().statusCode(200);
+
+        dynamo("ImportTable", body.replace("\"PAY_PER_REQUEST\"", "\"INVALID_MODE\""))
+            .then()
+            .statusCode(400)
+            .body("__type", containsString("ValidationException"))
+            .body("message", equalTo("1 validation error detected: Value 'INVALID_MODE' at "
+                    + "'tableCreationParameters.billingMode' failed to satisfy constraint: "
+                    + "Member must satisfy enum value set: [PROVISIONED, PAY_PER_REQUEST]"));
     }
 
     @Test
@@ -448,9 +490,9 @@ class DynamoDbImportIntegrationTest {
     }
 
     private String pollStatus(Supplier<io.restassured.response.Response> call, String statusPath) {
-        var deadline = System.currentTimeMillis() + 10_000;
+        long deadline = System.currentTimeMillis() + 10_000;
         while (System.currentTimeMillis() < deadline) {
-            var status = call.get().then().statusCode(200).extract().jsonPath().getString(statusPath);
+            String status = call.get().then().statusCode(200).extract().jsonPath().getString(statusPath);
             if (!"IN_PROGRESS".equals(status)) {
                 return status;
             }

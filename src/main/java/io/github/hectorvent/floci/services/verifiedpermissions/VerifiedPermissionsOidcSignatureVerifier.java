@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.verifiedpermissions;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hectorvent.floci.core.common.PublicKeys;
 import io.github.hectorvent.floci.core.common.SsrfProtection;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -28,10 +29,8 @@ import java.net.URI;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
-import java.security.KeyFactory;
 import java.security.Signature;
 import java.security.interfaces.RSAPublicKey;
-import java.security.spec.RSAPublicKeySpec;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
@@ -234,9 +233,8 @@ public class VerifiedPermissionsOidcSignatureVerifier implements AutoCloseable {
     }
 
     private static RSAPublicKey toRsaPublicKey(String n, String e) throws GeneralSecurityException {
-        BigInteger modulus = new BigInteger(1, Base64.getUrlDecoder().decode(pad(n)));
-        BigInteger exponent = new BigInteger(1, Base64.getUrlDecoder().decode(pad(e)));
-        return (RSAPublicKey) KeyFactory.getInstance("RSA").generatePublic(new RSAPublicKeySpec(modulus, exponent));
+        return PublicKeys.rsa(new BigInteger(1, Base64.getUrlDecoder().decode(pad(n))),
+                new BigInteger(1, Base64.getUrlDecoder().decode(pad(e))));
     }
 
     private static boolean signatureValid(String signingInput, String encodedSignature, RSAPublicKey key) {

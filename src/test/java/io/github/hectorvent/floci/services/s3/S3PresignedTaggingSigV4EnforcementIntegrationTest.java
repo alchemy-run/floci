@@ -1,5 +1,7 @@
 package io.github.hectorvent.floci.services.s3;
 
+import io.github.hectorvent.floci.core.common.Digests;
+import io.github.hectorvent.floci.testing.S3EnforceAuthProfile;
 import io.github.hectorvent.floci.testutil.S3RequestSigner;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
@@ -9,7 +11,6 @@ import org.junit.jupiter.api.Test;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -32,7 +33,7 @@ import static org.hamcrest.Matchers.not;
  * query fallback, and that a tag parameter added after signing is rejected.
  */
 @QuarkusTest
-@TestProfile(S3AuthEnforcementIntegrationTest.S3AuthProfile.class)
+@TestProfile(S3EnforceAuthProfile.class)
 class S3PresignedTaggingSigV4EnforcementIntegrationTest {
 
     private static final String BUCKET = "presigned-tagging-sigv4-bucket";
@@ -214,7 +215,7 @@ class S3PresignedTaggingSigV4EnforcementIntegrationTest {
         String stringToSign = "AWS4-HMAC-SHA256\n"
                 + amzDate + "\n"
                 + credentialScope + "\n"
-                + sha256Hex(canonicalRequest);
+                + Digests.sha256Hex(canonicalRequest);
 
         byte[] kDate = hmacSha256(("AWS4" + SECRET_KEY).getBytes(StandardCharsets.UTF_8), date);
         byte[] kRegion = hmacSha256(kDate, "us-east-1");
@@ -244,11 +245,6 @@ class S3PresignedTaggingSigV4EnforcementIntegrationTest {
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec(key, "HmacSHA256"));
         return mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
-    }
-
-    private static String sha256Hex(String input) throws Exception {
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        return hexEncode(digest.digest(input.getBytes(StandardCharsets.UTF_8)));
     }
 
     private static String hexEncode(byte[] bytes) {

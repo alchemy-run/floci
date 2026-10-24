@@ -4,6 +4,7 @@ import com.sun.net.httpserver.HttpServer;
 import com.sun.net.httpserver.HttpsConfigurator;
 import com.sun.net.httpserver.HttpsExchange;
 import com.sun.net.httpserver.HttpsServer;
+import io.github.hectorvent.floci.core.common.Pem;
 import io.github.hectorvent.floci.services.acm.CertificateGenerator;
 import io.github.hectorvent.floci.services.acm.model.KeyAlgorithm;
 import org.apache.hc.client5.http.DnsResolver;
@@ -16,12 +17,17 @@ import javax.net.ssl.SNIHostName;
 import javax.net.ssl.SNIServerName;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManagerFactory;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.ConnectException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
+import java.net.URI;
 import java.net.UnknownHostException;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.security.Security;
@@ -29,7 +35,13 @@ import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -221,8 +233,7 @@ class CloudFrontOriginHttpClientTest {
                 resolver(InetAddress.getByName("127.0.0.1")), List.of())) {
             HttpRequest request = request("http://blocked.invalid:" + server.getAddress().getPort() + "/");
 
-            assertThrows(UnknownHostException.class,
-                    () -> client.send(request, HttpResponse.BodyHandlers.ofByteArray()));
+            assertThrows(UnknownHostException.class, () -> get(client, request));
             assertEquals(0, hits.get());
         } finally {
             server.stop(0);
@@ -235,9 +246,7 @@ class CloudFrontOriginHttpClientTest {
                 InetAddress.getByName("8.8.8.8"),
                 InetAddress.getByName("127.0.0.1"));
         try (CloudFrontOriginHttpClient client = new CloudFrontOriginHttpClient(resolver, List.of())) {
-            assertThrows(UnknownHostException.class, () -> client.send(
-                    request("http://mixed.invalid:8080/"),
-                    HttpResponse.BodyHandlers.ofByteArray()));
+            assertThrows(UnknownHostException.class, () -> get(client, request("http://mixed.invalid:8080/")));
         }
     }
 
@@ -274,12 +283,11 @@ class CloudFrontOriginHttpClientTest {
 
         try (CloudFrontOriginHttpClient client = new CloudFrontOriginHttpClient(
                 resolver, List.of("rebind.invalid"))) {
-            HttpResponse<byte[]> response = client.send(
-                    request("http://rebind.invalid:" + server.getAddress().getPort() + "/"),
-                    HttpResponse.BodyHandlers.ofByteArray());
+            CloudFrontOriginHttpClient.OpenResponse response = get(client,
+                    request("http://rebind.invalid:" + server.getAddress().getPort() + "/"));
 
             assertEquals(200, response.statusCode());
-            assertArrayEquals("origin-ok".getBytes(StandardCharsets.UTF_8), response.body());
+            assertArrayEquals("origin-ok".getBytes(StandardCharsets.UTF_8), readAll(response));
             assertEquals(1, resolutions.get());
             assertEquals(1, hits.get());
             assertEquals("rebind.invalid:" + server.getAddress().getPort(), hostHeader.get());
@@ -306,9 +314,9 @@ class CloudFrontOriginHttpClientTest {
 
         try (CloudFrontOriginHttpClient client = new CloudFrontOriginHttpClient(
                 resolver(InetAddress.getByName("127.0.0.1")), List.of("redirect.invalid"))) {
-            HttpResponse<byte[]> response = client.send(
-                    request("http://redirect.invalid:" + server.getAddress().getPort() + "/start"),
-                    HttpResponse.BodyHandlers.ofByteArray());
+            CloudFrontOriginHttpClient.OpenResponse response = get(client,
+                    request("http://redirect.invalid:" + server.getAddress().getPort() + "/start"));
+            readAll(response);
 
             assertEquals(302, response.statusCode());
             assertEquals(0, redirectedHits.get());
@@ -337,12 +345,50 @@ class CloudFrontOriginHttpClientTest {
                     .GET()
                     .build();
 
-            client.send(
-                    request,
-                    Map.of("X-Origin-Verify", "configured-value"),
-                    HttpResponse.BodyHandlers.ofByteArray());
+            readAll(client.open(request, List.of(), Map.of("X-Origin-Verify", "configured-value"), null, -1));
 
             assertEquals(List.of("configured-value"), receivedValues.get());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void sendsTheBodyWithItsExactLengthAndTheCallerContentType() throws Exception {
+        AtomicReference<String> method = new AtomicReference<>();
+        AtomicReference<String> contentType = new AtomicReference<>();
+        AtomicReference<String> contentLength = new AtomicReference<>();
+        AtomicReference<byte[]> body = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            method.set(exchange.getRequestMethod());
+            contentType.set(exchange.getRequestHeaders().getFirst("Content-Type"));
+            contentLength.set(exchange.getRequestHeaders().getFirst("Content-Length"));
+            body.set(exchange.getRequestBody().readAllBytes());
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        server.start();
+
+        byte[] payload = "{\"a\":1}".getBytes(StandardCharsets.UTF_8);
+        try (CloudFrontOriginHttpClient client = new CloudFrontOriginHttpClient(
+                resolver(InetAddress.getByName("127.0.0.1")), List.of("origin.invalid"))) {
+            HttpRequest request = HttpRequest.newBuilder(java.net.URI.create(
+                            "http://origin.invalid:" + server.getAddress().getPort() + "/items"))
+                    .timeout(Duration.ofSeconds(5))
+                    .header("Content-Type", "application/json")
+                    .method("PUT", HttpRequest.BodyPublishers.noBody())
+                    .build();
+
+            CloudFrontOriginHttpClient.OpenResponse response = client.open(
+                    request, List.of(), Map.of(), new ByteArrayInputStream(payload), payload.length);
+            readAll(response);
+
+            assertEquals(204, response.statusCode());
+            assertEquals("PUT", method.get());
+            assertEquals("application/json", contentType.get());
+            assertEquals(Integer.toString(payload.length), contentLength.get());
+            assertArrayEquals(payload, body.get());
         } finally {
             server.stop(0);
         }
@@ -356,9 +402,9 @@ class CloudFrontOriginHttpClientTest {
         CertificateGenerator generator = new CertificateGenerator();
         CertificateGenerator.GeneratedCertificate generated = generator.generateSelfSignedCertificate(
                 "origin.invalid", List.of("origin.invalid"), KeyAlgorithm.RSA_2048);
-        X509Certificate certificate = generator.parseCertificate(generated.certificatePem());
+        X509Certificate certificate = Pem.parseCertificate(generated.certificatePem());
         SSLContext serverContext = serverSslContext(
-                certificate, generator.parsePrivateKey(generated.privateKeyPem()));
+                certificate, Pem.parsePrivateKey(generated.privateKeyPem()));
         SSLContext clientContext = clientSslContext(certificate);
 
         AtomicReference<String> hostHeader = new AtomicReference<>();
@@ -384,18 +430,301 @@ class CloudFrontOriginHttpClientTest {
         try (CloudFrontOriginHttpClient client = new CloudFrontOriginHttpClient(
                 resolver, List.of("origin.invalid", "wrong.invalid"), clientContext)) {
             int port = server.getAddress().getPort();
-            HttpResponse<byte[]> response = client.send(
-                    request("https://origin.invalid:" + port + "/"),
-                    HttpResponse.BodyHandlers.ofByteArray());
+            CloudFrontOriginHttpClient.OpenResponse response = get(client,
+                    request("https://origin.invalid:" + port + "/"));
+            readAll(response);
 
             assertEquals(200, response.statusCode());
             assertEquals("origin.invalid:" + port, hostHeader.get());
             assertEquals("origin.invalid", requestedSni.get());
-            assertThrows(IOException.class, () -> client.send(
-                    request("https://wrong.invalid:" + port + "/"),
-                    HttpResponse.BodyHandlers.ofByteArray()));
+            assertThrows(IOException.class, () -> get(client, request("https://wrong.invalid:" + port + "/")));
         } finally {
             server.stop(0);
+        }
+    }
+
+    @Test
+    void streamsARequestBodyChunkedWhenItsLengthIsUnknown() throws Exception {
+        AtomicReference<String> transferEncoding = new AtomicReference<>();
+        AtomicReference<byte[]> body = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            transferEncoding.set(exchange.getRequestHeaders().getFirst("Transfer-Encoding"));
+            body.set(exchange.getRequestBody().readAllBytes());
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        server.start();
+
+        byte[] payload = new byte[100_000];
+        new Random(1).nextBytes(payload);
+        try (CloudFrontOriginHttpClient client = new CloudFrontOriginHttpClient(
+                resolver(InetAddress.getByName("127.0.0.1")), List.of("origin.invalid"))) {
+            HttpRequest request = HttpRequest.newBuilder(URI.create(
+                            "http://origin.invalid:" + server.getAddress().getPort() + "/items"))
+                    .timeout(Duration.ofSeconds(5))
+                    .method("POST", HttpRequest.BodyPublishers.noBody())
+                    .build();
+
+            readAll(client.open(request, List.of(), Map.of(), new ByteArrayInputStream(payload), -1));
+
+            assertEquals("chunked", transferEncoding.get());
+            assertArrayEquals(payload, body.get());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void closingAResponseBeforeItsEndDoesNotReadTheRestOfIt() throws Exception {
+        long size = 512L * 1024 * 1024;
+        AtomicLong sent = new AtomicLong();
+        CountDownLatch done = new CountDownLatch(1);
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            byte[] chunk = new byte[64 * 1024];
+            exchange.sendResponseHeaders(200, size);
+            try (OutputStream out = exchange.getResponseBody()) {
+                for (long written = 0; written < size; written += chunk.length) {
+                    out.write(chunk);
+                    sent.addAndGet(chunk.length);
+                }
+            } catch (IOException expected) {
+                // The client went away mid-body, which is what the test does.
+            } finally {
+                done.countDown();
+            }
+        });
+        server.start();
+
+        try (CloudFrontOriginHttpClient client = new CloudFrontOriginHttpClient(
+                resolver(InetAddress.getByName("127.0.0.1")), List.of("origin.invalid"))) {
+            CloudFrontOriginHttpClient.OpenResponse response = get(client,
+                    request("http://origin.invalid:" + server.getAddress().getPort() + "/big"));
+            assertEquals(size, response.contentLength());
+            response.body().readNBytes(1024);
+            response.body().close();
+
+            assertTrue(done.await(30, TimeUnit.SECONDS), "the origin is still sending");
+            assertTrue(sent.get() < size / 2, "closing read " + (sent.get() >> 20) + " MiB of " + (size >> 20));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void aResponseReadToItsEndLeavesItsConnectionForTheNextRequest() throws Exception {
+        List<InetSocketAddress> peers = new CopyOnWriteArrayList<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            peers.add(exchange.getRemoteAddress());
+            byte[] body = "origin-ok".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try (CloudFrontOriginHttpClient client = new CloudFrontOriginHttpClient(
+                resolver(InetAddress.getByName("127.0.0.1")), List.of("origin.invalid"))) {
+            String uri = "http://origin.invalid:" + server.getAddress().getPort() + "/";
+            readAll(get(client, request(uri)));
+            readAll(get(client, request(uri)));
+
+            assertEquals(2, peers.size());
+            assertEquals(peers.get(0), peers.get(1), "the second request opened a new connection");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void retriesAnIdempotentRequestUntilTheAttemptsAreExhausted() throws Exception {
+        AtomicInteger hits = new AtomicInteger();
+        CountDownLatch release = new CountDownLatch(1);
+        HttpServer server = holdingServer(hits, release);
+        try (CloudFrontOriginHttpClient client = new CloudFrontOriginHttpClient(
+                resolver(InetAddress.getByName("127.0.0.1")), List.of("origin.invalid"))) {
+            CloudFrontOriginHttpClient.OriginTimeouts timeouts =
+                    new CloudFrontOriginHttpClient.OriginTimeouts(
+                            Duration.ofSeconds(1), Duration.ofMillis(200), 3);
+            HttpRequest request = request("http://origin.invalid:" + server.getAddress().getPort() + "/");
+
+            long started = System.nanoTime();
+            assertThrows(CloudFrontOriginTimeoutException.class, () -> get(client, request, timeouts));
+            long elapsedMillis = (System.nanoTime() - started) / 1_000_000;
+
+            assertEquals(3, hits.get());
+            assertTrue(elapsedMillis < 5000,
+                    "expected the 200 ms read timeout to end every attempt on an origin that never "
+                            + "answers, took " + elapsedMillis + " ms");
+        } finally {
+            release.countDown();
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void doesNotRetryAnIdempotentRequestWhenOnlyOneAttemptIsConfigured() throws Exception {
+        AtomicInteger hits = new AtomicInteger();
+        CountDownLatch release = new CountDownLatch(1);
+        HttpServer server = holdingServer(hits, release);
+        try (CloudFrontOriginHttpClient client = new CloudFrontOriginHttpClient(
+                resolver(InetAddress.getByName("127.0.0.1")), List.of("origin.invalid"))) {
+            CloudFrontOriginHttpClient.OriginTimeouts timeouts =
+                    new CloudFrontOriginHttpClient.OriginTimeouts(
+                            Duration.ofSeconds(1), Duration.ofMillis(200), 1);
+            HttpRequest request = request("http://origin.invalid:" + server.getAddress().getPort() + "/");
+
+            assertThrows(CloudFrontOriginTimeoutException.class, () -> get(client, request, timeouts));
+
+            assertEquals(1, hits.get());
+        } finally {
+            release.countDown();
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void doesNotRetryAResponseTimeoutForANonIdempotentRequest() throws Exception {
+        AtomicInteger hits = new AtomicInteger();
+        CountDownLatch release = new CountDownLatch(1);
+        HttpServer server = holdingServer(hits, release);
+        try (CloudFrontOriginHttpClient client = new CloudFrontOriginHttpClient(
+                resolver(InetAddress.getByName("127.0.0.1")), List.of("origin.invalid"))) {
+            CloudFrontOriginHttpClient.OriginTimeouts timeouts =
+                    new CloudFrontOriginHttpClient.OriginTimeouts(
+                            Duration.ofSeconds(1), Duration.ofMillis(200), 3);
+            HttpRequest request = HttpRequest.newBuilder(URI.create(
+                            "http://origin.invalid:" + server.getAddress().getPort() + "/"))
+                    .method("POST", HttpRequest.BodyPublishers.noBody())
+                    .build();
+
+            assertThrows(CloudFrontOriginTimeoutException.class, () -> get(client, request, timeouts));
+
+            assertEquals(1, hits.get(), "a POST that hit a response timeout must not be retried");
+        } finally {
+            release.countDown();
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void retriesAConnectTimeoutForANonIdempotentRequest() throws Exception {
+        AtomicInteger resolutions = new AtomicInteger();
+        DnsResolver resolver = countingResolver(resolutions, InetAddress.getByName("192.0.2.1"));
+        try (CloudFrontOriginHttpClient client = new CloudFrontOriginHttpClient(
+                resolver, List.of("blackhole.invalid"))) {
+            CloudFrontOriginHttpClient.OriginTimeouts timeouts =
+                    new CloudFrontOriginHttpClient.OriginTimeouts(
+                            Duration.ofMillis(100), Duration.ofSeconds(5), 3);
+            HttpRequest request = HttpRequest.newBuilder(URI.create("http://blackhole.invalid:81/"))
+                    .method("POST", HttpRequest.BodyPublishers.noBody())
+                    .build();
+
+            assertThrows(CloudFrontOriginTimeoutException.class, () -> get(client, request, timeouts));
+
+            assertEquals(3, resolutions.get(),
+                    "a POST whose connect times out counts as a connection attempt and is retried");
+        }
+    }
+
+    @Test
+    void retriesARefusedConnectionForANonIdempotentRequest() throws Exception {
+        int refusedPort;
+        try (ServerSocket socket = new ServerSocket(0)) {
+            refusedPort = socket.getLocalPort();
+        }
+        AtomicInteger resolutions = new AtomicInteger();
+        DnsResolver resolver = countingResolver(resolutions, InetAddress.getByName("127.0.0.1"));
+        try (CloudFrontOriginHttpClient client = new CloudFrontOriginHttpClient(
+                resolver, List.of("refused.invalid"))) {
+            CloudFrontOriginHttpClient.OriginTimeouts timeouts =
+                    new CloudFrontOriginHttpClient.OriginTimeouts(
+                            Duration.ofSeconds(1), Duration.ofSeconds(5), 3);
+            HttpRequest request = HttpRequest.newBuilder(URI.create(
+                            "http://refused.invalid:" + refusedPort + "/"))
+                    .method("POST", HttpRequest.BodyPublishers.noBody())
+                    .build();
+
+            assertThrows(ConnectException.class, () -> get(client, request, timeouts));
+
+            assertEquals(3, resolutions.get(),
+                    "a POST whose connection is refused counts as a connection attempt and is retried");
+        }
+    }
+
+    @Test
+    void honorsTheConfiguredReadTimeout() throws Exception {
+        AtomicInteger hits = new AtomicInteger();
+        CountDownLatch release = new CountDownLatch(1);
+        HttpServer server = holdingServer(hits, release);
+        try (CloudFrontOriginHttpClient client = new CloudFrontOriginHttpClient(
+                resolver(InetAddress.getByName("127.0.0.1")), List.of("origin.invalid"))) {
+            CloudFrontOriginHttpClient.OriginTimeouts timeouts =
+                    new CloudFrontOriginHttpClient.OriginTimeouts(
+                            Duration.ofSeconds(1), Duration.ofMillis(150), 1);
+            HttpRequest request = request("http://origin.invalid:" + server.getAddress().getPort() + "/");
+
+            long started = System.nanoTime();
+            assertThrows(CloudFrontOriginTimeoutException.class, () -> get(client, request, timeouts));
+            long elapsedMillis = (System.nanoTime() - started) / 1_000_000;
+
+            assertTrue(elapsedMillis < 5000,
+                    "expected the configured 150 ms read timeout to end the request, not the 30 s "
+                            + "default, took " + elapsedMillis + " ms");
+        } finally {
+            release.countDown();
+            server.stop(0);
+        }
+    }
+
+    private static CloudFrontOriginHttpClient.OpenResponse get(
+            CloudFrontOriginHttpClient client, HttpRequest request,
+            CloudFrontOriginHttpClient.OriginTimeouts timeouts) throws Exception {
+        return client.open(request, List.of(), Map.of(), null, -1, timeouts);
+    }
+
+    /**
+     * An origin that counts its hits and holds every request open until {@code release} opens, so a
+     * client that answers nothing never races a fixed origin delay: only the client's own timeout
+     * can end an attempt.
+     */
+    private static HttpServer holdingServer(AtomicInteger hits, CountDownLatch release) throws IOException {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
+        server.createContext("/", exchange -> {
+            hits.incrementAndGet();
+            try {
+                exchange.getRequestBody().readAllBytes();
+                release.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (IOException expected) {
+                // The client gave up on the attempt, which is what the read timeout under test causes.
+            }
+            try {
+                byte[] body = "origin-ok".getBytes(StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(200, body.length);
+                exchange.getResponseBody().write(body);
+            } catch (IOException expected) {
+                // The client is gone, so there is nobody left to answer.
+            } finally {
+                exchange.close();
+            }
+        });
+        server.start();
+        return server;
+    }
+
+    private static CloudFrontOriginHttpClient.OpenResponse get(CloudFrontOriginHttpClient client,
+                                                               HttpRequest request) throws Exception {
+        return client.open(request, List.of(), Map.of(), null, -1);
+    }
+
+    private static byte[] readAll(CloudFrontOriginHttpClient.OpenResponse response) throws IOException {
+        try (InputStream body = response.body()) {
+            return body.readAllBytes();
         }
     }
 
@@ -422,6 +751,22 @@ class CloudFrontOriginHttpClientTest {
             @Override
             public InetAddress[] resolve(String host) {
                 return addresses.clone();
+            }
+
+            @Override
+            public String resolveCanonicalHostname(String host) {
+                return host;
+            }
+        };
+    }
+
+    /** A resolver that answers every lookup with {@code address}, counting the lookups. */
+    private static DnsResolver countingResolver(AtomicInteger resolutions, InetAddress address) {
+        return new DnsResolver() {
+            @Override
+            public InetAddress[] resolve(String host) {
+                resolutions.incrementAndGet();
+                return new InetAddress[] { address };
             }
 
             @Override

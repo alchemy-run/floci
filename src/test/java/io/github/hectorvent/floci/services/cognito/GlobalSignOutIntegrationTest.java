@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.cognito;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hectorvent.floci.core.common.Base64Url;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.BeforeAll;
@@ -10,7 +11,6 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
-import java.util.Base64;
 import java.util.UUID;
 
 import static io.github.hectorvent.floci.services.cognito.CognitoRestAssuredUtils.cognitoAction;
@@ -243,6 +243,17 @@ class GlobalSignOutIntegrationTest {
                 "GlobalSignOut with no AccessToken must fail with InvalidParameterException, body was: " + body);
     }
 
+    @Test
+    @Order(13)
+    void globalSignOutRejectsExplicitNullAccessToken() throws Exception {
+        JsonNode body = cognitoJsonAny("GlobalSignOut", """
+                {"AccessToken":null}
+                """);
+
+        assertEquals("InvalidParameterException", body.path("__type").asText(),
+                "GlobalSignOut with a null AccessToken must fail with InvalidParameterException, body was: " + body);
+    }
+
     /** Build an unsigned JWT-shaped access token — the emulator decodes the payload without verifying the signature. */
     private static String forgeAccessToken(String poolId, String username) {
         long nowSeconds = System.currentTimeMillis() / 1000L;
@@ -255,6 +266,6 @@ class GlobalSignOutIntegrationTest {
     }
 
     private static String base64Url(String value) {
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(value.getBytes());
+        return Base64Url.encode(value.getBytes());
     }
 }

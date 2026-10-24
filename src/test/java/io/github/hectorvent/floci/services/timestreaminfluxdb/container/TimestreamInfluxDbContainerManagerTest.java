@@ -1,29 +1,49 @@
 package io.github.hectorvent.floci.services.timestreaminfluxdb.container;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.dockerjava.api.DockerClient;
+import com.github.dockerjava.api.exception.NotFoundException;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
 import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
+import io.github.hectorvent.floci.core.common.docker.ContainerExecStubs;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager.ContainerInfo;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager.EndpointInfo;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.core.common.docker.PortAllocator;
+import io.github.hectorvent.floci.core.common.docker.RetryingTarCopier;
 import io.github.hectorvent.floci.services.timestreaminfluxdb.container.TimestreamInfluxDbContainerManager.InfluxDbEndpoint;
 import io.github.hectorvent.floci.services.timestreaminfluxdb.container.TimestreamInfluxDbContainerManager.InfluxDbSetup;
+import io.github.hectorvent.floci.testing.DockerArchiveUploadFixture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mockito;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -33,6 +53,7 @@ class TimestreamInfluxDbContainerManagerTest {
     private ContainerBuilder.Builder builder;
     private PortAllocator portAllocator;
     private TimestreamInfluxDbContainerManager manager;
+    private EmulatorConfig.StorageConfig storage;
 
     @BeforeEach
     void setUp() {
@@ -40,14 +61,14 @@ class TimestreamInfluxDbContainerManagerTest {
         ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
         builder = mock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-        when(builder.build()).thenReturn(mock(ContainerSpec.class));
+        when(builder.build()).thenReturn(new ContainerSpec("test-image"));
         portAllocator = mock(PortAllocator.class);
         when(portAllocator.allocate(8086, 8185)).thenReturn(8090);
 
         EmulatorConfig config = mock(EmulatorConfig.class);
         EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
         EmulatorConfig.TimestreamInfluxDbServiceConfig influx = mock(EmulatorConfig.TimestreamInfluxDbServiceConfig.class);
-        EmulatorConfig.StorageConfig storage = mock(EmulatorConfig.StorageConfig.class);
+        storage = mock(EmulatorConfig.StorageConfig.class);
         when(config.services()).thenReturn(services);
         when(config.storage()).thenReturn(storage);
         when(services.timestreamInfluxdb()).thenReturn(influx);
@@ -65,7 +86,7 @@ class TimestreamInfluxDbContainerManagerTest {
         when(lifecycleManager.createAndStart(any())).thenReturn(new ContainerInfo("container-id",
                 Map.of(8086, new EndpointInfo("localhost", 8090))));
 
-        InfluxDbEndpoint endpoint = manager.start("abc1234567", "000000000000", "us-east-1",
+        InfluxDbEndpoint endpoint = manager.start("abc1234567", "floci-aws-timestream-influxdb-abc1234567", "000000000000", "us-east-1",
                 new InfluxDbSetup("admin", "password123", "acme", "metrics"), Map.of("INFLUXD_LOG_LEVEL", "debug"));
 
         assertEquals(new InfluxDbEndpoint("container-id", "localhost", 8090), endpoint);
@@ -76,8 +97,8 @@ class TimestreamInfluxDbContainerManagerTest {
         verify(builder).withEnv("DOCKER_INFLUXDB_INIT_BUCKET", "metrics");
         verify(builder).withEnv("INFLUXD_LOG_LEVEL", "debug");
         verify(builder).withPortBinding(8086, 8090);
-        verify(builder).withNamedVolume("floci-timestream-influxdb-abc1234567", "/var/lib/influxdb2");
-        verify(builder).withNamedVolume("floci-timestream-influxdb-abc1234567-config", "/etc/influxdb2");
+        verify(builder).withNamedVolume("floci-aws-timestream-influxdb-abc1234567", "/var/lib/influxdb2");
+        verify(builder).withNamedVolume("floci-aws-timestream-influxdb-abc1234567-config", "/etc/influxdb2");
         verify(builder).withLabels(Map.of(
                 "io.floci", "aws",
                 "io.floci.service", "timestream-influxdb",
@@ -91,7 +112,7 @@ class TimestreamInfluxDbContainerManagerTest {
         when(lifecycleManager.createAndStart(any())).thenReturn(new ContainerInfo("container-id",
                 Map.of(8086, new EndpointInfo("localhost", 8090))));
 
-        manager.start("abc1234567", "000000000000", "us-east-1", null, Map.of());
+        manager.start("abc1234567", "floci-aws-timestream-influxdb-abc1234567", "000000000000", "us-east-1", null, Map.of());
 
         verify(builder, never()).withEnv("DOCKER_INFLUXDB_INIT_MODE", "setup");
     }
@@ -100,18 +121,47 @@ class TimestreamInfluxDbContainerManagerTest {
     void failedStartRemovesTheContainerAndReleasesThePort() {
         when(lifecycleManager.createAndStart(any())).thenThrow(new RuntimeException("port already allocated"));
 
-        assertThrows(RuntimeException.class, () -> manager.start("abc1234567", "000000000000", "us-east-1",
+        assertThrows(RuntimeException.class, () -> manager.start("abc1234567", "floci-aws-timestream-influxdb-abc1234567", "000000000000", "us-east-1",
                 new InfluxDbSetup("admin", "password123", "acme", "metrics"), Map.of()));
 
         verify(portAllocator).release(8090);
-        verify(lifecycleManager, Mockito.times(2)).removeIfExists("floci-timestream-influxdb-abc1234567");
+        verify(lifecycleManager, Mockito.times(2)).removeIfExists("floci-aws-timestream-influxdb-abc1234567");
+    }
+
+    @Test
+    void volumeNamesCarryTheCurrentAndTheLegacyPrefix() {
+        assertEquals("floci-aws-timestream-influxdb-abc1234567", manager.volumeName("abc1234567"));
+        assertEquals("floci-timestream-influxdb-abc1234567", manager.legacyVolumeName("abc1234567"));
+    }
+
+    /** A record from before the migration keeps mounting the legacy-named volumes it was created with. */
+    @Test
+    void startMountsThePersistedVolumeNameRatherThanRecomputingIt() {
+        when(lifecycleManager.createAndStart(any())).thenReturn(new ContainerInfo("container-id",
+                Map.of(8086, new EndpointInfo("localhost", 8090))));
+
+        manager.start("abc1234567", "floci-timestream-influxdb-abc1234567", "000000000000", "us-east-1", null, Map.of());
+
+        verify(builder).withNamedVolume("floci-timestream-influxdb-abc1234567", "/var/lib/influxdb2");
+        verify(builder).withNamedVolume("floci-timestream-influxdb-abc1234567-config", "/etc/influxdb2");
+        verify(builder).withName("floci-aws-timestream-influxdb-abc1234567");
+    }
+
+    @Test
+    void removeStorageRemovesTheDataAndConfigVolumesByTheirPersistedName() {
+        when(storage.mode()).thenReturn("memory");
+
+        manager.removeStorage("floci-timestream-influxdb-abc1234567");
+
+        verify(lifecycleManager).removeVolume("floci-timestream-influxdb-abc1234567");
+        verify(lifecycleManager).removeVolume("floci-timestream-influxdb-abc1234567-config");
     }
 
     @Test
     void stopReleasesThePublishedPort() {
         when(lifecycleManager.createAndStart(any())).thenReturn(new ContainerInfo("container-id",
                 Map.of(8086, new EndpointInfo("localhost", 8090))));
-        manager.start("abc1234567", "000000000000", "us-east-1", null, Map.of());
+        manager.start("abc1234567", "floci-aws-timestream-influxdb-abc1234567", "000000000000", "us-east-1", null, Map.of());
 
         manager.stop("abc1234567", "container-id");
 
@@ -133,5 +183,141 @@ class TimestreamInfluxDbContainerManagerTest {
                 "INFLUXD_INFLUXQL_MAX_SELECT_BUCKETS", "5",
                 "INFLUXD_STORAGE_CACHE_SNAPSHOT_WRITE_COLD_DURATION", "48h",
                 "INFLUXD_HTTP_WRITE_TIMEOUT", "250ms"), environment);
+    }
+
+    @Test
+    void aFailedInfluxBackupReportsTheExitCodeAndTheCommandsOutput() {
+        DockerClient dockerClient = mock(DockerClient.class);
+        when(lifecycleManager.getDockerClient()).thenReturn(dockerClient);
+        List<List<String>> commands = ContainerExecStubs.completeEveryExec(dockerClient, "influx-container-id", 1, "",
+                "Error: failed to connect");
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> manager.backup("influx-container-id", "backup-1"));
+
+        assertEquals("influx backup failed with exit code 1: Error: failed to connect", error.getMessage());
+        assertEquals(List.of(List.of("influx", "backup", "/tmp/floci-backup-backup-1")), commands);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 73, 8192})
+    void restoreRetriesConsumedArchivesWithoutRetarringThem(int consumedBytes, @TempDir Path temporary) throws Exception {
+        List<byte[]> archives = backupArchives(temporary);
+        DockerClient docker = mock(DockerClient.class);
+        when(lifecycleManager.getDockerClient()).thenReturn(docker);
+        List<List<String>> commands = ContainerExecStubs.completeEveryExec(docker, "influx-id", 0, "", "");
+        DockerArchiveUploadFixture uploads = new DockerArchiveUploadFixture(docker, "influx-id");
+        uploads.failures = 1;
+        uploads.consumedBytes = consumedBytes;
+        uploads.failure = new RuntimeException(new IOException("Connection reset"));
+
+        restoreWithoutBackoff().restore("influx-id", "backup-1");
+
+        assertEquals(3, uploads.commands.size());
+        assertEquals(2, uploads.completed.size());
+        assertNotSame(uploads.streams.get(0), uploads.streams.get(1));
+        assertArrayEquals(archives.get(0), uploads.completed.get(0));
+        assertArrayEquals(archives.get(1), uploads.completed.get(1));
+        verify(uploads.commands.get(0)).withRemotePath("/tmp");
+        verify(uploads.commands.get(1)).withRemotePath("/tmp");
+        verify(uploads.commands.get(2)).withRemotePath("/etc/influxdb2");
+        assertEquals(List.of(List.of("influx", "restore", "--full", "/tmp/floci-backup-backup-1"),
+                List.of("rm", "-rf", "/tmp/floci-backup-backup-1")), commands);
+    }
+
+    @Test
+    void exhaustedDataUploadDoesNotRunRestoreButStillCleansUp(@TempDir Path temporary) throws Exception {
+        backupArchives(temporary);
+        DockerClient docker = mock(DockerClient.class);
+        when(lifecycleManager.getDockerClient()).thenReturn(docker);
+        List<List<String>> commands = ContainerExecStubs.completeEveryExec(docker, "influx-id", 0, "", "");
+        DockerArchiveUploadFixture uploads = new DockerArchiveUploadFixture(docker, "influx-id");
+        uploads.failures = 6;
+        uploads.consumedBytes = 73;
+        uploads.failure = new RuntimeException(new IOException("Broken pipe"));
+
+        assertThrows(RuntimeException.class, () -> restoreWithoutBackoff().restore("influx-id", "backup-1"));
+
+        assertEquals(6, uploads.commands.size());
+        assertTrue(uploads.completed.isEmpty());
+        assertEquals(List.of(List.of("rm", "-rf", "/tmp/floci-backup-backup-1")), commands);
+    }
+
+    @Test
+    void exhaustedCliUploadDoesNotRepeatTheRestoreCommand(@TempDir Path temporary) throws Exception {
+        List<byte[]> archives = backupArchives(temporary);
+        DockerClient docker = mock(DockerClient.class);
+        when(lifecycleManager.getDockerClient()).thenReturn(docker);
+        List<List<String>> commands = ContainerExecStubs.completeEveryExec(docker, "influx-id", 0, "", "");
+        DockerArchiveUploadFixture uploads = new DockerArchiveUploadFixture(docker, "influx-id");
+        uploads.consumedBytes = 73;
+        uploads.failure = new RuntimeException(new IOException("Broken pipe"));
+        TimestreamInfluxDbContainerManager restoring = restoreWithoutBackoff();
+        doAnswer(invocation -> {
+            uploads.failures = uploads.commands.size() + 6;
+            manager.copyToContainer(invocation.getArgument(0), invocation.getArgument(1),
+                    invocation.getArgument(2), 0);
+            return null;
+        }).when(restoring).copyToContainer(anyString(), any(Path.class), eq("/etc/influxdb2"), anyLong());
+
+        assertThrows(RuntimeException.class, () -> restoring.restore("influx-id", "backup-1"));
+
+        assertEquals(7, uploads.commands.size());
+        assertEquals(1, uploads.completed.size());
+        assertArrayEquals(archives.getFirst(), uploads.completed.getFirst());
+        assertEquals(List.of(List.of("influx", "restore", "--full", "/tmp/floci-backup-backup-1"),
+                List.of("rm", "-rf", "/tmp/floci-backup-backup-1")), commands);
+    }
+
+    @Test
+    void daemonRejectionIsNotRetriedAndStillCleansUp(@TempDir Path temporary) throws Exception {
+        backupArchives(temporary);
+        DockerClient docker = mock(DockerClient.class);
+        when(lifecycleManager.getDockerClient()).thenReturn(docker);
+        List<List<String>> commands = ContainerExecStubs.completeEveryExec(docker, "influx-id", 0, "", "");
+        DockerArchiveUploadFixture uploads = new DockerArchiveUploadFixture(docker, "influx-id");
+        uploads.failures = 6;
+        uploads.failure = new NotFoundException("container missing");
+
+        assertThrows(RuntimeException.class, () -> restoreWithoutBackoff().restore("influx-id", "backup-1"));
+
+        assertEquals(1, uploads.commands.size());
+        assertEquals(List.of(List.of("rm", "-rf", "/tmp/floci-backup-backup-1")), commands);
+    }
+
+    @Test
+    void missingLocalArchiveFailsWithoutRestoreOrRepeatedCopies(@TempDir Path temporary) {
+        when(storage.persistentPath()).thenReturn(temporary.toString());
+        DockerClient docker = mock(DockerClient.class);
+        when(lifecycleManager.getDockerClient()).thenReturn(docker);
+        List<List<String>> commands = ContainerExecStubs.completeEveryExec(docker, "influx-id", 0, "", "");
+        DockerArchiveUploadFixture uploads = new DockerArchiveUploadFixture(docker, "influx-id");
+
+        assertThrows(RuntimeException.class, () -> restoreWithoutBackoff().restore("influx-id", "backup-1"));
+
+        assertEquals(1, uploads.commands.size());
+        assertEquals(List.of(List.of("rm", "-rf", "/tmp/floci-backup-backup-1")), commands);
+    }
+
+    private TimestreamInfluxDbContainerManager restoreWithoutBackoff() throws IOException {
+        TimestreamInfluxDbContainerManager restoring = spy(manager);
+        doAnswer(invocation -> {
+            manager.copyToContainer(invocation.getArgument(0), invocation.getArgument(1),
+                    invocation.getArgument(2), 0);
+            return null;
+        }).when(restoring).copyToContainer(anyString(), any(Path.class), anyString(), anyLong());
+        return restoring;
+    }
+
+    private List<byte[]> backupArchives(Path temporary) throws IOException {
+        when(storage.persistentPath()).thenReturn(temporary.toString());
+        Path directory = temporary.resolve("timestream-influxdb/backups");
+        Files.createDirectories(directory);
+        List<byte[]> archives = List.of(
+                RetryingTarCopier.singleFileTar("floci-backup-backup-1/manifest", new byte[16384], 0644),
+                RetryingTarCopier.singleFileTar("influx-configs", "test config".getBytes(StandardCharsets.UTF_8), 0600));
+        Files.write(directory.resolve("backup-1.tar"), archives.get(0));
+        Files.write(directory.resolve("backup-1-cli.tar"), archives.get(1));
+        return archives;
     }
 }

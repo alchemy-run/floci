@@ -1,8 +1,13 @@
 package io.github.hectorvent.floci.services.eventbridge;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsErrorResponse;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.AwsJson11Controller;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.services.eventbridge.model.ApiDestination;
 import io.github.hectorvent.floci.services.eventbridge.model.Archive;
 import io.github.hectorvent.floci.services.eventbridge.model.ArchiveState;
@@ -11,6 +16,7 @@ import io.github.hectorvent.floci.services.eventbridge.model.Connection;
 import io.github.hectorvent.floci.services.eventbridge.model.ConnectionState;
 import io.github.hectorvent.floci.services.eventbridge.model.EcsParameters;
 import io.github.hectorvent.floci.services.eventbridge.model.EventBus;
+import io.github.hectorvent.floci.services.eventbridge.model.HttpParameters;
 import io.github.hectorvent.floci.services.eventbridge.model.InputTransformer;
 import io.github.hectorvent.floci.services.eventbridge.model.Replay;
 import io.github.hectorvent.floci.services.eventbridge.model.ReplayState;
@@ -18,10 +24,6 @@ import io.github.hectorvent.floci.services.eventbridge.model.Rule;
 import io.github.hectorvent.floci.services.eventbridge.model.RuleState;
 import io.github.hectorvent.floci.services.eventbridge.model.SqsParameters;
 import io.github.hectorvent.floci.services.eventbridge.model.Target;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -193,13 +195,37 @@ public class EventBridgeHandler {
     private Response handleListRules(JsonNode request, String region) {
         String busName = request.path("EventBusName").asText(null);
         String namePrefix = request.path("NamePrefix").asText(null);
-        List<Rule> rules = eventBridgeService.listRules(busName, namePrefix, region);
+        Integer limit = readLimit(request.path("Limit"));
+        String nextToken = request.path("NextToken").asText(null);
+        PaginatedResult<Rule> page = eventBridgeService.listRules(busName, namePrefix, limit, nextToken, region);
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode rulesArray = response.putArray("Rules");
-        for (Rule rule : rules) {
+        for (Rule rule : page.items()) {
             rulesArray.add(buildRuleNode(rule));
         }
+        if (page.nextToken() != null) {
+            response.put("NextToken", page.nextToken());
+        }
         return Response.ok(response).build();
+    }
+
+    /**
+     * Reads an integer {@code Limit} without coercion: a string, boolean or fractional value is
+     * a SerializationException, and an integral value wider than an int fails the range check
+     * instead of being truncated into it.
+     */
+    private static Integer readLimit(JsonNode limit) {
+        if (limit.isMissingNode() || limit.isNull()) {
+            return null;
+        }
+        if (!limit.isIntegralNumber()) {
+            throw new AwsException("SerializationException",
+                    "'" + limit.asText() + "' can not be converted to Integer", 400);
+        }
+        if (!limit.canConvertToInt()) {
+            throw EventBridgeService.limitOutOfRange(limit.asText(), limit.bigIntegerValue().signum() < 0);
+        }
+        return limit.intValue();
     }
 
     private Response handleEnableRule(JsonNode request, String region) {
@@ -231,6 +257,7 @@ public class EventBridgeHandler {
                         input.isEmpty() ? null : input,
                         inputPath.isEmpty() ? null : inputPath
                 );
+                target.setRoleArn(t.path("RoleArn").asText(null));
                 target.setInputTransformer(InputTransformer.fromJson(t.path("InputTransformer")));
                 JsonNode sqsParamsNode = t.path("SqsParameters");
                 if (!sqsParamsNode.isMissingNode() && sqsParamsNode.isObject()) {
@@ -248,6 +275,19 @@ public class EventBridgeHandler {
                 JsonNode ecsParamsNode = t.path("EcsParameters");
                 if (!ecsParamsNode.isMissingNode() && ecsParamsNode.isObject()) {
                     target.setEcsParameters(objectMapper.convertValue(ecsParamsNode, EcsParameters.class));
+                }
+                JsonNode retryPolicyNode = t.path("RetryPolicy");
+                if (retryPolicyNode.isObject()) {
+                    target.setRetryPolicy(objectMapper.convertValue(retryPolicyNode, Target.RetryPolicy.class));
+                }
+                JsonNode deadLetterConfigNode = t.path("DeadLetterConfig");
+                if (deadLetterConfigNode.isObject()) {
+                    target.setDeadLetterConfig(
+                            objectMapper.convertValue(deadLetterConfigNode, Target.DeadLetterConfig.class));
+                }
+                JsonNode httpParamsNode = t.path("HttpParameters");
+                if (!httpParamsNode.isMissingNode() && httpParamsNode.isObject()) {
+                    target.setHttpParameters(objectMapper.convertValue(httpParamsNode, HttpParameters.class));
                 }
                 targets.add(target);
             }
@@ -311,6 +351,18 @@ public class EventBridgeHandler {
             }
             if (t.getEcsParameters() != null) {
                 node.set("EcsParameters", objectMapper.valueToTree(t.getEcsParameters()));
+            }
+            if (t.getRetryPolicy() != null) {
+                node.set("RetryPolicy", objectMapper.valueToTree(t.getRetryPolicy()));
+            }
+            if (t.getRoleArn() != null) {
+                node.put("RoleArn", t.getRoleArn());
+            }
+            if (t.getDeadLetterConfig() != null) {
+                node.set("DeadLetterConfig", objectMapper.valueToTree(t.getDeadLetterConfig()));
+            }
+            if (t.getHttpParameters() != null) {
+                node.set("HttpParameters", objectMapper.valueToTree(t.getHttpParameters()));
             }
             targetsArray.add(node);
         }
@@ -459,7 +511,8 @@ public class EventBridgeHandler {
         String archiveName = request.path("ArchiveName").asText(null);
         String description = request.path("Description").asText(null);
         String eventPattern = textOrJson(request.path("EventPattern"));
-        int retentionDays = request.path("RetentionDays").asInt(0);
+        Integer retentionDays = request.hasNonNull("RetentionDays")
+                ? request.get("RetentionDays").asInt() : null;
         Archive archive = eventBridgeService.updateArchive(
                 archiveName, description, eventPattern, retentionDays, region);
         ObjectNode response = objectMapper.createObjectNode();
@@ -553,6 +606,106 @@ public class EventBridgeHandler {
             connectionsArray.add(buildConnectionNode(connection, false));
         }
         return Response.ok(response).build();
+    }
+
+    // ──────────────────────────── Api Destinations ────────────────────────────
+
+    private Response handleCreateApiDestination(JsonNode request, String region) {
+        String name = request.path("Name").asText(null);
+        String description = request.path("Description").asText(null);
+        String connectionArn = request.path("ConnectionArn").asText(null);
+        String invocationEndpoint = request.path("InvocationEndpoint").asText(null);
+        String httpMethod = request.path("HttpMethod").asText(null);
+        Integer invocationRateLimitPerSecond = request.hasNonNull("InvocationRateLimitPerSecond")
+                ? request.path("InvocationRateLimitPerSecond").asInt() : null;
+
+        ApiDestination destination = eventBridgeService.createApiDestination(
+                name, description, connectionArn, invocationEndpoint,
+                httpMethod, invocationRateLimitPerSecond, region);
+        return buildApiDestinationMutationResponse(destination);
+    }
+
+    private Response buildApiDestinationMutationResponse(ApiDestination destination) {
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("ApiDestinationArn", destination.getArn());
+        response.put("ApiDestinationState", destination.getApiDestinationState().name());
+        response.put("CreationTime", destination.getCreationTime().getEpochSecond());
+        response.put("LastModifiedTime", destination.getLastModifiedTime().getEpochSecond());
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeApiDestination(JsonNode request, String region) {
+        String name = request.path("Name").asText(null);
+        ApiDestination destination = eventBridgeService.describeApiDestination(name, region);
+        return Response.ok(buildApiDestinationNode(destination, true)).build();
+    }
+
+    private Response handleUpdateApiDestination(JsonNode request, String region) {
+        String name = request.path("Name").asText(null);
+        String description = request.has("Description") ? request.path("Description").asText(null) : null;
+        String connectionArn = request.has("ConnectionArn") ? request.path("ConnectionArn").asText(null) : null;
+        String invocationEndpoint = request.has("InvocationEndpoint") ? request.path("InvocationEndpoint").asText(null) : null;
+        String httpMethod = request.has("HttpMethod") ? request.path("HttpMethod").asText(null) : null;
+        Integer invocationRateLimitPerSecond = request.hasNonNull("InvocationRateLimitPerSecond")
+                ? request.path("InvocationRateLimitPerSecond").asInt() : null;
+
+        ApiDestination destination = eventBridgeService.updateApiDestination(
+                name, description, connectionArn, invocationEndpoint,
+                httpMethod, invocationRateLimitPerSecond, region);
+        return buildApiDestinationMutationResponse(destination);
+    }
+
+    private Response handleDeleteApiDestination(JsonNode request, String region) {
+        String name = request.path("Name").asText(null);
+        eventBridgeService.deleteApiDestination(name, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleListApiDestinations(JsonNode request, String region) {
+        String namePrefix = request.path("NamePrefix").asText(null);
+        String connectionArn = request.path("ConnectionArn").asText(null);
+        String nextToken = request.path("NextToken").asText(null);
+        int limit = request.hasNonNull("Limit") ? request.path("Limit").asInt() : 100;
+        if (limit < 1 || limit > 100) {
+            throw new AwsException("ValidationException", "Limit must be between 1 and 100.", 400);
+        }
+        // The list is sorted by name, so NextToken is simply the name of the last item on the previous page
+        List<ApiDestination> destinations = eventBridgeService.listApiDestinations(namePrefix, connectionArn, region)
+                .stream()
+                .filter(dest -> nextToken == null || dest.getName().compareTo(nextToken) > 0)
+                .toList();
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode array = response.putArray("ApiDestinations");
+        for (ApiDestination dest : destinations.subList(0, Math.min(limit, destinations.size()))) {
+            array.add(buildApiDestinationNode(dest, false));
+        }
+        if (destinations.size() > limit) {
+            response.put("NextToken", destinations.get(limit - 1).getName());
+        }
+        return Response.ok(response).build();
+    }
+
+    private ObjectNode buildApiDestinationNode(ApiDestination dest, boolean full) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("ApiDestinationArn", dest.getArn());
+        node.put("Name", dest.getName());
+        node.put("ApiDestinationState", dest.getApiDestinationState().name());
+        node.put("ConnectionArn", dest.getConnectionArn());
+        node.put("InvocationEndpoint", dest.getInvocationEndpoint());
+        node.put("HttpMethod", dest.getHttpMethod());
+        if (dest.getInvocationRateLimitPerSecond() != null) {
+            node.put("InvocationRateLimitPerSecond", dest.getInvocationRateLimitPerSecond());
+        }
+        if (full && dest.getDescription() != null) {
+            node.put("Description", dest.getDescription());
+        }
+        if (dest.getCreationTime() != null) {
+            node.put("CreationTime", dest.getCreationTime().getEpochSecond());
+        }
+        if (dest.getLastModifiedTime() != null) {
+            node.put("LastModifiedTime", dest.getLastModifiedTime().getEpochSecond());
+        }
+        return node;
     }
 
     // ──────────────────────────── Replays ────────────────────────────

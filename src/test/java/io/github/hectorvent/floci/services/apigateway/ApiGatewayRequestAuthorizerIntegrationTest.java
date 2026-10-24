@@ -1044,6 +1044,14 @@ class ApiGatewayRequestAuthorizerIntegrationTest {
             }
         } finally {
             executor.shutdown();
+        try (ExecutorService executor = Executors.newFixedThreadPool(functionNames.length)) {
+            List<Future<?>> deletions = new ArrayList<>();
+            for (String functionName : functionNames) {
+                deletions.add(executor.submit(() -> deleteFunction(functionName)));
+            }
+            for (Future<?> deletion : deletions) {
+                deletion.get();
+            }
         }
     }
 

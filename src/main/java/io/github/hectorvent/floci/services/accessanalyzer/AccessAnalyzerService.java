@@ -95,12 +95,8 @@ public class AccessAnalyzerService implements Resettable {
     }
 
     public synchronized void deleteAnalyzer(String region, String analyzerName) {
-        validateAnalyzerName(analyzerName);
-        String key = storageKey(region, analyzerName);
-        if (analyzers.get(key).isEmpty()) {
-            throw notFound(analyzerName, "AWS::AccessAnalyzer::Analyzer");
-        }
-        analyzers.delete(key);
+        getAnalyzer(region, analyzerName);
+        analyzers.delete(storageKey(region, analyzerName));
     }
 
     public Analyzer getAnalyzer(String region, String name) {
@@ -374,5 +370,25 @@ public class AccessAnalyzerService implements Resettable {
 
     static AwsException validation(String message) {
         return new AwsException("ValidationException", message, 400, Map.of("reason", "other"));
+    }
+
+    public Analyzer getAnalyzer(String region, String analyzerName) {
+        validateAnalyzerName(analyzerName);
+        String key = storageKey(region, analyzerName);
+        return analyzers.get(key).orElseThrow(() -> analyzerNotFound(analyzerName));
+    }
+
+    private static AwsException analyzerNotFound(String analyzerName) {
+        return new AwsException("ResourceNotFoundException", "The specified analyzer could not be found.", 404,
+                resourceFields(analyzerName, "analyzer"));
+    }
+
+    private static Map<String, Object> resourceFields(String resourceId, String resourceType) {
+        Map<String, Object> fields = new LinkedHashMap<>();
+        fields.put("resourceType", resourceType);
+        if (resourceId != null) {
+            fields.put("resourceId", resourceId);
+        }
+        return fields;
     }
 }

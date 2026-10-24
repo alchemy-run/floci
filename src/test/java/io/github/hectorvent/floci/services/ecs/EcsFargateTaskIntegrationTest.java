@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.ecs;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -31,6 +32,9 @@ class EcsFargateTaskIntegrationTest {
     private static final String SUBNET = "subnet-default-us-east-1-a";
     private static final String NETWORK =
             "\"networkConfiguration\":{\"awsvpcConfiguration\":{\"subnets\":[\"" + SUBNET + "\"]}}";
+
+    @Inject
+    EcsService ecsService;
 
     @BeforeAll
     static void configure() {
@@ -278,14 +282,32 @@ class EcsFargateTaskIntegrationTest {
     }
 
     @Test
-    void createServiceOnACapacityProviderStrategyReportsItInsteadOfALaunchType() {
+    void createServiceOnACapacityProviderStrategyStartsTasksAndReportsTheProvider() {
         String family = seed("fargate-service-strategy");
         call("CreateService", "{\"cluster\":\"" + CLUSTER + "\",\"serviceName\":\"fargate-spot-svc\","
-                + "\"taskDefinition\":\"" + family + "\",\"desiredCount\":0," + NETWORK + ","
+                + "\"taskDefinition\":\"" + family + "\",\"desiredCount\":2," + NETWORK + ","
                 + "\"capacityProviderStrategy\":[{\"capacityProvider\":\"FARGATE_SPOT\",\"weight\":1}]}", 200)
                 .then()
                 .body("service.capacityProviderStrategy[0].capacityProvider", equalTo("FARGATE_SPOT"))
                 .body("service.capacityProviderStrategy[0].weight", equalTo(1))
                 .body("service.launchType", nullValue());
+
+        ecsService.reconcileServices();
+        ecsService.reconcileServices();
+        call("DescribeServices", "{\"cluster\":\"" + CLUSTER
+                + "\",\"services\":[\"fargate-spot-svc\"]}", 200)
+                .then()
+                .body("services[0].runningCount", equalTo(2))
+                .body("services[0].pendingCount", equalTo(0))
+                .body("services[0].launchType", nullValue());
+        List<String> taskArns = call("ListTasks", "{\"cluster\":\"" + CLUSTER
+                + "\",\"serviceName\":\"fargate-spot-svc\"}", 200).path("taskArns");
+        assertEquals(2, taskArns.size());
+        call("DescribeTasks", "{\"cluster\":\"" + CLUSTER + "\",\"tasks\":[\""
+                + String.join("\",\"", taskArns) + "\"]}", 200)
+                .then()
+                .body("tasks.capacityProviderName", equalTo(List.of("FARGATE_SPOT", "FARGATE_SPOT")))
+                .body("tasks.launchType", equalTo(List.of("FARGATE", "FARGATE")))
+                .body("tasks.lastStatus", equalTo(List.of("RUNNING", "RUNNING")));
     }
 }

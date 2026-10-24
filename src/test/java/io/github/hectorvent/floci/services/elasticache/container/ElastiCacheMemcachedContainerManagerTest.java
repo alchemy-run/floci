@@ -54,7 +54,7 @@ class ElastiCacheMemcachedContainerManagerTest {
             ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
             ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
             when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-            when(builder.build()).thenReturn(mock(ContainerSpec.class));
+            when(builder.build()).thenReturn(new ContainerSpec("test-image"));
 
             EmulatorConfig config = mock(EmulatorConfig.class);
             EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
@@ -71,14 +71,14 @@ class ElastiCacheMemcachedContainerManagerTest {
                     containerBuilder, lifecycleManager, mock(ContainerLogStreamer.class),
                     mock(ContainerDetector.class), config, regionResolver);
 
-            manager.start("my-cluster", "memcached:1.6");
+            manager.start("my-cluster", "memcached:1.6", "eu-west-1");
 
             verify(builder).withLabels(Map.of(
                     "io.floci", "aws",
                     "io.floci.service", "elasticache",
                     "io.floci.resource-id", "my-cluster",
                     "io.floci.account", "000000000000",
-                    "io.floci.region", "us-east-1"));
+                    "io.floci.region", "eu-west-1"));
         }
     }
 
@@ -96,7 +96,7 @@ class ElastiCacheMemcachedContainerManagerTest {
         ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
         ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-        when(builder.build()).thenReturn(mock(ContainerSpec.class));
+        when(builder.build()).thenReturn(new ContainerSpec("test-image"));
 
         EmulatorConfig config = mock(EmulatorConfig.class);
         EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
@@ -109,7 +109,7 @@ class ElastiCacheMemcachedContainerManagerTest {
                 containerBuilder, lifecycleManager, logStreamer, mock(ContainerDetector.class),
                 config, mock(RegionResolver.class));
 
-        assertThrows(IllegalStateException.class, () -> manager.tryStart("my-cluster", "memcached:1.6"));
+        assertThrows(IllegalStateException.class, () -> manager.tryStart("my-cluster", "memcached:1.6", "us-east-1"));
 
         verify(lifecycleManager).stopAndRemove(eq("container-id"), any());
     }

@@ -9,6 +9,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -27,6 +28,8 @@ import java.util.Set;
 public class IamAccessKeyCfnProvisioner implements CfnResourceProvisioner {
 
     private static final String TYPE = "AWS::IAM::AccessKey";
+    /** The resource's own Allowed values line, which matches the IAM API's {@code statusType}. */
+    private static final List<String> STATUS_VALUES = List.of("Active", "Inactive", "Expired");
     private static final String SERIAL_ATTR = "__FlociAccessKeySerial";
 
     private final IamService iamService;
@@ -48,13 +51,14 @@ public class IamAccessKeyCfnProvisioner implements CfnResourceProvisioner {
             throw new AwsException("ValidationError", "AWS::IAM::AccessKey requires a UserName.", 400);
         }
         String serial = serialOf(props, ctx);
-        // Status (Active/Inactive) is a mutable property. Validate it up front, before any key is
-        // created, so a bad value fails cleanly: a user is capped at two keys, so creating one and
-        // only then rejecting the status could orphan it.
+        // Status is a mutable property whose Allowed values line reads "Active | Inactive |
+        // Expired", the same three the IAM API's statusType publishes. Validate it up front,
+        // before any key is created, so a bad value fails cleanly: a user is capped at two keys,
+        // so creating one and only then rejecting the status could orphan it.
         String status = ctx.resolveOptional(props, "Status");
-        if (status != null && !"Active".equals(status) && !"Inactive".equals(status)) {
+        if (status != null && !STATUS_VALUES.contains(status)) {
             throw new AwsException("ValidationError",
-                    "AWS::IAM::AccessKey Status must be Active or Inactive.", 400);
+                    "AWS::IAM::AccessKey Status must be Active, Inactive or Expired.", 400);
         }
 
         Map<String, String> attributesBefore = new HashMap<>(r.getAttributes());
@@ -75,8 +79,8 @@ public class IamAccessKeyCfnProvisioner implements CfnResourceProvisioner {
         r.getAttributes().put("Id", key.getAccessKeyId());
         r.getAttributes().put("SecretAccessKey", key.getSecretAccessKey());
         r.getAttributes().put(SERIAL_ATTR, serial);
-        // A new key is Active; only touch it when the template asked for Inactive.
-        if ("Inactive".equals(status)) {
+        // A new key is Active; only touch it when the template asked for something else.
+        if (status != null && !"Active".equals(status)) {
             iamService.updateAccessKey(userName, key.getAccessKeyId(), status);
         }
         // On a createOnly change this new key replaced the prior one; record it so the displaced

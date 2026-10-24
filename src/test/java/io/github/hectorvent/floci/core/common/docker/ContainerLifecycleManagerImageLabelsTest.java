@@ -1,8 +1,5 @@
 package io.github.hectorvent.floci.core.common.docker;
 
-import java.util.Map;
-import java.util.Optional;
-
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.InspectImageCmd;
 import com.github.dockerjava.api.command.InspectImageResponse;
@@ -16,6 +13,9 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+
+import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -40,14 +40,10 @@ class ContainerLifecycleManagerImageLabelsTest {
     ContainerDetector containerDetector;
 
     @Mock
-    PortAllocator portAllocator;
-
-    @Mock
     EmulatorConfig config;
 
     private ContainerLifecycleManager manager() {
-        return new ContainerLifecycleManager(dockerClient, imageCacheService, containerDetector,
-                portAllocator, config);
+        return new ContainerLifecycleManager(dockerClient, imageCacheService, containerDetector, config);
     }
 
     private void imageInspectReturns(Map<String, String> labels) {

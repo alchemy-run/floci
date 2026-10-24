@@ -172,10 +172,9 @@ public class ElastiCacheMemcachedContainerManager {
                 : info.containerId();
         String logGroup = "/aws/elasticache/cluster/" + clusterId + "/engine-log";
         String logStream = logStreamer.generateLogStreamName(shortId);
-        String region = regionResolver.getDefaultRegion();
 
         Closeable logHandle = logStreamer.attach(
-                info.containerId(), logGroup, logStream, region, "elasticache-memcached:" + clusterId);
+                info.containerId(), logGroup, logStream, effectiveRegion, "elasticache-memcached:" + clusterId);
         handle.setLogStream(logHandle);
 
         waitForBackendReady(clusterId, endpoint.host(), endpoint.port());
@@ -235,8 +234,10 @@ public class ElastiCacheMemcachedContainerManager {
         if (handle == null) {
             return;
         }
-        activeContainers.remove(handle.getGroupId());
-        lifecycleManager.stopAndRemove(handle.getContainerId(), handle.getLogStream());
+        ElastiCacheContainerHandle existing = activeContainers.remove(handle.getGroupId());
+        Closeable logStream = handle.getLogStream() != null ? handle.getLogStream()
+                : (existing != null ? existing.getLogStream() : null);
+        lifecycleManager.stopAndRemove(handle.getContainerId(), logStream);
     }
 
     public void stopAll() {

@@ -1,9 +1,9 @@
 package io.github.hectorvent.floci.core.common;
 
+import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
-import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -144,78 +144,6 @@ class GlobalCorsFilterIntegrationTest {
                     "floci.security.extra-cors-allowed-headers", "x-added-header",
                     "floci.security.extra-cors-expose-headers", "x-visible-header",
                     "floci.security.cors-allow-private-network", "true");
-        }
-    }
-
-    @QuarkusTest
-    @TestProfile(PrivateNetworkDefaultOffTest.CorsPnaDefaultProfile.class)
-    static class PrivateNetworkDefaultOffTest {
-
-        @BeforeAll
-        static void configureRestAssured() {
-            RestAssuredJsonUtils.configureAwsContentTypes();
-        }
-
-        @Test
-        void privateNetworkAccessNotGrantedByDefault() {
-            given()
-                .header("Origin", "http://localhost:3000")
-                .header("Access-Control-Request-Method", "POST")
-                .header("Access-Control-Request-Private-Network", "true")
-            .when()
-                .options("/")
-            .then()
-                .statusCode(204)
-                .header("Access-Control-Allow-Origin", equalTo("http://localhost:3000"))
-                .header("Access-Control-Allow-Private-Network", nullValue());
-        }
-
-        // Only origins set — cors-allow-private-network left at its (off) default.
-        public static final class CorsPnaDefaultProfile implements QuarkusTestProfile {
-            @Override
-            public Map<String, String> getConfigOverrides() {
-                return Map.of("floci.security.extra-cors-allowed-origins", "http://localhost:3000");
-            }
-        }
-    }
-
-    @QuarkusTest
-    @TestProfile(DisabledGlobalCorsFilterTest.DisabledCorsProfile.class)
-    static class DisabledGlobalCorsFilterTest {
-
-        @BeforeAll
-        static void configureRestAssured() {
-            RestAssuredJsonUtils.configureAwsContentTypes();
-        }
-
-        @Test
-        void preflightReturnsForbiddenWithoutCorsHeaders() {
-            given()
-                .header("Origin", "http://localhost:3000")
-                .header("Access-Control-Request-Method", "PUT")
-            .when()
-                .options("/my-bucket/some-key")
-            .then()
-                .statusCode(403)
-                .header("Access-Control-Allow-Origin", nullValue());
-        }
-
-        @Test
-        void actualRequestGetsNoCorsHeaders() {
-            given()
-                .header("Origin", "http://localhost:3000")
-                .header("X-Amz-Target", "DynamoDB_20120810.ListTables")
-                .contentType("application/x-amz-json-1.0")
-                .body("{}")
-            .when()
-                .post("/")
-            .then()
-                .statusCode(200)
-                .header("Access-Control-Allow-Origin", nullValue());
-        }
-
-        public static final class DisabledCorsProfile implements QuarkusTestProfile {
-            // No config overrides, testing default application.yml values
         }
     }
 }

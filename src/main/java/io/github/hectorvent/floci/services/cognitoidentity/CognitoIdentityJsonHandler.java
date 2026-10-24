@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.cognito.model.CognitoFederatedIdentity;
+import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.services.cognitoidentity.model.CognitoIdentityProvider;
 import io.github.hectorvent.floci.services.cognitoidentity.model.IdentityPool;
 import io.github.hectorvent.floci.services.cognitoidentity.model.PrincipalTagAttributeMap;
@@ -256,9 +257,9 @@ public class CognitoIdentityJsonHandler {
     private boolean requiredBool(JsonNode node, String field) {
         Boolean value = bool(node, field);
         if (value == null) {
-            throw new AwsException("ValidationException", "1 validation error detected: Value null at '"
+            throw SmithyValidationErrors.validationException("Value null at '"
                     + Character.toLowerCase(field.charAt(0)) + field.substring(1)
-                    + "' failed to satisfy constraint: Member must not be null", 400);
+                    + "' failed to satisfy constraint: Member must not be null");
         }
         return value;
     }

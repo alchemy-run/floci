@@ -11,6 +11,7 @@ import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager.C
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager.EndpointInfo;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.core.common.docker.ContainerStorageHelper;
+import io.github.hectorvent.floci.core.common.docker.RetryingTarCopier;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
 import io.github.hectorvent.floci.services.sagemaker.model.SageMakerEntities.EndpointResource;
@@ -27,10 +28,10 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.net.ConnectException;
 import java.net.URI;
-import java.net.http.HttpTimeoutException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -70,10 +71,14 @@ public class SageMakerEndpointManager implements ContainerTeardown, Resettable {
     }
 
     public void startEndpointAsync(EndpointResource endpoint, SageMakerService service) {
-        executor.submit(() -> startEndpoint(endpoint, service));
+        startEndpointAsync(endpoint, service, RetryingTarCopier.DEFAULT_BACKOFF_MS);
     }
 
-    private void startEndpoint(EndpointResource endpoint, SageMakerService service) {
+    void startEndpointAsync(EndpointResource endpoint, SageMakerService service, long backoffMillis) {
+        executor.submit(() -> startEndpoint(endpoint, service, backoffMillis));
+    }
+
+    private void startEndpoint(EndpointResource endpoint, SageMakerService service, long backoffMillis) {
         String containerId = null;
         try {
             ModelResource model = service.modelForEndpoint(endpoint);
@@ -82,7 +87,7 @@ public class SageMakerEndpointManager implements ContainerTeardown, Resettable {
             if (image == null) {
                 throw new IllegalArgumentException("PrimaryContainer.Image is required");
             }
-            String name = ContainerStorageHelper.dockerName(config, "floci-sagemaker-endpoint-" + endpoint.endpointName);
+            String name = ContainerStorageHelper.dockerName(config, "sagemaker-endpoint-" + endpoint.endpointName);
             lifecycleManager.removeIfExists(name);
             ContainerBuilder.Builder builder = containerBuilder.newContainer(image)
                     .withName(name)
@@ -97,7 +102,7 @@ public class SageMakerEndpointManager implements ContainerTeardown, Resettable {
             containerId = lifecycleManager.create(spec);
             String modelDataUrl = string(c.get("ModelDataUrl"));
             if (modelDataUrl != null && !modelDataUrl.isBlank()) {
-                copyModelData(containerId, modelDataUrl);
+                copyModelData(containerId, modelDataUrl, backoffMillis);
             }
             ContainerInfo info = lifecycleManager.startCreated(containerId, spec);
             EndpointInfo ep = info.getEndpoint(PORT);
@@ -255,14 +260,13 @@ public class SageMakerEndpointManager implements ContainerTeardown, Resettable {
         }
     }
 
-    private void copyModelData(String containerId, String s3Uri) throws Exception {
+    void copyModelData(String containerId, String s3Uri, long backoffMillis) throws Exception {
         S3Uri uri = S3Uri.parse(s3Uri);
         S3Object object = s3Service.getObject(uri.bucket(), uri.key());
         byte[] tarData = tarModelData(object.getData(), uri.key());
-        lifecycleManager.getDockerClient().copyArchiveToContainerCmd(containerId)
-                .withRemotePath("/")
-                .withTarInputStream(new ByteArrayInputStream(tarData))
-                .exec();
+        RetryingTarCopier.copyStreamed(lifecycleManager.getDockerClient(), containerId, "/",
+                "sagemaker-model-data", out -> out.write(tarData),
+                RetryingTarCopier.DEFAULT_MAX_ATTEMPTS, backoffMillis);
     }
 
     private byte[] tarModelData(byte[] data, String key) throws Exception {

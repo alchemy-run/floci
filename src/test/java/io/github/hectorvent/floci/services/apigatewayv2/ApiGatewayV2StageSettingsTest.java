@@ -1,16 +1,22 @@
 package io.github.hectorvent.floci.services.apigatewayv2;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.http.ContentType;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
+import java.util.Map;
+
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * Stage access logging, throttling defaults and per-route overrides, plus the API's version.
@@ -21,6 +27,9 @@ import static org.hamcrest.Matchers.notNullValue;
 @QuarkusTest
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class ApiGatewayV2StageSettingsTest {
+
+    @Inject
+    ApiGatewayV2Service service;
 
     private static final ObjectMapper mapper = new ObjectMapper();
     private static String apiId;
@@ -121,5 +130,22 @@ class ApiGatewayV2StageSettingsTest {
                 .body("defaultRouteSettings.throttlingRateLimit", equalTo(50.0f))
                 .body("defaultRouteSettings.throttlingBurstLimit", org.hamcrest.Matchers.nullValue())
                 .body("defaultRouteSettings.dataTraceEnabled", org.hamcrest.Matchers.nullValue());
+    }
+
+    @Test
+    @Order(6)
+    void stageVariablesLookupReturnsConfiguredValuesOrEmptyMap() {
+        Map<String, String> variables = Map.of("backend", "blue");
+        given().contentType(ContentType.JSON)
+                .body("{\"stageName\":\"variables\",\"stageVariables\":{\"backend\":\"blue\"}}")
+                .when().post("/v2/apis/" + apiId + "/stages")
+                .then().statusCode(201);
+
+        assertEquals(variables, service.getStageVariables("us-east-1", apiId, "variables"));
+        assertEquals(Map.of(), service.getStageVariables("us-east-1", apiId, "sparse"));
+        assertEquals(Map.of(), service.getStageVariables("us-east-1", apiId, "missing"));
+        assertEquals(Map.of(), service.getStageVariables("us-west-2", apiId, "variables"));
+        assertEquals(Map.of(), service.getStageVariables("us-east-1", "other-api", "variables"));
+        assertThrows(AwsException.class, () -> service.getStage("us-east-1", apiId, "missing"));
     }
 }

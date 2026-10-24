@@ -11,6 +11,10 @@ import software.amazon.awssdk.services.ec2.Ec2Client;
 import software.amazon.awssdk.services.ec2.model.DescribeSubnetsResponse;
 import software.amazon.awssdk.services.rds.RdsClient;
 import software.amazon.awssdk.services.rds.model.ConnectionPoolConfigurationInfo;
+import software.amazon.awssdk.services.rds.model.CreateDbClusterEndpointResponse;
+import software.amazon.awssdk.services.rds.model.CreateDbClusterResponse;
+import software.amazon.awssdk.services.rds.model.CreateDbInstanceResponse;
+import software.amazon.awssdk.services.rds.model.CreateDbProxyEndpointResponse;
 import software.amazon.awssdk.services.rds.model.CreateDbProxyResponse;
 import software.amazon.awssdk.services.rds.model.CreateDbSubnetGroupResponse;
 import software.amazon.awssdk.services.rds.model.CreateOptionGroupResponse;
@@ -19,6 +23,11 @@ import software.amazon.awssdk.services.rds.model.DBClusterSnapshot;
 import software.amazon.awssdk.services.rds.model.DBEngineVersion;
 import software.amazon.awssdk.services.rds.model.DBInstance;
 import software.amazon.awssdk.services.rds.model.DBProxyEndpoint;
+import software.amazon.awssdk.services.rds.model.DBClusterAssociatedRole;
+import software.amazon.awssdk.services.rds.model.DBClusterEndpoint;
+import software.amazon.awssdk.services.rds.model.DBClusterRole;
+import software.amazon.awssdk.services.rds.model.DBInstanceRole;
+import software.amazon.awssdk.services.rds.model.DBProxyEndpointTargetRole;
 import software.amazon.awssdk.services.rds.model.DBProxyTarget;
 import software.amazon.awssdk.services.rds.model.DBSnapshot;
 import software.amazon.awssdk.services.rds.model.DbClusterSnapshotNotFoundException;
@@ -29,12 +38,33 @@ import software.amazon.awssdk.services.rds.model.DbProxyNotFoundException;
 import software.amazon.awssdk.services.rds.model.DbSnapshotAlreadyExistsException;
 import software.amazon.awssdk.services.rds.model.DbSnapshotNotFoundException;
 import software.amazon.awssdk.services.rds.model.DescribeDbEngineVersionsResponse;
+import software.amazon.awssdk.services.rds.model.DbClusterEndpointAlreadyExistsException;
+import software.amazon.awssdk.services.rds.model.DbClusterEndpointNotFoundException;
+import software.amazon.awssdk.services.rds.model.DbClusterRoleAlreadyExistsException;
+import software.amazon.awssdk.services.rds.model.DbClusterRoleNotFoundException;
+import software.amazon.awssdk.services.rds.model.DbInstanceRoleAlreadyExistsException;
+import software.amazon.awssdk.services.rds.model.DbInstanceRoleNotFoundException;
+import software.amazon.awssdk.services.rds.model.DbLogFileNotFoundException;
+import software.amazon.awssdk.services.rds.model.DescribeDBLogFilesDetails;
+import software.amazon.awssdk.services.rds.model.DescribeDbProxiesResponse;
+import software.amazon.awssdk.services.rds.model.DescribeDbProxyEndpointsResponse;
+import software.amazon.awssdk.services.rds.model.DescribeDbProxyTargetGroupsResponse;
+import software.amazon.awssdk.services.rds.model.DescribeDbProxyTargetsResponse;
 import software.amazon.awssdk.services.rds.model.DescribeDbSubnetGroupsResponse;
 import software.amazon.awssdk.services.rds.model.DescribeOptionGroupsResponse;
 import software.amazon.awssdk.services.rds.model.DescribeOrderableDbInstanceOptionsResponse;
+import software.amazon.awssdk.services.rds.model.DownloadDbLogFilePortionResponse;
+import software.amazon.awssdk.services.rds.model.EngineDefaults;
 import software.amazon.awssdk.services.rds.model.InvalidDbInstanceStateException;
 import software.amazon.awssdk.services.rds.model.InvalidDbProxyEndpointStateException;
 import software.amazon.awssdk.services.rds.model.InvalidOptionGroupStateException;
+import software.amazon.awssdk.services.rds.model.InvalidRestoreException;
+import software.amazon.awssdk.services.rds.model.ListTagsForResourceResponse;
+import software.amazon.awssdk.services.rds.model.ModifyDbClusterEndpointResponse;
+import software.amazon.awssdk.services.rds.model.ModifyDbClusterResponse;
+import software.amazon.awssdk.services.rds.model.ModifyDbProxyEndpointResponse;
+import software.amazon.awssdk.services.rds.model.ModifyDbProxyResponse;
+import software.amazon.awssdk.services.rds.model.ModifyDbProxyTargetGroupResponse;
 import software.amazon.awssdk.services.rds.model.ModifyOptionGroupResponse;
 import software.amazon.awssdk.services.rds.model.OptionConfiguration;
 import software.amazon.awssdk.services.rds.model.OptionGroupNotFoundException;
@@ -42,7 +72,12 @@ import software.amazon.awssdk.services.rds.model.OptionSetting;
 import software.amazon.awssdk.services.rds.model.Parameter;
 import software.amazon.awssdk.services.rds.model.RdsException;
 import software.amazon.awssdk.services.rds.model.Tag;
+import software.amazon.awssdk.services.rds.model.RegisterDbProxyTargetsResponse;
+import software.amazon.awssdk.services.rds.model.ResourceNotFoundException;
+import software.amazon.awssdk.services.rds.model.UpgradeTarget;
+import software.amazon.awssdk.services.rds.model.ValidStorageOptions;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -153,7 +188,7 @@ class RdsControlPlaneTest {
 
     @Test
     void sdkRoundTripsAuroraServerlessV2ScalingConfiguration() {
-        var created = rds.createDBCluster(b -> b
+        CreateDbClusterResponse created = rds.createDBCluster(b -> b
                 .dbClusterIdentifier(serverlessClusterName)
                 .engine("aurora-postgresql")
                 .masterUsername("admin")
@@ -170,7 +205,7 @@ class RdsControlPlaneTest {
         assertThat(created.dbCluster().serverlessV2ScalingConfiguration().secondsUntilAutoPause())
                 .isEqualTo(300);
 
-        var modified = rds.modifyDBCluster(b -> b
+        ModifyDbClusterResponse modified = rds.modifyDBCluster(b -> b
                 .dbClusterIdentifier(serverlessClusterName)
                 .serverlessV2ScalingConfiguration(c -> c
                         .secondsUntilAutoPause(600)));
@@ -181,7 +216,7 @@ class RdsControlPlaneTest {
         assertThat(modified.dbCluster().serverlessV2ScalingConfiguration().secondsUntilAutoPause())
                 .isEqualTo(600);
 
-        var described = rds.describeDBClusters(b -> b
+        DBCluster described = rds.describeDBClusters(b -> b
                 .dbClusterIdentifier(serverlessClusterName)).dbClusters().get(0);
         assertThat(described.serverlessV2ScalingConfiguration().minCapacity()).isEqualTo(0.0);
         assertThat(described.serverlessV2ScalingConfiguration().maxCapacity()).isEqualTo(16.0);
@@ -224,7 +259,7 @@ class RdsControlPlaneTest {
 
     @Test
     void sdkRoundTripsDbProxyAndItsDefaultTargetGroup() {
-        var created = rds.createDBProxy(b -> b
+        CreateDbProxyResponse created = rds.createDBProxy(b -> b
                 .dbProxyName(proxyName)
                 .engineFamily("POSTGRESQL")
                 .roleArn("arn:aws:iam::000000000000:role/rds-proxy-test")
@@ -256,14 +291,14 @@ class RdsControlPlaneTest {
             assertThat(auth.description()).isEqualTo("compatibility credentials");
         });
 
-        var targetGroups = rds.describeDBProxyTargetGroups(b -> b.dbProxyName(proxyName));
+        DescribeDbProxyTargetGroupsResponse targetGroups = rds.describeDBProxyTargetGroups(b -> b.dbProxyName(proxyName));
         assertThat(targetGroups.targetGroups()).singleElement().satisfies(targetGroup -> {
             assertThat(targetGroup.targetGroupName()).isEqualTo("default");
             assertThat(targetGroup.isDefault()).isTrue();
             assertThat(targetGroup.targetGroupArn()).contains(":target-group:prx-tg-");
         });
 
-        var tags = rds.listTagsForResource(b -> b.resourceName(created.dbProxy().dbProxyArn()));
+        ListTagsForResourceResponse tags = rds.listTagsForResource(b -> b.resourceName(created.dbProxy().dbProxyArn()));
         assertThat(tags.tagList()).singleElement().satisfies(tag -> {
             assertThat(tag.key()).isEqualTo("owner");
             assertThat(tag.value()).isEqualTo("compatibility");
@@ -351,7 +386,7 @@ class RdsControlPlaneTest {
     void sdkRoundTripsIamDefaultAuthAndProxyUpdates() {
         String mutableProxyName = TestFixtures.uniqueName("rds-proxy-mutable");
         try {
-            var created = rds.createDBProxy(b -> b
+            CreateDbProxyResponse created = rds.createDBProxy(b -> b
                     .dbProxyName(mutableProxyName)
                     .engineFamily("MYSQL")
                     .roleArn("arn:aws:iam::000000000000:role/rds-proxy-initial")
@@ -365,7 +400,7 @@ class RdsControlPlaneTest {
             assertThat(created.dbProxy().defaultAuthScheme()).isEqualTo("IAM_AUTH");
             assertThat(created.dbProxy().auth()).isEmpty();
 
-            var modified = rds.modifyDBProxy(b -> b
+            ModifyDbProxyResponse modified = rds.modifyDBProxy(b -> b
                     .dbProxyName(mutableProxyName)
                     .roleArn("arn:aws:iam::000000000000:role/rds-proxy-updated")
                     .securityGroups("sg-proxy-updated-a", "sg-proxy-updated-b")
@@ -384,7 +419,7 @@ class RdsControlPlaneTest {
             assertThat(modified.dbProxy().idleClientTimeout()).isEqualTo(600);
             assertThat(modified.dbProxy().updatedDate()).isAfterOrEqualTo(created.dbProxy().updatedDate());
 
-            var described = rds.describeDBProxies(b -> b.dbProxyName(mutableProxyName));
+            DescribeDbProxiesResponse described = rds.describeDBProxies(b -> b.dbProxyName(mutableProxyName));
             assertThat(described.dbProxies()).singleElement().satisfies(proxy -> {
                 assertThat(proxy.defaultAuthScheme()).isEqualTo("IAM_AUTH");
                 assertThat(proxy.auth()).isEmpty();
@@ -397,7 +432,7 @@ class RdsControlPlaneTest {
                 assertThat(proxy.idleClientTimeout()).isEqualTo(600);
             });
 
-            var modifiedTargetGroup = rds.modifyDBProxyTargetGroup(b -> b
+            ModifyDbProxyTargetGroupResponse modifiedTargetGroup = rds.modifyDBProxyTargetGroup(b -> b
                     .dbProxyName(mutableProxyName)
                     .targetGroupName("default")
                     .connectionPoolConfig(pool -> pool
@@ -409,7 +444,7 @@ class RdsControlPlaneTest {
 
             assertPoolConfiguration(modifiedTargetGroup.dbProxyTargetGroup().connectionPoolConfig());
 
-            var describedTargetGroups = rds.describeDBProxyTargetGroups(b -> b
+            DescribeDbProxyTargetGroupsResponse describedTargetGroups = rds.describeDBProxyTargetGroups(b -> b
                     .dbProxyName(mutableProxyName)
                     .targetGroupName("default"));
             assertThat(describedTargetGroups.targetGroups()).singleElement().satisfies(targetGroup ->
@@ -420,14 +455,64 @@ class RdsControlPlaneTest {
     }
 
     @Test
+    void sdkRoundTripsDbProxyEndpoints() {
+        String proxyName = TestFixtures.uniqueName("rds-proxy-endpoints");
+        String endpointName = TestFixtures.uniqueName("reader");
+        String renamed = TestFixtures.uniqueName("analytics");
+        try {
+            CreateDbProxyResponse proxy = rds.createDBProxy(b -> b
+                    .dbProxyName(proxyName)
+                    .engineFamily("POSTGRESQL")
+                    .roleArn("arn:aws:iam::000000000000:role/rds-proxy")
+                    .vpcSubnetIds(subnetIds)
+                    .auth(a -> a.authScheme("SECRETS")
+                            .secretArn("arn:aws:secretsmanager:us-east-1:000000000000:secret:db-AbCdEf")));
+
+            CreateDbProxyEndpointResponse created = rds.createDBProxyEndpoint(b -> b
+                    .dbProxyName(proxyName)
+                    .dbProxyEndpointName(endpointName)
+                    .vpcSubnetIds(subnetIds)
+                    .vpcSecurityGroupIds("sg-endpoint")
+                    .targetRole(DBProxyEndpointTargetRole.READ_ONLY)
+                    .tags(t -> t.key("team").value("data")));
+            assertThat(created.dbProxyEndpoint().targetRole()).isEqualTo(DBProxyEndpointTargetRole.READ_ONLY);
+            assertThat(created.dbProxyEndpoint().isDefault()).isFalse();
+            assertThat(created.dbProxyEndpoint().endpoint()).isEqualTo(proxy.dbProxy().endpoint());
+            assertThat(created.dbProxyEndpoint().createdDate()).isNotNull();
+            assertThat(rds.listTagsForResource(b -> b.resourceName(created.dbProxyEndpoint().dbProxyEndpointArn()))
+                    .tagList()).extracting("key").containsExactly("team");
+
+            DescribeDbProxyEndpointsResponse described = rds.describeDBProxyEndpoints(b -> b.dbProxyName(proxyName));
+            assertThat(described.dbProxyEndpoints()).extracting("dbProxyEndpointName")
+                    .containsExactly("default", endpointName);
+            assertThat(described.dbProxyEndpoints().get(0).isDefault()).isTrue();
+
+            ModifyDbProxyEndpointResponse modified = rds.modifyDBProxyEndpoint(b -> b
+                    .dbProxyEndpointName(endpointName)
+                    .newDBProxyEndpointName(renamed)
+                    .vpcSecurityGroupIds("sg-other"));
+            assertThat(modified.dbProxyEndpoint().dbProxyEndpointName()).isEqualTo(renamed);
+            assertThat(modified.dbProxyEndpoint().vpcSecurityGroupIds()).containsExactly("sg-other");
+
+            assertThatThrownBy(() -> rds.deleteDBProxyEndpoint(b -> b.dbProxyEndpointName("default")))
+                    .isInstanceOf(InvalidDbProxyEndpointStateException.class);
+            rds.deleteDBProxyEndpoint(b -> b.dbProxyEndpointName(renamed));
+            assertThatThrownBy(() -> rds.describeDBProxyEndpoints(b -> b.dbProxyEndpointName(renamed)))
+                    .isInstanceOf(DbProxyEndpointNotFoundException.class);
+        } finally {
+            deleteProxy(rds, proxyName);
+        }
+    }
+
+    @Test
     void sdkScopesTheSameDbProxyNameBySignedRegion() {
         String regionalProxyName = TestFixtures.uniqueName("rds-proxy-regional");
         try (RdsClient east = rdsClient(Region.US_EAST_1);
              RdsClient west = rdsClient(Region.US_WEST_2)) {
             // Subnet ids are region-scoped on real AWS (and on floci, since #21), so each proxy
             // needs subnets from its own signed region rather than the shared us-east-1 subnetIds.
-            var eastProxy = createIamProxy(east, regionalProxyName, subnetIdsFor(Region.US_EAST_1));
-            var westProxy = createIamProxy(west, regionalProxyName, subnetIdsFor(Region.US_WEST_2));
+            CreateDbProxyResponse eastProxy = createIamProxy(east, regionalProxyName, subnetIdsFor(Region.US_EAST_1));
+            CreateDbProxyResponse westProxy = createIamProxy(west, regionalProxyName, subnetIdsFor(Region.US_WEST_2));
 
             assertThat(eastProxy.dbProxy().dbProxyArn()).contains(":rds:us-east-1:");
             assertThat(westProxy.dbProxy().dbProxyArn()).contains(":rds:us-west-2:");
@@ -467,8 +552,8 @@ class RdsControlPlaneTest {
         String regionalInstanceName = TestFixtures.uniqueName("rds-db-regional");
         try (RdsClient east = rdsClient(Region.US_EAST_1);
              RdsClient west = rdsClient(Region.US_WEST_2)) {
-            var eastInstance = createDbInstance(east, regionalInstanceName, "east-secret");
-            var westInstance = createDbInstance(west, regionalInstanceName, "west-secret");
+            CreateDbInstanceResponse eastInstance = createDbInstance(east, regionalInstanceName, "east-secret");
+            CreateDbInstanceResponse westInstance = createDbInstance(west, regionalInstanceName, "west-secret");
 
             assertThat(eastInstance.dbInstance().dbInstanceArn()).contains(":rds:us-east-1:");
             assertThat(westInstance.dbInstance().dbInstanceArn()).contains(":rds:us-west-2:");
@@ -513,7 +598,7 @@ class RdsControlPlaneTest {
         String targetInstanceName = TestFixtures.uniqueName("rds-db-target");
         boolean registered = false;
         try {
-            var instance = createDbInstance(rds, targetInstanceName, "target-secret");
+            CreateDbInstanceResponse instance = createDbInstance(rds, targetInstanceName, "target-secret");
             rds.createDBProxy(b -> b
                     .dbProxyName(targetProxyName)
                     .engineFamily("POSTGRESQL")
@@ -523,7 +608,7 @@ class RdsControlPlaneTest {
                             .secretArn("arn:aws:secretsmanager:us-east-1:000000000000:secret:rds-proxy-target")
                             .iamAuth("DISABLED")));
 
-            var registerResponse = rds.registerDBProxyTargets(b -> b
+            RegisterDbProxyTargetsResponse registerResponse = rds.registerDBProxyTargets(b -> b
                     .dbProxyName(targetProxyName)
                     .dbInstanceIdentifiers(targetInstanceName));
             registered = true;
@@ -531,7 +616,7 @@ class RdsControlPlaneTest {
                     assertInstanceProxyTarget(target, targetInstanceName,
                             instance.dbInstance().dbInstanceArn()));
 
-            var described = rds.describeDBProxyTargets(b -> b
+            DescribeDbProxyTargetsResponse described = rds.describeDBProxyTargets(b -> b
                     .dbProxyName(targetProxyName));
             assertThat(described.targets()).singleElement().satisfies(target ->
                     assertInstanceProxyTarget(target, targetInstanceName,
@@ -577,6 +662,49 @@ class RdsControlPlaneTest {
                     .dbInstances().get(0);
             assertThat(started.dbInstanceStatus()).isEqualTo("available");
             assertThat(started.endpoint().address()).isEqualTo(endpoint);
+        } finally {
+            deleteDbInstance(rds, instanceName);
+        }
+    }
+
+    @Test
+    @DisplayName("ModifyDBInstance resizes and upgrades an instance, and Describe reports it")
+    void sdkResizesAndUpgradesAStandaloneInstance() {
+        String instanceName = TestFixtures.uniqueName("rds-resize-db");
+        try {
+            createDbInstance(rds, instanceName, "resize-secret");
+
+            DBInstance modified = rds.modifyDBInstance(b -> b
+                    .dbInstanceIdentifier(instanceName)
+                    .dbInstanceClass("db.t3.large")
+                    .allocatedStorage(100)
+                    .engineVersion("16.4")).dbInstance();
+
+            assertThat(modified.dbInstanceClass()).isEqualTo("db.t3.large");
+            assertThat(modified.allocatedStorage()).isEqualTo(100);
+            assertThat(modified.engineVersion()).isEqualTo("16.4");
+
+            DBInstance described = rds.describeDBInstances(b -> b.dbInstanceIdentifier(instanceName))
+                    .dbInstances().get(0);
+            assertThat(described.dbInstanceClass()).isEqualTo("db.t3.large");
+            assertThat(described.allocatedStorage()).isEqualTo(100);
+            assertThat(described.engineVersion()).isEqualTo("16.4");
+
+            assertThatThrownBy(() -> rds.modifyDBInstance(b -> b
+                    .dbInstanceIdentifier(instanceName).allocatedStorage(50)))
+                    .isInstanceOfSatisfying(RdsException.class, e -> assertThat(
+                            e.awsErrorDetails().errorCode()).isEqualTo("InvalidParameterCombination"));
+
+            assertThatThrownBy(() -> rds.modifyDBInstance(b -> b
+                    .dbInstanceIdentifier(instanceName).engineVersion("17.2")))
+                    .isInstanceOfSatisfying(RdsException.class, e -> assertThat(
+                            e.awsErrorDetails().errorCode()).isEqualTo("InvalidParameterCombination"));
+
+            DBInstance upgraded = rds.modifyDBInstance(b -> b
+                    .dbInstanceIdentifier(instanceName)
+                    .engineVersion("17.2")
+                    .allowMajorVersionUpgrade(true)).dbInstance();
+            assertThat(upgraded.engineVersion()).isEqualTo("17.2");
         } finally {
             deleteDbInstance(rds, instanceName);
         }
@@ -703,6 +831,300 @@ class RdsControlPlaneTest {
                     rds.deleteDBCluster(b -> b.dbClusterIdentifier(name).skipFinalSnapshot(true));
                 } catch (Exception ignored) {}
             }
+        }
+    }
+
+    @Test
+    @DisplayName("Point in time restore of an instance and a cluster, and the restorable times")
+    void sdkRestoresAnInstanceAndAClusterToAPointInTime() {
+        String instanceName = TestFixtures.uniqueName("rds-pitr-db");
+        String restoredInstance = instanceName + "-restored";
+        String clusterName = TestFixtures.uniqueName("rds-pitr-cluster");
+        String restoredCluster = clusterName + "-restored";
+        try {
+            createDbInstance(rds, instanceName, "pitr-secret");
+            DBInstance source = rds.describeDBInstances(b -> b.dbInstanceIdentifier(instanceName))
+                    .dbInstances().get(0);
+            assertThat(source.latestRestorableTime()).isNotNull();
+
+            DBInstance restored = rds.restoreDBInstanceToPointInTime(b -> b
+                    .sourceDBInstanceIdentifier(instanceName)
+                    .targetDBInstanceIdentifier(restoredInstance)
+                    .useLatestRestorableTime(true)
+                    .dbInstanceClass("db.t3.small"))
+                    .dbInstance();
+            assertThat(restored.dbInstanceIdentifier()).isEqualTo(restoredInstance);
+            assertThat(restored.dbInstanceClass()).isEqualTo("db.t3.small");
+            assertThat(restored.dbName()).isEqualTo("app");
+
+            assertThatThrownBy(() -> rds.restoreDBInstanceToPointInTime(b -> b
+                    .sourceDBInstanceIdentifier(instanceName)
+                    .targetDBInstanceIdentifier(instanceName + "-early")
+                    // Before the source existed, so outside its restorable window.
+                    .restoreTime(Instant.now().minusSeconds(3 * 86400))))
+                    .isInstanceOf(InvalidRestoreException.class);
+
+            rds.createDBCluster(b -> b
+                    .dbClusterIdentifier(clusterName)
+                    .engine("aurora-postgresql")
+                    .engineVersion("16.3")
+                    .masterUsername("admin")
+                    .masterUserPassword("pitr-secret")
+                    .databaseName("app"));
+            DBCluster sourceCluster = rds.describeDBClusters(b -> b.dbClusterIdentifier(clusterName))
+                    .dbClusters().get(0);
+            assertThat(sourceCluster.earliestRestorableTime()).isNotNull();
+            assertThat(sourceCluster.latestRestorableTime()).isAfterOrEqualTo(sourceCluster.earliestRestorableTime());
+
+            DBCluster restoredFromTime = rds.restoreDBClusterToPointInTime(b -> b
+                    .dbClusterIdentifier(restoredCluster)
+                    .sourceDBClusterIdentifier(sourceCluster.dbClusterArn())
+                    .restoreToTime(sourceCluster.earliestRestorableTime())
+                    .restoreType("copy-on-write"))
+                    .dbCluster();
+            assertThat(restoredFromTime.dbClusterIdentifier()).isEqualTo(restoredCluster);
+            assertThat(restoredFromTime.databaseName()).isEqualTo("app");
+        } finally {
+            deleteDbInstance(rds, restoredInstance);
+            deleteDbInstance(rds, instanceName);
+            for (String name : List.of(restoredCluster, clusterName)) {
+                try {
+                    rds.deleteDBCluster(b -> b.dbClusterIdentifier(name).skipFinalSnapshot(true));
+                } catch (Exception e) {
+                    LOG.log(Level.WARNING, "Failed to clean up RDS cluster " + name, e);
+                }
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("Custom cluster endpoints round-trip with the built-in writer and reader endpoints")
+    void sdkRoundTripsCustomClusterEndpoints() {
+        String clusterName = TestFixtures.uniqueName("rds-cep-cluster");
+        String writerName = clusterName + "-w";
+        String readerName = clusterName + "-r";
+        String endpointName = TestFixtures.uniqueName("rds-cep");
+        try {
+            rds.createDBCluster(b -> b
+                    .dbClusterIdentifier(clusterName)
+                    .engine("aurora-postgresql")
+                    .engineVersion("16.3")
+                    .masterUsername("admin")
+                    .masterUserPassword("cep-secret"));
+            for (String instance : List.of(writerName, readerName)) {
+                rds.createDBInstance(b -> b
+                        .dbInstanceIdentifier(instance)
+                        .dbClusterIdentifier(clusterName)
+                        .engine("aurora-postgresql")
+                        .dbInstanceClass("db.r6g.large"));
+            }
+
+            CreateDbClusterEndpointResponse created = rds.createDBClusterEndpoint(b -> b
+                    .dbClusterIdentifier(clusterName)
+                    .dbClusterEndpointIdentifier(endpointName)
+                    .endpointType("READER")
+                    .staticMembers(readerName)
+                    .tags(Tag.builder().key("team").value("analytics").build()));
+            assertThat(created.endpointType()).isEqualTo("CUSTOM");
+            assertThat(created.customEndpointType()).isEqualTo("READER");
+            assertThat(created.staticMembers()).containsExactly(readerName);
+            assertThat(created.dbClusterEndpointArn()).endsWith(":cluster-endpoint:" + endpointName);
+
+            List<DBClusterEndpoint> endpoints = rds.describeDBClusterEndpoints(b -> b
+                    .dbClusterIdentifier(clusterName)).dbClusterEndpoints();
+            assertThat(endpoints).extracting(DBClusterEndpoint::endpointType)
+                    .containsExactly("WRITER", "READER", "CUSTOM");
+
+            ModifyDbClusterEndpointResponse modified = rds.modifyDBClusterEndpoint(b -> b
+                    .dbClusterEndpointIdentifier(endpointName)
+                    .endpointType("ANY")
+                    .excludedMembers(writerName));
+            assertThat(modified.customEndpointType()).isEqualTo("ANY");
+            assertThat(modified.staticMembers()).isEmpty();
+            assertThat(modified.excludedMembers()).containsExactly(writerName);
+
+            assertThatThrownBy(() -> rds.createDBClusterEndpoint(b -> b
+                    .dbClusterIdentifier(clusterName)
+                    .dbClusterEndpointIdentifier(endpointName)
+                    .endpointType("ANY")))
+                    .isInstanceOf(DbClusterEndpointAlreadyExistsException.class);
+
+            assertThat(rds.deleteDBClusterEndpoint(b -> b.dbClusterEndpointIdentifier(endpointName)).status())
+                    .isEqualTo("deleting");
+            assertThatThrownBy(() -> rds.deleteDBClusterEndpoint(b -> b.dbClusterEndpointIdentifier(endpointName)))
+                    .isInstanceOf(DbClusterEndpointNotFoundException.class);
+        } finally {
+            try {
+                rds.deleteDBClusterEndpoint(b -> b.dbClusterEndpointIdentifier(endpointName));
+            } catch (DbClusterEndpointNotFoundException expected) {
+                // Already deleted by the test body.
+            }
+            deleteDbInstance(rds, readerName);
+            deleteDbInstance(rds, writerName);
+            try {
+                rds.deleteDBCluster(b -> b.dbClusterIdentifier(clusterName).skipFinalSnapshot(true));
+            } catch (Exception e) {
+                LOG.log(Level.WARNING, "Failed to clean up RDS cluster " + clusterName, e);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("Data API endpoint: enable, describe and disable on an Aurora cluster")
+    void sdkTogglesTheDataApiEndpoint() {
+        String clusterName = TestFixtures.uniqueName("rds-data-api");
+        try {
+            String arn = rds.createDBCluster(b -> b
+                    .dbClusterIdentifier(clusterName)
+                    .engine("aurora-postgresql")
+                    .engineVersion("16.3")
+                    .masterUsername("admin")
+                    .masterUserPassword("data-api-secret")).dbCluster().dbClusterArn();
+            assertThat(rds.enableHttpEndpoint(b -> b.resourceArn(arn)).httpEndpointEnabled()).isTrue();
+            assertThat(rds.describeDBClusters(b -> b.dbClusterIdentifier(clusterName))
+                    .dbClusters().get(0).httpEndpointEnabled()).isTrue();
+            assertThat(rds.disableHttpEndpoint(b -> b.resourceArn(arn)).httpEndpointEnabled()).isFalse();
+            assertThatThrownBy(() -> rds.enableHttpEndpoint(b -> b.resourceArn(arn + "-missing")))
+                    .isInstanceOf(ResourceNotFoundException.class);
+        } finally {
+            try {
+                rds.deleteDBCluster(b -> b.dbClusterIdentifier(clusterName).skipFinalSnapshot(true));
+            } catch (Exception e) {
+                LOG.log(Level.WARNING, "Failed to clean up RDS cluster " + clusterName, e);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("Log files: list an instance's log files and download a block")
+    void sdkReadsInstanceLogFiles() {
+        String instanceName = TestFixtures.uniqueName("rds-log-files");
+        try {
+            createDbInstance(rds, instanceName, "log-files-secret");
+            List<DescribeDBLogFilesDetails> files =
+                    rds.describeDBLogFiles(b -> b.dbInstanceIdentifier(instanceName)).describeDBLogFiles();
+            assertThat(files).isNotEmpty();
+            assertThat(files).allSatisfy(f -> {
+                assertThat(f.logFileName()).startsWith("error/postgresql.log.");
+                assertThat(f.size()).isPositive();
+                assertThat(f.lastWritten()).isPositive();
+            });
+            String name = files.get(0).logFileName();
+            DownloadDbLogFilePortionResponse portion = rds.downloadDBLogFilePortion(b -> b
+                    .dbInstanceIdentifier(instanceName).logFileName(name).marker("0").numberOfLines(1));
+            assertThat(portion.logFileData()).isNotEmpty();
+            assertThat(portion.marker()).isEqualTo("1");
+            assertThatThrownBy(() -> rds.downloadDBLogFilePortion(b -> b
+                    .dbInstanceIdentifier(instanceName).logFileName("error/no-such.log")))
+                    .isInstanceOf(DbLogFileNotFoundException.class);
+        } finally {
+            deleteDbInstance(rds, instanceName);
+        }
+    }
+
+    @Test
+    @DisplayName("IAM role associations: add, describe and remove for a cluster and an instance")
+    void sdkRoundTripsIamRoleAssociations() {
+        String clusterName = TestFixtures.uniqueName("rds-roles-cluster");
+        String instanceName = TestFixtures.uniqueName("rds-roles-db");
+        String s3Role = "arn:aws:iam::000000000000:role/rds-s3-import";
+        String lambdaRole = "arn:aws:iam::000000000000:role/rds-lambda";
+        try {
+            CreateDbClusterResponse created = rds.createDBCluster(b -> b
+                    .dbClusterIdentifier(clusterName)
+                    .engine("aurora-postgresql")
+                    .engineVersion("16.3")
+                    .masterUsername("admin")
+                    .masterUserPassword("roles-secret")
+                    .associatedRoles(DBClusterAssociatedRole.builder().roleArn(s3Role).featureName("s3Import").build()));
+            assertThat(created.dbCluster().associatedRoles())
+                    .extracting(DBClusterRole::roleArn, DBClusterRole::featureName, DBClusterRole::status)
+                    .containsExactly(tuple(s3Role, "s3Import", "ACTIVE"));
+
+            rds.addRoleToDBCluster(b -> b.dbClusterIdentifier(clusterName).roleArn(lambdaRole));
+            assertThat(rds.describeDBClusters(b -> b.dbClusterIdentifier(clusterName))
+                    .dbClusters().get(0).associatedRoles())
+                    .extracting(DBClusterRole::roleArn)
+                    .containsExactly(s3Role, lambdaRole);
+            assertThatThrownBy(() -> rds.addRoleToDBCluster(b -> b.dbClusterIdentifier(clusterName).roleArn(s3Role)))
+                    .isInstanceOf(DbClusterRoleAlreadyExistsException.class);
+            // A feature the engine does not list in SupportedFeatureNames is refused.
+            assertThatThrownBy(() -> rds.addRoleToDBCluster(b -> b.dbClusterIdentifier(clusterName)
+                    .roleArn("arn:aws:iam::000000000000:role/rds-sqlserver-s3").featureName("S3_INTEGRATION")))
+                    .isInstanceOfSatisfying(RdsException.class,
+                            e -> assertThat(e.awsErrorDetails().errorCode()).isEqualTo("InvalidParameterValue"));
+
+            rds.removeRoleFromDBCluster(b -> b.dbClusterIdentifier(clusterName).roleArn(s3Role));
+            assertThatThrownBy(() -> rds.removeRoleFromDBCluster(b -> b
+                    .dbClusterIdentifier(clusterName).roleArn(s3Role)))
+                    .isInstanceOf(DbClusterRoleNotFoundException.class);
+
+            createDbInstance(rds, instanceName, "roles-secret");
+            rds.addRoleToDBInstance(b -> b.dbInstanceIdentifier(instanceName).roleArn(s3Role).featureName("s3Import"));
+            assertThat(rds.describeDBInstances(b -> b.dbInstanceIdentifier(instanceName))
+                    .dbInstances().get(0).associatedRoles())
+                    .extracting(DBInstanceRole::roleArn, DBInstanceRole::featureName, DBInstanceRole::status)
+                    .containsExactly(tuple(s3Role, "s3Import", "ACTIVE"));
+            assertThatThrownBy(() -> rds.addRoleToDBInstance(b -> b
+                    .dbInstanceIdentifier(instanceName).roleArn(lambdaRole).featureName("s3Import")))
+                    .isInstanceOf(DbInstanceRoleAlreadyExistsException.class);
+
+            rds.removeRoleFromDBInstance(b -> b.dbInstanceIdentifier(instanceName).roleArn(s3Role).featureName("s3Import"));
+            assertThatThrownBy(() -> rds.removeRoleFromDBInstance(b -> b
+                    .dbInstanceIdentifier(instanceName).roleArn(s3Role).featureName("s3Import")))
+                    .isInstanceOf(DbInstanceRoleNotFoundException.class);
+        } finally {
+            deleteDbInstance(rds, instanceName);
+            try {
+                rds.deleteDBCluster(b -> b.dbClusterIdentifier(clusterName).skipFinalSnapshot(true));
+            } catch (Exception e) {
+                LOG.log(Level.WARNING, "Failed to clean up RDS cluster " + clusterName, e);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("Catalogue reads: engine versions, engine defaults and valid instance modifications")
+    void sdkReadsTheEngineCatalogue() {
+        DBEngineVersion postgres = rds.describeDBEngineVersions(b -> b
+                .engine("postgres").engineVersion("16.3")).dbEngineVersions().get(0);
+        assertThat(postgres.dbParameterGroupFamily()).isEqualTo("postgres16");
+        assertThat(postgres.validUpgradeTarget()).extracting(UpgradeTarget::engineVersion).contains("17.4");
+        assertThat(postgres.supportedEngineModes()).containsExactly("provisioned");
+        assertThat(postgres.exportableLogTypes()).containsExactly("postgresql", "upgrade");
+        assertThat(postgres.supportsLogExportsToCloudwatchLogs()).isTrue();
+        assertThat(postgres.supportsReadReplica()).isTrue();
+        assertThat(postgres.supportedFeatureNames()).containsExactly("s3Import", "s3Export", "Lambda");
+        assertThat(postgres.supportsParallelQuery()).isFalse();
+        assertThat(postgres.supportsGlobalDatabases()).isFalse();
+        assertThat(postgres.supportsBabelfish()).isFalse();
+
+        assertThat(rds.describeDBEngineVersions(b -> b.engine("mysql").defaultOnly(true)).dbEngineVersions())
+                .extracting(DBEngineVersion::engineVersion).containsExactly("8.0.36");
+        DBEngineVersion auroraMysql = rds.describeDBEngineVersions(b -> b
+                .engine("aurora-mysql").defaultOnly(true)).dbEngineVersions().get(0);
+        assertThat(auroraMysql.engineVersion()).isEqualTo("8.0.mysql_aurora.3.05.2");
+        assertThat(auroraMysql.supportsGlobalDatabases()).isTrue();
+        assertThat(auroraMysql.supportedFeatureNames()).isEmpty();
+
+        EngineDefaults defaults = rds.describeEngineDefaultParameters(b -> b
+                .dbParameterGroupFamily("postgres16")).engineDefaults();
+        assertThat(defaults.dbParameterGroupFamily()).isEqualTo("postgres16");
+        assertThat(rds.describeEngineDefaultClusterParameters(b -> b
+                .dbParameterGroupFamily("aurora-postgresql16")).engineDefaults().dbParameterGroupFamily())
+                .isEqualTo("aurora-postgresql16");
+
+        String instanceName = TestFixtures.uniqueName("rds-valid-mods");
+        try {
+            createDbInstance(rds, instanceName, "catalogue-secret");
+            ValidStorageOptions storage = rds.describeValidDBInstanceModifications(b -> b
+                    .dbInstanceIdentifier(instanceName)).validDBInstanceModificationsMessage().storage().get(0);
+            assertThat(storage.storageType()).isEqualTo("gp2");
+            // 20 GiB stays as it is, and any increase stores at least 10% more (22 GiB).
+            assertThat(storage.storageSize()).extracting(r -> r.from() + "-" + r.to())
+                    .containsExactly("20-20", "22-65536");
+        } finally {
+            deleteDbInstance(rds, instanceName);
         }
     }
 
@@ -849,7 +1271,7 @@ class RdsControlPlaneTest {
                     .majorEngineVersion("16")
                     .optionGroupDescription("attached to an instance"));
 
-            var instance = rds.createDBInstance(b -> b
+            CreateDbInstanceResponse instance = rds.createDBInstance(b -> b
                     .dbInstanceIdentifier(instanceName)
                     .engine("postgres")
                     .engineVersion("16.3")
@@ -883,7 +1305,7 @@ class RdsControlPlaneTest {
     void sdkReportsTheDefaultOptionGroupForAnUnattachedInstance() {
         String instanceName = TestFixtures.uniqueName("rds-db-default-og");
         try {
-            var instance = createDbInstance(rds, instanceName, "default-og-secret");
+            CreateDbInstanceResponse instance = createDbInstance(rds, instanceName, "default-og-secret");
 
             assertThat(instance.dbInstance().optionGroupMemberships())
                     .singleElement()

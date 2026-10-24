@@ -56,6 +56,14 @@ class CredentialScopeCoverageTest {
     private static final int MIN_ROUTES = 3;
     /** Fraction of a service's routes Floci must already serve before its scope is expected. */
     private static final double MIN_COVERAGE = 0.6;
+    /**
+     * A route this many signing names model is generic and says nothing about which of them Floci
+     * serves, so it is left out of every count. Without it Account Access ({@code account-access})
+     * reads as 2/3 served: AppConfig and seven others model {@code /applications/{id}}, and over a
+     * hundred model {@code /tags/{arn}}. The IoT Jobs Data Plane's routes are each shared with
+     * {@code iot} alone, so they stay in.
+     */
+    private static final int GENERIC_ROUTE_OWNERS = 3;
 
     @Inject
     ResolvedServiceCatalog catalog;
@@ -70,10 +78,19 @@ class CredentialScopeCoverageTest {
                 .collect(Collectors.toSet());
         Set<String> flociRoutes = flociRouteTemplates();
         Map<String, Set<String>> modelled = routeTemplatesBySigningName();
+        Map<String, Long> signingNamesPerRoute = modelled.values().stream()
+                .flatMap(Set::stream)
+                .collect(Collectors.groupingBy(route -> route, Collectors.counting()));
 
         Map<String, String> undeclared = new TreeMap<>();
-        modelled.forEach((signingName, routes) -> {
-            if (declared.contains(signingName) || routes.size() < MIN_ROUTES) {
+        modelled.forEach((signingName, modelledRoutes) -> {
+            if (declared.contains(signingName)) {
+                return;
+            }
+            List<String> routes = modelledRoutes.stream()
+                    .filter(route -> signingNamesPerRoute.get(route) < GENERIC_ROUTE_OWNERS)
+                    .toList();
+            if (routes.size() < MIN_ROUTES) {
                 return;
             }
             long served = routes.stream().filter(flociRoutes::contains).count();

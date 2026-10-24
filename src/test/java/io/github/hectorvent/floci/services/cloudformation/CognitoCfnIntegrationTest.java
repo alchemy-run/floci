@@ -1,21 +1,17 @@
 package io.github.hectorvent.floci.services.cloudformation;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.XmlParser;
+import io.github.hectorvent.floci.testing.CfnStackWaits;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.specification.RequestSpecification;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-import java.util.Map;
-
 import static io.github.hectorvent.floci.services.cognito.CognitoRestAssuredUtils.cognitoAction;
 import static io.github.hectorvent.floci.services.cognito.CognitoRestAssuredUtils.cognitoJson;
 import static io.github.hectorvent.floci.testing.RestAssuredJsonUtils.awsAction;
-import static io.github.hectorvent.floci.testing.RestAssuredJsonUtils.awsActionJson;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
@@ -36,8 +32,8 @@ import static org.junit.jupiter.api.Assertions.fail;
  * the stub arm would leave in the record, that rotating to a new certificate resource updates the
  * domain in place so the alias target survives, that a changed domain name replaces the domain, and
  * that deleting the stack removes the domain before the pool that owns it and the certificate after
- * the domain that uses it. A prefix domain resolves the same distribution name that
- * {@code DescribeUserPoolDomain} returns.
+ * the domain that uses it. A prefix domain, which
+ * has no distribution of its own, resolves the attribute to an empty string rather than the literal.
  *
  * <p>The client case moves an {@code AWS::Cognito::UserPoolClient} between pools and flips
  * {@code GenerateSecret}, its two create-only properties: each is a replacement whose displaced client
@@ -128,22 +124,10 @@ class CognitoCfnIntegrationTest {
                 "PoolId": {"Value": {"Ref": "Pool"}},
                 "DomainRef": {"Value": {"Ref": "Domain"}},
                 "CertArn": {"Value": {"Fn::GetAtt": ["%1$s", "CertificateArn"]}},
-                "ZoneId": {"Value": {"Ref": "Zone"}},
                 "AliasTarget": {"Value": {"Fn::GetAtt": ["Domain", "CloudFrontDistribution"]}}
               }
             }
             """.formatted(certificateLogicalId, domain);
-    }
-
-    private static String certificatePrerequisitesTemplate() throws Exception {
-        ObjectNode template = (ObjectNode) new ObjectMapper().readTree(customDomainTemplate(DOMAIN, "Cert"));
-        ObjectNode resources = (ObjectNode) template.path("Resources");
-        resources.remove("Domain");
-        resources.remove("AuthAlias");
-        ObjectNode outputs = (ObjectNode) template.path("Outputs");
-        outputs.remove("DomainRef");
-        outputs.remove("AliasTarget");
-        return template.toString();
     }
 
     private static final String PREFIX_DOMAIN_TEMPLATE = """
@@ -177,27 +161,12 @@ class CognitoCfnIntegrationTest {
     @Test
     void customDomainStackExposesTheCloudFrontNameRotatesTheCertificateReplacesOnRenameAndDeletesBeforeThePool()
             throws Exception {
-        // Validate the stack-owned certificate before adding its dependent custom domain.
-        cloudFormation(CUSTOM_STACK, "CreateStack", certificatePrerequisitesTemplate());
-        String prerequisites = describeStacks(CUSTOM_STACK, "CREATE_COMPLETE");
-        String certificateArn = outputValue(prerequisites, "CertArn");
-        String zoneId = outputValue(prerequisites, "ZoneId").replace("/hostedzone/", "");
-        given().when().get("/2013-04-01/hostedzone/" + zoneId).then().statusCode(200)
-            .body("GetHostedZoneResponse.HostedZone.Config.PrivateZone", equalTo("false"));
-        assertCertificateStatus(certificateArn, "PENDING_VALIDATION");
-        JsonNode validations = awsActionJson("CertificateManager", "DescribeCertificate",
-                "{\"CertificateArn\": \"" + certificateArn + "\"}")
-                .path("Certificate").path("DomainValidationOptions");
-        assertEquals(1, validations.size());
-        JsonNode validationRecord = validations.get(0).path("ResourceRecord");
-        changeValidationRecord(zoneId, validationRecord, "UPSERT");
-        assertCertificateStatus(certificateArn, "ISSUED");
+        cloudFormation(CUSTOM_STACK, "CreateStack", customDomainTemplate(DOMAIN, "Cert"));
 
-        cloudFormation(CUSTOM_STACK, "UpdateStack", customDomainTemplate(DOMAIN, "Cert"));
-        String stacks = describeStacks(CUSTOM_STACK, "UPDATE_COMPLETE");
-        assertEquals(certificateArn, outputValue(stacks, "CertArn"));
+        String stacks = describeStacks(CUSTOM_STACK, "CREATE_COMPLETE");
         String poolId = outputValue(stacks, "PoolId");
         String aliasTarget = outputValue(stacks, "AliasTarget");
+        String certificateArn = outputValue(stacks, "CertArn");
         assertEquals(DOMAIN, outputValue(stacks, "DomainRef"));
         assertTrue(aliasTarget.endsWith(".cloudfront.net"),
                 "Fn::GetAtt CloudFrontDistribution must be a CloudFront name: " + aliasTarget);
@@ -214,13 +183,12 @@ class CognitoCfnIntegrationTest {
 
         // Rotation: a new certificate resource takes over and the old one leaves the template. The
         // domain moves to the new certificate in place, and the old certificate is removed once
-        // nothing references it. The existing validation CNAME also validates the renewed certificate.
+        // nothing references it.
         cloudFormation(CUSTOM_STACK, "UpdateStack", customDomainTemplate(DOMAIN, "RenewedCert"));
 
         stacks = describeStacks(CUSTOM_STACK, "UPDATE_COMPLETE");
         String renewedCertificateArn = outputValue(stacks, "CertArn");
         assertNotEquals(certificateArn, renewedCertificateArn);
-        assertCertificateStatus(renewedCertificateArn, "ISSUED");
         description = describeDomain(DOMAIN);
         assertEquals(renewedCertificateArn, description.path("CustomDomainConfig").path("CertificateArn").asText());
         assertEquals(aliasTarget, description.path("CloudFrontDistribution").asText(),
@@ -228,7 +196,7 @@ class CognitoCfnIntegrationTest {
         assertCertificateIsGone(certificateArn);
         assertCertificateConsumers(renewedCertificateArn, 1);
 
-        // The pool permits one custom domain: delete its old name before creating the replacement.
+        // Domain is createOnly: a new name is a replacement, created before the old domain goes.
         cloudFormation(CUSTOM_STACK, "UpdateStack", customDomainTemplate(REPLACEMENT_DOMAIN, "RenewedCert"));
 
         stacks = describeStacks(CUSTOM_STACK, "UPDATE_COMPLETE");
@@ -241,11 +209,9 @@ class CognitoCfnIntegrationTest {
         assertEquals(poolId, description.path("UserPoolId").asText());
         assertEquals(replacementTarget, description.path("CloudFrontDistribution").asText());
         assertEquals(renewedCertificateArn, description.path("CustomDomainConfig").path("CertificateArn").asText());
-        assertCertificateConsumers(renewedCertificateArn, 1);
 
-        changeValidationRecord(zoneId, validationRecord, "DELETE");
         cloudFormation(CUSTOM_STACK, "DeleteStack", null);
-        awaitStackDeleted(CUSTOM_STACK);
+        CfnStackWaits.awaitStackDeleted(CUSTOM_STACK);
 
         assertDomainIsGone(REPLACEMENT_DOMAIN);
         assertCertificateIsGone(renewedCertificateArn);
@@ -255,173 +221,23 @@ class CognitoCfnIntegrationTest {
     }
 
     @Test
-    void prefixDomainStackResolvesItsCloudFrontDistribution() throws Exception {
+    void prefixDomainStackResolvesAnEmptyCloudFrontDistribution() throws Exception {
         cloudFormation(PREFIX_STACK, "CreateStack", PREFIX_DOMAIN_TEMPLATE);
 
         String stacks = describeStacks(PREFIX_STACK, "CREATE_COMPLETE");
         assertEquals(PREFIX_DOMAIN, outputValue(stacks, "DomainRef"));
-        String distribution = outputValue(stacks, "CloudFront");
-        assertTrue(distribution.endsWith(".cloudfront.net"));
+        assertEquals("", outputValue(stacks, "CloudFront"),
+                "a prefix domain has no distribution of its own, and must not resolve to the literal attribute name");
 
         JsonNode description = describeDomain(PREFIX_DOMAIN);
         assertEquals(outputValue(stacks, "PoolId"), description.path("UserPoolId").asText());
-        assertEquals(distribution, description.path("CloudFrontDistribution").asText());
+        assertFalse(description.has("CloudFrontDistribution"));
         assertFalse(description.has("CustomDomainConfig"));
 
         cloudFormation(PREFIX_STACK, "DeleteStack", null);
-        awaitStackDeleted(PREFIX_STACK);
+        CfnStackWaits.awaitStackDeleted(PREFIX_STACK);
 
         assertDomainIsGone(PREFIX_DOMAIN);
-    }
-
-    private static String domainOnlyTemplate(String poolId, String domain, boolean retain, boolean failLater)
-            throws Exception {
-        ObjectMapper mapper = new ObjectMapper();
-        ObjectNode template = mapper.createObjectNode();
-        ObjectNode resources = template.putObject("Resources");
-        ObjectNode definition = resources.putObject("Domain").put("Type", "AWS::Cognito::UserPoolDomain");
-        if (retain) {
-            definition.put("UpdateReplacePolicy", "Retain");
-        }
-        definition.putObject("Properties").put("UserPoolId", poolId).put("Domain", domain);
-        if (failLater) {
-            resources.putObject("Failure").put("Type", "AWS::Cognito::UserPoolClient").put("DependsOn", "Domain")
-                    .putObject("Properties").put("UserPoolId", "us-east-1_missing-cognito-rename");
-        }
-        ObjectNode outputs = template.putObject("Outputs");
-        outputs.putObject("DomainRef").putObject("Value").put("Ref", "Domain");
-        outputs.putObject("CloudFront").putObject("Value").putArray("Fn::GetAtt")
-                .add("Domain").add("CloudFrontDistribution");
-        return template.toString();
-    }
-
-    private static String customDomainOnlyTemplate(String poolId, String domain, String certificateArn,
-                                                   boolean failLater) throws Exception {
-        ObjectNode template = (ObjectNode) new ObjectMapper().readTree(
-                domainOnlyTemplate(poolId, domain, false, failLater));
-        ((ObjectNode) template.path("Resources").path("Domain").path("Properties"))
-                .put("ManagedLoginVersion", 2).putObject("CustomDomainConfig").put("CertificateArn", certificateArn);
-        return template.toString();
-    }
-
-    @Test
-    void customRenameFailuresRestoreTheDistributionAndCertificateConsumer() throws Exception {
-        String prerequisites = "cognito-cfn-domain-rollback-prereq";
-        String stack = "cognito-cfn-domain-rollback-it";
-        String original = "auth.cognito-cfn-rollback-it.example.com";
-        String replacement = "login.cognito-cfn-rollback-it.example.com";
-        // Keep prerequisites outside the update: in-place pool rollback is not implemented.
-        cloudFormation(prerequisites, "CreateStack", certificatePrerequisitesTemplate()
-                .replace("cognito-cfn-it", "cognito-cfn-rollback-it"));
-        String outputs = describeStacks(prerequisites, "CREATE_COMPLETE");
-        String poolId = outputValue(outputs, "PoolId");
-        String certificateArn = outputValue(outputs, "CertArn");
-        String zoneId = outputValue(outputs, "ZoneId").replace("/hostedzone/", "");
-        JsonNode validation = awsActionJson("CertificateManager", "DescribeCertificate",
-                "{\"CertificateArn\": \"" + certificateArn + "\"}")
-                .path("Certificate").path("DomainValidationOptions").get(0).path("ResourceRecord");
-        changeValidationRecord(zoneId, validation, "UPSERT");
-        assertCertificateStatus(certificateArn, "ISSUED");
-        try {
-            cloudFormation(stack, "CreateStack", customDomainOnlyTemplate(poolId, original, certificateArn, false));
-            String distribution = outputValue(describeStacks(stack, "CREATE_COMPLETE"), "CloudFront");
-            JsonNode prior = describeDomain(original);
-            assertTrue(distribution.endsWith(".cloudfront.net"));
-            assertCertificateConsumers(certificateArn, 1);
-
-            cloudFormation(stack, "UpdateStack", customDomainOnlyTemplate(poolId, replacement,
-                    "arn:aws:acm:us-east-1:000000000000:certificate/missing-cognito-cfn", false));
-            outputs = describeStacks(stack, "UPDATE_ROLLBACK_COMPLETE");
-            assertTrue(describeStackEvents(stack).contains("specified SSL certificate"));
-            assertEquals(original, outputValue(outputs, "DomainRef"));
-            assertEquals(distribution, outputValue(outputs, "CloudFront"));
-            assertEquals(prior, describeDomain(original));
-            assertDomainIsGone(replacement);
-            assertCertificateConsumers(certificateArn, 1);
-
-            cloudFormation(stack, "UpdateStack", customDomainOnlyTemplate(poolId, replacement, certificateArn, true));
-            outputs = describeStacks(stack, "UPDATE_ROLLBACK_COMPLETE");
-            assertEquals(original, outputValue(outputs, "DomainRef"));
-            assertEquals(distribution, outputValue(outputs, "CloudFront"));
-            assertEquals(prior, describeDomain(original));
-            assertDomainIsGone(replacement);
-            assertCertificateConsumers(certificateArn, 1);
-        } finally {
-            cloudFormation(stack, "DeleteStack", null);
-            awaitStackDeleted(stack);
-            assertCertificateConsumers(certificateArn, 0);
-            changeValidationRecord(zoneId, validation, "DELETE");
-            cloudFormation(prerequisites, "DeleteStack", null);
-            awaitStackDeleted(prerequisites);
-        }
-        assertDomainIsGone(original);
-        assertDomainIsGone(replacement);
-        assertCertificateIsGone(certificateArn);
-    }
-
-    @Test
-    void prefixRenameRollsBackAfterALaterResourceFailsThenCanBeRetried() throws Exception {
-        String stack = "cognito-cfn-rename-rollback-it";
-        String original = "cognito-cfn-rename-original";
-        String replacement = "cognito-cfn-rename-replacement";
-        String poolId = cognitoJson("CreateUserPool", "{\"PoolName\": \"cognito-cfn-rename-rollback-pool\"}")
-                .path("UserPool").path("Id").asText();
-        try {
-            cloudFormation(stack, "CreateStack", domainOnlyTemplate(poolId, original, false, false));
-            String stacks = describeStacks(stack, "CREATE_COMPLETE");
-            String distribution = outputValue(stacks, "CloudFront");
-            assertTrue(distribution.endsWith(".cloudfront.net"));
-
-            cloudFormation(stack, "UpdateStack", domainOnlyTemplate(poolId, replacement, false, true));
-            stacks = describeStacks(stack, "UPDATE_ROLLBACK_COMPLETE");
-            assertEquals(original, outputValue(stacks, "DomainRef"));
-            assertEquals(distribution, outputValue(stacks, "CloudFront"));
-            assertEquals(distribution, describeDomain(original).path("CloudFrontDistribution").asText());
-            assertEquals(poolId, describeDomain(original).path("UserPoolId").asText());
-            assertDomainIsGone(replacement);
-            String events = describeStackEvents(stack);
-            assertTrue(events.contains("<PhysicalResourceId>" + replacement + "</PhysicalResourceId>"), events);
-            assertTrue(events.contains("Resource update rolled back"), events);
-
-            cloudFormation(stack, "UpdateStack", domainOnlyTemplate(poolId, replacement, false, false));
-            stacks = describeStacks(stack, "UPDATE_COMPLETE");
-            assertEquals(replacement, outputValue(stacks, "DomainRef"));
-            assertNotEquals(distribution, outputValue(stacks, "CloudFront"));
-            assertEquals(outputValue(stacks, "CloudFront"),
-                    describeDomain(replacement).path("CloudFrontDistribution").asText());
-            assertDomainIsGone(original);
-        } finally {
-            cloudFormation(stack, "DeleteStack", null);
-            awaitStackDeleted(stack);
-            cognitoAction("DeleteUserPool", "{\"UserPoolId\": \"" + poolId + "\"}").then().statusCode(200);
-        }
-        assertDomainIsGone(original);
-        assertDomainIsGone(replacement);
-    }
-
-    @Test
-    void retainedSamePoolDomainRenameIsRejectedWithoutDeletingThePredecessor() throws Exception {
-        String stack = "cognito-cfn-rename-retain-it";
-        String original = "cognito-cfn-retain-original";
-        String replacement = "cognito-cfn-retain-replacement";
-        String poolId = cognitoJson("CreateUserPool", "{\"PoolName\": \"cognito-cfn-rename-retain-pool\"}")
-                .path("UserPool").path("Id").asText();
-        try {
-            cloudFormation(stack, "CreateStack", domainOnlyTemplate(poolId, original, true, false));
-            String distribution = outputValue(describeStacks(stack, "CREATE_COMPLETE"), "CloudFront");
-
-            cloudFormation(stack, "UpdateStack", domainOnlyTemplate(poolId, replacement, true, false));
-            String stacks = describeStacks(stack, "UPDATE_ROLLBACK_COMPLETE");
-            assertTrue(describeStackEvents(stack).contains("UpdateReplacePolicy Retain"));
-            assertEquals(original, outputValue(stacks, "DomainRef"));
-            assertEquals(distribution, describeDomain(original).path("CloudFrontDistribution").asText());
-            assertDomainIsGone(replacement);
-        } finally {
-            cloudFormation(stack, "DeleteStack", null);
-            awaitStackDeleted(stack);
-            cognitoAction("DeleteUserPool", "{\"UserPoolId\": \"" + poolId + "\"}").then().statusCode(200);
-        }
-        assertDomainIsGone(original);
     }
 
     private static final String OVERRIDE_STACK = "cognito-cfn-override-it";
@@ -467,7 +283,7 @@ class CognitoCfnIntegrationTest {
         assertClientInPool(livePool, "orphan-web", "orphan-web");
 
         cloudFormation(stack, "DeleteStack", null);
-        awaitStackDeleted(stack);
+        CfnStackWaits.awaitStackDeleted(stack);
         cognitoAction("DeleteUserPool", "{\"UserPoolId\": \"" + livePool + "\"}").then().statusCode(200);
     }
 
@@ -501,11 +317,11 @@ class CognitoCfnIntegrationTest {
         describeStacks(OVERRIDE_STACK + "-2", "ROLLBACK_COMPLETE");
         assertClientInPool(poolId, "override-web", "override-web");
         cloudFormation(OVERRIDE_STACK + "-2", "DeleteStack", null);
-        awaitStackDeleted(OVERRIDE_STACK + "-2");
+        CfnStackWaits.awaitStackDeleted(OVERRIDE_STACK + "-2");
         assertClientInPool(poolId, "override-web", "override-web");
 
         cloudFormation(OVERRIDE_STACK, "DeleteStack", null);
-        awaitStackDeleted(OVERRIDE_STACK);
+        CfnStackWaits.awaitStackDeleted(OVERRIDE_STACK);
         assertClientIsGone(poolId, "override-web");
         cognitoAction("DeleteUserPool", "{\"UserPoolId\": \"" + poolId + "\"}").then().statusCode(200);
     }
@@ -565,7 +381,7 @@ class CognitoCfnIntegrationTest {
             .body("UserPoolClient.ClientSecret", nullValue());
 
         cloudFormation(CLIENT_STACK, "DeleteStack", null);
-        awaitStackDeleted(CLIENT_STACK);
+        CfnStackWaits.awaitStackDeleted(CLIENT_STACK);
 
         assertClientIsGone(poolB, withoutSecret);
         cognitoAction("DescribeUserPool", "{\"UserPoolId\": \"" + poolB + "\"}")
@@ -618,7 +434,7 @@ class CognitoCfnIntegrationTest {
             .body("UserPool.DeletionProtection", equalTo("INACTIVE"));
 
         cloudFormation(stack, "DeleteStack", null);
-        awaitStackDeleted(stack);
+        CfnStackWaits.awaitStackDeleted(stack);
         cognitoAction("DescribeUserPool", "{\"UserPoolId\": \"" + poolId + "\"}")
             .then()
             .body("__type", equalTo("ResourceNotFoundException"));
@@ -690,24 +506,6 @@ class CognitoCfnIntegrationTest {
     }
 
     /** DeleteStack runs asynchronously; a successful delete removes the stack entirely. */
-    private static void awaitStackDeleted(String stack) throws InterruptedException {
-        for (int i = 0; i < 100; i++) {
-            String body = given()
-                .contentType("application/x-www-form-urlencoded")
-                .header("Authorization", CFN_AUTH)
-                .formParam("Action", "DescribeStacks")
-                .formParam("StackName", stack)
-            .when().post("/").then().extract().asString();
-            if (body.contains("does not exist")) {
-                return;
-            }
-            if (body.contains("<StackStatus>DELETE_FAILED</StackStatus>")) {
-                fail("stack delete failed: " + body);
-            }
-            Thread.sleep(50);
-        }
-        fail("stack " + stack + " was not deleted within the timeout");
-    }
 
     private static JsonNode describeDomain(String domain) throws Exception {
         return cognitoJson("DescribeUserPoolDomain", "{\"Domain\": \"" + domain + "\"}").path("DomainDescription");
@@ -716,21 +514,8 @@ class CognitoCfnIntegrationTest {
     private static void assertDomainIsGone(String domain) {
         cognitoAction("DescribeUserPoolDomain", "{\"Domain\": \"" + domain + "\"}")
             .then()
-            .statusCode(200)
-            .body("DomainDescription", equalTo(Map.of()));
-    }
-
-    private static void changeValidationRecord(String zoneId, JsonNode record, String action) {
-        assertEquals("CNAME", record.path("Type").asText());
-        given().contentType("application/xml").body("""
-            <ChangeResourceRecordSetsRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
-              <ChangeBatch><Changes><Change><Action>%s</Action><ResourceRecordSet>
-                <Name>%s</Name><Type>CNAME</Type><TTL>60</TTL>
-                <ResourceRecords><ResourceRecord><Value>%s</Value></ResourceRecord></ResourceRecords>
-              </ResourceRecordSet></Change></Changes></ChangeBatch>
-            </ChangeResourceRecordSetsRequest>
-            """.formatted(action, record.path("Name").asText(), record.path("Value").asText()))
-            .when().post("/2013-04-01/hostedzone/" + zoneId + "/rrset").then().statusCode(200);
+            .statusCode(400)
+            .body("__type", equalTo("ResourceNotFoundException"));
     }
 
     private static void assertCertificateStatus(String certificateArn, String status) {

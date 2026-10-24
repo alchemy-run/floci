@@ -10,6 +10,12 @@ public class BasePathMapping {
     private String apiMappingId;
     private String restApiId;
     private String stage;
+    private String apiType;
+    /**
+     * The v2 {@code apiMappingId}, given when the mapping is created and kept when its key changes.
+     * Null on a record persisted before ids were stored, whose id is derived from its stored path.
+     */
+    private String apiMappingId;
 
     public BasePathMapping() {
         this.basePath = "(none)";
@@ -32,4 +38,10 @@ public class BasePathMapping {
 
     public String getStage() { return stage; }
     public void setStage(String stage) { this.stage = stage; }
+
+    public String getApiType() { return apiType; }
+    public void setApiType(String apiType) { this.apiType = apiType; }
+
+    public String getApiMappingId() { return apiMappingId; }
+    public void setApiMappingId(String apiMappingId) { this.apiMappingId = apiMappingId; }
 }

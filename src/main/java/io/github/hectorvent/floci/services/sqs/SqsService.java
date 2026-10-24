@@ -5,10 +5,17 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.config.EmulatorConfig.SqsServiceConfig.EndpointStrategy;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
+import io.github.hectorvent.floci.core.common.AwsEndpoints;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.AwsRegions;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
+import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.RequestContext;
 import io.github.hectorvent.floci.core.common.Resettable;
 import io.github.hectorvent.floci.core.resource.ExplorerResource;
 import io.github.hectorvent.floci.core.resource.ResourceProvider;
@@ -16,12 +23,14 @@ import io.github.hectorvent.floci.core.resource.SupportedResourceType;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.sns.SnsService;
 import io.github.hectorvent.floci.services.sqs.model.Message;
 import io.github.hectorvent.floci.services.sqs.model.MessageAttributeValue;
 import io.github.hectorvent.floci.services.sqs.model.Queue;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
@@ -57,21 +66,34 @@ public class SqsService implements Resettable, ResourceProvider {
 
     private static final Logger LOG = Logger.getLogger(SqsService.class);
     private static final int DEDUP_WINDOW_SECONDS = 300; // 5 minutes
+    private static final int DEDUP_LOCK_STRIPES = 256;
     private static final int MAX_RECEIVE_WAIT_TIME_SECONDS = 20;
+    private static final int MAX_BATCH_ENTRIES = 10;
+    private static final int MAX_LIST_QUEUES_RESULTS = 1000;
+    private static final String LIST_QUEUES_TOKEN_NAMESPACE = "sqs-list-queues";
     private static final int MAX_TERMINAL_MOVE_TASKS = 10;
     private static final Duration TERMINAL_MOVE_TASK_TTL = Duration.ofHours(1);
     /** AWS accepts MaximumMessageSize between 1 KiB and 1 MiB; 1 MiB is also the default.
      * Both the maximum and the default were raised from 256 KiB in August 2025. */
     private static final int MIN_MAXIMUM_MESSAGE_SIZE = 1024;
     private static final int AWS_MAXIMUM_MESSAGE_SIZE = 1048576;
+    private static final int DEFAULT_MESSAGE_RETENTION_PERIOD_SECONDS = 345600;
+    private static final int MIN_MESSAGE_RETENTION_PERIOD_SECONDS = 60;
+    private static final int MAX_MESSAGE_RETENTION_PERIOD_SECONDS = 1209600;
+    /** CloudWatch keeps reporting a queue for six hours after its last action, or while it holds a message. */
+    private static final Duration METRICS_ACTIVE_WINDOW = Duration.ofHours(6);
 
     private final StorageBackend<String, Queue> queueStore;
     private final StorageBackend<String, List<Message>> messageStore;
     private final StorageBackend<String, Map<String, Long>> dedupStore;
+    private final StorageBackend<String, Map<String, Map<String, String>>> dedupIdentityStore;
     private final ConcurrentHashMap<String, GuardedMessageQueue> messagesByQueue = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Object> queueLocks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, RedrivePolicy> redrivePolicyCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, ConcurrentHashMap<String, Instant>> deduplicationCache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, ConcurrentHashMap<String, DeduplicationIdentity>> deduplicationIdentityCache =
+            new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Object[]> deduplicationLocks = new ConcurrentHashMap<>();
     /** Move tasks keyed by opaque task handle. */
     private final MoveTaskStore moveTasksByHandle;
     /** Per-task cancellation signal: the move worker waits on it between moves, so a cancel wakes
@@ -90,6 +112,9 @@ public class SqsService implements Resettable, ResourceProvider {
     private static final HexFormat HEX = HexFormat.of();
 
     private record RedrivePolicy(int maxReceiveCount, String deadLetterTargetArn) {
+    }
+
+    private record DeduplicationIdentity(String messageId, long sequenceNumber) {
     }
 
     public record MoveTask(String taskHandle, String sourceArn, String destinationArn,
@@ -255,19 +280,30 @@ public class SqsService implements Resettable, ResourceProvider {
      * the AWS limit widens this bound so the configured default stays settable explicitly. */
     private final int maxAllowedMessageSize;
     private final String baseUrl;
+    private final EndpointStrategy endpointStrategy;
     private final RegionResolver regionResolver;
     private final boolean clearFifoDeduplicationCacheOnPurge;
     private final SnsService snsService;
     private final Clock clock;
+    private final String receiptHandleSecret;
+    private final Instance<RequestContext> requestContextInstance;
+    private final IamService iamService;
 
     public SqsService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver,
                       SnsService snsService) {
         this(storageFactory, config, regionResolver, snsService, Clock.systemUTC());
     }
 
-    @Inject
     public SqsService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver,
                       SnsService snsService, Clock clock) {
+        this(storageFactory, config, regionResolver, snsService, clock, null, null);
+    }
+
+    @Inject
+    public SqsService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver,
+                      SnsService snsService, Clock clock,
+                      Instance<RequestContext> requestContextInstance,
+                      IamService iamService) {
         this(
                 storageFactory.create("sqs", "sqs-queues.json",
                         new TypeReference<Map<String, Queue>>() {
@@ -278,13 +314,20 @@ public class SqsService implements Resettable, ResourceProvider {
                 storageFactory.create("sqs", "sqs-dedup.json",
                         new TypeReference<Map<String, Map<String, Long>>>() {
                         }),
+                storageFactory.create("sqs", "sqs-dedup-identities.json",
+                        new TypeReference<Map<String, Map<String, Map<String, String>>>>() {
+                        }),
                 config.services().sqs().defaultVisibilityTimeout(),
                 config.services().sqs().maxMessageSize(),
                 config.effectiveBaseUrl(),
                 regionResolver,
                 config.services().sqs().clearFifoDeduplicationCacheOnPurge(),
                 snsService,
-                clock
+                clock,
+                config.services().sqs().receiptHandleSecret(),
+                requestContextInstance,
+                iamService,
+                config.services().sqs().endpointStrategy()
         );
     }
 
@@ -294,13 +337,21 @@ public class SqsService implements Resettable, ResourceProvider {
     SqsService(StorageBackend<String, Queue> queueStore,
                int defaultVisibilityTimeout, int maxMessageSize, String baseUrl) {
         this(queueStore, null, null, defaultVisibilityTimeout, maxMessageSize, baseUrl,
-                new RegionResolver("us-east-1", "000000000000"), false, null);
+                new RegionResolver("us-east-1", "000000000000"), false, null); // partition-literal: test-shaped constructor default
     }
 
     SqsService(StorageBackend<String, Queue> queueStore,
                int defaultVisibilityTimeout, int maxMessageSize, String baseUrl, Clock clock) {
         this(queueStore, null, null, defaultVisibilityTimeout, maxMessageSize, baseUrl,
-                new RegionResolver("us-east-1", "000000000000"), false, null, clock);
+                new RegionResolver("us-east-1", "000000000000"), false, null, clock); // partition-literal: test-shaped constructor default
+    }
+
+    SqsService(StorageBackend<String, Queue> queueStore,
+               int defaultVisibilityTimeout, int maxMessageSize, String baseUrl, Clock clock,
+               Instance<RequestContext> requestContextInstance, IamService iamService) {
+        this(queueStore, null, null, null, defaultVisibilityTimeout, maxMessageSize, baseUrl,
+                new RegionResolver("us-east-1", "000000000000"), false, null, clock, // partition-literal: test-shaped constructor default
+                ReceiptHandle.DEFAULT_SECRET, requestContextInstance, iamService);
     }
 
     SqsService(StorageBackend<String, Queue> queueStore, StorageBackend<String, List<Message>> messageStore,
@@ -325,20 +376,76 @@ public class SqsService implements Resettable, ResourceProvider {
                int defaultVisibilityTimeout, int maxMessageSize, String baseUrl,
                RegionResolver regionResolver, boolean clearFifoDeduplicationCacheOnPurge,
                SnsService snsService, Clock clock) {
+        this(queueStore, messageStore, dedupStore, null, defaultVisibilityTimeout, maxMessageSize,
+                baseUrl, regionResolver, clearFifoDeduplicationCacheOnPurge, snsService, clock);
+    }
+
+    SqsService(StorageBackend<String, Queue> queueStore, StorageBackend<String, List<Message>> messageStore,
+               StorageBackend<String, Map<String, Long>> dedupStore,
+               StorageBackend<String, Map<String, Map<String, String>>> dedupIdentityStore,
+               int defaultVisibilityTimeout, int maxMessageSize, String baseUrl,
+               RegionResolver regionResolver, boolean clearFifoDeduplicationCacheOnPurge,
+               SnsService snsService, Clock clock) {
+        this(queueStore, messageStore, dedupStore, dedupIdentityStore, defaultVisibilityTimeout, maxMessageSize,
+                baseUrl, regionResolver, clearFifoDeduplicationCacheOnPurge, snsService, clock,
+                ReceiptHandle.DEFAULT_SECRET);
+    }
+
+    SqsService(StorageBackend<String, Queue> queueStore, StorageBackend<String, List<Message>> messageStore,
+               StorageBackend<String, Map<String, Long>> dedupStore,
+               StorageBackend<String, Map<String, Map<String, String>>> dedupIdentityStore,
+               int defaultVisibilityTimeout, int maxMessageSize, String baseUrl,
+               RegionResolver regionResolver, boolean clearFifoDeduplicationCacheOnPurge,
+               SnsService snsService, Clock clock, String receiptHandleSecret) {
+        this(queueStore, messageStore, dedupStore, dedupIdentityStore, defaultVisibilityTimeout, maxMessageSize,
+                baseUrl, regionResolver, clearFifoDeduplicationCacheOnPurge, snsService, clock,
+                receiptHandleSecret, null, null);
+    }
+
+    SqsService(StorageBackend<String, Queue> queueStore, StorageBackend<String, List<Message>> messageStore,
+               StorageBackend<String, Map<String, Long>> dedupStore,
+               StorageBackend<String, Map<String, Map<String, String>>> dedupIdentityStore,
+               int defaultVisibilityTimeout, int maxMessageSize, String baseUrl,
+               RegionResolver regionResolver, boolean clearFifoDeduplicationCacheOnPurge,
+               SnsService snsService, Clock clock, String receiptHandleSecret,
+               Instance<RequestContext> requestContextInstance, IamService iamService) {
+        this(queueStore, messageStore, dedupStore, dedupIdentityStore, defaultVisibilityTimeout, maxMessageSize,
+                baseUrl, regionResolver, clearFifoDeduplicationCacheOnPurge, snsService, clock,
+                receiptHandleSecret, requestContextInstance, iamService, EndpointStrategy.FLOCI);
+    }
+
+    SqsService(StorageBackend<String, Queue> queueStore, StorageBackend<String, List<Message>> messageStore,
+               StorageBackend<String, Map<String, Long>> dedupStore,
+               StorageBackend<String, Map<String, Map<String, String>>> dedupIdentityStore,
+               int defaultVisibilityTimeout, int maxMessageSize, String baseUrl,
+               RegionResolver regionResolver, boolean clearFifoDeduplicationCacheOnPurge,
+               SnsService snsService, Clock clock, String receiptHandleSecret,
+               Instance<RequestContext> requestContextInstance, IamService iamService,
+               EndpointStrategy endpointStrategy) {
         this.queueStore = queueStore;
         this.messageStore = messageStore;
         this.dedupStore = dedupStore;
+        this.dedupIdentityStore = dedupIdentityStore;
         this.defaultVisibilityTimeout = defaultVisibilityTimeout;
         this.maxMessageSize = maxMessageSize;
         this.maxAllowedMessageSize = Math.max(AWS_MAXIMUM_MESSAGE_SIZE, maxMessageSize);
         this.baseUrl = baseUrl;
+        this.endpointStrategy = endpointStrategy;
         this.regionResolver = regionResolver;
         this.clearFifoDeduplicationCacheOnPurge = clearFifoDeduplicationCacheOnPurge;
         this.snsService = snsService;
         this.clock = clock;
+        this.receiptHandleSecret = receiptHandleSecret;
+        this.requestContextInstance = requestContextInstance;
+        this.iamService = iamService;
         this.moveTasksByHandle = new MoveTaskStore(clock);
+        rekeyToAccountAndName(queueStore);
+        rekeyToAccountAndName(messageStore);
+        rekeyToAccountAndName(dedupStore);
+        rekeyToAccountAndName(dedupIdentityStore);
         loadPersistedMessages();
         loadPersistedDedup();
+        loadPersistedDedupIdentities();
     }
 
     @PreDestroy
@@ -352,9 +459,95 @@ public class SqsService implements Resettable, ResourceProvider {
         queueLocks.clear();
         redrivePolicyCache.clear();
         deduplicationCache.clear();
+        deduplicationIdentityCache.clear();
+        deduplicationLocks.clear();
         moveTaskCancellation.values().forEach(MoveTaskCancellation::request);
         moveTaskCancellation.clear();
         moveTasksByHandle.clear();
+    }
+
+    /**
+     * Moves entries stored under a longer queue path, as a base URL with a path of its own gave
+     * them, to the {@code region::/<account>/<name>} key every lookup now uses. It runs in the
+     * constructor, before any request can reach the stores. An entry whose destination already
+     * holds a different value stays where it is, so no stored data is dropped.
+     */
+    private static <V> void rekeyToAccountAndName(StorageBackend<String, V> store) {
+        if (store == null) {
+            return;
+        }
+        if (store instanceof AccountAwareStorageBackend<V> aware) {
+            aware.scanAllAccountsWithRawKeys().forEach((rawKey, value) -> {
+                boolean prefixed = AccountAwareStorageBackend.hasAccountPrefix(rawKey);
+                String storedKey = prefixed ? rawKey.substring(13) : rawKey;
+                if (!hasLongerQueuePath(storedKey)) {
+                    return;
+                }
+                String key = accountAndNameKey(storedKey);
+                String accountId = prefixed ? rawKey.substring(0, 12) : queuePathAccount(key, aware.accountId());
+                Optional<V> existing = aware.getForAccount(accountId, key);
+                if (existing.isEmpty()) {
+                    aware.putForAccount(accountId, key, value);
+                } else if (!sameValue(existing.get(), value)) {
+                    LOG.warnv("SQS entry {0} kept in place; {1} already holds a different value", rawKey, key);
+                    return;
+                }
+                aware.deleteRaw(rawKey);
+            });
+            return;
+        }
+        for (String storedKey : new ArrayList<>(store.keys())) {
+            if (!hasLongerQueuePath(storedKey)) {
+                continue;
+            }
+            Optional<V> value = store.get(storedKey);
+            if (value.isEmpty()) {
+                continue;
+            }
+            String key = accountAndNameKey(storedKey);
+            Optional<V> existing = store.get(key);
+            if (existing.isEmpty()) {
+                store.put(key, value.get());
+            } else if (!sameValue(existing.get(), value.get())) {
+                LOG.warnv("SQS entry {0} kept in place; {1} already holds a different value", storedKey, key);
+                continue;
+            }
+            store.delete(storedKey);
+        }
+    }
+
+    private static final ObjectMapper MIGRATION_MAPPER = new ObjectMapper().registerModule(new JavaTimeModule());
+
+    /** Whether two stored values hold the same data, compared as the storage layer serializes them. */
+    private static boolean sameValue(Object a, Object b) {
+        if (Objects.equals(a, b)) {
+            return true;
+        }
+        try {
+            return MIGRATION_MAPPER.valueToTree(a).equals(MIGRATION_MAPPER.valueToTree(b));
+        } catch (IllegalArgumentException e) {
+            LOG.debugv("SQS migration could not compare stored values: {0}", e.getMessage());
+            return false;
+        }
+    }
+
+    /** The account segment of a {@code region::/<account>/<name>} key, or {@code fallback} when it is not an account id. */
+    private static String queuePathAccount(String key, String fallback) {
+        String path = key.substring(key.indexOf("::") + 2);
+        String account = path.length() > 1 ? path.substring(1, Math.max(1, path.indexOf('/', 1))) : "";
+        return account.matches("\\d{12}") ? account : fallback;
+    }
+
+    private static boolean hasLongerQueuePath(String storageKey) {
+        return !accountAndNameKey(storageKey).equals(storageKey);
+    }
+
+    private static String accountAndNameKey(String storageKey) {
+        int sep = storageKey.indexOf("::");
+        if (sep < 0) {
+            return storageKey;
+        }
+        return storageKey.substring(0, sep + 2) + accountAndName(storageKey.substring(sep + 2));
     }
 
     private void loadPersistedMessages() {
@@ -363,11 +556,12 @@ public class SqsService implements Resettable, ResourceProvider {
         }
         if (messageStore instanceof AccountAwareStorageBackend<List<Message>> aware) {
             aware.scanAllAccountsAsMap().forEach((key, msgs) ->
-                    messagesByQueue.put(key, new GuardedMessageQueue(msgs, messageStore, key)));
+                    messagesByQueue.put(key, new GuardedMessageQueue(msgs, messageStore, key, receiptHandleSecret)));
         } else {
             for (String key : messageStore.keys()) {
                 messageStore.get(key).ifPresent(msgs ->
-                        messagesByQueue.put(key, new GuardedMessageQueue(msgs, messageStore, key)));
+                        messagesByQueue.put(key,
+                                new GuardedMessageQueue(msgs, messageStore, key, receiptHandleSecret)));
             }
         }
     }
@@ -376,7 +570,7 @@ public class SqsService implements Resettable, ResourceProvider {
         if (dedupStore == null) {
             return;
         }
-        Instant now = Instant.now();
+        Instant now = clock.instant();
         if (dedupStore instanceof AccountAwareStorageBackend<Map<String, Long>> aware) {
             aware.scanAllAccountsAsMap().forEach((key, entries) -> loadDedupEntries(key, entries, now));
         } else {
@@ -399,9 +593,47 @@ public class SqsService implements Resettable, ResourceProvider {
         }
     }
 
+    private void loadPersistedDedupIdentities() {
+        if (dedupIdentityStore == null) {
+            return;
+        }
+        if (dedupIdentityStore instanceof AccountAwareStorageBackend<Map<String, Map<String, String>>> aware) {
+            aware.scanAllAccountsAsMap().forEach(this::loadDedupIdentities);
+        } else {
+            for (String key : dedupIdentityStore.keys()) {
+                dedupIdentityStore.get(key).ifPresent(identities -> loadDedupIdentities(key, identities));
+            }
+        }
+    }
+
+    private void loadDedupIdentities(String key, Map<String, Map<String, String>> entries) {
+        ConcurrentHashMap<String, Instant> activeDedupEntries = deduplicationCache.get(key);
+        if (activeDedupEntries == null) {
+            return;
+        }
+        ConcurrentHashMap<String, DeduplicationIdentity> activeIdentities = new ConcurrentHashMap<>();
+        entries.forEach((dedupKey, identityFields) -> {
+            if (!activeDedupEntries.containsKey(dedupKey)) {
+                return;
+            }
+            try {
+                String messageId = identityFields.get("messageId");
+                long sequenceNumber = Long.parseLong(identityFields.get("sequenceNumber"));
+                if (messageId != null && !messageId.isBlank()) {
+                    activeIdentities.put(dedupKey, new DeduplicationIdentity(messageId, sequenceNumber));
+                }
+            } catch (RuntimeException e) {
+                LOG.warnv("Ignoring invalid FIFO deduplication identity for queue {0}, key {1}", key, dedupKey);
+            }
+        });
+        if (!activeIdentities.isEmpty()) {
+            deduplicationIdentityCache.put(key, activeIdentities);
+        }
+    }
+
     private GuardedMessageQueue getOrCreateQueue(String storageKey) {
         return messagesByQueue.computeIfAbsent(storageKey,
-                k -> new GuardedMessageQueue(messageStore, k));
+                k -> new GuardedMessageQueue(new ArrayList<>(), messageStore, k, receiptHandleSecret));
     }
 
     private void persistDedup(String storageKey) {
@@ -409,13 +641,54 @@ public class SqsService implements Resettable, ResourceProvider {
             return;
         }
         ConcurrentHashMap<String, Instant> dedupMap = deduplicationCache.get(storageKey);
-        if (dedupMap != null && !dedupMap.isEmpty()) {
-            Map<String, Long> serializable = new HashMap<>();
-            dedupMap.forEach((id, expiry) -> serializable.put(id, expiry.toEpochMilli()));
-            dedupStore.put(storageKey, serializable);
-        } else {
+        if (dedupMap == null) {
             dedupStore.delete(storageKey);
+            return;
         }
+        // Serialize snapshots, not the entire send. Otherwise a slow message write
+        // also blocks sends for unrelated deduplication IDs.
+        synchronized (dedupMap) {
+            if (dedupMap.isEmpty()) {
+                dedupStore.delete(storageKey);
+            } else {
+                Map<String, Long> serializable = new HashMap<>();
+                dedupMap.forEach((id, expiry) -> serializable.put(id, expiry.toEpochMilli()));
+                dedupStore.put(storageKey, serializable);
+            }
+        }
+    }
+
+    private void persistDedupIdentities(String storageKey) {
+        if (dedupIdentityStore == null) {
+            return;
+        }
+        ConcurrentHashMap<String, DeduplicationIdentity> identityMap = deduplicationIdentityCache.get(storageKey);
+        if (identityMap == null) {
+            dedupIdentityStore.delete(storageKey);
+            return;
+        }
+        synchronized (identityMap) {
+            if (identityMap.isEmpty()) {
+                dedupIdentityStore.delete(storageKey);
+            } else {
+                Map<String, Map<String, String>> serializable = new HashMap<>();
+                identityMap.forEach((dedupKey, identity) -> serializable.put(dedupKey, Map.of(
+                        "messageId", identity.messageId(),
+                        "sequenceNumber", Long.toString(identity.sequenceNumber()))));
+                dedupIdentityStore.put(storageKey, serializable);
+            }
+        }
+    }
+
+    private Object deduplicationLock(String storageKey, String dedupKey) {
+        Object[] locks = deduplicationLocks.computeIfAbsent(storageKey, key -> {
+            Object[] stripes = new Object[DEDUP_LOCK_STRIPES];
+            for (int i = 0; i < stripes.length; i++) {
+                stripes[i] = new Object();
+            }
+            return stripes;
+        });
+        return locks[dedupKey.hashCode() & (DEDUP_LOCK_STRIPES - 1)];
     }
 
     @Override
@@ -467,9 +740,10 @@ public class SqsService implements Resettable, ResourceProvider {
 
         validateMaximumMessageSize(attributes);
         attributes = withNormalizedPolicy(attributes);
+        attributes = validateMessageRetentionPeriod(attributes);
 
         String accountId = regionResolver.getAccountId();
-        String queueUrl = baseUrl + "/" + accountId + "/" + queueName;
+        String queueUrl = buildQueueUrl(region, accountId, queueName);
         String storageKey = regionKey(region, queueUrl);
 
         // If queue already exists with same name, check for attribute conflicts
@@ -479,18 +753,31 @@ public class SqsService implements Resettable, ResourceProvider {
                 Set<String> readOnlyAttrs = Set.of("QueueArn", "CreatedTimestamp", "LastModifiedTimestamp",
                         "ApproximateNumberOfMessages", "ApproximateNumberOfMessagesNotVisible",
                         "ApproximateNumberOfMessagesDelayed");
+                Map<String, String> effective = new LinkedHashMap<>(existing.getAttributes());
+                applyDerivedAttributes(effective);
                 for (Map.Entry<String, String> entry : attributes.entrySet()) {
                     if (readOnlyAttrs.contains(entry.getKey())) {
                         continue;
                     }
-                    String storedValue = existing.getAttributes().get(entry.getKey());
-                    if (storedValue != null && !storedValue.equals(entry.getValue())) {
+                    // Compare against what GetQueueAttributes reports, not the raw stored map:
+                    // SqsManagedSseEnabled is derived on read and never stored, so the stored map
+                    // alone would let a differing value through.
+                    String storedValue = effective.get(entry.getKey());
+                    String requested = entry.getValue();
+                    // The effective MaximumMessageSize is canonical ("1024"); canonicalise the
+                    // already-validated request too so "01024" is not a conflict with itself,
+                    // and an empty value maps to the same default the effective map reports.
+                    if ("MaximumMessageSize".equals(entry.getKey())) {
+                        requested = String.valueOf(parseMaxMessageSize(requested));
+                    }
+                    if (storedValue != null && !storedValue.equals(requested)) {
                         throw new AwsException("QueueAlreadyExists",
                                 "A queue already exists with the same name but different attributes.", 400);
                     }
                 }
             }
-            return existing;
+            getOrCreateQueue(storageKey).activity().accessed();
+            return withCurrentQueueUrl(existing, region);
         }
 
         validateRedrivePolicy(attributes, accountId, region);
@@ -518,7 +805,10 @@ public class SqsService implements Resettable, ResourceProvider {
         }
 
         queueStore.put(storageKey, queue);
-        messagesByQueue.put(storageKey, new GuardedMessageQueue(messageStore, storageKey));
+        GuardedMessageQueue messages = new GuardedMessageQueue(new ArrayList<>(), messageStore, storageKey,
+                receiptHandleSecret);
+        messages.activity().accessed();
+        messagesByQueue.put(storageKey, messages);
         LOG.infov("Created {0} queue: {1} in region {2}", queue.isFifo() ? "FIFO" : "standard", queueName, region);
         return queue;
     }
@@ -536,11 +826,16 @@ public class SqsService implements Resettable, ResourceProvider {
         }
         deduplicationCache.remove(storageKey);
         redrivePolicyCache.remove(storageKey);
+        deduplicationIdentityCache.remove(storageKey);
+        deduplicationLocks.remove(storageKey);
         if (messageStore != null) {
             messageStore.delete(storageKey);
         }
         if (dedupStore != null) {
             dedupStore.delete(storageKey);
+        }
+        if (dedupIdentityStore != null) {
+            dedupIdentityStore.delete(storageKey);
         }
         // Wake parked ReceiveMessage long polls so they observe the deletion
         // and finish, instead of staying registered against this queue URL.
@@ -552,28 +847,58 @@ public class SqsService implements Resettable, ResourceProvider {
 
     public List<Queue> listQueues(String namePrefix, String region) {
         String prefix = region + "::";
+        List<Queue> queues;
         if (namePrefix == null || namePrefix.isEmpty()) {
-            return queueStore.scan(key -> key.startsWith(prefix));
+            queues = queueStore.scan(key -> key.startsWith(prefix));
+        } else {
+            queues = queueStore.scan(key -> {
+                if (!key.startsWith(prefix)) {
+                    return false;
+                }
+                String queueUrl = key.substring(prefix.length());
+                String name = queueUrl.substring(queueUrl.lastIndexOf('/') + 1);
+                return name.startsWith(namePrefix);
+            });
         }
-        return queueStore.scan(key -> {
-            if (!key.startsWith(prefix)) {
-                return false;
-            }
-            String queueUrl = key.substring(prefix.length());
-            String name = queueUrl.substring(queueUrl.lastIndexOf('/') + 1);
-            return name.startsWith(namePrefix);
-        });
+        queues.forEach(q -> withCurrentQueueUrl(q, region));
+        return queues;
+    }
+
+    /**
+     * ListQueues with AWS paging: without {@code maxResults} the response holds at most 1,000
+     * queues and never a token; with it, a token is returned only while more queues remain.
+     * Queues are ordered by name so consecutive pages neither skip nor repeat a queue.
+     */
+    public PaginatedResult<Queue> listQueues(String namePrefix, Integer maxResults, String nextToken,
+                                             String region) {
+        if (maxResults != null && (maxResults < 1 || maxResults > MAX_LIST_QUEUES_RESULTS)) {
+            throw new AwsException("InvalidParameterValue",
+                    "Value for parameter MaxResults is invalid. Reason: MaxResults must be an integer between 1 and "
+                            + MAX_LIST_QUEUES_RESULTS + ".", 400);
+        }
+        int limit = maxResults != null ? maxResults : MAX_LIST_QUEUES_RESULTS;
+        PaginatedResult<Queue> page = Pagination.paginate(listQueues(namePrefix, region), Queue::getQueueName,
+                limit, nextToken, LIST_QUEUES_TOKEN_NAMESPACE,
+                token -> new AwsException("InvalidParameterValue", "Invalid NextToken value.", 400));
+        if (maxResults == null) {
+            return new PaginatedResult<>(page.items(), null);
+        }
+        return page;
     }
 
     public String getQueueUrl(String queueName, String region) {
         String accountId = regionResolver.getAccountId();
-        String queueUrl = baseUrl + "/" + accountId + "/" + queueName;
+        String queueUrl = buildQueueUrl(region, accountId, queueName);
         String storageKey = regionKey(region, queueUrl);
         if (queueStore.get(storageKey).isEmpty()) {
             throw new AwsException("AWS.SimpleQueueService.NonExistentQueue",
                     "The specified queue does not exist for this wsdl version.", 400);
         }
         return queueUrl;
+    }
+
+    public boolean queueExists(String queueUrl, String region) {
+        return getQueueByUrl(regionKey(region, queueUrl), queueUrl).isPresent();
     }
 
     public Map<String, String> getQueueAttributes(String queueUrl, List<String> attributeNames, String region) {
@@ -588,11 +913,33 @@ public class SqsService implements Resettable, ResourceProvider {
         attrs.put("CreatedTimestamp", String.valueOf(queue.getCreatedTimestamp().getEpochSecond()));
         attrs.put("LastModifiedTimestamp", String.valueOf(queue.getLastModifiedTimestamp().getEpochSecond()));
 
-        GuardedMessageQueue.MessageCounts counts = getOrCreateQueue(storageKey).messageCounts();
+        GuardedMessageQueue messages = unexpiredMessages(storageKey, queue);
+        // AWS: a GetQueueAttributes call activates the queue, so CloudWatch reports it again.
+        messages.activity().accessed();
+        GuardedMessageQueue.MessageCounts counts = messages.messageCounts();
         attrs.put("ApproximateNumberOfMessages", String.valueOf(counts.visible()));
         attrs.put("ApproximateNumberOfMessagesNotVisible", String.valueOf(counts.inFlight()));
         attrs.put("ApproximateNumberOfMessagesDelayed", String.valueOf(counts.delayed()));
 
+        applyDerivedAttributes(attrs);
+
+        if (attributeNames == null || attributeNames.contains("All")) {
+            return attrs;
+        }
+        Map<String, String> filtered = new LinkedHashMap<>();
+        for (String name : attributeNames) {
+            if (attrs.containsKey(name)) {
+                filtered.put(name, attrs.get(name));
+            }
+        }
+        return filtered;
+    }
+
+    /**
+     * Fills in the attributes reported on read but not necessarily stored. Shared by
+     * GetQueueAttributes and the CreateQueue conflict check so the two cannot drift.
+     */
+    private void applyDerivedAttributes(Map<String, String> attrs) {
         // Derived at read time and never stored, so it cannot go stale behind a
         // KmsMasterKeyId that was later cleared. A KMS key always wins; otherwise an
         // explicit SqsManagedSseEnabled stands, and a queue with neither reports the AWS
@@ -612,17 +959,35 @@ public class SqsService implements Resettable, ResourceProvider {
         attrs.putIfAbsent("DelaySeconds", "0");
         attrs.putIfAbsent("ReceiveMessageWaitTimeSeconds", "0");
         attrs.putIfAbsent("MessageRetentionPeriod", "345600");
+    }
 
-        if (attributeNames == null || attributeNames.contains("All")) {
-            return attrs;
-        }
-        Map<String, String> filtered = new LinkedHashMap<>();
-        for (String name : attributeNames) {
-            if (attrs.containsKey(name)) {
-                filtered.put(name, attrs.get(name));
+    /**
+     * Resolves the principal of the in-flight request. Only the SQS protocol handlers may call this,
+     * because only there is the request scope known to belong to a real SendMessage caller. Internal
+     * producers (SNS, S3 notifications, EventBridge...) run on someone else's request thread and must
+     * not inherit that identity: they pass an explicit senderId or get the queue owner by default.
+     */
+    public String resolveCallerSenderId(String queueUrl) {
+        if (requestContextInstance != null) {
+            try {
+                RequestContext ctx = requestContextInstance.get();
+                if (ctx != null) {
+                    String akid = ctx.getAccessKeyId();
+                    if (akid != null && iamService != null) {
+                        Optional<String> principalId = iamService.resolveCallerUserId(akid, ctx.getSessionToken());
+                        if (principalId.isPresent()) {
+                            return principalId.get();
+                        }
+                    }
+                    if (ctx.getAccountId() != null) {
+                        return ctx.getAccountId();
+                    }
+                }
+            } catch (RuntimeException ignored) {
+                // outside request scope or unsatisfied bean resolution, fall through to default
             }
         }
-        return filtered;
+        return senderIdFor(queueUrl);
     }
 
     public Message sendMessage(String queueUrl, String body, Integer delaySeconds, String region) {
@@ -648,6 +1013,16 @@ public class SqsService implements Resettable, ResourceProvider {
                                Map<String, MessageAttributeValue> messageAttributes,
                                String awsTraceHeader,
                                String region) {
+        return sendMessage(queueUrl, body, delaySeconds, messageGroupId, messageDeduplicationId,
+                messageAttributes, awsTraceHeader, null, region);
+    }
+
+    public Message sendMessage(String queueUrl, String body, Integer delaySeconds,
+                               String messageGroupId, String messageDeduplicationId,
+                               Map<String, MessageAttributeValue> messageAttributes,
+                               String awsTraceHeader,
+                               String senderId,
+                               String region) {
         String storageKey = regionKey(region, queueUrl);
         Queue queue = getQueueByUrl(storageKey, queueUrl)
                 .orElseThrow(() -> new AwsException("AWS.SimpleQueueService.NonExistentQueue",
@@ -662,6 +1037,7 @@ public class SqsService implements Resettable, ResourceProvider {
         }
 
         int queueDelaySeconds = parseNonNegativeSecondsAttribute(queue.getAttributes().get("DelaySeconds"));
+        String effectiveSenderId = senderId != null ? senderId : senderIdFor(queueUrl);
 
         // Resolve the effective delay:
         //   - FIFO queues only support queue-level DelaySeconds per AWS SQS,
@@ -704,57 +1080,97 @@ public class SqsService implements Resettable, ResourceProvider {
             // Use NUL as the delimiter — it is outside the SQS-allowed character set for
             // MessageGroupId/MessageDeduplicationId, so the composite key is unambiguous.
             String dedupCacheKey = groupScoped ? messageGroupId + "\0" + dedupId : dedupId;
-            cleanupDeduplicationCache(storageKey);
             ConcurrentHashMap<String, Instant> dedupMap = deduplicationCache.computeIfAbsent(storageKey, k -> new ConcurrentHashMap<>());
-            Instant expiry = Instant.now().plusSeconds(DEDUP_WINDOW_SECONDS);
-            Instant previous = dedupMap.putIfAbsent(dedupCacheKey, expiry);
-            persistDedup(storageKey);
-            if (previous != null && Instant.now().isBefore(previous)) {
-                // Duplicate within window — keep the original messageId and
-                // sequenceNumber but compute response MD5s from this request's
-                // body and attributes, otherwise SDK clients (which validate
-                // MD5 against what they sent) reject the response.
-                Message existing = getOrCreateQueue(storageKey).findByDeduplicationId(
-                        dedupId, groupScoped ? messageGroupId : null);
-                if (existing != null) {
+            cleanupDeduplicationCache(storageKey);
+            synchronized (deduplicationLock(storageKey, dedupCacheKey)) {
+                Instant now = clock.instant();
+                Instant expiry = now.plusSeconds(DEDUP_WINDOW_SECONDS);
+                Instant previous = dedupMap.putIfAbsent(dedupCacheKey, expiry);
+                if (previous != null && !now.isBefore(previous)) {
+                    dedupMap.replace(dedupCacheKey, previous, expiry);
+                    ConcurrentHashMap<String, DeduplicationIdentity> identities =
+                            deduplicationIdentityCache.get(storageKey);
+                    if (identities != null) {
+                        identities.remove(dedupCacheKey);
+                    }
+                    previous = null;
+                }
+                if (previous != null && now.isBefore(previous)) {
+                    // Duplicate within window — keep the original messageId and
+                    // sequenceNumber but compute response MD5s from this request's
+                    // body and attributes, otherwise SDK clients (which validate
+                    // MD5 against what they sent) reject the response.
+                    ConcurrentHashMap<String, DeduplicationIdentity> identities =
+                            deduplicationIdentityCache.get(storageKey);
+                    DeduplicationIdentity identity = identities == null ? null : identities.get(dedupCacheKey);
+                    if (identity == null) {
+                        Message existing = getOrCreateQueue(storageKey).findByDeduplicationId(
+                                dedupId, groupScoped ? messageGroupId : null);
+                        if (existing != null) {
+                            identity = new DeduplicationIdentity(
+                                    existing.getMessageId(), existing.getSequenceNumber());
+                            deduplicationIdentityCache.computeIfAbsent(storageKey, k -> new ConcurrentHashMap<>())
+                                    .putIfAbsent(dedupCacheKey, identity);
+                            persistDedupIdentities(storageKey);
+                        }
+                    }
+                    // The original message may have been received and deleted, but SQS
+                    // continues tracking the deduplication ID for the full interval.
+                    // Return the original identity without re-enqueueing a message.
                     Message response = new Message(body);
-                    response.setMessageId(existing.getMessageId());
+                    response.setSenderId(effectiveSenderId);
+                    if (identity != null) {
+                        response.setMessageId(identity.messageId());
+                        response.setSequenceNumber(identity.sequenceNumber());
+                    } else {
+                        response.setSequenceNumber(sequenceCounter.incrementAndGet());
+                    }
                     response.setMessageGroupId(messageGroupId);
                     response.setMessageDeduplicationId(dedupId);
-                    response.setSequenceNumber(existing.getSequenceNumber());
                     if (messageAttributes != null && !messageAttributes.isEmpty()) {
                         response.getMessageAttributes().putAll(messageAttributes);
                         response.updateMd5OfMessageAttributes();
                     }
+                    getOrCreateQueue(storageKey).activity().sent(totalSize, true);
                     return response;
                 }
-            }
 
-            Message message = new Message(body);
-            message.setMessageGroupId(messageGroupId);
-            message.setMessageDeduplicationId(dedupId);
-            message.setSequenceNumber(sequenceCounter.incrementAndGet());
-            message.setAwsTraceHeader(awsTraceHeader);
-            if (effectiveDelaySeconds > 0) {
-                message.setVisibleAt(Instant.now().plusSeconds(effectiveDelaySeconds));
-            }
-            if (messageAttributes != null && !messageAttributes.isEmpty()) {
-                message.getMessageAttributes().putAll(messageAttributes);
-                message.updateMd5OfMessageAttributes();
-            }
+                persistDedup(storageKey);
 
-            getOrCreateQueue(storageKey).addMessage(message);
-            notifyReceivers(storageKey);
-            LOG.debugv("Sent FIFO message {0} to queue {1}, group={2}, seq={3}",
-                    message.getMessageId(), queueUrl, messageGroupId, message.getSequenceNumber());
-            LOG.tracev("Sent message {0} to queue {1} body={2} attributes={3}",
-                    message.getMessageId(), queueUrl, body, message.getMessageAttributes());
-            return message;
+                Message message = new Message(body);
+                message.setSenderId(effectiveSenderId);
+                message.setMessageGroupId(messageGroupId);
+                message.setMessageDeduplicationId(dedupId);
+                message.setSequenceNumber(sequenceCounter.incrementAndGet());
+                message.setAwsTraceHeader(awsTraceHeader);
+                if (effectiveDelaySeconds > 0) {
+                    message.setVisibleAt(Instant.now().plusSeconds(effectiveDelaySeconds));
+                }
+                if (messageAttributes != null && !messageAttributes.isEmpty()) {
+                    message.getMessageAttributes().putAll(messageAttributes);
+                    message.updateMd5OfMessageAttributes();
+                }
+
+                GuardedMessageQueue messages = getOrCreateQueue(storageKey);
+                messages.addMessage(message);
+                messages.activity().sent(totalSize, false);
+                deduplicationIdentityCache.computeIfAbsent(storageKey, k -> new ConcurrentHashMap<>())
+                        .putIfAbsent(dedupCacheKey,
+                                new DeduplicationIdentity(message.getMessageId(), message.getSequenceNumber()));
+                persistDedupIdentities(storageKey);
+                notifyReceivers(storageKey);
+                LOG.debugv("Sent FIFO message {0} to queue {1}, group={2}, seq={3}",
+                        message.getMessageId(), queueUrl, messageGroupId, message.getSequenceNumber());
+                LOG.tracev("Sent message {0} to queue {1} body={2} attributes={3}",
+                        message.getMessageId(), queueUrl, body, message.getMessageAttributes());
+                return message;
+            }
         }
 
         // Standard queue. MessageGroupId is retained for ReceiveMessage to
         // return (fair queues); it has no effect on standard-queue delivery.
         Message message = new Message(body);
+        message.setSenderId(effectiveSenderId);
         message.setMessageGroupId(messageGroupId);
         message.setAwsTraceHeader(awsTraceHeader);
         if (effectiveDelaySeconds > 0) {
@@ -765,7 +1181,9 @@ public class SqsService implements Resettable, ResourceProvider {
             message.updateMd5OfMessageAttributes();
         }
 
-        getOrCreateQueue(storageKey).addMessage(message);
+        GuardedMessageQueue messages = getOrCreateQueue(storageKey);
+        messages.addMessage(message);
+        messages.activity().sent(totalSize, false);
         notifyReceivers(storageKey);
         LOG.debugv("Sent message {0} to queue {1}", message.getMessageId(), queueUrl);
         LOG.tracev("Sent message {0} to queue {1} body={2} attributes={3}",
@@ -853,6 +1271,28 @@ public class SqsService implements Resettable, ResourceProvider {
         }
         String dlqUrl = queueUrlFromArn(targetArn, region);
         return dlqUrl != null && getQueueByUrl(regionKey(region, dlqUrl), dlqUrl).isPresent();
+    /** AWS stores a valid value in canonical form, so "060" and "+60" read back as "60". */
+    private static Map<String, String> validateMessageRetentionPeriod(Map<String, String> attributes) {
+        if (attributes == null || !attributes.containsKey("MessageRetentionPeriod")) {
+            return attributes;
+        }
+        int parsed;
+        try {
+            parsed = Integer.parseInt(attributes.get("MessageRetentionPeriod"));
+        } catch (NumberFormatException ignored) {
+            throw invalidMessageRetentionPeriod();
+        }
+        if (parsed < MIN_MESSAGE_RETENTION_PERIOD_SECONDS || MAX_MESSAGE_RETENTION_PERIOD_SECONDS < parsed) {
+            throw invalidMessageRetentionPeriod();
+        }
+        Map<String, String> normalized = new HashMap<>(attributes);
+        normalized.put("MessageRetentionPeriod", String.valueOf(parsed));
+        return normalized;
+    }
+
+    private static AwsException invalidMessageRetentionPeriod() {
+        return new AwsException("InvalidAttributeValue",
+                "Invalid value for the parameter MessageRetentionPeriod.", 400);
     }
 
     private AwsException invalidMaximumMessageSize() {
@@ -863,6 +1303,23 @@ public class SqsService implements Resettable, ResourceProvider {
     private static boolean hasKmsMasterKey(Map<String, String> attributes) {
         String keyId = attributes.get("KmsMasterKeyId");
         return keyId != null && !keyId.isEmpty();
+    }
+
+    /**
+     * Reject a batch call carrying no entries or more than {@value #MAX_BATCH_ENTRIES}. AWS applies
+     * both checks to {@code SendMessageBatch}, {@code DeleteMessageBatch} and
+     * {@code ChangeMessageVisibilityBatch} alike, fails the whole request and processes no entry.
+     */
+    public void validateBatchEntryCount(String entryTypeName, int entryCount) {
+        if (entryCount == 0) {
+            throw new AwsException("AWS.SimpleQueueService.EmptyBatchRequest",
+                    "There should be at least one " + entryTypeName + " in the request.", 400);
+        }
+        if (entryCount > MAX_BATCH_ENTRIES) {
+            throw new AwsException("AWS.SimpleQueueService.TooManyEntriesInBatchRequest",
+                    "Maximum number of entries per request are " + MAX_BATCH_ENTRIES
+                            + ". You have sent " + entryCount + ".", 400);
+        }
     }
 
     /**
@@ -932,8 +1389,28 @@ public class SqsService implements Resettable, ResourceProvider {
     private void cleanupDeduplicationCache(String queueUrl) {
         ConcurrentHashMap<String, Instant> dedupMap = deduplicationCache.get(queueUrl);
         if (dedupMap != null) {
-            Instant now = Instant.now();
-            dedupMap.entrySet().removeIf(e -> now.isAfter(e.getValue()));
+            Instant now = clock.instant();
+            Set<String> expiredKeys = dedupMap.entrySet().stream()
+                    .filter(e -> !now.isBefore(e.getValue()))
+                    .map(Map.Entry::getKey)
+                    .collect(Collectors.toSet());
+            boolean removed = false;
+            for (String key : expiredKeys) {
+                synchronized (deduplicationLock(queueUrl, key)) {
+                    Instant expiry = dedupMap.get(key);
+                    if (expiry != null && !now.isBefore(expiry) && dedupMap.remove(key, expiry)) {
+                        ConcurrentHashMap<String, DeduplicationIdentity> identityMap =
+                                deduplicationIdentityCache.get(queueUrl);
+                        if (identityMap != null) {
+                            identityMap.remove(key);
+                        }
+                        removed = true;
+                    }
+                }
+            }
+            if (removed) {
+                persistDedupIdentities(queueUrl);
+            }
         }
     }
 
@@ -989,11 +1466,11 @@ public class SqsService implements Resettable, ResourceProvider {
                                 m.getMessageId(), queueUrl, m.getBody(), m.getMessageAttributes());
                     }
                 }
-                return result;
+                return recordReceive(polledQueue, result);
             }
             long elapsed = System.currentTimeMillis() - start;
             if (elapsed >= maxWait) {
-                return result;
+                return recordReceive(polledQueue, result);
             }
             try {
                 synchronized (lock) {
@@ -1001,9 +1478,15 @@ public class SqsService implements Resettable, ResourceProvider {
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                return result;
+                return recordReceive(polledQueue, result);
             }
         }
+    }
+
+    /** AWS takes one sample per ReceiveMessage call, however long it polled. */
+    private static List<Message> recordReceive(GuardedMessageQueue polledQueue, List<Message> received) {
+        polledQueue.activity().received(received.size());
+        return received;
     }
 
     private int resolveWaitTimeSeconds(Queue queue, Integer requestedWaitTimeSeconds) {
@@ -1054,7 +1537,7 @@ public class SqsService implements Resettable, ResourceProvider {
         int maxReceiveCount = rp != null ? rp.maxReceiveCount() : -1;
         String deadLetterTargetArn = rp != null ? rp.deadLetterTargetArn() : null;
 
-        GuardedMessageQueue guardedQueue = getOrCreateQueue(storageKey);
+        GuardedMessageQueue guardedQueue = unexpiredMessages(storageKey, queue);
         GuardedMessageQueue.ClaimResult claimResult = guardedQueue.claimVisibleMessages(
                 maxMessages, effectiveTimeout, queue.isFifo(), maxReceiveCount, deadLetterTargetArn);
 
@@ -1070,6 +1553,9 @@ public class SqsService implements Resettable, ResourceProvider {
                     // Remember where the message came from so StartMessageMoveTask
                     // with no DestinationArn can put it back.
                     msg.setOriginalSourceQueueUrl(queue.getQueueUrl());
+                    if (queue.isFifo()) {
+                        msg.setRetentionStartTimestamp(Instant.now());
+                    }
                 }
                 String dlqStorageKey = regionKey(region, dlqUrl);
                 getOrCreateQueue(dlqStorageKey).addAll(dlqCandidates);
@@ -1093,50 +1579,118 @@ public class SqsService implements Resettable, ResourceProvider {
 
     public List<Message> peekMessages(String queueUrl, String region) {
         String storageKey = regionKey(region, queueUrl);
-        ensureQueueExists(storageKey);
-        return getOrCreateQueue(storageKey).peekAll();
+        Queue queue = queueStore.get(storageKey)
+                .orElseThrow(() -> new AwsException("AWS.SimpleQueueService.NonExistentQueue",
+                        "The specified queue does not exist.", 400));
+        return unexpiredMessages(storageKey, queue).peekAll();
     }
 
     public void deleteMessage(String queueUrl, String receiptHandle, String region) {
+        deleteMessage(queueUrl, receiptHandle, region, false);
+    }
+
+    public void deleteMessageInBatch(String queueUrl, String receiptHandle, String region) {
+        deleteMessage(queueUrl, receiptHandle, region, true);
+    }
+
+    private void deleteMessage(String queueUrl, String receiptHandle, String region, boolean inBatch) {
         String storageKey = regionKey(region, queueUrl);
-        if (getQueueByUrl(storageKey, queueUrl).isEmpty()) {
-            throw new AwsException("AWS.SimpleQueueService.NonExistentQueue",
-                    "The specified queue does not exist.", 400);
-        }
+        Queue queue = getQueueByUrl(storageKey, queueUrl)
+                .orElseThrow(() -> new AwsException("AWS.SimpleQueueService.NonExistentQueue",
+                        "The specified queue does not exist.", 400));
+        ReceiptHandle handle = checkReceiptHandle(storageKey, receiptHandle, inBatch);
 
-        Optional<Message> removed = getOrCreateQueue(storageKey).removeByReceiptHandle(receiptHandle);
-
-        if (removed.isEmpty()) {
-            throw new AwsException("ReceiptHandleIsInvalid",
-                    "The input receipt handle is not a valid receipt handle.", 400);
+        GuardedMessageQueue messages = getOrCreateQueue(storageKey);
+        GuardedMessageQueue.Removal removal = messages.removeByReceiptHandle(handle, queue.isFifo());
+        rejectUnusableHandle(removal.result(), receiptHandle, inBatch);
+        // AWS counts every delete with a valid handle, including a repeat for a message already gone.
+        messages.activity().deleted();
+        // AWS reports success for a message that is already gone.
+        if (removal.result() == GuardedMessageQueue.HandleResult.MESSAGE_GONE) {
+            LOG.debugv("No message for receipt handle {0}", receiptHandle);
+            return;
         }
         LOG.debugv("Deleted message with receipt handle {0}", receiptHandle);
         if (LOG.isTraceEnabled()) {
-            Message m = removed.get();
+            Message m = removal.message();
             LOG.tracev("Deleted message {0} from queue {1} body={2}",
                     m.getMessageId(), queueUrl, m.getBody());
         }
     }
 
     public void changeMessageVisibility(String queueUrl, String receiptHandle, int visibilityTimeout, String region) {
-        String storageKey = regionKey(region, queueUrl);
-        ensureQueueExists(storageKey);
+        changeMessageVisibility(queueUrl, receiptHandle, visibilityTimeout, region, false);
+    }
 
-        boolean found = getOrCreateQueue(storageKey).changeVisibility(receiptHandle, visibilityTimeout);
-        if (!found) {
-            throw new AwsException("ReceiptHandleIsInvalid",
-                    "The input receipt handle is not a valid receipt handle.", 400);
+    private void changeMessageVisibility(String queueUrl, String receiptHandle, int visibilityTimeout,
+                                         String region, boolean inBatch) {
+        String storageKey = regionKey(region, queueUrl);
+        Queue queue = queueStore.get(storageKey)
+                .orElseThrow(() -> new AwsException("AWS.SimpleQueueService.NonExistentQueue",
+                        "The specified queue does not exist.", 400));
+        ReceiptHandle handle = checkReceiptHandle(storageKey, receiptHandle, inBatch);
+
+        GuardedMessageQueue messages = getOrCreateQueue(storageKey);
+        messages.activity().accessed();
+        GuardedMessageQueue.HandleResult result = messages.changeVisibility(handle, visibilityTimeout, queue.isFifo());
+        rejectUnusableHandle(result, receiptHandle, inBatch);
+        if (result == GuardedMessageQueue.HandleResult.MESSAGE_GONE) {
+            throw invalidReceiptHandle(receiptHandle,
+                    "Message does not exist or is not available for visibility timeout change", inBatch);
         }
+    }
+
+    private static void rejectUnusableHandle(GuardedMessageQueue.HandleResult result, String receiptHandle,
+                                             boolean inBatch) {
+        if (result == GuardedMessageQueue.HandleResult.HANDLE_EXPIRED) {
+            throw invalidReceiptHandle(receiptHandle, "The receipt handle has expired", inBatch);
+        }
+    }
+
+    private static AwsException invalidReceiptHandle(String receiptHandle, String reason, boolean inBatch) {
+        if (inBatch) {
+            return new AwsException("ReceiptHandleIsInvalid", reason, 400);
+        }
+        return new AwsException("InvalidParameterValue",
+                "Value " + receiptHandle + " for parameter ReceiptHandle is invalid. Reason: " + reason + ".", 400);
+    }
+
+    /** A batch entry reports every receipt handle error under the ReceiptHandleIsInvalid code. */
+    private ReceiptHandle checkReceiptHandle(String storageKey, String receiptHandle, boolean inBatch) {
+        if (receiptHandle == null || receiptHandle.isEmpty()) {
+            throw new AwsException(inBatch ? "ReceiptHandleIsInvalid" : "MissingParameter",
+                    "The request must contain the parameter ReceiptHandle.", 400);
+        }
+        ReceiptHandle parsed = ReceiptHandle.parse(receiptHandle);
+        if (parsed == null) {
+            throw new AwsException("ReceiptHandleIsInvalid", "The input receipt handle is invalid.", 400);
+        }
+        if (!parsed.isSignedWith(receiptHandleSecret) || !parsed.belongsTo(storageKey)) {
+            throw handleNotValidForQueue(receiptHandle);
+        }
+        return parsed;
+    }
+
+    private static AwsException handleNotValidForQueue(String receiptHandle) {
+        return new AwsException("ReceiptHandleIsInvalid",
+                "The receipt handle \"" + receiptHandle + "\" is not valid for this queue.", 400);
     }
 
     public void purgeQueue(String queueUrl, String region) {
         String storageKey = regionKey(region, queueUrl);
         ensureQueueExists(storageKey);
-        getOrCreateQueue(storageKey).purge();
+        GuardedMessageQueue messages = getOrCreateQueue(storageKey);
+        messages.purge();
+        messages.activity().accessed();
         if (clearFifoDeduplicationCacheOnPurge) {
             deduplicationCache.remove(storageKey);
+            deduplicationIdentityCache.remove(storageKey);
+            deduplicationLocks.remove(storageKey);
             if (dedupStore != null) {
                 dedupStore.delete(storageKey);
+            }
+            if (dedupIdentityStore != null) {
+                dedupIdentityStore.delete(storageKey);
             }
             if (snsService != null) {
                 snsService.clearFifoDeduplicationCacheForSqsQueueSubscriptions(queueUrl, region);
@@ -1156,6 +1710,7 @@ public class SqsService implements Resettable, ResourceProvider {
         String sourceAccountId = accountFromQueueUrl(queue.getQueueUrl());
         validateRedrivePolicy(attributes,
                 sourceAccountId != null ? sourceAccountId : regionResolver.getAccountId(), region);
+        attributes = validateMessageRetentionPeriod(attributes);
         if (attributes != null) {
             for (Map.Entry<String, String> entry : attributes.entrySet()) {
                 if (entry.getValue() == null || entry.getValue().isEmpty()) {
@@ -1170,6 +1725,7 @@ public class SqsService implements Resettable, ResourceProvider {
         }
         queue.setLastModifiedTimestamp(Instant.now());
         queueStore.put(storageKey, queue);
+        getOrCreateQueue(storageKey).activity().accessed();
         LOG.infov("Updated attributes for queue: {0}", queueUrl);
     }
 
@@ -1181,13 +1737,7 @@ public class SqsService implements Resettable, ResourceProvider {
         String prefix = region + "::";
         for (Queue q : queueStore.scan(k -> k.startsWith(prefix))) {
             if (targetArn.equals(redriveDlqArn(q))) {
-                // Echo the caller's scheme/host/port. Storage always records
-                // CreateQueue's baseUrl (https://localhost:4566/...), but a
-                // Lambda container holds the same queue as
-                // https://host.docker.internal:4566/... — sibling URLs must
-                // match that form or ListDeadLetterSourceQueues disagrees
-                // with the CreateQueue/GetQueueUrl value the caller already has.
-                sourceQueues.add(presentQueueUrl(q.getQueueUrl(), queueUrl));
+                sourceQueues.add(withCurrentQueueUrl(q, region).getQueueUrl());
             }
         }
         return sourceQueues;
@@ -1208,7 +1758,8 @@ public class SqsService implements Resettable, ResourceProvider {
                     "Invalid source ARN: " + sourceArn, 400);
         }
         String srcKey = regionKey(region, sourceUrl);
-        if (queueStore.get(srcKey).isEmpty()) {
+        Optional<Queue> srcQueue = queueStore.get(srcKey);
+        if (srcQueue.isEmpty()) {
             throw new AwsException("ResourceNotFoundException",
                     "The resource that you specified for the SourceArn parameter does not exist.", 404);
         }
@@ -1249,7 +1800,7 @@ public class SqsService implements Resettable, ResourceProvider {
             }
         }
 
-        GuardedMessageQueue srcQueueInitial = getOrCreateQueue(srcKey);
+        GuardedMessageQueue srcQueueInitial = unexpiredMessages(srcKey, srcQueue.get());
         GuardedMessageQueue.MessageCounts srcCounts = srcQueueInitial.messageCounts();
         long toMove = srcCounts.visible() + srcCounts.inFlight() + srcCounts.delayed();
 
@@ -1357,6 +1908,7 @@ public class SqsService implements Resettable, ResourceProvider {
                         return;
                     }
                 }
+                removeExpiredMessages(srcKey);
                 if (!moveOneMessage(srcQueue, destUrl, region)) {
                     break;
                 }
@@ -1456,7 +2008,7 @@ public class SqsService implements Resettable, ResourceProvider {
         List<BatchResultEntry> results = new ArrayList<>();
         for (ChangeVisibilityBatchEntry entry : entries) {
             try {
-                changeMessageVisibility(queueUrl, entry.receiptHandle(), entry.visibilityTimeout(), region);
+                changeMessageVisibility(queueUrl, entry.receiptHandle(), entry.visibilityTimeout(), region, true);
                 results.add(new BatchResultEntry(entry.id(), true, null, null));
             } catch (AwsException e) {
                 results.add(new BatchResultEntry(entry.id(), false, e.getErrorCode(), e.getMessage()));
@@ -1596,7 +2148,7 @@ public class SqsService implements Resettable, ResourceProvider {
         ObjectNode principal = statement.putObject("Principal");
         ArrayNode awsArns = principal.putArray("AWS");
         for (String accountId : awsAccountIds) {
-            awsArns.add(AwsArnUtils.Arn.of("iam", "", accountId, "root").toString());
+            awsArns.add(AwsArnUtils.Arn.global(AwsRegions.partitionFor(region), "iam", accountId, "root").toString());
         }
         ArrayNode actions = statement.putArray("Action");
         for (String action : actionNames) {
@@ -1693,15 +2245,37 @@ public class SqsService implements Resettable, ResourceProvider {
     }
 
     /**
-     * SQS reports SenderId as the principal that called SendMessage. Floci
-     * has no per-call IAM context, so it falls back to the account that owns
-     * the queue (parsed from the queue URL when present), otherwise the
-     * account from the current request context, otherwise the configured
-     * default account.
+     * Default SenderId for messages with no caller principal (internal producers such as SNS,
+     * S3 notifications or EventBridge): the account that owns the queue (parsed from the queue
+     * URL when present), otherwise the configured default account.
      */
     public String senderIdFor(String queueUrl) {
         String fromUrl = accountFromQueueUrl(normalizeQueueUrl(queueUrl));
         return fromUrl != null ? fromUrl : regionResolver.getAccountId();
+    }
+
+    /**
+     * The QueueUrl handed back to clients. The {@code floci} strategy, the default, returns floci's
+     * own endpoint form, {@code <base-url>/<account>/<name>}. The {@code aws} strategy returns
+     * the AWS form, {@code https://sqs.<region>.<dnsSuffix>/<account>/<name>}, for tooling that
+     * parses queue URLs. Lookups key off the URL path, so either form is accepted on input.
+     */
+    private String buildQueueUrl(String region, String accountId, String queueName) {
+        if (endpointStrategy != EndpointStrategy.AWS) {
+            return baseUrl + "/" + accountId + "/" + queueName;
+        }
+        String effectiveRegion = region != null && !region.isBlank() ? region : regionResolver.getDefaultRegion();
+        return "https://" + AwsEndpoints.host("sqs", effectiveRegion) + "/" + accountId + "/" + queueName;
+    }
+
+    /**
+     * Reports a stored queue under the URL a fresh CreateQueue would return, so queues persisted
+     * by an earlier version, or under the other endpoint strategy, list consistently.
+     */
+    private Queue withCurrentQueueUrl(Queue queue, String region) {
+        String accountId = queue.getAccountId() != null ? queue.getAccountId() : regionResolver.getAccountId();
+        queue.setQueueUrl(buildQueueUrl(region, accountId, queue.getQueueName()));
+        return queue;
     }
 
     /**
@@ -1770,7 +2344,86 @@ public class SqsService implements Resettable, ResourceProvider {
         if (pathStart < 0) {
             return queueUrl;
         }
-        return queueUrl.substring(pathStart);
+        return accountAndName(queueUrl.substring(pathStart));
+    }
+
+    /**
+     * The last two segments of a queue path, {@code /<account>/<name>}, so a path a base URL
+     * prefixes, such as {@code /sqs/<account>/<name>}, keys the same queue as the AWS form.
+     */
+    private static String accountAndName(String path) {
+        int last = path.lastIndexOf('/');
+        int previous = last > 0 ? path.lastIndexOf('/', last - 1) : -1;
+        return previous > 0 ? path.substring(previous) : path;
+    }
+
+    private GuardedMessageQueue unexpiredMessages(String storageKey, Queue queue) {
+        GuardedMessageQueue messages = getOrCreateQueue(storageKey);
+        messages.removeExpired(retentionCutoff(queue));
+        return messages;
+    }
+
+    private static Instant retentionCutoff(Queue queue) {
+        int retentionSeconds = DEFAULT_MESSAGE_RETENTION_PERIOD_SECONDS;
+        String value = queue.getAttributes().get("MessageRetentionPeriod");
+        if (value != null) {
+            try {
+                retentionSeconds = Integer.parseInt(value.trim());
+            } catch (NumberFormatException e) {
+                LOG.debugv("Ignoring invalid MessageRetentionPeriod {0} on queue {1}", value, queue.getQueueUrl());
+            }
+        }
+        return Instant.now().minusSeconds(retentionSeconds);
+    }
+
+    /** Frees the memory and storage held by expired messages. Reads already skip them. */
+    void deleteExpiredMessages() {
+        for (String storageKey : messagesByQueue.keySet()) {
+            removeExpiredMessages(storageKey);
+        }
+    }
+
+    /** One active queue's AWS/SQS metrics for one publication. */
+    record QueueMetrics(String accountId, String region, String queueName, boolean fifo,
+                        GuardedMessageQueue.Gauges gauges, SqsQueueActivity.Snapshot activity) {
+    }
+
+    /**
+     * The AWS/SQS metrics of every queue CloudWatch considers active: one that holds a message or
+     * was acted on in the last six hours. Each queue's activity since the previous call is handed
+     * over, so every call starts the next sample window.
+     */
+    List<QueueMetrics> collectQueueMetrics(Instant now) {
+        Instant activeSince = now.minus(METRICS_ACTIVE_WINDOW);
+        List<QueueMetrics> metrics = new ArrayList<>();
+        messagesByQueue.forEach((storageKey, messages) -> {
+            int separator = storageKey.indexOf("::");
+            String queueUrl = baseUrl + storageKey.substring(separator + 2);
+            Queue queue = getQueueByUrl(storageKey, queueUrl).orElse(null);
+            // A queue deleted and created again meanwhile has a new message queue; this one is gone.
+            if (queue == null || messagesByQueue.get(storageKey) != messages) {
+                return;
+            }
+            messages.removeExpired(retentionCutoff(queue));
+            GuardedMessageQueue.Gauges gauges = messages.gauges(now);
+            SqsQueueActivity.Snapshot activity = messages.activity().drain();
+            Instant lastActivity = activity.lastActivity();
+            if (gauges.isEmpty() && (lastActivity == null || lastActivity.isBefore(activeSince))) {
+                return;
+            }
+            metrics.add(new QueueMetrics(accountFromQueueUrl(queueUrl), storageKey.substring(0, separator),
+                    queue.getQueueName(), queue.isFifo(), gauges, activity));
+        });
+        return metrics;
+    }
+
+    private void removeExpiredMessages(String storageKey) {
+        GuardedMessageQueue messages = messagesByQueue.get(storageKey);
+        if (messages == null) {
+            return;
+        }
+        String queueUrl = baseUrl + storageKey.substring(storageKey.indexOf("::") + 2);
+        getQueueByUrl(storageKey, queueUrl).ifPresent(queue -> messages.removeExpired(retentionCutoff(queue)));
     }
 
     private void ensureQueueExists(String storageKey) {

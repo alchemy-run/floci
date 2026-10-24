@@ -1,15 +1,17 @@
 package io.github.hectorvent.floci.core.common.docker;
 
-import io.github.hectorvent.floci.config.EmulatorConfig;
-import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import com.github.dockerjava.api.model.AccessMode;
 import com.github.dockerjava.api.model.Bind;
+import com.github.dockerjava.api.model.Device;
 import com.github.dockerjava.api.model.DeviceRequest;
 import com.github.dockerjava.api.model.LogConfig;
 import com.github.dockerjava.api.model.Mount;
 import com.github.dockerjava.api.model.MountType;
 import com.github.dockerjava.api.model.Volume;
 import com.github.dockerjava.api.model.VolumesFrom;
+import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
+import io.github.hectorvent.floci.services.lambda.launcher.ImageCacheService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -67,12 +69,32 @@ public class ContainerBuilder {
         return new Builder(resolveImage(image), config, dockerHostResolver, embeddedDnsServer, currentContainerNetworkResolver);
     }
 
+    /**
+     * The Docker network a spec built with {@link Builder#withDockerNetwork} would land on: the
+     * service's own setting, else the global default, else the network Floci itself is attached
+     * to. Exposed because a caller occasionally needs that name before it has a spec to read it
+     * from, for instance to allocate an address on the network the container is about to join.
+     */
+    public Optional<String> resolveDockerNetwork(Optional<String> serviceNetwork) {
+        return resolveDockerNetwork(serviceNetwork, config, currentContainerNetworkResolver);
+    }
+
+    private static Optional<String> resolveDockerNetwork(Optional<String> serviceNetwork, EmulatorConfig config,
+                                                         CurrentContainerNetworkResolver currentContainerNetworkResolver) {
+        return serviceNetwork
+                .or(() -> config.services().dockerNetwork())
+                .filter(n -> !n.isBlank())
+                .or(() -> currentContainerNetworkResolver != null
+                        ? currentContainerNetworkResolver.resolveNetworkName()
+                        : Optional.empty());
+    }
+
     public String resolveImage(String image) {
         return resolveImage(image, configuredImageRegistryBase(config));
     }
 
     static String resolveImage(String image, Optional<String> imageRegistryBase) {
-        if (image == null || image.isBlank()) {
+        if (image == null || image.isBlank() || ImageCacheService.isImageId(image)) {
             return image;
         }
         return normalizeImageRegistryBase(imageRegistryBase)
@@ -130,8 +152,10 @@ public class ContainerBuilder {
         private Long nanoCpus;
         private Integer cpuShares;
         private boolean readonlyRootfs;
+        private boolean init;
         private final Map<Integer, Integer> portBindings = new HashMap<>();
         private final List<Integer> loopbackPortBindings = new ArrayList<>();
+        private final Map<Integer, String> portBindingHostIps = new HashMap<>();
         private final List<Integer> exposedPorts = new ArrayList<>();
         private String networkMode;
         private final List<Mount> mounts = new ArrayList<>();
@@ -148,6 +172,13 @@ public class ContainerBuilder {
         private boolean sourceHostMapping;
         private final List<String> linkLocalIps = new ArrayList<>();
         private final List<DeviceRequest> deviceRequests = new ArrayList<>();
+        private final List<String> capAdd = new ArrayList<>();
+        private final List<String> capDrop = new ArrayList<>();
+        private final List<Device> devices = new ArrayList<>();
+        private Long shmSizeBytes;
+        private final Map<String, String> tmpfs = new HashMap<>();
+        private Long memorySwapBytes;
+        private Long memorySwappiness;
 
         Builder(String image, EmulatorConfig config, DockerHostResolver dockerHostResolver,
                 EmbeddedDnsServer embeddedDnsServer,
@@ -256,11 +287,37 @@ public class ContainerBuilder {
         }
 
         /**
+         * Runs Docker's init process as PID 1, which forwards signals to the command (Docker
+         * {@code --init}). The kernel gives PID 1 no default signal actions, so a command that
+         * installs no SIGTERM handler of its own ignores the stop request and only goes when
+         * Docker sends SIGKILL at the end of the stop timeout.
+         */
+        public Builder withInit() {
+            this.init = true;
+            return this;
+        }
+
+        /**
          * Adds a port binding from container port to a specific host port.
          */
         public Builder withPortBinding(int containerPort, int hostPort) {
             this.portBindings.put(containerPort, hostPort);
             this.exposedPorts.add(containerPort);
+            return this;
+        }
+
+        /**
+         * Adds a port binding to a specific host port on a specific host interface.
+         *
+         * <p>Use this for a port whose reachability is an operator decision rather than a fixed
+         * property of the container: the caller passes the configured address through, and a null
+         * or blank one falls back to Docker's own default of publishing on every interface.
+         */
+        public Builder withPortBinding(int containerPort, int hostPort, String hostIp) {
+            withPortBinding(containerPort, hostPort);
+            if (hostIp != null && !hostIp.isBlank()) {
+                this.portBindingHostIps.put(containerPort, hostIp.strip());
+            }
             return this;
         }
 
@@ -321,13 +378,8 @@ public class ContainerBuilder {
          * This is the standard pattern for Floci container services.
          */
         public Builder withDockerNetwork(Optional<String> serviceNetwork) {
-            Optional<String> configuredNetwork = serviceNetwork
-                    .or(() -> config.services().dockerNetwork())
-                    .filter(n -> !n.isBlank())
-                    .or(() -> currentContainerNetworkResolver != null
-                            ? currentContainerNetworkResolver.resolveNetworkName()
-                            : Optional.empty());
-            configuredNetwork.ifPresent(n -> this.networkMode = n);
+            ContainerBuilder.resolveDockerNetwork(serviceNetwork, config, currentContainerNetworkResolver)
+                    .ifPresent(n -> this.networkMode = n);
             return this;
         }
 
@@ -587,6 +639,68 @@ public class ContainerBuilder {
             return this;
         }
 
+        /**
+         * Adds a capability to the daemon's default set ({@code --cap-add}), named without the
+         * {@code CAP_} prefix, or {@code ALL}.
+         */
+        public Builder withCapAdd(String capability) {
+            this.capAdd.add(capability);
+            return this;
+        }
+
+        /**
+         * Drops a capability from the daemon's default set ({@code --cap-drop}), named without the
+         * {@code CAP_} prefix, or {@code ALL}.
+         */
+        public Builder withCapDrop(String capability) {
+            this.capDrop.add(capability);
+            return this;
+        }
+
+        /**
+         * Exposes a host device inside the container ({@code --device}).
+         *
+         * @param cgroupPermissions any of {@code r}, {@code w} and {@code m}, as Docker takes them
+         */
+        public Builder withDevice(String hostPath, String containerPath, String cgroupPermissions) {
+            this.devices.add(new Device(cgroupPermissions, containerPath, hostPath));
+            return this;
+        }
+
+        /**
+         * Sets the size of {@code /dev/shm} ({@code --shm-size}).
+         */
+        public Builder withShmSizeBytes(long shmSizeBytes) {
+            this.shmSizeBytes = shmSizeBytes;
+            return this;
+        }
+
+        /**
+         * Mounts a tmpfs at {@code containerPath} ({@code --tmpfs}), with Docker's option string,
+         * such as {@code "noexec,size=64m"}.
+         */
+        public Builder withTmpfs(String containerPath, String options) {
+            this.tmpfs.put(containerPath, options);
+            return this;
+        }
+
+        /**
+         * Caps memory plus swap ({@code --memory-swap}); a value equal to the memory limit means
+         * the container does not swap.
+         */
+        public Builder withMemorySwapBytes(long memorySwapBytes) {
+            this.memorySwapBytes = memorySwapBytes;
+            return this;
+        }
+
+        /**
+         * Sets the container's swappiness, 0 to 100 ({@code --memory-swappiness}).
+         */
+        public Builder withMemorySwappiness(long memorySwappiness) {
+            this.memorySwappiness = memorySwappiness;
+            return this;
+        }
+
         private void requireNoExistingDeviceRequest() {
             if (!deviceRequests.isEmpty()) {
                 throw new IllegalStateException(
@@ -607,8 +721,9 @@ public class ContainerBuilder {
 
         /**
          * Injects Floci's embedded DNS server into the container so virtual-hosted
-         * S3 hostnames (my-bucket.localhost.floci.io) resolve to Floci's advertised
-         * container-reachable IP. No-op when the embedded DNS server is not running.
+         * S3 hostnames (my-bucket.localhost.floci.io) resolve to Floci's Docker
+         * network IP. No-op when explicit resolvers were already supplied or the embedded
+         * DNS server is not running.
          *
          * <p>When {@code floci.dns.container-fallback-enabled} is set, the configured public
          * fallback resolvers are appended after Floci's IP so the container's own resolver can
@@ -617,6 +732,9 @@ public class ContainerBuilder {
          * the embedded forwarder still resolves unrelated names through its upstreams.
          */
         public Builder withEmbeddedDns() {
+            if (!dnsServers.isEmpty()) {
+                return this;
+            }
             embeddedDnsServer.getServerIp().ifPresent(flociIp -> {
                 if (embeddedDnsServer.isSourceMode()) {
                     dnsServers.clear();
@@ -676,7 +794,11 @@ public class ContainerBuilder {
                     nanoCpus,
                     cpuShares,
                     readonlyRootfs,
-                    List.copyOf(linkLocalIps)
+                    List.copyOf(linkLocalIps),
+                    Map.copyOf(portBindingHostIps),
+                    init,
+                    new LinuxOptions(List.copyOf(capAdd), List.copyOf(capDrop), List.copyOf(devices),
+                            shmSizeBytes, Map.copyOf(tmpfs), memorySwapBytes, memorySwappiness)
             );
         }
     }

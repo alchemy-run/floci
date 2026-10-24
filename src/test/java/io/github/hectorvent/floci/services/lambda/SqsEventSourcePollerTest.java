@@ -6,6 +6,7 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.services.lambda.model.EventSourceMapping;
 import io.github.hectorvent.floci.services.lambda.model.InvocationType;
 import io.github.hectorvent.floci.services.lambda.model.InvokeResult;
+import io.github.hectorvent.floci.services.lambda.model.LambdaAlias;
 import io.github.hectorvent.floci.services.lambda.model.LambdaFunction;
 import io.github.hectorvent.floci.services.pipes.PipesFilterMatcher;
 import io.github.hectorvent.floci.services.sqs.SqsService;
@@ -21,6 +22,10 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -41,6 +46,7 @@ class SqsEventSourcePollerTest {
     private SqsService sqsService;
     private LambdaExecutorService executorService;
     private LambdaFunctionStore functionStore;
+    private LambdaAliasStore aliasStore;
 
     @BeforeEach
     void setUp() {
@@ -55,12 +61,13 @@ class SqsEventSourcePollerTest {
         sqsService = mock(SqsService.class);
         executorService = mock(LambdaExecutorService.class);
         functionStore = mock(LambdaFunctionStore.class);
+        aliasStore = mock(LambdaAliasStore.class);
 
         poller = new SqsEventSourcePoller(
                 mock(Vertx.class),
                 sqsService,
                 executorService,
-                functionStore,
+                new LambdaTargetResolver(functionStore, aliasStore),
                 mock(EsmStore.class),
                 config,
                 OBJECT_MAPPER,
@@ -326,6 +333,52 @@ class SqsEventSourcePollerTest {
     }
 
     @Test
+    void versionQualifiedMappingInvokesThatVersion() {
+        EventSourceMapping esm = esm();
+        esm.setFunctionArn("arn:aws:lambda:us-east-1:000000000000:function:throwfn:1");
+        stubThrowFn();
+        LambdaFunction version1 = new LambdaFunction();
+        version1.setFunctionName("throwfn");
+        version1.setVersion("1");
+        version1.setTimeout(10);
+        when(functionStore.getForAccount("000000000000", "us-east-1", "throwfn", "1"))
+                .thenReturn(Optional.of(version1));
+        stubReceive(esm, List.of(message("m1")));
+        when(executorService.invoke(any(LambdaFunction.class), any(byte[].class), eq(InvocationType.RequestResponse), eq(0), eq("1")))
+                .thenReturn(new InvokeResult());
+
+        poller.pollAndInvoke(esm);
+
+        verify(executorService, timeout(2000)).invoke(eq(version1), any(byte[].class), eq(InvocationType.RequestResponse), eq(0), eq("1"));
+    }
+
+    @Test
+    void aliasQualifiedMappingInvokesTheAliasVersion() {
+        EventSourceMapping esm = esm();
+        esm.setFunctionArn("arn:aws:lambda:us-east-1:000000000000:function:throwfn:live");
+        stubThrowFn();
+        LambdaAlias alias = new LambdaAlias();
+        alias.setName("live");
+        alias.setFunctionName("throwfn");
+        alias.setFunctionVersion("2");
+        when(aliasStore.getForAccount("000000000000", "us-east-1", "throwfn", "live"))
+                .thenReturn(Optional.of(alias));
+        LambdaFunction version2 = new LambdaFunction();
+        version2.setFunctionName("throwfn");
+        version2.setVersion("2");
+        version2.setTimeout(10);
+        when(functionStore.getForAccount("000000000000", "us-east-1", "throwfn", "2"))
+                .thenReturn(Optional.of(version2));
+        stubReceive(esm, List.of(message("m1")));
+        when(executorService.invoke(any(LambdaFunction.class), any(byte[].class), eq(InvocationType.RequestResponse), eq(0), eq("live")))
+                .thenReturn(new InvokeResult());
+
+        poller.pollAndInvoke(esm);
+
+        verify(executorService, timeout(2000)).invoke(eq(version2), any(byte[].class), eq(InvocationType.RequestResponse), eq(0), eq("live"));
+    }
+
+    @Test
     void failedInvocationFallsBackToDefaultVisibilityWhenQueueHasNone() {
         EventSourceMapping esm = esm();
         LambdaFunction fn = new LambdaFunction();
@@ -482,6 +535,17 @@ class SqsEventSourcePollerTest {
         }
     }
 
+    private static void awaitPoll(Future<?> poll) {
+        try {
+            poll.get(5, TimeUnit.SECONDS);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("interrupted while waiting for the poll", ie);
+        } catch (ExecutionException | TimeoutException e) {
+            throw new AssertionError("poll did not complete", e);
+        }
+    }
+
     private void pollUntilInvoked(EventSourceMapping esm, LambdaFunction fn) {
         long deadline = System.currentTimeMillis() + 5000;
         while (true) {
@@ -515,10 +579,10 @@ class SqsEventSourcePollerTest {
         when(executorService.invoke(eq(fn), any(byte[].class), eq(InvocationType.RequestResponse)))
                 .thenReturn(new InvokeResult());
 
-        // Polls inside the window buffer the record without invoking.
+        // Polls inside the window buffer the record without invoking. Each poll finishes before
+        // the clock moves, so the window starts at 0 however long the poll thread takes to run.
         for (int i = 0; i < 4; i++) {
-            poller.pollAndInvoke(esm);
-            sleep(25);
+            awaitPoll(poller.pollAndInvoke(esm));
             now.addAndGet(1000); // reaches 4s, short of the 5s window
         }
         verify(sqsService, atLeast(1))

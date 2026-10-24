@@ -3,13 +3,13 @@ package io.github.hectorvent.floci.services.ec2;
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.PersistentStorage;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.services.ec2.model.Address;
 import io.github.hectorvent.floci.services.ec2.model.BlockDeviceMapping;
 import io.github.hectorvent.floci.services.ec2.model.EbsBlockDevice;
-import io.github.hectorvent.floci.services.ec2.model.ManagedPrefixList;
-import io.github.hectorvent.floci.services.ec2.model.PrefixListEntry;
+import io.github.hectorvent.floci.services.ec2.model.Image;
 import io.github.hectorvent.floci.services.ec2.model.Instance;
 import io.github.hectorvent.floci.services.ec2.model.InternetGateway;
 import io.github.hectorvent.floci.services.ec2.model.IpPermission;
@@ -20,28 +20,38 @@ import io.github.hectorvent.floci.services.ec2.model.NetworkAcl;
 import io.github.hectorvent.floci.services.ec2.model.KeyPair;
 import io.github.hectorvent.floci.services.ec2.model.LaunchTemplate;
 import io.github.hectorvent.floci.services.ec2.model.LaunchTemplateData;
+import io.github.hectorvent.floci.services.ec2.model.ManagedPrefixList;
 import io.github.hectorvent.floci.services.ec2.model.NatGateway;
+import io.github.hectorvent.floci.services.ec2.model.NetworkAcl;
+import io.github.hectorvent.floci.services.ec2.model.PrefixListEntry;
 import io.github.hectorvent.floci.services.ec2.model.RouteTable;
 import io.github.hectorvent.floci.services.ec2.model.SecurityGroup;
 import io.github.hectorvent.floci.services.ec2.model.SecurityGroupRule;
 import io.github.hectorvent.floci.services.ec2.model.Snapshot;
+import io.github.hectorvent.floci.services.ec2.model.SpotInstanceRequest;
 import io.github.hectorvent.floci.services.ec2.model.Subnet;
 import io.github.hectorvent.floci.services.ec2.model.Tag;
+import io.github.hectorvent.floci.services.ec2.model.UserIdGroupPair;
 import io.github.hectorvent.floci.services.ec2.model.Volume;
 import io.github.hectorvent.floci.services.ec2.model.Vpc;
 import io.github.hectorvent.floci.services.ec2.model.VpcEndpoint;
-import io.github.hectorvent.floci.services.ec2.model.SpotInstanceRequest;
 import io.github.hectorvent.floci.services.ec2.portforward.Ec2PortForwardManager;
+import jakarta.ws.rs.core.MultivaluedHashMap;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static io.github.hectorvent.floci.services.ec2.Ec2KeyPairFixtures.ED25519_FINGERPRINT;
+import static io.github.hectorvent.floci.services.ec2.Ec2KeyPairFixtures.ED25519_KEY;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -95,6 +105,78 @@ class Ec2ServicePersistenceTest {
         assertTrue(restarted.describeVpnGatewayIds(
                 List.of(), Map.of("attachment.vpc-id", List.of("vpc-0123456789abcdef0"))).isEmpty());
         assertTrue(restarted.describeEgressOnlyInternetGatewayIds(Map.of("tag:Owner", List.of("TeamA"))).isEmpty());
+    void elasticIpMetadataSurvivesRestart(@TempDir Path dir) {
+        String region = "us-west-2";
+        String pool = "ipv4pool-ec2-0123456789abcdef0";
+        String borderGroup = "us-west-2-lax-1";
+        Ec2Service first = newService(dir);
+        Address allocated = first.allocateAddress(region, pool, borderGroup);
+
+        Ec2Service restarted = newService(dir);
+        Address described = restarted.describeAddresses(
+                region, List.of(allocated.getAllocationId()), Map.of()).getFirst();
+
+        assertEquals(allocated.getAllocationId(), described.getAllocationId());
+        assertEquals(pool, described.getPublicIpv4Pool());
+        assertEquals(borderGroup, described.getNetworkBorderGroup());
+    }
+
+    @Test
+    void legacyElasticIpMetadataDefaultsToAmazonAndItsStoredRegion(@TempDir Path dir) throws IOException {
+        String region = "us-west-2";
+        String allocationId = "eipalloc-0123456789abcdef0";
+        String legacyJson = """
+                {
+                  "%s::%s": {
+                    "allocationId": "%s",
+                    "publicIp": "54.1.2.3",
+                    "domain": "vpc",
+                    "region": "%s"
+                  }
+                }
+                """.formatted(region, allocationId, allocationId, region);
+        Files.writeString(dir.resolve("ec2-addresses.json"), legacyJson);
+
+        Ec2Service restarted = newService(dir);
+        Address described = restarted.describeAddresses(region, List.of(allocationId), Map.of()).getFirst();
+
+        assertEquals("amazon", described.getPublicIpv4Pool());
+        assertEquals(region, described.getNetworkBorderGroup());
+    }
+
+    @Test
+    void deletedVpcDefaultResourcesRemainAbsentAfterRestart(@TempDir Path dir) {
+        Ec2Service first = newService(dir);
+        Vpc vpc = first.createVpc(REGION, "10.77.0.0/16", false);
+        SecurityGroup defaultGroup = first.describeSecurityGroups(REGION, List.of(), List.of(), Map.of()).stream()
+                .filter(group -> vpc.getVpcId().equals(group.getVpcId()) && "default".equals(group.getGroupName()))
+                .findFirst().orElseThrow();
+
+        first.deleteVpc(REGION, vpc.getVpcId());
+        Ec2Service restarted = newService(dir);
+
+        assertTrue(restarted.describeVpcs(REGION, List.of(), Map.of()).stream()
+                .noneMatch(candidate -> vpc.getVpcId().equals(candidate.getVpcId())));
+        assertTrue(restarted.describeSecurityGroups(REGION, List.of(), List.of(), Map.of()).stream()
+                .noneMatch(group -> vpc.getVpcId().equals(group.getVpcId())));
+        assertTrue(restarted.describeSecurityGroupRules(
+                REGION, List.of(defaultGroup.getGroupId()), List.of()).isEmpty());
+        assertTrue(restarted.describeRouteTables(REGION, List.of(), Map.of()).stream()
+                .noneMatch(table -> vpc.getVpcId().equals(table.getVpcId())));
+        assertTrue(restarted.describeNetworkAcls(REGION, List.of(), Map.of()).stream()
+                .noneMatch(acl -> vpc.getVpcId().equals(acl.getVpcId())));
+    }
+
+    @Test
+    void emptyNetworkDiscoverySurvivesRestart(@TempDir Path dir) {
+        Ec2Service first = newService(dir);
+        assertTrue(first.describeVpnGatewayIds(List.of(), Map.of()).isEmpty());
+        assertTrue(first.describeEgressOnlyInternetGateways("us-east-1", List.of(), Map.of()).isEmpty());
+
+        Ec2Service restarted = newService(dir);
+        assertTrue(restarted.describeVpnGatewayIds(
+                List.of(), Map.of("attachment.vpc-id", List.of("vpc-0123456789abcdef0"))).isEmpty());
+        assertTrue(restarted.describeEgressOnlyInternetGateways("us-east-1", List.of(), Map.of("tag:Owner", List.of("TeamA"))).isEmpty());
     }
 
     @Test
@@ -133,6 +215,129 @@ class Ec2ServicePersistenceTest {
         List<Snapshot> snapshots = restarted.describeSnapshots(REGION, List.of("snap-persisted"), List.of(), Map.of());
         assertEquals(1, snapshots.size(), "linked snapshot must survive restart");
         assertEquals(12, snapshots.getFirst().getVolumeSize());
+    }
+
+    /**
+     * Creation provenance is stored beside the runtime ancestor rather than derived from it, so a
+     * restart reads both back from the image files and a copy still names its immediate source.
+     */
+    @Test
+    void imageCreationProvenanceSurvivesRestartApartFromTheRuntimeAncestor(@TempDir Path dir) {
+        Ec2Service first = newService(dir);
+        String instanceId = first.runInstances(REGION, "ami-0abcdef1234567890", "t3.micro", 1, 1, null,
+                List.of(), null, null, List.of(), null, null).getInstances().getFirst().getInstanceId();
+        Image captured = first.createImage(REGION, instanceId, "provenance-capture", null, true);
+        Image copied = first.copyImage("us-west-2", REGION, captured.getImageId(), "provenance-copy", null);
+
+        Ec2Service restarted = newService(dir);
+
+        Image restoredCapture = restarted.describeImages(REGION, List.of(captured.getImageId()), List.of(), Map.of())
+                .getFirst();
+        assertEquals("ami-0abcdef1234567890", restoredCapture.getCreationSourceImageId());
+        assertEquals(REGION, restoredCapture.getCreationSourceImageRegion());
+        assertEquals(instanceId, restoredCapture.getCreationSourceInstanceId());
+        Image restoredCopy = restarted.describeImages("us-west-2", List.of(copied.getImageId()), List.of(), Map.of())
+                .getFirst();
+        assertEquals(captured.getImageId(), restoredCopy.getCreationSourceImageId());
+        assertEquals(REGION, restoredCopy.getCreationSourceImageRegion());
+        assertNull(restoredCopy.getCreationSourceInstanceId());
+        assertEquals("ami-0abcdef1234567890", restoredCopy.getSourceImageId());
+    }
+
+    /**
+     * An image store as Floci wrote it before creation provenance was kept: a CreateImage AMI and its
+     * cross-region copy, each holding only its launchable ancestor, the catalog AMI, under
+     * {@code sourceImageId}. Both load and report no provenance, rather than passing that ancestor
+     * off as the image they were made from, and a copy made after the upgrade names its source.
+     */
+    @Test
+    void imagesSavedBeforeCreationProvenanceWasKeptLoadWithoutIt(@TempDir Path dir) throws IOException {
+        String capture = "ami-d62643c08afd5b4dd";
+        String copy = "ami-a6f93de002cd6d39b";
+        String legacyJson = """
+                {
+                  "us-west-2::%2$s" : {
+                    "imageId" : "%2$s",
+                    "name" : "legacy-copy",
+                    "description" : "legacy-copy",
+                    "state" : "available",
+                    "ownerId" : "000000000000",
+                    "architecture" : "x86_64",
+                    "rootDeviceType" : "ebs",
+                    "rootDeviceName" : "/dev/xvda",
+                    "virtualizationType" : "hvm",
+                    "hypervisor" : "xen",
+                    "platform" : null,
+                    "imageOwnerAlias" : null,
+                    "creationDate" : "2026-10-20T01:38:17.112Z",
+                    "region" : "us-west-2",
+                    "sourceImageId" : "ami-0abcdef1234567890",
+                    "dockerImage" : null,
+                    "blockDeviceMappings" : [ {
+                      "deviceName" : "/dev/xvda",
+                      "ebs" : {
+                        "snapshotId" : "snap-551e5e74928952115",
+                        "volumeSize" : 8,
+                        "volumeType" : "gp2",
+                        "deleteOnTermination" : true,
+                        "encrypted" : null
+                      }
+                    } ],
+                    "tags" : [ ],
+                    "public" : false
+                  },
+                  "us-east-1::%1$s" : {
+                    "imageId" : "%1$s",
+                    "name" : "legacy-capture",
+                    "description" : "legacy-capture",
+                    "state" : "available",
+                    "ownerId" : "000000000000",
+                    "architecture" : "x86_64",
+                    "rootDeviceType" : "ebs",
+                    "rootDeviceName" : "/dev/xvda",
+                    "virtualizationType" : "hvm",
+                    "hypervisor" : "xen",
+                    "platform" : null,
+                    "imageOwnerAlias" : null,
+                    "creationDate" : "2026-10-20T01:38:17.105Z",
+                    "region" : "us-east-1",
+                    "sourceImageId" : "ami-0abcdef1234567890",
+                    "dockerImage" : null,
+                    "blockDeviceMappings" : [ {
+                      "deviceName" : "/dev/xvda",
+                      "ebs" : {
+                        "snapshotId" : "snap-932ddc3942d093a00",
+                        "volumeSize" : 8,
+                        "volumeType" : "gp2",
+                        "deleteOnTermination" : true,
+                        "encrypted" : null
+                      }
+                    } ],
+                    "tags" : [ ],
+                    "public" : false
+                  }
+                }
+                """.formatted(capture, copy);
+        Files.writeString(dir.resolve("ec2-registered-images.json"), legacyJson);
+
+        Ec2Service restarted = newService(dir);
+
+        Image restoredCapture = restarted.describeImages(REGION, List.of(capture), List.of(), Map.of()).getFirst();
+        Image restoredCopy = restarted.describeImages("us-west-2", List.of(copy), List.of(), Map.of()).getFirst();
+        assertEquals("legacy-capture", restoredCapture.getName());
+        assertEquals("ami-0abcdef1234567890", restoredCopy.getSourceImageId());
+        for (Image restored : List.of(restoredCapture, restoredCopy)) {
+            assertNull(restored.getCreationSourceImageId());
+            assertNull(restored.getCreationSourceImageRegion());
+            assertNull(restored.getCreationSourceInstanceId());
+        }
+        assertTrue(restarted.describeImages("us-west-2", List.of(), List.of(),
+                Map.of("source-image-id", List.of("*"))).isEmpty());
+
+        Image copiedNow = restarted.copyImage("us-west-2", REGION, capture, "copied-after-upgrade", null);
+        assertEquals(capture, copiedNow.getCreationSourceImageId());
+        assertEquals(REGION, copiedNow.getCreationSourceImageRegion());
+        assertEquals("ami-0abcdef1234567890", copiedNow.getSourceImageId());
     }
 
     @Test
@@ -430,7 +635,7 @@ class Ec2ServicePersistenceTest {
                 .getFirst()
                 .getData();
         assertEquals("arn:aws:iam::000000000000:instance-profile/legacy-profile",
-                restarted.iamInstanceProfileArn(versioned),
+                versioned.getIamInstanceProfile().getArn(),
                 "IAM instance profile on a legacy versions-map entry must survive restart");
         assertEquals(List.of("legacy-versioned"),
                 versioned.getInstanceTags().stream().map(Tag::getValue).toList(),
@@ -441,11 +646,126 @@ class Ec2ServicePersistenceTest {
                 .getFirst()
                 .getData();
         assertEquals("arn:aws:iam::000000000000:instance-profile/legacy-profile",
-                restarted.iamInstanceProfileArn(noVersions),
+                noVersions.getIamInstanceProfile().getArn(),
                 "IAM instance profile on a legacy template with no versions map must survive restart");
         assertEquals(List.of("legacy-no-versions"),
                 noVersions.getInstanceTags().stream().map(Tag::getValue).toList(),
                 "instance tags on a legacy template with no versions map must survive restart");
+    }
+
+    @Test
+    void legacyLaunchTemplateUserDataDecodesOnRead(@TempDir Path dir) throws IOException {
+        String encoded = "IyEvYmluL2Jhc2gKZWNobyBoaQo=";
+        String legacyJson = """
+                {
+                  "us-east-1::lt-legacy-user-data": {
+                    "launchTemplateId": "lt-legacy-user-data",
+                    "launchTemplateName": "legacy-user-data",
+                    "defaultVersionNumber": "1",
+                    "latestVersionNumber": "1",
+                    "region": "us-east-1",
+                    "data": { "encodedUserData": "%s" },
+                    "versions": {
+                      "1": { "encodedUserData": "%s" }
+                    }
+                  }
+                }
+                """.formatted(encoded, encoded);
+        Files.writeString(dir.resolve("ec2-launch-templates.json"), legacyJson);
+
+        Ec2Service restarted = newService(dir);
+        LaunchTemplateData resolved = restarted.resolveLaunchTemplateData(
+                REGION, "lt-legacy-user-data", null, "1");
+        assertEquals(encoded, resolved.getEncodedUserData());
+        assertEquals("#!/bin/bash\necho hi\n", resolved.getUserData());
+
+        LaunchTemplateData described = restarted.describeLaunchTemplateVersions(
+                REGION, "lt-legacy-user-data", null, List.of("1")).getFirst().getData();
+        assertEquals(encoded, described.getEncodedUserData());
+        assertNull(described.getUserData());
+        assertNull(restarted.describeLaunchTemplates(REGION, List.of("lt-legacy-user-data"),
+                List.of(), Map.of()).getFirst().getData().getUserData());
+    }
+
+    @Test
+    void keyPairTypeAndCreateTimeSurviveRestart(@TempDir Path dir) {
+        Ec2Service first = newService(dir);
+        KeyPair created = first.createKeyPair(REGION, "restart-created");
+        KeyPair imported = first.importKeyPair(REGION, "restart-imported", ED25519_KEY);
+
+        Ec2Service restarted = newService(dir);
+        Map<String, KeyPair> described = new HashMap<>();
+        for (KeyPair keyPair : restarted.describeKeyPairs(REGION, List.of(), List.of())) {
+            described.put(keyPair.getKeyName(), keyPair);
+        }
+
+        assertEquals("rsa", described.get("restart-created").getKeyType());
+        assertEquals(created.getCreateTime(), described.get("restart-created").getCreateTime());
+        assertEquals("ed25519", described.get("restart-imported").getKeyType());
+        assertEquals(imported.getCreateTime(), described.get("restart-imported").getCreateTime());
+    }
+
+    /**
+     * Key pairs saved before keyType and createTime were recorded still load and are described:
+     * with no createTime, which was never known, and with the type read from the stored key, rsa for
+     * the created one and ed25519 for the imported one. The imported material is kept exactly as
+     * the older ImportKeyPair stored it, comment and newline included.
+     */
+    @Test
+    void keyPairsSavedBeforeTypeAndCreateTimeWereRecordedStillLoad(@TempDir Path dir) throws IOException {
+        Ec2KeyMaterial.Generated generated = Ec2KeyMaterial.generateRsa();
+        String importedKey = ED25519_KEY + " me@host\n";
+        String legacyJson = """
+                {
+                  "us-east-1::key-0aaaaaaaaaaaaaaaa": {
+                    "keyName": "legacy-created",
+                    "keyPairId": "key-0aaaaaaaaaaaaaaaa",
+                    "keyFingerprint": "%s",
+                    "keyMaterial": %s,
+                    "publicKey": "%s",
+                    "region": "us-east-1",
+                    "tags": []
+                  },
+                  "us-east-1::key-0bbbbbbbbbbbbbbbb": {
+                    "keyName": "legacy-imported",
+                    "keyPairId": "key-0bbbbbbbbbbbbbbbb",
+                    "keyFingerprint": "%s",
+                    "publicKey": %s,
+                    "region": "us-east-1",
+                    "tags": [{"key": "Team", "value": "blue"}]
+                  }
+                }
+                """.formatted(generated.fingerprint(), jsonString(generated.privateKeyPem()),
+                generated.openSshPublicKey(), ED25519_FINGERPRINT, jsonString(importedKey));
+        Files.writeString(dir.resolve("ec2-key-pairs.json"), legacyJson);
+
+        Ec2Service restarted = newService(dir);
+        Map<String, KeyPair> described = new HashMap<>();
+        for (KeyPair keyPair : restarted.describeKeyPairs(REGION, List.of(), List.of())) {
+            described.put(keyPair.getKeyName(), keyPair);
+        }
+
+        assertEquals(2, described.size());
+        assertEquals("rsa", Ec2Service.keyTypeOf(described.get("legacy-created")));
+        assertEquals("ed25519", Ec2Service.keyTypeOf(described.get("legacy-imported")));
+        assertNull(described.get("legacy-created").getCreateTime());
+        assertNull(described.get("legacy-imported").getCreateTime());
+        assertEquals(importedKey, described.get("legacy-imported").getPublicKey());
+        assertEquals(List.of("legacy-imported"), restarted.describeKeyPairs(REGION, List.of(), List.of(),
+                Map.of("key-type", List.of("ed25519"), "tag:Team", List.of("blue"))).stream()
+                .map(KeyPair::getKeyName).toList());
+
+        String xml = (String) new Ec2QueryHandler(restarted, mock(EmulatorConfig.class), mock(FlowLogService.class),
+                mock(Ec2EbsEncryptionService.class), mock(Ec2SnapshotBlockPublicAccessService.class),
+                mock(Ec2IpamService.class), new RegionResolver(REGION, "000000000000"))
+                .handle("DescribeKeyPairs", new MultivaluedHashMap<>(), REGION).getEntity();
+        assertTrue(xml.contains("<keyType>rsa</keyType>"), xml);
+        assertTrue(xml.contains("<keyType>ed25519</keyType>"), xml);
+        assertFalse(xml.contains("<createTime>"), xml);
+    }
+
+    private static String jsonString(String value) {
+        return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"";
     }
 
     private BlockDeviceMapping blockDeviceMapping(String snapshotId, int volumeSize) {
@@ -466,6 +786,7 @@ class Ec2ServicePersistenceTest {
         when(config.services()).thenReturn(services);
         when(services.ec2()).thenReturn(ec2);
         when(ec2.mock()).thenReturn(true);
+        when(ec2.mockPublicAddresses()).thenReturn(EmulatorConfig.Ec2ServiceConfig.MockPublicAddresses.NONE);
         Ec2ImageCatalog imageCatalog = new Ec2ImageCatalog();
         return new Ec2Service(config, null, mock(Ec2PortForwardManager.class),
                 new AmiImageResolver(imageCatalog), imageCatalog,

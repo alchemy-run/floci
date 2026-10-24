@@ -46,6 +46,23 @@ class UnknownServiceScopeGuardIntegrationTest {
     }
 
     @Test
+    void unsupportedRestServiceScopeWithAnUnrecognisedSmithyProtocolGetsUnknownOperation() {
+        // No protocol claims it before routing; the REST route it reaches claims it, and the guard
+        // still applies.
+        given()
+            .header("Authorization", authorization("support"))
+            .header("smithy-protocol", "unrecognised")
+            .contentType("application/json")
+            .body("{}")
+        .when()
+            .post("/listRegions")
+        .then()
+            .statusCode(404)
+            .body("__type", equalTo("UnknownOperationException"))
+            .body("message", equalTo("Unknown operation: POST /listRegions"));
+    }
+
+    @Test
     void knownRestJsonScopeCannotFallThroughToS3Wildcard() {
         given()
             .header("Authorization", authorization("bedrock"))
@@ -57,6 +74,22 @@ class UnknownServiceScopeGuardIntegrationTest {
             .statusCode(404)
             .contentType(containsString("application/json"))
             .header("X-Amzn-Errortype", "UnknownOperationException")
+            .body("__type", equalTo("UnknownOperationException"))
+            .body("message", equalTo("Unknown operation: POST /prompts"));
+    }
+
+    @Test
+    void aKnownRestJsonScopeWithAnUnrecognisedSmithyProtocolCannotFallThroughToS3Wildcard() {
+        // No protocol claims it, so it is judged as the S3 route it reached, which bedrock is not.
+        given()
+            .header("Authorization", authorization("bedrock"))
+            .header("smithy-protocol", "unrecognised")
+            .contentType("application/x-amz-json-1.1")
+            .body("{\"name\":\"probe\"}")
+        .when()
+            .post("/prompts")
+        .then()
+            .statusCode(404)
             .body("__type", equalTo("UnknownOperationException"))
             .body("message", equalTo("Unknown operation: POST /prompts"));
     }
@@ -113,6 +146,45 @@ class UnknownServiceScopeGuardIntegrationTest {
             .statusCode(404)
             .body("message", containsString("guard-test-thing"))
             .body("__type", not(equalTo("UnknownOperationException")));
+    }
+
+    @Test
+    void sesv2IsNotASigningScope() {
+        // Every SDK signs SES v2 as ses (botocore sesv2 signingName), so a REST request signed
+        // sesv2 names no service Floci serves.
+        given()
+            .header("Authorization", authorization("sesv2"))
+        .when()
+            .get("/v2/email/account")
+        .then()
+            .statusCode(404)
+            .body("__type", equalTo("UnknownOperationException"));
+
+        given()
+            .header("Authorization", authorization("ses"))
+        .when()
+            .get("/v2/email/account")
+        .then()
+            .statusCode(200);
+    }
+
+    @Test
+    void apigatewayv2IsNotASigningScope() {
+        // API Gateway v2 signs as apigateway in every SDK (botocore apigatewayv2 signingName).
+        given()
+            .header("Authorization", authorization("apigatewayv2"))
+        .when()
+            .get("/v2/apis")
+        .then()
+            .statusCode(404)
+            .body("__type", equalTo("UnknownOperationException"));
+
+        given()
+            .header("Authorization", authorization("apigateway"))
+        .when()
+            .get("/v2/apis")
+        .then()
+            .statusCode(200);
     }
 
     @Test

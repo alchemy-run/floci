@@ -2,10 +2,10 @@ package io.github.hectorvent.floci.services.appsync.graphql.auth;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hectorvent.floci.core.common.Base64Url;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
-import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Map;
 import java.util.Optional;
@@ -70,10 +70,8 @@ public class JwtClaimsDecoder {
 
     static String encode(Map<String, Object> claims, ObjectMapper objectMapper) {
         try {
-            String header = Base64.getUrlEncoder().withoutPadding()
-                    .encodeToString("{\"alg\":\"none\",\"typ\":\"JWT\"}".getBytes(StandardCharsets.UTF_8));
-            String payload = Base64.getUrlEncoder().withoutPadding()
-                    .encodeToString(objectMapper.writeValueAsBytes(claims));
+            String header = Base64Url.encode("{\"alg\":\"none\",\"typ\":\"JWT\"}");
+            String payload = Base64Url.encode(objectMapper.writeValueAsBytes(claims));
             return header + "." + payload + ".sig";
         } catch (Exception e) {
             throw new IllegalArgumentException(e);

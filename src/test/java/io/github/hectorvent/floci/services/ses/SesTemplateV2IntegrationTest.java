@@ -11,9 +11,12 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.stream.Stream;
 
+import static io.github.hectorvent.floci.services.ses.SesV2TimestampMatchers.DECIMAL_NUMBERS;
+import static io.github.hectorvent.floci.services.ses.SesV2TimestampMatchers.epochSecondsWithMillis;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.everyItem;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.notNullValue;
 
@@ -165,6 +168,7 @@ class SesTemplateV2IntegrationTest {
     @Order(8)
     void listTemplates_includesCreated() {
         given()
+            .config(DECIMAL_NUMBERS)
             .contentType("application/json")
             .header("Authorization", AUTH_HEADER)
         .when()
@@ -172,7 +176,8 @@ class SesTemplateV2IntegrationTest {
         .then()
             .statusCode(200)
             .body("TemplatesMetadata", notNullValue())
-            .body("TemplatesMetadata.TemplateName", hasItem("v2-welcome"));
+            .body("TemplatesMetadata.TemplateName", hasItem("v2-welcome"))
+            .body("TemplatesMetadata.CreatedTimestamp", everyItem(epochSecondsWithMillis()));
     }
 
     @Test
@@ -684,11 +689,53 @@ class SesTemplateV2IntegrationTest {
             .body("__type", equalTo("BadRequestException"));
     }
 
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("io.github.hectorvent.floci.services.ses.SesV2SerializationErrors#nonObjectBodies")
+    @Order(51)
+    void sendEmail_nonObjectBody_isASerializationException(String body, String message) {
+        given()
+            .contentType("application/json")
+            .header("Authorization", AUTH_HEADER)
+            .body(body)
+        .when()
+            .post("/v2/email/outbound-emails")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("SerializationException"))
+            .body("message", equalTo(message));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("wrongTypeSendEmailBodies")
+    @Order(52)
+    void sendEmail_wrongMemberType_returnsSerializationException(String label, String body) {
+        given()
+            .contentType("application/json")
+            .header("Authorization", AUTH_HEADER)
+            .body(body)
+        .when()
+            .post("/v2/email/outbound-emails")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("SerializationException"));
+    }
+
     static Stream<Arguments> malformedSendEmailBodies() {
         return Stream.of(
-                Arguments.of("body is array", "[1,2,3]"),
-                Arguments.of("body is JSON null literal", "null"),
-                Arguments.of("body is JSON string", "\"hello\""),
+                Arguments.of("TemplateData as invalid JSON string", """
+                    {
+                      "FromEmailAddress": "sender@example.com",
+                      "Destination": {"ToAddresses": ["recipient@example.com"]},
+                      "Content": {
+                        "Template": {"TemplateName": "any", "TemplateData": "{not json"}
+                      }
+                    }
+                    """)
+        );
+    }
+
+    static Stream<Arguments> wrongTypeSendEmailBodies() {
+        return Stream.of(
                 Arguments.of("Destination as string", """
                     {
                       "FromEmailAddress": "sender@example.com",
@@ -711,15 +758,6 @@ class SesTemplateV2IntegrationTest {
                       "Destination": {"ToAddresses": ["recipient@example.com"]},
                       "Content": {
                         "Template": {"TemplateName": "any", "TemplateData": [1,2,3]}
-                      }
-                    }
-                    """),
-                Arguments.of("TemplateData as invalid JSON string", """
-                    {
-                      "FromEmailAddress": "sender@example.com",
-                      "Destination": {"ToAddresses": ["recipient@example.com"]},
-                      "Content": {
-                        "Template": {"TemplateName": "any", "TemplateData": "{not json"}
                       }
                     }
                     """)

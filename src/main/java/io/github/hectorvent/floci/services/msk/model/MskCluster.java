@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.msk.model;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.quarkus.runtime.annotations.RegisterForReflection;
+
 import java.time.Instant;
 import java.util.Map;
 
@@ -113,6 +114,12 @@ public class MskCluster {
     // host:port of the broker's own listener behind the SASL/IAM gateway.
     @JsonProperty("iamBackendAddress")
     private String iamBackendAddress;
+    /**
+     * The Docker volume name. Stamped at creation with the current prefix; null on records
+     * written before this field existed, which are backfilled with the frozen legacy name so
+     * their data stays reachable.
+     */
+    private String dockerVolumeName;
 
     public MskCluster() {}
 
@@ -204,4 +211,7 @@ public class MskCluster {
 
     public String getIamBackendAddress() { return iamBackendAddress; }
     public void setIamBackendAddress(String iamBackendAddress) { this.iamBackendAddress = iamBackendAddress; }
+    public String getDockerVolumeName() { return dockerVolumeName; }
+
+    public void setDockerVolumeName(String dockerVolumeName) { this.dockerVolumeName = dockerVolumeName; }
 }

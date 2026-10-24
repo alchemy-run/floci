@@ -1,15 +1,15 @@
 package io.github.hectorvent.floci.services.cloudformation;
 
+import io.github.hectorvent.floci.testing.CfnStackWaits;
+import io.github.hectorvent.floci.testing.CloudFormationSettingsProfile;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.Test;
-
-import java.util.Map;
 
 import static io.github.hectorvent.floci.services.cloudformation.CloudFormationLambdaMissingS3CodeIntegrationTest.CFN_AUTH;
 import static io.github.hectorvent.floci.services.cloudformation.CloudFormationLambdaMissingS3CodeIntegrationTest.createStack;
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 
 /**
@@ -21,17 +21,13 @@ import static org.hamcrest.Matchers.containsString;
  * <p>A separate top-level class rather than a nested one, because {@code @TestProfile} applies per
  * test class and Surefire discovers test classes by file name: a nested class carrying the profile
  * compiles and passes when targeted directly, but is silently skipped in a full {@code mvn test}.
+ *
+ * <p>The setting comes from {@link CloudFormationSettingsProfile}, which this class shares with the
+ * other CloudFormation classes that change a default.
  */
 @QuarkusTest
-@TestProfile(CloudFormationUnsupportedResourceTypeStrictIntegrationTest.StrictProfile.class)
+@TestProfile(CloudFormationSettingsProfile.class)
 class CloudFormationUnsupportedResourceTypeStrictIntegrationTest {
-
-    public static final class StrictProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci.services.cloudformation.allow-stub-unsupported-resource-types", "false");
-        }
-    }
 
     @Test
     void strictProfileRollsTheStackBack() {
@@ -58,6 +54,8 @@ class CloudFormationUnsupportedResourceTypeStrictIntegrationTest {
         .then()
             .statusCode(200)
             .body(containsString("<StackStatus>ROLLBACK_COMPLETE</StackStatus>"))
-            .body(containsString("Resource type AWS::Fake::Thing is not supported by Floci."));
+            .body(containsString("The following resource(s) failed to create: [MyThing]. Rollback requested by user."));
+        assertThat(CfnStackWaits.failedResourceReason(stackName, CFN_AUTH),
+                containsString("Resource type AWS::Fake::Thing is not supported by Floci."));
     }
 }

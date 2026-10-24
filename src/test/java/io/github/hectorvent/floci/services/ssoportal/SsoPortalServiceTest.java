@@ -1,5 +1,8 @@
 package io.github.hectorvent.floci.services.ssoportal;
 
+import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
+import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.organizations.OrganizationsService;
 import io.github.hectorvent.floci.services.ssoadmin.SsoAdminService;
@@ -8,6 +11,9 @@ import io.github.hectorvent.floci.services.ssoadmin.model.PermissionSet;
 import io.github.hectorvent.floci.services.ssooidc.SsoOidcException;
 import io.github.hectorvent.floci.services.ssooidc.SsoOidcService;
 import io.github.hectorvent.floci.services.ssooidc.model.TokenSession;
+import io.github.hectorvent.floci.services.ssoportal.model.PortalAccountInfo;
+import io.github.hectorvent.floci.services.ssoportal.model.PortalRoleCredentials;
+import io.github.hectorvent.floci.services.ssoportal.model.PortalRoleInfo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -39,7 +45,8 @@ class SsoPortalServiceTest {
         ssoAdminService = mock(SsoAdminService.class);
         organizationsService = mock(OrganizationsService.class);
         iamService = mock(IamService.class);
-        service = new SsoPortalService(oidcService, ssoAdminService, organizationsService, iamService);
+        service = new SsoPortalService(oidcService, ssoAdminService, organizationsService, iamService,
+                new RegionResolver("cn-north-1", "000000000000"));
     }
 
     @Test
@@ -57,19 +64,20 @@ class SsoPortalServiceTest {
         when(ssoAdminService.permissionSetForPortal(permissionSetArn)).thenReturn(new PermissionSet(
                 permissionSetArn, "PlatformAdmins", null, "PT1H", Map.of(), Map.of(), null, null, Map.of()));
 
-        var accounts = service.listAccounts(accessToken, null, null);
+        PaginatedResult<PortalAccountInfo> accounts = service.listAccounts(accessToken, null, null);
         assertEquals(List.of(accountId), accounts.items().stream().map(a -> a.accountId()).toList());
 
-        var roles = service.listAccountRoles(accessToken, accountId, null, null);
+        PaginatedResult<PortalRoleInfo> roles = service.listAccountRoles(accessToken, accountId, null, null);
         assertEquals("PlatformAdmins", roles.items().getFirst().roleName());
 
-        var credentials = service.getRoleCredentials(accessToken, accountId, "PlatformAdmins");
+        PortalRoleCredentials credentials = service.getRoleCredentials(accessToken, accountId, "PlatformAdmins");
         assertTrue(credentials.accessKeyId().startsWith("ASIA"));
         assertTrue(credentials.expiration() > System.currentTimeMillis());
 
         ArgumentCaptor<String> roleArn = ArgumentCaptor.forClass(String.class);
         verify(iamService).registerSessionForAccount(eq(accountId), any(), any(), any(), roleArn.capture(), any(), eq(null));
-        assertTrue(roleArn.getValue().contains(":iam::" + accountId + ":role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_PlatformAdmins_floci"));
+        assertEquals("arn:aws-cn:iam::" + accountId
+                + ":role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_PlatformAdmins_floci", roleArn.getValue());
     }
 
     @Test
@@ -87,7 +95,7 @@ class SsoPortalServiceTest {
     void rejectsInvalidOrExpiredTokens() {
         when(oidcService.requireAccessToken("bad-token")).thenThrow(new SsoOidcException("invalid_token", "expired", 401));
 
-        var error = assertThrows(io.github.hectorvent.floci.core.common.AwsException.class,
+        AwsException error = assertThrows(AwsException.class,
                 () -> service.listAccounts("bad-token", null, null));
         assertEquals("UnauthorizedException", error.getErrorCode());
     }

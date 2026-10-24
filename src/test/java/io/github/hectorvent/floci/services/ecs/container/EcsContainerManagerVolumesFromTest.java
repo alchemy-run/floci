@@ -23,6 +23,7 @@ import io.github.hectorvent.floci.services.ecs.model.FirelensConfiguration;
 import io.github.hectorvent.floci.services.ecs.model.LogConfiguration;
 import io.github.hectorvent.floci.services.ecs.model.TaskDefinition;
 import io.github.hectorvent.floci.services.ecs.model.VolumeFrom;
+import io.github.hectorvent.floci.services.lambda.launcher.ImageCacheService.LaunchImage;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.secretsmanager.SecretsManagerService;
 import io.github.hectorvent.floci.services.ssm.SsmService;
@@ -61,14 +62,17 @@ class EcsContainerManagerVolumesFromTest {
     @BeforeEach
     void setUp() {
         containerBuilder = mock(ContainerBuilder.class);
+        when(containerBuilder.resolveImage(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
         sourceBuilder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
         appBuilder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
         when(containerBuilder.newContainer("sidecar:latest")).thenReturn(sourceBuilder);
         when(containerBuilder.newContainer("app:latest")).thenReturn(appBuilder);
-        when(sourceBuilder.build()).thenReturn(mock(ContainerSpec.class));
-        when(appBuilder.build()).thenReturn(mock(ContainerSpec.class));
+        when(sourceBuilder.build()).thenReturn(new ContainerSpec("test-image"));
+        when(appBuilder.build()).thenReturn(new ContainerSpec("test-image"));
 
         lifecycleManager = mock(ContainerLifecycleManager.class);
+        when(lifecycleManager.resolveImageForLaunch(any(), any()))
+                .thenAnswer(invocation -> new LaunchImage(invocation.getArgument(0), null));
         when(lifecycleManager.createAndStart(any()))
                 .thenReturn(new ContainerInfo("source-id", Map.of()))
                 .thenReturn(new ContainerInfo("app-id", Map.of()));
@@ -122,7 +126,7 @@ class EcsContainerManagerVolumesFromTest {
     void firelensRouterAndApplicationStartAfterTheirVolumeSource() {
         ContainerBuilder.Builder routerBuilder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
         when(containerBuilder.newContainer("router:latest")).thenReturn(routerBuilder);
-        when(routerBuilder.build()).thenReturn(mock(ContainerSpec.class));
+        when(routerBuilder.build()).thenReturn(new ContainerSpec("test-image"));
         when(lifecycleManager.create(any())).thenReturn("router-id");
         when(lifecycleManager.startCreated(eq("router-id"), any()))
                 .thenReturn(new ContainerInfo("router-id", Map.of()));
@@ -130,7 +134,7 @@ class EcsContainerManagerVolumesFromTest {
         when(lifecycleManager.getDockerClient()).thenReturn(dockerClient);
         InspectVolumeCmd inspectVolumeCmd = mock(InspectVolumeCmd.class);
         InspectVolumeResponse volume = mock(InspectVolumeResponse.class);
-        when(dockerClient.inspectVolumeCmd("floci-ecs-firelens-volumesfrom1")).thenReturn(inspectVolumeCmd);
+        when(dockerClient.inspectVolumeCmd("floci-aws-ecs-firelens-volumesfrom1")).thenReturn(inspectVolumeCmd);
         when(inspectVolumeCmd.exec()).thenReturn(volume);
         when(volume.getMountpoint()).thenReturn("/var/lib/docker/volumes/floci-ecs-firelens-volumesfrom1/_data");
         CopyArchiveToContainerCmd copyCmd = mock(CopyArchiveToContainerCmd.class, RETURNS_SELF);
@@ -142,7 +146,9 @@ class EcsContainerManagerVolumesFromTest {
         ContainerDefinition router = definition("router", "router:latest");
         router.setFirelensConfiguration(new FirelensConfiguration("fluentbit", Map.of()));
         router.setVolumesFrom(List.of(new VolumeFrom("source", false)));
+        router.setLogConfiguration(awslogs());
         ContainerDefinition source = definition("source", "sidecar:latest");
+        source.setLogConfiguration(awslogs());
 
         EcsTask ecsTask = task();
         EcsTaskHandle handle = manager.startTask(
@@ -160,8 +166,8 @@ class EcsContainerManagerVolumesFromTest {
         lifecycleOrder.verify(lifecycleManager).createAndStart(any(ContainerSpec.class));
         verify(routerBuilder).withVolumesFrom("source-id", false);
         verify(appBuilder).withVolumesFrom("source-id", true);
-        verify(lifecycleManager).ensureVolume("floci-ecs-firelens-volumesfrom1");
-        verify(routerBuilder).withNamedVolume("floci-ecs-firelens-volumesfrom1", "/var/run");
+        verify(lifecycleManager).ensureVolume("floci-aws-ecs-firelens-volumesfrom1");
+        verify(routerBuilder).withNamedVolume("floci-aws-ecs-firelens-volumesfrom1", "/var/run");
         verify(copyCmd).withRemotePath("/fluent-bit/etc");
         verify(routerBuilder, never()).withLoopbackPortBinding(anyInt(), anyInt());
         verify(appBuilder, never()).withNetworkMode(anyString());
@@ -175,10 +181,10 @@ class EcsContainerManagerVolumesFromTest {
         verify(appBuilder, never()).withLogRotation();
         verify(sourceBuilder).withLogRotation();
         verify(routerBuilder).withLogRotation();
-        verify(logStreamer, never()).attach(eq("app-id"), any(), any(), any(), any());
-        verify(logStreamer).attach(eq("source-id"), any(), any(), eq("us-east-1"), any());
-        verify(logStreamer).attach(eq("router-id"), any(), any(), eq("us-east-1"), any());
-        assertEquals("floci-ecs-firelens-volumesfrom1", handle.getFirelensVolumeName());
+        verify(logStreamer, never()).attachForAccount(any(), eq("app-id"), any(), any(), any(), any());
+        verify(logStreamer).attachForAccount(eq("000000000000"), eq("source-id"), any(), any(), eq("us-east-1"), any());
+        verify(logStreamer).attachForAccount(eq("000000000000"), eq("router-id"), any(), any(), eq("us-east-1"), any());
+        assertEquals("floci-aws-ecs-firelens-volumesfrom1", handle.getFirelensVolumeName());
         assertEquals(List.of("source", "router", "app"), handle.getContainerIds().keySet().stream().toList());
         assertEquals(List.of("app", "router", "source"),
                 ecsTask.getContainers().stream().map(Container::getName).toList());
@@ -261,6 +267,10 @@ class EcsContainerManagerVolumesFromTest {
         definition.setName(name);
         definition.setImage(image);
         return definition;
+    }
+
+    private static LogConfiguration awslogs() {
+        return new LogConfiguration("awslogs", Map.of("awslogs-group", "/ecs/volumesfrom-family"), null);
     }
 
     private static TaskDefinition taskDefinition(List<ContainerDefinition> definitions) {

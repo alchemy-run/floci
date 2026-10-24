@@ -2,23 +2,19 @@ package io.github.hectorvent.floci.services.stepfunctions;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.hectorvent.floci.config.EmulatorConfig;
-import io.github.hectorvent.floci.services.dynamodb.DynamoDbJsonHandler;
-import io.github.hectorvent.floci.services.dynamodb.DynamoDbService;
+import io.github.hectorvent.floci.services.lambda.LambdaAliasStore;
 import io.github.hectorvent.floci.services.lambda.LambdaExecutorService;
 import io.github.hectorvent.floci.services.lambda.LambdaFunctionStore;
+import io.github.hectorvent.floci.services.lambda.LambdaTargetResolver;
 import io.github.hectorvent.floci.services.lambda.model.InvocationType;
 import io.github.hectorvent.floci.services.lambda.model.InvokeResult;
+import io.github.hectorvent.floci.services.lambda.model.LambdaAlias;
 import io.github.hectorvent.floci.services.lambda.model.LambdaFunction;
-import io.github.hectorvent.floci.services.s3.S3Service;
-import io.github.hectorvent.floci.services.sns.SnsJsonHandler;
-import io.github.hectorvent.floci.services.sqs.SqsJsonHandler;
 import io.github.hectorvent.floci.services.stepfunctions.model.Execution;
 import io.github.hectorvent.floci.services.stepfunctions.model.HistoryEvent;
 import io.github.hectorvent.floci.services.stepfunctions.model.StateMachine;
 import io.quarkus.test.junit.QuarkusTest;
 import io.vertx.mutiny.core.Vertx;
-import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -54,14 +50,18 @@ class AslExecutorLambdaInvokeResultTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private AslExecutor executor;
+    private LambdaExecutorService lambdaExecutor;
+    private LambdaFunctionStore functionStore;
+    private LambdaAliasStore aliasStore;
 
     @Inject
     Vertx vertx;
 
     @BeforeEach
     void setUp() throws Exception {
-        LambdaExecutorService lambdaExecutor = mock(LambdaExecutorService.class);
-        LambdaFunctionStore functionStore = mock(LambdaFunctionStore.class);
+        lambdaExecutor = mock(LambdaExecutorService.class);
+        functionStore = mock(LambdaFunctionStore.class);
+        aliasStore = mock(LambdaAliasStore.class);
         LambdaFunction function = new LambdaFunction();
         function.setFunctionName(FUNCTION_NAME);
         function.setFunctionArn(FUNCTION_ARN);
@@ -76,23 +76,13 @@ class AslExecutorLambdaInvokeResultTest {
                     return new InvokeResult(200, null, output, null, "echo-request");
                 });
 
-        executor = new AslExecutor(
-                lambdaExecutor,
-                functionStore,
-                mock(DynamoDbService.class),
-                mock(DynamoDbJsonHandler.class),
-                mock(SqsJsonHandler.class), mock(SnsJsonHandler.class),
-                mock(io.github.hectorvent.floci.services.cloudformation.CloudFormationQueryHandler.class),
-                mock(io.github.hectorvent.floci.services.ec2.Ec2Service.class),
-                mock(S3Service.class),
-                mock(io.github.hectorvent.floci.services.ecs.EcsService.class),
-                mock(io.github.hectorvent.floci.services.ecs.EcsJsonHandler.class),
-                mock(io.github.hectorvent.floci.services.eventbridge.EventBridgeHandler.class),
-                mock(io.github.hectorvent.floci.services.scheduler.SchedulerService.class),
-                mock(io.github.hectorvent.floci.services.scheduler.SchedulerController.class),
-                objectMapper,
-                new JsonataEvaluator(objectMapper),
-                mock(Instance.class), mock(EmulatorConfig.class), vertx, null);
+        executor = AslExecutorFixture.builder()
+                .lambdaExecutor(lambdaExecutor)
+                .targetResolver(new LambdaTargetResolver(functionStore, aliasStore))
+                .objectMapper(objectMapper)
+                .vertx(vertx)
+                .customResourceLiveness(null)
+                .build();
     }
 
     @Test
@@ -243,6 +233,68 @@ class AslExecutorLambdaInvokeResultTest {
         JsonNode output = objectMapper.readTree(execution.getOutput());
         assertEquals("RET", output.path("marker").asText());
         assertEquals(1, output.path("echo").path("in").asInt());
+    }
+
+    @Test
+    void directVersionQualifiedArnInvokesThatVersion() throws Exception {
+        stubVersion("1", "V1");
+
+        Execution execution = run("""
+                {
+                  "StartAt": "Call",
+                  "States": {
+                    "Call": {
+                      "Type": "Task",
+                      "Resource": "%s:1",
+                      "End": true
+                    }
+                  }
+                }
+                """.formatted(FUNCTION_ARN));
+
+        assertEquals("SUCCEEDED", execution.getStatus());
+        assertEquals("V1", objectMapper.readTree(execution.getOutput()).path("marker").asText());
+    }
+
+    @Test
+    void optimizedInvokeWithAliasInvokesTheAliasVersion() throws Exception {
+        stubVersion("2", "V2");
+        LambdaAlias alias = new LambdaAlias();
+        alias.setName("live");
+        alias.setFunctionName(FUNCTION_NAME);
+        alias.setFunctionVersion("2");
+        when(aliasStore.get(REGION, FUNCTION_NAME, "live")).thenReturn(Optional.of(alias));
+
+        Execution execution = run("""
+                {
+                  "StartAt": "Call",
+                  "States": {
+                    "Call": {
+                      "Type": "Task",
+                      "Resource": "arn:aws:states:::lambda:invoke",
+                      "Parameters": {"FunctionName": "%s:live", "Payload": {}},
+                      "End": true
+                    }
+                  }
+                }
+                """.formatted(FUNCTION_ARN));
+
+        assertEquals("SUCCEEDED", execution.getStatus());
+        JsonNode output = objectMapper.readTree(execution.getOutput());
+        assertEquals("V2", output.path("Payload").path("marker").asText());
+        assertEquals("2", output.path("ExecutedVersion").asText());
+    }
+
+    private void stubVersion(String version, String marker) throws Exception {
+        LambdaFunction function = new LambdaFunction();
+        function.setFunctionName(FUNCTION_NAME);
+        function.setFunctionArn(FUNCTION_ARN + ":" + version);
+        function.setVersion(version);
+        when(functionStore.get(REGION, FUNCTION_NAME, version)).thenReturn(Optional.of(function));
+        when(lambdaExecutor.invoke(eq(function), any(byte[].class), eq(InvocationType.RequestResponse)))
+                .thenReturn(new InvokeResult(200, null,
+                        objectMapper.writeValueAsBytes(objectMapper.createObjectNode().put("marker", marker)),
+                        null, "version-request"));
     }
 
     private Execution run(String definition) {

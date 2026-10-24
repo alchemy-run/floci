@@ -1,17 +1,23 @@
 package io.github.hectorvent.floci.services.cloudformation;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hectorvent.floci.testing.CfnStackWaits;
+import io.github.hectorvent.floci.testing.RdsMockProfile;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
+import static io.github.hectorvent.floci.testing.RdsRequests.rds;
 import static io.restassured.RestAssured.given;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * RDS master credentials are the only properties where {@code {{resolve:ssm-secure:...}}} is
@@ -27,7 +33,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  * leaves the whole suite green and breaks {@code ssm-secure} on the one resource that accepts it.
  */
 @QuarkusTest
-@TestProfile(CloudFormationRdsDynamicReferenceIntegrationTest.RdsMockProfile.class)
+@TestProfile(RdsMockProfile.class)
 class CloudFormationRdsDynamicReferenceIntegrationTest {
 
     private static final String CFN_AUTH =
@@ -37,6 +43,65 @@ class CloudFormationRdsDynamicReferenceIntegrationTest {
     @BeforeAll
     static void configureRestAssured() {
         RestAssuredJsonUtils.configureAwsContentTypes();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"MasterUsername", "MasterUserPassword"})
+    void memberCreationRejectsExplicitCredentialsAndAllowsOmittedRetry(String credential) throws Exception {
+        String suffix = Long.toString(System.nanoTime(), 36);
+        String clusterId = "cfn-credential-cluster-" + suffix;
+        String memberId = "cfn-credential-member-" + suffix;
+        String rejectedStack = "cfn-member-input-" + suffix;
+        String validStack = rejectedStack + "-valid";
+        rds("CreateDBCluster").formParam("DBClusterIdentifier", clusterId)
+                .formParam("Engine", "aurora-postgresql").formParam("MasterUsername", "clusteradmin")
+                .formParam("MasterUserPassword", "ClusterPassword!").post("/").then().statusCode(200);
+        boolean rejectedCreated = false;
+        boolean validCreated = false;
+        try {
+            Map<String, Object> properties = new LinkedHashMap<>();
+            properties.put("DBInstanceIdentifier", memberId);
+            properties.put("DBClusterIdentifier", clusterId);
+            properties.put("Engine", "aurora-postgresql");
+            properties.put("DBInstanceClass", "db.serverless");
+            properties.put(credential, "MasterUsername".equals(credential) ? "clusteradmin" : "ClusterPassword!");
+            ObjectMapper mapper = new ObjectMapper();
+            createStack(rejectedStack, mapper.writeValueAsString(Map.of("Resources", Map.of("Member",
+                    Map.of("Type", "AWS::RDS::DBInstance", "Properties", properties)))));
+            rejectedCreated = true;
+            assertEquals("ROLLBACK_COMPLETE", CfnStackWaits.awaitTerminal(rejectedStack, CFN_AUTH).status());
+            String events = given().contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+                    .formParam("Action", "DescribeStackEvents").formParam("StackName", rejectedStack)
+                    .post("/").then().statusCode(200).extract().asString();
+            assertTrue(events.contains("will be a member of a DB Cluster"), events);
+            rds("DescribeDBInstances").formParam("DBInstanceIdentifier", memberId)
+                    .post("/").then().statusCode(404);
+            properties.remove(credential);
+            createStack(validStack, mapper.writeValueAsString(Map.of("Resources", Map.of("Member",
+                    Map.of("Type", "AWS::RDS::DBInstance", "Properties", properties)))));
+            validCreated = true;
+            assertEquals("CREATE_COMPLETE", CfnStackWaits.awaitTerminal(validStack, CFN_AUTH).status());
+            assertEquals("clusteradmin", rds("DescribeDBInstances").formParam("DBInstanceIdentifier", memberId)
+                    .post("/").then().statusCode(200).extract().xmlPath()
+                    .getString("DescribeDBInstancesResponse.DescribeDBInstancesResult.DBInstances.DBInstance.MasterUsername"));
+        } finally {
+            try {
+                try {
+                    if (validCreated) {
+                        deleteStack(validStack);
+                        CfnStackWaits.awaitStackDeleted(validStack);
+                    }
+                } finally {
+                    if (rejectedCreated) {
+                        deleteStack(rejectedStack);
+                        CfnStackWaits.awaitStackDeleted(rejectedStack);
+                    }
+                }
+            } finally {
+                rds("DeleteDBCluster").formParam("DBClusterIdentifier", clusterId).formParam("SkipFinalSnapshot", true)
+                        .post("/").then().statusCode(200);
+            }
+        }
     }
 
     /**
@@ -64,7 +129,7 @@ class CloudFormationRdsDynamicReferenceIntegrationTest {
         } finally {
             if (stackCreated) {
                 deleteStack(stackName);
-                awaitStackDeleted(stackName);
+                CfnStackWaits.awaitStackDeleted(stackName);
             }
             deleteParameter(parameterName);
         }
@@ -94,7 +159,7 @@ class CloudFormationRdsDynamicReferenceIntegrationTest {
         } finally {
             if (stackCreated) {
                 deleteStack(stackName);
-                awaitStackDeleted(stackName);
+                CfnStackWaits.awaitStackDeleted(stackName);
             }
             deleteParameter(parameterName);
         }
@@ -170,31 +235,5 @@ class CloudFormationRdsDynamicReferenceIntegrationTest {
             .formParam("Action", "DeleteStack")
             .formParam("StackName", stackName)
         .when().post("/").then().statusCode(200);
-    }
-
-    private static void awaitStackDeleted(String stackName) throws InterruptedException {
-        for (int i = 0; i < 100; i++) {
-            String body = given()
-                .contentType("application/x-www-form-urlencoded")
-                .header("Authorization", CFN_AUTH)
-                .formParam("Action", "DescribeStacks")
-                .formParam("StackName", stackName)
-            .when().post("/").then().extract().asString();
-            if (body.contains("does not exist")) {
-                return;
-            }
-            if (body.contains("<StackStatus>DELETE_FAILED</StackStatus>")) {
-                fail("stack delete failed: " + body);
-            }
-            Thread.sleep(50);
-        }
-        fail("stack " + stackName + " was not deleted within the timeout");
-    }
-
-    public static final class RdsMockProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci.services.rds.mock", "true");
-        }
     }
 }

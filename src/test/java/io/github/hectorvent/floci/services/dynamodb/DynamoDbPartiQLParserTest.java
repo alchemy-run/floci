@@ -18,6 +18,8 @@ import java.util.stream.IntStream;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -41,7 +43,7 @@ class DynamoDbPartiQLParserTest {
     }
 
     private Cond firstCond(String statement, String... params) {
-        var stmt = DynamoDbPartiQLParser.parse(statement, Arrays.stream(params).map(this::json).toList());
+        Stmt stmt = DynamoDbPartiQLParser.parse(statement, Arrays.stream(params).map(this::json).toList());
         return assertInstanceOf(Stmt.Select.class, stmt).where().get(0);
     }
 
@@ -55,9 +57,9 @@ class DynamoDbPartiQLParserTest {
             "{\"M\":{\"a\":{\"S\":\"b\"}}}"
     })
     void bindsAParameterOfATypeWithNoLiteralSyntax(String param) {
-        var cond = firstCond(SELECT + "= ?", param);
+        Cond cond = firstCond(SELECT + "= ?", param);
 
-        var val = assertInstanceOf(Cond.Eq.class, cond).val();
+        PVal val = assertInstanceOf(Cond.Eq.class, cond).val();
         assertEquals(json(param), assertInstanceOf(PVal.Av.class, val).node());
     }
 
@@ -66,7 +68,7 @@ class DynamoDbPartiQLParserTest {
     @ParameterizedTest
     @ValueSource(strings = {"{\"Q\":\"x\"}", "{}"})
     void rejectsAParameterCarryingNoRecognisedType(String param) {
-        var e = assertThrows(AwsException.class, () -> firstCond(SELECT + "= ?", param));
+        AwsException e = assertThrows(AwsException.class, () -> firstCond(SELECT + "= ?", param));
 
         assertEquals("ValidationException", e.getErrorCode());
         assertEquals("Supplied AttributeValue is empty, must contain exactly one of the supported datatypes",
@@ -81,7 +83,7 @@ class DynamoDbPartiQLParserTest {
             "{\"M\":{\"k\":{\"S\":\"a\",\"N\":\"1\"}}}"
     })
     void rejectsAParameterCarryingMoreThanOneType(String param) {
-        var e = assertThrows(AwsException.class, () -> firstCond(SELECT + "= ?", param));
+        AwsException e = assertThrows(AwsException.class, () -> firstCond(SELECT + "= ?", param));
 
         assertEquals("ValidationException", e.getErrorCode());
         assertEquals("Supplied AttributeValue has more than one datatypes set, "
@@ -97,7 +99,7 @@ class DynamoDbPartiQLParserTest {
             "{\"B\":123}"
     })
     void rejectsABinaryParameterThatIsNotBase64(String param) {
-        var e = assertThrows(AwsException.class, () -> firstCond(SELECT + "= ?", param));
+        AwsException e = assertThrows(AwsException.class, () -> firstCond(SELECT + "= ?", param));
 
         assertEquals("SerializationException", e.getErrorCode());
         assertEquals(400, e.getHttpStatus());
@@ -105,7 +107,7 @@ class DynamoDbPartiQLParserTest {
 
     @Test
     void namesTheLengthOfBase64ThatIsNotAMultipleOfFour() {
-        var e = assertThrows(AwsException.class, () -> firstCond(SELECT + "= ?", "{\"B\":\"AQI\"}"));
+        AwsException e = assertThrows(AwsException.class, () -> firstCond(SELECT + "= ?", "{\"B\":\"AQI\"}"));
 
         assertEquals("SerializationException", e.getErrorCode());
         assertEquals("Base64 encoded length is expected a multiple of 4 bytes but found: 3", e.getMessage());
@@ -113,7 +115,7 @@ class DynamoDbPartiQLParserTest {
 
     @Test
     void acceptsAnEmptyBinaryParameter() {
-        var cond = firstCond(SELECT + "= ?", "{\"B\":\"\"}");
+        Cond cond = firstCond(SELECT + "= ?", "{\"B\":\"\"}");
 
         assertInstanceOf(PVal.Av.class, assertInstanceOf(Cond.Eq.class, cond).val());
     }
@@ -122,7 +124,7 @@ class DynamoDbPartiQLParserTest {
     // last placeholder still fails the request.
     @Test
     void rejectsAMalformedParameterBeyondThePlaceholders() {
-        var e = assertThrows(AwsException.class,
+        AwsException e = assertThrows(AwsException.class,
                 () -> firstCond(SELECT + "= ?", "{\"S\":\"a\"}", "{\"B\":\"not base64!!\"}"));
 
         assertEquals("SerializationException", e.getErrorCode());
@@ -139,7 +141,7 @@ class DynamoDbPartiQLParserTest {
             "'<',  {\"BS\":[\"AQID\"]},      BS"
     })
     void rejectsAnOrderingOperatorOnATypeWithNoOrdering(String op, String param, String type) {
-        var e = assertThrows(AwsException.class, () -> firstCond(SELECT + op + " ?", param));
+        AwsException e = assertThrows(AwsException.class, () -> firstCond(SELECT + op + " ?", param));
 
         assertEquals("ValidationException", e.getErrorCode());
         assertEquals("Incorrect operand type for operator or function; "
@@ -148,7 +150,7 @@ class DynamoDbPartiQLParserTest {
 
     @Test
     void namesBetweenAsTheOperatorWhenItsBoundIsUnordered() {
-        var e = assertThrows(AwsException.class,
+        AwsException e = assertThrows(AwsException.class,
                 () -> firstCond(SELECT + "BETWEEN ? AND ?", "{\"BOOL\":true}", "{\"BOOL\":false}"));
 
         assertEquals("Incorrect operand type for operator or function; "
@@ -164,7 +166,7 @@ class DynamoDbPartiQLParserTest {
     @ParameterizedTest
     @ValueSource(strings = {"{\"S\":\"a\"}", "{\"N\":\"1\"}", "{\"B\":\"AQID\"}"})
     void acceptsAnOrderingOperatorOnAnOrderedType(String param) {
-        var cond = firstCond(SELECT + "< ?", param);
+        Cond cond = firstCond(SELECT + "< ?", param);
 
         assertEquals("<", assertInstanceOf(Cond.Cmp.class, cond).op());
     }

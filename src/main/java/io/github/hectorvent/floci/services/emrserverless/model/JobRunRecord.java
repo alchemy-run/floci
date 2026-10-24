@@ -1,0 +1,26 @@
+package io.github.hectorvent.floci.services.emrserverless.model;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import io.quarkus.runtime.annotations.RegisterForReflection;
+
+/**
+ * A stored job run: the run as GetJobRun reports it, plus what only Floci needs. The client token
+ * and the request it came with decide whether a repeated StartJobRun is a retry or a conflict; the
+ * application type fills ListJobRuns' {@code type}.
+ */
+@RegisterForReflection
+public class JobRunRecord {
+    private JobRun jobRun;
+    private String clientToken;
+    private JsonNode request;
+    private String applicationType;
+
+    public JobRun getJobRun() { return jobRun; }
+    public void setJobRun(JobRun jobRun) { this.jobRun = jobRun; }
+    public String getClientToken() { return clientToken; }
+    public void setClientToken(String clientToken) { this.clientToken = clientToken; }
+    public JsonNode getRequest() { return request; }
+    public void setRequest(JsonNode request) { this.request = request; }
+    public String getApplicationType() { return applicationType; }
+    public void setApplicationType(String applicationType) { this.applicationType = applicationType; }
+}

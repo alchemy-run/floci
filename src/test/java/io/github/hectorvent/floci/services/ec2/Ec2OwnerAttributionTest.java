@@ -212,6 +212,7 @@ class Ec2OwnerAttributionTest {
         when(config.services()).thenReturn(services);
         when(services.ec2()).thenReturn(ec2);
         when(ec2.mock()).thenReturn(true);
+        when(ec2.mockPublicAddresses()).thenReturn(EmulatorConfig.Ec2ServiceConfig.MockPublicAddresses.NONE);
 
         Ec2ImageCatalog imageCatalog = new Ec2ImageCatalog();
         return new Ec2Service(config, null, mock(Ec2PortForwardManager.class),

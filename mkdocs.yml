@@ -87,6 +87,7 @@ nav:
     - Docker Configuration: configuration/docker.md
     - Ports Reference: configuration/ports.md
     - Multi-Account Isolation: configuration/multi-account.md
+    - AWS Partitions: configuration/partitions.md
     - Storage Modes: configuration/storage.md
     - TLS / HTTPS: configuration/tls.md
     - Initialization Hooks: configuration/initialization-hooks.md
@@ -105,6 +106,7 @@ nav:
     - DynamoDB: services/dynamodb.md
     - Lambda: services/lambda.md
     - Lambda MicroVMs: services/lambda-microvms.md
+    - Lambda Web Functions: services/lambda-web-functions.md
     - API Gateway: services/api-gateway.md
     - Cognito: services/cognito.md
     - Cognito Identity: services/cognitoidentity.md
@@ -139,6 +141,7 @@ nav:
     - AWS Service Catalog: services/service-catalog.md
     - ElastiCache: services/elasticache.md
     - MemoryDB: services/memorydb.md
+    - Aurora DSQL: services/dsql.md
     - RDS: services/rds.md
     - RDS Data API: services/rds-data.md
     - Timestream for InfluxDB: services/timestream-influxdb.md
@@ -153,6 +156,7 @@ nav:
     - Athena: services/athena.md
     - Redshift: services/redshift.md
     - Redshift Data API: services/redshift-data.md
+    - Redshift Serverless: services/redshift-serverless.md
     - Data Firehose: services/firehose.md
     - EventBridge: services/eventbridge.md
     - EventBridge Pipes: services/pipes.md
@@ -165,9 +169,11 @@ nav:
     - GuardDuty: services/guardduty.md
     - Connect: services/connect.md
     - AppIntegrations: services/appintegrations.md
+    - Amazon Data Lifecycle Manager: services/dlm.md
     - ACM: services/acm.md
     - ECS: services/ecs.md
     - ECR: services/ecr.md
+    - AWS Resource Groups: services/resource-groups.md
     - Resource Groups Tagging API: services/resource-groups-tagging.md
     - Resource Explorer 2: services/resource-explorer.md
     - EKS: services/eks.md

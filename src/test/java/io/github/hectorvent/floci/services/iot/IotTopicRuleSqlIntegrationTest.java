@@ -147,7 +147,7 @@ class IotTopicRuleSqlIntegrationTest {
 
         publish("sqltest/functions/a", "{\"n\":null}");
 
-        assertEquals(List.of("{\"client\":\"n/a\",\"account\":\"000000000000\",\"u\":true}"),
+        assertEquals(List.of("{\"client\":\"N/A\",\"account\":\"000000000000\",\"u\":true}"),
                 republished("sqltest/functions-out"));
     }
 
@@ -155,7 +155,8 @@ class IotTopicRuleSqlIntegrationTest {
     void clientidIsTheMqttClientWhenThePublishCarriesOne() {
         createRule("sqlClientIdRule", "SELECT clientid() AS client FROM 'sqltest/clientid/+'", "sqltest/clientid-out");
 
-        iotService.handlePublish("sqltest/clientid/a", "{}".getBytes(StandardCharsets.UTF_8), true, REGION, "sensor-9");
+        iotService.handlePublish("sqltest/clientid/a", "{}".getBytes(StandardCharsets.UTF_8), true, REGION, "sensor-9",
+                Runnable::run);
 
         assertEquals(List.of("{\"client\":\"sensor-9\"}"), republished("sqltest/clientid-out"));
     }
@@ -173,7 +174,7 @@ class IotTopicRuleSqlIntegrationTest {
         .then()
             .statusCode(200);
 
-        assertEquals(List.of("{\"client\":\"n/a\"}"), republished("sqltest/httpclient-out"));
+        assertEquals(List.of("{\"client\":\"N/A\"}"), republished("sqltest/httpclient-out"));
     }
 
     @ParameterizedTest
@@ -225,7 +226,7 @@ class IotTopicRuleSqlIntegrationTest {
     }
 
     private void publish(String topic, String payload) {
-        iotService.handlePublish(topic, payload.getBytes(StandardCharsets.UTF_8), true, REGION, null);
+        iotService.handlePublish(topic, payload.getBytes(StandardCharsets.UTF_8), true, REGION, null, Runnable::run);
     }
 
     private List<String> republished(String targetTopic) {

@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.testutil;
 
+import io.github.hectorvent.floci.core.common.Digests;
 import io.restassured.filter.Filter;
 import io.restassured.filter.FilterContext;
 import io.restassured.response.Response;
@@ -11,7 +12,6 @@ import javax.crypto.spec.SecretKeySpec;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -19,7 +19,9 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -33,6 +35,7 @@ import java.util.stream.Collectors;
  * session token is given, {@code x-amz-security-token}; the content hash is the SHA-256 of the
  * body the request carries. The {@code with*} methods return a copy that deliberately deviates
  * (a stale timestamp, a forged signature, a wrong content hash) for the rejection cases.
+ * {@link #presignedQuery} signs the same credential into a presigned URL's query string instead.
  */
 public final class S3RequestSigner implements Filter {
 
@@ -40,6 +43,9 @@ public final class S3RequestSigner implements Filter {
     private static final String SERVICE = "s3";
     private static final DateTimeFormatter AMZ_DATE =
             DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC);
+    /** The query parameters a presigned URL carries, lowercased: a URI holding one is already signed. */
+    private static final Set<String> PRESIGN_PARAMETERS = Set.of("x-amz-algorithm", "x-amz-credential",
+            "x-amz-date", "x-amz-expires", "x-amz-security-token", "x-amz-signedheaders", "x-amz-signature");
 
     private final String accessKeyId;
     private final String secretKey;
@@ -92,6 +98,12 @@ public final class S3RequestSigner implements Filter {
                 signatureOverride, contentSha256, signHost);
     }
 
+    /** Signs with {@code region} in the credential scope instead of {@code us-east-1}. */
+    public S3RequestSigner inRegion(String region) {
+        return new S3RequestSigner(accessKeyId, secretKey, sessionToken, region, signedAt,
+                signatureOverride, contentSha256Override, signHost);
+    }
+
     /** Leaves {@code host} out of {@code SignedHeaders}; no real signer does this. */
     public S3RequestSigner withoutSignedHost() {
         return new S3RequestSigner(accessKeyId, secretKey, sessionToken, region, signedAt,
@@ -125,14 +137,11 @@ public final class S3RequestSigner implements Filter {
         String scopeDate = amzDate.substring(0, 8);
         String contentSha256 = contentSha256Override != null
                 ? contentSha256Override
-                : sha256Hex(body);
-        String host = uri.getPort() > 0 && uri.getPort() != 80 && uri.getPort() != 443
-                ? uri.getHost() + ":" + uri.getPort()
-                : uri.getHost();
+                : Digests.sha256Hex(body);
 
         List<String[]> headers = new ArrayList<>();
         if (signHost) {
-            headers.add(new String[]{"host", host});
+            headers.add(new String[]{"host", host(uri)});
         }
         headers.add(new String[]{"x-amz-content-sha256", contentSha256});
         headers.add(new String[]{"x-amz-date", amzDate});
@@ -155,7 +164,7 @@ public final class S3RequestSigner implements Filter {
         String stringToSign = ALGORITHM + "\n"
                 + amzDate + "\n"
                 + credentialScope + "\n"
-                + sha256Hex(canonicalRequest.getBytes(StandardCharsets.UTF_8));
+                + Digests.sha256Hex(canonicalRequest.getBytes(StandardCharsets.UTF_8));
         String signature = signatureOverride != null
                 ? signatureOverride
                 : hexEncode(hmacSha256(signingKey(scopeDate), stringToSign));
@@ -173,6 +182,68 @@ public final class S3RequestSigner implements Filter {
         return result;
     }
 
+    /**
+     * The query string of a presigned URL for {@code method} on {@code uri}, written the way an AWS
+     * SDK presigner writes it: the {@code X-Amz-*} parameters, {@code X-Amz-Security-Token} when a
+     * session token is given, {@code host} as the only signed header, an unsigned payload, and the
+     * signature last. Parameters already in {@code uri}'s query, such as an upload id, are signed too
+     * and lead the result, so send it in place of that query. A {@code uri} that is already presigned
+     * is refused, since signing over its signature would give a URL no verifier accepts. Send the
+     * result with URL encoding off, since it is already encoded.
+     */
+    public String presignedQuery(String method, URI uri, int expiresSeconds) throws Exception {
+        String uriQuery = uri.getRawQuery() == null ? "" : uri.getRawQuery();
+        for (String pair : uriQuery.split("&")) {
+            String name = URLDecoder.decode(pair.split("=", 2)[0], StandardCharsets.UTF_8);
+            if (PRESIGN_PARAMETERS.contains(name.toLowerCase(Locale.ROOT))) {
+                throw new IllegalArgumentException("already presigned, it carries " + name + ": " + uri);
+            }
+        }
+        Instant at = signedAt != null ? signedAt : Instant.now();
+        String amzDate = AMZ_DATE.format(at);
+        String scopeDate = amzDate.substring(0, 8);
+        String credentialScope = scopeDate + "/" + region + "/" + SERVICE + "/aws4_request";
+
+        Map<String, String> params = new LinkedHashMap<>();
+        params.put("X-Amz-Algorithm", ALGORITHM);
+        params.put("X-Amz-Credential", accessKeyId + "/" + credentialScope);
+        params.put("X-Amz-Date", amzDate);
+        params.put("X-Amz-Expires", Integer.toString(expiresSeconds));
+        if (sessionToken != null) {
+            params.put("X-Amz-Security-Token", sessionToken);
+        }
+        params.put("X-Amz-SignedHeaders", "host");
+        String query = params.entrySet().stream()
+                .map(param -> uriEncode(param.getKey()) + "=" + uriEncode(param.getValue()))
+                .collect(Collectors.joining("&"));
+        if (!uriQuery.isEmpty()) {
+            query = uriQuery + "&" + query;
+        }
+
+        String rawPath = uri.getRawPath() == null || uri.getRawPath().isEmpty() ? "/" : uri.getRawPath();
+        String canonicalRequest = method + "\n"
+                + rawPath + "\n"
+                + canonicalQueryString(query) + "\n"
+                + "host:" + host(uri) + "\n"
+                + "\n"
+                + "host" + "\n"
+                + "UNSIGNED-PAYLOAD";
+        String stringToSign = ALGORITHM + "\n"
+                + amzDate + "\n"
+                + credentialScope + "\n"
+                + Digests.sha256Hex(canonicalRequest.getBytes(StandardCharsets.UTF_8));
+        String signature = signatureOverride != null
+                ? signatureOverride
+                : hexEncode(hmacSha256(signingKey(scopeDate), stringToSign));
+        return query + "&X-Amz-Signature=" + signature;
+    }
+
+    static String host(URI uri) {
+        return uri.getPort() > 0 && uri.getPort() != 80 && uri.getPort() != 443
+                ? uri.getHost() + ":" + uri.getPort()
+                : uri.getHost();
+    }
+
     private byte[] signingKey(String scopeDate) throws Exception {
         byte[] kDate = hmacSha256(("AWS4" + secretKey).getBytes(StandardCharsets.UTF_8), scopeDate);
         byte[] kRegion = hmacSha256(kDate, region);
@@ -180,7 +251,7 @@ public final class S3RequestSigner implements Filter {
         return hmacSha256(kService, "aws4_request");
     }
 
-    private static byte[] bodyBytes(Object body) {
+    static byte[] bodyBytes(Object body) {
         if (body == null) {
             return new byte[0];
         }
@@ -229,10 +300,6 @@ public final class S3RequestSigner implements Filter {
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec(key, "HmacSHA256"));
         return mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
-    }
-
-    private static String sha256Hex(byte[] input) throws Exception {
-        return hexEncode(MessageDigest.getInstance("SHA-256").digest(input));
     }
 
     private static String hexEncode(byte[] bytes) {

@@ -19,24 +19,32 @@ public class CodePipelineExecution {
     private String pipelineExecutionId;
     private String pipelineName;
     private Integer pipelineVersion;
-    private String status;
+    private volatile String status;
     private String statusSummary;
     private String executionMode;
     private String executionType;
     private Double startTime;
+    private Long admissionOrdinal;
     private Double lastUpdateTime;
     private List<Map<String, Object>> artifactRevisions = new ArrayList<>();
     private List<Map<String, Object>> sourceRevisions = new ArrayList<>();
+    private List<Map<String, Object>> sourceRevisionOverrides = new ArrayList<>();
     private List<Map<String, String>> variables = new ArrayList<>();
     private Map<String, String> trigger = new LinkedHashMap<>();
     private List<ActionExecution> actionExecutions = new ArrayList<>();
     private Map<String, String> stageExecutionStatuses = new LinkedHashMap<>();
-    private String currentStage;
+    private volatile String currentStage;
+    private volatile String waitingStage;
     private volatile boolean stopRequested;
     private volatile boolean abandon;
+    private volatile boolean artifactsReleased;
     private String rollbackTargetPipelineExecutionId;
     private String resumeStageName;
     private boolean retryFailedActionsOnly;
+    private String rollbackStageName;
+    private List<Map<String, Object>> ruleExecutions = new ArrayList<>();
+    /** Overridden stage conditions, keyed {@code <stageName>/<conditionType>}. */
+    private Map<String, Boolean> conditionOverrides = new LinkedHashMap<>();
 
     public String getAccountId() {
         return accountId;
@@ -118,6 +126,14 @@ public class CodePipelineExecution {
         this.startTime = startTime;
     }
 
+    public Long getAdmissionOrdinal() {
+        return admissionOrdinal;
+    }
+
+    public void setAdmissionOrdinal(Long admissionOrdinal) {
+        this.admissionOrdinal = admissionOrdinal;
+    }
+
     public Double getLastUpdateTime() {
         return lastUpdateTime;
     }
@@ -140,6 +156,14 @@ public class CodePipelineExecution {
 
     public void setSourceRevisions(List<Map<String, Object>> sourceRevisions) {
         this.sourceRevisions = sourceRevisions;
+    }
+
+    public List<Map<String, Object>> getSourceRevisionOverrides() {
+        return sourceRevisionOverrides;
+    }
+
+    public void setSourceRevisionOverrides(List<Map<String, Object>> sourceRevisionOverrides) {
+        this.sourceRevisionOverrides = sourceRevisionOverrides == null ? new ArrayList<>() : sourceRevisionOverrides;
     }
 
     public List<Map<String, String>> getVariables() {
@@ -183,6 +207,14 @@ public class CodePipelineExecution {
         this.currentStage = currentStage;
     }
 
+    public String getWaitingStage() {
+        return waitingStage;
+    }
+
+    public void setWaitingStage(String waitingStage) {
+        this.waitingStage = waitingStage;
+    }
+
     public boolean isStopRequested() {
         return stopRequested;
     }
@@ -197,6 +229,22 @@ public class CodePipelineExecution {
 
     public void setAbandon(boolean abandon) {
         this.abandon = abandon;
+    }
+
+    public boolean isArtifactsReleased() {
+        return artifactsReleased;
+    }
+
+    public void setArtifactsReleased(boolean artifactsReleased) {
+        this.artifactsReleased = artifactsReleased;
+    }
+
+    public String getRollbackStageName() {
+        return rollbackStageName;
+    }
+
+    public void setRollbackStageName(String rollbackStageName) {
+        this.rollbackStageName = rollbackStageName;
     }
 
     public String getRollbackTargetPipelineExecutionId() {
@@ -221,6 +269,20 @@ public class CodePipelineExecution {
 
     public void setRetryFailedActionsOnly(boolean retryFailedActionsOnly) {
         this.retryFailedActionsOnly = retryFailedActionsOnly;
+    public List<Map<String, Object>> getRuleExecutions() {
+        return ruleExecutions;
+    }
+
+    public void setRuleExecutions(List<Map<String, Object>> ruleExecutions) {
+        this.ruleExecutions = ruleExecutions;
+    }
+
+    public Map<String, Boolean> getConditionOverrides() {
+        return conditionOverrides;
+    }
+
+    public void setConditionOverrides(Map<String, Boolean> conditionOverrides) {
+        this.conditionOverrides = conditionOverrides;
     }
 
     @RegisterForReflection

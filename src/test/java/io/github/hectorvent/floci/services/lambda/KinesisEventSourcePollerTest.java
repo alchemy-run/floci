@@ -11,6 +11,7 @@ import io.github.hectorvent.floci.services.kinesis.model.KinesisStream;
 import io.github.hectorvent.floci.services.lambda.model.EventSourceMapping;
 import io.github.hectorvent.floci.services.lambda.model.InvocationType;
 import io.github.hectorvent.floci.services.lambda.model.InvokeResult;
+import io.github.hectorvent.floci.services.lambda.model.LambdaAlias;
 import io.github.hectorvent.floci.services.lambda.model.LambdaFunction;
 import io.github.hectorvent.floci.services.pipes.PipesFilterMatcher;
 import io.vertx.core.Vertx;
@@ -61,6 +62,7 @@ class KinesisEventSourcePollerTest {
     private KinesisService kinesisService;
     private LambdaExecutorService executorService;
     private LambdaFunctionStore functionStore;
+    private LambdaAliasStore aliasStore;
     private EsmStore esmStore;
 
     @BeforeEach
@@ -75,10 +77,11 @@ class KinesisEventSourcePollerTest {
         kinesisService = mock(KinesisService.class);
         executorService = mock(LambdaExecutorService.class);
         functionStore = mock(LambdaFunctionStore.class);
+        aliasStore = mock(LambdaAliasStore.class);
         esmStore = mock(EsmStore.class);
 
         poller = new KinesisEventSourcePoller(mock(Vertx.class), kinesisService, executorService,
-                functionStore, esmStore, config, MAPPER, new PipesFilterMatcher(MAPPER));
+                new LambdaTargetResolver(functionStore, aliasStore), esmStore, config, MAPPER, new PipesFilterMatcher(MAPPER));
     }
 
     private EventSourceMapping esm(String... patterns) {
@@ -112,10 +115,10 @@ class KinesisEventSourcePollerTest {
     private void stubStreamWith(List<KinesisRecord> records) {
         KinesisStream stream = new KinesisStream("s", STREAM_ARN);
         stream.setShards(List.of(new KinesisShard(SHARD, "0", "1", "0")));
-        when(kinesisService.describeStream(anyString(), eq(REGION))).thenReturn(stream);
-        when(kinesisService.getShardIterator(anyString(), eq(SHARD), anyString(), any(), eq(REGION)))
+        when(kinesisService.describeStreamForAccount(eq(ACCOUNT), anyString(), eq(REGION))).thenReturn(stream);
+        when(kinesisService.getShardIteratorForAccount(eq(ACCOUNT), anyString(), eq(SHARD), anyString(), any(), eq(REGION)))
                 .thenReturn("iter-0");
-        when(kinesisService.getRecords(eq("iter-0"), anyInt(), eq(REGION)))
+        when(kinesisService.getRecordsForAccount(eq(ACCOUNT), eq("iter-0"), anyInt(), eq(REGION)))
                 .thenReturn(Map.of("Records", records));
     }
 
@@ -144,7 +147,7 @@ class KinesisEventSourcePollerTest {
         while (true) {
             poller.pollAndInvoke(esm);
             try {
-                verify(kinesisService, atLeast(2)).getRecords(eq("iter-0"), anyInt(), eq(REGION));
+                verify(kinesisService, atLeast(2)).getRecordsForAccount(eq(ACCOUNT), eq("iter-0"), anyInt(), eq(REGION));
                 return;
             } catch (AssertionError retry) {
                 if (System.currentTimeMillis() > deadline) {
@@ -158,6 +161,47 @@ class KinesisEventSourcePollerTest {
                 }
             }
         }
+    }
+
+    @Test
+    void versionQualifiedMappingInvokesThatVersion() {
+        stubFunction();
+        LambdaFunction version1 = stubVersion("1");
+        stubStreamWith(List.of(record("s1", "p1", "{}")));
+        when(executorService.invoke(any(), any(), eq(InvocationType.RequestResponse), eq(0), eq("1"))).thenReturn(new InvokeResult());
+        EventSourceMapping esm = esm();
+        esm.setFunctionArn("arn:aws:lambda:" + REGION + ":" + ACCOUNT + ":function:fn:1");
+
+        poller.pollAndInvoke(esm);
+
+        verify(executorService, timeout(2000)).invoke(eq(version1), any(), eq(InvocationType.RequestResponse), eq(0), eq("1"));
+    }
+
+    @Test
+    void aliasQualifiedMappingInvokesTheAliasVersion() {
+        stubFunction();
+        LambdaFunction version2 = stubVersion("2");
+        LambdaAlias alias = new LambdaAlias();
+        alias.setName("live");
+        alias.setFunctionName("fn");
+        alias.setFunctionVersion("2");
+        when(aliasStore.getForAccount(ACCOUNT, REGION, "fn", "live")).thenReturn(Optional.of(alias));
+        stubStreamWith(List.of(record("s1", "p1", "{}")));
+        when(executorService.invoke(any(), any(), eq(InvocationType.RequestResponse), eq(0), eq("live"))).thenReturn(new InvokeResult());
+        EventSourceMapping esm = esm();
+        esm.setFunctionArn("arn:aws:lambda:" + REGION + ":" + ACCOUNT + ":function:fn:live");
+
+        poller.pollAndInvoke(esm);
+
+        verify(executorService, timeout(2000)).invoke(eq(version2), any(), eq(InvocationType.RequestResponse), eq(0), eq("live"));
+    }
+
+    private LambdaFunction stubVersion(String version) {
+        LambdaFunction fn = new LambdaFunction();
+        fn.setFunctionName("fn");
+        fn.setVersion(version);
+        when(functionStore.getForAccount(ACCOUNT, REGION, "fn", version)).thenReturn(Optional.of(fn));
+        return fn;
     }
 
     @Test
@@ -304,5 +348,135 @@ class KinesisEventSourcePollerTest {
 
         verify(esmStore, never()).saveForAccount(eq(ACCOUNT), any());
         assertNull(esm.getShardSequenceNumbers().get(SHARD));
+    }
+
+    private static InvokeResult batchItemFailures(String json) {
+        InvokeResult result = new InvokeResult();
+        result.setPayload(json.getBytes(StandardCharsets.UTF_8));
+        return result;
+    }
+
+    private EventSourceMapping reportingEsm() {
+        EventSourceMapping esm = esm();
+        esm.setFunctionResponseTypes(List.of("ReportBatchItemFailures"));
+        return esm;
+    }
+
+    @Test
+    void reportedFailureCheckpointsBeforeTheLowestFailedRecord() {
+        stubFunction();
+        stubStreamWith(List.of(record("s1", "p1", "{}"), record("s2", "p2", "{}"), record("s3", "p3", "{}")));
+        when(executorService.invoke(any(), any(), eq(InvocationType.RequestResponse))).thenReturn(
+                batchItemFailures("{\"batchItemFailures\":[{\"itemIdentifier\":\"s3\"},{\"itemIdentifier\":\"s2\"}]}"));
+        EventSourceMapping esm = reportingEsm();
+
+        poller.pollAndInvoke(esm);
+
+        verify(esmStore, timeout(2000)).saveForAccount(eq(ACCOUNT), any());
+        assertEquals("s1", esm.getShardSequenceNumbers().get(SHARD));
+    }
+
+    @Test
+    void reportedFailureOnTheFirstRecordRetriesTheWholeBatch() {
+        stubFunction();
+        stubStreamWith(List.of(record("s1", "p1", "{}"), record("s2", "p2", "{}")));
+        when(executorService.invoke(any(), any(), eq(InvocationType.RequestResponse))).thenReturn(
+                batchItemFailures("{\"batchItemFailures\":[{\"itemIdentifier\":\"s1\"}]}"));
+        EventSourceMapping esm = reportingEsm();
+
+        poller.pollAndInvoke(esm);
+        verify(executorService, timeout(2000)).invoke(any(), any(), eq(InvocationType.RequestResponse));
+        awaitPollCompletedViaSecondFetch(esm);
+
+        verify(esmStore, never()).saveForAccount(eq(ACCOUNT), any());
+        assertNull(esm.getShardSequenceNumbers().get(SHARD));
+    }
+
+    @Test
+    void unknownItemIdentifierRetriesTheWholeBatch() {
+        stubFunction();
+        stubStreamWith(List.of(record("s1", "p1", "{}"), record("s2", "p2", "{}")));
+        when(executorService.invoke(any(), any(), eq(InvocationType.RequestResponse))).thenReturn(
+                batchItemFailures("{\"batchItemFailures\":[{\"itemIdentifier\":\"nope\"}]}"));
+        EventSourceMapping esm = reportingEsm();
+
+        poller.pollAndInvoke(esm);
+        verify(executorService, timeout(2000)).invoke(any(), any(), eq(InvocationType.RequestResponse));
+        awaitPollCompletedViaSecondFetch(esm);
+
+        verify(esmStore, never()).saveForAccount(eq(ACCOUNT), any());
+        assertNull(esm.getShardSequenceNumbers().get(SHARD));
+    }
+
+    @Test
+    void emptyBatchItemFailuresCheckpointsTheWholeBatch() {
+        stubFunction();
+        stubStreamWith(List.of(record("s1", "p1", "{}"), record("s2", "p2", "{}")));
+        when(executorService.invoke(any(), any(), eq(InvocationType.RequestResponse)))
+                .thenReturn(batchItemFailures("{\"batchItemFailures\":[]}"));
+        EventSourceMapping esm = reportingEsm();
+
+        poller.pollAndInvoke(esm);
+
+        verify(esmStore, timeout(2000)).saveForAccount(eq(ACCOUNT), any());
+        assertEquals("s2", esm.getShardSequenceNumbers().get(SHARD));
+    }
+
+    @Test
+    void batchItemFailuresAreIgnoredWithoutReportBatchItemFailures() {
+        stubFunction();
+        stubStreamWith(List.of(record("s1", "p1", "{}"), record("s2", "p2", "{}")));
+        when(executorService.invoke(any(), any(), eq(InvocationType.RequestResponse))).thenReturn(
+                batchItemFailures("{\"batchItemFailures\":[{\"itemIdentifier\":\"s1\"}]}"));
+        EventSourceMapping esm = esm();
+
+        poller.pollAndInvoke(esm);
+
+        verify(esmStore, timeout(2000)).saveForAccount(eq(ACCOUNT), any());
+        assertEquals("s2", esm.getShardSequenceNumbers().get(SHARD));
+    }
+
+    /**
+     * Regression for the account leak: a non-default ESM must read its stream through the
+     * account-aware Kinesis overloads. The old request-context calls resolved against the ambient
+     * request account, which defaults outside a request, so a same-named stream in the default
+     * account could be read instead.
+     */
+    @Test
+    void readsTheStreamInTheEventSourceMappingsAccountNotTheRequestAccount() {
+        String esmAccount = "111111111111";
+        LambdaFunction fn = new LambdaFunction();
+        fn.setFunctionName("fn");
+        when(functionStore.getForAccount(esmAccount, REGION, "fn")).thenReturn(Optional.of(fn));
+
+        KinesisStream stream = new KinesisStream("s", STREAM_ARN);
+        stream.setShards(List.of(new KinesisShard(SHARD, "0", "1", "0")));
+        when(kinesisService.describeStreamForAccount(eq(esmAccount), anyString(), eq(REGION))).thenReturn(stream);
+        when(kinesisService.getShardIteratorForAccount(eq(esmAccount), anyString(), eq(SHARD), anyString(), any(), eq(REGION)))
+                .thenReturn("iter-0");
+        when(kinesisService.getRecordsForAccount(eq(esmAccount), eq("iter-0"), anyInt(), eq(REGION)))
+                .thenReturn(Map.of("Records", List.of(record("s1", "p1", "{\"type\":\"order\"}"))));
+        when(executorService.invoke(any(), any(), eq(InvocationType.RequestResponse))).thenReturn(new InvokeResult());
+
+        EventSourceMapping esm = esm();
+        esm.setAccountId(esmAccount);
+
+        poller.pollAndInvoke(esm);
+
+        verify(executorService, timeout(2000)).invoke(any(), any(), eq(InvocationType.RequestResponse));
+        verify(esmStore, timeout(2000)).saveForAccount(eq(esmAccount), any());
+        verify(kinesisService, never()).describeStream(anyString(), anyString());
+        verify(kinesisService, never()).getShardIterator(anyString(), anyString(), anyString(), any(), anyString());
+        verify(kinesisService, never()).getRecords(anyString(), anyInt(), anyString());
+    }
+
+    @Test
+    void streamNameComesFromAStreamOrAConsumerArn() {
+        assertEquals("orders", KinesisEventSourcePoller.streamNameFromArn(
+                "arn:aws:kinesis:us-east-1:000000000000:stream/orders"));
+        assertEquals("orders", KinesisEventSourcePoller.streamNameFromArn(
+                "arn:aws:kinesis:us-east-1:000000000000:stream/orders/consumer/reader:1700000000"));
+        assertEquals("orders/not-a-consumer", KinesisEventSourcePoller.streamNameFromArn(
+                "arn:aws:kinesis:us-east-1:000000000000:stream/orders/not-a-consumer"));
     }
 }

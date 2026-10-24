@@ -1,7 +1,9 @@
 package io.github.hectorvent.floci.services.eks;
 
+import io.github.hectorvent.floci.core.common.Base64Url;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
+import io.restassured.response.ValidatableResponse;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -116,8 +118,7 @@ class EksIrsaEndToEndIntegrationTest {
     }
 
     private static String base64Url(String value) {
-        return Base64.getUrlEncoder().withoutPadding()
-                .encodeToString(value.getBytes(StandardCharsets.UTF_8));
+        return Base64Url.encode(value);
     }
 
     private Response assumeRole(String token) {
@@ -134,11 +135,10 @@ class EksIrsaEndToEndIntegrationTest {
 
     @Test
     @Order(3)
-    void mintedTokenAssumesRoleAndReturnsRealClaims() {
+    void mintedTokenAssumesRoleAndPreservesCallerIdentity() {
         String token = mintToken(NAMESPACE, SERVICE_ACCOUNT, null);
 
-        assumeRole(token)
-        .then()
+        ValidatableResponse assumed = assumeRole(token).then()
             .statusCode(200)
             .body(containsString("<AccessKeyId>ASIA"))
             .body(containsString("<SecretAccessKey>"))
@@ -148,6 +148,21 @@ class EksIrsaEndToEndIntegrationTest {
                     + NAMESPACE + ":" + SERVICE_ACCOUNT + "</SubjectFromWebIdentityToken>"))
             .body(containsString("<Provider>" + issuer + "</Provider>"))
             .body(containsString("<Audience>sts.amazonaws.com</Audience>"));
+
+        String prefix = "AssumeRoleWithWebIdentityResponse.AssumeRoleWithWebIdentityResult.";
+        String accessKeyId = assumed.extract().path(prefix + "Credentials.AccessKeyId");
+        String sessionToken = assumed.extract().path(prefix + "Credentials.SessionToken");
+        String assumedRoleArn = assumed.extract().path(prefix + "AssumedRoleUser.Arn");
+        String assumedRoleId = assumed.extract().path(prefix + "AssumedRoleUser.AssumedRoleId");
+        given()
+            .contentType(FORM)
+            .formParam("Action", "GetCallerIdentity")
+            .header("Authorization", "AWS4-HMAC-SHA256 Credential=" + accessKeyId
+                    + "/20260926/us-east-1/sts/aws4_request")
+            .header("X-Amz-Security-Token", sessionToken)
+        .when().post("/").then().statusCode(200)
+            .body("GetCallerIdentityResponse.GetCallerIdentityResult.Arn", equalTo(assumedRoleArn))
+            .body("GetCallerIdentityResponse.GetCallerIdentityResult.UserId", equalTo(assumedRoleId));
     }
 
     @Test
@@ -221,7 +236,7 @@ class EksIrsaEndToEndIntegrationTest {
         signature.initSign(clusterSigningKey());
         signature.update((header + "." + payload).getBytes(StandardCharsets.UTF_8));
         String token = header + "." + payload + "."
-                + Base64.getUrlEncoder().withoutPadding().encodeToString(signature.sign());
+                + Base64Url.encode(signature.sign());
 
         assumeRole(token)
         .then()

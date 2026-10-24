@@ -14,7 +14,6 @@ public class CodeArtifactPackageVersion {
     private String domainOwner;
     private String region;
     private String repositoryName;
-    private String originRepository;
     private String format;
     private String namespace;
     private String packageName;
@@ -54,14 +53,6 @@ public class CodeArtifactPackageVersion {
 
     public void setRepositoryName(String repositoryName) {
         this.repositoryName = repositoryName;
-    }
-
-    public String getOriginRepository() {
-        return originRepository;
-    }
-
-    public void setOriginRepository(String originRepository) {
-        this.originRepository = originRepository;
     }
 
     public String getFormat() {

@@ -7,6 +7,7 @@ import io.github.hectorvent.floci.core.common.AwsRegions;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.Resettable;
+import io.github.hectorvent.floci.core.common.ServicePrincipals;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.account.model.AccountMetadata;
@@ -30,7 +31,7 @@ import java.util.regex.Pattern;
 
 @ApplicationScoped
 public class AccountService implements Resettable {
-    private static final String ACCOUNT_MANAGEMENT_SERVICE_PRINCIPAL = "account.amazonaws.com";
+    private static final String ACCOUNT_MANAGEMENT_SERVICE_PRINCIPAL = ServicePrincipals.of("account");
     private static final Pattern ACCOUNT_ID = Pattern.compile("\\d{12}");
     private static final Pattern EMAIL = Pattern.compile("\\s*[\\w+=.#|!&-]+@[\\w.-]+\\.[\\w]+\\s*");
     private static final Pattern PHONE = Pattern.compile("[\\s0-9()+-]+");
@@ -316,8 +317,16 @@ public class AccountService implements Resettable {
         String targetAccountId = resolveTargetAccount(callerAccountId, request);
         String type = requireContactType(request);
         return contacts.getForAccount(targetAccountId, type)
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                        "The alternate contact does not exist for the specified account and contact type.", 404));
+                .orElseThrow(AccountService::notFound);
+    }
+
+    public synchronized void deleteAlternateContact(String callerAccountId, JsonNode request) {
+        String targetAccountId = resolveTargetAccount(callerAccountId, request);
+        String type = requireContactType(request);
+        if (contacts.getForAccount(targetAccountId, type).isEmpty()) {
+            throw notFound();
+        }
+        contacts.deleteForAccount(targetAccountId, type);
     }
 
     public void deleteAlternateContact(String callerAccountId, JsonNode request) {
@@ -420,5 +429,10 @@ public class AccountService implements Resettable {
 
     private static AwsException validation(String message) {
         return new AwsException("ValidationException", message, 400);
+    }
+
+    private static AwsException notFound() {
+        return new AwsException("ResourceNotFoundException",
+                "The alternate contact does not exist for the specified account and contact type.", 404);
     }
 }

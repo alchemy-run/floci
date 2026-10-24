@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.eks;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.Base64Url;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -257,8 +258,7 @@ public class EksAccessEntryService {
                 .map(stored -> stored.entry().principalArn()).filter(principal -> principal.compareTo(cursor) > 0)
                 .sorted(Comparator.naturalOrder()).toList();
         List<String> page = remaining.stream().limit(limit).toList();
-        String token = remaining.size() > limit ? Base64.getUrlEncoder().withoutPadding().encodeToString(
-                (prefix + "\n" + page.getLast()).getBytes(StandardCharsets.UTF_8)) : null;
+        String token = remaining.size() > limit ? Base64Url.encode(prefix + "\n" + page.getLast()) : null;
         return new Page(page, token);
     }
 

@@ -8,6 +8,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -40,7 +42,14 @@ public class SesSentEmailService {
         emailStore.put(emailKey(region, messageId), email);
     }
 
+    /**
+     * One stored message, for {@code GetMessageInsights}. Empty when the region has no record under
+     * that id; the caller owns the AWS-shaped error.
+     */
     public Optional<SentEmail> find(String region, String messageId) {
+        if (messageId == null || messageId.isBlank()) {
+            return Optional.empty();
+        }
         return emailStore.get(emailKey(region, messageId));
     }
 
@@ -49,8 +58,29 @@ public class SesSentEmailService {
         return emailStore.scan(k -> k.startsWith(prefix)).size();
     }
 
+    /**
+     * Every stored message for one region, for the metric aggregation behind BatchGetMetricData.
+     */
+    public List<SentEmail> listInRegion(String region) {
+        String prefix = "email::" + region + "::";
+        return emailStore.scan(k -> k.startsWith(prefix));
+    }
+
+    /** Every stored message across regions, oldest first. */
     public List<SentEmail> listAll() {
-        return emailStore.scan(k -> k.startsWith("email::"));
+        return emailStore.scan(k -> k.startsWith("email::")).stream()
+                .sorted(Comparator.comparing(SentEmail::getSentAt,
+                        Comparator.nullsFirst(Comparator.<Instant>naturalOrder())))
+                .toList();
+    }
+
+    /** Removes the message with this id from whichever region holds it; an unknown id removes nothing. */
+    public void delete(String messageId) {
+        List<String> keys = emailStore.keys().stream()
+                .filter(key -> messageId.equals(messageIdOf(key)))
+                .toList();
+        keys.forEach(emailStore::delete);
+        LOG.infov("Deleted SES email {0} ({1} record(s))", messageId, keys.size());
     }
 
     public void clear() {
@@ -60,5 +90,14 @@ public class SesSentEmailService {
 
     private static String emailKey(String region, String messageId) {
         return "email::" + region + "::" + messageId;
+    }
+
+    // The inverse of emailKey: a region never contains the separator, so the id follows the second.
+    private static String messageIdOf(String key) {
+        if (!key.startsWith("email::")) {
+            return null;
+        }
+        int separator = key.indexOf("::", "email::".length());
+        return separator < 0 ? null : key.substring(separator + 2);
     }
 }

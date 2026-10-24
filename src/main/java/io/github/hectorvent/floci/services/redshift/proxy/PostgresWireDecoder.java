@@ -1,5 +1,7 @@
 package io.github.hectorvent.floci.services.redshift.proxy;
 
+import io.github.hectorvent.floci.core.common.PostgresWire;
+
 import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
@@ -95,14 +97,8 @@ public class PostgresWireDecoder {
         char type = (char) typeByte;
 
         byte[] lengthBytes = readFully(4);
-        int length = ((lengthBytes[0] & 0xFF) << 24)
-                | ((lengthBytes[1] & 0xFF) << 16)
-                | ((lengthBytes[2] & 0xFF) << 8)
-                | (lengthBytes[3] & 0xFF);
-
-        if (length < 4) {
-            throw new IOException("Invalid message length: " + length);
-        }
+        int length = PostgresWire.checkedLength(PostgresWire.int32(lengthBytes, 0), 4, Integer.MAX_VALUE,
+                "frontend message");
 
         if (passthroughOut != null && (!inspectType.test(type) || length > MAX_MESSAGE_BYTES)) {
             passthroughOut.write(typeByte);
@@ -126,10 +122,7 @@ public class PostgresWireDecoder {
             return new FrontendMessage(type, null);
         }
 
-        if (length > MAX_MESSAGE_BYTES) {
-            throw new IOException("Refusing PostgreSQL message of " + length
-                    + " bytes (limit " + MAX_MESSAGE_BYTES + ")");
-        }
+        PostgresWire.checkedLength(length, 4, MAX_MESSAGE_BYTES, "frontend message");
 
         byte[] body = (length == 4) ? new byte[0] : readFully(length - 4);
         betweenMessages = true;
@@ -190,23 +183,13 @@ public class PostgresWireDecoder {
         }
 
         ByteArrayOutputStream body = new ByteArrayOutputStream();
-        writeCString(body, statementName);
-        writeCString(body, rewrittenSql);
+        body.writeBytes(PostgresWire.cStringBytes(statementName));
+        body.writeBytes(PostgresWire.cStringBytes(rewrittenSql));
         writeInt16(body, parameterTypeOids.size());
         for (Integer oid : parameterTypeOids) {
-            writeInt32(body, Objects.requireNonNull(oid, "parameter type OID must not be null"));
+            body.writeBytes(PostgresWire.int32(Objects.requireNonNull(oid, "parameter type OID must not be null")));
         }
-
-        byte[] bodyBytes = body.toByteArray();
-        int length = bodyBytes.length + 4;
-        byte[] packet = new byte[bodyBytes.length + 5];
-        packet[0] = 'P';
-        packet[1] = (byte) ((length >> 24) & 0xFF);
-        packet[2] = (byte) ((length >> 16) & 0xFF);
-        packet[3] = (byte) ((length >> 8) & 0xFF);
-        packet[4] = (byte) (length & 0xFF);
-        System.arraycopy(bodyBytes, 0, packet, 5, bodyBytes.length);
-        return packet;
+        return PostgresWire.frame('P', body.toByteArray());
     }
 
     private TargetMessage decodeTarget(FrontendMessage message, char expectedType) throws IOException {
@@ -234,20 +217,7 @@ public class PostgresWireDecoder {
         return new BodyCursor(message.body());
     }
 
-    private static void writeCString(ByteArrayOutputStream out, String value) {
-        byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-        out.writeBytes(bytes);
-        out.write(0);
-    }
-
     private static void writeInt16(ByteArrayOutputStream out, int value) {
-        out.write((value >> 8) & 0xFF);
-        out.write(value & 0xFF);
-    }
-
-    private static void writeInt32(ByteArrayOutputStream out, int value) {
-        out.write((value >> 24) & 0xFF);
-        out.write((value >> 16) & 0xFF);
         out.write((value >> 8) & 0xFF);
         out.write(value & 0xFF);
     }
@@ -255,14 +225,7 @@ public class PostgresWireDecoder {
     /** Read exactly {@code n} bytes or throw {@link EOFException}. */
     private byte[] readFully(int n) throws IOException {
         byte[] buf = new byte[n];
-        int off = 0;
-        while (off < n) {
-            int read = in.read(buf, off, n - off);
-            if (read == -1) {
-                throw new EOFException("Unexpected EOF (expected " + n + " bytes, got " + off + ")");
-            }
-            off += read;
-        }
+        PostgresWire.readFully(in, buf);
         return buf;
     }
 
@@ -324,22 +287,7 @@ public class PostgresWireDecoder {
 
     /** Encode an SQL string as a Simple Query ({@code 'Q'}) packet with a NUL-terminated body. */
     public static byte[] encodeQuery(String sql) {
-        if (sql == null) {
-            sql = "";
-        }
-        byte[] sqlBytes = sql.getBytes(StandardCharsets.UTF_8);
-        int bodyLength = sqlBytes.length + 1;
-        int totalLength = 4 + bodyLength;
-
-        byte[] packet = new byte[1 + 4 + bodyLength];
-        packet[0] = 'Q';
-        packet[1] = (byte) ((totalLength >> 24) & 0xFF);
-        packet[2] = (byte) ((totalLength >> 16) & 0xFF);
-        packet[3] = (byte) ((totalLength >> 8) & 0xFF);
-        packet[4] = (byte) (totalLength & 0xFF);
-        System.arraycopy(sqlBytes, 0, packet, 5, sqlBytes.length);
-        packet[packet.length - 1] = 0x00;
-        return packet;
+        return PostgresWire.frame('Q', PostgresWire.cStringBytes(sql == null ? "" : sql));
     }
 
     /** A single PostgreSQL wire message from the client. */
@@ -366,18 +314,7 @@ public class PostgresWireDecoder {
             if (body == null) {
                 throw new IllegalStateException("Message body was streamed to passthrough output and not retained");
             }
-            int bodyLen = body.length;
-            int lengthField = 4 + bodyLen;
-            byte[] packet = new byte[1 + 4 + bodyLen];
-            packet[0] = (byte) type;
-            packet[1] = (byte) ((lengthField >> 24) & 0xFF);
-            packet[2] = (byte) ((lengthField >> 16) & 0xFF);
-            packet[3] = (byte) ((lengthField >> 8) & 0xFF);
-            packet[4] = (byte) (lengthField & 0xFF);
-            if (bodyLen > 0) {
-                System.arraycopy(body, 0, packet, 5, bodyLen);
-            }
-            return packet;
+            return PostgresWire.frame(type, body);
         }
     }
 

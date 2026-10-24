@@ -1,15 +1,15 @@
 package io.github.hectorvent.floci.services.cloudformation.provisioners;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import io.github.hectorvent.floci.services.cloudformation.model.StackResource;
 import io.github.hectorvent.floci.services.cloudformation.model.StackEvent;
+import io.github.hectorvent.floci.services.cloudformation.model.StackResource;
 
 import java.util.Set;
 import java.util.function.Consumer;
 
 /**
- * Provisions and deletes the CloudFormation resource types for a single service, replacing one
- * arm of the switch in {@code CloudFormationResourceProvisioner}. Implementations inject only
+ * Provisions and deletes the CloudFormation resource types for a single service. Implementations
+ * inject only
  * the service they wrap and are discovered via CDI by {@link CloudFormationResourceRegistry}.
  *
  * <p>{@code provision} mutates the passed {@link StackResource} in place — setting its physical
@@ -22,6 +22,19 @@ public interface CfnResourceProvisioner {
     Set<String> resourceTypes();
 
     void provision(StackResource resource, JsonNode properties, ProvisionContext ctx);
+
+    /**
+     * True when the service this provisioner wraps is turned off. {@link CloudFormationResourceRegistry}
+     * then serves none of its types, so the dispatcher stubs them instead of provisioning them.
+     */
+    default boolean serviceDisabled() {
+        return false;
+    }
+
+    /** The config property that turns this provisioner's service on, named in messages about it being off. */
+    default String serviceEnabledFlag() {
+        return null;
+    }
 
     /** Most implementations delegate to {@code service.deleteX(physicalId, region)}. */
     default void delete(String resourceType, String physicalId, String region) {
@@ -52,18 +65,15 @@ public interface CfnResourceProvisioner {
     }
 
     /**
-     * Whether a failed update still needs this provisioner's ownership-aware delete. Opt-in:
-     * a failed resource is not otherwise assumed to own a backing entity.
-     */
-    default boolean hasPendingRollbackCleanup(StackResource resource) {
-        return false;
-    }
-
-    /**
      * True when this provisioner keeps the failed update attempt's own identity and tracking for
      * its {@code rollbackUpdate}, so the engine must not restore the previous resource over it.
      */
     default boolean retainsFailedUpdateState(StackResource resource) {
+        return false;
+    }
+
+    /** Whether a prior failed rollback must be retried before even an outputs-only update commits. */
+    default boolean requiresUpdateRecovery(StackResource resource) {
         return false;
     }
 
@@ -87,6 +97,15 @@ public interface CfnResourceProvisioner {
     }
 
     /**
+     * Deletes entities displaced by an unfinished update before the stack itself is deleted.
+     * The default uses normal replacement cleanup. A provisioner may distinguish this operation
+     * from committing an update when it still carries configuration needed for rollback.
+     */
+    default UpdateCleanupResult completeDeleteCleanup(StackResource resource) {
+        return completeUpdate(resource);
+    }
+
+    /**
      * Whether this update replaced the physical entity, so the stack has cleanup pending and enters
      * UPDATE_COMPLETE_CLEANUP_IN_PROGRESS. The default reports no replacement.
      */
@@ -95,11 +114,39 @@ public interface CfnResourceProvisioner {
     }
 
     /**
+     * Whether a resource of {@code resourceType} takes the physical id of the resource it depends
+     * on as its own, as a bucket policy takes its bucket's name. The stack then deletes one left
+     * behind before whatever else holds that id. The default is no.
+     */
+    default boolean takesParentPhysicalId(String resourceType) {
+        return false;
+    }
+
+    /**
+     * Whether a prefix of a {@code resourceType} physical id, up to a {@code /}, {@code :} or
+     * {@code |}, can be the physical id of the resource it belongs to, as {@code function|sid} is
+     * a Lambda permission's. The stack then deletes one left behind before that resource. The
+     * default is yes; a type whose id only joins parts of its own identity says no.
+     */
+    default boolean idPrefixCanNameParent(String resourceType) {
+        return true;
+    }
+
+    /**
      * Drops the bookkeeping the replacement cleanup kept on the resource, once the displaced entity
      * is gone or its deletion is given up on. The default has none to drop.
      */
     default void clearUpdate(StackResource resource) {
         // no-op by default: a type with no replacement cleanup records nothing to clear
+    }
+
+    /**
+     * Drops completed replacement cleanup during stack deletion. The default preserves the normal
+     * cleanup behavior; an override may keep rollback configuration until the managed entity is
+     * successfully deleted.
+     */
+    default void clearDeleteCleanup(StackResource resource) {
+        clearUpdate(resource);
     }
 
     /**

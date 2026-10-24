@@ -1,11 +1,9 @@
 package io.github.hectorvent.floci.services.eks;
 
 import com.github.dockerjava.api.DockerClient;
-import com.github.dockerjava.api.async.ResultCallback;
-import com.github.dockerjava.api.command.ExecCreateCmdResponse;
-import com.github.dockerjava.api.model.Frame;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
+import io.github.hectorvent.floci.core.common.docker.ContainerExec;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
@@ -26,12 +24,10 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -154,7 +150,9 @@ class EksPodIdentityDockerIntegrationTest {
                 .withName("floci-eks-pi-test-" + clusterName)
                 .withPrivileged(true)
                 .withHostDockerInternalOnLinux()
-                .withCmd(List.of("sleep", "300"))
+                // PID 1 gets no default SIGTERM handler, so a bare "sleep 300" sits out the
+                // whole stopAndRemove grace period when @AfterEach tears the container down.
+                .withCmd(List.of("sh", "-c", "trap 'exit 0' TERM; sleep 300 & wait"))
                 .build();
 
         containerId = lifecycleManager.createAndStart(spec).containerId();
@@ -187,21 +185,7 @@ class EksPodIdentityDockerIntegrationTest {
         }
     }
 
-    private String execInContainer(String containerId, String cmd) throws Exception {
-        ExecCreateCmdResponse exec = dockerClient.execCreateCmd(containerId)
-                .withCmd("sh", "-c", cmd)
-                .withAttachStdout(true)
-                .withAttachStderr(true)
-                .exec();
-        StringBuilder stdout = new StringBuilder();
-        dockerClient.execStartCmd(exec.getId()).exec(new ResultCallback.Adapter<Frame>() {
-            @Override
-            public void onNext(Frame frame) {
-                if (frame != null && frame.getPayload() != null) {
-                    stdout.append(new String(frame.getPayload(), StandardCharsets.UTF_8));
-                }
-            }
-        }).awaitCompletion(30, TimeUnit.SECONDS);
-        return stdout.toString();
+    private String execInContainer(String containerId, String cmd) {
+        return ContainerExec.runMerged(dockerClient, containerId, new String[]{"sh", "-c", cmd}, 30).stdout();
     }
 }

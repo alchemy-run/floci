@@ -1,5 +1,7 @@
 package io.github.hectorvent.floci.services.eks;
 
+import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
 import io.github.hectorvent.floci.services.ec2.model.Instance;
@@ -21,13 +23,16 @@ class EksWorkerAuthentication {
     private final EksService eks;
     private final Ec2Service ec2;
     private final EksAccessEntryService entries;
+    private final EmulatorConfig config;
 
     @Inject
-    EksWorkerAuthentication(IamService iam, EksService eks, Ec2Service ec2, EksAccessEntryService entries) {
+    EksWorkerAuthentication(IamService iam, EksService eks, Ec2Service ec2, EksAccessEntryService entries,
+                            EmulatorConfig config) {
         this.iam = iam;
         this.eks = eks;
         this.ec2 = ec2;
         this.entries = entries;
+        this.config = config;
     }
 
     Optional<Map<String, Object>> authenticate(EksTokenValidator.VerifiedToken token, String name,
@@ -36,7 +41,13 @@ class EksWorkerAuthentication {
         // Keep the existing non-worker compatibility path. Expired/revoked temporary sessions
         // must never fall through to it after signature validation.
         if (session.isEmpty()) {
-            return IamService.isTemporaryAccessKey(token.accessKeyId()) ? Optional.empty() : legacyIdentity();
+            if (IamService.isTemporaryAccessKey(token.accessKeyId())) {
+                return Optional.empty();
+            }
+            // The legacy identity is system:masters, so only a key of the cluster's own account gets it.
+            return Optional.ofNullable(token.keyAccountId())
+                    .filter(owner -> owner.equals(clusterAccount(account)))
+                    .flatMap(owner -> legacyIdentity());
         }
         EksSessionIdentity identity = session.get();
         if (identity.instanceId() == null) {
@@ -48,7 +59,7 @@ class EksWorkerAuthentication {
         }
         Optional<Cluster> cluster = eks.findAuthenticationCluster(account, name)
                 .filter(value -> value.getArn() != null && value.getArn().equals(
-                        "arn:aws:eks:" + region + ":" + account + ":cluster/" + name))
+                        AwsArnUtils.Arn.of("eks", region, account, "cluster/" + name).toString()))
                 .filter(value -> createdAt.equals(String.valueOf(value.getCreatedAt())));
         if (cluster.isEmpty()) {
             return Optional.empty();
@@ -81,12 +92,21 @@ class EksWorkerAuthentication {
 
     private boolean profileMatches(Instance instance, String account, String roleName) {
         String arn = instance.getIamInstanceProfileArn();
-        if (arn == null || !arn.startsWith("arn:aws:iam::" + account + ":instance-profile/")) {
+        if (!AwsArnUtils.isArnFor(arn, "iam")) {
+            return false;
+        }
+        AwsArnUtils.Arn parsed = AwsArnUtils.parse(arn);
+        if (!account.equals(parsed.accountId()) || !parsed.resource().startsWith("instance-profile/")) {
             return false;
         }
         return iam.findInstanceProfile(account, arn.substring(arn.lastIndexOf('/') + 1))
                 .filter(profile -> arn.equals(profile.getArn()))
                 .filter(profile -> List.of(roleName).equals(profile.getRoleNames())).isPresent();
+    }
+
+    /** Unscoped webhook paths predate per-account clusters, so they serve the default account. */
+    private String clusterAccount(String account) {
+        return account != null ? account : config.defaultAccountId();
     }
 
     private static Optional<Map<String, Object>> legacyIdentity() {

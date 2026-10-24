@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.redshift.model;
 
 import io.quarkus.runtime.annotations.RegisterForReflection;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -36,6 +37,7 @@ public class Cluster {
     public void setPubliclyAccessible(boolean publiclyAccessible) { this.publiclyAccessible = publiclyAccessible; }
     public boolean isEncrypted() { return encrypted; }
     public void setEncrypted(boolean encrypted) { this.encrypted = encrypted; }
+    private String defaultIamRoleArn;
 
     public String getClusterIdentifier() { return clusterIdentifier; }
     public void setClusterIdentifier(String clusterIdentifier) { this.clusterIdentifier = clusterIdentifier; }
@@ -61,6 +63,57 @@ public class Cluster {
     public void setVpcSecurityGroupIds(List<String> vpcSecurityGroupIds) { this.vpcSecurityGroupIds = vpcSecurityGroupIds; }
     public List<String> getIamRoleArns() { return iamRoleArns; }
     public void setIamRoleArns(List<String> iamRoleArns) { this.iamRoleArns = iamRoleArns; }
+    public String getDefaultIamRoleArn() { return defaultIamRoleArn; }
+    public void setDefaultIamRoleArn(String defaultIamRoleArn) { this.defaultIamRoleArn = defaultIamRoleArn; }
+
+    // Audit logging config as set by EnableLogging; no log delivery is emulated.
+    private boolean loggingEnabled = false;
+    private String loggingBucketName;
+    private String loggingS3KeyPrefix;
+
+    public boolean isLoggingEnabled() { return loggingEnabled; }
+    public void setLoggingEnabled(boolean loggingEnabled) { this.loggingEnabled = loggingEnabled; }
+    public String getLoggingBucketName() { return loggingBucketName; }
+    public void setLoggingBucketName(String loggingBucketName) { this.loggingBucketName = loggingBucketName; }
+    public String getLoggingS3KeyPrefix() { return loggingS3KeyPrefix; }
+    public void setLoggingS3KeyPrefix(String loggingS3KeyPrefix) { this.loggingS3KeyPrefix = loggingS3KeyPrefix; }
+
+    private String loggingDestinationType;
+    private List<String> loggingExports;
+    private String loggingS3TableKmsKeyId;
+    private String loggingS3TableGranularity;
+
+    public String getLoggingDestinationType() { return loggingDestinationType; }
+    public void setLoggingDestinationType(String loggingDestinationType) { this.loggingDestinationType = loggingDestinationType; }
+    public List<String> getLoggingExports() { return loggingExports; }
+    public void setLoggingExports(List<String> loggingExports) { this.loggingExports = loggingExports; }
+    public String getLoggingS3TableKmsKeyId() { return loggingS3TableKmsKeyId; }
+    public void setLoggingS3TableKmsKeyId(String loggingS3TableKmsKeyId) { this.loggingS3TableKmsKeyId = loggingS3TableKmsKeyId; }
+    public String getLoggingS3TableGranularity() { return loggingS3TableGranularity; }
+    public void setLoggingS3TableGranularity(String loggingS3TableGranularity) { this.loggingS3TableGranularity = loggingS3TableGranularity; }
+
+    // Cross-region snapshot copy (EnableSnapshotCopy). Enabled exactly when the destination is set.
+    private String snapshotCopyDestinationRegion;
+    private Integer snapshotCopyRetentionPeriod;
+    private Integer snapshotCopyManualRetentionPeriod;
+    private String snapshotCopyGrantName;
+    private String snapshotScheduleIdentifier;
+
+    public String getSnapshotCopyDestinationRegion() { return snapshotCopyDestinationRegion; }
+    public void setSnapshotCopyDestinationRegion(String snapshotCopyDestinationRegion) { this.snapshotCopyDestinationRegion = snapshotCopyDestinationRegion; }
+    public Integer getSnapshotCopyRetentionPeriod() { return snapshotCopyRetentionPeriod; }
+    public void setSnapshotCopyRetentionPeriod(Integer snapshotCopyRetentionPeriod) { this.snapshotCopyRetentionPeriod = snapshotCopyRetentionPeriod; }
+    public Integer getSnapshotCopyManualRetentionPeriod() { return snapshotCopyManualRetentionPeriod; }
+    public void setSnapshotCopyManualRetentionPeriod(Integer snapshotCopyManualRetentionPeriod) { this.snapshotCopyManualRetentionPeriod = snapshotCopyManualRetentionPeriod; }
+    public String getSnapshotCopyGrantName() { return snapshotCopyGrantName; }
+    public void setSnapshotCopyGrantName(String snapshotCopyGrantName) { this.snapshotCopyGrantName = snapshotCopyGrantName; }
+    public String getSnapshotScheduleIdentifier() { return snapshotScheduleIdentifier; }
+    public void setSnapshotScheduleIdentifier(String snapshotScheduleIdentifier) { this.snapshotScheduleIdentifier = snapshotScheduleIdentifier; }
+
+    private boolean multiAZ = false;
+
+    public boolean isMultiAZ() { return multiAZ; }
+    public void setMultiAZ(boolean multiAZ) { this.multiAZ = multiAZ; }
 
     // Real backend address of this cluster's PostgreSQL container. `endpoint` now points at the
     // auth proxy, not the container, so the container address is kept here for proxy wiring and

@@ -48,10 +48,10 @@ class BuildV2ProxyEventLambdaAuthorizerTest {
         when(uriInfo.getRequestUri()).thenReturn(new URI("http://localhost:4566/api/stage/v1/things"));
 
         controller = new ApiGatewayExecuteController(
-                null, null, null,
+                null, null, null, null,
                 regionResolver, MAPPER, null,
                 null, null, null, null, new ApiGatewayExecuteRouteContext(), null, null, null
-        );
+        , null, null);
     }
 
     @Test

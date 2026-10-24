@@ -21,18 +21,22 @@ public record CreateBrokerParams(
         boolean autoMinorVersionUpgrade,
         List<MqUser> users,
         Map<String, String> tags,
-        String configurationId,
-        Integer configurationRevision,
-        String authenticationStrategy,
-        Map<String, Object> maintenanceWindowStartTime,
+        List<String> securityGroups,
+        List<String> subnetIds,
         Map<String, Object> logs,
-        List<String> securityGroups) {
+        Map<String, Object> maintenanceWindowStartTime,
+        String storageType,
+        String authenticationStrategy,
+        Map<String, Object> encryptionOptions,
+        Map<String, Object> configuration) {
 
-    /** CreateBroker without a configuration reference or the optional operational settings. */
+    /** The members every broker needs; the optional ones default to absent. */
     public CreateBrokerParams(String brokerName, String engineType, String engineVersion,
-                              String deploymentMode, String hostInstanceType, boolean publiclyAccessible,
-                              boolean autoMinorVersionUpgrade, List<MqUser> users, Map<String, String> tags) {
-        this(brokerName, engineType, engineVersion, deploymentMode, hostInstanceType, publiclyAccessible,
-                autoMinorVersionUpgrade, users, tags, null, null, null, null, null, null);
+                              String deploymentMode, String hostInstanceType,
+                              boolean publiclyAccessible, boolean autoMinorVersionUpgrade,
+                              List<MqUser> users, Map<String, String> tags) {
+        this(brokerName, engineType, engineVersion, deploymentMode, hostInstanceType,
+                publiclyAccessible, autoMinorVersionUpgrade, users, tags,
+                null, null, null, null, null, null, null, null);
     }
 }

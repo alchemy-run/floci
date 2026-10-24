@@ -1,16 +1,17 @@
 package io.github.hectorvent.floci.services.ses;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.ServiceCallAuthorizer;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.CloudWatchMetricsService;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.Dimension;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricDatum;
 import io.github.hectorvent.floci.services.eventbridge.EventBridgeService;
 import io.github.hectorvent.floci.services.firehose.FirehoseService;
 import io.github.hectorvent.floci.services.firehose.model.Record;
+import io.github.hectorvent.floci.services.iam.IamPolicyEvaluator.Decision;
 import io.github.hectorvent.floci.services.ses.model.CloudWatchDestination;
 import io.github.hectorvent.floci.services.ses.model.CloudWatchDimensionConfiguration;
 import io.github.hectorvent.floci.services.ses.model.ConfigurationSet;
@@ -25,7 +26,6 @@ import org.jboss.logging.Logger;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -35,6 +35,12 @@ import java.util.Map;
  * {@code KinesisFirehoseDestination}, {@code EventBridgeDestination}, and
  * {@code CloudWatchDestination} are delivered live; Pinpoint destinations are
  * logged and skipped.
+ *
+ * <p>SES publishes to an SNS topic as {@code ses.amazonaws.com}, so the topic's policy decides
+ * whether it may, through {@link ServiceCallAuthorizer}, with the resource whose configuration names
+ * the topic as {@code aws:SourceArn}: the configuration set for an event destination, the identity
+ * for an identity notification (SES Developer Guide, "Set up an Amazon SNS event destination for
+ * event publishing" and "Configuring Amazon SNS notifications for Amazon SES").
  */
 @ApplicationScoped
 public class SesEventPublisher {
@@ -47,17 +53,19 @@ public class SesEventPublisher {
     private final FirehoseService firehoseService;
     private final EventBridgeService eventBridgeService;
     private final CloudWatchMetricsService cloudWatchMetricsService;
+    private final ServiceCallAuthorizer serviceCallAuthorizer;
     private final ObjectMapper objectMapper;
 
     @Inject
     public SesEventPublisher(SnsService snsService, FirehoseService firehoseService,
                              EventBridgeService eventBridgeService,
                              CloudWatchMetricsService cloudWatchMetricsService,
-                             ObjectMapper objectMapper) {
+                             ServiceCallAuthorizer serviceCallAuthorizer, ObjectMapper objectMapper) {
         this.snsService = snsService;
         this.firehoseService = firehoseService;
         this.eventBridgeService = eventBridgeService;
         this.cloudWatchMetricsService = cloudWatchMetricsService;
+        this.serviceCallAuthorizer = serviceCallAuthorizer;
         this.objectMapper = objectMapper;
     }
 
@@ -86,7 +94,7 @@ public class SesEventPublisher {
             }
             try {
                 dispatch(ed, eventType, payloadJson, sourceArn, configurationSet.getName(),
-                        emailTags, additionalHeaders, defaultRegion);
+                        sendingAccountId, emailTags, additionalHeaders, defaultRegion);
             } catch (Exception e) {
                 LOG.warnf(e, "Failed to publish SES event %s to destination %s",
                         eventType, ed.getName());
@@ -102,25 +110,44 @@ public class SesEventPublisher {
      * configuration set. The payload uses the legacy {@code notificationType} discriminator, omits
      * {@code mail.tags}, and includes the original headers only when {@code includeHeaders} is set
      * (i.e. the identity has headers-in-notifications enabled for the type).
+     *
+     * @param identityArn the identity the topic is configured on, the sender's own or its domain's,
+     *                    which SES names as {@code aws:SourceArn}
+     * @return false when SES may not publish to the topic, because it no longer exists or its policy
+     *         does not let SES publish for {@code identityArn}, so nothing was sent; true otherwise,
+     *         including when the publish itself failed for another reason
      */
-    public void publishIdentityNotification(String topicArn, boolean includeHeaders,
+    public boolean publishIdentityNotification(String topicArn, String identityArn, boolean includeHeaders,
                         SesRecipientEvent event, String messageId, String source, String sourceArn,
                         String sendingAccountId, String subject, List<String> toAddresses,
                         List<String> ccAddresses, List<String> bccAddresses,
                         List<String> envelopeDestinations, List<MessageHeader> additionalHeaders,
                         Instant timestamp, String defaultRegion) {
         if (topicArn == null || topicArn.isBlank()) {
-            return;
+            return true;
+        }
+        if (!sesMayPublish(topicArn, identityArn, sendingAccountId)) {
+            LOG.warnf("SES %s notification for %s not delivered (topic %s does not allow SES to publish).",
+                    event.eventType(), identityArn, topicArn);
+            return false;
+        }
+        // Read in the topic's own account: a topic of another account that Floci cannot deliver to
+        // still exists, and only a topic that is gone counts as one SES cannot publish to.
+        if (!snsService.topicExists(topicArn, AwsArnUtils.regionOrDefault(topicArn, defaultRegion))) {
+            LOG.warnf("SES %s notification for %s not delivered (topic %s does not exist).",
+                    event.eventType(), identityArn, topicArn);
+            return false;
         }
         ObjectNode payload = SesEventPayload.buildIdentityNotification(objectMapper, event,
                 messageId, source, sourceArn, sendingAccountId, subject,
                 toAddresses, ccAddresses, bccAddresses, envelopeDestinations,
                 additionalHeaders, timestamp, includeHeaders);
         publishSns(topicArn, payload.toString(), defaultRegion);
+        return true;
     }
 
     private void dispatch(EventDestination ed, String eventType, String payloadJson,
-                          String sourceArn, String configurationSetName,
+                          String sourceArn, String configurationSetName, String sendingAccountId,
                           List<MessageTag> emailTags, List<MessageHeader> additionalHeaders,
                           String defaultRegion) {
         if (ed.getSnsDestination() != null) {
@@ -128,6 +155,13 @@ public class SesEventPublisher {
             if (topicArn == null || topicArn.isBlank()) {
                 LOG.warnf("SES SNS destination %s: event %s not delivered (TopicArn is missing).",
                         ed.getName(), eventType);
+                return;
+            }
+            String configurationSetArn = AwsArnUtils.Arn.of("ses", defaultRegion, sendingAccountId,
+                    "configuration-set/" + configurationSetName).toString();
+            if (!sesMayPublish(topicArn, configurationSetArn, sendingAccountId)) {
+                LOG.warnf("SES SNS destination %s: event %s not delivered (topic %s does not allow SES to publish).",
+                        ed.getName(), eventType, topicArn);
                 return;
             }
             publishSns(topicArn, payloadJson, defaultRegion);
@@ -165,6 +199,12 @@ public class SesEventPublisher {
         }
         LOG.warnf("SES destination %s: event %s not delivered (no destination target configured).",
                 ed.getName(), eventType);
+    }
+
+    /** Whether the topic's policy lets SES publish to it for {@code sourceArn}, owned by {@code sourceAccount}. */
+    private boolean sesMayPublish(String topicArn, String sourceArn, String sourceAccount) {
+        return serviceCallAuthorizer.authorize("ses", "sns:Publish", topicArn, sourceArn, sourceAccount)
+                == Decision.ALLOW;
     }
 
     private void publishSns(String topicArn, String payload, String defaultRegion) {
@@ -206,21 +246,9 @@ public class SesEventPublisher {
         }
         String region = AwsArnUtils.regionOrDefault(busArn, defaultRegion);
         try {
-            Map<String, Object> entry = new HashMap<>();
-            entry.put("Source", "aws.ses");
-            entry.put("DetailType", SesEventPayload.eventBridgeDetailType(eventType));
-            entry.put("Detail", payloadJson);
+            Map<String, Object> entry = EventBridgeService.serviceEventEntry("aws.ses",
+                    SesEventPayload.eventBridgeDetailType(eventType), payloadJson, sourceArn);
             entry.put("EventBusName", busName);
-            entry.put("Region", region);
-            // Always emit Resources (possibly empty) — EventBridgeService.matchesPattern
-            // casts entry.get("Resources") to ArrayNode unconditionally for any rule with
-            // a "resources" filter; an absent key NPEs and silently turns the rule into
-            // a no-match.
-            ArrayNode resources = objectMapper.createArrayNode();
-            if (sourceArn != null && !sourceArn.isBlank()) {
-                resources.add(sourceArn);
-            }
-            entry.put("Resources", resources);
             EventBridgeService.PutEventsResult result =
                     eventBridgeService.putEvents(List.of(entry), region);
             if (result.failedCount() > 0) {
@@ -252,14 +280,10 @@ public class SesEventPublisher {
                 dimensions.add(new Dimension(cfg.getDimensionName(), value));
             }
         }
-        MetricDatum datum = new MetricDatum();
-        datum.setNamespace(SES_METRIC_NAMESPACE);
-        datum.setMetricName(SesEventPayload.cloudWatchMetricName(eventType));
-        datum.setValue(1.0);
-        datum.setUnit("Count");
-        datum.setDimensions(dimensions);
-        // Leave timestamp unset: CloudWatchMetricsService.putMetricData defaults a zero
-        // timestamp to Instant.now().getEpochSecond() (epoch seconds, not milliseconds).
+        // A zero timestamp: CloudWatchMetricsService.putMetricData defaults it to
+        // Instant.now().getEpochSecond() (epoch seconds, not milliseconds).
+        MetricDatum datum = MetricDatum.of(SesEventPayload.cloudWatchMetricName(eventType), "Count", 1.0,
+                dimensions, 0);
         try {
             cloudWatchMetricsService.putMetricData(SES_METRIC_NAMESPACE, List.of(datum),
                     defaultRegion);

@@ -23,6 +23,19 @@ public class NetworkInterface {
     private String availabilityZone;
     private String interfaceType = "interface";
     private String region;
+    /**
+     * Whether AWS itself manages this interface, rather than the account it is billed to.
+     * False for anything a customer created; true for the service-owned interfaces AWS
+     * creates on the customer's behalf, of which an interface VPC endpoint's is one.
+     */
+    private boolean requesterManaged;
+    /**
+     * The alias or account of the principal that created the interface, for a
+     * requester-managed one. Left null rather than filled with a plausible-looking id:
+     * real AWS reports an internal service account here, which floci cannot know, and an
+     * invented twelve-digit account would be a wrong answer rather than a missing one.
+     */
+    private String requesterId;
     private List<GroupIdentifier> groups = new ArrayList<>();
     private NetworkInterfaceAttachment attachment;
     private List<Tag> tagSet = new ArrayList<>();
@@ -71,6 +84,11 @@ public class NetworkInterface {
 
     public String getRegion() { return region; }
     public void setRegion(String region) { this.region = region; }
+    public boolean isRequesterManaged() { return requesterManaged; }
+    public void setRequesterManaged(boolean requesterManaged) { this.requesterManaged = requesterManaged; }
+
+    public String getRequesterId() { return requesterId; }
+    public void setRequesterId(String requesterId) { this.requesterId = requesterId; }
 
     public NetworkInterfaceAttachment getAttachment() { return attachment; }
     public void setAttachment(NetworkInterfaceAttachment attachment) { this.attachment = attachment; }

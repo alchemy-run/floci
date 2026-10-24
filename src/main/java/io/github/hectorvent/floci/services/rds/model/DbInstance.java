@@ -11,6 +11,9 @@ import java.util.Map;
 @RegisterForReflection
 public class DbInstance {
 
+    /** The fallback for existing records and requests that do not name a storage type. */
+    public static final String DEFAULT_STORAGE_TYPE = "gp2";
+
     private String dbInstanceIdentifier;
     private DatabaseEngine engine;
     // the engine name the request gave (aurora-postgresql, postgres, ...): the enum collapses the
@@ -22,6 +25,7 @@ public class DbInstance {
     private String dbName;
     private String dbInstanceClass;
     private int allocatedStorage;
+    private String storageType;
     private DbInstanceStatus status;
     private DbEndpoint endpoint;
     private boolean iamDatabaseAuthenticationEnabled;
@@ -44,6 +48,7 @@ public class DbInstance {
     private String preferredBackupWindow;
     private String preferredMaintenanceWindow;
     private boolean copyTagsToSnapshot;
+    private boolean deletionProtection;
     private boolean publiclyAccessible;
     /** MonitoringInterval documents 0 as its default. */
     private int monitoringInterval;
@@ -84,6 +89,7 @@ public class DbInstance {
     private String masterUserSecretStatus;
     private String masterUserSecretKmsKeyId;
     private Map<String, String> tags = new LinkedHashMap<>();
+    private List<DbRoleAssociation> associatedRoles = new ArrayList<>();
     private Instant createdAt;
     private int proxyPort;
     // The listener port clients connect to (CreateDBInstance Port / ModifyDBInstance
@@ -152,6 +158,9 @@ public class DbInstance {
 
     public String getDbInstanceClass() { return dbInstanceClass; }
     public void setDbInstanceClass(String dbInstanceClass) { this.dbInstanceClass = dbInstanceClass; }
+
+    public String getStorageType() { return storageType != null ? storageType : DEFAULT_STORAGE_TYPE; }
+    public void setStorageType(String storageType) { this.storageType = storageType; }
 
     public int getAllocatedStorage() { return allocatedStorage; }
     public void setAllocatedStorage(int allocatedStorage) { this.allocatedStorage = allocatedStorage; }
@@ -241,6 +250,9 @@ public class DbInstance {
     public boolean isCopyTagsToSnapshot() { return copyTagsToSnapshot; }
     public void setCopyTagsToSnapshot(boolean copyTagsToSnapshot) { this.copyTagsToSnapshot = copyTagsToSnapshot; }
 
+    public boolean isDeletionProtection() { return deletionProtection; }
+    public void setDeletionProtection(boolean deletionProtection) { this.deletionProtection = deletionProtection; }
+
     public String getMasterUserSecretKmsKeyId() { return masterUserSecretKmsKeyId; }
     public void setMasterUserSecretKmsKeyId(String masterUserSecretKmsKeyId) { this.masterUserSecretKmsKeyId = masterUserSecretKmsKeyId; }
 
@@ -262,6 +274,11 @@ public class DbInstance {
     public boolean hasReadReplicaSource() {
         return readReplicaSourceDbInstanceIdentifier != null
                 && !readReplicaSourceDbInstanceIdentifier.isBlank();
+    }
+
+    public List<DbRoleAssociation> getAssociatedRoles() { return associatedRoles; }
+    public void setAssociatedRoles(List<DbRoleAssociation> associatedRoles) {
+        this.associatedRoles = associatedRoles != null ? new ArrayList<>(associatedRoles) : new ArrayList<>();
     }
 
     public Map<String, String> getTags() { return tags; }

@@ -4,6 +4,7 @@ import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.CopyArchiveToContainerCmd;
 import com.github.dockerjava.api.command.InspectVolumeCmd;
 import com.github.dockerjava.api.command.InspectVolumeResponse;
+import com.github.dockerjava.api.exception.NotFoundException;
 import com.github.dockerjava.api.model.LogConfig;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
@@ -15,6 +16,7 @@ import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager.C
 import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.core.common.docker.LaunchedContainerAwsEnv;
+import io.github.hectorvent.floci.core.common.docker.RetryingTarCopier;
 import io.github.hectorvent.floci.services.ecr.registry.EcrRegistryManager;
 import io.github.hectorvent.floci.services.ecs.model.ContainerDefinition;
 import io.github.hectorvent.floci.services.ecs.model.EcsTask;
@@ -23,18 +25,26 @@ import io.github.hectorvent.floci.services.ecs.model.LogConfiguration;
 import io.github.hectorvent.floci.services.ecs.model.NetworkMode;
 import io.github.hectorvent.floci.services.ecs.model.PortMapping;
 import io.github.hectorvent.floci.services.ecs.model.TaskDefinition;
+import io.github.hectorvent.floci.services.lambda.launcher.ImageCacheService.LaunchImage;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
 import io.github.hectorvent.floci.services.secretsmanager.SecretsManagerService;
 import io.github.hectorvent.floci.services.ssm.SsmService;
+import io.github.hectorvent.floci.testing.DockerArchiveUploadFixture;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
+import org.mockito.MockMakers;
+import org.mockito.MockedStatic;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
@@ -42,6 +52,10 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -49,11 +63,14 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.RETURNS_SELF;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.withSettings;
 
 class EcsContainerManagerFirelensTest {
 
@@ -63,6 +80,8 @@ class EcsContainerManagerFirelensTest {
     private ContainerLogStreamer logStreamer;
     private DockerClient dockerClient;
     private CopyArchiveToContainerCmd copyCmd;
+    private InputStream uploadStream;
+    private byte[] uploadedArchive;
     private EcsContainerManager manager;
 
     @BeforeEach
@@ -71,8 +90,11 @@ class EcsContainerManagerFirelensTest {
         when(builder.build()).thenReturn(new ContainerSpec("image"));
         ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
         when(containerBuilder.newContainer(anyString())).thenReturn(builder);
+        when(containerBuilder.resolveImage(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
 
         lifecycleManager = mock(ContainerLifecycleManager.class);
+        when(lifecycleManager.resolveImageForLaunch(any(), any()))
+                .thenAnswer(invocation -> new LaunchImage(invocation.getArgument(0), null));
         when(lifecycleManager.createAndStart(any())).thenReturn(new ContainerInfo("app-id", Map.of()));
         when(lifecycleManager.create(any())).thenReturn("router-id");
         when(lifecycleManager.startCreated(anyString(), any())).thenReturn(new ContainerInfo("router-id", Map.of()));
@@ -85,6 +107,14 @@ class EcsContainerManagerFirelensTest {
         when(inspectVolumeCmd.exec()).thenReturn(volume);
         when(volume.getMountpoint()).thenReturn("/var/lib/docker/volumes/floci-ecs-firelens-abc123/_data");
         copyCmd = mock(CopyArchiveToContainerCmd.class, RETURNS_SELF);
+        when(copyCmd.withTarInputStream(any(InputStream.class))).thenAnswer(invocation -> {
+            uploadStream = invocation.getArgument(0);
+            return copyCmd;
+        });
+        doAnswer(invocation -> {
+            uploadedArchive = uploadStream.readAllBytes();
+            return null;
+        }).when(copyCmd).exec();
         when(dockerClient.copyArchiveToContainerCmd("router-id")).thenReturn(copyCmd);
 
         logStreamer = mock(ContainerLogStreamer.class);
@@ -110,6 +140,8 @@ class EcsContainerManagerFirelensTest {
         router.setName("log_router");
         router.setImage("amazon/aws-for-fluent-bit:stable");
         router.setFirelensConfiguration(new FirelensConfiguration("fluentbit", Map.of()));
+        router.setLogConfiguration(new LogConfiguration("awslogs",
+                Map.of("awslogs-group", "/ecs/firelens-family", "awslogs-stream-prefix", "firelens"), null));
 
         ContainerDefinition app = new ContainerDefinition();
         app.setName("app");
@@ -144,14 +176,16 @@ class EcsContainerManagerFirelensTest {
         assertTrue(logConfig.getValue().getConfig().get("fluentd-async-connect") == null,
                 "fluentd-async-connect was removed by Docker 28");
 
-        verify(logStreamer).attach(eq("router-id"), anyString(), anyString(), anyString(), anyString());
-        verify(logStreamer, never()).attach(eq("app-id"), anyString(), anyString(), anyString(), anyString());
+        verify(logStreamer).attachForAccount(eq("000000000000"), eq("router-id"), anyString(), anyString(), anyString(),
+                anyString());
+        verify(logStreamer, never()).attachForAccount(anyString(), eq("app-id"), anyString(), anyString(), anyString(),
+                anyString());
+        verify(logStreamer, never()).attachConsoleOnly(eq("app-id"), anyString());
         assertTrue(handle.getFirelensVolumeName().contains("firelens"));
 
         verify(copyCmd).withRemotePath("/fluent-bit/etc");
-        ArgumentCaptor<InputStream> configArchive = ArgumentCaptor.forClass(InputStream.class);
-        verify(copyCmd).withTarInputStream(configArchive.capture());
-        assertTrue(readFluentBitConf(configArchive.getValue()).contains(
+        verify(copyCmd).withTarInputStream(any(InputStream.class));
+        assertTrue(readFluentBitConf(new ByteArrayInputStream(uploadedArchive)).contains(
                 "    Endpoint http://host.docker.internal:4566"));
     }
 
@@ -192,9 +226,8 @@ class EcsContainerManagerFirelensTest {
                 logConfig.getValue().getConfig().get("fluentd-address"));
 
         verify(copyCmd).withRemotePath("/fluentd/etc");
-        ArgumentCaptor<InputStream> configArchive = ArgumentCaptor.forClass(InputStream.class);
-        verify(copyCmd).withTarInputStream(configArchive.capture());
-        String conf = readFluentBitConf(configArchive.getValue());
+        verify(copyCmd).withTarInputStream(any(InputStream.class));
+        String conf = readFluentBitConf(new ByteArrayInputStream(uploadedArchive));
         assertTrue(conf.contains("@type unix"));
         assertTrue(conf.contains("<match app-firelens**>"));
         assertTrue(conf.contains("@type stdout"));
@@ -236,9 +269,8 @@ class EcsContainerManagerFirelensTest {
 
         verify(s3Service).getObject("firelens-configs", "extra.conf");
         verify(copyCmd).withRemotePath("/fluent-bit/etc");
-        ArgumentCaptor<InputStream> configArchive = ArgumentCaptor.forClass(InputStream.class);
-        verify(copyCmd).withTarInputStream(configArchive.capture());
-        Map<String, String> files = readFirelensArchive(configArchive.getValue());
+        verify(copyCmd).withTarInputStream(any(InputStream.class));
+        Map<String, String> files = readFirelensArchive(new ByteArrayInputStream(uploadedArchive));
         assertEquals(2, files.size(), files::toString);
         assertTrue(files.get("fluent-bit.conf").contains(
                 "@INCLUDE /fluent-bit/etc/external.conf"), files.get("fluent-bit.conf"));
@@ -276,9 +308,8 @@ class EcsContainerManagerFirelensTest {
         manager.startTask(task, taskDef, null, "us-east-1");
 
         verify(copyCmd).withRemotePath("/fluentd/etc");
-        ArgumentCaptor<InputStream> configArchive = ArgumentCaptor.forClass(InputStream.class);
-        verify(copyCmd).withTarInputStream(configArchive.capture());
-        Map<String, String> files = readFirelensArchive(configArchive.getValue());
+        verify(copyCmd).withTarInputStream(any(InputStream.class));
+        Map<String, String> files = readFirelensArchive(new ByteArrayInputStream(uploadedArchive));
         assertTrue(files.get("fluent.conf").contains(
                 "@include /fluentd/etc/external.conf"), files.get("fluent.conf"));
         assertTrue(files.containsKey("external.conf"), files::toString);
@@ -369,6 +400,180 @@ class EcsContainerManagerFirelensTest {
         assertEquals("ClientException", failure.getErrorCode());
         assertEquals("FireLens configuration type must be fluentbit or fluentd.", failure.getMessage());
         verify(lifecycleManager, never()).create(any(ContainerSpec.class));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"true,500", "false,0", "false,13"})
+    void firelensUploadUsesTheSelectedBackoffAndSharedRetryBudget(boolean productionDefaults, long backoffMillis) {
+        try (MockedStatic<RetryingTarCopier> copies = mockStatic(RetryingTarCopier.class,
+                withSettings().mockMaker(MockMakers.INLINE))) {
+            TaskDefinition definition = retryTaskDefinition("fluentbit", false, "");
+            if (productionDefaults) {
+                manager.startTask(task(), definition, null, "us-east-1");
+            } else {
+                manager.startTask(task(), definition, null, "us-east-1", backoffMillis);
+            }
+
+            copies.verify(() -> RetryingTarCopier.copyArchive(eq(dockerClient), eq("router-id"),
+                    eq("/fluent-bit/etc"), eq("firelens-config"), any(byte[].class),
+                    eq(6), eq(backoffMillis)));
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"fluentbit,false", "fluentbit,true", "fluentd,false", "fluentd,true"})
+    void uploadsConfigFromMemoryWithoutAStreamingPipe(String type, boolean external) {
+        manager.startTask(task(), retryTaskDefinition(type, external, "# external config\n"), null, "us-east-1");
+
+        assertInstanceOf(ByteArrayInputStream.class, uploadStream,
+                "an already-built archive must not allocate a streaming pipe and writer thread");
+    }
+
+    @ParameterizedTest
+    @CsvSource({"fluentbit,false,0", "fluentbit,false,73", "fluentbit,false,8192",
+            "fluentbit,true,0", "fluentbit,true,73", "fluentbit,true,8192",
+            "fluentd,false,0", "fluentd,false,73", "fluentd,false,8192",
+            "fluentd,true,0", "fluentd,true,73", "fluentd,true,8192"})
+    void retriesConsumedConfigArchiveBeforeStartingContainers(String type, boolean external, int consumedBytes)
+            throws Exception {
+        DockerArchiveUploadFixture uploads = new DockerArchiveUploadFixture(dockerClient, "router-id");
+        uploads.failures = 1;
+        uploads.consumedBytes = consumedBytes;
+        uploads.failure = new RuntimeException(new IOException("Connection reset"));
+        String extra = "# café ../not-an-entry\n".repeat(1024);
+
+        EcsTaskHandle handle = manager.startTask(task(), retryTaskDefinition(type, external, extra), null, "us-east-1", 0L);
+
+        assertEquals(List.of("log_router", "app"), handle.getContainerIds().keySet().stream().toList());
+        assertEquals(2, uploads.commands.size());
+        assertEquals(1, uploads.completed.size());
+        assertNotSame(uploads.streams.getFirst(), uploads.streams.get(1));
+        String path = "fluentd".equals(type) ? "/fluentd/etc" : "/fluent-bit/etc";
+        String file = "fluentd".equals(type) ? "fluent.conf" : "fluent-bit.conf";
+        verify(uploads.commands.get(1)).withRemotePath(path);
+        try (TarArchiveInputStream tar = new TarArchiveInputStream(new ByteArrayInputStream(uploads.completed.getFirst()))) {
+            assertConfigEntry(tar, file, expectedRetryConfig(type, external));
+            if (external) {
+                assertConfigEntry(tar, "external.conf", extra);
+            }
+            assertNull(tar.getNextEntry());
+        }
+        InOrder order = inOrder(lifecycleManager, uploads.commands.get(1));
+        order.verify(lifecycleManager).create(any());
+        order.verify(uploads.commands.get(1)).exec();
+        order.verify(lifecycleManager).startCreated(eq("router-id"), any());
+        order.verify(lifecycleManager).createAndStart(any());
+        verify(lifecycleManager, never()).removeIfExists(anyString());
+        if (external) {
+            verify(s3Service).getObject("firelens-configs", "extra.conf");
+        }
+    }
+
+    @Test
+    void exhaustedConfigUploadCleansUpBeforeAnyContainerStarts() {
+        DockerArchiveUploadFixture uploads = failingUploads();
+
+        RuntimeException failure = assertThrows(RuntimeException.class, () -> manager.startTask(
+                task(), retryTaskDefinition("fluentbit", true, "# external config\n"), null, "us-east-1", 0L));
+
+        assertSame(uploads.failure, failure.getCause());
+        assertEquals(6, uploads.commands.size());
+        assertEquals(0, uploads.completed.size());
+        verifyFailedLaunchCleanup();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"fluentbit", "fluentd"})
+    void daemonRejectionDoesNotRetryAndCleansUp(String type) {
+        DockerArchiveUploadFixture uploads = failingUploads();
+        uploads.failure = new NotFoundException("container missing");
+
+        RuntimeException failure = assertThrows(RuntimeException.class, () -> manager.startTask(
+                task(), retryTaskDefinition(type, false, ""), null, "us-east-1"));
+
+        assertSame(uploads.failure, failure.getCause());
+        assertEquals(1, uploads.commands.size());
+        verifyFailedLaunchCleanup();
+    }
+
+    @Test
+    void routerStartTransportFailureDoesNotRetryTheUploadOrStart() {
+        DockerArchiveUploadFixture uploads = new DockerArchiveUploadFixture(dockerClient, "router-id");
+        RuntimeException transportFailure = new RuntimeException(new IOException("Connection reset"));
+        when(lifecycleManager.startCreated(anyString(), any())).thenThrow(transportFailure);
+
+        RuntimeException failure = assertThrows(RuntimeException.class, () -> manager.startTask(
+                task(), retryTaskDefinition("fluentbit", false, ""), null, "us-east-1"));
+
+        assertSame(transportFailure, failure);
+        assertEquals(1, uploads.commands.size());
+        assertEquals(1, uploads.completed.size());
+        verify(lifecycleManager).startCreated(eq("router-id"), any());
+        verify(lifecycleManager, never()).createAndStart(any());
+        verify(lifecycleManager).removeIfExists("router-id");
+        verifyFirelensVolumeRemoved();
+    }
+
+    private DockerArchiveUploadFixture failingUploads() {
+        DockerArchiveUploadFixture uploads = new DockerArchiveUploadFixture(dockerClient, "router-id");
+        uploads.failures = Integer.MAX_VALUE;
+        uploads.consumedBytes = 73;
+        uploads.failure = new RuntimeException(new IOException("Connection reset"));
+        return uploads;
+    }
+
+    private void verifyFailedLaunchCleanup() {
+        verify(lifecycleManager).create(any());
+        verify(lifecycleManager, never()).startCreated(anyString(), any());
+        verify(lifecycleManager, never()).createAndStart(any());
+        verify(lifecycleManager).removeIfExists("router-id");
+        verifyFirelensVolumeRemoved();
+    }
+
+    private void verifyFirelensVolumeRemoved() {
+        ArgumentCaptor<String> volumeName = ArgumentCaptor.forClass(String.class);
+        verify(lifecycleManager).ensureVolume(volumeName.capture());
+        verify(lifecycleManager).removeVolume(volumeName.getValue());
+    }
+
+    private TaskDefinition retryTaskDefinition(String type, boolean external, String extra) {
+        ContainerDefinition router = router(type, List.of());
+        Map<String, String> options = external
+                ? Map.of("enable-ecs-log-metadata", "false", "config-file-type", "s3",
+                        "config-file-value", "arn:aws:s3:::firelens-configs/extra.conf")
+                : Map.of("enable-ecs-log-metadata", "false");
+        router.setFirelensConfiguration(new FirelensConfiguration(type, options));
+        ContainerDefinition app = new ContainerDefinition();
+        app.setName("app");
+        app.setImage("app:latest");
+        app.setLogConfiguration(new LogConfiguration("awsfirelens",
+                Map.of("fluentd".equals(type) ? "@type" : "Name", "stdout"), null));
+        if (external) {
+            S3Object object = new S3Object();
+            object.setData(extra.getBytes(StandardCharsets.UTF_8));
+            when(s3Service.getObject("firelens-configs", "extra.conf")).thenReturn(object);
+        }
+        TaskDefinition definition = taskDefinition(List.of(app, router));
+        definition.setNetworkMode(NetworkMode.host);
+        return definition;
+    }
+
+    private static String expectedRetryConfig(String type, boolean external) {
+        if ("fluentd".equals(type)) {
+            return "<source>\n    @type unix\n    path /var/run/fluent.sock\n</source>\n\n"
+                    + (external ? "@include /fluentd/etc/external.conf\n\n" : "")
+                    + "<match app-firelens**>\n    @type stdout\n</match>\n\n";
+        }
+        return "[INPUT]\n    Name forward\n    unix_path /var/run/fluent.sock\n    Mem_Buf_Limit 25MB\n\n"
+                + (external ? "@INCLUDE /fluent-bit/etc/external.conf\n\n" : "")
+                + "[OUTPUT]\n    Name stdout\n    Match app-firelens*\n\n";
+    }
+
+    private static void assertConfigEntry(TarArchiveInputStream tar, String name, String content) throws IOException {
+        TarArchiveEntry entry = tar.getNextEntry();
+        assertEquals(name, entry.getName());
+        assertEquals(0100644, entry.getMode());
+        assertEquals(content, new String(tar.readAllBytes(), StandardCharsets.UTF_8));
     }
 
     private static ContainerDefinition router(String type, List<PortMapping> portMappings) {

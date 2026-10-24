@@ -4,6 +4,7 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.ResolvedServiceCatalog;
 import io.github.hectorvent.floci.core.common.ServiceDescriptor;
 import io.github.hectorvent.floci.core.common.ServiceProtocol;
+import io.github.hectorvent.floci.testutil.LogCapture;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
@@ -16,12 +17,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.logging.Handler;
-import java.util.logging.Level;
 import java.util.logging.LogRecord;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -47,7 +46,7 @@ class PersistentPathValidatorTest {
     private static ServiceDescriptor descriptor(String key, boolean enabled, String storageKey, String mode) {
         return new ServiceDescriptor(key, key, enabled, true, storageKey, mode, 0L,
                 null, ServiceProtocol.REST_XML, Set.of(ServiceProtocol.REST_XML),
-                Set.of(), Set.of(), Set.of(), Set.of());
+                Set.of(), Set.of(), Set.of(), Set.of(), Set.of());
     }
 
     @Test
@@ -69,7 +68,7 @@ class PersistentPathValidatorTest {
         validator().validateAtBoot();
 
         assertTrue(Files.isDirectory(root));
-        try (var entries = Files.list(root)) {
+        try (Stream<Path> entries = Files.list(root)) {
             assertEquals(0, entries.count(), "write probe must not be left behind");
         }
     }
@@ -122,7 +121,8 @@ class PersistentPathValidatorTest {
                 descriptor("s3", true, "s3", "memory"),
                 descriptor("sqs", true, "sqs", "memory")));
 
-        List<LogRecord> records = captureLogs(() -> validator().validateAtBoot());
+        List<LogRecord> records = LogCapture.capture(PersistentPathValidator.class,
+                () -> validator().validateAtBoot());
 
         assertTrue(records.stream().anyMatch(r -> r.getMessage() != null
                         && r.getMessage().contains("memory")
@@ -136,7 +136,8 @@ class PersistentPathValidatorTest {
         when(catalog.all()).thenReturn(List.of(descriptor("sqs", true, "sqs", "hybrid")));
         when(storageConfig.persistentPath()).thenReturn(root.toString());
 
-        List<LogRecord> records = captureLogs(() -> validator().validateAtBoot());
+        List<LogRecord> records = LogCapture.capture(PersistentPathValidator.class,
+                () -> validator().validateAtBoot());
 
         assertTrue(records.stream().anyMatch(r -> r.getMessage() != null
                         && r.getMessage().contains("persistent")
@@ -145,34 +146,5 @@ class PersistentPathValidatorTest {
                         && String.valueOf(r.getParameters()[0]).contains("sqs=hybrid")
                         && String.valueOf(r.getParameters()[1]).contains(root.toString())),
                 "expected a boot log announcing persistent mode with the effective path, got: " + records);
-    }
-
-    private static List<LogRecord> captureLogs(Runnable action) {
-        java.util.logging.Logger julLogger =
-                java.util.logging.Logger.getLogger(PersistentPathValidator.class.getName());
-        julLogger.setLevel(Level.ALL);
-        List<LogRecord> records = new ArrayList<>();
-        Handler handler = new Handler() {
-            @Override
-            public void publish(LogRecord record) {
-                records.add(record);
-            }
-
-            @Override
-            public void flush() {
-            }
-
-            @Override
-            public void close() {
-            }
-        };
-        handler.setLevel(Level.ALL);
-        julLogger.addHandler(handler);
-        try {
-            action.run();
-        } finally {
-            julLogger.removeHandler(handler);
-        }
-        return records;
     }
 }

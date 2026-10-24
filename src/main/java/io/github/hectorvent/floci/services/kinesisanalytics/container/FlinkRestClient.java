@@ -209,7 +209,12 @@ public class FlinkRestClient {
             if (resp.statusCode() != 200) {
                 return null;
             }
-            return parseSavepointStatus(mapper.readTree(resp.body()));
+            JsonNode root = mapper.readTree(resp.body());
+            String statusId = root.path("status").path("id").asText(null);
+            JsonNode operation = root.path("operation");
+            boolean failed = operation.has("failure-cause");
+            String location = operation.path("location").asText(null);
+            return new SavepointStatus(statusId, location, failed);
         } catch (Exception e) {
             LOG.debugf("Flink savepoint status probe (job %s, request %s) on %s failed: %s",
                     jobId, requestId, restBase, e.toString());

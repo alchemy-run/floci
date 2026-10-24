@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sun.net.httpserver.HttpServer;
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.Base64Url;
 import io.github.hectorvent.floci.services.apigatewayv2.JwtSignatureVerifier;
 import io.github.hectorvent.floci.services.appsync.graphql.AppSyncTransportException;
 import org.junit.jupiter.api.AfterEach;
@@ -24,7 +25,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Arrays;
-import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -70,6 +70,7 @@ class OidcAuthValidatorTest {
         EmulatorConfig.SecurityConfig securityConfig = mock(EmulatorConfig.SecurityConfig.class);
         when(config.security()).thenReturn(securityConfig);
         when(securityConfig.allowPrivateJwtTargets()).thenReturn(true);
+        when(config.tls()).thenReturn(mock(EmulatorConfig.TlsConfig.class));
         signatureVerifier = new JwtSignatureVerifier(mapper, config);
         validator = new OidcAuthValidator(new JwtClaimsDecoder(mapper), signatureVerifier,
                 Clock.fixed(NOW, ZoneOffset.UTC));
@@ -210,12 +211,12 @@ class OidcAuthValidatorTest {
         Signature signature = Signature.getInstance("SHA256withRSA");
         signature.initSign(signingKey);
         signature.update(signingInput.getBytes(StandardCharsets.UTF_8));
-        String encodedSignature = Base64.getUrlEncoder().withoutPadding().encodeToString(signature.sign());
+        String encodedSignature = Base64Url.encode(signature.sign());
         return signingInput + "." + encodedSignature;
     }
 
     private static String base64Url(String value) {
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(value.getBytes(StandardCharsets.UTF_8));
+        return Base64Url.encode(value);
     }
 
     private static String base64UrlUnsigned(BigInteger value) {
@@ -223,6 +224,6 @@ class OidcAuthValidatorTest {
         if (bytes.length > 1 && bytes[0] == 0) {
             bytes = Arrays.copyOfRange(bytes, 1, bytes.length);
         }
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+        return Base64Url.encode(bytes);
     }
 }

@@ -1,5 +1,11 @@
 package io.github.hectorvent.floci.services.networkfirewall;
 
+import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
+import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.ValidatableResponse;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.aMapWithSize;
 import static org.hamcrest.Matchers.anEmptyMap;
@@ -7,19 +13,13 @@ import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.emptyOrNullString;
 import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasItems;
+import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.matchesPattern;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
-
-import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
-import io.quarkus.test.junit.QuarkusTest;
-import io.restassured.response.ValidatableResponse;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
 
 @QuarkusTest
 class NetworkFirewallIntegrationTest {
@@ -500,6 +500,64 @@ class NetworkFirewallIntegrationTest {
     }
 
     @Test
+    void dryRunRuleGroupCreateAndUpdate_validateButDoNotPersist() {
+        String name = "dry-run-rule-group";
+        String create = "{\"RuleGroupName\":\"" + name + "\",\"Type\":\"STATEFUL\","
+                + "\"Capacity\":100,\"RuleGroup\":{\"RulesSource\":{\"RulesString\":\"pass ip any any\"}}}";
+        call("CreateRuleGroup", create.substring(0, create.length() - 1) + ",\"DryRun\":true}")
+            .statusCode(200)
+            .body("RuleGroupResponse.RuleGroupName", equalTo(name))
+            .body("RuleGroupResponse.DryRun", nullValue());
+        call("DescribeRuleGroup", "{\"RuleGroupName\":\"" + name + "\"}")
+            .statusCode(400)
+            .body("__type", equalTo("ResourceNotFoundException"));
+
+        String token = call("CreateRuleGroup", create).statusCode(200).extract().path("UpdateToken");
+        String arn = "arn:aws:network-firewall:us-east-1:723679240095:stateful-rulegroup/" + name;
+        String update = "{\"RuleGroupArn\":\"" + arn + "\",\"UpdateToken\":\"" + token + "\","
+                + "\"RuleGroup\":{\"RulesSource\":{\"RulesString\":\"drop ip any any\"}},\"DryRun\":true}";
+        call("UpdateRuleGroup", update).statusCode(200)
+            .body("RuleGroup.RulesSource.RulesString", equalTo("drop ip any any"))
+            .body("UpdateToken", equalTo(token));
+        call("DescribeRuleGroup", "{\"RuleGroupArn\":\"" + arn + "\"}").statusCode(200)
+            .body("RuleGroup.RulesSource.RulesString", equalTo("pass ip any any"))
+            .body("UpdateToken", equalTo(token));
+        call("UpdateRuleGroup", update.replace(token, "stale-token"))
+            .statusCode(400)
+            .body("__type", equalTo("InvalidTokenException"));
+    }
+
+    @Test
+    void dryRunFirewallPolicyCreateAndUpdate_validateButDoNotPersist() {
+        String name = "dry-run-firewall-policy";
+        String create = "{\"FirewallPolicyName\":\"" + name + "\",\"FirewallPolicy\":{"
+                + "\"StatelessDefaultActions\":[\"aws:pass\"],"
+                + "\"StatelessFragmentDefaultActions\":[\"aws:pass\"]}}";
+        call("CreateFirewallPolicy", create.substring(0, create.length() - 1) + ",\"DryRun\":true}")
+            .statusCode(200)
+            .body("FirewallPolicyResponse.FirewallPolicyName", equalTo(name))
+            .body("FirewallPolicyResponse.DryRun", nullValue());
+        call("DescribeFirewallPolicy", "{\"FirewallPolicyName\":\"" + name + "\"}")
+            .statusCode(400)
+            .body("__type", equalTo("ResourceNotFoundException"));
+
+        String token = call("CreateFirewallPolicy", create).statusCode(200).extract().path("UpdateToken");
+        String arn = "arn:aws:network-firewall:us-east-1:723679240095:firewall-policy/" + name;
+        String update = "{\"FirewallPolicyArn\":\"" + arn + "\",\"UpdateToken\":\"" + token + "\","
+                + "\"FirewallPolicy\":{\"StatelessDefaultActions\":[\"aws:drop\"],"
+                + "\"StatelessFragmentDefaultActions\":[\"aws:drop\"]},\"DryRun\":true}";
+        call("UpdateFirewallPolicy", update).statusCode(200)
+            .body("FirewallPolicy.StatelessDefaultActions[0]", equalTo("aws:drop"))
+            .body("UpdateToken", equalTo(token));
+        call("DescribeFirewallPolicy", "{\"FirewallPolicyArn\":\"" + arn + "\"}").statusCode(200)
+            .body("FirewallPolicy.StatelessDefaultActions[0]", equalTo("aws:pass"))
+            .body("UpdateToken", equalTo(token));
+        call("UpdateFirewallPolicy", update.replace(token, "stale-token"))
+            .statusCode(400)
+            .body("__type", equalTo("InvalidTokenException"));
+    }
+
+    @Test
     void deleteFirewall_returnsTheDeletedFirewallAndItsStatus() {
         String name = "DeletableFirewall";
         createFirewall(name, "", "subnet-11111111111111112");
@@ -541,6 +599,239 @@ class NetworkFirewallIntegrationTest {
                 + "\"Capacity\":100,\"RuleGroup\":{\"RulesSource\":{\"RulesString\":\"pass ip any any\"}}}")
             .statusCode(400)
             .body("__type", equalTo("InvalidRequestException"));
+    }
+
+    @Test
+    void updateRuleGroup_whenReplacementIsRejected_keepsTheOriginal() {
+        String tokenA = call("CreateRuleGroup", "{\"RuleGroupName\":\"atomic-keep-a\",\"Type\":\"STATEFUL\","
+                + "\"Capacity\":100,\"RuleGroup\":{\"RulesSource\":{\"RulesString\":\"pass ip any any\"}}}")
+            .statusCode(200)
+            .extract().path("UpdateToken");
+        call("CreateRuleGroup", "{\"RuleGroupName\":\"atomic-keep-b\",\"Type\":\"STATEFUL\","
+                + "\"Capacity\":100,\"RuleGroup\":{\"RulesSource\":{\"RulesString\":\"drop ip any any\"}}}")
+            .statusCode(200);
+
+        String arnA = "arn:aws:network-firewall:us-east-1:723679240095:stateful-rulegroup/atomic-keep-a";
+
+        call("UpdateRuleGroup", "{\"RuleGroupArn\":\"" + arnA + "\","
+                + "\"RuleGroupName\":\"atomic-keep-b\",\"Type\":\"STATEFUL\",\"UpdateToken\":\"" + tokenA + "\","
+                + "\"RuleGroup\":{\"RulesSource\":{\"RulesString\":\"drop tcp any any\"}}}")
+            .statusCode(400)
+            .body("__type", equalTo("InvalidRequestException"));
+
+        call("DescribeRuleGroup", "{\"RuleGroupName\":\"atomic-keep-a\"}")
+            .statusCode(200)
+            .body("RuleGroup.RulesSource.RulesString", equalTo("pass ip any any"))
+            .body("RuleGroupResponse.RuleGroupArn", equalTo(arnA));
+    }
+
+    @Test
+    void updateRuleGroup_replacesTheStoredDefinitionAtomically() {
+        String name = "atomic-replace-rule-group";
+        String arn = "arn:aws:network-firewall:us-east-1:723679240095:stateful-rulegroup/" + name;
+        String token = call("CreateRuleGroup", "{\"RuleGroupName\":\"" + name + "\",\"Type\":\"STATEFUL\","
+                + "\"Capacity\":100,\"RuleGroup\":{\"RulesSource\":{\"RulesString\":\"pass ip any any\"}}}")
+            .statusCode(200)
+            .extract().path("UpdateToken");
+
+        String newToken = call("UpdateRuleGroup", "{\"RuleGroupArn\":\"" + arn + "\","
+                + "\"RuleGroupName\":\"" + name + "\",\"Type\":\"STATEFUL\",\"UpdateToken\":\"" + token + "\","
+                + "\"RuleGroup\":{\"RulesSource\":{\"RulesString\":\"drop ip any any\"}}}")
+            .statusCode(200)
+            .body("UpdateToken", not(equalTo(token)))
+            .extract().path("UpdateToken");
+
+        call("DescribeRuleGroup", "{\"RuleGroupName\":\"" + name + "\"}")
+            .statusCode(200)
+            .body("RuleGroup.RulesSource.RulesString", equalTo("drop ip any any"))
+            .body("RuleGroupResponse.Capacity", equalTo(100))
+            .body("RuleGroupResponse.RuleGroupArn", equalTo(arn))
+            .body("UpdateToken", equalTo(newToken));
+    }
+
+    @Test
+    void updateRuleGroup_withAStaleOrMissingToken_isRejectedAndLeavesTheRuleGroupUntouched() {
+        String name = "stale-token-rule-group";
+        String arn = "arn:aws:network-firewall:us-east-1:723679240095:stateful-rulegroup/" + name;
+        call("CreateRuleGroup", "{\"RuleGroupName\":\"" + name + "\",\"Type\":\"STATEFUL\","
+                + "\"Capacity\":100,\"RuleGroup\":{\"RulesSource\":{\"RulesString\":\"pass ip any any\"}}}")
+            .statusCode(200);
+
+        call("UpdateRuleGroup", "{\"RuleGroupArn\":\"" + arn + "\","
+                + "\"UpdateToken\":\"00000000-0000-0000-0000-000000000000\","
+                + "\"RuleGroup\":{\"RulesSource\":{\"RulesString\":\"drop ip any any\"}}}")
+            .statusCode(400)
+            .body("__type", equalTo("InvalidTokenException"));
+
+        call("UpdateRuleGroup", "{\"RuleGroupArn\":\"" + arn + "\","
+                + "\"RuleGroup\":{\"RulesSource\":{\"RulesString\":\"drop ip any any\"}}}")
+            .statusCode(400)
+            .body("__type", equalTo("InvalidRequestException"));
+
+        call("DescribeRuleGroup", "{\"RuleGroupArn\":\"" + arn + "\"}")
+            .statusCode(200)
+            .body("RuleGroup.RulesSource.RulesString", equalTo("pass ip any any"));
+    }
+
+    @Test
+    void updateRuleGroup_changingTheType_isRejectedAndKeepsTheOriginal() {
+        String name = "type-change-rule-group";
+        String arn = "arn:aws:network-firewall:us-east-1:723679240095:stateful-rulegroup/" + name;
+        String token = call("CreateRuleGroup", "{\"RuleGroupName\":\"" + name + "\",\"Type\":\"STATEFUL\","
+                + "\"Capacity\":100,\"RuleGroup\":{\"RulesSource\":{\"RulesString\":\"pass ip any any\"}}}")
+            .statusCode(200)
+            .extract().path("UpdateToken");
+
+        call("UpdateRuleGroup", "{\"RuleGroupArn\":\"" + arn + "\",\"Type\":\"STATELESS\","
+                + "\"UpdateToken\":\"" + token + "\","
+                + "\"RuleGroup\":{\"RulesSource\":{\"RulesString\":\"drop ip any any\"}}}")
+            .statusCode(400)
+            .body("__type", equalTo("InvalidRequestException"));
+
+        call("DescribeRuleGroup", "{\"RuleGroupArn\":\"" + arn + "\"}")
+            .statusCode(200)
+            .body("RuleGroupResponse.Type", equalTo("STATEFUL"))
+            .body("RuleGroup.RulesSource.RulesString", equalTo("pass ip any any"));
+    }
+
+    @Test
+    void updateRuleGroup_withoutExactlyOneOfRuleGroupOrRules_isRejectedAndKeepsTheDefinition() {
+        String name = "bodyless-update-rule-group";
+        String arn = "arn:aws:network-firewall:us-east-1:723679240095:stateful-rulegroup/" + name;
+        String token = call("CreateRuleGroup", "{\"RuleGroupName\":\"" + name + "\",\"Type\":\"STATEFUL\","
+                + "\"Capacity\":100,\"RuleGroup\":{\"RulesSource\":{\"RulesString\":\"pass ip any any\"}}}")
+            .statusCode(200)
+            .extract().path("UpdateToken");
+
+        call("UpdateRuleGroup", "{\"RuleGroupArn\":\"" + arn + "\",\"UpdateToken\":\"" + token + "\"}")
+            .statusCode(400)
+            .body("__type", equalTo("InvalidRequestException"));
+
+        call("UpdateRuleGroup", "{\"RuleGroupArn\":\"" + arn + "\",\"UpdateToken\":\"" + token + "\","
+                + "\"Rules\":\"drop ip any any\","
+                + "\"RuleGroup\":{\"RulesSource\":{\"RulesString\":\"drop ip any any\"}}}")
+            .statusCode(400)
+            .body("__type", equalTo("InvalidRequestException"));
+
+        call("DescribeRuleGroup", "{\"RuleGroupArn\":\"" + arn + "\"}")
+            .statusCode(200)
+            .body("RuleGroup.RulesSource.RulesString", equalTo("pass ip any any"))
+            .body("UpdateToken", equalTo(token));
+    }
+
+    @Test
+    void updateFirewallPolicy_whenReplacementIsRejected_keepsTheOriginal() {
+        String arnA = "arn:aws:network-firewall:us-east-1:723679240095:firewall-policy/atomic-policy-a";
+        String tokenA = call("CreateFirewallPolicy", "{\"FirewallPolicyName\":\"atomic-policy-a\","
+                + "\"FirewallPolicy\":{\"StatelessDefaultActions\":[\"aws:pass\"],"
+                + "\"StatelessFragmentDefaultActions\":[\"aws:pass\"]}}")
+            .statusCode(200)
+            .extract().path("UpdateToken");
+        call("CreateFirewallPolicy", "{\"FirewallPolicyName\":\"atomic-policy-b\","
+                + "\"FirewallPolicy\":{\"StatelessDefaultActions\":[\"aws:drop\"],"
+                + "\"StatelessFragmentDefaultActions\":[\"aws:drop\"]}}")
+            .statusCode(200);
+
+        call("UpdateFirewallPolicy", "{\"FirewallPolicyArn\":\"" + arnA + "\","
+                + "\"FirewallPolicyName\":\"atomic-policy-b\",\"UpdateToken\":\"" + tokenA + "\","
+                + "\"FirewallPolicy\":{\"StatelessDefaultActions\":[\"aws:drop\"],"
+                + "\"StatelessFragmentDefaultActions\":[\"aws:drop\"]}}")
+            .statusCode(400)
+            .body("__type", equalTo("InvalidRequestException"));
+
+        call("DescribeFirewallPolicy", "{\"FirewallPolicyName\":\"atomic-policy-a\"}")
+            .statusCode(200)
+            .body("FirewallPolicy.StatelessDefaultActions[0]", equalTo("aws:pass"))
+            .body("FirewallPolicyResponse.FirewallPolicyArn", equalTo(arnA));
+    }
+
+    @Test
+    void updateFirewallPolicy_byArnAlone_replacesTheStoredDefinition() {
+        String name = "arn-only-policy";
+        String arn = "arn:aws:network-firewall:us-east-1:723679240095:firewall-policy/" + name;
+        String token = call("CreateFirewallPolicy", "{\"FirewallPolicyName\":\"" + name + "\","
+                + "\"Description\":\"original\",\"Tags\":[{\"Key\":\"team\",\"Value\":\"network\"}],"
+                + "\"FirewallPolicy\":{\"StatelessDefaultActions\":[\"aws:pass\"],"
+                + "\"StatelessFragmentDefaultActions\":[\"aws:pass\"]}}")
+            .statusCode(200)
+            .extract().path("UpdateToken");
+
+        call("UpdateFirewallPolicy", "{\"FirewallPolicyArn\":\"" + arn + "\",\"UpdateToken\":\"" + token + "\","
+                + "\"FirewallPolicy\":{\"StatelessDefaultActions\":[\"aws:drop\"],"
+                + "\"StatelessFragmentDefaultActions\":[\"aws:drop\"]}}")
+            .statusCode(200);
+
+        call("DescribeFirewallPolicy", "{\"FirewallPolicyArn\":\"" + arn + "\"}")
+            .statusCode(200)
+            .body("FirewallPolicy.StatelessDefaultActions[0]", equalTo("aws:drop"))
+            .body("FirewallPolicyResponse.FirewallPolicyName", equalTo(name))
+            .body("FirewallPolicyResponse.Description", equalTo("original"))
+            .body("FirewallPolicyResponse.Tags[0].Key", equalTo("team"));
+    }
+
+    @Test
+    void updateFirewallPolicy_withAStaleToken_isRejectedAndLeavesThePolicyUntouched() {
+        String name = "stale-token-policy";
+        String arn = "arn:aws:network-firewall:us-east-1:723679240095:firewall-policy/" + name;
+        call("CreateFirewallPolicy", "{\"FirewallPolicyName\":\"" + name + "\","
+                + "\"FirewallPolicy\":{\"StatelessDefaultActions\":[\"aws:pass\"],"
+                + "\"StatelessFragmentDefaultActions\":[\"aws:pass\"]}}")
+            .statusCode(200);
+
+        call("UpdateFirewallPolicy", "{\"FirewallPolicyArn\":\"" + arn + "\","
+                + "\"UpdateToken\":\"00000000-0000-0000-0000-000000000000\","
+                + "\"FirewallPolicy\":{\"StatelessDefaultActions\":[\"aws:drop\"],"
+                + "\"StatelessFragmentDefaultActions\":[\"aws:drop\"]}}")
+            .statusCode(400)
+            .body("__type", equalTo("InvalidTokenException"));
+
+        call("DescribeFirewallPolicy", "{\"FirewallPolicyArn\":\"" + arn + "\"}")
+            .statusCode(200)
+            .body("FirewallPolicy.StatelessDefaultActions[0]", equalTo("aws:pass"));
+    }
+
+    @Test
+    void updateFirewallPolicy_withoutAPolicy_isRejectedAndKeepsTheDefinition() {
+        String name = "bodyless-update-policy";
+        String arn = "arn:aws:network-firewall:us-east-1:723679240095:firewall-policy/" + name;
+        String token = call("CreateFirewallPolicy", "{\"FirewallPolicyName\":\"" + name + "\","
+                + "\"FirewallPolicy\":{\"StatelessDefaultActions\":[\"aws:pass\"],"
+                + "\"StatelessFragmentDefaultActions\":[\"aws:pass\"]}}")
+            .statusCode(200)
+            .extract().path("UpdateToken");
+
+        call("UpdateFirewallPolicy", "{\"FirewallPolicyArn\":\"" + arn + "\",\"UpdateToken\":\"" + token + "\"}")
+            .statusCode(400)
+            .body("__type", equalTo("InvalidRequestException"));
+
+        call("DescribeFirewallPolicy", "{\"FirewallPolicyArn\":\"" + arn + "\"}")
+            .statusCode(200)
+            .body("FirewallPolicy.StatelessDefaultActions[0]", equalTo("aws:pass"))
+            .body("UpdateToken", equalTo(token));
+    }
+
+    @Test
+    void updateRuleGroup_byArnAlone_keepsTheStoredNameTypeCapacityAndTags() {
+        String name = "arn-only-rule-group";
+        String arn = "arn:aws:network-firewall:us-east-1:723679240095:stateful-rulegroup/" + name;
+        String token = call("CreateRuleGroup", "{\"RuleGroupName\":\"" + name + "\",\"Type\":\"STATEFUL\","
+                + "\"Capacity\":100,\"Tags\":[{\"Key\":\"team\",\"Value\":\"network\"}],"
+                + "\"RuleGroup\":{\"RulesSource\":{\"RulesString\":\"pass ip any any\"}}}")
+            .statusCode(200)
+            .extract().path("UpdateToken");
+
+        call("UpdateRuleGroup", "{\"RuleGroupArn\":\"" + arn + "\",\"UpdateToken\":\"" + token + "\","
+                + "\"RuleGroup\":{\"RulesSource\":{\"RulesString\":\"drop ip any any\"}}}")
+            .statusCode(200);
+
+        call("DescribeRuleGroup", "{\"RuleGroupArn\":\"" + arn + "\"}")
+            .statusCode(200)
+            .body("RuleGroup.RulesSource.RulesString", equalTo("drop ip any any"))
+            .body("RuleGroupResponse.Capacity", equalTo(100))
+            .body("RuleGroupResponse.Tags[0].Key", equalTo("team"))
+            .body("RuleGroupResponse.RuleGroupName", equalTo(name))
+            .body("RuleGroupResponse.Type", equalTo("STATEFUL"))
+            .body("RuleGroupResponse.RuleGroupArn", equalTo(arn));
     }
 
     @Test

@@ -2,14 +2,28 @@ package io.github.hectorvent.floci.services.s3;
 
 import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.testutil.IamServiceTestHelper;
+import jakarta.ws.rs.container.ContainerRequestContext;
+import jakarta.ws.rs.container.ResourceInfo;
 import jakarta.ws.rs.core.MultivaluedHashMap;
 import jakarta.ws.rs.core.MultivaluedMap;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriInfo;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.lang.reflect.Method;
+import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class PreSignedUrlFilterTest {
 
@@ -38,7 +52,7 @@ class PreSignedUrlFilterTest {
     @Test
     void resolveSecretKeyRejectsUnregisteredNumericAccessKeyId() throws Exception {
         IamService iamService = IamServiceTestHelper.iamServiceWithAccessKey("AKIDUNRELATED", "unrelated-secret");
-        PreSignedUrlFilter filter = new PreSignedUrlFilter(null, null, iamService);
+        PreSignedUrlFilter filter = new PreSignedUrlFilter(null, null, iamService, null);
 
         assertNull(resolveSecretKey(filter, "123456789012"));
     }
@@ -47,7 +61,7 @@ class PreSignedUrlFilterTest {
     void temporaryCredentialRequiresMatchingSessionToken() throws Exception {
         IamService iamService = IamServiceTestHelper.iamServiceWithSessionCredential(
                 "ASIAS3EXAMPLE", "temporary-secret", "issued-token", java.time.Instant.now().plusSeconds(3600));
-        PreSignedUrlFilter filter = new PreSignedUrlFilter(null, null, iamService);
+        PreSignedUrlFilter filter = new PreSignedUrlFilter(null, null, iamService, null);
 
         assertEquals("temporary-secret", resolveSecretKey(filter, "ASIAS3EXAMPLE", "issued-token"));
         assertNull(resolveSecretKey(filter, "ASIAS3EXAMPLE", null));
@@ -58,7 +72,7 @@ class PreSignedUrlFilterTest {
     void temporaryCredentialIsRejectedAfterExpiration() throws Exception {
         IamService iamService = IamServiceTestHelper.iamServiceWithSessionCredential(
                 "ASIAS3EXPIRED", "temporary-secret", "issued-token", java.time.Instant.now().minusSeconds(1));
-        PreSignedUrlFilter filter = new PreSignedUrlFilter(null, null, iamService);
+        PreSignedUrlFilter filter = new PreSignedUrlFilter(null, null, iamService, null);
 
         assertNull(resolveSecretKey(filter, "ASIAS3EXPIRED", "issued-token"));
     }
@@ -141,5 +155,191 @@ class PreSignedUrlFilterTest {
         assertEquals(
                 "X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20260101T000000Z",
                 PreSignedUrlFilter.buildCanonicalQueryString(params));
+    }
+
+    @Test
+    void identifiesUnsignedChecksumHeadersCaseInsensitively() {
+        assertEquals(
+                List.of(
+                        "x-amz-checksum-algorithm",
+                        "x-amz-checksum-crc32",
+                        "x-amz-checksum-crc32c",
+                        "x-amz-checksum-crc64nvme",
+                        "x-amz-checksum-sha1",
+                        "x-amz-checksum-sha256",
+                        "x-amz-sdk-checksum-algorithm"),
+                PreSignedUrlFilter.unsignedHeadersRequiringSignature(
+                        Set.of(
+                                "Host",
+                                "X-Amz-Checksum-Algorithm",
+                                "X-Amz-Checksum-CRC32",
+                                "X-Amz-Checksum-CRC32C",
+                                "X-Amz-Checksum-CRC64NVME",
+                                "X-Amz-Checksum-SHA1",
+                                "X-Amz-Checksum-SHA256",
+                                "X-Amz-SDK-Checksum-Algorithm"),
+                        "host"));
+    }
+
+    @Test
+    void acceptsChecksumHeadersIncludedInSignedHeaders() {
+        assertEquals(
+                List.of(),
+                PreSignedUrlFilter.unsignedHeadersRequiringSignature(
+                        Set.of("host", "x-amz-checksum-algorithm", "x-amz-checksum-crc32",
+                                "x-amz-checksum-sha256", "x-amz-sdk-checksum-algorithm"),
+                        "host;x-amz-checksum-algorithm;x-amz-checksum-crc32;"
+                                + "x-amz-checksum-sha256;x-amz-sdk-checksum-algorithm"));
+    }
+
+    @Test
+    void reportsUnsignedUserMetadataHeaders() {
+        assertEquals(
+                List.of("x-amz-meta-source"),
+                PreSignedUrlFilter.unsignedHeadersRequiringSignature(
+                        Set.of("host", "X-Amz-Meta-Source", "x-amz-meta-signed"),
+                        "host;x-amz-meta-signed"));
+    }
+
+    @Test
+    void requiresIfRangeSignedWhenRangeIsSigned() {
+        assertEquals(
+                List.of("if-range"),
+                PreSignedUrlFilter.unsignedHeadersRequiringSignature(
+                        Set.of("host", "Range", "If-Range"), "host;range"));
+        assertEquals(
+                List.of(),
+                PreSignedUrlFilter.unsignedHeadersRequiringSignature(
+                        Set.of("host", "range", "if-range"), "host;range;if-range"));
+        assertEquals(
+                List.of(),
+                PreSignedUrlFilter.unsignedHeadersRequiringSignature(
+                        Set.of("host", "range", "if-range"), "host"),
+                "an unsigned Range leaves If-Range unsigned too");
+    }
+
+    @Test
+    void ignoresHeadersOutsideChecksumFamily() {
+        assertEquals(
+                List.of(),
+                PreSignedUrlFilter.unsignedHeadersRequiringSignature(
+                        Set.of("content-type", "user-agent", "x-amz-content-sha256",
+                                "x-amz-user-agent", "x-amz-checksum-type"),
+                        "host"));
+    }
+
+    @Test
+    void abortsWhenPresignedParamPresentWithoutAlgorithm() {
+        PreSignedUrlGenerator presignGenerator = mock(PreSignedUrlGenerator.class);
+        when(presignGenerator.shouldValidateSignatures()).thenReturn(true);
+        PreSignedUrlFilter filter = new PreSignedUrlFilter(presignGenerator, null, null, null, s3ResourceInfo());
+        ContainerRequestContext ctx = mock(ContainerRequestContext.class);
+        UriInfo uriInfo = mock(UriInfo.class);
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
+        queryParams.add("X-Amz-Credential", "111122223333/20261001/us-east-1/s3/aws4_request");
+        when(uriInfo.getQueryParameters()).thenReturn(queryParams);
+        when(ctx.getUriInfo()).thenReturn(uriInfo);
+
+        filter.filter(ctx);
+
+        ArgumentCaptor<Response> captor = ArgumentCaptor.forClass(Response.class);
+        verify(ctx).abortWith(captor.capture());
+        Response response = captor.getValue();
+        assertEquals(400, response.getStatus());
+        String entity = (String) response.getEntity();
+        assertTrue(entity.contains("<Code>AuthorizationQueryParametersError</Code>"), entity);
+        assertTrue(
+                entity.contains(S3RequestAuthorizationParser.AUTHORIZATION_QUERY_PARAMETERS_ERROR_MESSAGE),
+                entity);
+    }
+
+    @Test
+    void abortsWhenOnlySignatureParamPresentWithoutAlgorithm() {
+        PreSignedUrlGenerator presignGenerator = mock(PreSignedUrlGenerator.class);
+        when(presignGenerator.shouldValidateSignatures()).thenReturn(true);
+        PreSignedUrlFilter filter = new PreSignedUrlFilter(presignGenerator, null, null, null, s3ResourceInfo());
+        ContainerRequestContext ctx = mock(ContainerRequestContext.class);
+        UriInfo uriInfo = mock(UriInfo.class);
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
+        queryParams.add("X-Amz-Signature", "abc");
+        when(uriInfo.getQueryParameters()).thenReturn(queryParams);
+        when(ctx.getUriInfo()).thenReturn(uriInfo);
+
+        filter.filter(ctx);
+
+        ArgumentCaptor<Response> captor = ArgumentCaptor.forClass(Response.class);
+        verify(ctx).abortWith(captor.capture());
+        assertEquals(400, captor.getValue().getStatus());
+        assertTrue(((String) captor.getValue().getEntity()).contains("<Code>AuthorizationQueryParametersError</Code>"));
+    }
+
+    @Test
+    void allowsPresignedParamWithoutAlgorithmWhenValidationDisabled() {
+        PreSignedUrlFilter filter = new PreSignedUrlFilter(null, null, null, null, s3ResourceInfo());
+        ContainerRequestContext ctx = mock(ContainerRequestContext.class);
+        UriInfo uriInfo = mock(UriInfo.class);
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
+        queryParams.add("X-Amz-Credential", "111122223333/20261001/us-east-1/s3/aws4_request");
+        when(uriInfo.getQueryParameters()).thenReturn(queryParams);
+        when(ctx.getUriInfo()).thenReturn(uriInfo);
+
+        filter.filter(ctx);
+
+        verify(ctx, never()).abortWith(any());
+    }
+
+    @Test
+    void allowsRequestWithoutAnyPresignedParams() {
+        PreSignedUrlFilter filter = new PreSignedUrlFilter(null, null, null, null, s3ResourceInfo());
+        ContainerRequestContext ctx = mock(ContainerRequestContext.class);
+        UriInfo uriInfo = mock(UriInfo.class);
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
+        queryParams.add("prefix", "photos/");
+        when(uriInfo.getQueryParameters()).thenReturn(queryParams);
+        when(ctx.getUriInfo()).thenReturn(uriInfo);
+
+        filter.filter(ctx);
+
+        verify(ctx, never()).abortWith(any());
+    }
+
+    @Test
+    void allowsHeaderSignedRequestWithDateOrExpiresQueryParam() {
+        PreSignedUrlFilter filter = new PreSignedUrlFilter(null, null, null, null, s3ResourceInfo());
+        ContainerRequestContext ctx = mock(ContainerRequestContext.class);
+        UriInfo uriInfo = mock(UriInfo.class);
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
+        queryParams.add("X-Amz-Date", "20261001T000000Z");
+        queryParams.add("X-Amz-Expires", "3600");
+        when(uriInfo.getQueryParameters()).thenReturn(queryParams);
+        when(ctx.getUriInfo()).thenReturn(uriInfo);
+
+        filter.filter(ctx);
+
+        verify(ctx, never()).abortWith(any());
+    }
+
+    @Test
+    void allowsNonS3Routes() {
+        ResourceInfo nonS3Info = mock(ResourceInfo.class);
+        doReturn(Object.class).when(nonS3Info).getResourceClass();
+        PreSignedUrlFilter filter = new PreSignedUrlFilter(null, null, null, null, nonS3Info);
+
+        ContainerRequestContext ctx = mock(ContainerRequestContext.class);
+        UriInfo uriInfo = mock(UriInfo.class);
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
+        queryParams.add("X-Amz-Credential", "111122223333/20261001/us-east-1/s3/aws4_request");
+        when(uriInfo.getQueryParameters()).thenReturn(queryParams);
+        when(ctx.getUriInfo()).thenReturn(uriInfo);
+
+        filter.filter(ctx);
+
+        verify(ctx, never()).abortWith(any());
+    }
+
+    private static ResourceInfo s3ResourceInfo() {
+        ResourceInfo info = mock(ResourceInfo.class);
+        doReturn(S3Controller.class).when(info).getResourceClass();
+        return info;
     }
 }

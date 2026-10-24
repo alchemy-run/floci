@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.cloudformation;
 
 import io.github.hectorvent.floci.services.pipes.PipesService;
+import io.github.hectorvent.floci.testing.CfnStackWaits;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.mockito.InjectSpy;
@@ -13,6 +14,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -338,7 +340,8 @@ class CloudFormationPipesCleanupIntegrationTest {
      * can fail. The pipe the rollback exists to preserve is the prior one, so the resource names it
      * and the rename cleanup is spent before the delete is attempted. The stack still reports
      * UPDATE_ROLLBACK_FAILED naming the resource, the replacement is what stays orphaned, and the
-     * next update finds nothing on the resource that would delete the prior pipe.
+     * next update, once ContinueUpdateRollback has skipped the resource, finds nothing on it that
+     * would delete the prior pipe.
      */
     @Test
     void aRollbackThatCannotDeleteTheReplacementStillKeepsThePriorPipe() {
@@ -393,8 +396,24 @@ class CloudFormationPipesCleanupIntegrationTest {
         assertPipe(priorName);
         assertPipe(replacementName);
 
+        // AWS refuses an update over UPDATE_ROLLBACK_FAILED. The pipe's rollback already restored
+        // the prior pipe and only failed to delete the replacement, so skipping it finishes the
+        // rollback and the stack takes updates again.
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "ContinueUpdateRollback")
+            .formParam("StackName", stackName)
+            .formParam("ResourcesToSkip.member.1", "MyPipe")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+        assertEquals("UPDATE_ROLLBACK_COMPLETE", CfnStackWaits.awaitTerminal(stackName).status());
+
         Mockito.doCallRealMethod().when(pipesService).deletePipe(eq(replacementName), anyString());
-        updateStack(stackName, renameRollbackTemplate(replacementName, ""));
+        // The rollback left the stack on this very template, which AWS refuses to update to with
+        // "No updates are to be performed.": a new output makes it an update.
+        updateStack(stackName, CfnUpdates.forceUpdate(renameRollbackTemplate(priorName, "")));
 
         given()
             .contentType("application/json")
@@ -407,8 +426,8 @@ class CloudFormationPipesCleanupIntegrationTest {
         verify(pipesService, never()).deletePipe(eq(priorName), anyString());
 
         deleteStack(stackName);
-        // The rollback left the replacement orphaned and the resource UPDATE_FAILED, so neither pipe
-        // is one DeleteStack removes and this test removes them itself.
+        // The replacement the rollback orphaned is no resource of the stack, so this test removes
+        // it itself, and the prior pipe too should DeleteStack have left it.
         given().when().delete("/v1/pipes/" + priorName);
         given().when().delete("/v1/pipes/" + replacementName);
     }
@@ -507,9 +526,8 @@ class CloudFormationPipesCleanupIntegrationTest {
 
         Mockito.doCallRealMethod().when(pipesService).tagResource(anyString(), anyString(), anyMap());
         deleteStack(stackName);
-        // A resource left UPDATE_FAILED by a failed rollback is not one DeleteStack removes, so the
-        // pipe outlives the stack and this test deletes it itself.
-        pipesService.deletePipe(pipeName, "us-east-1");
+        // A resource left UPDATE_FAILED by a failed rollback still belongs to the stack.
+        assertPipeMissing(pipeName);
     }
 
     /** The pipe alone, under a fixed name, so every update reconciles it in place. */
@@ -592,6 +610,7 @@ class CloudFormationPipesCleanupIntegrationTest {
             .post("/")
         .then()
             .statusCode(200);
+        CfnStackWaits.awaitStackDeleted(stackName);
     }
 
     private static void assertPipe(String pipeName) {

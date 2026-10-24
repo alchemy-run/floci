@@ -2,29 +2,28 @@ package io.github.hectorvent.floci.services.ec2;
 
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
-import com.github.dockerjava.api.command.BuildImageResultCallback;
 import com.github.dockerjava.api.command.InspectContainerResponse;
 import com.github.dockerjava.api.exception.NotFoundException;
 import com.github.dockerjava.api.model.Container;
 import com.github.dockerjava.api.model.Frame;
 import com.github.dockerjava.api.model.Info;
-import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
-import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.core.common.docker.ContainerStorageHelper;
+import io.github.hectorvent.floci.core.common.docker.LocallyBuiltHelperImage;
 import io.github.hectorvent.floci.services.ec2.model.SecurityGroup;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
+import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import org.jboss.logging.Logger;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -44,15 +43,18 @@ public class SecurityGroupFirewallManager {
     private final ContainerBuilder containerBuilder;
     private final ContainerLifecycleManager lifecycleManager;
     private final EmulatorConfig config;
+    private final EmbeddedDnsServer embeddedDnsServer;
     private final Map<String, ProtectedEndpoint> endpoints = new HashMap<>();
 
     @Inject
     public SecurityGroupFirewallManager(DockerClient dockerClient, ContainerBuilder containerBuilder,
-                                        ContainerLifecycleManager lifecycleManager, EmulatorConfig config) {
+                                        ContainerLifecycleManager lifecycleManager, EmulatorConfig config,
+                                        EmbeddedDnsServer embeddedDnsServer) {
         this.dockerClient = dockerClient;
         this.containerBuilder = containerBuilder;
         this.lifecycleManager = lifecycleManager;
         this.config = config;
+        this.embeddedDnsServer = embeddedDnsServer;
     }
 
     public boolean enabled() {
@@ -61,23 +63,25 @@ public class SecurityGroupFirewallManager {
 
     @PostConstruct
     void quarantineSurvivingNamespaces() {
-        if (!enabled() && config.services().ec2().mock()) {
+        if (!enabled()) {
             return;
         }
         try {
-            String namespace = config.docker().resourceNamespace().orElse("");
-            String owner = namespace.isBlank() ? String.valueOf(config.port()) : namespace + "/" + config.port();
-            dockerClient.listContainersCmd().withShowAll(true)
-                    .withLabelFilter(Map.of("floci.security-group-helper", "true"))
-                    .exec().stream()
-                    .filter(container -> owner.equals(container.getLabels().get("floci_owner_port")))
+            String owner = ContainerStorageHelper.ownerIdentity(config);
+            ContainerStorageHelper.LabelAliases aliases = ContainerStorageHelper.CONTAINER_LABEL_ALIASES;
+            aliases.listByLabels(Map.of(ContainerStorageHelper.SECURITY_GROUP_HELPER_LABEL, "true"),
+                            filter -> dockerClient.listContainersCmd().withShowAll(true)
+                                    .withLabelFilter(filter).exec(),
+                            Container::getId).stream()
+                    .filter(container -> aliases.consistent(container.getId(), container.getLabels())
+                            && aliases.matches(container.getLabels(), ContainerStorageHelper.OWNER_LABEL, owner))
                     .forEach(container -> {
                         if ("running".equals(container.getState())) {
                             quarantine(container.getId());
                         } else {
                             stopNamespaceWorkloads(container.getId());
                         }
-                        if ("ecs".equals(container.getLabels().get("io.floci.service"))) {
+                        if ("ecs".equals(container.getLabels().get(ContainerStorageHelper.SERVICE_LABEL))) {
                             removeNamespaceWorkloads(container.getId());
                             lifecycleManager.removeIfExists(container.getId());
                         }
@@ -90,15 +94,16 @@ public class SecurityGroupFirewallManager {
     /** The helper starts before any workload process and owns all published ports. */
     public Namespace createNamespace(String service, String resourceId, String accountId, String region,
                                      Optional<String> dockerNetwork, Map<Integer, Integer> portBindings) {
+        return createNamespace(service, resourceId, accountId, region, dockerNetwork, portBindings, Map.of());
+    }
+
+    /** {@link #createNamespace} with extra labels on the helper, as the owning service tracks it by. */
+    public Namespace createNamespace(String service, String resourceId, String accountId, String region,
+                                     Optional<String> dockerNetwork, Map<Integer, Integer> portBindings,
+                                     Map<String, String> extraLabels) {
         if (!enabled()) {
             throw new IllegalStateException("Security-group enforcement is disabled");
         }
-        return createNetworkNamespace(service, resourceId, accountId, region, dockerNetwork, portBindings);
-    }
-
-    /** A private namespace is also required for overlapping VPC address translation without SG enforcement. */
-    public Namespace createNetworkNamespace(String service, String resourceId, String accountId, String region,
-                                            Optional<String> dockerNetwork, Map<Integer, Integer> portBindings) {
         Info daemon = dockerClient.infoCmd().exec();
         if (!"linux".equalsIgnoreCase(daemon.getOsType())) {
             throw new IllegalStateException("Security-group enforcement requires a Linux Docker daemon");
@@ -110,17 +115,18 @@ public class SecurityGroupFirewallManager {
         ensureHelperImage();
         String name = ContainerStorageHelper.resourceName(config, "sg", null,
                 resourceId.replaceAll("[^a-zA-Z0-9_.-]", "-"));
-        String namespace = config.docker().resourceNamespace().orElse("");
-        String owner = namespace.isBlank() ? String.valueOf(config.port()) : namespace + "/" + config.port();
         ContainerBuilder.Builder builder = containerBuilder.newContainer(config.network().securityGroupEnforcement().helperImage())
                 .withName(name)
                 .withDockerNetwork(dockerNetwork)
+                // Workloads join this network namespace and use its resolver and hosts file.
                 .withEmbeddedDns()
                 .withHostDockerInternalOnLinux()
                 .withEntrypoint(List.of("sh", "-c"))
                 .withCmd(List.of("exec sleep 2147483647"))
                 .withLabels(ContainerStorageHelper.resourceIdentityLabels(service, resourceId, accountId, region))
-                .withLabels(Map.of("floci.security-group-helper", "true", "floci_owner_port", owner));
+                .withLabels(Map.of(ContainerStorageHelper.SECURITY_GROUP_HELPER_LABEL, "true",
+                        ContainerStorageHelper.OWNER_LABEL, ContainerStorageHelper.ownerIdentity(config)))
+                .withLabels(extraLabels);
         if (portBindings != null) {
             portBindings.forEach(builder::withPortBinding);
         }
@@ -142,58 +148,15 @@ public class SecurityGroupFirewallManager {
         }
     }
 
-    private synchronized void ensureHelperImage() {
-        String configured = config.network().securityGroupEnforcement().helperImage();
-        if (!"floci/network-helper:local".equals(configured)) {
-            return;
-        }
-        String image = containerBuilder.resolveImage(configured);
-        try {
-            var current = dockerClient.inspectImageCmd(image).exec().getConfig();
-            if (current != null && current.getLabels() != null
-                    && "2".equals(current.getLabels().get("io.floci.network-helper.version"))) {
-                return;
-            }
-        } catch (NotFoundException missing) {
-            // Build the versioned Floci recipe in the daemon used for workloads.
-        }
-        try (InputStream dockerfile = getClass().getResourceAsStream("/docker/network-helper.Dockerfile")) {
-            if (dockerfile == null) {
-                throw new IllegalStateException("Floci network helper Dockerfile is missing");
-            }
-            byte[] content = dockerfile.readAllBytes();
-            ByteArrayOutputStream archive = new ByteArrayOutputStream(content.length + 1024);
-            try (TarArchiveOutputStream tar = new TarArchiveOutputStream(archive)) {
-                TarArchiveEntry entry = new TarArchiveEntry("Dockerfile");
-                entry.setSize(content.length);
-                tar.putArchiveEntry(entry);
-                tar.write(content);
-                tar.closeArchiveEntry();
-            }
-            try (BuildImageResultCallback callback = new BuildImageResultCallback()) {
-                String built = dockerClient.buildImageCmd(new ByteArrayInputStream(archive.toByteArray()))
-                        .withTags(Set.of(image)).exec(callback).awaitImageId();
-                if (built == null || built.isBlank()) {
-                    throw new IllegalStateException("Docker did not build the Floci network helper image");
-                }
-            }
-        } catch (IOException e) {
-            throw new IllegalStateException("Cannot build the Floci network helper image", e);
-        }
+    private void ensureHelperImage() {
+        LocallyBuiltHelperImage.ensureBuilt(dockerClient, containerBuilder,
+                config.network().securityGroupEnforcement().helperImage(), "floci/network-helper:local",
+                "/docker/network-helper.Dockerfile");
     }
 
     /** Registers only after the default-deny table exists, before workload startup. */
     public synchronized void register(SecurityGroupNftCompiler.Endpoint endpoint, String helperId,
                                       Map<String, List<String>> prefixLists) {
-        register(endpoint, helperId, prefixLists, true);
-    }
-
-    public synchronized void registerNetworkEndpoint(SecurityGroupNftCompiler.Endpoint endpoint, String helperId) {
-        register(endpoint, helperId, Map.of(), false);
-    }
-
-    private void register(SecurityGroupNftCompiler.Endpoint endpoint, String helperId,
-                          Map<String, List<String>> prefixLists, boolean enforceSecurityGroups) {
         if (endpoints.values().stream().map(ProtectedEndpoint::endpoint)
                 .anyMatch(existing -> !existing.eniId().equals(endpoint.eniId())
                         && existing.transportAddress().equals(endpoint.transportAddress()))) {
@@ -201,7 +164,7 @@ public class SecurityGroupFirewallManager {
             throw new IllegalStateException("Two managed ENIs share a Docker transport address");
         }
         ProtectedEndpoint previous = endpoints.put(endpoint.eniId(),
-                new ProtectedEndpoint(endpoint, helperId, Map.copyOf(prefixLists), enforceSecurityGroups));
+                new ProtectedEndpoint(endpoint, helperId, Map.copyOf(prefixLists)));
         try {
             reconcileAll();
         } catch (RuntimeException e) {
@@ -216,27 +179,11 @@ public class SecurityGroupFirewallManager {
     }
 
     public synchronized void unregister(String eniId) {
-        ProtectedEndpoint current = endpoints.get(eniId);
-        if (current != null) {
-            unregister(eniId, current.helperId());
+        ProtectedEndpoint removed = endpoints.remove(eniId);
+        if (removed != null) {
+            lifecycleManager.removeIfExists(removed.helperId());
+            reconcileAll();
         }
-    }
-
-    /** A delayed instance cleanup must not remove a successor reusing the same standalone ENI. */
-    public synchronized void unregister(String eniId, String expectedHelperId) {
-        ProtectedEndpoint current = endpoints.get(eniId);
-        if (current == null || !current.helperId().equals(expectedHelperId)) {
-            return;
-        }
-        lifecycleManager.removeIfExists(current.helperId());
-        try {
-            dockerClient.inspectContainerCmd(current.helperId()).exec();
-            throw new IllegalStateException("EC2 namespace removal is not confirmed");
-        } catch (NotFoundException removed) {
-            // Only a confirmed absence releases this endpoint's identity.
-        }
-        endpoints.remove(eniId, current);
-        reconcileAll();
     }
 
     public synchronized void updateGroups(String eniId, Set<String> groupIds,
@@ -255,7 +202,7 @@ public class SecurityGroupFirewallManager {
         SecurityGroupNftCompiler.Endpoint updated = new SecurityGroupNftCompiler.Endpoint(
                 identity.accountId(), identity.region(), identity.vpcId(), identity.eniId(),
                 identity.logicalAddress(), identity.transportAddress(), Set.copyOf(groupIds), attached);
-        endpoints.put(eniId, new ProtectedEndpoint(updated, current.helperId(), Map.copyOf(prefixLists), current.enforceSecurityGroups()));
+        endpoints.put(eniId, new ProtectedEndpoint(updated, current.helperId(), Map.copyOf(prefixLists)));
         reconcileAll();
     }
 
@@ -275,11 +222,11 @@ public class SecurityGroupFirewallManager {
         }
         List<SecurityGroupNftCompiler.Endpoint> peers = endpoints.values().stream()
                 .map(ProtectedEndpoint::endpoint).toList();
+        List<String> vpcResolvers = vpcResolvers();
         for (ProtectedEndpoint protectedEndpoint : new ArrayList<>(endpoints.values())) {
             try {
-                String rules = protectedEndpoint.enforceSecurityGroups()
-                        ? SecurityGroupNftCompiler.compile(protectedEndpoint.endpoint(), peers, protectedEndpoint.prefixLists())
-                        : SecurityGroupNftCompiler.compileNetworkOnly(protectedEndpoint.endpoint(), peers);
+                String rules = SecurityGroupNftCompiler.compile(protectedEndpoint.endpoint(), peers,
+                        protectedEndpoint.prefixLists(), vpcResolvers);
                 apply(protectedEndpoint.helperId(), rules);
             } catch (RuntimeException e) {
                 endpoints.values().forEach(endpoint -> quarantine(endpoint.helperId()));
@@ -294,7 +241,7 @@ public class SecurityGroupFirewallManager {
         for (Map.Entry<String, ProtectedEndpoint> entry : new ArrayList<>(endpoints.entrySet())) {
             ProtectedEndpoint current = entry.getValue();
             SecurityGroupNftCompiler.Endpoint identity = current.endpoint();
-            if (!current.enforceSecurityGroups() || !region.equals(identity.region())) {
+            if (!region.equals(identity.region())) {
                 continue;
             }
             List<SecurityGroup> attached = identity.groupIds().stream().map(groups::get).toList();
@@ -306,9 +253,17 @@ public class SecurityGroupFirewallManager {
                     identity.accountId(), identity.region(), identity.vpcId(), identity.eniId(),
                     identity.logicalAddress(), identity.transportAddress(), identity.groupIds(), attached);
             endpoints.put(entry.getKey(), new ProtectedEndpoint(updated, current.helperId(),
-                    Map.copyOf(prefixLists), current.enforceSecurityGroups()));
+                    Map.copyOf(prefixLists)));
         }
         reconcileAll();
+    }
+
+    /**
+     * Floci's embedded DNS stands in for the VPC's Amazon DNS server, the one resolver security
+     * groups never filter on AWS. The fallback resolvers are ordinary internet destinations.
+     */
+    List<String> vpcResolvers() {
+        return embeddedDnsServer.getServerIp().map(List::of).orElse(List.of());
     }
 
     private void quarantine(String helperId) {
@@ -396,5 +351,5 @@ public class SecurityGroupFirewallManager {
 
     public record Namespace(String helperId, String transportAddress) {}
     private record ProtectedEndpoint(SecurityGroupNftCompiler.Endpoint endpoint, String helperId,
-                                     Map<String, List<String>> prefixLists, boolean enforceSecurityGroups) {}
+                                     Map<String, List<String>> prefixLists) {}
 }

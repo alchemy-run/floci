@@ -61,7 +61,7 @@ public class EksController {
     @Inject
     public EksController(EksService eksService, EksAccessEntryService accessEntries,
                          EksPodIdentityAssociationService podIdentityAssociations,
-                         EksAddonService addons, EksCatalogService catalog, EksInsightsService insights) {
+                         EksAddonService addons) {
         this.eksService = eksService;
         this.accessEntries = accessEntries;
         this.podIdentityAssociations = podIdentityAssociations;
@@ -146,11 +146,17 @@ public class EksController {
      * causes Jackson to omit the property due to @JsonInclude(NON_DEFAULT).
      */
     private Cluster toClusterResponse(Cluster cluster) {
-        if (cluster == null || !cluster.isExplicitVersion()) {
+        if (cluster == null || (!cluster.isExplicitVersion() && cluster.getNodeInstanceType() == null
+                && cluster.getClusterArgs() == null && cluster.getDefaultStorageClass() == null
+                && cluster.getJoinedInstanceIds() == null)) {
             return cluster;
         }
         Cluster response = cluster.copy();
         response.setExplicitVersion(false);
+        response.setNodeInstanceType(null);
+        response.setClusterArgs(null);
+        response.setDefaultStorageClass(null);
+        response.setJoinedInstanceIds(null);
         return response;
     }
 
@@ -350,87 +356,11 @@ public class EksController {
     }
 
     @GET
-    @Path("/clusters/{name}/updates")
-    public Response listUpdates(@PathParam("name") String name,
-                                @QueryParam("nodegroupName") String nodegroupName,
-                                @QueryParam("addonName") String addonName,
-                                @QueryParam("capabilityName") String capabilityName,
-                                @QueryParam("maxResults") String maxResults,
-                                @QueryParam("nextToken") String nextToken) {
-        PaginatedResult<String> page = eksService.listUpdates(name, nodegroupName, addonName, capabilityName,
-                Pagination.parseMaxResults(maxResults, "InvalidParameterException"), nextToken);
-        return Response.ok(page.nextToken() == null
-                ? Map.of("updateIds", page.items())
-                : Map.of("updateIds", page.items(), "nextToken", page.nextToken())).build();
-    }
-
-    @POST
-    @Path("/clusters/{name}/insights")
-    public Response listInsights(@PathParam("name") String name, ListInsightsRequest request) {
-        PaginatedResult<InsightSummary> page = insights.list(eksService.describeCluster(name), request);
-        return Response.ok(page.nextToken() == null
-                ? Map.of("insights", page.items())
-                : Map.of("insights", page.items(), "nextToken", page.nextToken())).build();
-    }
-
-    @GET
-    @Path("/clusters/{name}/insights/{id}")
-    public Response describeInsight(@PathParam("name") String name, @PathParam("id") String id) {
-        return Response.ok(Map.of("insight", insights.describe(eksService.describeCluster(name), id))).build();
-    }
-
-    @POST
-    @Path("/clusters/{name}/insights-refresh")
-    @Consumes(MediaType.WILDCARD)
-    public Response startInsightsRefresh(@PathParam("name") String name) {
-        return Response.ok(insights.startRefresh(eksService.describeCluster(name))).build();
-    }
-
-    @GET
-    @Path("/clusters/{name}/insights-refresh")
-    public Response describeInsightsRefresh(@PathParam("name") String name) {
-        return Response.ok(insights.describeRefresh(eksService.describeCluster(name))).build();
-    }
-
-    @GET
-    @Path("/clusters/{name}/capabilities")
-    public Response listCapabilities(@PathParam("name") String name,
-                                     @QueryParam("maxResults") String maxResults,
-                                     @QueryParam("nextToken") String nextToken) {
-        Pagination.parseMaxResults(maxResults, "InvalidParameterException");
-        eksService.describeCluster(name);
-        return Response.ok(Map.of("capabilities", List.of())).build();
-    }
-
-    @GET
-    @Path("/clusters/{name}/capabilities/{capabilityName}")
-    public Response describeCapability(@PathParam("name") String name,
-                                       @PathParam("capabilityName") String capabilityName) {
-        eksService.describeCapability(name, capabilityName);
-        return Response.ok(Map.of()).build();
-    }
-
-    @POST
-    @Path("/clusters/{name}/identity-provider-configs/describe")
-    public Response describeIdentityProviderConfig(@PathParam("name") String name,
-                                                   DescribeIdentityProviderConfigRequest request) {
-        DescribeIdentityProviderConfigRequest.IdentityProviderConfig config =
-                request == null ? null : request.identityProviderConfig();
-        eksService.describeIdentityProviderConfig(name, config == null ? null : config.type(),
-                config == null ? null : config.name());
-        return Response.ok(Map.of()).build();
-    }
-
-    @GET
     @Path("/clusters/{name}/updates/{updateId}")
     public Response describeUpdate(@PathParam("name") String name,
                                    @PathParam("updateId") String updateId,
                                    @QueryParam("addonName") String addonName,
                                    @QueryParam("nodegroupName") String nodegroupName) {
-        if (nodegroupName != null && !nodegroupName.isBlank()) {
-            return Response.ok(Map.of("update",
-                    eksService.describeNodegroupUpdate(name, nodegroupName, updateId))).build();
-        }
         Cluster cluster = eksService.describeCluster(name);
         Update update = addons.describeUpdate(cluster, updateId, addonName);
         return Response.ok(Map.of("update", update)).build();
@@ -444,6 +374,29 @@ public class EksController {
         Cluster cluster = eksService.describeCluster(name);
         Addon addon = addons.delete(cluster, addonName, Boolean.TRUE.equals(preserve));
         return Response.ok(Map.of("addon", addon)).build();
+    }
+
+    @GET
+    @Path("/addons/supported-versions")
+    public Response describeAddonVersions(@QueryParam("addonName") String addonName,
+                                          @QueryParam("kubernetesVersion") String kubernetesVersion,
+                                          @QueryParam("maxResults") String maxResults,
+                                          @QueryParam("nextToken") String nextToken,
+                                          @QueryParam("publishers") List<String> publishers,
+                                          @QueryParam("types") List<String> types,
+                                          @QueryParam("owners") List<String> owners) {
+        EksAddonService.AddonVersionsPage page = addons.describeAddonVersions(
+                addonName,
+                kubernetesVersion,
+                Pagination.parseMaxResults(maxResults, "InvalidParameterException"),
+                nextToken,
+                publishers,
+                types,
+                owners
+        );
+        return Response.ok(page.nextToken() == null
+                ? Map.of("addons", page.addons())
+                : Map.of("addons", page.addons(), "nextToken", page.nextToken())).build();
     }
 
     @GET

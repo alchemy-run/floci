@@ -127,8 +127,8 @@ public class ElastiCacheContainerManager {
         }
     }
 
-    public ElastiCacheContainerHandle start(String groupId, String image) {
-        return start(groupId, image, List.of());
+    public ElastiCacheContainerHandle start(String groupId, String image, String region) {
+        return start(groupId, image, List.of(), region);
     }
 
     /**
@@ -166,7 +166,7 @@ public class ElastiCacheContainerManager {
                 .withDockerNetwork(config.services().elasticache().dockerNetwork())
                 .withLogRotation()
                 .withLabels(ContainerStorageHelper.resourceIdentityLabels(
-                        "elasticache", groupId, regionResolver.getAccountId(), regionResolver.getDefaultRegion()));
+                        "elasticache", groupId, regionResolver.getAccountId(), region));
 
         if (!containerDetector.isRunningInContainer()) {
             specBuilder.withDynamicPort(backendPort);
@@ -199,7 +199,6 @@ public class ElastiCacheContainerManager {
                 : info.containerId();
         String logGroup = "/aws/elasticache/cluster/" + groupId + "/engine-log";
         String logStream = logStreamer.generateLogStreamName(shortId);
-        String region = regionResolver.getDefaultRegion();
 
         Closeable logHandle = logStreamer.attach(
                 info.containerId(), logGroup, logStream, region, "elasticache:" + groupId);
@@ -253,8 +252,10 @@ public class ElastiCacheContainerManager {
         if (handle == null) {
             return;
         }
-        activeContainers.remove(handle.getGroupId());
-        lifecycleManager.stopAndRemove(handle.getContainerId(), handle.getLogStream());
+        ElastiCacheContainerHandle existing = activeContainers.remove(handle.getGroupId());
+        Closeable logStream = handle.getLogStream() != null ? handle.getLogStream()
+                : (existing != null ? existing.getLogStream() : null);
+        lifecycleManager.stopAndRemove(handle.getContainerId(), logStream);
     }
 
     /**

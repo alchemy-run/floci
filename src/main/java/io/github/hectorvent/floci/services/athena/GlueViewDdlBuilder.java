@@ -2,7 +2,7 @@ package io.github.hectorvent.floci.services.athena;
 
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.glue.GlueService;
-import io.github.hectorvent.floci.services.glue.model.Column;
+import io.github.hectorvent.floci.services.glue.GlueTableResolver;
 import io.github.hectorvent.floci.services.glue.model.Database;
 import io.github.hectorvent.floci.services.glue.model.Table;
 import io.github.hectorvent.floci.services.s3.S3Service;
@@ -11,11 +11,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
-import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
-import java.util.Set;
 
 
 @ApplicationScoped
@@ -29,14 +25,6 @@ public class GlueViewDdlBuilder {
      * front, only when the batch actually contains an Iceberg table.
      */
     private static final String ICEBERG_EXTENSION_SETUP = "INSTALL iceberg; LOAD iceberg;\n";
-
-    /** Glue table property AWS/pyiceberg set to mark a table as Iceberg-format. */
-    private static final String PARAM_TABLE_TYPE = "table_type";
-
-    /** Glue table property holding the path to the table's current Iceberg metadata JSON. */
-    private static final String PARAM_METADATA_LOCATION = "metadata_location";
-
-    private static final String ICEBERG_TABLE_TYPE = "ICEBERG";
 
     private final GlueService glueService;
     private final S3Service s3Service;
@@ -117,22 +105,23 @@ public class GlueViewDdlBuilder {
                 String target = qualified
                         ? quote(schemaOrNull) + "." + quote(t.getName())
                         : quote(t.getName());
-                List<String> selects = new ArrayList<>();
-                if (isIcebergTable(t) && icebergMetadataLocation(t) != null && !icebergMetadataLocation(t).isBlank()) {
-                    selects.add("SELECT " + buildProjection(t) + " FROM " + icebergReadExpression(icebergMetadataLocation(t)));
+                String fromClause;
+                if (GlueTableResolver.isIcebergTable(t) && GlueTableResolver.icebergMetadataLocation(t) != null
+                        && !GlueTableResolver.icebergMetadataLocation(t).isBlank()) {
+                    fromClause = GlueTableResolver.icebergReadExpression(GlueTableResolver.icebergMetadataLocation(t));
                     usesIceberg = true;
                 } else {
-                    String readPath = PartitionProjection.readPath(t, normalizedLocation);
-                    List<String> paths = dataPaths(t, readPath);
-                    if (paths.isEmpty()) {
-                        continue;
-                    }
-                    for (String path : paths) {
-                        selects.add("SELECT " + buildProjection(t) + " FROM " + AthenaGlueDdl.readExpression(t, path));
-                    }
+                    String readFn = GlueTableResolver.inferReadFunction(t);
+                    String readPath = GlueTableResolver.readPath(t, normalizedLocation);
+                    fromClause = GlueTableResolver.readExpression(readFn, readPath);
                 }
-                sb.append("CREATE OR REPLACE VIEW ").append(target)
-                        .append(" AS ").append(String.join(" UNION ALL ", selects)).append(";\n");
+                sb.append("CREATE OR REPLACE VIEW ")
+                  .append(target)
+                  .append(" AS SELECT ")
+                  .append(GlueTableResolver.buildProjection(t))
+                  .append(" FROM ")
+                  .append(fromClause)
+                  .append(";\n");
             } catch (Exception e) {
                 LOG.debugv("skip Glue table {0}.{1}: {2}", schemaOrNull, t != null ? t.getName() : "unknown", e.getMessage());
             }

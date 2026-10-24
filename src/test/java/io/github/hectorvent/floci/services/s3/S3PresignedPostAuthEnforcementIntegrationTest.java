@@ -1,50 +1,57 @@
 package io.github.hectorvent.floci.services.s3;
 
+import io.github.hectorvent.floci.testing.EnforcementFixtures.UserCredentials;
+import io.github.hectorvent.floci.testing.PartitionCleanup;
+import io.github.hectorvent.floci.testing.S3IamEnforcementProfile;
 import io.github.hectorvent.floci.testutil.S3RequestSigner;
+import io.quarkus.test.common.http.TestHTTPResource;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
-import java.util.Map;
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 
+import static io.github.hectorvent.floci.testing.EnforcementFixtures.createUser;
+import static io.github.hectorvent.floci.testing.EnforcementFixtures.removeBucket;
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.notNullValue;
 
 /**
  * Regression coverage for presigned POST (browser-form multipart upload) rejecting fabricated
  * or absent credentials once {@code floci.services.s3.enforce-auth} is enabled: see the fix in
  * {@code S3Controller#validatePresignedPostAuth}.
+ *
+ * <p>It runs on {@link S3IamEnforcementProfile}, whose global bucket namespace is inert here: every
+ * bucket the class creates is reached only from the account that owns it.
  */
 @QuarkusTest
-@TestProfile(S3PresignedPostAuthEnforcementIntegrationTest.S3AuthProfile.class)
+@TestProfile(S3IamEnforcementProfile.class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class S3PresignedPostAuthEnforcementIntegrationTest {
-
-    public static final class S3AuthProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of(
-                    "floci.services.s3.enforce-auth", "true",
-                    "floci.services.iam.enforcement-enabled", "true");
-        }
-    }
 
     private static final String BUCKET = "presigned-post-auth-bucket";
     private static final String LEGACY_ACCESS_KEY_ID = "test";
     private static final String LEGACY_SECRET_KEY = "test";
     // Matches the "20260101" date embedded in every credential scope built by this test class.
     private static final String AMZ_DATE = "20260101T000000Z";
+
+    @RegisterExtension
+    final PartitionCleanup cleanup = new PartitionCleanup();
+
+    @TestHTTPResource
+    URI endpoint;
 
     @Test
     @Order(1)
@@ -338,9 +345,9 @@ class S3PresignedPostAuthEnforcementIntegrationTest {
     void rejectsGenuineSignatureWhenIdentityPolicyDeniesPutObject() {
         String key = "uploads/iam-denied.txt";
         String userName = "presigned-post-denied-user";
-        String[] credentials = createUserAndAccessKey(userName);
-        String accessKeyId = credentials[0];
-        String secretKey = credentials[1];
+        UserCredentials credentials = createUser(cleanup, endpoint.getPort(), IAM_ROOT_AUTH, userName);
+        String accessKeyId = credentials.accessKeyId();
+        String secretKey = credentials.secretAccessKey();
         putUserPolicy(userName, "DenyPutObject", """
                 {"Version":"2012-10-17","Statement":[
                   {"Effect":"Deny","Action":"s3:PutObject","Resource":"*"}
@@ -372,9 +379,9 @@ class S3PresignedPostAuthEnforcementIntegrationTest {
         String key = "uploads/iam-allowed.txt";
         String fileContent = "uploaded by a permitted IAM user";
         String userName = "presigned-post-allowed-user";
-        String[] credentials = createUserAndAccessKey(userName);
-        String accessKeyId = credentials[0];
-        String secretKey = credentials[1];
+        UserCredentials credentials = createUser(cleanup, endpoint.getPort(), IAM_ROOT_AUTH, userName);
+        String accessKeyId = credentials.accessKeyId();
+        String secretKey = credentials.secretAccessKey();
         putUserPolicy(userName, "AllowPutObject", """
                 {"Version":"2012-10-17","Statement":[
                   {"Effect":"Allow","Action":"s3:PutObject","Resource":"arn:aws:s3:::%1$s/*"}
@@ -399,36 +406,172 @@ class S3PresignedPostAuthEnforcementIntegrationTest {
             .header("ETag", notNullValue());
     }
 
+    @Test
+    @Order(32)
+    void acceptsGenuineSignatureWhenOnlyBucketPolicyAllowsPutObject() {
+        String bucket = "presigned-post-bucket-policy-bucket";
+        String key = "uploads/bucket-policy-only.txt";
+        String fileContent = "uploaded under a bucket-policy-only grant";
+        String userName = "presigned-post-bucket-policy-user";
+        UserCredentials credentials = createUser(cleanup, endpoint.getPort(), IAM_ROOT_AUTH, userName);
+        String accessKeyId = credentials.accessKeyId();
+        String secretKey = credentials.secretAccessKey();
+
+        createBucket(bucket);
+        putBucketPolicy(bucket, """
+                {"Version":"2012-10-17","Statement":[
+                  {"Effect":"Allow",
+                   "Principal":{"AWS":"arn:aws:iam::000000000000:user/%1$s"},
+                   "Action":"s3:PutObject",
+                   "Resource":"arn:aws:s3:::%2$s/*"}
+                ]}""".formatted(userName, bucket));
+
+        String policyBase64 = buildPolicyBase64(bucket, key);
+        String credential = accessKeyId + "/20260101/us-east-1/s3/aws4_request";
+        String signature = signPolicy(policyBase64, credential, secretKey);
+
+        given()
+            .multiPart("key", key)
+            .multiPart("policy", policyBase64)
+            .multiPart("x-amz-algorithm", "AWS4-HMAC-SHA256")
+            .multiPart("x-amz-credential", credential)
+            .multiPart("x-amz-date", AMZ_DATE)
+            .multiPart("x-amz-signature", signature)
+            .multiPart("file", "bucket-policy-only.txt",
+                    fileContent.getBytes(StandardCharsets.UTF_8), "text/plain")
+        .when()
+            .post("/" + bucket)
+        .then()
+            .statusCode(204)
+            .header("ETag", notNullValue());
+    }
+
+    @Test
+    @Order(33)
+    void rejectsGenuineSignatureWhenBucketPolicyDeniesPutObject() {
+        String bucket = "presigned-post-bucket-policy-deny-bucket";
+        String key = "uploads/bucket-policy-denied.txt";
+        String userName = "presigned-post-bucket-policy-denied-user";
+        UserCredentials credentials = createUser(cleanup, endpoint.getPort(), IAM_ROOT_AUTH, userName);
+        String accessKeyId = credentials.accessKeyId();
+        String secretKey = credentials.secretAccessKey();
+        putUserPolicy(userName, "AllowPutObject", """
+                {"Version":"2012-10-17","Statement":[
+                  {"Effect":"Allow","Action":"s3:PutObject","Resource":"*"}
+                ]}""");
+
+        createBucket(bucket);
+        putBucketPolicy(bucket, """
+                {"Version":"2012-10-17","Statement":[
+                  {"Effect":"Deny",
+                   "Principal":{"AWS":"arn:aws:iam::000000000000:user/%1$s"},
+                   "Action":"s3:PutObject",
+                   "Resource":"arn:aws:s3:::%2$s/*"}
+                ]}""".formatted(userName, bucket));
+
+        String policyBase64 = buildPolicyBase64(bucket, key);
+        String credential = accessKeyId + "/20260101/us-east-1/s3/aws4_request";
+        String signature = signPolicy(policyBase64, credential, secretKey);
+
+        given()
+            .multiPart("key", key)
+            .multiPart("policy", policyBase64)
+            .multiPart("x-amz-algorithm", "AWS4-HMAC-SHA256")
+            .multiPart("x-amz-credential", credential)
+            .multiPart("x-amz-date", AMZ_DATE)
+            .multiPart("x-amz-signature", signature)
+            .multiPart("file", "bucket-policy-denied.txt",
+                    "should not be stored".getBytes(StandardCharsets.UTF_8), "text/plain")
+        .when()
+            .post("/" + bucket)
+        .then()
+            .statusCode(403)
+            .body("Error.Code", equalTo("AccessDenied"));
+    }
+
+    /**
+     * Regression for a tag-condition spoofing gap: a presigned POST's signed policy document
+     * covers the multipart fields, never the request's outer HTTP headers, and {@code
+     * S3Controller} does not apply any tag to the uploaded object on this path at all. A
+     * bucket-policy grant conditioned on {@code s3:RequestObjectTag/*} must not be satisfiable by
+     * setting an unsigned {@code x-amz-tagging} header, since a caller could then obtain a grant
+     * meant only for tagged uploads without the object ever carrying that tag.
+     */
+    @Test
+    @Order(34)
+    void rejectsGenuineSignatureWhenBucketPolicyGrantRequiresATagTheHeaderCannotSupply() {
+        String bucket = "presigned-post-tag-condition-bucket";
+        String key = "uploads/tag-condition.txt";
+        String userName = "presigned-post-tag-condition-user";
+        UserCredentials credentials = createUser(cleanup, endpoint.getPort(), IAM_ROOT_AUTH, userName);
+        String accessKeyId = credentials.accessKeyId();
+        String secretKey = credentials.secretAccessKey();
+
+        createBucket(bucket);
+        putBucketPolicy(bucket, """
+                {"Version":"2012-10-17","Statement":[
+                  {"Effect":"Allow",
+                   "Principal":{"AWS":"arn:aws:iam::000000000000:user/%1$s"},
+                   "Action":"s3:PutObject",
+                   "Resource":"arn:aws:s3:::%2$s/*",
+                   "Condition":{"StringEquals":{"s3:RequestObjectTag/team":"eng"}}}
+                ]}""".formatted(userName, bucket));
+
+        String policyBase64 = buildPolicyBase64(bucket, key);
+        String credential = accessKeyId + "/20260101/us-east-1/s3/aws4_request";
+        String signature = signPolicy(policyBase64, credential, secretKey);
+
+        given()
+            .header("x-amz-tagging", "team=eng")
+            .multiPart("key", key)
+            .multiPart("policy", policyBase64)
+            .multiPart("x-amz-algorithm", "AWS4-HMAC-SHA256")
+            .multiPart("x-amz-credential", credential)
+            .multiPart("x-amz-date", AMZ_DATE)
+            .multiPart("x-amz-signature", signature)
+            .multiPart("file", "tag-condition.txt",
+                    "should not be stored".getBytes(StandardCharsets.UTF_8), "text/plain")
+        .when()
+            .post("/" + bucket)
+        .then()
+            .statusCode(403)
+            .body("Error.Code", equalTo("AccessDenied"));
+    }
+
+    /** Removes {@link #BUCKET}, which the tests from {@code createBucket} on share, with the objects they uploaded. */
+    @Test
+    @Order(99)
+    void cleanup_removeTheSharedBucket() {
+        removeBucket(endpoint.getPort(), S3RequestSigner.signedAs(LEGACY_ACCESS_KEY_ID, LEGACY_SECRET_KEY),
+                BUCKET);
+    }
+
+    /** Creates {@code bucket} as the account root, having first registered its removal. */
+    private void createBucket(String bucket) {
+        cleanup.register(() -> removeBucket(endpoint.getPort(),
+                S3RequestSigner.signedAs(LEGACY_ACCESS_KEY_ID, LEGACY_SECRET_KEY), bucket));
+        given()
+            .filter(S3RequestSigner.signedAs(LEGACY_ACCESS_KEY_ID, LEGACY_SECRET_KEY))
+        .when()
+            .put("/" + bucket)
+        .then()
+            .statusCode(200);
+    }
+
+    private static void putBucketPolicy(String bucket, String policyDocument) {
+        given()
+            .filter(S3RequestSigner.signedAs(LEGACY_ACCESS_KEY_ID, LEGACY_SECRET_KEY))
+            .contentType("application/json")
+            .body(policyDocument)
+        .when()
+            .put("/" + bucket + "?policy")
+        .then()
+            .statusCode(200);
+    }
+
     private static final String IAM_ROOT_AUTH =
             "AWS4-HMAC-SHA256 Credential=" + LEGACY_ACCESS_KEY_ID + "/20260101/us-east-1/iam/aws4_request"
                     + ", SignedHeaders=host, Signature=abc";
-
-    /** Returns {accessKeyId, secretAccessKey} for a freshly created IAM user. */
-    private static String[] createUserAndAccessKey(String userName) {
-        given()
-            .formParam("Action", "CreateUser")
-            .formParam("UserName", userName)
-            .header("Authorization", IAM_ROOT_AUTH)
-        .when()
-            .post("/")
-        .then()
-            .statusCode(200);
-
-        io.restassured.response.ExtractableResponse<io.restassured.response.Response> response = given()
-            .formParam("Action", "CreateAccessKey")
-            .formParam("UserName", userName)
-            .header("Authorization", IAM_ROOT_AUTH)
-        .when()
-            .post("/")
-        .then()
-            .statusCode(200)
-            .extract();
-
-        return new String[] {
-                response.path("CreateAccessKeyResponse.CreateAccessKeyResult.AccessKey.AccessKeyId"),
-                response.path("CreateAccessKeyResponse.CreateAccessKeyResult.AccessKey.SecretAccessKey")
-        };
-    }
 
     private static void putUserPolicy(String userName, String policyName, String policyDocument) {
         given()

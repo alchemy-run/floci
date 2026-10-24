@@ -129,6 +129,20 @@ class ContainerBuilderTest {
     }
 
     @Test
+    void withEmbeddedDns_preservesExplicitResolversWithoutAddingFallbacks() {
+        TestFixture fixture = new TestFixture();
+        when(fixture.embeddedDnsServer.getServerIp()).thenReturn(Optional.of("172.18.0.4"));
+
+        ContainerSpec spec = fixture.builder.newContainer("alpine")
+                .withDnsServer("172.18.0.8")
+                .withDnsServer("172.18.0.9")
+                .withEmbeddedDns()
+                .build();
+
+        assertEquals(List.of("172.18.0.8", "172.18.0.9"), spec.dnsServers());
+    }
+
+    @Test
     void withCgroupnsModeRecordsDockerNamespaceMode() {
         TestFixture fixture = new TestFixture();
 
@@ -350,6 +364,15 @@ class ContainerBuilderTest {
                 .build();
 
         assertEquals("ghcr.io/floci-io/mirror/floci/ami-ubuntu:24.04-arm64", spec.image());
+    }
+
+    @Test
+    void imageRegistryBaseLeavesAnImageIdAlone() {
+        TestFixture fixture = new TestFixture();
+        when(fixture.docker.imageRegistryBase()).thenReturn(Optional.of("ghcr.io/floci-io/mirror"));
+        String imageId = "sha256:" + "a".repeat(64);
+
+        assertEquals(imageId, fixture.builder.newContainer(imageId).build().image());
     }
 
     private static class TestFixture {

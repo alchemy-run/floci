@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.ecr.registry;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.config.NetworkExposureGuard;
 import io.github.hectorvent.floci.services.ecr.EcrService;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpClient;
@@ -10,6 +11,7 @@ import io.vertx.core.http.HttpMethod;
 import io.vertx.core.http.RequestOptions;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
+import io.vertx.core.net.HostAndPort;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -21,7 +23,7 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -43,8 +45,6 @@ public class EcrRegistryDataPlane {
     private final EcrService ecrService;
     private final EmulatorConfig config;
     private final Vertx vertx;
-    private final HttpClient proxyClient;
-    private final Set<String> inFlightImmutableTags = ConcurrentHashMap.newKeySet();
 
     @Inject
     public EcrRegistryDataPlane(EcrRegistryManager registryManager,
@@ -55,9 +55,6 @@ public class EcrRegistryDataPlane {
         this.ecrService = ecrService;
         this.config = config;
         this.vertx = vertx;
-        this.proxyClient = vertx.createHttpClient(new HttpClientOptions()
-                .setConnectTimeout(5_000)
-                .setKeepAlive(true));
     }
 
     void register(@Observes Router router) {
@@ -83,13 +80,20 @@ public class EcrRegistryDataPlane {
                             registryRequest.repositoryName(), registryRequest.accountId(), registryRequest.region()));
         }
         String immutableTag = immutableTag(context, registryRequest);
-        if (immutableTag != null && !inFlightImmutableTags.add(immutableTag)) {
+        if (immutableTag != null && !ecrService.claimImmutableTag(immutableTag)) {
             context.request().resume();
             imageTagAlreadyExists(context, registryRequest);
             return;
         }
 
-        checkTagAndProxy(context, registryRequest, immutableTag);
+        Exchange exchange = new Exchange(immutableTag);
+        // A client that goes away, by resetting its HTTP/2 stream or closing the connection, ends
+        // the exchange at any point, the registry check included: otherwise the registry keeps
+        // waiting for the rest of a body with a Content-Length, and the exchange's connection,
+        // client and immutable tag lock stay.
+        context.response().closeHandler(closed -> exchange.end());
+        context.request().exceptionHandler(failure -> exchange.end());
+        checkTagAndProxy(context, registryRequest, exchange);
     }
 
     private String immutableTag(RoutingContext context, RegistryRequest request) {
@@ -97,10 +101,11 @@ public class EcrRegistryDataPlane {
                 || !ecrService.isImageTagImmutable(request.repositoryName(), request.accountId(), request.region())) {
             return null;
         }
-        return request.accountId() + "/" + request.region() + "/" + request.repositoryName() + ":" + request.tag();
+        return EcrService.immutableTagKey(request.accountId(), request.region(), request.repositoryName(), request.tag());
     }
 
-    private void checkTagAndProxy(RoutingContext context, RegistryRequest request, String immutableTag) {
+    private void checkTagAndProxy(RoutingContext context, RegistryRequest request, Exchange exchange) {
+        String immutableTag = exchange.immutableTag;
         vertx.<Boolean>executeBlocking(promise -> {
             try {
                 registryManager.ensureStarted();
@@ -116,62 +121,77 @@ public class EcrRegistryDataPlane {
                 promise.fail(e);
             }
         }).onComplete(result -> {
+            if (exchange.ended()) {
+                // The client went away during the check: nothing of this exchange reaches the
+                // registry.
+                return;
+            }
             if (result.failed()) {
                 context.request().resume();
-                release(immutableTag);
+                exchange.end();
                 context.response().setStatusCode(503).end();
             } else if (result.result()) {
                 context.request().resume();
-                release(immutableTag);
+                exchange.end();
                 imageTagAlreadyExists(context, request);
             } else {
-                proxy(context, request, immutableTag);
+                proxy(context, request, exchange);
             }
         });
     }
 
-    private void proxy(RoutingContext context, RegistryRequest request, String immutableTag) {
+    private void proxy(RoutingContext context, RegistryRequest request, Exchange exchange) {
         URI backend = URI.create(registryManager.httpClient().baseUrl());
         RequestOptions options = new RequestOptions()
                 .setHost(backend.getHost())
                 .setPort(backend.getPort() == -1 ? 80 : backend.getPort())
                 .setURI(request.backendUri())
                 .setMethod(context.request().method());
-        proxyClient.request(options).onComplete(upstreamRequest -> {
+        // A registry connection of its own for every exchange, never a place in a shared pool's
+        // queue. An HTTP/2 client such as crane sends a whole push as streams on one connection,
+        // so a pool of any size can be full of its uploads while another of its streams waits,
+        // paused. The waiting stream's unread bytes hold that connection's flow-control window,
+        // the uploads that do have a registry connection stop receiving data, and none of them
+        // ever gives its connection back.
+        HttpClient client = exchange.open(vertx.createHttpClient(new HttpClientOptions().setConnectTimeout(5_000)));
+        client.request(options).onComplete(upstreamRequest -> {
             if (upstreamRequest.failed()) {
                 context.request().resume();
-                release(immutableTag);
-                context.response().setStatusCode(503).end();
+                exchange.end();
+                failUnlessGone(context, 503);
                 return;
             }
             HttpClientRequest clientReq = upstreamRequest.result();
             copyRequestHeaders(context, clientReq);
             clientReq.response().onComplete(upstreamResponse -> {
                 if (upstreamResponse.failed()) {
-                    release(immutableTag);
-                    if (!context.response().ended()) {
-                        context.response().setStatusCode(502).end();
-                    }
+                    exchange.end();
+                    failUnlessGone(context, 502);
                     return;
                 }
                 copyResponseHeaders(context, upstreamResponse.result(), request);
-                upstreamResponse.result().pipeTo(context.response()).onComplete(ignored -> release(immutableTag));
+                upstreamResponse.result().pipeTo(context.response()).onComplete(ignored -> exchange.end());
             });
             clientReq.send(context.request()).onFailure(ignored -> {
-                release(immutableTag);
-                if (!context.response().ended()) {
-                    context.response().setStatusCode(502).end();
-                }
+                exchange.end();
+                failUnlessGone(context, 502);
             });
             context.request().resume();
         });
+    }
+
+    /** Answers {@code status} unless the response is already written or its client went away. */
+    private static void failUnlessGone(RoutingContext context, int status) {
+        if (!context.response().ended() && !context.response().closed()) {
+            context.response().setStatusCode(status).end();
+        }
     }
 
     private static void copyRequestHeaders(RoutingContext context, HttpClientRequest upstream) {
         context.request().headers().forEach(header -> {
             if (!HOP_BY_HOP_HEADERS.contains(header.getKey().toLowerCase())
                     && !"host".equalsIgnoreCase(header.getKey())) {
-                upstream.putHeader(header.getKey(), header.getValue());
+                upstream.headers().add(header.getKey(), header.getValue());
             }
         });
         if (context.request().getHeader("Content-Length") == null
@@ -220,7 +240,47 @@ public class EcrRegistryDataPlane {
 
     private void release(String immutableTag) {
         if (immutableTag != null) {
-            inFlightImmutableTags.remove(immutableTag);
+            ecrService.releaseImmutableTag(immutableTag);
+        }
+    }
+
+    /**
+     * One proxied request: the registry client it opens once it gets that far, and the immutable
+     * tag it holds. It ends once, at whichever comes first of the registry's answer, a failure and
+     * the client going away; the close handler also fires after an exchange that ended normally,
+     * when another exchange may already hold the same tag.
+     */
+    private final class Exchange {
+
+        private final String immutableTag;
+        private final AtomicBoolean ended = new AtomicBoolean();
+        private HttpClient client;
+
+        private Exchange(String immutableTag) {
+            this.immutableTag = immutableTag;
+        }
+
+        private boolean ended() {
+            return ended.get();
+        }
+
+        private HttpClient open(HttpClient registryClient) {
+            client = registryClient;
+            return registryClient;
+        }
+
+        private void end() {
+            if (!ended.compareAndSet(false, true)) {
+                return;
+            }
+            if (client == null) {
+                release(immutableTag);
+                return;
+            }
+            // Closing the client closes the exchange's registry connection, which the registry
+            // sees and aborts on. The tag is free only once it is closed, so another write of the
+            // tag cannot start its check while this one can still reach the registry.
+            client.close().onComplete(closed -> release(immutableTag));
         }
     }
 
@@ -245,7 +305,9 @@ public class EcrRegistryDataPlane {
                     storageRepositoryName, repository, backendUri,
                     tag(path)));
         }
-        if (!"path".equalsIgnoreCase(uriStyle)) {
+        // A loopback host is the address Floci itself hands the Docker daemon for the ECS and
+        // Lambda images it pulls, path style in either URI style (see rewriteImageUri).
+        if (!"path".equalsIgnoreCase(uriStyle) && !isLoopbackHost(host)) {
             return Optional.empty();
         }
 
@@ -263,6 +325,11 @@ public class EcrRegistryDataPlane {
         return Optional.of(new RegistryRequest(segments[0], segments[1], repository,
                 storageRepositoryName, storageRepositoryName,
                 registryPath + querySuffix(query, true), tag(registryPath)));
+    }
+
+    private static boolean isLoopbackHost(String host) {
+        HostAndPort authority = host == null ? null : HostAndPort.parseAuthority(host, -1);
+        return authority != null && NetworkExposureGuard.isLoopback(authority.host());
     }
 
     private static String querySuffix(String query, boolean removeNamespace) {

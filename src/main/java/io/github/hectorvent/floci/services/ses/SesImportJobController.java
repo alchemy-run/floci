@@ -1,13 +1,11 @@
 package io.github.hectorvent.floci.services.ses;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.ObjectReader;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.ses.model.ImportJob;
 import jakarta.inject.Inject;
@@ -23,13 +21,11 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
-import java.util.List;
-
 import static io.github.hectorvent.floci.services.ses.SesV2Json.intMemberOrAbsent;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.putTimestamp;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.readOptionBody;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.readRequiredStringField;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.remapV1Exception;
-import static io.github.hectorvent.floci.services.ses.SesV2Json.requireJsonObject;
-import static io.github.hectorvent.floci.services.ses.SesV2Json.requireObjectOrAbsent;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.stringMemberOrAbsent;
 
 /**
@@ -47,9 +43,6 @@ public class SesImportJobController {
     private final SesImportJobService importJobService;
     private final RegionResolver regionResolver;
     private final ObjectMapper objectMapper;
-    // FAIL_ON_TRAILING_TOKENS so "{...} garbage" is rejected instead of creating a job from the
-    // leading object, as the JSON protocol controllers do.
-    private final ObjectReader strictReader;
 
     @Inject
     public SesImportJobController(SesImportJobService importJobService, RegionResolver regionResolver,
@@ -57,7 +50,6 @@ public class SesImportJobController {
         this.importJobService = importJobService;
         this.regionResolver = regionResolver;
         this.objectMapper = objectMapper;
-        this.strictReader = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
     }
 
     @POST
@@ -65,23 +57,23 @@ public class SesImportJobController {
     public Response createImportJob(@Context HttpHeaders headers, String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            if (body == null || body.isBlank()) {
+            if (body == null || body.isEmpty()) {
                 throw new AwsException("BadRequestException", "Request body is required.", 400);
             }
-            JsonNode request = strictReader.readTree(body);
-            requireJsonObject(request);
-            JsonNode source = requireObjectOrAbsent(request, "ImportDataSource");
-            if (!source.isObject()) {
+            JsonNode request = readOptionBody(objectMapper, body);
+            SesV2RequestShapes.check("CreateImportJob", request);
+            JsonNode source = request.path("ImportDataSource");
+            if (source.isMissingNode() || source.isNull()) {
                 throw new AwsException("BadRequestException", "ImportDataSource is required.", 400);
             }
             String s3Url = readRequiredStringField(source, "S3Url");
             String dataFormat = readRequiredStringField(source, "DataFormat");
-            JsonNode destination = requireObjectOrAbsent(request, "ImportDestination");
-            if (!destination.isObject()) {
+            JsonNode destination = request.path("ImportDestination");
+            if (destination.isMissingNode() || destination.isNull()) {
                 throw new AwsException("BadRequestException", "ImportDestination is required.", 400);
             }
-            JsonNode suppression = requireObjectOrAbsent(destination, "SuppressionListDestination");
-            JsonNode contactList = requireObjectOrAbsent(destination, "ContactListDestination");
+            JsonNode suppression = destination.path("SuppressionListDestination");
+            JsonNode contactList = destination.path("ContactListDestination");
             if (suppression.isObject() == contactList.isObject()) {
                 throw new AwsException("BadRequestException",
                         "ImportDestination must contain exactly one of SuppressionListDestination "
@@ -104,8 +96,6 @@ public class SesImportJobController {
             return Response.ok(result).build();
         } catch (AwsException e) {
             throw remapV1Exception(e);
-        } catch (JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
         }
     }
 
@@ -119,9 +109,7 @@ public class SesImportJobController {
         ObjectNode source = result.putObject("ImportDataSource");
         source.put("S3Url", job.getS3Url());
         source.put("DataFormat", job.getDataFormat());
-        if (job.getCompletedTimestamp() != null) {
-            result.put("CompletedTimestamp", job.getCompletedTimestamp().toEpochMilli() / 1000.0);
-        }
+        putTimestamp(result, "CompletedTimestamp", job.getCompletedTimestamp());
         if (job.getErrorMessage() != null) {
             result.putObject("FailureInfo").put("ErrorMessage", job.getErrorMessage());
         }
@@ -133,26 +121,21 @@ public class SesImportJobController {
     public Response listImportJobs(@Context HttpHeaders headers, String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            JsonNode request = (body == null || body.isBlank())
-                    ? objectMapper.createObjectNode()
-                    : strictReader.readTree(body);
-            requireJsonObject(request);
+            JsonNode request = readOptionBody(objectMapper, body);
             String destinationType = stringMemberOrAbsent(request, "ImportDestinationType");
             Integer pageSize = intMemberOrAbsent(request, "PageSize");
             String nextToken = stringMemberOrAbsent(request, "NextToken");
-            List<ImportJob> jobs = importJobService.listImportJobs(region, destinationType, pageSize, nextToken);
+            PaginatedResult<ImportJob> page = importJobService.listImportJobs(region, destinationType,
+                    SesListPaging.V2_LIST_IMPORT_JOBS, pageSize, nextToken);
             ObjectNode result = objectMapper.createObjectNode();
             ArrayNode items = result.putArray("ImportJobs");
-            for (ImportJob job : jobs) {
+            for (ImportJob job : page.items()) {
                 writeSummary(items.addObject(), job);
             }
-            // AWS renders NextToken as an explicit null on the last (here: only) page.
-            result.putNull("NextToken");
+            result.put("NextToken", page.nextToken());
             return Response.ok(result).build();
         } catch (AwsException e) {
             throw remapV1Exception(e);
-        } catch (JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
         }
     }
 
@@ -170,7 +153,7 @@ public class SesImportJobController {
             contactList.put("ContactListImportAction", job.getImportAction());
         }
         node.put("JobStatus", job.getJobStatus());
-        node.put("CreatedTimestamp", job.getCreatedTimestamp().toEpochMilli() / 1000.0);
+        putTimestamp(node, "CreatedTimestamp", job.getCreatedTimestamp());
         node.put("ProcessedRecordsCount", job.getProcessedRecordsCount());
         node.put("FailedRecordsCount", job.getFailedRecordsCount());
     }

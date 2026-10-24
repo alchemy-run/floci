@@ -8,6 +8,8 @@ import io.github.hectorvent.floci.services.lambda.microvm.MicrovmController;
 import io.github.hectorvent.floci.services.lambda.microvm.MicrovmEndpointProxyController;
 import io.github.hectorvent.floci.services.lambdamicrovms.LambdaMicrovmsController;
 import io.github.hectorvent.floci.services.lambdamicrovms.LambdaNetworkConnectorsController;
+import io.github.hectorvent.floci.services.apigateway.ApiGatewayController;
+import io.github.hectorvent.floci.services.s3.S3Controller;
 import io.github.hectorvent.floci.services.securityadmin.SecurityAdminController;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -58,11 +60,13 @@ class ServiceCatalogRoutingIntegrationTest {
         assertEquals("sqs", catalog.byCborSdkServiceId("AmazonSQS").orElseThrow().externalKey());
         assertEquals("sns", catalog.byCborSdkServiceId("SNS_20100331").orElseThrow().externalKey());
         assertEquals("states", catalog.byCborSdkServiceId("AWSStepFunctions").orElseThrow().externalKey());
+        assertTrue(catalog.byCborSdkServiceId("DynamoDB_20111205").isEmpty());
+        assertEquals("DescribeTable", catalog.matchTarget("DynamoDB_20111205.DescribeTable").orElseThrow().action());
     }
 
     @Test
     void queryProtocolAliasesAreDeclaredOnDescriptors() {
-        assertTrue(catalog.byCredentialScope("sesv2").orElseThrow().supportsProtocol(ServiceProtocol.QUERY));
+        assertTrue(catalog.byCredentialScope("ses").orElseThrow().supportsProtocol(ServiceProtocol.QUERY));
         assertTrue(catalog.byCredentialScope("cognito-idp").orElseThrow().supportsProtocol(ServiceProtocol.QUERY));
     }
 
@@ -121,6 +125,10 @@ class ServiceCatalogRoutingIntegrationTest {
                 .orElseThrow().configKey());
         assertEquals(1, catalog.all().stream()
                 .filter(descriptor -> "cognito-identity".equals(descriptor.externalKey())).count());
+    void iamEnforcementCanResolveRestServicesFromMatchedRoutes() {
+        assertEquals("s3", catalog.byResourceClass(S3Controller.class).orElseThrow().externalKey());
+        assertEquals("apigateway",
+                catalog.byResourceClass(ApiGatewayController.class).orElseThrow().externalKey());
     }
 
     @Test

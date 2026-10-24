@@ -50,6 +50,14 @@ Disabling verification (`--no-verify-ssl`, `verify=False`, `NODE_TLS_REJECT_UNAU
 | `FLOCI_TLS_KEY_PATH` | *(unset)* | Path to PEM private key file |
 | `FLOCI_TLS_SELF_SIGNED` | `true` | Auto-generate a server certificate signed by Floci's local CA when no cert/key paths provided |
 
+The HTTPS listener accepts TLS 1.3 and TLS 1.2 by default, matching
+[AWS's TLS 1.2 minimum](https://aws.amazon.com/blogs/security/tls-1-2-required-for-aws-endpoints/).
+TLS 1.0 and TLS 1.1 are not enabled by default. To require TLS 1.3 only, set
+`QUARKUS_TLS_PROTOCOLS=TLSv1.3`. An explicit [Quarkus TLS registry protocol setting](https://quarkus.io/guides/tls-registry-reference#tls-protocol-versions)
+(`quarkus.tls.protocols`) takes precedence; otherwise the listener inherits the legacy
+`quarkus.http.ssl.protocols` setting, including `QUARKUS_HTTP_SSL_PROTOCOLS`. The selected
+protocols are retained when the server certificate is reloaded.
+
 With TLS enabled, the proxy that accepts HTTP and HTTPS on Floci's ports listens on `QUARKUS_HTTP_HOST` (`127.0.0.1` by default). As without TLS, any address outside loopback also needs `FLOCI_SECURITY_ALLOW_UNSAFE_NETWORK_EXPOSURE=true`; see [Network Exposure](./environment-variables.md#network-exposure).
 
 ## Local CA and Server Certificate
@@ -58,17 +66,14 @@ When `FLOCI_TLS_ENABLED=true` and no custom certificate is provided, Floci keeps
 
 - Is persisted to `{persistent-path}/tls/` and reused across restarts
 - Includes `localhost`, `127.0.0.1`, `0.0.0.0`, `*.localhost`, `localhost.floci.io`,
-  `*.localhost.floci.io`, `host.docker.internal`, `*.execute-api.localhost.floci.io`,
+  `*.localhost.floci.io`, `*.execute-api.localhost.floci.io`,
   `*.execute-api.localhost.localstack.cloud`, `*.cloudfront.localhost.floci.io`,
   `*.cloudfront.localhost`, and `*.dkr.ecr.<region>.localhost.floci.io` for every advertised
-  AWS region, plus `sync-states.us-east-1.amazonaws.com`,
-  `sync-states-fips.us-east-1.amazonaws.com`, `*.us-east-1.amazonaws.com`,
-  `*.appsync-api.us-east-1.amazonaws.com`, `*.execute-api.us-east-1.amazonaws.com`, and
-  `*.lambda-microvm.us-east-1.localhost.floci.io` as Subject Alternative Names (SANs)
+  AWS region as Subject Alternative Names (SANs)
 - Automatically includes custom hostnames from `FLOCI_HOSTNAME`, `FLOCI_BASE_URL` and `FLOCI_SERVICES_IOT_ENDPOINT_ADDRESS` in the SANs
 - Is regenerated when hostname configuration changes between restarts, or when it was not issued by the current CA
 
-The CA is created once and never rotates on its own. If its files are missing, corrupt or do not match each other, Floci generates a new CA, logs a warning, and reissues the server certificate; clients then need the new `ca.pem`.
+The CA key is created once and never rotates on its own. On the first start after upgrading from a version whose CA lacks X.509 key identifiers, Floci reissues the CA certificate with the same key and validity period, then reissues the server certificate. The CA certificate's fingerprint changes, so clients using a previously downloaded CA file must import the current `ca.pem` again. ACM and IoT certificates issued before the upgrade are not rewritten; reissue them if a strict client must verify them. If the CA files are missing, corrupt or do not match each other, Floci generates a new CA and key, logs a warning, and reissues the server certificate; clients then need the new `ca.pem`.
 
 ### Custom Hostname Support
 
@@ -102,7 +107,7 @@ Names are added by the custom domain operations: API Gateway `CreateDomainName`,
 
 ### Containers Floci Launches
 
-Every container Floci launches, from Lambda functions and ECS or Batch tasks to the Docker backends behind RDS, ElastiCache, MWAA and Flink, and the Kubernetes Lambda pods, receives `/etc/floci-ca-bundle.pem`: the public root CAs the Floci JVM trusts, followed by the Floci CA (or your certificate file when you provide one). `SSL_CERT_FILE`, `CURL_CA_BUNDLE`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS` and `AWS_CA_BUNDLE` point at it, so curl, Python, Node.js, Go, the AWS CLI and the AWS SDKs that read `AWS_CA_BUNDLE` reach both Floci and public HTTPS sites with no setup in the workload. A variable you set on the function or task definition wins over the injected one. The JVM ignores all of these variables, so a Java workload still needs its own trust store, as shown under SDK Configuration Examples. The bundle is written to `{persistent-path}/tls/floci-ca-bundle.pem` at startup; when it is missing, or when an image has no `/etc` to copy it into, the container starts without the variables and Floci logs a warning.
+Every container Floci launches, from Lambda functions and ECS or Batch tasks to the Docker backends behind RDS, ElastiCache, MWAA and Flink, and the Kubernetes Lambda pods, receives `/etc/floci-ca-bundle.pem`: the public root CAs the Floci JVM trusts, followed by the Floci CA (or your certificate file when you provide one). `SSL_CERT_FILE`, `CURL_CA_BUNDLE`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS` and `AWS_CA_BUNDLE` point at it, so curl, Python, Node.js, Go, the AWS CLI and the AWS SDKs that read `AWS_CA_BUNDLE` reach both Floci and public HTTPS sites with no setup in the workload. A variable you set on the function or task definition wins over the injected one. The JVM ignores all of these variables, so a Java workload still needs its own trust store, as shown under SDK Configuration Examples. The bundle is written to `{persistent-path}/tls/floci-ca-bundle.pem` at startup; when it is missing, or when an image has no `/etc` to copy it into, the container starts without the variables and Floci logs a warning. Floci trusts the same bundle when it fetches a JWT issuer's keys for an HTTP API authorizer or an AppSync OIDC provider, so an issuer it serves itself, a Cognito user pool for one, verifies over HTTPS.
 
 ## User-Provided Certificates
 

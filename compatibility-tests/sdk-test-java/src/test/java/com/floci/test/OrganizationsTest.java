@@ -1,12 +1,9 @@
 package com.floci.test;
 
 import org.junit.jupiter.api.Test;
-import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
-import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
-import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.organizations.OrganizationsClient;
-import software.amazon.awssdk.services.organizations.model.Account;
 import software.amazon.awssdk.services.organizations.model.AccessDeniedException;
+import software.amazon.awssdk.services.organizations.model.Account;
 import software.amazon.awssdk.services.organizations.model.AwsOrganizationsNotInUseException;
 import software.amazon.awssdk.services.organizations.model.ChildType;
 import software.amazon.awssdk.services.organizations.model.ConstraintViolationException;
@@ -46,36 +43,32 @@ public class OrganizationsTest {
 
     private final OrganizationsClient client = TestFixtures.organizationsClient();
 
-    /** A client whose 12-digit access key id makes Floci treat the caller as that account. */
-    private static OrganizationsClient clientFor(String accountId) {
-        return OrganizationsClient.builder()
-                .endpointOverride(TestFixtures.endpoint())
-                .region(Region.US_EAST_1)
-                .credentialsProvider(StaticCredentialsProvider.create(
-                        AwsBasicCredentials.create(accountId, "test")))
-                .build();
-    }
-
     @Test
     public void testFullLifecycle() {
         // 1. Create the organization.
         Organization organization = client.createOrganization(r -> r.featureSet(OrganizationFeatureSet.ALL))
                 .organization();
-        assertThat(organization.id()).matches("o-[a-z0-9]{10}");
-        assertThat(organization.featureSet()).isEqualTo(OrganizationFeatureSet.ALL);
-        assertThat(organization.arn()).startsWith("arn:aws:organizations::");
-        assertThat(organization.masterAccountId()).isNotBlank();
-
         String managementAccountId = organization.masterAccountId();
 
+        // Every assertion runs inside the try, so a failure still deletes the organization: one left
+        // behind makes the caller its management account for every later test in the run.
         try {
+            assertThat(organization.id()).matches("o-[a-z0-9]{10}");
+            assertThat(organization.featureSet()).isEqualTo(OrganizationFeatureSet.ALL);
+            assertThat(organization.arn()).startsWith("arn:" + TestFixtures.partition() + ":organizations::");
+            assertThat(managementAccountId).isNotBlank();
+
             assertThat(client.describeOrganization().organization().id()).isEqualTo(organization.id());
 
-            // 2. The root exists and carries the AWS-managed FullAWSAccess SCP.
+            // 2. The root exists with no policy types enabled, and carries the AWS-managed
+            //    FullAWSAccess SCP. SCPs have to be enabled on it before one can be created.
             Root root = client.listRoots().roots().get(0);
             assertThat(root.id()).matches("r-[a-z0-9]{4}");
             assertThat(root.name()).isEqualTo("Root");
-            assertThat(root.policyTypes()).anyMatch(p -> p.type() == PolicyType.SERVICE_CONTROL_POLICY);
+            assertThat(root.policyTypes()).isEmpty();
+            client.enablePolicyType(r -> r.rootId(root.id()).policyType(PolicyType.SERVICE_CONTROL_POLICY));
+            assertThat(client.listRoots().roots().get(0).policyTypes())
+                    .anyMatch(p -> p.type() == PolicyType.SERVICE_CONTROL_POLICY);
 
             assertThat(client.listPoliciesForTarget(r -> r.targetId(root.id())
                             .filter(PolicyType.SERVICE_CONTROL_POLICY)).policies())
@@ -217,7 +210,7 @@ public class OrganizationsTest {
             client.deleteResourcePolicy(r -> { });
 
             // 10. The invitation handshake, driven from both sides.
-            try (OrganizationsClient invitedClient = clientFor(INVITED_ACCOUNT)) {
+            try (OrganizationsClient invitedClient = TestFixtures.organizationsClient(INVITED_ACCOUNT)) {
                 assertThatThrownBy(invitedClient::describeOrganization)
                         .isInstanceOf(AwsOrganizationsNotInUseException.class);
 
@@ -236,7 +229,8 @@ public class OrganizationsTest {
                         .isEqualTo(organization.id());
                 assertThatThrownBy(() -> invitedClient.createOrganizationalUnit(r -> r
                         .parentId(root.id()).name("Nope")))
-                        .isInstanceOf(AccessDeniedException.class);
+                        .isInstanceOfSatisfying(AccessDeniedException.class,
+                                error -> assertThat(error.statusCode()).isEqualTo(400));
 
                 assertThat(client.listHandshakesForOrganization().handshakes())
                         .extracting(Handshake::id).contains(invitation.id());

@@ -48,6 +48,50 @@ services:
 
 Use this only when the socket's permissions require root. Without the option, Floci retains its unprivileged default. The setting applies to the container entrypoint, not to `floci.docker` configuration.
 
+## Connection Pool
+
+Every Docker call Floci makes goes through one shared client with a bounded connection pool. Some of those connections stay open for as long as a container runs: each Lambda container holds one (the watcher that notices its runtime exiting) plus one per Lambda extension. Log-follow streams use a second pool, described below. When those long-lived connections fill the pool, every other Docker call (create, start, stop, remove) waits for one to free up, and Floci stops making progress.
+
+The default of 1024 connections covers the 500 concurrent Lambda containers the default [Runtime API port range](../services/lambda.md#configuration) allows. Raise it if you widen that range or run many other containers at the same time:
+
+```yaml
+floci:
+  docker:
+    max-connections: 1024
+```
+
+Environment variable: `FLOCI_DOCKER_MAX_CONNECTIONS`
+
+Container log-follow streams use a second, separate pool so they can never starve create, start, stop and remove calls. Its size defaults to 512 and follows the same rule (at least 1). Exec-output and container-wait streams (CodeBuild phases, Lambda extensions and exit watchers, EKS audit followers) still use the main pool and count against `max-connections`:
+
+```yaml
+floci:
+  docker:
+    streaming-max-connections: 512
+```
+
+Environment variable: `FLOCI_DOCKER_STREAMING_MAX_CONNECTIONS`
+
+When a pool is full, a Docker call waits for a free connection, then fails. The wait defaults to 30 seconds for both pools and must be at least 1 (httpclient5 reads 0 as no limit, so a call would wait forever); a failed wait is not retried, because a full pool means Floci is saturated:
+
+```yaml
+floci:
+  docker:
+    connection-request-timeout-seconds: 30
+```
+
+Environment variable: `FLOCI_DOCKER_CONNECTION_REQUEST_TIMEOUT_SECONDS`
+
+A Docker call that gets no response within `api-timeout-seconds` fails, on Unix-socket and TCP hosts alike, so a hung daemon cannot block a request indefinitely. The limit applies to each attempt: a control-plane request that is safe to repeat is tried up to six times, so against a silent daemon it can take about six times the limit, plus backoff, to fail. It defaults to 300 seconds (5 minutes) for both pools and must be at least 1, since httpclient5 reads 0 as no limit. Requests that follow a container for as long as it runs (container waits, exec and attach output, followed logs, streamed stats, daemon events, image pulls and builds) have no such limit, since they can stay silent while healthy:
+
+```yaml
+floci:
+  docker:
+    api-timeout-seconds: 300
+```
+
+Environment variable: `FLOCI_DOCKER_API_TIMEOUT_SECONDS`
+
 ## Private Registry Authentication
 
 Any service that pulls a container image from a private registry (Lambda image functions, custom OpenSearch images, private Postgres images, etc.) needs Docker credentials. Two approaches are supported and can be combined.
@@ -161,7 +205,7 @@ services:
 Extra labels are a list of key/value entries rather than a map so that label keys containing dots, colons, or uppercase characters survive the environment-variable naming convention.
 
 !!! note
-    Entries using one of the reserved keys (`floci`, `floci_emulator`, `floci_namespace`) are ignored with a warning — user configuration can never break Floci's own container discovery and volume pruning.
+    Entries using one of the reserved keys (`floci`, `floci_emulator`, `floci_namespace`, or any key listed under [Internal Labels](#internal-labels), new or legacy) are ignored with a warning: user configuration can never break Floci's own container discovery and volume pruning, or fake the owner or identity a cleanup path trusts.
 
 ### Resource Identity Labels
 
@@ -175,7 +219,28 @@ A container backing an emulated AWS resource also carries labels tying it back t
 | `io.floci.account` | the resolved account id | The AWS account the resource belongs to |
 | `io.floci.region` | the resolved region | The AWS region the resource belongs to |
 
-This makes `docker ps --filter label=io.floci.resource-id=orders-db-primary` resolve a specific emulated resource to its backing container directly, without inferring it from names or creation order. Applied to RDS, DocDB, ElastiCache (Redis/Valkey and Memcached), MemoryDB, Neptune, MSK, OpenSearch, ECS, EKS, AmazonMQ, MWAA, Kinesis Data Analytics (Flink), Batch, CodeBuild, Lambda, and EC2. ECR's backing registry container carries every label except `io.floci.resource-id`, since it is a shared singleton with no single resource identifier.
+This makes `docker ps --filter label=io.floci.resource-id=orders-db-primary` resolve a specific emulated resource to its backing container directly, without inferring it from names or creation order. Applied to RDS, DocDB, ElastiCache (Redis/Valkey and Memcached), MemoryDB, Neptune, MSK, OpenSearch, ECS, EKS, AmazonMQ, MWAA, Kinesis Data Analytics (Flink), Batch, CodeBuild, Lambda, and EC2. ECR's backing registry container carries every label except `io.floci.resource-id`, since it is a shared singleton with no single resource identifier. The EventBridge Pipes Kafka bridge carries only `io.floci` and `io.floci.service=pipes`, since one bridge serves every pipe reading the same cluster. The Docker networks backing EC2 VPCs carry `io.floci`, `io.floci.service=ec2`, `io.floci.resource-id` (the VPC id) and `io.floci.region`.
+
+The same key set is used by Floci's GCP, Azure and OCI emulators, each with its own scope keys in place of `io.floci.account` and `io.floci.region` (see the [floci-gcp](https://floci.io/floci-gcp/), [floci-az](https://floci.io/floci-az/) and [floci-oci](https://floci.io/floci-oci/) documentation).
+
+### Internal Labels
+
+Floci also stamps bookkeeping labels it reads back itself: which Floci deployment owns a container or network, which process run created an ECS container, and which containers belong to the security-group sandbox. Each key Floci used before it adopted the `io.floci.*` namespace is still written next to its new key with the same value, and read when the new key is missing, so resources created by an earlier version keep being found. *Legacy: still written, prefer the new key.*
+
+| Label | Legacy alias | On | Value |
+|---|---|---|---|
+| `io.floci.owner` | `floci_owner_port` | ECS task containers, ECS credentials proxies, EC2 instance containers, security-group helpers | The owning deployment: `<namespace>/<port>`, or the bare API port without a resource namespace |
+| `io.floci.owner` | `floci_vpc_owner_port` | EC2 VPC networks | As above |
+| `io.floci.ecs.run` | `floci.ecs-run` | ECS task containers and their security-group helpers | The process run that created the container |
+| `io.floci.ecs.credentials-proxy` | `floci.ecs-task-role-credentials-proxy` | ECS credentials proxies | `true` |
+| `io.floci.security-group.helper` | `floci.security-group-helper` | Security-group helpers | `true` |
+| `io.floci.security-group.workload` | `floci.security-group-workload` | Workloads inside a security-group helper's network namespace | `true` |
+| `io.floci.component` | `floci.component` | The EventBridge Pipes Kafka bridge | `pipes-kafka-rest-bridge` |
+| `io.floci.service=ec2` and `io.floci.component=vpc-network` | `floci_component=ec2-vpc` | EC2 VPC networks | |
+| `io.floci.resource-id` | `floci_vpc_id` | EC2 VPC networks | The VPC id |
+| `io.floci.region` | `floci_vpc_region` | EC2 VPC networks | The VPC's region |
+
+Startup cleanup acts on an object only when every owner key it carries, new or legacy, names this deployment. An object whose new and legacy labels disagree was relabelled outside Floci and is left alone with a warning.
 
 ## Docker Network
 
@@ -194,6 +259,8 @@ floci:
 Environment variable: `FLOCI_SERVICES_DOCKER_NETWORK`
 
 Individual services can override the network with their own `docker-network` setting (e.g. `floci.services.lambda.docker-network`).
+
+A network mode of `host`, `none` or `container:<id>` places the spawned containers in that network namespace instead of on a Docker network. Docker publishes no host ports there, so a container on the host network serves its own port directly on the host (an OpenSearch domain listens on `9200` rather than on a port from its configured range), and Floci reaches it via `localhost`. A container placed in another container's namespace (`container:<id>`) is reached through that container's address instead: its IP on the Docker network, or `localhost` when it is itself on the host network.
 
 !!! tip
     In Docker Compose, the default network name is `<project-name>_default`. If your compose file is in a directory named `myapp`, the network is `myapp_default`.
@@ -249,12 +316,27 @@ What each setting does and why it is needed:
     auto-detection entirely. See the [Lambda docs](../services/lambda.md#configuration)
     for details.
 
+## Transient I/O retry
+
+All of Floci's short-lived docker calls (create/start/inspect/remove container, volume management, image operations) travel one shared daemon socket, and under fan-out load the daemon occasionally drops a connection mid-call with `java.io.IOException: Broken pipe`. Floci retries these transient failures centrally, at the docker transport layer, up to 6 attempts with a capped exponential backoff (500ms base, 8s cap); so every call site is covered without per-call configuration, and a genuine daemon rejection (a 4xx, a name conflict) still surfaces immediately.
+
+A request is only replayed when doing so cannot change semantics: requests carrying a one-shot upload stream (e.g. copying an archive into a container), bidirectional attach streams, and `exec` requests (which would re-run the command) are never retried. Log-follow connections use a separate transport that does not retry at all. Bodyless actions whose replay changes the outcome (unnamed container create, network create, container restart, network connect and disconnect) are not retried either. A tar-writer failure on the Floci host (for example an unreadable source file) is reported at once instead of retried.
+
+Archive uploads that use the shared tar-copy helper retry above the transport layer, rebuilding
+the upload stream for each attempt with the same six-attempt backoff. This includes user-data
+scripts, the container CA bundle, Verdaccio's configuration, SageMaker model data and training
+inputs, Flink log configuration and application properties, and EKS audit policies, IRSA
+signing keys, the containerd certificate-directory link and the Pod Identity manifest. Only the
+upload is retried, not script execution. Daemon rejections still stop immediately, and each
+caller keeps its existing failure handling after retries are exhausted.
+
 ## Full Reference
 
 | Environment variable | Default | Description |
 |---|---|---|
 | `FLOCI_DOCKER_DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker daemon socket |
 | `FLOCI_DOCKER_DOCKER_CONFIG_PATH` | _(unset)_ | Path to directory containing Docker's `config.json` |
+| `FLOCI_DOCKER_MAX_CONNECTIONS` | `1024` | Connection pool size for Floci's Docker client. Each live Lambda container holds two connections, so about half this many can run at once |
 | `FLOCI_DOCKER_REGISTRY_CREDENTIALS_0__SERVER` | _(unset)_ | Registry hostname for credential entry 0 |
 | `FLOCI_DOCKER_REGISTRY_CREDENTIALS_0__USERNAME` | _(unset)_ | Username for credential entry 0 |
 | `FLOCI_DOCKER_REGISTRY_CREDENTIALS_0__PASSWORD` | _(unset)_ | Password for credential entry 0 |
@@ -263,4 +345,4 @@ What each setting does and why it is needed:
 | `FLOCI_DOCKER_EXTRA_LABELS_0__KEY` | _(unset)_ | Label key for extra-label entry 0, applied to every Floci-created container and volume (increment the index for more) |
 | `FLOCI_DOCKER_EXTRA_LABELS_0__VALUE` | _(unset)_ | Label value for extra-label entry 0 |
 | `FLOCI_SERVICES_DOCKER_NETWORK` | _(unset)_ | Shared Docker network for all container-based services |
-| `FLOCI_SERVICES_LAMBDA_CONTAINER_NAME_PREFIX` | `floci` | Base name prefix for spawned Lambda containers and code volumes (e.g. `acme` → `acme-<function>-<id>` containers, `acme-code-<function>-<hash>` volumes). Must be a valid Docker name segment (`[A-Za-z0-9][A-Za-z0-9_.-]*`); invalid values are ignored with a warning. See the [Lambda docs](../services/lambda.md#configuration) |
+| `FLOCI_SERVICES_LAMBDA_CONTAINER_NAME_PREFIX` | `floci` | Base name prefix for spawned Lambda containers and code volumes (e.g. `acme` → `acme-<function>-<id>` containers, `acme-code-<function>-<hash>` volumes; with `FLOCI_DOCKER_RESOURCE_NAMESPACE` set, the namespace follows the prefix and a short hash of it ends the volume name, e.g. `acme-<namespace>-code-<function>-<hash>-<namespace hash>`). Must be a valid Docker name segment (`[A-Za-z0-9][A-Za-z0-9_.-]*`); invalid values are ignored with a warning. See the [Lambda docs](../services/lambda.md#configuration) |

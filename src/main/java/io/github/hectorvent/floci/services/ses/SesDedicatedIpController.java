@@ -1,11 +1,11 @@
 package io.github.hectorvent.floci.services.ses;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.ses.model.DedicatedIpPool;
 import io.github.hectorvent.floci.services.ses.model.Tag;
@@ -18,6 +18,7 @@ import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
@@ -31,7 +32,6 @@ import static io.github.hectorvent.floci.services.ses.SesV2Json.parseTagsArray;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.readOptionBody;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.readRequiredStringField;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.remapV1Exception;
-import static io.github.hectorvent.floci.services.ses.SesV2Json.requireJsonObject;
 
 /**
  * SES V2 dedicated IP pool and dedicated IP endpoints ({@code /v2/email/dedicated-ip-pools} and
@@ -63,11 +63,10 @@ public class SesDedicatedIpController {
     public Response createDedicatedIpPool(@Context HttpHeaders headers, String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            if (body == null || body.isBlank()) {
+            if (body == null || body.isEmpty()) {
                 throw new AwsException("BadRequestException", "Request body is required.", 400);
             }
-            JsonNode request = objectMapper.readTree(body);
-            requireJsonObject(request);
+            JsonNode request = readOptionBody(objectMapper, body);
             String poolName = readRequiredStringField(request, "PoolName");
             JsonNode scalingNode = request.path("ScalingMode");
             String scalingMode;
@@ -85,18 +84,21 @@ public class SesDedicatedIpController {
             return Response.ok(objectMapper.createObjectNode()).build();
         } catch (AwsException e) {
             throw remapV1Exception(e);
-        } catch (JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
         }
     }
 
     @GET
     @Path("/dedicated-ip-pools")
-    public Response listDedicatedIpPools(@Context HttpHeaders headers) {
+    public Response listDedicatedIpPools(@Context HttpHeaders headers,
+                                         @QueryParam("PageSize") String pageSize,
+                                         @QueryParam("NextToken") String nextToken) {
         String region = regionResolver.resolveRegion(headers);
+        PaginatedResult<String> page = dedicatedIpService.listDedicatedIpPools(region,
+                SesListPaging.V2_LIST_DEDICATED_IP_POOLS, SesListPaging.parseQueryPageSize(pageSize), nextToken);
         ObjectNode result = objectMapper.createObjectNode();
         ArrayNode pools = result.putArray("DedicatedIpPools");
-        dedicatedIpService.listDedicatedIpPools(region).forEach(pools::add);
+        page.items().forEach(pools::add);
+        result.put("NextToken", page.nextToken());
         return Response.ok(result).build();
     }
 
@@ -144,12 +146,16 @@ public class SesDedicatedIpController {
 
     @GET
     @Path("/dedicated-ips")
-    public Response getDedicatedIps(@Context HttpHeaders headers) {
-        regionResolver.resolveRegion(headers);
+    public Response getDedicatedIps(@Context HttpHeaders headers,
+                                    @QueryParam("PageSize") String pageSize,
+                                    @QueryParam("NextToken") String nextToken) {
+        String region = regionResolver.resolveRegion(headers);
         // Floci does not model leased dedicated IPs, so the account has none.
+        PaginatedResult<String> page = dedicatedIpService.listDedicatedIps(region,
+                SesListPaging.V2_GET_DEDICATED_IPS, SesListPaging.parseQueryPageSize(pageSize), nextToken);
         ObjectNode result = objectMapper.createObjectNode();
         result.putArray("DedicatedIps");
-        result.putNull("NextToken");
+        result.put("NextToken", page.nextToken());
         return Response.ok(result).build();
     }
 

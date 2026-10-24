@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.lambda;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.MethodOrderer;
@@ -139,7 +140,7 @@ class LambdaPermissionTagLayerIntegrationTest {
         // Policy is a JSON string — parse it and verify statements
         ObjectMapper om = new ObjectMapper();
         String policyJson = om.readTree(response).get("Policy").asText();
-        var policy = om.readTree(policyJson);
+        JsonNode policy = om.readTree(policyJson);
         assert policy.get("Statement").size() == 2;
     }
 
@@ -177,7 +178,7 @@ class LambdaPermissionTagLayerIntegrationTest {
 
         ObjectMapper om = new ObjectMapper();
         String policyJson = om.readTree(response).get("Policy").asText();
-        var policy = om.readTree(policyJson);
+        JsonNode policy = om.readTree(policyJson);
         assert policy.get("Statement").size() == 1;
     }
 
@@ -271,6 +272,25 @@ class LambdaPermissionTagLayerIntegrationTest {
             .statusCode(200)
             .body("Tags.env", nullValue())
             .body("Tags.team", equalTo("platform"));
+    }
+
+    @Test
+    @Order(16)
+    void tagResource_keyOutsideTheAwsPattern_returns400() {
+        given()
+            .contentType("application/json")
+            .body("""
+                {"Tags": {"a,b": "x"}}
+                """)
+        .when()
+            .post("/2017-03-31/tags/" + FN_ARN)
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ValidationException"))
+            .body("message", equalTo("1 validation error detected: Value '{a,b=x}' at 'tags' failed to satisfy"
+                    + " constraint: Map keys must satisfy constraint: [Member must have length less than or"
+                    + " equal to 128, Member must have length greater than or equal to 1, Member must satisfy"
+                    + " regular expression pattern: ([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)]"));
     }
 
     // ── ListLayers / ListLayerVersions ────────────────────────────────────────

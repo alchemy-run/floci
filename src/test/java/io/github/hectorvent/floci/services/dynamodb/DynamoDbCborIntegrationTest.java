@@ -29,6 +29,19 @@ class DynamoDbCborIntegrationTest {
     private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
     @Test
+    void legacyDynamoDbTargetDoesNotEnterModernCborHandling() throws Exception {
+        byte[] body = CBOR_MAPPER.writeValueAsBytes(JSON_MAPPER.readTree("{\"TableName\":\"CborTable\"}"));
+        for (String contentType : new String[]{"application/cbor", "application/x-amz-cbor-1.1"}) {
+            byte[] result = given().contentType(contentType).accept(contentType)
+                    .header("X-Amz-Target", "DynamoDB_20111205.DescribeTable").body(body)
+                    .post("/").then().statusCode(404).extract().asByteArray();
+            assertThat(CBOR_MAPPER.readTree(result).path("__type").asText(), containsString("UnknownOperation"));
+        }
+        given().contentType("application/cbor").body(body)
+                .post("/service/DynamoDB_20111205/operation/DescribeTable").then().statusCode(404);
+    }
+
+    @Test
     @Order(1)
     void createTableViaCbor() throws Exception {
         JsonNode request = JSON_MAPPER.readTree("""

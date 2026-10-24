@@ -274,6 +274,16 @@ class AccountServiceTest {
                 .put("StateOrRegion", "WA").put("PostalCode", "98101")
                 .put("CountryCode", "US").put("PhoneNumber", "+12025550123");
         return request;
+    void deleteRemovesContactAndDeletingUnsetThrows() {
+        ObjectNode request = contactRequest();
+        service.putAlternateContact(ACCOUNT_ID, request);
+        service.deleteAlternateContact(ACCOUNT_ID, request);
+        AwsException getError = assertThrows(AwsException.class,
+                () -> service.getAlternateContact(ACCOUNT_ID, request));
+        assertEquals("ResourceNotFoundException", getError.getErrorCode());
+        AwsException deleteError = assertThrows(AwsException.class,
+                () -> service.deleteAlternateContact(ACCOUNT_ID, request));
+        assertEquals("ResourceNotFoundException", deleteError.getErrorCode());
     }
 
     private ObjectNode contactRequest() {

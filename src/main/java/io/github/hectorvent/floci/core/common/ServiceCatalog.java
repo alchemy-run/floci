@@ -56,7 +56,9 @@ public class ServiceCatalog {
                 String rpcV2ServiceName = prefix.endsWith(".")
                         ? prefix.substring(0, prefix.length() - 1)
                         : prefix;
-                cborSdkServiceIds.putIfAbsent(rpcV2ServiceName, descriptor);
+                if (!descriptor.jsonOnlyTargetPrefixes().contains(prefix)) {
+                    cborSdkServiceIds.putIfAbsent(rpcV2ServiceName, descriptor);
+                }
             }
         }
         targets.sort(Comparator.comparingInt((Map.Entry<String, ServiceDescriptor> entry) -> entry.getKey().length())
@@ -111,6 +113,12 @@ public class ServiceCatalog {
         return matchTarget(target).map(TargetMatch::descriptor);
     }
 
+    /** Targeted application/json requests are accepted only by descriptors declaring that format. */
+    public Optional<TargetMatch> matchPlainJsonTarget(String target) {
+        return matchTarget(target)
+                .filter(match -> match.descriptor().supportsProtocol(ServiceProtocol.PLAIN_JSON));
+    }
+
     public List<ServiceDescriptor> all() {
         return all;
     }
@@ -120,5 +128,8 @@ public class ServiceCatalog {
     }
 
     public record TargetMatch(ServiceDescriptor descriptor, String prefix, String action) {
+        public boolean jsonOnly() {
+            return descriptor.jsonOnlyTargetPrefixes().contains(prefix);
+        }
     }
 }

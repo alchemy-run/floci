@@ -2,6 +2,8 @@ package io.github.hectorvent.floci.services.bedrock;
 
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.ExtractableResponse;
+import io.restassured.response.Response;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -31,7 +33,7 @@ class BedrockIntegrationTest {
     @Test
     @Order(1)
     void createGuardrail() {
-        var response = given()
+        ExtractableResponse<Response> response = given()
             .contentType("application/json")
             .body("""
                 {
@@ -537,6 +539,46 @@ class BedrockIntegrationTest {
             .statusCode(400)
             .body("__type", equalTo("TooManyTagsException"))
             .body("resourceName", equalTo(arn));
+    }
+
+    @Test
+    @Order(23)
+    void updateRejectingTheKmsKeyLeavesTheGuardrailUnchanged() {
+        String id = given()
+            .contentType("application/json")
+            .body("{\"name\": \"kms-update-rejected\","
+                + " \"blockedInputMessaging\": \"in\","
+                + " \"blockedOutputsMessaging\": \"out\"}")
+        .when()
+            .post("/guardrails")
+        .then()
+            .statusCode(202)
+            .extract().path("guardrailId");
+
+        given()
+            .contentType("application/json")
+            .body("""
+                {
+                  "name": "kms-update-renamed",
+                  "blockedInputMessaging": "in v2",
+                  "blockedOutputsMessaging": "out v2",
+                  "kmsKeyId": "alias/does-not-exist"
+                }
+                """)
+        .when()
+            .put("/guardrails/" + id)
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ValidationException"));
+
+        given()
+        .when()
+            .get("/guardrails/" + id)
+        .then()
+            .statusCode(200)
+            .body("name", equalTo("kms-update-rejected"))
+            .body("blockedInputMessaging", equalTo("in"))
+            .body("blockedOutputsMessaging", equalTo("out"));
     }
 
     private static String tagListJson(String prefix, int count) {

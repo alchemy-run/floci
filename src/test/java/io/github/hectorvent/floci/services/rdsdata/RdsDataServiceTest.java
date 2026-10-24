@@ -5,9 +5,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager.EndpointInfo;
+import io.github.hectorvent.floci.services.rds.container.RdsBackendEndpointResolver;
+import io.github.hectorvent.floci.services.rds.container.RdsBackendGate;
 import io.github.hectorvent.floci.services.rds.model.DatabaseEngine;
 import io.github.hectorvent.floci.services.secretsmanager.SecretsManagerService;
+import io.github.hectorvent.floci.services.secretsmanager.model.SecretVersion;
+import org.h2.Driver;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.lang.reflect.Proxy;
 import java.sql.Connection;
@@ -17,16 +24,19 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
 import java.time.Duration;
+import java.util.List;
 import java.util.Properties;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
-import org.h2.Driver;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
@@ -47,6 +57,167 @@ class RdsDataServiceTest {
     private static final String REGION = "us-east-1";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Test
+    void returnsTypedArraysThroughTheJdbcExecutionPath() throws Exception {
+        TestHarness harness = new TestHarness(DatabaseEngine.POSTGRES);
+        ObjectNode request = harness.request("""
+                select array[1,2,3], array['a','b'], array[true,false],
+                       array[cast(1.5 as double),cast(2.25 as double)],
+                       cast(null as integer array)
+                """);
+        request.put("includeResultMetadata", true);
+        ObjectNode response = harness.service.executeStatement(request, REGION);
+
+        assertEquals(objectMapper.readTree("""
+                [[{"arrayValue":{"longValues":[1,2,3]}},
+                  {"arrayValue":{"stringValues":["a","b"]}},
+                  {"arrayValue":{"booleanValues":[true,false]}},
+                  {"arrayValue":{"doubleValues":[1.5,2.25]}}, {"isNull":true}]]
+                """), objectMapper.readTree(response.get("records").toString()));
+        assertEquals(Types.INTEGER, response.path("columnMetadata").get(0).path("arrayBaseColumnType").asInt());
+    }
+
+    @Test
+    void rejectsMultidimensionalArrayResultsThroughTheJdbcExecutionPath() throws Exception {
+        TestHarness harness = new TestHarness(DatabaseEngine.POSTGRES);
+        AwsException error = assertThrows(AwsException.class, () -> harness.service.executeStatement(
+                harness.request("select array[array[1,2],array[3,4]]"), REGION));
+
+        assertEquals("UnsupportedResultException", error.getErrorCode());
+        assertEquals(400, error.getHttpStatus());
+        assertEquals(0, harness.gate.held.get());
+    }
+
+    @Test
+    void rejectsMultipleStatementsBeforeEitherWriteRuns() throws Exception {
+        TestHarness harness = new TestHarness(DatabaseEngine.POSTGRES);
+        harness.createEventsTable();
+
+        AwsException error = assertThrows(AwsException.class, () -> harness.service.executeStatement(harness.request(
+                "insert into data_api_events(name) values ('first'); insert into data_api_events(name) values ('second')"),
+                REGION));
+
+        assertEquals("ValidationException", error.getErrorCode());
+        assertEquals("Multistatements aren't supported.", error.getMessage());
+        assertEquals(400, error.getHttpStatus());
+        assertEquals(0, harness.countEvents());
+    }
+
+    @Test
+    void rejectsMultipleStatementsInsideATransactionWithoutChangingItsData() throws Exception {
+        TestHarness harness = new TestHarness(DatabaseEngine.POSTGRES);
+        harness.createEventsTable();
+        String transactionId = harness.service.beginTransaction(harness.beginRequest(), REGION)
+                .path("transactionId").asText();
+        ObjectNode request = harness.request(
+                "insert into data_api_events(name) values ('first'); insert into data_api_events(name) values ('second')");
+        request.put("transactionId", transactionId);
+
+        AwsException error = assertThrows(AwsException.class,
+                () -> harness.service.executeStatement(request, REGION));
+        assertEquals("ValidationException", error.getErrorCode());
+        assertEquals("Multistatements aren't supported.", error.getMessage());
+
+        harness.service.commitTransaction(harness.transactionRequest(transactionId), REGION);
+        assertEquals(0, harness.countEvents());
+    }
+
+    @Test
+    void batchRejectsMultipleStatementsBeforeAnyParameterSetRuns() throws Exception {
+        for (DatabaseEngine engine : List.of(DatabaseEngine.POSTGRES, DatabaseEngine.MYSQL)) {
+            TestHarness harness = new TestHarness(engine);
+            harness.createEventsTable();
+            ObjectNode request = harness.request(
+                    "insert into data_api_events(name) values (:name); insert into data_api_events(name) values ('second')");
+            request.set("parameterSets", parameterSets("first"));
+
+            AwsException error = assertThrows(AwsException.class,
+                    () -> harness.service.batchExecuteStatement(request, REGION));
+            assertEquals("ValidationException", error.getErrorCode());
+            assertEquals("Multistatements aren't supported.", error.getMessage());
+            assertEquals(0, harness.countEvents());
+        }
+    }
+
+    @Test
+    void executesSingleStatementsContainingLiteralAndCommentSemicolons() throws Exception {
+        TestHarness harness = new TestHarness(DatabaseEngine.POSTGRES);
+        ObjectNode response = harness.service.executeStatement(harness.request(
+                "select ';' as separator /* ignored; statement */; -- trailing; comment\n"), REGION);
+
+        assertEquals(";", response.path("records").get(0).get(0).path("stringValue").asText());
+    }
+
+    @Test
+    void executeStatementRejectsAResponseOverOneMebibyte() throws Exception {
+        TestHarness harness = new TestHarness();
+        ObjectNode request = harness.request(
+                "select repeat('x', 20000) as c from system_range(1, 100)");
+
+        AwsException error = assertThrows(AwsException.class,
+                () -> harness.service.executeStatement(request, REGION));
+        assertEquals("UnsupportedResultException", error.getErrorCode());
+        assertEquals("Database response exceeded size limit", error.getMessage());
+    }
+
+    @Test
+    void executeStatementAllowsAResponseUnderOneMebibyte() throws Exception {
+        TestHarness harness = new TestHarness();
+        ObjectNode response = harness.service.executeStatement(harness.request(
+                "select repeat('x', 20000) as c from system_range(1, 10)"), REGION);
+
+        assertEquals(10, response.get("records").size());
+    }
+
+    /** Records serialize as [[{"stringValue":"..."}]]: 20 bytes around a single string per row. */
+    @Test
+    void executeStatementCountsTheWholeRecordsArrayAtTheBoundary() throws Exception {
+        int rows = 25;
+        int exactLength = 41922;
+        TestHarness harness = new TestHarness();
+        ObjectNode exact = harness.service.executeStatement(harness.request(
+                "select repeat('x', " + exactLength + ") as c from system_range(1, " + rows + ")"), REGION);
+        assertEquals(rows, exact.get("records").size());
+
+        ObjectNode over = harness.request(
+                "select repeat('x', " + (exactLength + 1) + ") as c from system_range(1, " + rows + ")");
+        AwsException error = assertThrows(AwsException.class,
+                () -> harness.service.executeStatement(over, REGION));
+        assertEquals("UnsupportedResultException", error.getErrorCode());
+        assertEquals("Database response exceeded size limit", error.getMessage());
+    }
+
+    @Test
+    void executeStatementRejectsARowOverSixtyFourKilobytes() throws Exception {
+        int limit = 64 * 1024;
+        TestHarness harness = new TestHarness();
+        ObjectNode exact = harness.service.executeStatement(harness.request(
+                "select repeat('x', " + (limit - 1) + ") as a, 'y' as b"), REGION);
+        assertEquals(1, exact.get("records").size());
+
+        ObjectNode over = harness.request("select repeat('x', " + limit + ") as a, 'y' as b");
+        AwsException error = assertThrows(AwsException.class,
+                () -> harness.service.executeStatement(over, REGION));
+        assertEquals("UnsupportedResultException", error.getErrorCode());
+        assertEquals("Packet for query is too large", error.getMessage());
+        assertEquals(400, error.getHttpStatus());
+    }
+
+    /** The limit applies to the row the database returns, not to its JSON escaping or base64 encoding. */
+    @Test
+    void executeStatementMeasuresARowBeforeItIsSerialized() throws Exception {
+        int size = 60 * 1024;
+        TestHarness harness = new TestHarness();
+        ObjectNode quotes = harness.service.executeStatement(harness.request(
+                "select repeat('\"', " + size + ") as c"), REGION);
+        assertEquals(size, quotes.get("records").get(0).get(0).get("stringValue").asText().length());
+
+        ObjectNode binary = harness.service.executeStatement(harness.request(
+                "select cast(repeat('x', " + size + ") as varbinary) as c"), REGION);
+        assertEquals(1, binary.get("records").size());
+        assertTrue(binary.get("records").get(0).get(0).has("blobValue"));
+    }
 
     /**
      * Message and error code checked against Aurora PostgreSQL 17.7 through the real
@@ -672,6 +843,46 @@ class RdsDataServiceTest {
     }
 
     @Test
+    void doesNotUseMasterCredentialsWhenSecretLookupFails() {
+        TestHarness harness = new TestHarness(missingSecrets());
+
+        AwsException error = assertThrows(AwsException.class,
+                () -> harness.service.executeStatement(harness.request("select 1"), REGION));
+
+        assertEquals("SecretsErrorException", error.getErrorCode());
+    }
+
+    @Test
+    void rejectsMalformedSecretInsteadOfUsingMasterCredentials() {
+        TestHarness harness = new TestHarness(secretWith("not-json"));
+
+        AwsException error = assertThrows(AwsException.class,
+                () -> harness.service.executeStatement(harness.request("select 1"), REGION));
+
+        assertEquals("InvalidSecretException", error.getErrorCode());
+    }
+
+    @Test
+    void rejectsEmptySecretInsteadOfUsingMasterCredentials() {
+        TestHarness harness = new TestHarness(secretWith(" "));
+
+        AwsException error = assertThrows(AwsException.class,
+                () -> harness.service.executeStatement(harness.request("select 1"), REGION));
+
+        assertEquals("InvalidSecretException", error.getErrorCode());
+    }
+
+    @Test
+    void rejectsSecretMissingCredentialsInsteadOfUsingMasterCredentials() {
+        TestHarness harness = new TestHarness(secretWith("{\"username\":\"sa\"}"));
+
+        AwsException error = assertThrows(AwsException.class,
+                () -> harness.service.executeStatement(harness.request("select 1"), REGION));
+
+        assertEquals("InvalidSecretException", error.getErrorCode());
+    }
+
+    @Test
     void rejectsUnsupportedExecuteOptions() throws Exception {
         TestHarness harness = new TestHarness();
         harness.createTables();
@@ -733,22 +944,138 @@ class RdsDataServiceTest {
     }
 
     @Test
+    void statementOutsideATransactionHoldsTheClusterAwakeOnlyWhileItRuns() throws Exception {
+        TestHarness harness = new TestHarness();
+        harness.createTables();
+
+        harness.service.executeStatement(harness.request("select 1"), REGION);
+
+        assertEquals(List.of(RESOURCE_ARN), harness.gate.entered);
+        assertEquals(0, harness.gate.held.get());
+    }
+
+    @Test
+    void transactionHoldsTheClusterAwakeUntilItEnds() throws Exception {
+        TestHarness harness = new TestHarness();
+        harness.createTables();
+
+        String committed = harness.service.beginTransaction(harness.beginRequest(), REGION)
+                .get("transactionId").asText();
+        ObjectNode insert = harness.request("insert into data_api_items(id, title, score) values ('held', 'Held', 1)");
+        insert.put("transactionId", committed);
+        harness.service.executeStatement(insert, REGION);
+        assertEquals(1, harness.gate.held.get(), "an open transaction keeps the cluster from pausing");
+        harness.service.commitTransaction(harness.transactionRequest(committed), REGION);
+        assertEquals(0, harness.gate.held.get());
+
+        String rolledBack = harness.service.beginTransaction(harness.beginRequest(), REGION)
+                .get("transactionId").asText();
+        assertEquals(1, harness.gate.held.get());
+        harness.service.rollbackTransaction(harness.transactionRequest(rolledBack), REGION);
+        assertEquals(0, harness.gate.held.get());
+        assertEquals(2, harness.gate.entered.size(), "statements in a transaction reuse its hold");
+    }
+
+    @Test
+    void expiredTransactionLetsTheClusterPause() throws Exception {
+        TestHarness harness = new TestHarness(Duration.ofMillis(50));
+        String tx = harness.service.beginTransaction(harness.beginRequest(), REGION)
+                .get("transactionId").asText();
+        Thread.sleep(200);
+
+        ObjectNode next = harness.request("select 1");
+        next.put("transactionId", tx);
+        assertThrows(AwsException.class, () -> harness.service.executeStatement(next, REGION));
+
+        assertEquals(0, harness.gate.held.get());
+    }
+
+    @Test
+    void clusterThatCannotResumeFailsTheRequestAsAnInternalError() {
+        TestHarness harness = new TestHarness();
+        harness.gate.failure = new IllegalStateException("Could not resume auto-paused RDS container");
+
+        AwsException error = assertThrows(AwsException.class,
+                () -> harness.service.executeStatement(harness.request("select 1"), REGION));
+
+        assertEquals("InternalServerErrorException", error.getErrorCode());
+        assertEquals(500, error.getHttpStatus());
+        assertEquals(0, harness.gate.held.get());
+    }
+
+    @Test
+    void resolvesTheCurrentEndpointForEveryNewPhysicalConnection() {
+        TestHarness harness = new TestHarness();
+        EndpointInfo first = new EndpointInfo("198.18.200.10", 3306);
+        EndpointInfo second = new EndpointInfo("198.18.200.11", 3306);
+        harness.currentEndpoint.set(first);
+
+        harness.service.executeStatement(harness.request("select 1"), REGION);
+        harness.currentEndpoint.set(second);
+        harness.service.executeStatement(harness.request("select 1"), REGION);
+
+        assertEquals(2, harness.endpointsResolved.get());
+        assertEquals(List.of(first, second), harness.endpointsOpened);
+        assertEquals(List.of(RESOURCE_ARN, RESOURCE_ARN), harness.gate.entered);
+    }
+
+    @Test
+    void anOpenTransactionKeepsItsConnectionWhileNewConnectionsRefresh() {
+        TestHarness harness = new TestHarness();
+        EndpointInfo first = new EndpointInfo("198.18.200.10", 3306);
+        EndpointInfo second = new EndpointInfo("198.18.200.11", 3306);
+        harness.currentEndpoint.set(first);
+        String firstTransaction = harness.service.beginTransaction(harness.beginRequest(), REGION)
+                .path("transactionId").asText();
+        harness.currentEndpoint.set(second);
+
+        ObjectNode inTransaction = harness.request("select 1");
+        inTransaction.put("transactionId", firstTransaction);
+        harness.service.executeStatement(inTransaction, REGION);
+        harness.service.executeStatement(harness.request("select 1"), REGION);
+        String secondTransaction = harness.service.beginTransaction(harness.beginRequest(), REGION)
+                .path("transactionId").asText();
+
+        assertEquals(3, harness.endpointsResolved.get());
+        assertEquals(List.of(first, second, second), harness.endpointsOpened);
+        harness.service.rollbackTransaction(harness.transactionRequest(firstTransaction), REGION);
+        harness.service.rollbackTransaction(harness.transactionRequest(secondTransaction), REGION);
+    }
+
+    @Test
+    void endpointResolutionFailureFailsClosedAndReleasesTheLease() {
+        TestHarness harness = new TestHarness();
+        harness.endpointFailure = new IllegalStateException("Docker inspect failed");
+
+        AwsException error = assertThrows(AwsException.class,
+                () -> harness.service.executeStatement(harness.request("select 1"), REGION));
+
+        assertEquals("InternalServerErrorException", error.getErrorCode());
+        assertEquals(500, error.getHttpStatus());
+        assertEquals(1, harness.endpointsResolved.get());
+        assertEquals(0, harness.connectionsOpened.get());
+        assertEquals(0, harness.gate.held.get());
+    }
+
+    @Test
     void closesConnectionWhenTransactionSetupFails() {
         RdsDataResourceResolver resolver = mock(RdsDataResourceResolver.class);
-        SecretsManagerService secrets = fallbackSecrets();
+        SecretsManagerService secrets = defaultSecrets();
         RdsDataResourceResolver.DatabaseTarget target = target();
         when(resolver.resolve(RESOURCE_ARN, REGION)).thenReturn(target);
         AtomicBoolean closed = new AtomicBoolean(false);
         RdsDataConnectionFactory failingFactory = new RdsDataConnectionFactory() {
             @Override
             Connection open(RdsDataResourceResolver.DatabaseTarget target,
+                            EndpointInfo endpoint,
                             String username,
                             String password,
                             String database) {
                 return throwingSetAutoCommitConnection(closed);
             }
         };
-        RdsDataService service = new RdsDataService(resolver, secrets, objectMapper, failingFactory, Duration.ofSeconds(60));
+        RdsDataService service = new RdsDataService(
+                resolver, secrets, objectMapper, failingFactory, Duration.ofSeconds(60), endpointResolver());
 
         AwsException error = assertThrows(AwsException.class, () -> service.beginTransaction(beginRequest(), REGION));
 
@@ -806,11 +1133,27 @@ class RdsDataServiceTest {
         return param;
     }
 
-    private static SecretsManagerService fallbackSecrets() {
+    private static SecretsManagerService defaultSecrets() {
+        SecretsManagerService secrets = mock(SecretsManagerService.class);
+        SecretVersion version = new SecretVersion();
+        version.setSecretString("{\"username\":\"sa\",\"password\":\"\"}");
+        when(secrets.getSecretValue(any(), any(), any(), any())).thenReturn(version);
+        return secrets;
+    }
+
+    private static SecretsManagerService missingSecrets() {
         SecretsManagerService secrets = mock(SecretsManagerService.class);
         when(secrets.getSecretValue(any(), any(), any(), any()))
                 .thenThrow(new AwsException("ResourceNotFoundException",
                         "Secrets Manager can't find the specified secret.", 400));
+        return secrets;
+    }
+
+    private static SecretsManagerService secretWith(String value) {
+        SecretsManagerService secrets = mock(SecretsManagerService.class);
+        SecretVersion version = new SecretVersion();
+        version.setSecretString(value);
+        when(secrets.getSecretValue(any(), any(), any(), any())).thenReturn(version);
         return secrets;
     }
 
@@ -823,8 +1166,12 @@ class RdsDataServiceTest {
     }
 
     private static RdsDataResourceResolver.DatabaseTarget target(String resourceArn, DatabaseEngine engine) {
-        return new RdsDataResourceResolver.DatabaseTarget(resourceArn, engine,
-                "127.0.0.1", 3306, "sa", "", "app");
+        return new RdsDataResourceResolver.DatabaseTarget(
+                resourceArn, resourceArn, engine, "sa", "", "app");
+    }
+
+    private static RdsBackendEndpointResolver endpointResolver() {
+        return (runtimeId, engine) -> new EndpointInfo("127.0.0.1", engine.defaultPort());
     }
 
     /** The H2 compatibility mode standing in for {@code engine}. */
@@ -864,14 +1211,110 @@ class RdsDataServiceTest {
                 });
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"ExecuteStatement", "BatchExecuteStatement", "BeginTransaction"})
+    void optedInCallsRejectResumingBackendsBeforeOpeningJdbcAndSucceedOnRetry(String operation) throws Exception {
+        TestHarness harness = new TestHarness(true);
+        harness.createEventsTable();
+        harness.gate.resuming = true;
+
+        AwsException error = assertThrows(AwsException.class, () -> call(harness, operation));
+
+        assertEquals("DatabaseResumingException", error.getErrorCode());
+        assertEquals(400, error.getHttpStatus());
+        assertEquals(0, harness.connectionsOpened.get());
+        assertEquals(0, harness.endpointsResolved.get());
+        assertEquals(0, harness.gate.held.get());
+
+        harness.gate.resuming = false;
+        call(harness, operation);
+        assertEquals(1, harness.connectionsOpened.get());
+        if ("BatchExecuteStatement".equals(operation)) {
+            assertEquals(1, harness.service.executeStatement(
+                    harness.request("select count(*) from data_api_events"), REGION)
+                    .path("records").get(0).get(0).path("longValue").asInt());
+        }
+        harness.service.shutdown();
+        assertEquals(0, harness.gate.held.get());
+    }
+
+    @Test
+    void defaultConfigurationStillWaitsForResumingBackends() {
+        TestHarness harness = new TestHarness();
+        harness.gate.resuming = true;
+
+        assertEquals(1, harness.service.executeStatement(harness.request("select 1"), REGION)
+                .path("records").get(0).get(0).path("longValue").asInt());
+        assertEquals(0, harness.gate.held.get());
+        harness.service.shutdown();
+    }
+
+    private void call(TestHarness harness, String operation) {
+        switch (operation) {
+            case "ExecuteStatement" -> harness.service.executeStatement(harness.request("select 1"), REGION);
+            case "BatchExecuteStatement" -> {
+                ObjectNode request = harness.request("insert into data_api_events(name) values ('retry')");
+                request.set("parameterSets", objectMapper.createArrayNode().add(objectMapper.createArrayNode()));
+                harness.service.batchExecuteStatement(request, REGION);
+            }
+            case "BeginTransaction" -> harness.service.beginTransaction(harness.beginRequest(), REGION);
+            default -> throw new AssertionError(operation);
+        }
+    }
+
+    /** Counts the backends the Data API enters and the holds still open on them. */
+    private static final class CountingGate implements RdsBackendGate {
+        private final List<String> entered = new CopyOnWriteArrayList<>();
+        private final AtomicInteger held = new AtomicInteger();
+        private volatile IllegalStateException failure;
+        private boolean resuming;
+
+        @Override
+        public Lease enterRuntime(String runtimeId) {
+            return enterRuntime(runtimeId, true);
+        }
+
+        @Override
+        public Lease enterRuntime(String runtimeId, boolean waitForResume) {
+            if (!waitForResume && resuming) {
+                throw new ResumingException();
+            }
+            if (failure != null) {
+                throw failure;
+            }
+            entered.add(runtimeId);
+            held.incrementAndGet();
+            AtomicBoolean closed = new AtomicBoolean();
+            return () -> {
+                if (closed.compareAndSet(false, true)) {
+                    held.decrementAndGet();
+                }
+            };
+        }
+    }
+
     private final class TestHarness {
         private final String jdbcUrl;
         private final RdsDataResourceResolver resolver;
         private final RdsDataResourceResolver.DatabaseTarget target;
+        private final CountingGate gate = new CountingGate();
+        private final AtomicInteger connectionsOpened = new AtomicInteger();
+        private final AtomicInteger endpointsResolved = new AtomicInteger();
+        private final AtomicReference<EndpointInfo> currentEndpoint = new AtomicReference<>();
+        private final List<EndpointInfo> endpointsOpened = new CopyOnWriteArrayList<>();
+        private volatile RuntimeException endpointFailure;
         private final RdsDataService service;
 
         private TestHarness() {
             this(DatabaseEngine.MYSQL, Duration.ofSeconds(60));
+        }
+
+        private TestHarness(boolean resumingExceptionEnabled) {
+            this(defaultSecrets(), DatabaseEngine.POSTGRES, Duration.ofSeconds(60), resumingExceptionEnabled);
+        }
+
+        private TestHarness(SecretsManagerService secrets) {
+            this(secrets, DatabaseEngine.MYSQL, Duration.ofSeconds(60));
         }
 
         private TestHarness(DatabaseEngine engine) {
@@ -883,26 +1326,46 @@ class RdsDataServiceTest {
         }
 
         private TestHarness(DatabaseEngine engine, Duration transactionTtl) {
+            this(defaultSecrets(), engine, transactionTtl);
+        }
+
+        private TestHarness(SecretsManagerService secrets, DatabaseEngine engine, Duration transactionTtl) {
+            this(secrets, engine, transactionTtl, false);
+        }
+
+        private TestHarness(SecretsManagerService secrets, DatabaseEngine engine, Duration transactionTtl,
+                            boolean resumingExceptionEnabled) {
             jdbcUrl = "jdbc:h2:mem:rdsdata_" + UUID.randomUUID() + ";MODE=" + h2Mode(engine)
                     + ";DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1";
             resolver = mock(RdsDataResourceResolver.class);
-            SecretsManagerService secrets = fallbackSecrets();
             target = target(RESOURCE_ARN, engine);
             when(resolver.resolve(RESOURCE_ARN, REGION)).thenReturn(target);
             when(resolver.resolve(FALLBACK_RESOURCE_ARN, REGION)).thenReturn(target);
             when(resolver.resolve(OTHER_RESOURCE_ARN, REGION)).thenReturn(target(OTHER_RESOURCE_ARN));
             when(resolver.resolve(UNKNOWN_RESOURCE_ARN, REGION))
                     .thenThrow(new AwsException("BadRequestException", "resource is missing", 400));
+            currentEndpoint.set(new EndpointInfo("127.0.0.1", engine.defaultPort()));
+            RdsBackendEndpointResolver backendEndpointResolver = (runtimeId, databaseEngine) -> {
+                endpointsResolved.incrementAndGet();
+                if (endpointFailure != null) {
+                    throw endpointFailure;
+                }
+                return currentEndpoint.get();
+            };
             RdsDataConnectionFactory connectionFactory = new RdsDataConnectionFactory() {
                 @Override
                 Connection open(RdsDataResourceResolver.DatabaseTarget target,
+                                EndpointInfo endpoint,
                                 String username,
                                 String password,
                                 String database) throws SQLException {
+                    endpointsOpened.add(endpoint);
+                    connectionsOpened.incrementAndGet();
                     return getConnection();
                 }
             };
-            service = new RdsDataService(resolver, secrets, objectMapper, connectionFactory, transactionTtl);
+            service = new RdsDataService(resolver, secrets, objectMapper, connectionFactory,
+                    transactionTtl, gate, backendEndpointResolver, resumingExceptionEnabled);
         }
 
         private Connection getConnection() throws SQLException {

@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.cognito;
 
+import io.github.hectorvent.floci.core.common.Base64Url;
 import io.github.hectorvent.floci.services.cognito.model.UserPool;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
@@ -12,7 +13,6 @@ import jakarta.ws.rs.core.Response;
 import java.math.BigInteger;
 import java.security.interfaces.RSAPublicKey;
 import java.util.Arrays;
-import java.util.Base64;
 
 /**
  * Exposes Cognito well-known endpoints.
@@ -66,7 +66,7 @@ public class CognitoWellKnownController {
         String authorizationEndpoint = tokenEndpoint.replace("/token", "/authorize");
 
         String body = """
-                {"issuer":"%s","jwks_uri":"%s","authorization_endpoint":"%s","token_endpoint":"%s","userinfo_endpoint":"%s","subject_types_supported":["public"],"response_types_supported":["code"],"grant_types_supported":["client_credentials","authorization_code"],"token_endpoint_auth_methods_supported":["client_secret_basic","client_secret_post"],"id_token_signing_alg_values_supported":["RS256"]}
+                {"issuer":"%s","jwks_uri":"%s","authorization_endpoint":"%s","token_endpoint":"%s","userinfo_endpoint":"%s","subject_types_supported":["public"],"response_types_supported":["code"],"grant_types_supported":["client_credentials","authorization_code"],"token_endpoint_auth_methods_supported":["client_secret_basic","client_secret_post"],"id_token_signing_alg_values_supported":["RS256"],"code_challenge_methods_supported":["S256"]}
                 """.formatted(issuer, jwksUri, authorizationEndpoint, tokenEndpoint, userInfoEndpoint).strip();
         return Response.ok(body).build();
     }
@@ -76,6 +76,6 @@ public class CognitoWellKnownController {
         if (bytes.length > 1 && bytes[0] == 0) {
             bytes = Arrays.copyOfRange(bytes, 1, bytes.length);
         }
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+        return Base64Url.encode(bytes);
     }
 }

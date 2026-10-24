@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.config;
 
+import io.github.hectorvent.floci.core.common.Pem;
 import io.github.hectorvent.floci.services.acm.CertificateGenerator;
 import io.github.hectorvent.floci.services.acm.model.KeyAlgorithm;
 import org.junit.jupiter.api.AfterEach;
@@ -7,14 +8,21 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.X509TrustManager;
 import java.io.ByteArrayInputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.GeneralSecurityException;
+import java.security.KeyStore;
+import java.security.cert.Certificate;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -57,6 +65,34 @@ class ContainerCaBundleTest {
         assertEquals(1, certificates.stream().filter(ca.certificate()::equals).count());
     }
 
+    /**
+     * The SSL context trusts every root the JVM trusts, so a public issuer, such as a real
+     * Cognito pool's, still validates, and Floci's own anchor besides.
+     */
+    @Test
+    void theSslContextTrustsEveryJvmRootAndTheAnchor() throws Exception {
+        Path tlsDir = tempDir.resolve("tls");
+        FlociCertificateAuthority ca = FlociCertificateAuthority.loadOrCreate(tlsDir);
+        Path bundle = ContainerCaBundle.write(tlsDir, ca.certificatePath());
+
+        List<X509Certificate> accepted = new ArrayList<>();
+        for (TrustManager manager : ContainerCaBundle.trustManagers(bundle)) {
+            if (manager instanceof X509TrustManager x509) {
+                accepted.addAll(List.of(x509.getAcceptedIssuers()));
+            }
+        }
+        TrustManagerFactory jvm = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+        jvm.init((KeyStore) null);
+        for (TrustManager manager : jvm.getTrustManagers()) {
+            if (manager instanceof X509TrustManager x509) {
+                for (X509Certificate root : x509.getAcceptedIssuers()) {
+                    assertTrue(accepted.contains(root), root.getSubjectX500Principal().getName());
+                }
+            }
+        }
+        assertTrue(accepted.contains(ca.certificate()), "Floci's anchor");
+    }
+
     @Test
     void writeIsIdempotent() throws Exception {
         Path tlsDir = tempDir.resolve("tls");
@@ -66,7 +102,7 @@ class ContainerCaBundleTest {
         byte[] second = Files.readAllBytes(ContainerCaBundle.write(tlsDir, ca.certificatePath()));
 
         assertTrue(java.util.Arrays.equals(first, second));
-        try (var files = Files.list(tlsDir)) {
+        try (Stream<Path> files = Files.list(tlsDir)) {
             assertTrue(files.noneMatch(file -> file.getFileName().toString().endsWith(".tmp")), "no temp file left behind");
         }
     }
@@ -86,7 +122,7 @@ class ContainerCaBundleTest {
         List<X509Certificate> certificates = parseAll(bundle.getBytes());
         int size = certificates.size();
         assertEquals(ca.certificate(), certificates.get(size - 1));
-        assertEquals(new CertificateGenerator().parseCertificate(leaf.certificatePem()), certificates.get(size - 2));
+        assertEquals(Pem.parseCertificate(leaf.certificatePem()), certificates.get(size - 2));
     }
 
     @Test
@@ -96,6 +132,24 @@ class ContainerCaBundleTest {
 
         assertThrows(IllegalArgumentException.class, () -> ContainerCaBundle.write(tlsDir, notACertificate));
         assertFalse(Files.exists(tlsDir.resolve("floci-ca-bundle.pem")));
+    }
+
+    /**
+     * A bundle with no certificate in it would make a trust store that trusts nothing, and every
+     * HTTPS call through it would fail, public endpoints included. Floci's own clients fall back to
+     * the JVM's roots instead.
+     */
+    @Test
+    void sslContextIsEmptyForABundleWithNoCertificate() throws Exception {
+        Path tlsDir = Files.createDirectories(tempDir.resolve("tls"));
+        Files.writeString(tlsDir.resolve(ContainerCaBundle.FILE_NAME), "");
+        EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
+        when(config.tls().enabled()).thenReturn(true);
+        when(config.storage().persistentPath()).thenReturn(tempDir.toString());
+
+        assertEquals(Optional.empty(), ContainerCaBundle.sslContext(config));
+        assertThrows(GeneralSecurityException.class,
+                () -> ContainerCaBundle.sslContext(tlsDir.resolve(ContainerCaBundle.FILE_NAME)));
     }
 
     @Test
@@ -207,7 +261,7 @@ class ContainerCaBundleTest {
 
     private static List<X509Certificate> parseAll(byte[] pem) throws Exception {
         List<X509Certificate> certificates = new ArrayList<>();
-        for (var certificate : CertificateFactory.getInstance("X.509").generateCertificates(new ByteArrayInputStream(pem))) {
+        for (Certificate certificate : CertificateFactory.getInstance("X.509").generateCertificates(new ByteArrayInputStream(pem))) {
             certificates.add((X509Certificate) certificate);
         }
         return certificates;

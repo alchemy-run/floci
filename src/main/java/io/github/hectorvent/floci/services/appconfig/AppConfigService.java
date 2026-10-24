@@ -8,6 +8,7 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.core.storage.StorageOperations;
 import io.github.hectorvent.floci.services.appconfig.model.Application;
 import io.github.hectorvent.floci.services.appconfig.model.ConfigurationProfile;
 import io.github.hectorvent.floci.services.appconfig.model.Deployment;
@@ -110,39 +111,31 @@ public class AppConfigService {
         return app;
     }
 
-    public Application updateApplication(String id, Map<String, Object> request) {
-        Application app = getApplication(id);
-        if (request.containsKey("Name")) {
-            app.setName((String) request.get("Name"));
-        }
-        if (request.containsKey("Description")) {
-            app.setDescription((String) request.get("Description"));
-        }
-        applicationStore.put(id, app);
-        return app;
+    public Application getApplication(String idOrName) {
+        return resolveApplication(idOrName);
     }
 
-    public Application getApplication(String id) {
-        return applicationStore.get(id).orElseThrow(() -> new AwsException("ResourceNotFoundException", "Application not found", 404));
+    /** The application whose ID or name is {@code idOrName}. */
+    public Application resolveApplication(String idOrName) {
+        return applicationStore.get(idOrName)
+                .or(() -> listApplications().stream().filter(a -> idOrName.equals(a.getName())).findFirst())
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Application not found", 404));
     }
 
     public List<Application> listApplications() {
         return applicationStore.scan(k -> true);
     }
 
-    public void deleteApplication(String id) {
-        getApplication(id);
-        if (!listEnvironments(id).isEmpty() || !listConfigurationProfiles(id).isEmpty()) {
-            throw new AwsException("BadRequestException",
-                    "Cannot delete application " + id + ", because there are still environments existing under it", 400);
-        }
-        applicationStore.delete(id);
+    public void deleteApplication(String idOrName) {
+        applicationStore.get(idOrName)
+                .or(() -> listApplications().stream().filter(a -> idOrName.equals(a.getName())).findFirst())
+                .ifPresent(application -> applicationStore.delete(application.getId()));
     }
 
     // ──────────────────────────── Environment ────────────────────────────
 
-    public Environment createEnvironment(String appId, Map<String, Object> request) {
-        getApplication(appId);
+    public Environment createEnvironment(String applicationIdentifier, Map<String, Object> request) {
+        String appId = resolveApplication(applicationIdentifier).getId();
         Environment env = new Environment();
         env.setId(shortId(7));
         env.setApplicationId(appId);
@@ -155,33 +148,36 @@ public class AppConfigService {
         return env;
     }
 
-    public Environment updateEnvironment(String appId, String envId, Map<String, Object> request) {
-        Environment env = getEnvironment(appId, envId);
-        if (request.containsKey("Name")) {
-            env.setName((String) request.get("Name"));
-        }
-        if (request.containsKey("Description")) {
-            env.setDescription((String) request.get("Description"));
-        }
-        if (request.containsKey("Monitors")) {
-            env.setMonitors(monitorsFrom(request.get("Monitors")));
-        }
-        environmentStore.put(envId, env);
-        return env;
+    public Environment getEnvironment(String applicationIdentifier, String environmentIdentifier) {
+        String appId = resolveApplication(applicationIdentifier).getId();
+        return resolveEnvironment(appId, environmentIdentifier);
     }
 
-    public void deleteEnvironment(String appId, String envId) {
-        getEnvironment(appId, envId);
+    public synchronized void deleteEnvironment(String applicationIdentifier, String environmentIdentifier) {
+        Application application = resolveApplication(applicationIdentifier);
+        Environment environment = resolveEnvironment(application.getId(), environmentIdentifier);
+        String appId = application.getId();
+        String envId = environment.getId();
+
+        StorageOperations.deleteByPrefix(deploymentStore, appId + "::" + envId + "::");
+        StorageOperations.deleteByPrefix(activeConfigStore, envId + "::");
+
+        String deploymentScope = appId + "::" + envId;
+        deploymentPageTokens.entrySet().removeIf(entry -> entry.getValue().scope().equals(deploymentScope));
         environmentStore.delete(envId);
     }
 
-    public Environment getEnvironment(String appId, String envId) {
-        Environment env = environmentStore.get(envId).orElseThrow(() -> new AwsException("ResourceNotFoundException", "Environment not found", 404));
-        if (!env.getApplicationId().equals(appId)) throw new AwsException("ResourceNotFoundException", "Environment not found in this application", 404);
-        return env;
+    /** The environment of {@code appId} whose ID or name is {@code idOrName}. */
+    public Environment resolveEnvironment(String appId, String idOrName) {
+        // An exact ID always wins over another environment's name, and a direct lookup skips the scan.
+        return environmentStore.get(idOrName)
+                .filter(e -> appId.equals(e.getApplicationId()))
+                .or(() -> listEnvironments(appId).stream().filter(e -> idOrName.equals(e.getName())).findFirst())
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Environment not found", 404));
     }
 
-    public List<Environment> listEnvironments(String appId) {
+    public List<Environment> listEnvironments(String applicationIdentifier) {
+        String appId = resolveApplication(applicationIdentifier).getId();
         return environmentStore.scan(k -> true).stream()
                 .filter(e -> e.getApplicationId().equals(appId))
                 .toList();
@@ -189,8 +185,8 @@ public class AppConfigService {
 
     // ──────────────────────────── Configuration Profile ────────────────────────────
 
-    public ConfigurationProfile createConfigurationProfile(String appId, Map<String, Object> request) {
-        getApplication(appId);
+    public ConfigurationProfile createConfigurationProfile(String applicationIdentifier, Map<String, Object> request) {
+        String appId = resolveApplication(applicationIdentifier).getId();
         ConfigurationProfile profile = new ConfigurationProfile();
         profile.setId(shortId(7));
         profile.setApplicationId(appId);
@@ -206,63 +202,64 @@ public class AppConfigService {
         return profile;
     }
 
-    public ConfigurationProfile updateConfigurationProfile(String appId, String profileId, Map<String, Object> request) {
-        ConfigurationProfile profile = getConfigurationProfile(appId, profileId);
-        if (request.containsKey("Name")) {
-            profile.setName((String) request.get("Name"));
-        }
-        if (request.containsKey("Description")) {
-            profile.setDescription((String) request.get("Description"));
-        }
-        if (request.containsKey("RetrievalRoleArn")) {
-            profile.setRetrievalRoleArn((String) request.get("RetrievalRoleArn"));
-        }
-        if (request.containsKey("KmsKeyIdentifier")) {
-            profile.setKmsKeyIdentifier((String) request.get("KmsKeyIdentifier"));
-        }
-        if (request.containsKey("Validators")) {
-            profile.setValidators(monitorsFrom(request.get("Validators")));
-        }
-        profileStore.put(profileId, profile);
-        return profile;
+    public ConfigurationProfile getConfigurationProfile(String applicationIdentifier, String profileIdentifier) {
+        String appId = resolveApplication(applicationIdentifier).getId();
+        return resolveConfigurationProfile(appId, profileIdentifier);
     }
 
-
-    public ConfigurationProfile getConfigurationProfile(String appId, String profileId) {
-        ConfigurationProfile profile = profileStore.get(profileId).orElseThrow(() -> new AwsException("ResourceNotFoundException", "Configuration profile not found", 404));
-        if (!profile.getApplicationId().equals(appId)) throw new AwsException("ResourceNotFoundException", "Profile not found in this application", 404);
-        return profile;
+    /** The configuration profile of {@code appId} whose ID or name is {@code idOrName}. */
+    public ConfigurationProfile resolveConfigurationProfile(String appId, String idOrName) {
+        return profileStore.get(idOrName)
+                .filter(p -> appId.equals(p.getApplicationId()))
+                .or(() -> listConfigurationProfiles(appId).stream().filter(p -> idOrName.equals(p.getName())).findFirst())
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Configuration profile not found", 404));
     }
 
-    public List<ConfigurationProfile> listConfigurationProfiles(String appId) {
+    public List<ConfigurationProfile> listConfigurationProfiles(String applicationIdentifier) {
+        String appId = resolveApplication(applicationIdentifier).getId();
         return profileStore.scan(k -> true).stream()
                 .filter(p -> p.getApplicationId().equals(appId))
                 .toList();
     }
 
-    public void deleteConfigurationProfile(String appId, String profileId) {
+    public void deleteConfigurationProfile(String applicationIdentifier, String profileIdentifier) {
+        String appId = resolveApplication(applicationIdentifier).getId();
         // Unlike deleteApplication (a single, unscoped ID), a profile is nested under an
         // application - a mismatched appId must not be able to delete another application's
         // profile just because its bare profileId is guessed/known. A profileId that doesn't
         // exist at all is still an idempotent no-op, matching deleteApplication's convention;
         // only an existing-but-wrongly-scoped one is rejected.
-        profileStore.get(profileId).ifPresent(profile -> {
-            if (!profile.getApplicationId().equals(appId)) {
-                throw new AwsException("ResourceNotFoundException", "Configuration profile not found in this application", 404);
-            }
-        });
-        String versionPrefix = appId + "::" + profileId + "::";
-        if (!versionStore.scan(key -> key.startsWith(versionPrefix)).isEmpty()) {
-            throw new AwsException("BadRequestException",
-                    "Cannot delete configuration profile " + profileId + " because hosted configuration versions still exist", 400);
+        ConfigurationProfile exactProfile = profileStore.get(profileIdentifier).orElse(null);
+        ConfigurationProfile profile = exactProfile != null && appId.equals(exactProfile.getApplicationId())
+                ? exactProfile
+                : listConfigurationProfiles(appId).stream()
+                    .filter(candidate -> profileIdentifier.equals(candidate.getName()))
+                    .findFirst()
+                    .orElse(null);
+        if (profile == null && exactProfile != null) {
+            throw new AwsException("ResourceNotFoundException",
+                    "Configuration profile not found in this application", 404);
         }
+        if (profile == null) {
+            return;
+        }
+        String profileId = profile.getId();
+        // A hosted configuration version isn't independently addressable outside its profile's
+        // lifecycle - cascade the delete so a caller can't still fetch versions for a profile
+        // that's supposedly gone.
+        StorageOperations.deleteByPrefix(versionStore, appId + "::" + profileId + "::");
         profileStore.delete(profileId);
     }
 
     // ──────────────────────────── Hosted Configuration Version ────────────────────────────
 
-    public HostedConfigurationVersion createHostedConfigurationVersion(String appId, String profileId, byte[] content, String contentType, String description, String versionLabel) {
-        getConfigurationProfile(appId, profileId);
+    public HostedConfigurationVersion createHostedConfigurationVersion(String applicationIdentifier,
+                                                                         String profileIdentifier,
+                                                                         byte[] content,
+                                                                         String contentType,
+                                                                         String description) {
+        String appId = resolveApplication(applicationIdentifier).getId();
+        String profileId = resolveConfigurationProfile(appId, profileIdentifier).getId();
         String prefix = appId + "::" + profileId + "::";
         int nextVersion = versionStore.scan(k -> k.startsWith(prefix))
                 .stream().mapToInt(HostedConfigurationVersion::getVersionNumber).max().orElse(0) + 1;
@@ -280,13 +277,19 @@ public class AppConfigService {
         return version;
     }
 
-
-    public HostedConfigurationVersion getHostedConfigurationVersion(String appId, String profileId, int versionNumber) {
+    public HostedConfigurationVersion getHostedConfigurationVersion(String applicationIdentifier,
+                                                                      String profileIdentifier,
+                                                                      int versionNumber) {
+        String appId = resolveApplication(applicationIdentifier).getId();
+        String profileId = resolveConfigurationProfile(appId, profileIdentifier).getId();
         return versionStore.get(appId + "::" + profileId + "::" + versionNumber)
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Hosted configuration version not found", 404));
     }
 
-    public List<HostedConfigurationVersionSummary> listHostedConfigurationVersions(String appId, String profileId) {
+    public List<HostedConfigurationVersionSummary> listHostedConfigurationVersions(String applicationIdentifier,
+                                                                                     String profileIdentifier) {
+        String appId = resolveApplication(applicationIdentifier).getId();
+        String profileId = resolveConfigurationProfile(appId, profileIdentifier).getId();
         String prefix = appId + "::" + profileId + "::";
         return versionStore.scan(k -> k.startsWith(prefix))
                 .stream()
@@ -303,7 +306,11 @@ public class AppConfigService {
                 .toList();
     }
 
-    public void deleteHostedConfigurationVersion(String appId, String profileId, int versionNumber) {
+    public void deleteHostedConfigurationVersion(String applicationIdentifier,
+                                                  String profileIdentifier,
+                                                  int versionNumber) {
+        String appId = resolveApplication(applicationIdentifier).getId();
+        String profileId = resolveConfigurationProfile(appId, profileIdentifier).getId();
         versionStore.delete(appId + "::" + profileId + "::" + versionNumber);
     }
 
@@ -416,9 +423,13 @@ public class AppConfigService {
 
     // ──────────────────────────── Deployment ────────────────────────────
 
-    public Deployment startDeployment(String appId, String envId, Map<String, Object> request) {
-        Environment env = getEnvironment(appId, envId);
-        String profileId = (String) request.get("ConfigurationProfileId");
+    public synchronized Deployment startDeployment(String applicationIdentifier,
+                                                    String environmentIdentifier,
+                                                    Map<String, Object> request) {
+        String appId = resolveApplication(applicationIdentifier).getId();
+        String envId = resolveEnvironment(appId, environmentIdentifier).getId();
+        String profileId = resolveConfigurationProfile(
+                appId, (String) request.get("ConfigurationProfileId")).getId();
         String version = (String) request.get("ConfigurationVersion");
         String strategyId = (String) request.get("DeploymentStrategyId");
 
@@ -448,7 +459,12 @@ public class AppConfigService {
         deployment.setConfigurationName(profile.getName());
         deployment.setConfigurationVersion(version);
         deployment.setDeploymentStrategyId(strategyId);
-        deployment.setDeploymentNumber(nextNumber);
+        int nextDeploymentNumber = deploymentStore.scan(key -> true).stream()
+                .mapToInt(Deployment::getDeploymentNumber)
+                .max()
+                .orElse(0) + 1;
+        deployment.setDeploymentNumber(nextDeploymentNumber);
+        deployment.setState("COMPLETE"); // Synchronous immediate deployment
         deployment.setDescription((String) request.get("Description"));
         deployment.setDeploymentDurationInMinutes(strategy.getDeploymentDurationInMinutes());
         deployment.setGrowthFactor(strategy.getGrowthFactor());
@@ -494,13 +510,21 @@ public class AppConfigService {
         return deployment;
     }
 
-    public Deployment getDeployment(String appId, String envId, int deploymentNumber) {
+    public Deployment getDeployment(String applicationIdentifier,
+                                    String environmentIdentifier,
+                                    int deploymentNumber) {
+        String appId = resolveApplication(applicationIdentifier).getId();
+        String envId = resolveEnvironment(appId, environmentIdentifier).getId();
         return deploymentStore.get(appId + "::" + envId + "::" + deploymentNumber)
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Deployment not found", 404));
     }
 
-    public DeploymentPage listDeployments(String appId, String envId, Integer maxResults, String nextToken) {
-        getEnvironment(appId, envId);
+    public DeploymentPage listDeployments(String applicationIdentifier,
+                                          String environmentIdentifier,
+                                          Integer maxResults,
+                                          String nextToken) {
+        String appId = resolveApplication(applicationIdentifier).getId();
+        String envId = resolveEnvironment(appId, environmentIdentifier).getId();
         int pageSize = maxResults == null ? 50 : maxResults;
         if (pageSize < 1 || pageSize > 50) {
             throw new AwsException("BadRequestException", "max_results must be between 1 and 50", 400);
@@ -943,13 +967,13 @@ public class AppConfigService {
     public void tagApplication(String appId, Map<String, String> tags) {
         Application app = getApplication(appId);
         app.getTags().putAll(tags);
-        applicationStore.put(appId, app);
+        applicationStore.put(app.getId(), app);
     }
 
     public void untagApplication(String appId, List<String> tagKeys) {
         Application app = getApplication(appId);
         tagKeys.forEach(app.getTags()::remove);
-        applicationStore.put(appId, app);
+        applicationStore.put(app.getId(), app);
     }
 
     public Map<String, String> getEnvironmentTags(String envId) {

@@ -6,10 +6,11 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
+import static io.github.hectorvent.floci.services.ses.SesV2TimestampMatchers.DECIMAL_NUMBERS;
+import static io.github.hectorvent.floci.services.ses.SesV2TimestampMatchers.epochSecondsWithMillis;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
-import static org.hamcrest.Matchers.notNullValue;
 
 /**
  * Integration test for SES V2 Contact CRUD under
@@ -54,7 +55,7 @@ class SesContactV2IntegrationTest {
     @Test
     @Order(3)
     void getContact_shape() {
-        given().header("Authorization", SES_AUTH)
+        given().config(DECIMAL_NUMBERS).header("Authorization", SES_AUTH)
         .when().get(CONTACTS + "/" + EMAIL)
         .then().statusCode(200)
                 .body("EmailAddress", equalTo(EMAIL))
@@ -67,8 +68,8 @@ class SesContactV2IntegrationTest {
                 .body("TopicDefaultPreferences[0].SubscriptionStatus", equalTo("OPT_OUT"))
                 .body("UnsubscribeAll", equalTo(false))
                 .body("AttributesData", equalTo("{\"name\":\"Alice\"}"))
-                .body("CreatedTimestamp", notNullValue())
-                .body("LastUpdatedTimestamp", notNullValue());
+                .body("CreatedTimestamp", epochSecondsWithMillis())
+                .body("LastUpdatedTimestamp", epochSecondsWithMillis());
     }
 
     @Test
@@ -175,13 +176,13 @@ class SesContactV2IntegrationTest {
     @Test
     @Order(13)
     void listContacts_lightweightProjection() {
-        given().contentType("application/json").header("Authorization", SES_AUTH).body("{}")
+        given().config(DECIMAL_NUMBERS).contentType("application/json").header("Authorization", SES_AUTH).body("{}")
         .when().post(CONTACTS + "/list")
         .then().statusCode(200)
                 .body("Contacts", hasSize(1))
                 .body("Contacts[0].EmailAddress", equalTo(EMAIL))
                 .body("Contacts[0].TopicPreferences", hasSize(2))
-                .body("Contacts[0].LastUpdatedTimestamp", notNullValue())
+                .body("Contacts[0].LastUpdatedTimestamp", epochSecondsWithMillis())
                 // ListContacts is a lightweight projection: no AttributesData / CreatedTimestamp.
                 .body("Contacts[0].AttributesData", org.hamcrest.Matchers.nullValue())
                 .body("Contacts[0].CreatedTimestamp", org.hamcrest.Matchers.nullValue());
@@ -259,12 +260,13 @@ class SesContactV2IntegrationTest {
         given().contentType("application/json").header("Authorization", SES_AUTH).body("[]")
         .when().post(CONTACTS + "/list")
         .then().statusCode(400)
-                .body("__type", equalTo("BadRequestException"));
+                .body("__type", equalTo("SerializationException"))
+                .body("message", equalTo("Start of list found where not expected"));
     }
 
-    // Type coercion — verified against real AWS (Jackson-backed), consistent with parseSendingEnabled:
-    // a JSON string coerces to the Boolean UnsubscribeAll (any string -> true), but a number is a
-    // SerializationException; AttributesData (String) rejects non-string types the same way.
+    // Type coercion, verified against real AWS: a JSON string coerces to the Boolean UnsubscribeAll
+    // only when it names a boolean, and a number is a SerializationException; AttributesData
+    // (String) rejects non-string types the same way.
 
     @Test
     @Order(21)
@@ -295,13 +297,25 @@ class SesContactV2IntegrationTest {
 
     @Test
     @Order(24)
-    void createContact_unsubscribeAllString_coercesToTrue() {
-        // AWS coerces ANY JSON string to true for the Boolean field (unlike a number, which is rejected).
-        post(CONTACTS, "{\"EmailAddress\":\"type-d@example.com\",\"UnsubscribeAll\":\"no\"}")
+    void createContact_unsubscribeAllString_coercesByText() {
+        post(CONTACTS, "{\"EmailAddress\":\"type-d@example.com\",\"UnsubscribeAll\":\"yes\"}")
         .then().statusCode(200);
         given().header("Authorization", SES_AUTH)
         .when().get(CONTACTS + "/type-d@example.com")
         .then().statusCode(200).body("UnsubscribeAll", equalTo(true));
+
+        given().contentType("application/json").header("Authorization", SES_AUTH)
+                .body("{\"UnsubscribeAll\":\"no\"}")
+        .when().put(CONTACTS + "/type-d@example.com")
+        .then().statusCode(200);
+        given().header("Authorization", SES_AUTH)
+        .when().get(CONTACTS + "/type-d@example.com")
+        .then().statusCode(200).body("UnsubscribeAll", equalTo(false));
+
+        post(CONTACTS, "{\"EmailAddress\":\"type-e@example.com\",\"UnsubscribeAll\":\"abc\"}")
+        .then().statusCode(400)
+                .body("__type", equalTo("SerializationException"))
+                .body("message", equalTo("STRING_VALUE can not be converted to an Boolean"));
     }
 
     @Test

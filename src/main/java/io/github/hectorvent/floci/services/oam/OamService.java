@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.Base64Url;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
@@ -18,6 +19,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collection;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -282,7 +284,14 @@ public class OamService {
     }
 
     private static boolean principalValueMatches(String value, String account) {
-        return "*".equals(value) || account.equals(value) || ("arn:aws:iam::" + account + ":root").equals(value);
+        if ("*".equals(value) || account.equals(value)) {
+            return true;
+        }
+        if (!AwsArnUtils.isArnFor(value, "iam")) {
+            return false;
+        }
+        AwsArnUtils.Arn parsed = AwsArnUtils.parse(value);
+        return account.equals(parsed.accountId()) && "root".equals(parsed.resource());
     }
 
     private static boolean resourceMatches(JsonNode node, String arn) {
@@ -297,14 +306,14 @@ public class OamService {
             return true;
         }
         List<String> allowed = new ArrayList<>();
-        var operators = condition.fields();
+        Iterator<Map.Entry<String, JsonNode>> operators = condition.fields();
         while (operators.hasNext()) {
             Map.Entry<String, JsonNode> operator = operators.next();
             JsonNode entries = operator.getValue();
             if (!entries.isObject()) {
                 return false;
             }
-            var conditions = entries.fields();
+            Iterator<Map.Entry<String, JsonNode>> conditions = entries.fields();
             while (conditions.hasNext()) {
                 Map.Entry<String, JsonNode> entry = conditions.next();
                 if (!"oam:ResourceTypes".equalsIgnoreCase(entry.getKey())) {
@@ -369,7 +378,7 @@ public class OamService {
     }
 
     public static String encodeToken(int offset) {
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(String.valueOf(offset).getBytes(StandardCharsets.UTF_8));
+        return Base64Url.encode(String.valueOf(offset));
     }
 
     public static int decodeToken(String token) {

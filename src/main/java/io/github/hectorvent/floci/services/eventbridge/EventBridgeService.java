@@ -1,14 +1,30 @@
 package io.github.hectorvent.floci.services.eventbridge;
 
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
-import io.github.hectorvent.floci.core.common.AwsArnUtils;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.TextNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
+import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
+import io.github.hectorvent.floci.core.resource.ExplorerResource;
+import io.github.hectorvent.floci.core.resource.ResourceProvider;
+import io.github.hectorvent.floci.core.resource.SupportedResourceType;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.eventbridge.model.ApiDestination;
+import io.github.hectorvent.floci.services.eventbridge.model.ApiDestinationState;
 import io.github.hectorvent.floci.services.eventbridge.model.Archive;
 import io.github.hectorvent.floci.services.eventbridge.model.ArchiveState;
 import io.github.hectorvent.floci.services.eventbridge.model.ArchivedEvent;
@@ -21,34 +37,31 @@ import io.github.hectorvent.floci.services.eventbridge.model.Rule;
 import io.github.hectorvent.floci.services.eventbridge.model.RuleState;
 import io.github.hectorvent.floci.services.eventbridge.model.Target;
 import io.github.hectorvent.floci.services.resourcegroupstagging.ResourceGroupsTaggingService;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.fasterxml.jackson.databind.node.TextNode;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
-import io.github.hectorvent.floci.core.resource.ExplorerResource;
-import io.github.hectorvent.floci.core.resource.ResourceProvider;
-import io.github.hectorvent.floci.core.resource.SupportedResourceType;
-import java.util.Set;
 
 @ApplicationScoped
 public class EventBridgeService implements ResourceProvider {
 
     private static final Logger LOG = Logger.getLogger(EventBridgeService.class);
+    private static final int MAX_LIST_LIMIT = 100;
+    private static final List<String> REQUIRED_ENTRY_FIELDS = List.of("Source", "DetailType", "Detail");
 
     private final StorageBackend<String, EventBus> busStore;
     private final StorageBackend<String, Rule> ruleStore;
@@ -58,10 +71,11 @@ public class EventBridgeService implements ResourceProvider {
     private final StorageBackend<String, Replay> replayStore;
     private final StorageBackend<String, Connection> connectionStore;
     private final StorageBackend<String, ApiDestination> destinationStore;
+    private final StorageBackend<String, ApiDestination> apiDestinationStore;
     private final RegionResolver regionResolver;
     private final ObjectMapper objectMapper;
     private final RuleScheduler ruleScheduler;
-    private final EventBridgeInvoker invoker;
+    private final TargetDispatcher dispatcher;
     private final ResourceGroupsTaggingService resourceGroupsTaggingService;
     private final ReplayDispatcher replayDispatcher;
 
@@ -71,7 +85,7 @@ public class EventBridgeService implements ResourceProvider {
                               RegionResolver regionResolver,
                               ObjectMapper objectMapper,
                               RuleScheduler ruleScheduler,
-                              EventBridgeInvoker invoker,
+                              TargetDispatcher dispatcher,
                               ReplayDispatcher replayDispatcher,
                               ResourceGroupsTaggingService resourceGroupsTaggingService) {
         this(
@@ -91,7 +105,7 @@ public class EventBridgeService implements ResourceProvider {
                         new TypeReference<Map<String, Connection>>() {}),
                 storageFactory.create("eventbridge", "eventbridge-api-destinations.json",
                         new TypeReference<Map<String, ApiDestination>>() {}),
-                regionResolver, objectMapper, ruleScheduler, invoker, replayDispatcher,
+                regionResolver, objectMapper, ruleScheduler, dispatcher, replayDispatcher,
                 resourceGroupsTaggingService
         );
     }
@@ -104,10 +118,11 @@ public class EventBridgeService implements ResourceProvider {
                        StorageBackend<String, Replay> replayStore,
                        StorageBackend<String, Connection> connectionStore,
                        StorageBackend<String, ApiDestination> destinationStore,
+                       StorageBackend<String, ApiDestination> apiDestinationStore,
                        RegionResolver regionResolver,
                        ObjectMapper objectMapper,
                        RuleScheduler ruleScheduler,
-                       EventBridgeInvoker invoker,
+                       TargetDispatcher dispatcher,
                        ReplayDispatcher replayDispatcher,
                        ResourceGroupsTaggingService resourceGroupsTaggingService) {
         this.busStore = busStore;
@@ -118,10 +133,11 @@ public class EventBridgeService implements ResourceProvider {
         this.replayStore = replayStore;
         this.connectionStore = connectionStore;
         this.destinationStore = destinationStore;
+        this.apiDestinationStore = apiDestinationStore;
         this.regionResolver = regionResolver;
         this.objectMapper = objectMapper;
         this.ruleScheduler = ruleScheduler;
-        this.invoker = invoker;
+        this.dispatcher = dispatcher;
         this.replayDispatcher = replayDispatcher;
         this.resourceGroupsTaggingService = resourceGroupsTaggingService;
     }
@@ -308,6 +324,11 @@ public class EventBridgeService implements ResourceProvider {
     public Rule putRule(String name, String busName, String eventPattern,
                         String scheduleExpression, RuleState state, String description,
                         String roleArn, Map<String, String> tags, String region) {
+        if ((eventPattern == null || eventPattern.isBlank())
+                && (scheduleExpression == null || scheduleExpression.isBlank())) {
+            throw new AwsException("ValidationException",
+                    "Parameter(s) EventPattern or ScheduleExpression must be specified.", 400);
+        }
         String effectiveBus = resolvedBusName(busName);
         ensureBusExists(effectiveBus, region);
 
@@ -384,6 +405,29 @@ public class EventBridgeService implements ResourceProvider {
         });
     }
 
+    /**
+     * One page of a bus's rules in name order. {@code limit} defaults to 100, the documented
+     * per-page maximum, and the token is the shared opaque cursor, so a page stays resumable
+     * when rules are added or removed between requests.
+     */
+    public PaginatedResult<Rule> listRules(String busName, String namePrefix, Integer limit,
+                                           String nextToken, String region) {
+        if (limit != null && (limit < 1 || limit > MAX_LIST_LIMIT)) {
+            throw limitOutOfRange(limit.toString(), limit < 1);
+        }
+        return Pagination.paginate(listRules(busName, namePrefix, region), Rule::getName,
+                limit != null ? limit : MAX_LIST_LIMIT, nextToken, "rule",
+                token -> new AwsException("InvalidToken", "Invalid NextToken: " + token, 400));
+    }
+
+    static AwsException limitOutOfRange(String value, boolean belowMinimum) {
+        String constraint = belowMinimum
+                ? "Member must have value greater than or equal to 1"
+                : "Member must have value less than or equal to " + MAX_LIST_LIMIT;
+        return SmithyValidationErrors.validationException(
+                "Value '" + value + "' at 'limit' failed to satisfy constraint: " + constraint);
+    }
+
     public void enableRule(String name, String busName, String region) {
         String effectiveBus = resolvedBusName(busName);
         String key = ruleKey(region, effectiveBus, name);
@@ -412,19 +456,71 @@ public class EventBridgeService implements ResourceProvider {
     // ──────────────────────────── Targets ────────────────────────────
 
     public int putTargets(String ruleName, String busName, List<Target> newTargets, String region) {
+        validateTargetSettings(newTargets);
         String effectiveBus = resolvedBusName(busName);
         String key = ruleKey(region, effectiveBus, ruleName);
-        ruleStore.get(key)
+        Rule rule = ruleStore.get(key)
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException",
                         "Rule not found: " + ruleName, 400));
         List<Target> existing = new ArrayList<>(targetStore.get(key).orElse(new ArrayList<>()));
         for (Target newTarget : newTargets) {
+            if (newTarget.getRoleArn() == null && isCrossAccountEventBus(newTarget.getArn(), rule)) {
+                existing.stream()
+                        .filter(t -> t.getId().equals(newTarget.getId()) && newTarget.getArn().equals(t.getArn()))
+                        .findFirst()
+                        .ifPresent(t -> newTarget.setRoleArn(t.getRoleArn()));
+            }
             existing.removeIf(t -> t.getId().equals(newTarget.getId()));
             existing.add(newTarget);
         }
         targetStore.put(key, existing);
         LOG.infov("Put {0} targets on rule {1}", newTargets.size(), ruleName);
         return 0;
+    }
+
+    private boolean isCrossAccountEventBus(String targetArn, Rule rule) {
+        if (!AwsArnUtils.isArnFor(targetArn, "events")) {
+            return false;
+        }
+        AwsArnUtils.Arn arn = AwsArnUtils.parse(targetArn);
+        String accountId = rule.getAccountId() != null ? rule.getAccountId() : regionResolver.getAccountId();
+        return arn.resource().startsWith("event-bus/") && AwsArnUtils.isForeignAccount(arn, accountId);
+    }
+
+    private static void validateTargetSettings(List<Target> targets) {
+        for (int i = 0; i < targets.size(); i++) {
+            Target target = targets.get(i);
+            Integer attempts = target.getRetryPolicy() != null ? target.getRetryPolicy().maximumRetryAttempts() : null;
+            Integer age = target.getRetryPolicy() != null ? target.getRetryPolicy().maximumEventAgeInSeconds() : null;
+            String arn = target.getDeadLetterConfig() != null ? target.getDeadLetterConfig().arn() : null;
+            String field = null;
+            Object value = null;
+            String constraint = null;
+            if (attempts != null && (attempts < 0 || attempts > 185)) {
+                field = "retryPolicy.maximumRetryAttempts";
+                value = attempts;
+                constraint = attempts < 0 ? "value greater than or equal to 0" : "value less than or equal to 185";
+            } else if (age != null && (age < 60 || age > 86400)) {
+                field = "retryPolicy.maximumEventAgeInSeconds";
+                value = age;
+                constraint = age < 60 ? "value greater than or equal to 60" : "value less than or equal to 86400";
+            } else if (arn != null && (arn.isEmpty() || arn.length() > 1600)) {
+                field = "deadLetterConfig.arn";
+                value = arn;
+                constraint = arn.isEmpty() ? "length greater than or equal to 1" : "length less than or equal to 1600";
+            } else if (target.getRoleArn() != null
+                    && (target.getRoleArn().isEmpty() || target.getRoleArn().length() > 1600)) {
+                field = "roleArn";
+                value = target.getRoleArn();
+                constraint = target.getRoleArn().isEmpty()
+                        ? "length greater than or equal to 1" : "length less than or equal to 1600";
+            }
+            if (field != null) {
+                throw SmithyValidationErrors.validationException("Value '" + value
+                        + "' at 'targets." + (i + 1) + ".member." + field
+                        + "' failed to satisfy constraint: Member must have " + constraint);
+            }
+        }
     }
 
     public record RemoveTargetsResult(int successfulCount, int failedCount) {}
@@ -441,6 +537,7 @@ public class EventBridgeService implements ResourceProvider {
             }
         }
         targetStore.put(key, existing);
+        ruleStore.get(key).ifPresent(rule -> dispatcher.dropPendingRetries(rule.getArn(), ids));
         return new RemoveTargetsResult(removed, ids.size() - removed);
     }
 
@@ -482,29 +579,52 @@ public class EventBridgeService implements ResourceProvider {
     // ──────────────────────────── Tags ────────────────────────────
 
     public Map<String, String> listTagsForResource(String resourceArn, String region) {
+        validateTagResourceArn(resourceArn, region);
         String resource = AwsArnUtils.parse(resourceArn).resource();
         if (resource.startsWith("event-bus/")) {
             String busName = resource.substring("event-bus/".length());
-            String key = busKey(region, busName);
-            return busStore.get(key)
-                    .map(EventBus::getTags)
-                    .orElse(Map.of());
+            if (busName.isBlank()) {
+                throw new AwsException("ResourceNotFoundException", "Resource not found: " + resourceArn, 400);
+            }
+            return describeEventBus(busName, region).getTags();
         }
         if (resource.startsWith("rule/")) {
             RuleRef ref = parseRuleResource(resource);
             String key = ruleKey(region, ref.busName(), ref.ruleName());
             return ruleStore.get(key)
                     .map(Rule::getTags)
-                    .orElse(Map.of());
+                    .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                            "Resource not found: " + resourceArn, 400));
         }
         if (resource.startsWith("archive/")) {
             String archiveName = resource.substring("archive/".length());
             String key = archiveKey(region, archiveName);
             return archiveStore.get(key)
                     .map(Archive::getTags)
-                    .orElse(Map.of());
+                    .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                            "Archive not found: " + archiveName, 400));
         }
-        return Map.of();
+        throw new AwsException("ResourceNotFoundException", "Resource not found: " + resourceArn, 400);
+    }
+
+    /** EventBridge tag operations only address resources in the caller's account and Region. */
+    private void validateTagResourceArn(String resourceArn, String region) {
+        AwsArnUtils.Arn arn;
+        try {
+            arn = AwsArnUtils.parse(resourceArn);
+        } catch (IllegalArgumentException e) {
+            throw new AwsException("ResourceNotFoundException",
+                    "Resource not found: " + resourceArn, 400);
+        }
+        if (!"events".equals(arn.service())
+                || arn.partition().isBlank()
+                || AwsArnUtils.isForeignPartition(arn, regionResolver.partitionForRegion(region))
+                || !region.equals(arn.region())
+                || arn.accountId().isBlank()
+                || AwsArnUtils.isForeignAccount(arn, regionResolver.getAccountId())) {
+            throw new AwsException("ResourceNotFoundException",
+                    "Resource not found: " + resourceArn, 400);
+        }
     }
 
     /** Resolves the bus and rule name from a {@code rule/...} ARN resource segment. */
@@ -522,6 +642,7 @@ public class EventBridgeService implements ResourceProvider {
     }
 
     public void tagResource(String resourceArn, Map<String, String> tags, String region) {
+        validateTagResourceArn(resourceArn, region);
         String resource = AwsArnUtils.parse(resourceArn).resource();
         if (resource.startsWith("archive/")) {
             String archiveName = resource.substring("archive/".length());
@@ -560,6 +681,7 @@ public class EventBridgeService implements ResourceProvider {
     }
 
     public void untagResource(String resourceArn, List<String> tagKeys, String region) {
+        validateTagResourceArn(resourceArn, region);
         String resource = AwsArnUtils.parse(resourceArn).resource();
         if (resource.startsWith("archive/")) {
             String archiveName = resource.substring("archive/".length());
@@ -725,6 +847,26 @@ public class EventBridgeService implements ResourceProvider {
 
     public record PutEventsResult(int failedCount, List<Map<String, String>> entries) {}
 
+    /**
+     * The entry an AWS service sends on its own behalf, for {@link #putEvents}. {@code Resources} is
+     * always present, because rule matching reads it for any rule with a {@code resources} filter,
+     * and holds {@code resourceArn} unless that is null or blank. With no {@code EventBusName} the
+     * entry goes to the default bus; the map is mutable so a caller can name another.
+     */
+    public static Map<String, Object> serviceEventEntry(String source, String detailType, String detail,
+                                                        String resourceArn) {
+        ArrayNode resources = JsonNodeFactory.instance.arrayNode();
+        if (resourceArn != null && !resourceArn.isBlank()) {
+            resources.add(resourceArn);
+        }
+        Map<String, Object> entry = new HashMap<>();
+        entry.put("Source", source);
+        entry.put("DetailType", detailType);
+        entry.put("Detail", detail);
+        entry.put("Resources", resources);
+        return entry;
+    }
+
     public PutEventsResult putEvents(List<Map<String, Object>> entries, String region) {
         return putEvents(entries, region, null);
     }
@@ -750,6 +892,33 @@ public class EventBridgeService implements ResourceProvider {
             // delivered envelope would correctly carry the call's region/account, giving an
             // inconsistent observable.
             Map<String, Object> entry = new HashMap<>(originalEntry);
+
+            String missingRequiredField = null;
+            for(String field : REQUIRED_ENTRY_FIELDS) {
+                if(entry.get(field) == null) {
+                    missingRequiredField = field;
+                    break;
+                }
+            }
+
+            if(missingRequiredField != null) {
+                Map<String, String> errorEntry = new HashMap<>();
+                errorEntry.put("ErrorCode", "InvalidArgument");
+                errorEntry.put("ErrorMessage",
+                        "Parameter " + missingRequiredField +  " is not valid. Reason: " + missingRequiredField + " is a required argument.");
+                resultEntries.add(errorEntry);
+                failed++;
+                continue;
+            }
+            if (!isValidDetailJson(entry)) {
+                Map<String, String> errorEntry = new HashMap<>();
+                errorEntry.put("ErrorCode", "MalformedDetail");
+                errorEntry.put("ErrorMessage", "The JSON provided is not valid.");
+                resultEntries.add(errorEntry);
+                failed++;
+
+                continue;
+            }
             if (isBlank(entry.get("Region"))) {
                 entry.put("Region", isBlank(region) ? regionResolver.getDefaultRegion() : region);
             }
@@ -780,12 +949,17 @@ public class EventBridgeService implements ResourceProvider {
                 if (rule.getState() != RuleState.ENABLED) {
                     continue;
                 }
+                // A rule without an event pattern is a schedule rule: it never matches put events.
+                if (rule.getEventPattern() == null || rule.getEventPattern().isBlank()) {
+                    continue;
+                }
                 if (matchesPattern(entry, rule.getEventPattern())) {
                     String ruleKey = ruleKey(region, effectiveBus, rule.getName());
                     List<Target> targets = accountGet(targetStore, accountId, ruleKey).orElse(List.of());
                     String eventJson = buildEventEnvelope(entry, effectiveBus, eventId, region, accountId);
                     for (Target target : targets) {
-                        invoker.invokeTarget(target, eventJson, region);
+                        dispatcher.dispatch(rule.getArn(), target, eventJson, region,
+                                () -> accountGet(targetStore, accountId, ruleKey).orElse(List.of()));
                     }
                 }
             }
@@ -798,6 +972,24 @@ public class EventBridgeService implements ResourceProvider {
         }
 
         return new PutEventsResult(failed, resultEntries);
+    }
+
+    private boolean isValidDetailJson(Map<String, Object> detail) {
+        Object raw = detail.get("Detail");
+        if (!(raw instanceof String jsonString) || jsonString.trim().isEmpty()) {
+            return false;
+        }
+
+        try (JsonParser parser = objectMapper.getFactory().createParser(jsonString)) {
+            JsonNode node = objectMapper.readTree(parser);
+            if (node == null || !node.isObject()) {
+                return false; // empty input or "123" or "[1,2]"
+            }
+            // check if there is more
+            return parser.nextToken() == null;
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     // ──────────────────────────── Pattern Matching ────────────────────────────
@@ -1183,6 +1375,7 @@ public class EventBridgeService implements ResourceProvider {
 
     public Archive createArchive(String archiveName, String eventSourceArn, String description,
                                  String eventPattern, int retentionDays, String region) {
+        requireArchiveFields(description, eventPattern, retentionDays);
         if (archiveName == null || archiveName.isBlank()) {
             throw new AwsException("ValidationException", "ArchiveName is required.", 400);
         }
@@ -1190,6 +1383,7 @@ public class EventBridgeService implements ResourceProvider {
             throw new AwsException("ValidationException", "EventSourceArn is required.", 400);
         }
         ensureArchiveSourceBusExists(eventSourceArn, region);
+        requireArchiveSource(eventSourceArn, region);
         String key = archiveKey(region, archiveName);
         if (archiveStore.get(key).isPresent()) {
             throw new AwsException("ResourceAlreadyExistsException",
@@ -1209,23 +1403,81 @@ public class EventBridgeService implements ResourceProvider {
         return archive;
     }
 
+    /**
+     * The request constraints CreateArchive and UpdateArchive enforce before any other check, all
+     * violations reported together in AWS's order. A null argument is absent and not checked.
+     */
+    private void requireArchiveFields(String description, String eventPattern, Integer retentionDays) {
+        List<String> violations = new ArrayList<>();
+        if (retentionDays != null && retentionDays < 0) {
+            violations.add("Value '" + retentionDays + "' at 'retentionDays' failed to satisfy constraint: "
+                    + "Member must have value greater than or equal to 0");
+        }
+        if (description != null && description.length() > 512) {
+            violations.add("Value '" + description + "' at 'description' failed to satisfy constraint: "
+                    + "Member must have length less than or equal to 512");
+        }
+        if (eventPattern != null && eventPattern.length() > 4096) {
+            violations.add("Value '" + eventPattern + "' at 'eventPattern' failed to satisfy constraint: "
+                    + "Member must have length less than or equal to 4096");
+        }
+        if (!violations.isEmpty()) {
+            throw SmithyValidationErrors.validationException(violations);
+        }
+    }
+
+    /**
+     * Checked as AWS does, before the name: the source's account, then its region, then that it is
+     * the ARN of an existing bus. Anything else, a malformed ARN included, is reported as a missing
+     * bus, since an archive on it could never capture an event.
+     */
+    private void requireArchiveSource(String eventSourceArn, String region) {
+        String accountId = regionResolver.getAccountId();
+        AwsArnUtils.Arn source = AwsArnUtils.isArn(eventSourceArn) ? AwsArnUtils.parse(eventSourceArn) : null;
+        if (source != null && !accountId.equals(source.accountId())) {
+            throw new AwsException("AccessDeniedException", "Archive event source " + eventSourceArn
+                    + " does not belong to account " + accountId + ".", 400);
+        }
+        if (source != null && !region.equals(source.region())) {
+            throw new AwsException("ValidationException",
+                    "Parameter EventSourceArn is not valid. Reason: Creating cross-region archive is not permitted.",
+                    400);
+        }
+        String busName = eventSourceArn.substring(eventSourceArn.indexOf('/') + 1);
+        EventBus bus = "default".equals(busName)
+                ? getOrCreateDefaultBus(region)
+                : busStore.get(busKey(region, busName)).orElse(null);
+        if (bus == null || !eventSourceArn.equals(bus.getArn())) {
+            throw new AwsException("ResourceNotFoundException", "Event bus " + busName + " does not exist.", 400);
+        }
+    }
+
     public Archive describeArchive(String archiveName, String region) {
         return archiveStore.get(archiveKey(region, archiveName))
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException",
                         "Archive not found: " + archiveName, 400));
     }
 
+    /**
+     * A partial update, as on AWS: a null argument leaves the stored value alone, and an empty
+     * description or event pattern clears it.
+     */
     public Archive updateArchive(String archiveName, String description,
-                                 String eventPattern, int retentionDays, String region) {
+                                 String eventPattern, Integer retentionDays, String region) {
+        requireArchiveFields(description, eventPattern, retentionDays);
         String key = archiveKey(region, archiveName);
         Archive archive = archiveStore.get(key)
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException",
                         "Archive not found: " + archiveName, 400));
         if (description != null) {
-            archive.setDescription(description);
+            archive.setDescription(description.isEmpty() ? null : description);
         }
-        archive.setEventPattern(eventPattern);
-        archive.setRetentionDays(retentionDays);
+        if (eventPattern != null) {
+            archive.setEventPattern(eventPattern.isEmpty() ? null : eventPattern);
+        }
+        if (retentionDays != null) {
+            archive.setRetentionDays(retentionDays);
+        }
         archiveStore.put(key, archive);
         return archive;
     }
@@ -1395,6 +1647,255 @@ public class EventBridgeService implements ResourceProvider {
             case "BASIC", "OAUTH_CLIENT_CREDENTIALS", "API_KEY" -> { }
             default -> throw new AwsException("ValidationException",
                     "AuthorizationType must be one of BASIC, OAUTH_CLIENT_CREDENTIALS, API_KEY.", 400);
+        }
+    }
+
+    // ──────────────────────────── Api Destinations ────────────────────────────
+
+    private static final Pattern API_DESTINATION_NAME_PATTERN =
+            Pattern.compile("[\\.\\-_A-Za-z0-9]+");
+    private static final Set<String> ALLOWED_HTTP_METHODS =
+            Set.of("GET", "HEAD", "POST", "OPTIONS", "PUT", "DELETE", "PATCH");
+
+    public synchronized ApiDestination createApiDestination(String name, String description, String connectionArn,
+                                                            String invocationEndpoint, String httpMethod,
+                                                            Integer invocationRateLimitPerSecond, String region) {
+        validateApiDestinationName(name);
+        if (connectionArn == null || connectionArn.isBlank()) {
+            throw new AwsException("ValidationException", "ConnectionArn is required.", 400);
+        }
+        findConnectionByArn(connectionArn, region);
+        if (invocationEndpoint == null || invocationEndpoint.isBlank()) {
+            throw new AwsException("ValidationException", "InvocationEndpoint is required.", 400);
+        }
+        validateInvocationEndpoint(invocationEndpoint);
+        validateHttpMethod(httpMethod);
+        if (invocationRateLimitPerSecond != null && invocationRateLimitPerSecond < 1) {
+            throw new AwsException("ValidationException",
+                    "InvocationRateLimitPerSecond must be at least 1.", 400);
+        }
+
+        String key = apiDestinationKey(region, name);
+        if (apiDestinationStore.get(key).isPresent()) {
+            throw new AwsException("ResourceAlreadyExistsException",
+                    "ApiDestination " + name + " already exists.", 400);
+        }
+
+        String destinationId = UUID.randomUUID().toString();
+        Instant now = Instant.now();
+        ApiDestination destination = new ApiDestination();
+        destination.setName(name);
+        destination.setArn(regionResolver.buildArn("events", region,
+                "api-destination/" + name + "/" + destinationId));
+        destination.setDescription(description);
+        destination.setConnectionArn(connectionArn);
+        destination.setInvocationEndpoint(invocationEndpoint);
+        destination.setHttpMethod(httpMethod);
+        destination.setInvocationRateLimitPerSecond(invocationRateLimitPerSecond);
+        destination.setApiDestinationState(ApiDestinationState.ACTIVE);
+        destination.setCreationTime(now);
+        destination.setLastModifiedTime(now);
+
+        apiDestinationStore.put(key, destination);
+        LOG.infov("Created API Destination: {0} with endpoint {1}", name, invocationEndpoint);
+        return destination;
+    }
+
+    public ApiDestination describeApiDestination(String name, String region) {
+        return apiDestinationStore.get(apiDestinationKey(region, name))
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "ApiDestination " + name + " does not exist.", 400));
+    }
+
+    public synchronized ApiDestination updateApiDestination(String name, String description, String connectionArn,
+                                                            String invocationEndpoint, String httpMethod,
+                                                            Integer invocationRateLimitPerSecond, String region) {
+        String key = apiDestinationKey(region, name);
+        ApiDestination destination = apiDestinationStore.get(key)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "ApiDestination " + name + " does not exist.", 400));
+
+        // Validate everything before assigning: the in-memory store returns the same instance, so a rejected update must not leave partial changes
+        if (connectionArn != null) {
+            findConnectionByArn(connectionArn, region);
+        }
+        if (invocationEndpoint != null) {
+            validateInvocationEndpoint(invocationEndpoint);
+        }
+        if (httpMethod != null) {
+            validateHttpMethod(httpMethod);
+        }
+        if (invocationRateLimitPerSecond != null && invocationRateLimitPerSecond < 1) {
+            throw new AwsException("ValidationException",
+                    "InvocationRateLimitPerSecond must be at least 1.", 400);
+        }
+
+        if (connectionArn != null) {
+            destination.setConnectionArn(connectionArn);
+        }
+        if (description != null) {
+            destination.setDescription(description);
+        }
+        if (invocationEndpoint != null) {
+            destination.setInvocationEndpoint(invocationEndpoint);
+        }
+        if (httpMethod != null) {
+            destination.setHttpMethod(httpMethod);
+        }
+        if (invocationRateLimitPerSecond != null) {
+            destination.setInvocationRateLimitPerSecond(invocationRateLimitPerSecond);
+        }
+        Instant now = Instant.now();
+        destination.setLastModifiedTime(now);
+        apiDestinationStore.put(key, destination);
+        LOG.infov("Updated API Destination: {0}", name);
+        return destination;
+    }
+
+    // Puts back a prior configuration verbatim, including unset fields that updateApiDestination cannot clear
+    public synchronized ApiDestination restoreApiDestination(String name, String description, String connectionArn,
+                                                             String invocationEndpoint, String httpMethod,
+                                                             Integer invocationRateLimitPerSecond, String region) {
+        String key = apiDestinationKey(region, name);
+        ApiDestination destination = apiDestinationStore.get(key)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "ApiDestination " + name + " does not exist.", 400));
+        destination.setDescription(description);
+        destination.setConnectionArn(connectionArn);
+        destination.setInvocationEndpoint(invocationEndpoint);
+        destination.setHttpMethod(httpMethod);
+        destination.setInvocationRateLimitPerSecond(invocationRateLimitPerSecond);
+        destination.setLastModifiedTime(Instant.now());
+        apiDestinationStore.put(key, destination);
+        LOG.infov("Restored API Destination: {0}", name);
+        return destination;
+    }
+
+    public synchronized ApiDestination deleteApiDestination(String name, String region) {
+        String key = apiDestinationKey(region, name);
+        ApiDestination destination = apiDestinationStore.get(key)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "ApiDestination " + name + " does not exist.", 400));
+        apiDestinationStore.delete(key);
+        LOG.infov("Deleted API Destination: {0}", name);
+        return destination;
+    }
+
+    public List<ApiDestination> listApiDestinations(String namePrefix, String connectionArn, String region) {
+        String prefix = "api-destination:" + region + ":";
+        List<ApiDestination> destinations = new ArrayList<>(apiDestinationStore.scan(k -> {
+            if (!k.startsWith(prefix)) {
+                return false;
+            }
+            ApiDestination dest = apiDestinationStore.get(k).orElse(null);
+            if (dest == null) {
+                return false;
+            }
+            if (namePrefix != null && !namePrefix.isBlank()
+                    && !dest.getName().startsWith(namePrefix)) {
+                return false;
+            }
+            if (connectionArn != null && !connectionArn.isBlank()
+                    && !connectionArn.equals(dest.getConnectionArn())) {
+                return false;
+            }
+            return true;
+        }));
+        destinations.sort(Comparator.comparing(ApiDestination::getName));
+        return destinations;
+    }
+
+    public Connection findConnectionByArn(String connectionArn, String region) {
+        if (connectionArn == null || connectionArn.isBlank()) {
+            throw new AwsException("ResourceNotFoundException", "Connection ARN is required.", 400);
+        }
+        if (AwsArnUtils.isArn(connectionArn)) {
+            AwsArnUtils.Arn parsed = AwsArnUtils.parse(connectionArn);
+            String resource = parsed.resource();
+            if (resource.startsWith("connection/")) {
+                String remainder = resource.substring("connection/".length());
+                int slash = remainder.indexOf('/');
+                String name = slash > 0 ? remainder.substring(0, slash) : remainder;
+                String connRegion = parsed.region().isEmpty() ? region : parsed.region();
+                Optional<Connection> opt = connectionStore.get(connectionKey(connRegion, name));
+                // The ARN carries a generated id: one for a connection deleted and recreated under the same name must not match
+                if (opt.isPresent() && connectionArn.equals(opt.get().getConnectionArn())) {
+                    return opt.get();
+                }
+            }
+        }
+        return connectionStore.scan(k -> {
+            Connection c = connectionStore.get(k).orElse(null);
+            return c != null && connectionArn.equals(c.getConnectionArn());
+        }).stream().findFirst().orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                "Connection " + connectionArn + " does not exist.", 400));
+    }
+
+    public ApiDestination findApiDestinationByArn(String arn, String region) {
+        if (arn == null || arn.isBlank()) {
+            return null;
+        }
+        if (AwsArnUtils.isArn(arn)) {
+            AwsArnUtils.Arn parsed = AwsArnUtils.parse(arn);
+            String resource = parsed.resource();
+            if (resource.startsWith("api-destination/")) {
+                String remainder = resource.substring("api-destination/".length());
+                int slash = remainder.indexOf('/');
+                String name = slash > 0 ? remainder.substring(0, slash) : remainder;
+                String destRegion = parsed.region().isEmpty() ? region : parsed.region();
+                Optional<ApiDestination> opt = apiDestinationStore.get(apiDestinationKey(destRegion, name));
+                // Same as connections: an ARN for a destination deleted and recreated under the same name is stale
+                if (opt.isPresent() && arn.equals(opt.get().getArn())) {
+                    return opt.get();
+                }
+            }
+        }
+        return apiDestinationStore.scan(k -> {
+            ApiDestination d = apiDestinationStore.get(k).orElse(null);
+            return d != null && arn.equals(d.getArn());
+        }).stream().findFirst().orElse(null);
+    }
+
+    private static String apiDestinationKey(String region, String name) {
+        return "api-destination:" + region + ":" + name;
+    }
+
+    private static void validateApiDestinationName(String name) {
+        if (name == null || name.isBlank()) {
+            throw new AwsException("ValidationException", "Name is required.", 400);
+        }
+        if (name.length() > 64 || !API_DESTINATION_NAME_PATTERN.matcher(name).matches()) {
+            throw new AwsException("ValidationException",
+                    "Name must match [\\.\\-_A-Za-z0-9]+ and be at most 64 characters.", 400);
+        }
+    }
+
+    private static void validateInvocationEndpoint(String invocationEndpoint) {
+        URI uri;
+        try {
+            uri = new URI(invocationEndpoint);
+        } catch (URISyntaxException e) {
+            throw new AwsException("ValidationException", "InvocationEndpoint is not a valid URL.", 400);
+        }
+        String scheme = uri.getScheme();
+        if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+            throw new AwsException("ValidationException",
+                    "InvocationEndpoint must be an HTTP or HTTPS URL.", 400);
+        }
+        // getHost() is null for a missing host (https://:8080), and for a '*' in the host, which AWS only allows in the path
+        if (uri.getHost() == null) {
+            throw new AwsException("ValidationException",
+                    "InvocationEndpoint must include a valid host, and a '*' wildcard is only allowed in the path.", 400);
+        }
+    }
+
+    private static void validateHttpMethod(String httpMethod) {
+        if (httpMethod == null || httpMethod.isBlank()) {
+            throw new AwsException("ValidationException", "HttpMethod is required.", 400);
+        }
+        if (!ALLOWED_HTTP_METHODS.contains(httpMethod)) {
+            throw new AwsException("ValidationException",
+                    "HttpMethod must be one of GET, HEAD, POST, OPTIONS, PUT, DELETE, PATCH.", 400);
         }
     }
 
@@ -1735,7 +2236,7 @@ public class EventBridgeService implements ResourceProvider {
                 && rule.getState() == RuleState.ENABLED
                 && rule.getScheduleExpression() != null
                 && !rule.getScheduleExpression().isBlank()) {
-            String region = rule.getRegion() != null ? rule.getRegion() : "us-east-1";
+            String region = rule.getRegion() != null ? rule.getRegion() : regionResolver.getDefaultRegion();
             String key = ruleKey(region, rule.getEventBusName(), rule.getName());
             String accountId = rule.getAccountId();
             ruleScheduler.startScheduler(

@@ -15,6 +15,7 @@ import software.amazon.awssdk.services.timestreaminfluxdb.model.ListDbInstancesR
 import software.amazon.awssdk.services.timestreaminfluxdb.model.ListTagsForResourceRequest;
 import software.amazon.awssdk.services.timestreaminfluxdb.model.LogLevel;
 import software.amazon.awssdk.services.timestreaminfluxdb.model.Parameters;
+import software.amazon.awssdk.services.timestreaminfluxdb.model.RebootDbInstanceRequest;
 import software.amazon.awssdk.services.timestreaminfluxdb.model.ResourceNotFoundException;
 import software.amazon.awssdk.services.timestreaminfluxdb.model.TagResourceRequest;
 import software.amazon.awssdk.services.timestreaminfluxdb.model.ValidationException;
@@ -46,8 +47,8 @@ class TimestreamInfluxDbTest {
                     .dbInstanceType("db.influx.medium")
                     .allocatedStorage(20)
                     .dbParameterGroupIdentifier(group.id())
-                    .vpcSubnetIds("subnet-default-us-east-1-a")
-                    .vpcSecurityGroupIds("sg-default-us-east-1")
+                    .vpcSubnetIds("subnet-abc123")
+                    .vpcSecurityGroupIds("sg-abc123")
                     .tags(Map.of("env", "compat"))
                     .build());
             assertNotNull(created.id());
@@ -67,6 +68,11 @@ class TimestreamInfluxDbTest {
                         .resourceArn(created.arn()).build()).tags();
                 assertEquals("compat", tags.get("env"));
                 assertEquals("metrics", tags.get("team"));
+
+                awaitStatus(client, created.id(), "AVAILABLE");
+                assertEquals("REBOOTING", client.rebootDbInstance(RebootDbInstanceRequest.builder()
+                        .identifier(created.id()).build()).statusAsString());
+                awaitStatus(client, created.id(), "AVAILABLE");
             } finally {
                 client.deleteDbInstance(DeleteDbInstanceRequest.builder().identifier(created.id()).build());
             }
@@ -78,9 +84,26 @@ class TimestreamInfluxDbTest {
                     .password("password123")
                     .dbInstanceType("db.influx.medium")
                     .allocatedStorage(19)
-                    .vpcSubnetIds("subnet-default-us-east-1-a")
-                    .vpcSecurityGroupIds("sg-default-us-east-1")
+                    .vpcSubnetIds("subnet-abc123")
+                    .vpcSecurityGroupIds("sg-abc123")
                     .build()));
         }
+    }
+
+    private static void awaitStatus(TimestreamInfluxDbClient client, String id, String expected) {
+        String status = "";
+        long deadline = System.currentTimeMillis() + 180_000;
+        while (System.currentTimeMillis() < deadline && !expected.equals(status)) {
+            status = client.getDbInstance(GetDbInstanceRequest.builder().identifier(id).build()).statusAsString();
+            if (!expected.equals(status)) {
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(e);
+                }
+            }
+        }
+        assertEquals(expected, status);
     }
 }

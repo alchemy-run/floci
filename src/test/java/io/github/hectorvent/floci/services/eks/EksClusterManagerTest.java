@@ -1,26 +1,5 @@
 package io.github.hectorvent.floci.services.eks;
 
-import io.github.hectorvent.floci.config.EmulatorConfig;
-import io.github.hectorvent.floci.config.FlociCertificateAuthority;
-import io.github.hectorvent.floci.core.common.AwsRegions;
-import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
-import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
-import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
-import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager.ContainerInfo;
-import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
-import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
-import io.github.hectorvent.floci.core.common.docker.PortAllocator;
-import io.github.hectorvent.floci.services.ecr.registry.EcrRegistryManager;
-import io.github.hectorvent.floci.services.eks.model.CertificateAuthority;
-import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
-import io.github.hectorvent.floci.services.eks.model.Cluster;
-import io.github.hectorvent.floci.services.eks.model.ClusterIdentity;
-import io.github.hectorvent.floci.services.eks.model.ClusterOidcKey;
-import io.github.hectorvent.floci.services.eks.model.LogSetup;
-import io.github.hectorvent.floci.services.eks.model.Logging;
-import io.github.hectorvent.floci.services.eks.model.OidcIdentity;
-
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.dockerjava.api.DockerClient;
@@ -36,17 +15,57 @@ import com.github.dockerjava.api.command.InspectExecResponse;
 import com.github.dockerjava.api.command.InspectVolumeCmd;
 import com.github.dockerjava.api.model.Container;
 import com.github.dockerjava.api.model.Frame;
+import com.github.dockerjava.api.model.Info;
 import com.github.dockerjava.api.model.NetworkSettings;
+import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.config.FlociCertificateAuthority;
+import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.AwsRegions;
+import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.dns.DnsAnswer;
+import io.github.hectorvent.floci.core.common.dns.DnsClientVpcSource.ClientVpc;
+import io.github.hectorvent.floci.core.common.dns.DnsForwardingRule;
+import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
+import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
+import io.github.hectorvent.floci.core.common.docker.ContainerExec;
+import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
+import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager.ContainerInfo;
+import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
+import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
+import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
+import io.github.hectorvent.floci.core.common.docker.PortAllocator;
+import io.github.hectorvent.floci.core.storage.InMemoryStorage;
+import io.github.hectorvent.floci.core.storage.StorageBackend;
+import io.github.hectorvent.floci.services.ec2.Ec2InstanceTypeCatalog;
 import io.github.hectorvent.floci.services.ec2.Ec2MetadataServer;
 import io.github.hectorvent.floci.services.ec2.model.Instance;
+import io.github.hectorvent.floci.services.ec2.model.Placement;
+import io.github.hectorvent.floci.services.ecr.registry.EcrRegistryManager;
+import io.github.hectorvent.floci.services.eks.model.CertificateAuthority;
+import io.github.hectorvent.floci.services.eks.model.Cluster;
+import io.github.hectorvent.floci.services.eks.model.ClusterIdentity;
+import io.github.hectorvent.floci.services.eks.model.ClusterOidcKey;
+import io.github.hectorvent.floci.services.eks.model.LogSetup;
+import io.github.hectorvent.floci.services.eks.model.Logging;
+import io.github.hectorvent.floci.services.eks.model.Nodegroup;
+import io.github.hectorvent.floci.services.eks.model.OidcIdentity;
+import io.github.hectorvent.floci.services.eks.model.ResourcesVpcConfig;
+import io.github.hectorvent.floci.testutil.LogCapture;
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -56,11 +75,19 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
 
+import static io.github.hectorvent.floci.testing.InlineMocks.inlineMock;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -70,9 +97,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -89,16 +118,17 @@ class EksClusterManagerTest {
         cluster.setArn("arn:aws:eks:us-west-2:123456789012:cluster/demo");
         cluster.setCreatedAt(Instant.parse("2026-09-17T00:00:00Z"));
         assertEquals("/_floci/eks/clusters/demo/token-webhook/scope/123456789012"
-                + "/us-west-2/2026-09-17T00:00:00Z", EksClusterManager.webhookPath(cluster));
+                + "/us-west-2/2026-09-17T00:00:00Z", EksClusterManager.webhookPath(cluster, "cn-north-1"));
     }
 
     @Test
     void webhookPathHandlesMissingArnOrCreatedAtGracefully() {
+        // Without an ARN the region is the deployment default the caller passes, not us-east-1.
         Cluster cluster = new Cluster();
         cluster.setName("demo");
         cluster.setAccountId("123456789012");
         assertEquals("/_floci/eks/clusters/demo/token-webhook/scope/123456789012"
-                + "/us-east-1/1970-01-01T00:00:00Z", EksClusterManager.webhookPath(cluster));
+                + "/cn-north-1/1970-01-01T00:00:00Z", EksClusterManager.webhookPath(cluster, "cn-north-1"));
     }
 
     @Test
@@ -153,17 +183,17 @@ class EksClusterManagerTest {
     @Test
     void registriesYamlMirrorsEveryRegionHostnameAndThePathStyleForm() {
         String yaml = EksClusterManager.buildRegistriesYaml(
-                "000000000000", AwsRegions.ALL, 4566, "http://floci:4566");
+                "000000000000", AwsRegions.advertised("aws"), 4566, "http://floci:4566");
 
         assertTrue(yaml.startsWith("mirrors:\n"));
-        for (String region : AwsRegions.ALL) {
+        for (String region : AwsRegions.advertised("aws")) {
             assertTrue(yaml.contains("\"000000000000.dkr.ecr." + region + ".localhost:4566\":"),
                     "should mirror the " + region + " hostname");
         }
         assertTrue(yaml.contains("\"localhost:4566\":"), "should mirror the path-style form");
         assertFalse(yaml.contains("\"*\""), "must not catch-all public registries");
         long endpoints = yaml.lines().filter(l -> l.contains("- \"http://floci:4566\"")).count();
-        assertEquals(AwsRegions.ALL.size() + 1, endpoints,
+        assertEquals(AwsRegions.advertised("aws").size() + 1, endpoints,
                 "every mirror should point at Floci's in-network data plane");
     }
 
@@ -178,10 +208,94 @@ class EksClusterManagerTest {
     }
 
     @Test
+    void registriesYamlTlsAliasesPreserveLoopbackMirrorsAndInternalHttpEndpoint() {
+        String endpoint = "http://host.docker.internal:4577";
+        String yaml = EksClusterManager.buildRegistriesYaml(
+                "111122223333", AwsRegions.advertised("aws"), 4577, endpoint, true);
+
+        for (String region : AwsRegions.advertised("aws")) {
+            assertTrue(yaml.contains("\"111122223333.dkr.ecr." + region + ".localhost:4577\":"));
+            assertTrue(yaml.contains("\"111122223333.dkr.ecr." + region + ".localhost.floci.io:4577\":"));
+        }
+        assertTrue(yaml.contains("\"localhost:4577\":"));
+        assertTrue(yaml.contains("\"localhost.floci.io:4577\":"));
+        assertFalse(yaml.contains("*"), "mirrors must not intercept unrelated registries");
+        assertFalse(yaml.contains("amazonaws.com"));
+        assertFalse(yaml.contains("docker.io"));
+        assertFalse(yaml.contains("ghcr.io"));
+        assertFalse(yaml.contains("https://"), "internal pulls still use the HTTP data plane");
+        long endpoints = yaml.lines().filter(line -> line.contains("- \"" + endpoint + "\"")).count();
+        assertEquals(2L * (AwsRegions.advertised("aws").size() + 1), endpoints);
+    }
+
+    @Test
+    void registriesYamlForACommercialClusterInTheDefaultAccountIsUnchanged() {
+        String yaml = EksClusterManager.buildRegistriesYaml(
+                EksClusterManager.mirrorAccounts("000000000000", "000000000000"),
+                EksClusterManager.mirrorRegions("us-east-1"), 4566, "http://floci:4566", false);
+
+        assertEquals(EksClusterManager.buildRegistriesYaml(
+                "000000000000", AwsRegions.advertised("aws"), 4566, "http://floci:4566"), yaml);
+    }
+
+    @Test
+    void registriesYamlForAChinaClusterMirrorsTheChinaRegions() {
+        String yaml = EksClusterManager.buildRegistriesYaml(
+                EksClusterManager.mirrorAccounts("000000000000", "000000000000"),
+                EksClusterManager.mirrorRegions("cn-north-1"), 4566, "http://floci:4566", false);
+
+        for (String region : AwsRegions.advertised("aws-cn")) {
+            assertTrue(yaml.contains("\"000000000000.dkr.ecr." + region + ".localhost:4566\":"), region);
+        }
+        assertTrue(yaml.contains("\"000000000000.dkr.ecr.cn-north-1.localhost:4566\":"));
+        assertFalse(yaml.contains(".us-east-1."));
+        assertFalse(yaml.contains("amazonaws"), "repository URIs are Floci's localhost hosts in every partition");
+        assertEquals(AwsRegions.advertised("aws-cn").size() + 1,
+                yaml.lines().filter(line -> line.contains("- \"http://floci:4566\"")).count());
+    }
+
+    @Test
+    void registriesYamlForANonDefaultAccountMirrorsBothAccounts() {
+        String yaml = EksClusterManager.buildRegistriesYaml(
+                EksClusterManager.mirrorAccounts("111122223333", "000000000000"),
+                List.of("eu-central-1"), 4566, "http://floci:4566", false);
+
+        assertEquals("""
+                mirrors:
+                  "111122223333.dkr.ecr.eu-central-1.localhost:4566":
+                    endpoint:
+                      - "http://floci:4566"
+                  "000000000000.dkr.ecr.eu-central-1.localhost:4566":
+                    endpoint:
+                      - "http://floci:4566"
+                  "localhost:4566":
+                    endpoint:
+                      - "http://floci:4566"
+                """, yaml);
+    }
+
+    @Test
+    void registriesYamlKeepsTheExistingOutputWhenTlsUrisAreDisabled() {
+        String yaml = EksClusterManager.buildRegistriesYaml(
+                "111122223333", List.of("eu-central-1"), 4566, "http://floci:4566", false);
+
+        assertEquals("""
+                mirrors:
+                  "111122223333.dkr.ecr.eu-central-1.localhost:4566":
+                    endpoint:
+                      - "http://floci:4566"
+                  "localhost:4566":
+                    endpoint:
+                      - "http://floci:4566"
+                """, yaml);
+    }
+
+    @Test
     void serverArgsOmitCniFlagsByDefault() {
         List<String> args = EksClusterManager.buildServerArgs(false);
 
         assertTrue(args.contains("--disable=traefik"));
+        assertTrue(args.contains("--disable=local-storage"));
         assertFalse(args.contains("--flannel-backend=none"));
         assertFalse(args.contains("--disable-network-policy"));
         assertFalse(args.contains("--disable-kube-proxy"));
@@ -194,8 +308,27 @@ class EksClusterManagerTest {
         assertTrue(args.contains("--flannel-backend=none"));
         assertTrue(args.contains("--disable-network-policy"));
         assertTrue(args.contains("--disable-kube-proxy"));
-        // Base args must still be present — disableCni only adds flags, never replaces them.
+        // Base args must still be present: disableCni only adds flags, never replaces them.
         assertTrue(args.contains("--disable=traefik"));
+        assertTrue(args.contains("--disable=local-storage"));
+        assertTrue(args.contains("--tls-san=localhost"));
+    }
+
+    @Test
+    void serverArgsRetainLocalStorageWhenDefaultStorageClassEnabled() {
+        List<String> args = EksClusterManager.buildServerArgs(false, true, null, null);
+
+        assertTrue(args.contains("--disable=traefik"));
+        assertFalse(args.contains("--disable=local-storage"));
+        assertTrue(args.contains("--tls-san=localhost"));
+    }
+
+    @Test
+    void serverArgsDisableLocalStorageWhenDefaultStorageClassDisabled() {
+        List<String> args = EksClusterManager.buildServerArgs(false, false, null, null);
+
+        assertTrue(args.contains("--disable=traefik"));
+        assertTrue(args.contains("--disable=local-storage"));
         assertTrue(args.contains("--tls-san=localhost"));
     }
 
@@ -252,11 +385,13 @@ class EksClusterManagerTest {
         ContainerBuilder containerBuilder = Mockito.mock(ContainerBuilder.class);
         ContainerBuilder.Builder builder = Mockito.mock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-        when(builder.build()).thenReturn(Mockito.mock(ContainerSpec.class));
+        when(builder.build()).thenReturn(new ContainerSpec("test-image"));
 
         RegionResolver regionResolver = Mockito.mock(RegionResolver.class);
         when(regionResolver.getAccountId()).thenReturn("000000000000");
         when(regionResolver.getDefaultRegion()).thenReturn("us-east-1");
+        when(regionResolver.buildGlobalArn(anyString(), anyString(), anyString())).thenAnswer(invocation ->
+                "arn:aws:" + invocation.getArgument(0) + "::" + invocation.getArgument(1) + ":" + invocation.getArgument(2));
 
         EksClusterManager manager = new EksClusterManager(containerBuilder, lifecycleManager,
                 Mockito.mock(ContainerDetector.class), Mockito.mock(PortAllocator.class),
@@ -273,7 +408,78 @@ class EksClusterManagerTest {
                 "io.floci.service", "eks",
                 "io.floci.resource-id", "my-cluster",
                 "io.floci.account", "000000000000",
-                "io.floci.region", "us-east-1"));
+                "io.floci.region", "us-east-1",
+                "io.floci.eks.node-capacity", "m5.large:unbounded",
+                "io.floci.eks.default-storage-class", "false"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void startClusterEmbeddedDnsFlag(boolean embeddedDns) {
+        EmulatorConfig config = Mockito.mock(EmulatorConfig.class, Mockito.RETURNS_DEEP_STUBS);
+        when(config.services().eks().defaultImage()).thenReturn("rancher/k3s:v1.30.0-k3s1");
+        when(config.services().eks().embeddedDns()).thenReturn(embeddedDns);
+
+        ContainerLifecycleManager lifecycleManager = Mockito.mock(ContainerLifecycleManager.class, Mockito.RETURNS_DEEP_STUBS);
+        when(lifecycleManager.create(any())).thenReturn("container-id");
+
+        ContainerBuilder containerBuilder = Mockito.mock(ContainerBuilder.class);
+        ContainerBuilder.Builder builder = Mockito.mock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
+        when(containerBuilder.newContainer(anyString())).thenReturn(builder);
+        when(builder.build()).thenReturn(new ContainerSpec("test-image"));
+
+        EksClusterManager manager = new EksClusterManager(containerBuilder, lifecycleManager,
+                Mockito.mock(ContainerDetector.class), Mockito.mock(PortAllocator.class),
+                Mockito.mock(DockerHostResolver.class), Mockito.mock(EcrRegistryManager.class),
+                config, new RegionResolver("us-east-1", "000000000000"));
+
+        Cluster cluster = new Cluster();
+        cluster.setName("my-cluster");
+
+        manager.startCluster(cluster);
+
+        if (embeddedDns) {
+            verify(builder).withEmbeddedDns();
+        } else {
+            verify(builder, never()).withEmbeddedDns();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void startClusterDefaultStorageClassFlag(boolean defaultStorageClass) {
+        EmulatorConfig config = Mockito.mock(EmulatorConfig.class, Mockito.RETURNS_DEEP_STUBS);
+        when(config.services().eks().defaultImage()).thenReturn("rancher/k3s:v1.30.0-k3s1");
+        when(config.services().eks().defaultStorageClass()).thenReturn(defaultStorageClass);
+
+        ContainerLifecycleManager lifecycleManager = Mockito.mock(ContainerLifecycleManager.class, Mockito.RETURNS_DEEP_STUBS);
+        when(lifecycleManager.create(any())).thenReturn("container-id");
+
+        ContainerBuilder containerBuilder = Mockito.mock(ContainerBuilder.class);
+        ContainerBuilder.Builder builder = Mockito.mock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
+        when(containerBuilder.newContainer(anyString())).thenReturn(builder);
+        when(builder.build()).thenReturn(new ContainerSpec("test-image"));
+
+        EksClusterManager manager = new EksClusterManager(containerBuilder, lifecycleManager,
+                Mockito.mock(ContainerDetector.class), Mockito.mock(PortAllocator.class),
+                Mockito.mock(DockerHostResolver.class), Mockito.mock(EcrRegistryManager.class),
+                config, new RegionResolver("us-east-1", "000000000000"));
+
+        Cluster cluster = new Cluster();
+        cluster.setName("my-cluster");
+
+        manager.startCluster(cluster);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<String>> cmdCaptor = ArgumentCaptor.forClass(List.class);
+        verify(builder).withCmd(cmdCaptor.capture());
+        List<String> cmd = cmdCaptor.getValue();
+
+        if (defaultStorageClass) {
+            assertFalse(cmd.contains("--disable=local-storage"));
+        } else {
+            assertTrue(cmd.contains("--disable=local-storage"));
+        }
     }
 
     /** Re-latching persisted clusters after a Floci/Docker restart (#2609), without a Docker daemon. */
@@ -284,6 +490,9 @@ class EksClusterManagerTest {
         private EmulatorConfig.StorageConfig storage;
         private ContainerLifecycleManager lifecycleManager;
         private PortAllocator portAllocator;
+        private DockerClient dockerClient;
+        private ContainerBuilder containerBuilder;
+        private ContainerDetector containerDetector;
         private EksClusterManager manager;
 
         @BeforeEach
@@ -305,26 +514,31 @@ class EksClusterManagerTest {
             when(eks.ecrRegistryMirror()).thenReturn(false);
 
             lifecycleManager = Mockito.mock(ContainerLifecycleManager.class);
-            ContainerBuilder containerBuilder = Mockito.mock(ContainerBuilder.class);
+            containerBuilder = Mockito.mock(ContainerBuilder.class);
             ContainerBuilder.Builder builder = Mockito.mock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
             when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-            when(builder.build()).thenReturn(Mockito.mock(ContainerSpec.class));
+            when(builder.build()).thenReturn(new ContainerSpec("test-image"));
             portAllocator = Mockito.mock(PortAllocator.class);
+            dockerClient = Mockito.mock(DockerClient.class, Mockito.RETURNS_DEEP_STUBS);
+            when(lifecycleManager.getDockerClient()).thenReturn(dockerClient);
 
+            containerDetector = Mockito.mock(ContainerDetector.class);
             manager = new EksClusterManager(containerBuilder, lifecycleManager,
-                    Mockito.mock(ContainerDetector.class), portAllocator,
+                    containerDetector, portAllocator,
                     Mockito.mock(DockerHostResolver.class), Mockito.mock(EcrRegistryManager.class),
                     config, Mockito.mock(RegionResolver.class));
         }
 
         // Container's getters are final, so survivors are built from JSON instead of mocked.
         private Container survivingContainer(String id) {
-            return containerFromJson("{\"Id\":\"" + id + "\"}");
+            return containerFromJson("{\"Id\":\"" + id + "\","
+                    + "\"Labels\":{\"io.floci.eks.node-capacity\":\"m5.large:unbounded\"}}");
         }
 
         private Container survivingContainerOwnedBy(String id, String accountId) {
             return containerFromJson("{\"Id\":\"" + id + "\","
-                    + "\"Labels\":{\"io.floci.account\":\"" + accountId + "\"}}");
+                    + "\"Labels\":{\"io.floci.account\":\"" + accountId + "\","
+                    + "\"io.floci.eks.node-capacity\":\"m5.large:unbounded\"}}");
         }
 
         private Container containerFromJson(String json) {
@@ -349,11 +563,44 @@ class EksClusterManagerTest {
         }
 
         @Test
+        void adoptsASurvivorThroughTheNetworkClustersAreCreatedOn() {
+            // k3s starts on the default bridge and is then connected to Floci's network, so the
+            // survivor is on both and only the second is reachable from Floci.
+            when(containerBuilder.resolveDockerNetwork(Optional.empty())).thenReturn(Optional.of("floci_default"));
+            when(lifecycleManager.findByName("floci-eks-demo"))
+                    .thenReturn(Optional.of(survivingContainer("cid-1")));
+            when(lifecycleManager.adopt("cid-1", List.of(6443), Optional.of("floci_default")))
+                    .thenReturn(new ContainerInfo("cid-1", Map.of(), Map.of(6443, 6512)));
+
+            Cluster cluster = cluster();
+            manager.restoreCluster(cluster);
+
+            assertEquals("cid-1", cluster.getContainerId());
+            verify(lifecycleManager).adopt("cid-1", List.of(6443), Optional.of("floci_default"));
+            verify(lifecycleManager, never()).create(any());
+        }
+
+        @Test
+        void adoptsASurvivorThroughTheConfiguredEksNetwork() {
+            when(config.services().eks().dockerNetwork()).thenReturn(Optional.of("eks-net"));
+            when(containerBuilder.resolveDockerNetwork(Optional.of("eks-net"))).thenReturn(Optional.of("eks-net"));
+            when(lifecycleManager.findByName("floci-eks-demo"))
+                    .thenReturn(Optional.of(survivingContainer("cid-1")));
+            when(lifecycleManager.adopt("cid-1", List.of(6443), Optional.of("eks-net")))
+                    .thenReturn(new ContainerInfo("cid-1", Map.of(), Map.of(6443, 6512)));
+
+            Cluster cluster = cluster();
+            manager.restoreCluster(cluster);
+
+            verify(lifecycleManager).adopt("cid-1", List.of(6443), Optional.of("eks-net"));
+        }
+
+        @Test
         void adoptsASurvivingContainerAndKeepsItsPublishedPort() {
             when(lifecycleManager.findByName("floci-eks-demo"))
                     .thenReturn(Optional.of(survivingContainer("cid-1")));
             // adopt() starts a stopped container — the Docker-reboot case from #2609.
-            when(lifecycleManager.adopt("cid-1", List.of(6443)))
+            when(lifecycleManager.adopt("cid-1", List.of(6443), Optional.empty()))
                     .thenReturn(new ContainerInfo("cid-1", Map.of(), Map.of(6443, 6512)));
 
             Cluster cluster = cluster();
@@ -369,6 +616,359 @@ class EksClusterManagerTest {
         }
 
         @Test
+        void restoreClusterPreservesPreUpgradeLocalStorageWhenContainerSurvives() {
+            when(lifecycleManager.findByName("floci-eks-demo"))
+                    .thenReturn(Optional.of(survivingContainer("cid-pre-upgrade")));
+            when(lifecycleManager.adopt("cid-pre-upgrade", List.of(6443), Optional.empty()))
+                    .thenReturn(new ContainerInfo("cid-pre-upgrade", Map.of(), Map.of(6443, 6512)));
+
+            Cluster cluster = cluster();
+            manager.restoreCluster(cluster);
+
+            assertEquals(Boolean.TRUE, cluster.getDefaultStorageClass());
+        }
+
+        @Test
+        void restoreClusterPreservesDefaultStorageClassLabelFromSurvivingContainer() {
+            Container container = containerFromJson("{\"Id\":\"cid-new\","
+                    + "\"Labels\":{\"io.floci.eks.node-capacity\":\"m5.large:unbounded\","
+                    + "\"io.floci.eks.default-storage-class\":\"false\"}}");
+            when(lifecycleManager.findByName("floci-eks-demo"))
+                    .thenReturn(Optional.of(container));
+            when(lifecycleManager.adopt("cid-new", List.of(6443), Optional.empty()))
+                    .thenReturn(new ContainerInfo("cid-new", Map.of(), Map.of(6443, 6512)));
+
+            Cluster cluster = cluster();
+            manager.restoreCluster(cluster);
+
+            assertEquals(Boolean.FALSE, cluster.getDefaultStorageClass());
+        }
+
+        @Test
+        void replacesASurvivorLeftOnANetworkFlociNoLongerUses() {
+            when(containerDetector.isRunningInContainer()).thenReturn(true);
+            restoreSurvivorOn("\"bridge\":{\"IPAddress\":\"172.17.0.3\"}");
+            stubFreshStart("cid-new", 6440);
+
+            Cluster cluster = cluster();
+            manager.restoreCluster(cluster);
+
+            assertEquals("cid-new", cluster.getContainerId());
+            verify(dockerClient).stopContainerCmd("cid-old");
+        }
+
+        @Test
+        void keepsASurvivorOnTheNetworkFlociUsesBesideTheDefaultBridge() {
+            when(containerDetector.isRunningInContainer()).thenReturn(true);
+            restoreSurvivorOn("\"bridge\":{\"IPAddress\":\"172.17.0.3\"},"
+                    + "\"floci_default\":{\"IPAddress\":\"172.18.0.4\"}");
+
+            Cluster cluster = cluster();
+            manager.restoreCluster(cluster);
+
+            assertEquals("cid-old", cluster.getContainerId());
+            verify(lifecycleManager, never()).create(any());
+        }
+
+        @Test
+        void keepsASurvivorThatReportsNoNetworks() {
+            when(containerDetector.isRunningInContainer()).thenReturn(true);
+            restoreSurvivorOn("");
+
+            Cluster cluster = cluster();
+            manager.restoreCluster(cluster);
+
+            assertEquals("cid-old", cluster.getContainerId());
+            verify(lifecycleManager, never()).create(any());
+        }
+
+        @Test
+        void keepsASurvivorOnAnotherNetworkWhenFlociRunsOnTheHost() {
+            restoreSurvivorOn("\"bridge\":{\"IPAddress\":\"172.17.0.3\"}");
+
+            Cluster cluster = cluster();
+            manager.restoreCluster(cluster);
+
+            assertEquals("cid-old", cluster.getContainerId());
+            verify(lifecycleManager, never()).create(any());
+        }
+
+        private void restoreSurvivorOn(String networks) {
+            when(containerBuilder.resolveDockerNetwork(Optional.empty())).thenReturn(Optional.of("floci_default"));
+            when(lifecycleManager.findByName("floci-eks-demo")).thenReturn(Optional.of(containerFromJson(
+                    "{\"Id\":\"cid-old\",\"Labels\":{\"io.floci.eks.node-capacity\":\"m5.large:unbounded\"},"
+                            + "\"NetworkSettings\":{\"Networks\":{" + networks + "}}}")));
+            when(lifecycleManager.adopt(eq("cid-old"), eq(List.of(6443)), any()))
+                    .thenReturn(new ContainerInfo("cid-old", Map.of(), Map.of(6443, 6440)));
+        }
+
+        @Test
+        void recreatesAnOldSurvivorWithoutCapacityLimits() {
+            when(lifecycleManager.findByName("floci-eks-demo"))
+                    .thenReturn(Optional.of(containerFromJson("{\"Id\":\"cid-old\"}")));
+            when(lifecycleManager.adopt("cid-old", List.of(6443), Optional.empty()))
+                    .thenReturn(new ContainerInfo("cid-old", Map.of(), Map.of(6443, 6440)));
+            stubFreshStart("cid-new", 6440);
+
+            Cluster cluster = cluster();
+            manager.restoreCluster(cluster);
+
+            assertEquals("cid-new", cluster.getContainerId());
+            verify(lifecycleManager).create(any());
+            verify(portAllocator, never()).allocate(6440, 6499);
+            verify(dockerClient).stopContainerCmd("cid-old");
+        }
+
+        @Test
+        void restoresOldSurvivorWhenCapacityReplacementFails() {
+            when(lifecycleManager.findByName("floci-eks-demo"))
+                    .thenReturn(Optional.of(containerFromJson("{\"Id\":\"cid-old\"}")));
+            when(lifecycleManager.adopt("cid-old", List.of(6443), Optional.empty()))
+                    .thenReturn(new ContainerInfo("cid-old", Map.of(), Map.of(6443, 6440)));
+            when(lifecycleManager.create(any())).thenReturn("cid-new");
+            when(lifecycleManager.startCreated(any(), any()))
+                    .thenThrow(new RuntimeException("replacement failed"));
+
+            Cluster cluster = cluster();
+            manager.restoreCluster(cluster);
+
+            assertEquals("cid-old", cluster.getContainerId());
+            assertEquals(6440, cluster.getHostPort());
+            verify(lifecycleManager).removeIfExistsStrict("floci-eks-demo");
+            verify(dockerClient).stopContainerCmd("cid-old");
+            verify(portAllocator, never()).allocate(6440, 6499);
+        }
+
+        @Test
+        void firstNodeGroupReplacementKeepsTheClusterEndpoint() {
+            when(lifecycleManager.create(any())).thenReturn("cid-new");
+            when(lifecycleManager.startCreated(any(), any()))
+                    .thenReturn(new ContainerInfo("cid-new", Map.of()));
+            Cluster cluster = cluster();
+            cluster.setDockerName("floci-eks-demo");
+            cluster.setContainerId("cid-old");
+            cluster.setHostPort(6441);
+            cluster.setNodeInstanceType("t3.medium");
+
+            assertTrue(manager.restartForNodeCapacity(cluster, "m5.large"));
+
+            assertEquals("cid-new", cluster.getContainerId());
+            assertEquals(6441, cluster.getHostPort());
+            assertEquals("https://localhost:6441", cluster.getEndpoint());
+            verify(portAllocator, never()).allocate(6440, 6499);
+            verify(portAllocator, never()).release(6441);
+            verify(dockerClient).stopContainerCmd("cid-old");
+            verify(lifecycleManager, Mockito.times(2))
+                    .removeIfExistsStrict("floci-aws-eks-capacity-backup.demo");
+        }
+
+        @Test
+        void deletingAClusterHandsItsApiServerPortBackForTheNextCluster() {
+            stubFreshStart("cid-1", 6441);
+            Cluster cluster = cluster();
+            manager.startCluster(cluster);
+
+            manager.stopCluster(cluster);
+
+            verify(portAllocator).release(6441);
+        }
+
+        @Test
+        void deletingAClusterWhoseContainerDockerCouldNotRemoveKeepsItsPortReserved() {
+            stubFreshStart("cid-1", 6441);
+            Mockito.doThrow(new IllegalStateException("Failed to remove container cid-1"))
+                    .when(lifecycleManager).stopAndRemoveStrict("cid-1", null);
+            Cluster cluster = cluster();
+            manager.startCluster(cluster);
+
+            assertThrows(IllegalStateException.class, () -> manager.stopCluster(cluster));
+
+            verify(portAllocator, never()).release(6441);
+        }
+
+        @Test
+        void retryingADeleteAfterContainerRemovalFailedHandsThePortBack() {
+            stubFreshStart("cid-1", 6441);
+            Mockito.doThrow(new IllegalStateException("Failed to remove container cid-1")).doNothing()
+                    .when(lifecycleManager).stopAndRemoveStrict("cid-1", null);
+            Cluster cluster = cluster();
+            manager.startCluster(cluster);
+
+            assertThrows(IllegalStateException.class, () -> manager.stopCluster(cluster));
+            manager.stopCluster(cluster);
+
+            verify(portAllocator, Mockito.times(1)).release(6441);
+        }
+
+        @Test
+        void retryingADeleteAfterBackupCleanupFailedHandsThePortBackOnlyOnce() {
+            Cluster cluster = cluster();
+            cluster.setDockerName("floci-eks-demo");
+            cluster.setContainerId("cid-1");
+            cluster.setHostPort(6441);
+            Mockito.doThrow(new IllegalStateException("Docker cleanup failed")).doNothing()
+                    .when(lifecycleManager).removeIfExistsStrict("floci-aws-eks-capacity-backup.demo");
+
+            assertThrows(IllegalStateException.class, () -> manager.stopCluster(cluster));
+            manager.stopCluster(cluster);
+
+            verify(portAllocator, Mockito.times(1)).release(6441);
+        }
+
+        @Test
+        void aClusterWhoseContainerCannotBeCreatedHandsItsPortBackExactlyOnce() {
+            when(portAllocator.allocate(6440, 6499)).thenReturn(6441);
+            when(lifecycleManager.create(any())).thenThrow(new IllegalStateException("Docker unreachable"));
+            Cluster cluster = cluster();
+
+            assertThrows(IllegalStateException.class, () -> manager.startCluster(cluster));
+            assertEquals(0, cluster.getHostPort());
+            manager.stopCluster(cluster);
+
+            verify(portAllocator, Mockito.times(1)).release(6441);
+        }
+
+        @Test
+        void capacityBackupDoesNotCollideWithAnotherClusterName() {
+            when(lifecycleManager.create(any())).thenReturn("cid-new");
+            when(lifecycleManager.startCreated(any(), any()))
+                    .thenReturn(new ContainerInfo("cid-new", Map.of()));
+            Cluster cluster = cluster();
+            cluster.setName("foo");
+            cluster.setDockerName("floci-eks-foo");
+            cluster.setContainerId("cid-foo");
+            cluster.setHostPort(6441);
+            cluster.setNodeInstanceType("t3.medium");
+            Cluster other = cluster();
+            other.setName("foo-capacity-backup");
+            other.setDockerName("floci-eks-foo-capacity-backup");
+            other.setContainerId("cid-other");
+
+            assertTrue(manager.restartForNodeCapacity(cluster, "m5.large"));
+            manager.stopCluster(cluster);
+
+            assertTrue(other.getName().matches(EksService.CLUSTER_NAME_REGEX));
+            assertFalse("foo.capacity-backup".matches(EksService.CLUSTER_NAME_REGEX));
+            assertEquals("floci-eks-foo-capacity-backup", manager.clusterResourceName(other));
+            verify(lifecycleManager, Mockito.times(3))
+                    .removeIfExistsStrict("floci-aws-eks-capacity-backup.foo");
+            verify(lifecycleManager, never()).removeIfExistsStrict(other.getDockerName());
+            verify(lifecycleManager, never()).stopAndRemoveStrict("cid-other", null);
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"floci-eks-", "floci-aws-eks-"})
+        void deletingNumericClusterDoesNotRemoveAnotherAccountsCluster(String prefix) {
+            when(config.defaultAccountId()).thenReturn("000000000000");
+            Cluster cluster = cluster();
+            cluster.setAccountId("000000000000");
+            cluster.setName("999999999999");
+            cluster.setDockerName(prefix + cluster.getName());
+            cluster.setContainerId("cid-numeric");
+            String otherClusterName = "capacity-backup";
+            String otherDockerName = prefix + "999999999999." + otherClusterName;
+
+            assertTrue(cluster.getName().matches(EksService.CLUSTER_NAME_REGEX));
+            assertTrue(otherClusterName.matches(EksService.CLUSTER_NAME_REGEX));
+
+            manager.stopCluster(cluster);
+
+            verify(lifecycleManager).stopAndRemoveStrict("cid-numeric", null);
+            verify(lifecycleManager).removeIfExistsStrict("floci-aws-eks-capacity-backup.999999999999");
+            verify(lifecycleManager, never()).removeIfExistsStrict(otherDockerName);
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"floci-eks-", "floci-aws-eks-"})
+        void replacingNumericClusterDoesNotRemoveAnotherAccountsCluster(String prefix) {
+            when(config.defaultAccountId()).thenReturn("000000000000");
+            stubFreshStart("cid-new", 6441);
+            Cluster cluster = cluster();
+            cluster.setAccountId("000000000000");
+            cluster.setName("999999999999");
+            cluster.setDockerName(prefix + cluster.getName());
+            cluster.setContainerId("cid-numeric");
+            cluster.setHostPort(6441);
+            cluster.setNodeInstanceType("t3.medium");
+            String otherDockerName = prefix + "999999999999.capacity-backup";
+
+            assertTrue(manager.restartForNodeCapacity(cluster, "m5.large"));
+
+            assertEquals("cid-new", cluster.getContainerId());
+            verify(lifecycleManager, Mockito.times(2))
+                    .removeIfExistsStrict("floci-aws-eks-capacity-backup.999999999999");
+            verify(dockerClient.renameContainerCmd("cid-numeric"))
+                    .withName("floci-aws-eks-capacity-backup.999999999999");
+            verify(lifecycleManager, never()).removeIfExistsStrict(otherDockerName);
+            verify(dockerClient.renameContainerCmd("cid-numeric"), never()).withName(otherDockerName);
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"000000000000", "111111111111", "999999999999"})
+        void capacityBackupsRespectAccountAndResourceNamespace(String accountId) {
+            when(config.defaultAccountId()).thenReturn("000000000000");
+            EmulatorConfig.DockerConfig docker = Mockito.mock(EmulatorConfig.DockerConfig.class);
+            when(config.docker()).thenReturn(docker);
+            when(docker.resourceNamespace()).thenReturn(Optional.of("isolated"));
+            Cluster cluster = cluster();
+            cluster.setAccountId(accountId);
+            cluster.setName("demo");
+            cluster.setDockerName(manager.clusterResourceName(cluster));
+            cluster.setContainerId("cid-node");
+            String qualifiedName = accountId.equals("000000000000")
+                    ? cluster.getName() : accountId + "." + cluster.getName();
+
+            manager.stopCluster(cluster);
+
+            verify(lifecycleManager).removeIfExistsStrict(
+                    "floci-aws-isolated-eks-capacity-backup." + qualifiedName);
+            verify(lifecycleManager, never()).removeIfExistsStrict(cluster.getDockerName() + ".capacity-backup");
+            assertEquals("floci-aws-isolated-eks-" + qualifiedName, cluster.getDockerName());
+        }
+
+        @Test
+        void failedFirstNodeGroupReplacementRestoresPreviousContainerAndType() {
+            when(lifecycleManager.create(any())).thenReturn("cid-new");
+            when(lifecycleManager.startCreated(any(), any()))
+                    .thenThrow(new IllegalStateException("replacement failed"));
+            when(lifecycleManager.adopt("cid-old", List.of(6443), Optional.empty()))
+                    .thenReturn(new ContainerInfo("cid-old", Map.of(), Map.of(6443, 6441)));
+            Cluster cluster = cluster();
+            cluster.setDockerName("floci-eks-demo");
+            cluster.setContainerId("cid-old");
+            cluster.setHostPort(6441);
+            cluster.setNodeInstanceType("t3.medium");
+
+            assertFalse(manager.restartForNodeCapacity(cluster, "m5.large"));
+
+            assertEquals("m5.large", cluster.getNodeInstanceType());
+            assertEquals("cid-old", cluster.getContainerId());
+            assertEquals(6441, cluster.getHostPort());
+            assertEquals("https://localhost:6441", cluster.getEndpoint());
+            verify(portAllocator, never()).allocate(6440, 6499);
+            verify(portAllocator, never()).release(6441);
+            verify(lifecycleManager, never()).removeVolume(anyString());
+        }
+
+        @Test
+        void backupCleanupFailureKeepsTheNewNodeRunning() {
+            when(lifecycleManager.findByName("floci-eks-demo"))
+                    .thenReturn(Optional.of(containerFromJson("{\"Id\":\"cid-old\"}")));
+            when(lifecycleManager.adopt("cid-old", List.of(6443), Optional.empty()))
+                    .thenReturn(new ContainerInfo("cid-old", Map.of(), Map.of(6443, 6440)));
+            stubFreshStart("cid-new", 6440);
+            Mockito.doNothing().doThrow(new IllegalStateException("Docker cleanup failed"))
+                    .when(lifecycleManager).removeIfExistsStrict("floci-aws-eks-capacity-backup.demo");
+
+            Cluster cluster = cluster();
+            manager.restoreCluster(cluster);
+
+            assertEquals("cid-new", cluster.getContainerId());
+            verify(lifecycleManager, Mockito.times(1)).adopt("cid-old", List.of(6443), Optional.empty());
+            verify(lifecycleManager, never()).removeIfExistsStrict("floci-eks-demo");
+        }
+
+        @Test
         void recreatesTheContainerWhenNoneSurvives() {
             when(lifecycleManager.findByName("floci-eks-demo")).thenReturn(Optional.empty());
             stubFreshStart("cid-new", 6440);
@@ -379,14 +979,14 @@ class EksClusterManagerTest {
             assertEquals("cid-new", cluster.getContainerId());
             assertEquals(6440, cluster.getHostPort());
             verify(lifecycleManager).create(any());
-            verify(lifecycleManager, never()).adopt(anyString(), any());
+            verify(lifecycleManager, never()).adopt(anyString(), any(), any());
         }
 
         @Test
         void recreatesWhenTheSurvivingContainerPublishesNoPort() {
             when(lifecycleManager.findByName("floci-eks-demo"))
                     .thenReturn(Optional.of(survivingContainer("cid-1")));
-            when(lifecycleManager.adopt("cid-1", List.of(6443)))
+            when(lifecycleManager.adopt("cid-1", List.of(6443), Optional.empty()))
                     .thenReturn(new ContainerInfo("cid-1", Map.of()));
             stubFreshStart("cid-new", 6440);
 
@@ -401,7 +1001,7 @@ class EksClusterManagerTest {
         void recreatesWhenAdoptionFails() {
             when(lifecycleManager.findByName("floci-eks-demo"))
                     .thenReturn(Optional.of(survivingContainer("cid-1")));
-            when(lifecycleManager.adopt(anyString(), any())).thenThrow(new RuntimeException("broken"));
+            when(lifecycleManager.adopt(anyString(), any(), any())).thenThrow(new RuntimeException("broken"));
             stubFreshStart("cid-new", 6440);
 
             Cluster cluster = cluster();
@@ -421,8 +1021,22 @@ class EksClusterManagerTest {
             cluster.setContainerId("cid-1");
             manager.stopCluster(cluster);
 
-            verify(lifecycleManager).stopAndRemove("cid-1", null);
+            verify(lifecycleManager).stopAndRemoveStrict("cid-1", null);
             // The volume must survive so restoreCluster can bring the workloads back.
+            verify(lifecycleManager, never()).removeVolume(anyString());
+        }
+
+        @Test
+        void backupCleanupFailureDoesNotLeaveTheLiveNodeRunning() {
+            Cluster cluster = cluster();
+            cluster.setDockerName("floci-eks-demo");
+            cluster.setContainerId("cid-new");
+            Mockito.doThrow(new IllegalStateException("Docker cleanup failed"))
+                    .when(lifecycleManager).removeIfExistsStrict("floci-aws-eks-capacity-backup.demo");
+
+            assertThrows(IllegalStateException.class, () -> manager.stopCluster(cluster));
+
+            verify(lifecycleManager).stopAndRemoveStrict("cid-new", null);
             verify(lifecycleManager, never()).removeVolume(anyString());
         }
 
@@ -434,8 +1048,8 @@ class EksClusterManagerTest {
             cluster.setContainerId("cid-1");
             manager.stopCluster(cluster);
 
-            verify(lifecycleManager).stopAndRemove("cid-1", null);
-            verify(lifecycleManager).removeVolume("floci-eks-demo");
+            verify(lifecycleManager).stopAndRemoveStrict("cid-1", null);
+            verify(lifecycleManager).removeVolume("floci-aws-eks-demo");
         }
 
         @Test
@@ -446,7 +1060,7 @@ class EksClusterManagerTest {
             when(lifecycleManager.findByName("floci-eks-demo")).thenReturn(Optional.empty());
             when(lifecycleManager.findByName("floci-eks-999999999999.demo"))
                     .thenReturn(Optional.of(survivingContainer("cid-9")));
-            when(lifecycleManager.adopt("cid-9", List.of(6443)))
+            when(lifecycleManager.adopt("cid-9", List.of(6443), Optional.empty()))
                     .thenReturn(new ContainerInfo("cid-9", Map.of(), Map.of(6443, 6520)));
 
             Cluster cluster = cluster();
@@ -464,7 +1078,7 @@ class EksClusterManagerTest {
             Cluster cluster = cluster();
             cluster.setAccountId("000000000000");
 
-            assertEquals("floci-eks-demo", manager.clusterResourceName(cluster));
+            assertEquals("floci-aws-eks-demo", manager.clusterResourceName(cluster));
         }
 
         @Test
@@ -475,7 +1089,7 @@ class EksClusterManagerTest {
             when(config.defaultAccountId()).thenReturn("000000000000");
             when(lifecycleManager.findByName("floci-eks-demo"))
                     .thenReturn(Optional.of(survivingContainerOwnedBy("cid-legacy", "999999999999")));
-            when(lifecycleManager.adopt("cid-legacy", List.of(6443)))
+            when(lifecycleManager.adopt("cid-legacy", List.of(6443), Optional.empty()))
                     .thenReturn(new ContainerInfo("cid-legacy", Map.of(), Map.of(6443, 6512)));
 
             Cluster cluster = cluster();
@@ -502,9 +1116,9 @@ class EksClusterManagerTest {
             cluster.setAccountId("999999999999");
             manager.restoreCluster(cluster);
 
-            assertEquals("floci-eks-999999999999.demo", cluster.getDockerName());
+            assertEquals("floci-aws-eks-999999999999.demo", cluster.getDockerName());
             assertEquals("cid-new", cluster.getContainerId());
-            verify(lifecycleManager, never()).adopt(anyString(), any());
+            verify(lifecycleManager, never()).adopt(anyString(), any(), any());
             verify(lifecycleManager, never()).removeIfExists("floci-eks-demo");
         }
 
@@ -523,8 +1137,8 @@ class EksClusterManagerTest {
             cluster.setAccountId("999999999999");
             manager.restoreCluster(cluster);
 
-            assertEquals("floci-eks-999999999999.demo", cluster.getDockerName());
-            verify(lifecycleManager, never()).adopt(anyString(), any());
+            assertEquals("floci-aws-eks-999999999999.demo", cluster.getDockerName());
+            verify(lifecycleManager, never()).adopt(anyString(), any(), any());
             verify(lifecycleManager, never()).removeIfExists("floci-eks-demo");
         }
 
@@ -544,7 +1158,7 @@ class EksClusterManagerTest {
             cluster.setAccountId("999999999999");
             manager.restoreCluster(cluster);
 
-            assertEquals("floci-eks-999999999999.demo", cluster.getDockerName());
+            assertEquals("floci-aws-eks-999999999999.demo", cluster.getDockerName());
             assertEquals("cid-new", cluster.getContainerId());
             verify(inspectVolumeCmd).exec();
         }
@@ -558,8 +1172,8 @@ class EksClusterManagerTest {
             cluster.setAccountId("999999999999");
             manager.startCluster(cluster);
 
-            assertEquals("floci-eks-999999999999.demo", cluster.getDockerName());
-            verify(lifecycleManager).removeIfExists("floci-eks-999999999999.demo");
+            assertEquals("floci-aws-eks-999999999999.demo", cluster.getDockerName());
+            verify(lifecycleManager).removeIfExists("floci-aws-eks-999999999999.demo");
         }
     }
 
@@ -574,6 +1188,7 @@ class EksClusterManagerTest {
         private DockerClient dockerClient;
         private CopyArchiveToContainerCmd copyCmd;
         private EcrRegistryManager registryManager;
+        private EmulatorConfig config;
         private EmulatorConfig.EksServiceConfig eks;
         private EmulatorConfig.EcrServiceConfig ecr;
         private EksClusterManager manager;
@@ -587,8 +1202,8 @@ class EksClusterManagerTest {
             when(dockerClient.copyArchiveToContainerCmd(anyString())).thenReturn(copyCmd);
 
             registryManager = Mockito.mock(EcrRegistryManager.class);
-
-            EmulatorConfig config = Mockito.mock(EmulatorConfig.class);
+            when(registryManager.advertisedPort()).thenReturn(4566);
+            config = Mockito.mock(EmulatorConfig.class);
             eks = Mockito.mock(EmulatorConfig.EksServiceConfig.class);
             ecr = Mockito.mock(EmulatorConfig.EcrServiceConfig.class);
             when(config.services()).thenReturn(Mockito.mock(EmulatorConfig.ServicesConfig.class));
@@ -610,12 +1225,106 @@ class EksClusterManagerTest {
                     Mockito.mock(RegionResolver.class));
         }
 
+        private Cluster demoCluster() {
+            Cluster cluster = new Cluster();
+            cluster.setName("demo");
+            return cluster;
+        }
+
+        private Cluster clusterWithArn(String arn) {
+            Cluster cluster = demoCluster();
+            cluster.setArn(arn);
+            return cluster;
+        }
+
         @Test
-        void injectsTheMirrorIntoTheContainer() {
-            manager.injectEcrRegistryMirror("container-1", "demo");
+        void aDefaultCommercialClusterKeepsTheDeploymentWideMirror() throws Exception {
+            manager.injectEcrRegistryMirror("container-1",
+                    clusterWithArn("arn:aws:eks:us-east-1:000000000000:cluster/demo"));
+
+            assertEquals(EksClusterManager.buildRegistriesYaml("000000000000", AwsRegions.advertised("aws"),
+                    4566, "http://floci:4566"), Files.readString(tempDir.resolve("registries/demo/registries.yaml")));
+        }
+
+        @Test
+        void aChinaClusterInACommercialDeploymentMirrorsItsOwnPartitionsRegions() throws Exception {
+            manager.injectEcrRegistryMirror("container-1",
+                    clusterWithArn("arn:aws-cn:eks:cn-north-1:000000000000:cluster/demo"));
+
+            String yaml = Files.readString(tempDir.resolve("registries/demo/registries.yaml"));
+            assertTrue(yaml.contains("\"000000000000.dkr.ecr.cn-north-1.localhost:4566\":"));
+            assertTrue(yaml.contains("\"000000000000.dkr.ecr.cn-northwest-1.localhost:4566\":"));
+            assertFalse(yaml.contains(".us-east-1."), "a China cluster pulls from China regions only");
+        }
+
+        @Test
+        void aClusterInAnotherAccountMirrorsItsOwnAccountAndTheDefaultOne() throws Exception {
+            Cluster cluster = clusterWithArn("arn:aws:eks:eu-west-1:111122223333:cluster/demo");
+            cluster.setAccountId("111122223333");
+
+            manager.injectEcrRegistryMirror("container-1", cluster);
+
+            String yaml = Files.readString(tempDir.resolve("registries/demo/registries.yaml"));
+            assertTrue(yaml.contains("\"111122223333.dkr.ecr.eu-west-1.localhost:4566\":"));
+            assertTrue(yaml.contains("\"000000000000.dkr.ecr.eu-west-1.localhost:4566\":"));
+        }
+
+        @Test
+        void injectsTheMirrorIntoTheContainer() throws Exception {
+            manager.injectEcrRegistryMirror("container-1", demoCluster());
 
             verify(registryManager).ensureStarted();
             verify(copyCmd).withRemotePath("/etc");
+            verify(copyCmd).exec();
+            verify(config, never()).tls();
+            String yaml = Files.readString(tempDir.resolve("registries/demo/registries.yaml"));
+            assertFalse(yaml.contains("localhost.floci.io"));
+        }
+
+        @Test
+        void mirrorsTheAdvertisedRegistryPortToTheInNetworkDataPlane() throws Exception {
+            // Floci published as -p 54321:4566: pods name the advertised repository URI, while
+            // k3s still reaches Floci on its own port inside the Docker network.
+            when(registryManager.advertisedPort()).thenReturn(54321);
+
+            manager.injectEcrRegistryMirror("container-1", demoCluster());
+
+            String yaml = Files.readString(tempDir.resolve("registries/demo/registries.yaml"));
+            assertTrue(yaml.contains("\"000000000000.dkr.ecr.us-east-1.localhost:54321\":"));
+            assertTrue(yaml.contains("\"localhost:54321\":"));
+            assertFalse(yaml.contains("localhost:4566\":"));
+            assertTrue(yaml.contains("- \"http://floci:4566\""));
+            verify(copyCmd).exec();
+        }
+
+        @Test
+        void injectsTlsAliasesWhenTlsAndTlsUrisAreEnabled() throws Exception {
+            EmulatorConfig.TlsConfig tls = Mockito.mock(EmulatorConfig.TlsConfig.class);
+            when(config.tls()).thenReturn(tls);
+            when(tls.enabled()).thenReturn(true);
+            when(ecr.tlsUri()).thenReturn(true);
+
+            manager.injectEcrRegistryMirror("container-1", demoCluster());
+
+            String yaml = Files.readString(tempDir.resolve("registries/demo/registries.yaml"));
+            assertTrue(yaml.contains("\"000000000000.dkr.ecr.us-east-1.localhost.floci.io:4566\":"));
+            assertTrue(yaml.contains("\"localhost.floci.io:4566\":"));
+            assertTrue(yaml.contains("- \"http://floci:4566\""));
+            assertFalse(yaml.contains("https://"));
+            verify(copyCmd).exec();
+        }
+
+        @Test
+        void omitsTlsAliasesWhenTlsIsDisabled() throws Exception {
+            EmulatorConfig.TlsConfig tls = Mockito.mock(EmulatorConfig.TlsConfig.class);
+            when(config.tls()).thenReturn(tls);
+            when(ecr.tlsUri()).thenReturn(true);
+
+            manager.injectEcrRegistryMirror("container-1", demoCluster());
+
+            String yaml = Files.readString(tempDir.resolve("registries/demo/registries.yaml"));
+            assertFalse(yaml.contains("localhost.floci.io"));
+            assertTrue(yaml.contains("\"localhost:4566\":"));
             verify(copyCmd).exec();
         }
 
@@ -623,7 +1332,7 @@ class EksClusterManagerTest {
         void skipsWhenTheKnobIsOff() {
             when(eks.ecrRegistryMirror()).thenReturn(false);
 
-            manager.injectEcrRegistryMirror("container-1", "demo");
+            manager.injectEcrRegistryMirror("container-1", demoCluster());
 
             verifyNoInteractions(registryManager);
             verify(lifecycleManager, never()).getDockerClient();
@@ -633,7 +1342,7 @@ class EksClusterManagerTest {
         void skipsWhenEcrIsDisabled() {
             when(ecr.enabled()).thenReturn(false);
 
-            manager.injectEcrRegistryMirror("container-1", "demo");
+            manager.injectEcrRegistryMirror("container-1", demoCluster());
 
             verifyNoInteractions(registryManager);
             verify(lifecycleManager, never()).getDockerClient();
@@ -643,7 +1352,7 @@ class EksClusterManagerTest {
         void registryStartupFailureSkipsTheMirrorWithoutAborting() {
             Mockito.doThrow(new RuntimeException("no docker")).when(registryManager).ensureStarted();
 
-            manager.injectEcrRegistryMirror("container-1", "demo");
+            manager.injectEcrRegistryMirror("container-1", demoCluster());
 
             verify(lifecycleManager, never()).getDockerClient();
         }
@@ -652,9 +1361,77 @@ class EksClusterManagerTest {
         void copyFailureDoesNotAbortClusterCreation() {
             when(copyCmd.exec()).thenThrow(new RuntimeException("copy failed"));
 
-            manager.injectEcrRegistryMirror("container-1", "demo");
+            manager.injectEcrRegistryMirror("container-1", demoCluster());
 
             verify(copyCmd).exec();
+        }
+    }
+
+    @Nested
+    class LinkContainerdCertsDir {
+
+        private ContainerLifecycleManager lifecycleManager;
+        private DockerClient dockerClient;
+        private CopyArchiveToContainerCmd copyCmd;
+        private EksClusterManager manager;
+
+        @BeforeEach
+        void setUp() {
+            lifecycleManager = Mockito.mock(ContainerLifecycleManager.class);
+            dockerClient = Mockito.mock(DockerClient.class);
+            copyCmd = Mockito.mock(CopyArchiveToContainerCmd.class, Mockito.RETURNS_SELF);
+            when(lifecycleManager.getDockerClient()).thenReturn(dockerClient);
+            when(dockerClient.copyArchiveToContainerCmd(anyString())).thenReturn(copyCmd);
+
+            manager = new EksClusterManager(
+                    Mockito.mock(ContainerBuilder.class), lifecycleManager,
+                    Mockito.mock(ContainerDetector.class), Mockito.mock(PortAllocator.class),
+                    Mockito.mock(DockerHostResolver.class), Mockito.mock(EcrRegistryManager.class),
+                    Mockito.mock(EmulatorConfig.class), Mockito.mock(RegionResolver.class));
+        }
+
+        @Test
+        void copiesArchiveWithTargetDirectoryAndSymlinkAtContainerRoot() throws Exception {
+            ArgumentCaptor<InputStream> archive = ArgumentCaptor.forClass(InputStream.class);
+            when(copyCmd.withTarInputStream(archive.capture())).thenReturn(copyCmd);
+            ByteArrayOutputStream archiveBytes = new ByteArrayOutputStream();
+            when(copyCmd.exec()).thenAnswer(invocation -> {
+                archive.getValue().transferTo(archiveBytes);
+                return null;
+            });
+
+            manager.linkContainerdCertsDir("container-1", "demo");
+
+            verify(dockerClient).copyArchiveToContainerCmd("container-1");
+            verify(copyCmd).withRemotePath("/");
+            verify(copyCmd).exec();
+
+            verify(copyCmd).withTarInputStream(any());
+            try (TarArchiveInputStream tar = new TarArchiveInputStream(
+                    new ByteArrayInputStream(archiveBytes.toByteArray()))) {
+                TarArchiveEntry targetDir = tar.getNextEntry();
+                assertNotNull(targetDir);
+                assertEquals("var/lib/rancher/k3s/agent/etc/containerd/certs.d/", targetDir.getName());
+                assertTrue(targetDir.isDirectory());
+
+                TarArchiveEntry etcDir = tar.getNextEntry();
+                assertNotNull(etcDir);
+                assertEquals("etc/containerd/", etcDir.getName());
+                assertTrue(etcDir.isDirectory());
+
+                TarArchiveEntry symlink = tar.getNextEntry();
+                assertNotNull(symlink);
+                assertEquals("etc/containerd/certs.d", symlink.getName());
+                assertTrue(symlink.isSymbolicLink());
+                assertEquals("/var/lib/rancher/k3s/agent/etc/containerd/certs.d", symlink.getLinkName());
+            }
+        }
+
+        @Test
+        void copyFailureDoesNotPropagate() {
+            when(copyCmd.exec()).thenThrow(new RuntimeException("docker copy failed"));
+
+            assertDoesNotThrow(() -> manager.linkContainerdCertsDir("container-1", "demo"));
         }
     }
 
@@ -691,15 +1468,14 @@ class EksClusterManagerTest {
             when(lifecycleManager.getDockerClient()).thenReturn(dockerClient);
 
             metadataServer = Mockito.mock(Ec2MetadataServer.class);
-            when(metadataServer.registerProxy(any())).thenReturn("test-proxy-capability");
-            CopyArchiveToContainerCmd copy = Mockito.mock(CopyArchiveToContainerCmd.class, Mockito.RETURNS_SELF);
-            when(dockerClient.copyArchiveToContainerCmd(anyString())).thenReturn(copy);
             dockerHostResolver = Mockito.mock(DockerHostResolver.class);
             when(dockerHostResolver.resolve()).thenReturn("floci-host");
 
             regionResolver = Mockito.mock(RegionResolver.class);
             when(regionResolver.getAccountId()).thenReturn("000000000000");
             when(regionResolver.getDefaultRegion()).thenReturn("us-east-1");
+            when(regionResolver.buildGlobalArn(anyString(), anyString(), anyString())).thenAnswer(invocation ->
+                    "arn:aws:" + invocation.getArgument(0) + "::" + invocation.getArgument(1) + ":" + invocation.getArgument(2));
 
             capturedCmds = new ArrayList<>();
             execCreate = Mockito.mock(ExecCreateCmd.class, Mockito.withSettings().defaultAnswer(Mockito.RETURNS_SELF));
@@ -761,8 +1537,9 @@ class EksClusterManagerTest {
             assertEquals("us-west-2a", instance.getPlacement().getAvailabilityZone());
             assertEquals("us-west-2", instance.getRegion());
             assertEquals("172.17.0.2", instance.getPrivateIpAddress());
-            assertEquals("ip-172-17-0-2.us-west-2.compute.internal", instance.getPrivateDnsName());
+            assertEquals("i-0e413a1bfb5c3cd79.us-west-2.compute.internal", instance.getPrivateDnsName());
             assertEquals("arn:aws:iam::123456789012:instance-profile/prod-cluster-node-profile", instance.getIamInstanceProfileArn());
+            assertEquals("AIPA0E413A1BFB5C3CD79", instance.getIamInstanceProfileId());
             assertNotEquals(cluster.getRoleArn(), instance.getIamInstanceProfileArn());
             assertEquals("running", instance.getState().getName());
         }
@@ -778,6 +1555,107 @@ class EksClusterManagerTest {
             assertNotNull(inst1);
             assertNotNull(inst2);
             assertNotEquals(inst1.getInstanceId(), inst2.getInstanceId());
+            assertEquals(inst1.getInstanceId() + ".ec2.internal", inst1.getPrivateDnsName());
+            assertEquals(inst2.getInstanceId() + ".us-west-2.compute.internal", inst2.getPrivateDnsName());
+        }
+
+        @Test
+        void derivesClusterNodeProviderIdMatchingExpectedFormat() {
+            Cluster cluster = new Cluster();
+            cluster.setName("prod-cluster");
+
+            String providerId = manager.deriveClusterNodeProviderId(cluster, "us-west-2", "123456789012");
+            assertEquals("aws:///us-west-2a/i-0e413a1bfb5c3cd79", providerId);
+        }
+
+        @Test
+        void derivedProviderIdAgreesWithSynthesizedClusterNodeInstance() {
+            Cluster cluster = new Cluster();
+            cluster.setName("prod-cluster");
+            cluster.setRoleArn("arn:aws:iam::123456789012:role/eks-node-role");
+
+            Instance instance = manager.synthesizeClusterNodeInstance(cluster, "172.17.0.2", "us-west-2", "123456789012");
+            String providerId = manager.deriveClusterNodeProviderId(cluster, "us-west-2", "123456789012");
+
+            String expectedProviderId = "aws:///" + instance.getPlacement().getAvailabilityZone() + "/" + instance.getInstanceId();
+            assertEquals(expectedProviderId, providerId);
+            assertEquals(instance.getInstanceId(), manager.deriveClusterNodeInstanceId(cluster, "us-west-2", "123456789012"));
+            assertEquals(instance.getPlacement().getAvailabilityZone(), manager.deriveClusterNodeAvailabilityZone(cluster, "us-west-2"));
+        }
+
+        @Test
+        void deriveClusterNodeAvailabilityZoneDerivesFromClusterArn() {
+            Cluster cluster = new Cluster();
+            cluster.setArn("arn:aws:eks:ap-southeast-1:123456789012:cluster/test-cluster");
+            assertEquals("ap-southeast-1a", manager.deriveClusterNodeAvailabilityZone(cluster));
+        }
+
+        @Test
+        void derivesClusterNodeInstanceIdMatchingExpectedAwsFormat() {
+            Cluster cluster = new Cluster();
+            cluster.setName("prod-cluster");
+
+            String instanceId = manager.deriveClusterNodeInstanceId(cluster, "us-west-2", "123456789012");
+            assertEquals("i-0e413a1bfb5c3cd79", instanceId);
+            assertTrue(instanceId.matches("^i-[0-9a-f]{17}$"));
+        }
+
+        @Test
+        void deriveClusterNodeInstanceIdDerivesFromClusterArn() {
+            Cluster cluster = new Cluster();
+            cluster.setName("test-cluster");
+            cluster.setArn("arn:aws:eks:ap-southeast-1:123456789012:cluster/test-cluster");
+
+            String instanceId = manager.deriveClusterNodeInstanceId(cluster);
+            assertNotNull(instanceId);
+            assertEquals(manager.deriveClusterNodeInstanceId(cluster, "ap-southeast-1", "123456789012"), instanceId);
+        }
+
+        @Test
+        void twoClustersGetDistinctNodeNames() {
+            Cluster cluster1 = new Cluster();
+            cluster1.setName("cluster-alpha");
+            cluster1.setArn("arn:aws:eks:us-west-2:123456789012:cluster/cluster-alpha");
+
+            Cluster cluster2 = new Cluster();
+            cluster2.setName("cluster-beta");
+            cluster2.setArn("arn:aws:eks:us-west-2:123456789012:cluster/cluster-beta");
+
+            String name1 = manager.deriveClusterNodePrivateDnsName(cluster1);
+            String name2 = manager.deriveClusterNodePrivateDnsName(cluster2);
+
+            assertNotEquals(name1, name2);
+        }
+
+        @Test
+        void recreatingClusterContainerProducesSameNodeName() {
+            Cluster cluster = new Cluster();
+            cluster.setName("prod-cluster");
+            cluster.setArn("arn:aws:eks:us-west-2:123456789012:cluster/prod-cluster");
+
+            String initialName = manager.deriveClusterNodePrivateDnsName(cluster);
+            String recreatedName = manager.deriveClusterNodePrivateDnsName(cluster);
+
+            assertEquals(initialName, recreatedName);
+        }
+
+        @Test
+        void derivesClusterNodePrivateDnsDomainForUsEast1AndOtherRegions() {
+            assertEquals("ec2.internal", manager.deriveClusterNodePrivateDnsDomain("us-east-1"));
+            assertEquals("us-west-2.compute.internal", manager.deriveClusterNodePrivateDnsDomain("us-west-2"));
+            assertEquals("eu-central-1.compute.internal", manager.deriveClusterNodePrivateDnsDomain("eu-central-1"));
+        }
+
+        @Test
+        void derivesClusterNodePrivateDnsNameMatchingExpectedAwsFormat() {
+            Cluster cluster = new Cluster();
+            cluster.setName("prod-cluster");
+
+            String dnsNameUsEast1 = manager.deriveClusterNodePrivateDnsName(cluster, "us-east-1", "123456789012");
+            assertTrue(dnsNameUsEast1.matches("^i-[0-9a-f]{17}\\.ec2\\.internal$"));
+
+            String dnsNameUsWest2 = manager.deriveClusterNodePrivateDnsName(cluster, "us-west-2", "123456789012");
+            assertEquals("i-0e413a1bfb5c3cd79.us-west-2.compute.internal", dnsNameUsWest2);
         }
 
         @Test
@@ -787,15 +1665,16 @@ class EksClusterManagerTest {
 
             manager.configureLinkLocalMetadataEndpoint(cluster, "container-42");
 
-            verify(metadataServer).registerProxy(any());
-            verify(metadataServer, never()).reconcileContainerAddresses(any(), any());
+            verify(metadataServer).reconcileClusterNodeAddresses(any(), any());
+            // imds=true, imdsPodNetwork=false (default): 2 commands (install probe, start proxy)
             assertEquals(2, capturedCmds.size());
-            assertTrue(capturedCmds.get(0)[2].contains("command -v python3"));
+            // First command: install probe
+            assertTrue(capturedCmds.get(0)[2].contains("command -v socat"));
+            // Second command: start command with 169.254.169.254
             assertTrue(capturedCmds.get(1)[2].contains("169.254.169.254"));
-            assertTrue(capturedCmds.get(1)[2].contains("python3 /var/lib/floci-imds-proxy.py"));
-            assertFalse(capturedCmds.get(1)[2].contains("test-proxy-capability"));
+            assertTrue(capturedCmds.get(1)[2].contains("TCP:floci-host:9169"));
 
-            assertEquals("container-42", manager.getRegisteredClusterNodeInstance(cluster).getDockerContainerId());
+            assertNotNull(manager.getRegisteredClusterNodeInstance(cluster));
         }
 
         @Test
@@ -807,14 +1686,13 @@ class EksClusterManagerTest {
 
             manager.configureLinkLocalMetadataEndpoint(cluster, "container-42");
 
-            verify(metadataServer).registerProxy(any());
-            verify(metadataServer, never()).reconcileContainerAddresses(any(), any());
+            verify(metadataServer).reconcileClusterNodeAddresses(any(), any());
             assertEquals(3, capturedCmds.size());
             // First command: install probe
-            assertTrue(capturedCmds.get(0)[2].contains("command -v python3"));
+            assertTrue(capturedCmds.get(0)[2].contains("command -v socat"));
             // Second command: start command with 169.254.169.254
             assertTrue(capturedCmds.get(1)[2].contains("169.254.169.254"));
-            assertTrue(capturedCmds.get(1)[2].contains("python3 /var/lib/floci-imds-proxy.py"));
+            assertTrue(capturedCmds.get(1)[2].contains("TCP:floci-host:9169"));
             // Third command: pod network routing with iptables
             assertTrue(capturedCmds.get(2)[2].contains("FLOCI-LINK-LOCAL"));
             assertTrue(capturedCmds.get(2)[2].contains("10.42.0.0/16"));
@@ -841,6 +1719,194 @@ class EksClusterManagerTest {
         }
 
         @Test
+        void registerClusterNodeInstanceRegistersWithoutImds() {
+            Cluster cluster = new Cluster();
+            cluster.setName("no-imds-cluster");
+            ResourcesVpcConfig vpcConfig = new ResourcesVpcConfig();
+            vpcConfig.setVpcId("vpc-12345678");
+            vpcConfig.setSubnetIds(List.of("subnet-87654321"));
+            cluster.setResourcesVpcConfig(vpcConfig);
+
+            manager.registerClusterNodeInstance(cluster, "container-no-imds");
+            Instance instance = manager.getRegisteredClusterNodeInstance(cluster);
+            assertNotNull(instance);
+            assertEquals("vpc-12345678", instance.getVpcId());
+            assertEquals("subnet-87654321", instance.getSubnetId());
+            assertNotNull(instance.getLaunchTime());
+            assertTrue(instance.getTags().stream().anyMatch(t -> "Name".equals(t.getKey()) && "no-imds-cluster-node".equals(t.getValue())));
+            assertTrue(instance.getTags().stream().anyMatch(t -> "kubernetes.io/cluster/no-imds-cluster".equals(t.getKey()) && "owned".equals(t.getValue())));
+            assertTrue(instance.getTags().stream().anyMatch(t -> "eks:cluster-name".equals(t.getKey()) && "no-imds-cluster".equals(t.getValue())));
+        }
+
+        @Test
+        void clusterNodeAddressesResolveToTheClustersVpcForResolverRules() {
+            Cluster cluster = new Cluster();
+            cluster.setName("dns-cluster");
+            ResourcesVpcConfig vpcConfig = new ResourcesVpcConfig();
+            vpcConfig.setVpcId("vpc-12345678");
+            cluster.setResourcesVpcConfig(vpcConfig);
+
+            manager.registerClusterNodeInstance(cluster, "container-dns");
+
+            assertEquals(Optional.of(new ClientVpc("000000000000", "us-east-1", "vpc-12345678")),
+                    manager.vpcForClient("172.17.0.2"));
+            assertTrue(manager.vpcForClient("172.17.0.99").isEmpty());
+            assertTrue(manager.vpcForClient(null).isEmpty());
+
+            manager.unregisterMetadataEndpoint(cluster);
+            assertTrue(manager.vpcForClient("172.17.0.2").isEmpty());
+        }
+
+        @Test
+        void aClusterWithoutAVpcClaimsNoAddress() {
+            Cluster cluster = new Cluster();
+            cluster.setName("no-vpc-cluster");
+
+            manager.registerClusterNodeInstance(cluster, "container-no-vpc");
+
+            assertTrue(manager.vpcForClient("172.17.0.2").isEmpty());
+        }
+
+        @Test
+        void aClusterWhoseAddressesCannotBeDeterminedClaimsNoneAndSaysWhy() {
+            // Inspection failing leaves resolver rules quietly not applying rather than failing
+            // anything, so the warning is the only way a reader finds out. See #4538 review.
+            when(dockerClient.inspectContainerCmd(anyString()))
+                    .thenThrow(new RuntimeException("docker is unreachable"));
+            Cluster cluster = new Cluster();
+            cluster.setName("unreachable-cluster");
+            ResourcesVpcConfig vpcConfig = new ResourcesVpcConfig();
+            vpcConfig.setVpcId("vpc-12345678");
+            cluster.setResourcesVpcConfig(vpcConfig);
+
+            List<LogRecord> logs = LogCapture.capture(EksClusterManager.class,
+                    () -> manager.registerClusterNodeInstance(cluster, "container-unreachable"));
+
+            assertTrue(manager.vpcForClient("172.17.0.2").isEmpty());
+            // Compared by severity, not identity: JBoss LogManager has its own Level constants, so
+            // its WARN is not the same object as java.util.logging's WARNING.
+            assertTrue(logs.stream().anyMatch(
+                            record -> record.getLevel().intValue() >= Level.WARNING.intValue()
+                                    && String.valueOf(record.getMessage()).contains("Resolver rules will not apply")),
+                    "the cluster must say why its rules stopped applying, got: "
+                            + logs.stream().map(LogRecord::getMessage).toList());
+        }
+
+        @Test
+        void clusterNodeInstanceProviderFindsAndListsRegisteredInstances() {
+            Cluster cluster = new Cluster();
+            cluster.setName("prov-cluster");
+            cluster.setArn("arn:aws:eks:us-east-1:123456789012:cluster/prov-cluster");
+
+            manager.registerClusterNodeInstance(cluster, "container-prov");
+            Instance registered = manager.getRegisteredClusterNodeInstance(cluster);
+            assertNotNull(registered);
+
+            assertTrue(manager.findInstance("123456789012", "us-east-1", registered.getInstanceId()).isPresent());
+            assertEquals(registered.getInstanceId(), manager.findInstance("123456789012", "us-east-1", registered.getInstanceId()).get().getInstanceId());
+            assertTrue(manager.findInstance(null, null, registered.getInstanceId()).isEmpty());
+            assertTrue(manager.findInstance("123456789012", null, registered.getInstanceId()).isPresent());
+            assertTrue(manager.findInstance("999999999999", "us-east-1", registered.getInstanceId()).isEmpty());
+            assertTrue(manager.findInstance("123456789012", "eu-central-1", registered.getInstanceId()).isEmpty());
+
+            List<Instance> eastInstances = manager.listInstances("123456789012", "us-east-1");
+            assertTrue(eastInstances.stream().anyMatch(i -> registered.getInstanceId().equals(i.getInstanceId())));
+            assertTrue(manager.listInstances(null, "us-east-1").isEmpty());
+            assertTrue(manager.listInstances("999999999999", "us-east-1").isEmpty());
+            assertTrue(manager.listInstances("123456789012", "eu-central-1").isEmpty());
+
+            manager.unregisterMetadataEndpoint(cluster);
+            assertTrue(manager.findInstance("123456789012", "us-east-1", registered.getInstanceId()).isEmpty());
+            assertTrue(manager.listInstances("123456789012", "us-east-1").isEmpty());
+        }
+
+        @Test
+        void dnsRecordSourceResolvesRegisteredNodePrivateDnsName() {
+            Cluster cluster = new Cluster();
+            cluster.setName("dns-cluster");
+            cluster.setArn("arn:aws:eks:us-east-1:123456789012:cluster/dns-cluster");
+
+            manager.registerClusterNodeInstance(cluster, "container-dns");
+            Instance registered = manager.getRegisteredClusterNodeInstance(cluster);
+            assertNotNull(registered);
+
+            String dnsName = registered.getPrivateDnsName();
+            assertNotNull(dnsName);
+            String ip = registered.getPrivateIpAddress();
+            assertNotNull(ip);
+
+            // Exact match
+            Optional<DnsAnswer> answer = manager.resolveIpv4(dnsName);
+            assertTrue(answer.isPresent());
+            assertEquals(List.of(ip), answer.get().addresses());
+
+            // Case-insensitive match
+            Optional<DnsAnswer> upperAnswer = manager.resolveIpv4(dnsName.toUpperCase(Locale.ROOT));
+            assertTrue(upperAnswer.isPresent());
+            assertEquals(List.of(ip), upperAnswer.get().addresses());
+
+            // Trailing dot match
+            Optional<DnsAnswer> trailingDotAnswer = manager.resolveIpv4(dnsName + ".");
+            assertTrue(trailingDotAnswer.isPresent());
+            assertEquals(List.of(ip), trailingDotAnswer.get().addresses());
+
+            // Unknown host
+            assertTrue(manager.resolveIpv4("unknown.ec2.internal").isEmpty());
+            assertTrue(manager.resolveIpv4(null).isEmpty());
+            assertTrue(manager.resolveIpv4("").isEmpty());
+
+            // Other DNS types preserve ownership
+            assertTrue(manager.resolve(dnsName, 1).isPresent());
+            assertTrue(manager.resolve(dnsName, 28).isPresent());
+
+            // After unregistering, name no longer resolves
+            manager.unregisterMetadataEndpoint(cluster);
+            assertTrue(manager.resolveIpv4(dnsName).isEmpty());
+        }
+
+        @Test
+        void dnsForwardingRuleSourceEmitsSystemRuleForRegisteredNode() {
+            Cluster cluster = new Cluster();
+            cluster.setName("fwd-cluster");
+            cluster.setArn("arn:aws:eks:us-east-1:123456789012:cluster/fwd-cluster");
+            ResourcesVpcConfig vpcConfig = new ResourcesVpcConfig();
+            vpcConfig.setVpcId("vpc-12345678");
+            cluster.setResourcesVpcConfig(vpcConfig);
+
+            manager.registerClusterNodeInstance(cluster, "container-fwd");
+            Instance registered = manager.getRegisteredClusterNodeInstance(cluster);
+            assertNotNull(registered);
+
+            String dnsName = registered.getPrivateDnsName();
+            assertNotNull(dnsName);
+
+            // Matching VPC and account
+            List<DnsForwardingRule> rules = manager.rulesFor("123456789012", "us-east-1", "vpc-12345678");
+            assertEquals(1, rules.size());
+            assertEquals(DnsForwardingRule.system(dnsName), rules.getFirst());
+            assertFalse(rules.getFirst().forwards());
+
+            // Wrong account or VPC returns no rules
+            assertTrue(manager.rulesFor("999999999999", "us-east-1", "vpc-12345678").isEmpty());
+            assertTrue(manager.rulesFor("123456789012", "us-east-1", "vpc-other").isEmpty());
+            assertTrue(manager.rulesFor("123456789012", "us-east-1", null).isEmpty());
+            assertTrue(manager.rulesFor("123456789012", "us-east-1", "").isEmpty());
+
+            // Cluster without VPC does not emit rules for any VPC
+            Cluster clusterNoVpc = new Cluster();
+            clusterNoVpc.setName("novpc-cluster");
+            clusterNoVpc.setArn("arn:aws:eks:us-east-1:123456789012:cluster/novpc-cluster");
+            manager.registerClusterNodeInstance(clusterNoVpc, "container-novpc");
+            assertTrue(manager.rulesFor("123456789012", "us-east-1", "vpc-12345678").stream()
+                    .noneMatch(r -> r.domainName().contains("novpc-cluster")));
+            manager.unregisterMetadataEndpoint(clusterNoVpc);
+
+            // After unregistering, rule disappears
+            manager.unregisterMetadataEndpoint(cluster);
+            assertTrue(manager.rulesFor("123456789012", "us-east-1", "vpc-12345678").isEmpty());
+        }
+
+        @Test
         void failureToWireLogsAndDoesNotAbort() {
             when(dockerClient.execCreateCmd(anyString())).thenThrow(new RuntimeException("docker exec failed"));
 
@@ -849,20 +1915,6 @@ class EksClusterManagerTest {
 
             // Failure to wire proxy should log warning and continue without throwing
             manager.configureLinkLocalMetadataEndpoint(cluster, "container-42");
-        }
-
-        @Test
-        void failedProxyStartupRevokesItsIdentity() {
-            InspectExecResponse response = Mockito.mock(InspectExecResponse.class);
-            when(response.getExitCodeLong()).thenReturn(0L, 1L);
-            when(dockerClient.inspectExecCmd(anyString()).exec()).thenReturn(response);
-            Cluster cluster = new Cluster();
-            cluster.setName("failed-proxy-cluster");
-
-            manager.configureLinkLocalMetadataEndpoint(cluster, "container-failed");
-
-            verify(metadataServer).unregisterProxy(any(), Mockito.eq("test-proxy-capability"));
-            assertNull(manager.getRegisteredClusterNodeInstance(cluster));
         }
 
         @Test
@@ -896,6 +1948,40 @@ class EksClusterManagerTest {
 
             manager.unregisterMetadataEndpoint(cluster);
             verify(metadataServer).unregisterInstance(any());
+            assertNull(manager.getRegisteredClusterNodeInstance(cluster));
+        }
+
+        @Test
+        void aDeleteThatCouldNotRemoveTheContainerKeepsItsNodeOnTheMetadataServer() {
+            Cluster cluster = new Cluster();
+            cluster.setName("test-cluster");
+            manager.configureLinkLocalMetadataEndpoint(cluster, "container-42");
+            cluster.setContainerId("container-42");
+            Mockito.doThrow(new IllegalStateException("Failed to remove container container-42"))
+                    .when(lifecycleManager).stopAndRemoveStrict("container-42", null);
+
+            assertThrows(IllegalStateException.class, () -> manager.stopCluster(cluster));
+
+            verify(metadataServer, never()).unregisterInstance(any());
+            assertNotNull(manager.getRegisteredClusterNodeInstance(cluster));
+        }
+
+        @Test
+        void retryingADeleteAfterContainerRemovalFailedRemovesTheNodeFromTheMetadataServer() {
+            EmulatorConfig.StorageConfig storage = Mockito.mock(EmulatorConfig.StorageConfig.class);
+            when(config.storage()).thenReturn(storage);
+            when(storage.mode()).thenReturn("memory");
+            Cluster cluster = new Cluster();
+            cluster.setName("test-cluster");
+            manager.configureLinkLocalMetadataEndpoint(cluster, "container-42");
+            cluster.setContainerId("container-42");
+            Mockito.doThrow(new IllegalStateException("Failed to remove container container-42"))
+                    .doNothing()
+                    .when(lifecycleManager).stopAndRemoveStrict("container-42", null);
+            assertThrows(IllegalStateException.class, () -> manager.stopCluster(cluster));
+
+            manager.stopCluster(cluster);
+
             assertNull(manager.getRegisteredClusterNodeInstance(cluster));
         }
     }
@@ -1038,6 +2124,7 @@ class EksClusterManagerTest {
         private EksOidcService oidcService;
         private RegionResolver regionResolver;
         private EksClusterManager manager;
+        private StorageBackend<String, Nodegroup> nodeGroupStorage;
 
         @BeforeEach
         void setUp() {
@@ -1069,20 +2156,23 @@ class EksClusterManagerTest {
             ContainerBuilder containerBuilder = Mockito.mock(ContainerBuilder.class);
             builder = Mockito.mock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
             when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-            when(builder.build()).thenReturn(Mockito.mock(ContainerSpec.class));
+            when(builder.build()).thenReturn(new ContainerSpec("test-image"));
 
             regionResolver = Mockito.mock(RegionResolver.class);
             when(regionResolver.getAccountId()).thenReturn("000000000000");
             when(regionResolver.getDefaultRegion()).thenReturn("us-east-1");
+            when(regionResolver.buildGlobalArn(anyString(), anyString(), anyString())).thenAnswer(invocation ->
+                    "arn:aws:" + invocation.getArgument(0) + "::" + invocation.getArgument(1) + ":" + invocation.getArgument(2));
 
             oidcService = Mockito.mock(EksOidcService.class);
             when(oidcService.newIssuerUrl(anyString())).thenReturn(
                     "https://oidc.eks.us-east-1.amazonaws.com/id/TESTISSUER12345678901234567890");
 
+            nodeGroupStorage = new InMemoryStorage<>();
             manager = new EksClusterManager(containerBuilder, lifecycleManager,
                     Mockito.mock(ContainerDetector.class), Mockito.mock(PortAllocator.class),
                     Mockito.mock(DockerHostResolver.class), Mockito.mock(EcrRegistryManager.class),
-                    config, regionResolver, null, oidcService);
+                    config, regionResolver, null, oidcService, null, null, nodeGroupStorage);
         }
 
         @Test
@@ -1161,7 +2251,7 @@ class EksClusterManagerTest {
             assertFalse(cmd.stream().anyMatch(a -> a.contains("service-account-issuer")));
             assertFalse(cmd.stream().anyMatch(a -> a.contains("api-audiences")));
 
-            verifyNoInteractions(dockerClient);
+            verify(copyCmd, never()).withHostResource(anyString());
             assertFalse(Files.exists(tempDir.resolve("keys")));
         }
 
@@ -1221,8 +2311,10 @@ class EksClusterManagerTest {
 
             Container container = Mockito.mock(Container.class);
             when(container.getId()).thenReturn("surviving-container-id");
+            when(container.getLabels()).thenReturn(Map.of(
+                    "io.floci.eks.node-capacity", "m5.large:unbounded"));
             when(lifecycleManager.findByName("floci-eks-my-cluster")).thenReturn(Optional.of(container));
-            when(lifecycleManager.adopt(anyString(), any())).thenReturn(
+            when(lifecycleManager.adopt(anyString(), any(), any())).thenReturn(
                     new ContainerInfo("surviving-container-id", Map.of(6443, new ContainerLifecycleManager.EndpointInfo("localhost", 6500)), Map.of(6443, 6500)));
 
             Cluster cluster = new Cluster();
@@ -1239,6 +2331,521 @@ class EksClusterManagerTest {
 
             verify(copyCmd).withHostResource(privFile.toString());
             verify(copyCmd).withHostResource(pubFile.toString());
+        }
+
+        @Test
+        void startClusterConfiguresNodeNameArg() {
+            Cluster cluster = new Cluster();
+            cluster.setName("prod-cluster");
+            cluster.setAccountId("123456789012");
+            cluster.setArn("arn:aws:eks:us-west-2:123456789012:cluster/prod-cluster");
+
+            manager.startCluster(cluster);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> cmdCaptor = ArgumentCaptor.forClass(List.class);
+            verify(builder).withCmd(cmdCaptor.capture());
+            List<String> cmd = cmdCaptor.getValue();
+
+            String expectedNodeName = manager.deriveClusterNodePrivateDnsName(cluster);
+            assertEquals("i-0e413a1bfb5c3cd79.us-west-2.compute.internal", expectedNodeName);
+            assertTrue(cmd.contains("--node-name=" + expectedNodeName));
+        }
+
+        @Test
+        void startClusterContinuesWhenNodeNameDerivationFails() {
+            EksClusterManager spyManager = Mockito.spy(manager);
+            Mockito.doThrow(new RuntimeException("derivation failure"))
+                    .when(spyManager).deriveClusterNodePrivateDnsName(any());
+
+            Cluster cluster = new Cluster();
+            cluster.setName("fail-cluster");
+
+            assertDoesNotThrow(() -> spyManager.startCluster(cluster));
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> cmdCaptor = ArgumentCaptor.forClass(List.class);
+            verify(builder).withCmd(cmdCaptor.capture());
+            List<String> cmd = cmdCaptor.getValue();
+
+            assertFalse(cmd.stream().anyMatch(arg -> arg.startsWith("--node-name=")));
+        }
+
+        @Test
+        void nodeNameMatchesProviderIdInstanceId() {
+            Cluster cluster = new Cluster();
+            cluster.setName("prod-cluster");
+            cluster.setAccountId("123456789012");
+            cluster.setArn("arn:aws:eks:eu-central-1:123456789012:cluster/prod-cluster");
+
+            manager.startCluster(cluster);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> cmdCaptor = ArgumentCaptor.forClass(List.class);
+            verify(builder).withCmd(cmdCaptor.capture());
+            List<String> cmd = cmdCaptor.getValue();
+
+            String nodeNameArg = cmd.stream()
+                    .filter(arg -> arg.startsWith("--node-name="))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("node-name arg missing"));
+            String nodeName = nodeNameArg.substring("--node-name=".length());
+
+            String providerIdArg = cmd.stream()
+                    .filter(arg -> arg.startsWith("--kubelet-arg=provider-id="))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("provider-id arg missing"));
+            String providerId = providerIdArg.substring("--kubelet-arg=provider-id=".length());
+            String[] parts = providerId.split("/");
+            String providerInstanceId = parts[parts.length - 1];
+
+            assertEquals(providerInstanceId, manager.deriveClusterNodeInstanceId(cluster));
+            assertEquals(nodeName, manager.deriveClusterNodePrivateDnsName(cluster));
+            assertTrue(nodeName.startsWith(providerInstanceId + "."));
+        }
+
+        @Test
+        void startClusterConfiguresKubeletProviderIdArg() {
+            Cluster cluster = new Cluster();
+            cluster.setName("prod-cluster");
+            cluster.setAccountId("123456789012");
+            cluster.setArn("arn:aws:eks:us-west-2:123456789012:cluster/prod-cluster");
+
+            manager.startCluster(cluster);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> cmdCaptor = ArgumentCaptor.forClass(List.class);
+            verify(builder).withCmd(cmdCaptor.capture());
+            List<String> cmd = cmdCaptor.getValue();
+
+            String expectedProviderId = manager.deriveClusterNodeProviderId(cluster);
+            assertEquals("aws:///us-west-2a/i-0e413a1bfb5c3cd79", expectedProviderId);
+            assertTrue(cmd.contains("--kubelet-arg=provider-id=" + expectedProviderId));
+        }
+
+        @Test
+        void startClusterContinuesWhenProviderIdDerivationFails() {
+            EksClusterManager spyManager = Mockito.spy(manager);
+            Mockito.doThrow(new RuntimeException("derivation failure"))
+                    .when(spyManager).deriveClusterNodeProviderId(any());
+
+            Cluster cluster = new Cluster();
+            cluster.setName("fail-cluster");
+
+            assertDoesNotThrow(() -> spyManager.startCluster(cluster));
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> cmdCaptor = ArgumentCaptor.forClass(List.class);
+            verify(builder).withCmd(cmdCaptor.capture());
+            List<String> cmd = cmdCaptor.getValue();
+
+            assertFalse(cmd.stream().anyMatch(arg -> arg.startsWith("--kubelet-arg=provider-id=")));
+        }
+
+        @Test
+        void startClusterConfiguresKubeletTopologyLabelsArg() {
+            Cluster cluster = new Cluster();
+            cluster.setName("prod-cluster");
+            cluster.setAccountId("123456789012");
+            cluster.setArn("arn:aws:eks:us-west-2:123456789012:cluster/prod-cluster");
+
+            manager.startCluster(cluster);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> cmdCaptor = ArgumentCaptor.forClass(List.class);
+            verify(builder).withCmd(cmdCaptor.capture());
+            List<String> cmd = cmdCaptor.getValue();
+
+            String expectedAz = manager.deriveClusterNodeAvailabilityZone(cluster, "us-west-2");
+            assertEquals("us-west-2a", expectedAz);
+            assertTrue(cmd.contains("--kubelet-arg=node-labels=topology.kubernetes.io/zone=" + expectedAz
+                    + ",topology.kubernetes.io/region=us-west-2"));
+        }
+
+        @Test
+        void topologyLabelZoneMatchesProviderIdZone() {
+            Cluster cluster = new Cluster();
+            cluster.setName("prod-cluster");
+            cluster.setAccountId("123456789012");
+            cluster.setArn("arn:aws:eks:eu-central-1:123456789012:cluster/prod-cluster");
+
+            manager.startCluster(cluster);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> cmdCaptor = ArgumentCaptor.forClass(List.class);
+            verify(builder).withCmd(cmdCaptor.capture());
+            List<String> cmd = cmdCaptor.getValue();
+
+            String providerIdArg = cmd.stream()
+                    .filter(arg -> arg.startsWith("--kubelet-arg=provider-id="))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("provider-id arg missing"));
+            String providerId = providerIdArg.substring("--kubelet-arg=provider-id=".length());
+            String[] parts = providerId.split("/");
+            assertTrue(parts.length >= 4, "Provider ID should have format aws:///<zone>/<instance-id>");
+            String providerZone = parts[3];
+
+            String nodeLabelsArg = cmd.stream()
+                    .filter(arg -> arg.startsWith("--kubelet-arg=node-labels="))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("node-labels arg missing"));
+            String labelZone = null;
+            String labelsPart = nodeLabelsArg.substring("--kubelet-arg=node-labels=".length());
+            for (String pair : labelsPart.split(",")) {
+                String[] kv = pair.split("=", 2);
+                if ("topology.kubernetes.io/zone".equals(kv[0])) {
+                    labelZone = kv[1];
+                    break;
+                }
+            }
+            assertNotNull(labelZone, "topology.kubernetes.io/zone must be present in node-labels arg");
+            assertEquals(providerZone, labelZone);
+        }
+
+        @Test
+        void startClusterContinuesWhenTopologyLabelsDerivationFails() {
+            EksClusterManager spyManager = Mockito.spy(manager);
+            Mockito.doThrow(new RuntimeException("derivation failure"))
+                    .when(spyManager).deriveClusterNodeAvailabilityZone(any(), any());
+
+            Cluster cluster = new Cluster();
+            cluster.setName("fail-cluster");
+
+            assertDoesNotThrow(() -> spyManager.startCluster(cluster));
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> cmdCaptor = ArgumentCaptor.forClass(List.class);
+            verify(builder).withCmd(cmdCaptor.capture());
+            List<String> cmd = cmdCaptor.getValue();
+
+            assertFalse(cmd.stream().anyMatch(arg -> arg.startsWith("--kubelet-arg=node-labels=")));
+        }
+
+        @Test
+        void nodegroupLabelsAppearOnNode() {
+            Cluster cluster = new Cluster();
+            cluster.setName("prod-cluster");
+            cluster.setAccountId("123456789012");
+            cluster.setArn("arn:aws:eks:us-west-2:123456789012:cluster/prod-cluster");
+
+            Nodegroup nodegroup = new Nodegroup();
+            nodegroup.setNodegroupName("worker-group-1");
+            nodegroup.setCapacityType("ON_DEMAND");
+            nodegroup.setInstanceTypes(List.of("t3.medium"));
+            nodegroup.setLabels(Map.of("environment", "production", "team", "platform"));
+            nodeGroupStorage.put("prod-cluster/worker-group-1", nodegroup);
+
+            manager.startCluster(cluster);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> cmdCaptor = ArgumentCaptor.forClass(List.class);
+            verify(builder).withCmd(cmdCaptor.capture());
+            List<String> cmd = cmdCaptor.getValue();
+
+            String nodeLabelsArg = cmd.stream()
+                    .filter(arg -> arg.startsWith("--kubelet-arg=node-labels="))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("node-labels arg missing"));
+            Map<String, String> labels = parseNodeLabels(nodeLabelsArg);
+
+            assertEquals("us-west-2a", labels.get("topology.kubernetes.io/zone"));
+            assertEquals("us-west-2", labels.get("topology.kubernetes.io/region"));
+            assertEquals("worker-group-1", labels.get("eks.amazonaws.com/nodegroup"));
+            assertEquals("ON_DEMAND", labels.get("eks.amazonaws.com/capacityType"));
+            assertEquals("ami-eks-k3s", labels.get("eks.amazonaws.com/nodegroup-image"));
+            assertEquals("t3.medium", labels.get("node.kubernetes.io/instance-type"));
+            assertEquals("production", labels.get("environment"));
+            assertEquals("platform", labels.get("team"));
+        }
+
+        @Test
+        void nodegroupTaintsAppearWithKubernetesEffectSpelling() {
+            Cluster cluster = new Cluster();
+            cluster.setName("prod-cluster");
+            cluster.setAccountId("123456789012");
+            cluster.setArn("arn:aws:eks:us-west-2:123456789012:cluster/prod-cluster");
+
+            Nodegroup nodegroup = new Nodegroup();
+            nodegroup.setNodegroupName("gpu-group");
+            nodegroup.setTaints(List.of(
+                    Map.of("key", "dedicated", "value", "gpu", "effect", "NO_SCHEDULE"),
+                    Map.of("key", "evict", "value", "true", "effect", "NO_EXECUTE"),
+                    Map.of("key", "spot", "value", "preemptible", "effect", "PREFER_NO_SCHEDULE")
+            ));
+            nodeGroupStorage.put("prod-cluster/gpu-group", nodegroup);
+
+            manager.startCluster(cluster);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> cmdCaptor = ArgumentCaptor.forClass(List.class);
+            verify(builder).withCmd(cmdCaptor.capture());
+            List<String> cmd = cmdCaptor.getValue();
+
+            assertTrue(cmd.contains("--kubelet-arg=register-with-taints="
+                    + "dedicated=gpu:NoSchedule,evict=true:NoExecute,spot=preemptible:PreferNoSchedule"));
+        }
+
+        @Test
+        void nodegroupCapacityTypeSpot() {
+            Cluster cluster = new Cluster();
+            cluster.setName("prod-cluster");
+            cluster.setAccountId("123456789012");
+            cluster.setArn("arn:aws:eks:us-west-2:123456789012:cluster/prod-cluster");
+
+            Nodegroup nodegroup = new Nodegroup();
+            nodegroup.setNodegroupName("spot-group");
+            nodegroup.setCapacityType("SPOT");
+            nodeGroupStorage.put("prod-cluster/spot-group", nodegroup);
+
+            manager.startCluster(cluster);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> cmdCaptor = ArgumentCaptor.forClass(List.class);
+            verify(builder).withCmd(cmdCaptor.capture());
+            List<String> cmd = cmdCaptor.getValue();
+
+            String nodeLabelsArg = cmd.stream()
+                    .filter(arg -> arg.startsWith("--kubelet-arg=node-labels="))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("node-labels arg missing"));
+            Map<String, String> labels = parseNodeLabels(nodeLabelsArg);
+            assertEquals("SPOT", labels.get("eks.amazonaws.com/capacityType"));
+            assertEquals("spot-group", labels.get("eks.amazonaws.com/nodegroup"));
+        }
+
+        @Test
+        void nodegroupCapacityTypeCapacityBlock() {
+            Cluster cluster = new Cluster();
+            cluster.setName("prod-cluster");
+            cluster.setAccountId("123456789012");
+            cluster.setArn("arn:aws:eks:us-west-2:123456789012:cluster/prod-cluster");
+
+            Nodegroup nodegroup = new Nodegroup();
+            nodegroup.setNodegroupName("block-group");
+            nodegroup.setCapacityType("CAPACITY_BLOCK");
+            nodeGroupStorage.put("prod-cluster/block-group", nodegroup);
+
+            manager.startCluster(cluster);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> cmdCaptor = ArgumentCaptor.forClass(List.class);
+            verify(builder).withCmd(cmdCaptor.capture());
+            List<String> cmd = cmdCaptor.getValue();
+
+            String nodeLabelsArg = cmd.stream()
+                    .filter(arg -> arg.startsWith("--kubelet-arg=node-labels="))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("node-labels arg missing"));
+            Map<String, String> labels = parseNodeLabels(nodeLabelsArg);
+            assertEquals("CAPACITY_BLOCK", labels.get("eks.amazonaws.com/capacityType"));
+            assertEquals("block-group", labels.get("eks.amazonaws.com/nodegroup"));
+        }
+
+        @Test
+        void clusterWithNoNodegroupsProducesSameArgumentsAsBefore() {
+            Cluster cluster = new Cluster();
+            cluster.setName("prod-cluster");
+            cluster.setAccountId("123456789012");
+            cluster.setArn("arn:aws:eks:us-west-2:123456789012:cluster/prod-cluster");
+
+            manager.startCluster(cluster);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> cmdCaptor = ArgumentCaptor.forClass(List.class);
+            verify(builder).withCmd(cmdCaptor.capture());
+            List<String> cmd = cmdCaptor.getValue();
+
+            String expectedAz = manager.deriveClusterNodeAvailabilityZone(cluster, "us-west-2");
+            assertTrue(cmd.contains("--kubelet-arg=node-labels=topology.kubernetes.io/zone=" + expectedAz
+                    + ",topology.kubernetes.io/region=us-west-2"));
+            assertFalse(cmd.stream().anyMatch(arg -> arg.startsWith("--kubelet-arg=register-with-taints=")));
+            assertFalse(cmd.stream().anyMatch(arg -> arg.contains("eks.amazonaws.com/")));
+        }
+
+        @Test
+        void multipleNodegroupsAppliesFirstAndIgnoresLater() {
+            Cluster cluster = new Cluster();
+            cluster.setName("prod-cluster");
+            cluster.setAccountId("123456789012");
+            cluster.setArn("arn:aws:eks:us-west-2:123456789012:cluster/prod-cluster");
+
+            Instant now = Instant.now();
+            Nodegroup first = new Nodegroup();
+            first.setNodegroupName("first-ng");
+            first.setCreatedAt(now.minusSeconds(60));
+            first.setLabels(Map.of("role", "frontend"));
+            first.setTaints(List.of(Map.of("key", "tier", "value", "frontend", "effect", "NO_SCHEDULE")));
+
+            Nodegroup second = new Nodegroup();
+            second.setNodegroupName("second-ng");
+            second.setCreatedAt(now);
+            second.setLabels(Map.of("role", "backend", "secondary", "true"));
+            second.setTaints(List.of(Map.of("key", "tier", "value", "backend", "effect", "NO_SCHEDULE")));
+
+            nodeGroupStorage.put("prod-cluster/second-ng", second);
+            nodeGroupStorage.put("prod-cluster/first-ng", first);
+
+            manager.startCluster(cluster);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> cmdCaptor = ArgumentCaptor.forClass(List.class);
+            verify(builder).withCmd(cmdCaptor.capture());
+            List<String> cmd = cmdCaptor.getValue();
+
+            String nodeLabelsArg = cmd.stream()
+                    .filter(arg -> arg.startsWith("--kubelet-arg=node-labels="))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("node-labels arg missing"));
+            Map<String, String> labels = parseNodeLabels(nodeLabelsArg);
+
+            assertEquals("first-ng", labels.get("eks.amazonaws.com/nodegroup"));
+            assertEquals("frontend", labels.get("role"));
+            assertNull(labels.get("secondary"));
+
+            String taintsArg = cmd.stream()
+                    .filter(arg -> arg.startsWith("--kubelet-arg=register-with-taints="))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("register-with-taints arg missing"));
+            assertEquals("--kubelet-arg=register-with-taints=tier=frontend:NoSchedule", taintsArg);
+        }
+
+        @Test
+        void topologyLabelsAndProviderIdPreservedWithNodegroup() {
+            Cluster cluster = new Cluster();
+            cluster.setName("prod-cluster");
+            cluster.setAccountId("123456789012");
+            cluster.setArn("arn:aws:eks:us-west-2:123456789012:cluster/prod-cluster");
+
+            Nodegroup nodegroup = new Nodegroup();
+            nodegroup.setNodegroupName("app-workers");
+            nodegroup.setLabels(Map.of("app", "test"));
+            nodeGroupStorage.put("prod-cluster/app-workers", nodegroup);
+
+            manager.startCluster(cluster);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> cmdCaptor = ArgumentCaptor.forClass(List.class);
+            verify(builder).withCmd(cmdCaptor.capture());
+            List<String> cmd = cmdCaptor.getValue();
+
+            String expectedProviderId = manager.deriveClusterNodeProviderId(cluster);
+            assertTrue(cmd.contains("--kubelet-arg=provider-id=" + expectedProviderId));
+
+            String nodeLabelsArg = cmd.stream()
+                    .filter(arg -> arg.startsWith("--kubelet-arg=node-labels="))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("node-labels arg missing"));
+            Map<String, String> labels = parseNodeLabels(nodeLabelsArg);
+            assertEquals("us-west-2a", labels.get("topology.kubernetes.io/zone"));
+            assertEquals("us-west-2", labels.get("topology.kubernetes.io/region"));
+        }
+
+        @Test
+        void userLabelsCannotOverwriteReservedKeys() {
+            Cluster cluster = new Cluster();
+            cluster.setName("prod-cluster");
+            cluster.setAccountId("123456789012");
+            cluster.setArn("arn:aws:eks:us-west-2:123456789012:cluster/prod-cluster");
+
+            Nodegroup nodegroup = new Nodegroup();
+            nodegroup.setNodegroupName("worker-group");
+            nodegroup.setCapacityType("ON_DEMAND");
+            nodegroup.setInstanceTypes(List.of("m5.large"));
+            nodegroup.setLabels(Map.of(
+                    "topology.kubernetes.io/zone", "fake-zone",
+                    "topology.kubernetes.io/region", "fake-region",
+                    "eks.amazonaws.com/capacityType", "FAKE_CAPACITY",
+                    "eks.amazonaws.com/nodegroup", "fake-group",
+                    "eks.amazonaws.com/nodegroup-image", "fake-image",
+                    "node.kubernetes.io/instance-type", "fake-type",
+                    "custom-label", "valid-value"
+            ));
+            nodeGroupStorage.put("prod-cluster/worker-group", nodegroup);
+
+            manager.startCluster(cluster);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> cmdCaptor = ArgumentCaptor.forClass(List.class);
+            verify(builder).withCmd(cmdCaptor.capture());
+            List<String> cmd = cmdCaptor.getValue();
+
+            String nodeLabelsArg = cmd.stream()
+                    .filter(arg -> arg.startsWith("--kubelet-arg=node-labels="))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("node-labels arg missing"));
+            Map<String, String> labels = parseNodeLabels(nodeLabelsArg);
+
+            assertEquals("us-west-2a", labels.get("topology.kubernetes.io/zone"));
+            assertEquals("us-west-2", labels.get("topology.kubernetes.io/region"));
+            assertEquals("ON_DEMAND", labels.get("eks.amazonaws.com/capacityType"));
+            assertEquals("worker-group", labels.get("eks.amazonaws.com/nodegroup"));
+            assertEquals("ami-eks-k3s", labels.get("eks.amazonaws.com/nodegroup-image"));
+            assertEquals("m5.large", labels.get("node.kubernetes.io/instance-type"));
+            assertEquals("valid-value", labels.get("custom-label"));
+        }
+
+        @Test
+        void unrecognizedInstanceTypeFallsBackToDefaultCatalogType() {
+            Cluster cluster = new Cluster();
+            cluster.setName("prod-cluster");
+            cluster.setAccountId("123456789012");
+            cluster.setArn("arn:aws:eks:us-west-2:123456789012:cluster/prod-cluster");
+
+            Nodegroup nodegroup = new Nodegroup();
+            nodegroup.setNodegroupName("custom-group");
+            nodegroup.setInstanceTypes(List.of("nonexistent.nano"));
+            nodeGroupStorage.put("prod-cluster/custom-group", nodegroup);
+
+            manager.startCluster(cluster);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> cmdCaptor = ArgumentCaptor.forClass(List.class);
+            verify(builder).withCmd(cmdCaptor.capture());
+            List<String> cmd = cmdCaptor.getValue();
+
+            String nodeLabelsArg = cmd.stream()
+                    .filter(arg -> arg.startsWith("--kubelet-arg=node-labels="))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("node-labels arg missing"));
+            Map<String, String> labels = parseNodeLabels(nodeLabelsArg);
+            assertEquals("m5.large", labels.get("node.kubernetes.io/instance-type"));
+        }
+
+        @Test
+        void nodegroupReleaseVersionUsedAsImageId() {
+            Cluster cluster = new Cluster();
+            cluster.setName("prod-cluster");
+            cluster.setAccountId("123456789012");
+            cluster.setArn("arn:aws:eks:us-west-2:123456789012:cluster/prod-cluster");
+
+            Nodegroup nodegroup = new Nodegroup();
+            nodegroup.setNodegroupName("versioned-group");
+            nodegroup.setReleaseVersion("1.30.2-20240703");
+            nodeGroupStorage.put("prod-cluster/versioned-group", nodegroup);
+
+            manager.startCluster(cluster);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> cmdCaptor = ArgumentCaptor.forClass(List.class);
+            verify(builder).withCmd(cmdCaptor.capture());
+            List<String> cmd = cmdCaptor.getValue();
+
+            String nodeLabelsArg = cmd.stream()
+                    .filter(arg -> arg.startsWith("--kubelet-arg=node-labels="))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("node-labels arg missing"));
+            Map<String, String> labels = parseNodeLabels(nodeLabelsArg);
+            assertEquals("1.30.2-20240703", labels.get("eks.amazonaws.com/nodegroup-image"));
+        }
+
+        private static Map<String, String> parseNodeLabels(String nodeLabelsArg) {
+            String raw = nodeLabelsArg.substring("--kubelet-arg=node-labels=".length());
+            Map<String, String> map = new LinkedHashMap<>();
+            for (String pair : raw.split(",")) {
+                String[] kv = pair.split("=", 2);
+                map.put(kv[0], kv.length > 1 ? kv[1] : "");
+            }
+            return map;
         }
 
         @Test
@@ -1378,7 +2985,7 @@ class EksClusterManagerTest {
             containerBuilder = Mockito.mock(ContainerBuilder.class);
             builder = Mockito.mock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
             when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-            when(builder.build()).thenReturn(Mockito.mock(ContainerSpec.class));
+            when(builder.build()).thenReturn(new ContainerSpec("test-image"));
 
             portAllocator = Mockito.mock(PortAllocator.class);
             when(portAllocator.allocate(6500, 6599)).thenReturn(6500);
@@ -1386,11 +2993,81 @@ class EksClusterManagerTest {
             RegionResolver regionResolver = Mockito.mock(RegionResolver.class);
             when(regionResolver.getAccountId()).thenReturn("000000000000");
             when(regionResolver.getDefaultRegion()).thenReturn("us-east-1");
+            when(regionResolver.buildGlobalArn(anyString(), anyString(), anyString())).thenAnswer(invocation ->
+                    "arn:aws:" + invocation.getArgument(0) + "::" + invocation.getArgument(1) + ":" + invocation.getArgument(2));
 
             manager = new EksClusterManager(containerBuilder, lifecycleManager,
                     Mockito.mock(ContainerDetector.class), portAllocator,
                     Mockito.mock(DockerHostResolver.class), Mockito.mock(EcrRegistryManager.class),
                     config, regionResolver, null, Mockito.mock(EksOidcService.class));
+        }
+
+        @Test
+        void nodeGroupTypeControlsContainerAndSynthesizedInstance() {
+            DockerClient dockerClient = Mockito.mock(DockerClient.class, Mockito.RETURNS_DEEP_STUBS);
+            Info host = Mockito.mock(Info.class);
+            when(host.getMemTotal()).thenReturn(16L * 1024 * 1024 * 1024);
+            when(host.getNCPU()).thenReturn(8);
+            when(dockerClient.infoCmd().exec()).thenReturn(host);
+            when(lifecycleManager.getDockerClient()).thenReturn(dockerClient);
+
+            Cluster cluster = new Cluster();
+            cluster.setName("capacity-cluster");
+            cluster.setNodeInstanceType(manager.selectNodeInstanceType("t3.medium"));
+            manager.startCluster(cluster);
+
+            Ec2InstanceTypeCatalog catalog = new Ec2InstanceTypeCatalog();
+            EksNodeCapacity.Limits limits = EksNodeCapacity.calculate(
+                    catalog.find("t3.medium").orElseThrow(), host.getMemTotal(), host.getNCPU(), 0, 0);
+            verify(builder).withMemoryBytes(limits.memoryBytes());
+            verify(builder).withCpuUnits(limits.vcpus() * 1024);
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> cmdCaptor = ArgumentCaptor.forClass(List.class);
+            verify(builder).withCmd(cmdCaptor.capture());
+            List<String> expectedArgs = new ArrayList<>();
+            limits.addKubeletArgs(expectedArgs);
+            assertTrue(cmdCaptor.getValue().containsAll(expectedArgs));
+            assertEquals("t3.medium", manager.synthesizeClusterNodeInstance(
+                    cluster, "172.17.0.2", "us-east-1", "000000000000").getInstanceType());
+        }
+
+        @Test
+        void hostTooSmallLeavesClusterUnboundedAndStarting() {
+            DockerClient dockerClient = Mockito.mock(DockerClient.class, Mockito.RETURNS_DEEP_STUBS);
+            Info host = Mockito.mock(Info.class);
+            when(host.getMemTotal()).thenReturn(1024L * 1024 * 1024);
+            when(host.getNCPU()).thenReturn(2);
+            when(dockerClient.infoCmd().exec()).thenReturn(host);
+            when(lifecycleManager.getDockerClient()).thenReturn(dockerClient);
+
+            Cluster cluster = new Cluster();
+            cluster.setName("small-host");
+            assertDoesNotThrow(() -> manager.startCluster(cluster));
+            verify(builder, never()).withMemoryBytes(Mockito.anyLong());
+            verify(builder, never()).withCpuUnits(Mockito.anyInt());
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> cmdCaptor = ArgumentCaptor.forClass(List.class);
+            verify(builder).withCmd(cmdCaptor.capture());
+            assertFalse(cmdCaptor.getValue().stream().anyMatch(arg -> arg.contains("reserved=")
+                    || arg.contains("eviction-hard=")));
+        }
+
+        @Test
+        void explicitCeilingSurvivesMissingDockerHostInformation() {
+            when(eks.maxMemoryMib()).thenReturn(512);
+            when(eks.maxVcpus()).thenReturn(1);
+            Cluster cluster = new Cluster();
+            cluster.setName("capped-cluster");
+
+            manager.startCluster(cluster);
+
+            verify(builder).withMemoryBytes(512L * 1024 * 1024);
+            verify(builder).withCpuUnits(1024);
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> cmdCaptor = ArgumentCaptor.forClass(List.class);
+            verify(builder).withCmd(cmdCaptor.capture());
+            assertFalse(cmdCaptor.getValue().stream().anyMatch(arg -> arg.contains("reserved=")
+                    || arg.contains("eviction-hard=")));
         }
 
         @Test
@@ -1504,6 +3181,7 @@ class EksClusterManagerTest {
             List<String> args = EksClusterManager.buildServerArgs(false, "172.20.0.0/16", "10.44.0.0/16");
             assertTrue(args.contains("--service-cidr=172.20.0.0/16"));
             assertTrue(args.contains("--cluster-cidr=10.44.0.0/16"));
+            assertTrue(args.contains("--disable=local-storage"));
             assertFalse(args.contains("--flannel-backend=none"));
         }
 
@@ -1513,6 +3191,7 @@ class EksClusterManagerTest {
             assertTrue(args.contains("--flannel-backend=none"));
             assertTrue(args.contains("--disable-network-policy"));
             assertTrue(args.contains("--disable-kube-proxy"));
+            assertTrue(args.contains("--disable=local-storage"));
             assertTrue(args.contains("--service-cidr=10.100.0.0/16"));
             assertTrue(args.contains("--cluster-cidr=10.42.0.0/16"));
         }
@@ -1527,7 +3206,7 @@ class EksClusterManagerTest {
             cluster.setVersion("1.30");
 
             assertThrows(RuntimeException.class, () -> manager.startCluster(cluster));
-            verify(lifecycleManager, Mockito.times(2)).removeIfExists("floci-eks-fail-cluster");
+            verify(lifecycleManager, Mockito.times(2)).removeIfExists("floci-aws-eks-fail-cluster");
         }
     }
 
@@ -1576,7 +3255,7 @@ class EksClusterManagerTest {
             ContainerBuilder containerBuilder = Mockito.mock(ContainerBuilder.class);
             ContainerBuilder.Builder builder = Mockito.mock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
             when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-            when(builder.build()).thenReturn(Mockito.mock(ContainerSpec.class));
+            when(builder.build()).thenReturn(new ContainerSpec("test-image"));
 
             DockerHostResolver dockerHostResolver = Mockito.mock(DockerHostResolver.class);
             when(dockerHostResolver.resolve()).thenReturn("host.docker.internal");
@@ -1584,8 +3263,10 @@ class EksClusterManagerTest {
             RegionResolver regionResolver = Mockito.mock(RegionResolver.class);
             when(regionResolver.getAccountId()).thenReturn("000000000000");
             when(regionResolver.getDefaultRegion()).thenReturn("us-east-1");
+            when(regionResolver.buildGlobalArn(anyString(), anyString(), anyString())).thenAnswer(invocation ->
+                    "arn:aws:" + invocation.getArgument(0) + "::" + invocation.getArgument(1) + ":" + invocation.getArgument(2));
 
-            FlociCertificateAuthority certificateAuthority = Mockito.mock(FlociCertificateAuthority.class);
+            FlociCertificateAuthority certificateAuthority = inlineMock(FlociCertificateAuthority.class);
             when(certificateAuthority.caPem()).thenReturn(CA_PEM);
 
             manager = new EksClusterManager(
@@ -1656,7 +3337,7 @@ class EksClusterManagerTest {
 
             manager.startCluster(cluster);
 
-            verify(copyCmd).exec();
+            verify(copyCmd, atLeastOnce()).exec();
             verify(lifecycleManager).startCreated(any(), any());
             assertEquals("container-1", cluster.getContainerId());
         }
@@ -1707,7 +3388,7 @@ class EksClusterManagerTest {
             ContainerBuilder containerBuilder = Mockito.mock(ContainerBuilder.class);
             builder = Mockito.mock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
             when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-            when(builder.build()).thenReturn(Mockito.mock(ContainerSpec.class));
+            when(builder.build()).thenReturn(new ContainerSpec("test-image"));
 
             PortAllocator portAllocator = Mockito.mock(PortAllocator.class);
             when(portAllocator.allocate(6440, 6499)).thenReturn(6443);
@@ -1715,6 +3396,8 @@ class EksClusterManagerTest {
             RegionResolver regionResolver = Mockito.mock(RegionResolver.class);
             when(regionResolver.getAccountId()).thenReturn("000000000000");
             when(regionResolver.getDefaultRegion()).thenReturn("us-east-1");
+            when(regionResolver.buildGlobalArn(anyString(), anyString(), anyString())).thenAnswer(invocation ->
+                    "arn:aws:" + invocation.getArgument(0) + "::" + invocation.getArgument(1) + ":" + invocation.getArgument(2));
 
             logStreamer = Mockito.mock(ContainerLogStreamer.class);
             mockHandle = Mockito.mock(Closeable.class);
@@ -1800,6 +3483,72 @@ class EksClusterManagerTest {
         }
 
         @Test
+        void logHandleSurvivesADeleteThatCouldNotRemoveTheContainer() {
+            Cluster cluster = new Cluster();
+            cluster.setName("prod-cluster");
+            cluster.setLogging(new Logging(List.of(new LogSetup(List.of("api"), true))));
+            manager.startCluster(cluster);
+            Mockito.doThrow(new IllegalStateException("Failed to remove container"))
+                    .when(lifecycleManager).stopAndRemoveStrict("container-id-123456789012345678901234567890", mockHandle);
+
+            assertThrows(IllegalStateException.class, () -> manager.stopCluster(cluster));
+
+            assertEquals(mockHandle, manager.getLogHandle(cluster));
+        }
+
+        @Test
+        void aRecreatedClusterReplacesALogHandleLeftBehindUnderItsName() throws Exception {
+            Cluster stale = new Cluster();
+            stale.setName("prod-cluster");
+            stale.setLogging(new Logging(List.of(new LogSetup(List.of("api"), true))));
+            manager.startCluster(stale);
+            Closeable freshHandle = Mockito.mock(Closeable.class);
+            when(logStreamer.attachForAccount(anyString(), anyString(), anyString(), anyString(), anyString(), anyString()))
+                    .thenReturn(freshHandle);
+            Cluster recreated = new Cluster();
+            recreated.setName("prod-cluster");
+            recreated.setLogging(new Logging(List.of(new LogSetup(List.of("api"), true))));
+
+            manager.startCluster(recreated);
+
+            verify(mockHandle).close();
+            assertEquals(freshHandle, manager.getLogHandle(recreated));
+        }
+
+        @Test
+        void retryingADeleteAfterContainerRemovalFailedReleasesTheLogHandle() {
+            Cluster cluster = new Cluster();
+            cluster.setName("prod-cluster");
+            cluster.setLogging(new Logging(List.of(new LogSetup(List.of("api"), true))));
+            manager.startCluster(cluster);
+            Mockito.doThrow(new IllegalStateException("Failed to remove container"))
+                    .doNothing()
+                    .when(lifecycleManager).stopAndRemoveStrict("container-id-123456789012345678901234567890", mockHandle);
+            assertThrows(IllegalStateException.class, () -> manager.stopCluster(cluster));
+
+            manager.stopCluster(cluster);
+
+            assertNull(manager.getLogHandle(cluster));
+        }
+
+        @Test
+        void aFailedDeleteOverlappingASuccessfulOneLeavesNoLogHandleBehind() {
+            Cluster cluster = new Cluster();
+            cluster.setName("prod-cluster");
+            cluster.setLogging(new Logging(List.of(new LogSetup(List.of("api"), true))));
+            manager.startCluster(cluster);
+            String containerId = "container-id-123456789012345678901234567890";
+            Mockito.doAnswer(failing -> {
+                manager.stopCluster(cluster);
+                throw new IllegalStateException("Failed to remove container");
+            }).doNothing().when(lifecycleManager).stopAndRemoveStrict(eq(containerId), any());
+
+            assertThrows(IllegalStateException.class, () -> manager.stopCluster(cluster));
+
+            assertNull(manager.getLogHandle(cluster));
+        }
+
+        @Test
         void logHandleIsReleasedOnClusterStop() {
             Cluster cluster = new Cluster();
             cluster.setName("prod-cluster");
@@ -1810,12 +3559,17 @@ class EksClusterManagerTest {
 
             manager.stopCluster(cluster);
 
-            verify(lifecycleManager).stopAndRemove("container-id-123456789012345678901234567890", mockHandle);
+            verify(lifecycleManager).stopAndRemoveStrict("container-id-123456789012345678901234567890", mockHandle);
             assertNull(manager.getLogHandle(cluster));
         }
 
+        /**
+         * Explicit DeleteCluster tears down through {@code stopCluster}. The shutdown retention
+         * option is decided by {@link EksService#shutdown()}, so it must not leave a deleted
+         * cluster's container running.
+         */
         @Test
-        void logHandleClosedWhenKeepRunningOnShutdownIsTrue() throws Exception {
+        void stopClusterRemovesTheContainerEvenWhenShutdownRetentionIsEnabled() {
             when(eks.keepRunningOnShutdown()).thenReturn(true);
 
             Cluster cluster = new Cluster();
@@ -1823,12 +3577,23 @@ class EksClusterManagerTest {
             cluster.setLogging(new Logging(List.of(new LogSetup(List.of("api"), true))));
 
             manager.startCluster(cluster);
-            assertEquals(mockHandle, manager.getLogHandle(cluster));
-
             manager.stopCluster(cluster);
 
+            verify(lifecycleManager).stopAndRemoveStrict("container-id-123456789012345678901234567890", mockHandle);
+            assertNull(manager.getLogHandle(cluster));
+        }
+
+        @Test
+        void detachClusterClosesTheLogStreamAndLeavesTheContainerRunning() throws Exception {
+            Cluster cluster = new Cluster();
+            cluster.setName("prod-cluster");
+            cluster.setLogging(new Logging(List.of(new LogSetup(List.of("api"), true))));
+
+            manager.startCluster(cluster);
+            manager.detachCluster(cluster);
+
             verify(mockHandle).close();
-            verify(lifecycleManager, never()).stopAndRemove(anyString(), any());
+            verify(lifecycleManager, never()).stopAndRemoveStrict(anyString(), any());
             assertNull(manager.getLogHandle(cluster));
         }
 
@@ -1836,8 +3601,10 @@ class EksClusterManagerTest {
         void restoreClusterAttachesLogsForAdoptedContainer() {
             Container container = Mockito.mock(Container.class);
             when(container.getId()).thenReturn("adopted-container-id-12345678901234567890");
+            when(container.getLabels()).thenReturn(Map.of(
+                    "io.floci.eks.node-capacity", "m5.large:unbounded"));
             when(lifecycleManager.findByName("floci-eks-prod-cluster")).thenReturn(Optional.of(container));
-            when(lifecycleManager.adopt(anyString(), any())).thenReturn(
+            when(lifecycleManager.adopt(anyString(), any(), any())).thenReturn(
                     new ContainerInfo("adopted-container-id-12345678901234567890",
                             Map.of(6443, new ContainerLifecycleManager.EndpointInfo("localhost", 6500)),
                             Map.of(6443, 6500)));
@@ -1924,7 +3691,7 @@ class EksClusterManagerTest {
             assertTrue(cmd.contains("--kube-apiserver-arg=audit-log-maxbackup=10"));
             assertTrue(cmd.contains("--kube-apiserver-arg=audit-log-maxsize=100"));
 
-            verify(dockerClient).copyArchiveToContainerCmd("container-id-123456789012345678901234567890");
+            verify(dockerClient, atLeastOnce()).copyArchiveToContainerCmd("container-id-123456789012345678901234567890");
             verify(copyCmd).withRemotePath("/etc");
         }
 
@@ -1932,7 +3699,9 @@ class EksClusterManagerTest {
         void clusterWithoutAuditLoggingDoesNotAddAuditArgsOrInjectPolicyFile(@TempDir Path tempDir) {
             when(eks.dataPath()).thenReturn(tempDir.toString());
             DockerClient dockerClient = Mockito.mock(DockerClient.class);
+            CopyArchiveToContainerCmd copyCmd = Mockito.mock(CopyArchiveToContainerCmd.class, Mockito.RETURNS_SELF);
             when(lifecycleManager.getDockerClient()).thenReturn(dockerClient);
+            when(dockerClient.copyArchiveToContainerCmd(anyString())).thenReturn(copyCmd);
 
             Cluster cluster = new Cluster();
             cluster.setName("no-audit-cluster");
@@ -1948,7 +3717,7 @@ class EksClusterManagerTest {
             assertFalse(cmd.stream().anyMatch(arg -> arg.contains("audit-policy-file")));
             assertFalse(cmd.stream().anyMatch(arg -> arg.contains("audit-log-path")));
 
-            verify(dockerClient, never()).copyArchiveToContainerCmd(anyString());
+            verify(copyCmd, never()).withRemotePath("/etc");
         }
 
         @Test
@@ -1989,9 +3758,13 @@ class EksClusterManagerTest {
 
             manager.startCluster(cluster);
             assertEquals(mockAuditHandle, manager.getLogHandle(cluster));
+            verify(logStreamer).execLogCallbackForAccount(
+                    "000000000000", "/aws/eks/audit-cluster/cluster",
+                    "kube-apiserver-audit-container-id-1234567890123456789",
+                    "us-east-1", "eks-audit:audit-cluster", false);
 
             manager.stopCluster(cluster);
-            verify(lifecycleManager).stopAndRemove("container-id-123456789012345678901234567890", mockAuditHandle);
+            verify(lifecycleManager).stopAndRemoveStrict("container-id-123456789012345678901234567890", mockAuditHandle);
             assertNull(manager.getLogHandle(cluster));
         }
 
@@ -2011,6 +3784,312 @@ class EksClusterManagerTest {
             assertTrue(policy.contains("nonResourceURLs:"));
             assertTrue(policy.contains("/healthz*"));
             assertTrue(policy.contains("/version"));
+        }
+    }
+
+    @Nested
+    class ClusterArgsPassthrough {
+
+        private ContainerBuilder containerBuilder;
+        private ContainerBuilder.Builder builder;
+        private ContainerLifecycleManager lifecycleManager;
+        private EksClusterManager manager;
+
+        @BeforeEach
+        void setUp() {
+            EmulatorConfig config = Mockito.mock(EmulatorConfig.class);
+            EmulatorConfig.ServicesConfig services = Mockito.mock(EmulatorConfig.ServicesConfig.class);
+            EmulatorConfig.EksServiceConfig eks = Mockito.mock(EmulatorConfig.EksServiceConfig.class);
+            when(config.services()).thenReturn(services);
+            when(services.eks()).thenReturn(eks);
+            when(eks.defaultImage()).thenReturn("rancher/k3s:v1.30.0-k3s1");
+            when(eks.apiServerBasePort()).thenReturn(6440);
+            when(eks.apiServerMaxPort()).thenReturn(6499);
+            when(eks.dockerNetwork()).thenReturn(Optional.empty());
+            when(eks.disableCni()).thenReturn(false);
+            when(eks.iamAuthWebhook()).thenReturn(false);
+            when(eks.ecrRegistryMirror()).thenReturn(false);
+
+            lifecycleManager = Mockito.mock(ContainerLifecycleManager.class);
+            when(lifecycleManager.create(any())).thenReturn("container-id");
+            when(lifecycleManager.startCreated(any(), any())).thenReturn(
+                    new ContainerInfo("container-id", Map.of()));
+
+            containerBuilder = Mockito.mock(ContainerBuilder.class);
+            builder = Mockito.mock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
+            when(containerBuilder.newContainer(anyString())).thenReturn(builder);
+            when(builder.build()).thenReturn(new ContainerSpec("test-image"));
+
+            RegionResolver regionResolver = Mockito.mock(RegionResolver.class);
+            when(regionResolver.getAccountId()).thenReturn("000000000000");
+            when(regionResolver.getDefaultRegion()).thenReturn("us-east-1");
+            when(regionResolver.buildGlobalArn(anyString(), anyString(), anyString())).thenAnswer(invocation ->
+                    "arn:aws:" + invocation.getArgument(0) + "::" + invocation.getArgument(1) + ":" + invocation.getArgument(2));
+
+            manager = new EksClusterManager(containerBuilder, lifecycleManager,
+                    Mockito.mock(ContainerDetector.class), Mockito.mock(PortAllocator.class),
+                    Mockito.mock(DockerHostResolver.class), Mockito.mock(EcrRegistryManager.class),
+                    config, regionResolver);
+        }
+
+        @Test
+        void callerArgsAppearAlongsideFlociArgs() {
+            Cluster cluster = new Cluster();
+            cluster.setName("my-cluster");
+            cluster.setClusterArgs(List.of(
+                    "--kubelet-arg=max-pods=250",
+                    "--kube-apiserver-arg=feature-gates=CSIStorageCapacity=true"
+            ));
+
+            manager.startCluster(cluster);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> cmdCaptor = ArgumentCaptor.forClass(List.class);
+            verify(builder).withCmd(cmdCaptor.capture());
+            List<String> cmd = cmdCaptor.getValue();
+
+            assertTrue(cmd.contains("server"));
+            assertTrue(cmd.contains("--kubelet-arg=max-pods=250"));
+            assertTrue(cmd.contains("--kube-apiserver-arg=feature-gates=CSIStorageCapacity=true"));
+        }
+
+        @Test
+        void twoClustersWithDifferentArgsGetTheirOwn() {
+            Cluster cluster1 = new Cluster();
+            cluster1.setName("cluster-one");
+            cluster1.setClusterArgs(List.of("--kubelet-arg=max-pods=250"));
+
+            Cluster cluster2 = new Cluster();
+            cluster2.setName("cluster-two");
+            cluster2.setClusterArgs(List.of("--kubelet-arg=max-pods=500"));
+
+            manager.startCluster(cluster1);
+            manager.startCluster(cluster2);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> cmdCaptor = ArgumentCaptor.forClass(List.class);
+            verify(builder, Mockito.times(2)).withCmd(cmdCaptor.capture());
+            List<List<String>> allCmds = cmdCaptor.getAllValues();
+
+            List<String> cmd1 = allCmds.get(0);
+            List<String> cmd2 = allCmds.get(1);
+
+            assertTrue(cmd1.contains("--kubelet-arg=max-pods=250"));
+            assertFalse(cmd1.contains("--kubelet-arg=max-pods=500"));
+
+            assertTrue(cmd2.contains("--kubelet-arg=max-pods=500"));
+            assertFalse(cmd2.contains("--kubelet-arg=max-pods=250"));
+        }
+
+        @Test
+        void clusterWithoutCustomArgsProducesExactExistingArguments() {
+            Cluster clusterWithNoArgs = new Cluster();
+            clusterWithNoArgs.setName("plain-cluster");
+
+            manager.startCluster(clusterWithNoArgs);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> cmdCaptor = ArgumentCaptor.forClass(List.class);
+            verify(builder).withCmd(cmdCaptor.capture());
+            List<String> cmd = cmdCaptor.getValue();
+
+            assertFalse(cmd.stream().anyMatch(a -> a.contains("max-pods")));
+        }
+
+        @Test
+        void collisionThrowsExpectedException() {
+            Cluster cluster = new Cluster();
+            cluster.setName("colliding-cluster");
+            cluster.setClusterArgs(List.of("--kubelet-arg=provider-id=custom-id"));
+
+            IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                    () -> manager.startCluster(cluster));
+            assertTrue(e.getMessage().contains("collides with Floci-managed kubelet argument"));
+        }
+
+        @Test
+        void malformedInputLogsWarningAndStartsCluster() {
+            Cluster cluster = new Cluster();
+            cluster.setName("malformed-cluster");
+            cluster.setTags(Map.of(
+                    "floci:kubelet-arg:", "",
+                    "floci:kubelet-arg:max-pods=250", "true"
+            ));
+
+            assertDoesNotThrow(() -> manager.startCluster(cluster));
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> cmdCaptor = ArgumentCaptor.forClass(List.class);
+            verify(builder).withCmd(cmdCaptor.capture());
+            List<String> cmd = cmdCaptor.getValue();
+            assertTrue(cmd.contains("--kubelet-arg=max-pods=250"));
+        }
+    }
+
+    @Nested
+    class JoinedInstancesTest {
+
+        private EksClusterManager manager;
+        private EmulatorConfig config;
+
+        @BeforeEach
+        void setUp() {
+            config = Mockito.mock(EmulatorConfig.class);
+            EmulatorConfig.ServicesConfig services = Mockito.mock(EmulatorConfig.ServicesConfig.class);
+            when(config.services()).thenReturn(services);
+            when(services.eks()).thenReturn(Mockito.mock(EmulatorConfig.EksServiceConfig.class));
+            manager = Mockito.spy(new EksClusterManager(Mockito.mock(ContainerBuilder.class),
+                    Mockito.mock(ContainerLifecycleManager.class), Mockito.mock(ContainerDetector.class),
+                    Mockito.mock(PortAllocator.class), Mockito.mock(DockerHostResolver.class),
+                    Mockito.mock(EcrRegistryManager.class), config, new RegionResolver("us-east-1", "000000000000"),
+                    Mockito.mock(Ec2MetadataServer.class), Mockito.mock(EksOidcService.class),
+                    inlineMock(FlociCertificateAuthority.class), Mockito.mock(ContainerLogStreamer.class),
+                    new InMemoryStorage<>()));
+        }
+
+        private Cluster clusterNamed(String name, String containerId) {
+            Cluster c = new Cluster();
+            c.setName(name);
+            c.setContainerId(containerId);
+            return c;
+        }
+
+        @Test
+        void deriveInstanceNodeNameAndProviderId() {
+            Instance inst = createInstance("i-0123456789abcdef0", "us-east-1b", null, null, null);
+            inst.setPrivateDnsName("ip-10-0-1-50.ec2.internal");
+            assertEquals("ip-10-0-1-50.ec2.internal", manager.deriveInstanceNodeName(inst, "us-east-1"));
+            assertEquals("aws:///us-east-1b/i-0123456789abcdef0", manager.deriveInstanceNodeProviderId(inst, "us-east-1"));
+            Instance euInst = createInstance("i-0abcdef1234567890", "eu-west-1c", null, null, null);
+            assertEquals("i-0abcdef1234567890.eu-west-1.compute.internal", manager.deriveInstanceNodeName(euInst, "eu-west-1"));
+            assertEquals("aws:///eu-west-1c/i-0abcdef1234567890", manager.deriveInstanceNodeProviderId(euInst, "eu-west-1"));
+        }
+
+        @Test
+        void joinAndQueryJoinedInstances() {
+            Cluster cluster = clusterNamed("track-cluster", null);
+            cluster.setEndpoint("https://public:6443");
+            cluster.setInternalEndpoint("https://internal:6443");
+            Instance inst = createInstance("i-0123456789abcdef0", "us-east-1a", null, null, "10.0.1.50");
+            assertFalse(manager.isInstanceJoined(cluster, "i-0123456789abcdef0"));
+            manager.joinInstance(cluster, inst);
+            assertTrue(manager.isInstanceJoined(cluster, "i-0123456789abcdef0"));
+            assertEquals(1, manager.getJoinedInstances(cluster).size());
+            assertEquals("i-0123456789abcdef0", manager.getJoinedInstances(cluster).getFirst().getInstanceId());
+            Optional<DnsAnswer> ans = manager.resolveIpv4("i-0123456789abcdef0.ec2.internal");
+            assertTrue(ans.isPresent() && ans.get().addresses().contains("10.0.1.50"));
+            manager.unregisterMetadataEndpoint(cluster);
+            assertFalse(manager.isInstanceJoined(cluster, "i-0123456789abcdef0"));
+        }
+
+        @Test
+        void joinInstanceRegistersNodeInRunningContainerWithExpectedManifest() {
+            Cluster cluster = clusterNamed("live-cluster", "live-container-123");
+            Instance inst = createInstance("i-0123456789abcdef0", "us-east-1a", "t3.medium", "x86_64", "10.0.1.50");
+
+            ArgumentCaptor<String[]> cmdCaptor = ArgumentCaptor.forClass(String[].class);
+            doReturn(new ContainerExec.Result(0L, "", "", false)).when(manager)
+                    .execInContainerForResult(eq("live-container-123"), cmdCaptor.capture(), anyInt());
+
+            manager.joinInstance(cluster, inst);
+            assertTrue(manager.isInstanceJoined(cluster, "i-0123456789abcdef0"));
+            List<String[]> capturedCmds = cmdCaptor.getAllValues();
+            assertEquals(2, capturedCmds.size());
+
+            String applyScript = capturedCmds.getFirst()[2];
+            assertTrue(applyScript.contains("i-0123456789abcdef0.ec2.internal")
+                    && applyScript.contains("aws:///us-east-1a/i-0123456789abcdef0")
+                    && applyScript.contains("\"topology.kubernetes.io/zone\":\"us-east-1a\"")
+                    && applyScript.contains("\"topology.kubernetes.io/region\":\"us-east-1\"")
+                    && applyScript.contains("\"node.kubernetes.io/instance-type\":\"t3.medium\"")
+                    && applyScript.contains("\"kubernetes.io/arch\":\"amd64\""));
+
+            String[] patchCmd = capturedCmds.get(1);
+            assertEquals("node", patchCmd[2]);
+            assertEquals("i-0123456789abcdef0.ec2.internal", patchCmd[3]);
+            assertTrue(patchCmd[7].contains("10.0.1.50") && patchCmd[7].contains("KubeletReady"));
+        }
+
+        @Test
+        void joinArmInstanceRegistersWithArm64Label() {
+            Cluster cluster = clusterNamed("arm-cluster", "arm-container-123");
+            Instance inst = createInstance("i-0arm1234567890abc", "us-east-1b", "t4g.medium", "arm64", "10.0.2.60");
+
+            ArgumentCaptor<String[]> cmdCaptor = ArgumentCaptor.forClass(String[].class);
+            doReturn(new ContainerExec.Result(0L, "", "", false)).when(manager)
+                    .execInContainerForResult(eq("arm-container-123"), cmdCaptor.capture(), anyInt());
+
+            manager.joinInstance(cluster, inst);
+            assertTrue(cmdCaptor.getAllValues().getFirst()[2].contains("\"kubernetes.io/arch\":\"arm64\""));
+        }
+
+        @Test
+        void joinInstanceRegistrationFailureCleansUpAndThrows() {
+            Cluster c1 = clusterNamed("fail-apply", "c1");
+            doReturn(new ContainerExec.Result(1L, "", "apply failed", false))
+                    .when(manager).execInContainerForResult(eq("c1"), any(), anyInt());
+            assertThrows(IllegalStateException.class, () ->
+                    manager.joinInstance(c1, createInstance("i-fail1", "us-east-1a", null, null, null)));
+            assertFalse(manager.isInstanceJoined(c1, "i-fail1"));
+
+            Cluster c2 = clusterNamed("fail-patch", "c2");
+            ArgumentCaptor<String[]> captor = ArgumentCaptor.forClass(String[].class);
+            doReturn(new ContainerExec.Result(0L, "", "", false),
+                    new ContainerExec.Result(1L, "", "patch failed", false),
+                    new ContainerExec.Result(0L, "", "", false))
+                    .when(manager).execInContainerForResult(eq("c2"), captor.capture(), anyInt());
+            assertThrows(IllegalStateException.class, () ->
+                    manager.joinInstance(c2, createInstance("i-fail2", "us-east-1a", null, null, null)));
+            assertFalse(manager.isInstanceJoined(c2, "i-fail2"));
+            assertEquals("delete", captor.getAllValues().get(2)[1]);
+        }
+
+        @Test
+        void joinInstanceSameClusterIsIdempotent() {
+            Cluster cluster = clusterNamed("idem-cluster", null);
+            Instance inst = createInstance("i-idem123456789", "us-east-1a", null, null, null);
+            manager.joinInstance(cluster, inst);
+            assertTrue(manager.isInstanceJoined(cluster, "i-idem123456789"));
+            manager.joinInstance(cluster, inst);
+            assertEquals(1, manager.getJoinedInstances(cluster).size());
+        }
+
+        @Test
+        void joinInstanceRejectsInstanceAlreadyJoinedToAnotherCluster() {
+            Cluster c1 = clusterNamed("c1", null), c2 = clusterNamed("c2", null);
+            Instance inst = createInstance("i-shared1234567890", "us-east-1a", null, null, null);
+            manager.joinInstance(c1, inst);
+            assertTrue(manager.isInstanceJoined(c1, "i-shared1234567890"));
+            assertThrows(AwsException.class, () -> manager.joinInstance(c2, inst));
+            assertFalse(manager.isInstanceJoined(c2, "i-shared1234567890"));
+        }
+
+        @Test
+        void recordJoinedInstanceIdConcurrentSafety() throws Exception {
+            Cluster cluster = clusterNamed("concurrent-cluster", null);
+            ExecutorService executor = Executors.newFixedThreadPool(8);
+            List<Future<?>> futures = new ArrayList<>();
+            for (int i = 0; i < 20; i++) {
+                final int idx = i;
+                futures.add(executor.submit(() ->
+                        manager.recordJoinedInstanceId(cluster, createInstance("i-c" + idx, "us-east-1a", null, null, null))));
+            }
+            for (Future<?> f : futures) {
+                f.get();
+            }
+            executor.shutdown();
+            assertEquals(20, cluster.getJoinedInstanceIds().size());
+        }
+
+        private Instance createInstance(String id, String zone, String type, String arch, String ip) {
+            Instance inst = new Instance();
+            inst.setInstanceId(id);
+            inst.setRegion(zone.substring(0, zone.length() - 1));
+            inst.setPlacement(new Placement(zone));
+            inst.setInstanceType(type);
+            inst.setArchitecture(arch);
+            inst.setPrivateIpAddress(ip);
+            return inst;
         }
     }
 }

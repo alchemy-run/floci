@@ -7,6 +7,8 @@ quarkus:
     host: 0.0.0.0
     limits:
       max-body-size: ${floci.protocols.max-request-size}M
+      max-header-size: 256K
+      max-initial-line-length: 262144
   # Groovy (a REST Assured dependency) starts DFA-cache-cleaner threads that never stop.
   # Loaded parent-first they live in the shared system classloader, so they cannot pin a
   # per-profile application classloader across the many app restarts of a test run.
@@ -21,6 +23,9 @@ floci:
       helper-image: floci/network-helper:local
   default-region: us-east-1
   default-account-id: "000000000000"
+  partitions:
+    strict: false
+    allow-unknown-regions: false
   ai-mock-config-file: ${AI_MOCK_CONFIG:src/test/resources/fixtures/ai-mock-config.json}
   storage:
     mode: memory
@@ -69,6 +74,9 @@ floci:
         flush-interval-ms: 60000
       codedeploy:
         flush-interval-ms: 60000
+      resource-groups:
+        mode: ${FLOCI_STORAGE_SERVICES_RESOURCE_GROUPS_MODE:}
+        flush-interval-ms: ${FLOCI_STORAGE_SERVICES_RESOURCE_GROUPS_FLUSH_INTERVAL_MS:5000}
       tagging:
         flush-interval-ms: 60000
       elasticbeanstalk:
@@ -105,6 +113,7 @@ floci:
     allow-private-jwt-targets: true
 
   init-hooks:
+    dir: /etc/floci/init
     shell-executable: /bin/sh
     timeout-seconds: 5
     shutdown-grace-period-seconds: 2
@@ -130,20 +139,32 @@ floci:
       enabled: true
       default-visibility-timeout: 30
       max-message-size: 1048576
+      endpoint-strategy: floci
+      cloudwatch-metrics-enabled: false   # tests publish themselves, so no tick stamps another test's queue behind its back
     s3:
       enabled: true
       enforce-auth: false
       default-presign-expiry-seconds: 3600
       global-bucket-namespace: false
+      lifecycle-sweep-enabled: false   # tests run the sweep themselves, so no bucket's rules apply behind another test's back
+      lifecycle-sweep-interval-seconds: 60
     dynamodb:
       enabled: true
+      vector-index-allocation-seconds: 0
+      vector-index-backfill-seconds: 0
+      latest-restorable-lag-seconds: 0
+      backend: native
     sns:
       enabled: true
     lambda:
       enabled: true
+      container-drain-timeout-seconds: 15
       docker-flags: ""
       honour-architectures: false
       zip-max-entries: 100000
+      async-retry-delay-seconds: 1
+      durable-sweep-enabled: true
+      durable-sweep-interval-seconds: 1
       # aws-config-path:
       hot-reload:
         enabled: true
@@ -195,6 +216,7 @@ floci:
       proxy-handshake-timeout-millis: 10000
       proxy-backend-connect-timeout-millis: 5000
       proxy-max-connections: 100
+      spectrum-max-rows: 1000000
     rds:
       enabled: true
       mock: false
@@ -204,12 +226,24 @@ floci:
       proxy-handshake-timeout-millis: 10000
       proxy-backend-connect-timeout-millis: 5000
       proxy-max-connections: 100
+      aurora-auto-pause-enabled: true
+      aurora-resume-delay-millis: 0
     rds-data:
       enabled: true
       transaction-ttl-seconds: 180
+      database-resuming-exception-enabled: false
+    dsql:
+      enabled: true
+      mock: true
+      port: 0
     redshift-data:
       enabled: true
       result-ttl-hours: 24
+      max-concurrent-statements: 10
+      queue-capacity: 100
+      shutdown-timeout-seconds: 10
+    redshift-serverless:
+      enabled: true
     neptune:
       enabled: true
       proxy-base-port: 8182
@@ -238,13 +272,15 @@ floci:
       list-shards-next-token-ttl-millis: 300000
     firehose:
       enabled: true
-      tick-interval-seconds: 10
+      tick-interval-seconds: 1
       flush-record-count: 0
       staging-bucket: floci-firehose-staging
     kms:
       enabled: true
     cognito:
       enabled: true
+      google-issuer: https://accounts.google.com
+      enforce-token-validity-limits: true
     stepfunctions:
       enabled: true
       allow-plaintext-http: true
@@ -256,6 +292,9 @@ floci:
       timeout-sweep-interval-seconds: 1
     cloudformation:
       enabled: true
+      # Pinned to the shipped default: the retention tests advance the test clock past this
+      # window by name, so the value they assume is spelled out rather than inherited.
+      deleted-stack-retention-seconds: 30
       # Fail an AWS::Lambda::Function whose S3 code cannot be read, as real CloudFormation
       # does. Set true to fall back to the built-in stub handler instead (issue #2648).
       allow-stub-lambda-code: false
@@ -278,8 +317,11 @@ floci:
       proxy-base-port: 9400
       proxy-max-port: 9499
     ec2:
+      # Opt-in Standard On-Demand vCPU admission. FLOCI_SERVICES_EC2_ENFORCE_VCPU_QUOTAS
+      enforce-vcpu-quotas: false
       # Optional complete catalog override for locally built guest images.
       image-catalog-path: ${FLOCI_SERVICES_EC2_IMAGE_CATALOG_PATH:}
+      managed-prefix-list-catalog-path: ${FLOCI_SERVICES_EC2_MANAGED_PREFIX_LIST_CATALOG_PATH:}
       enabled: true
       imds-port: 9169
       ssh-port-range-start: 2200
@@ -289,7 +331,11 @@ floci:
       app-port-range-end: 30999
       max-published-ports-per-instance: 20
       socat-image: alpine/socat
+      volume-block-devices: false
+      volume-helper-image: alpine:3.21
       mock: true
+      mock-public-addresses: none
+      instance-resource-limits: true
       aws-faithful-private-ip: false
       # container-ips-routable: true  # see src/main/resources/application.yml
       # Off explicitly, not merely by implication of mock: true above. Tests must not create or
@@ -301,12 +347,14 @@ floci:
       mock: true
       host-volume-roots: []
       allow-unsafe-host-volumes: false
+      image-pull-behavior: prefer-cached
     appconfig:
       enabled: true
     appconfigdata:
       enabled: true
     ecr:
       enabled: true
+      tls-uri: false
     ui:
       enabled: true
     bedrock:
@@ -316,9 +364,13 @@ floci:
     eks:
       enabled: true
       mock: true
+      max-memory-mib: 0
+      max-vcpus: 0
       ecr-registry-mirror: true
+      default-storage-class: false
       imds: false
       irsa-signing-key: true
+      embedded-dns: true
     mwaa:
       enabled: true
       mock: true
@@ -356,6 +408,8 @@ floci:
       enabled: true
     codepipeline:
       enabled: true
+      source-poll-interval-ms: 100   # a shorter cycle so the "did not trigger" tests wait less
+      worker-poll-interval-ms: 1
     autoscaling:
       enabled: true
     applicationautoscaling:
@@ -452,6 +506,7 @@ floci:
       spark-image: apache/spark:3.5.2-scala2.12-java17-python3-ubuntu
       spark-home: /opt/spark
       job-timeout-seconds: 300
+      job-run-duration-seconds: 0   # 0 = BATCH job runs succeed as soon as they start
     ssoadmin:
       enabled: true
     ssooidc:
@@ -485,6 +540,8 @@ floci:
       enabled: true
     appintegrations:
       enabled: true
+    dlm:
+      enabled: true
     cognitoidentity:
       enabled: true
     globalaccelerator:
@@ -494,6 +551,8 @@ floci:
     aps:
       enabled: true
     lakeformation:
+      enabled: true
+    resource-groups:
       enabled: true
     tagging:
       enabled: true
@@ -513,6 +572,7 @@ floci:
       enabled: true
     servicequotas:
       enabled: true
+      standard-on-demand-vcpus: 5
     verifiedpermissions:
       enabled: true
     ram:

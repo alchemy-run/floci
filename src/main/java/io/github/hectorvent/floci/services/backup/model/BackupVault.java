@@ -50,6 +50,44 @@ public class BackupVault {
     public void setSnsTopicArn(String snsTopicArn) { this.snsTopicArn = snsTopicArn; }
     public List<String> getBackupVaultEvents() { return backupVaultEvents; }
     public void setBackupVaultEvents(List<String> events) { this.backupVaultEvents = events; }
+    // Vault Lock. These four ARE part of the DescribeBackupVault response in AWS, unlike
+    // the access policy and the notification configuration, which have their own Get
+    // operations and are stored separately.
+    //
+    // `locked` is a primitive, so it serialises as `false` on an unlocked vault rather
+    // than being dropped by @JsonInclude(NON_NULL). That matches AWS, which always
+    // reports Locked, and it matters: a client that has to distinguish "not locked" from
+    // "this emulator does not model locking" can only do so if the member is present.
+    // The other three stay boxed, because AWS omits them until a lock exists.
+    @JsonProperty("Locked")
+    private boolean locked;
+
+    @JsonProperty("LockDate")
+    private Long lockDate;
+
+    @JsonProperty("MinRetentionDays")
+    private Long minRetentionDays;
+
+    @JsonProperty("MaxRetentionDays")
+    private Long maxRetentionDays;
+
+    // Floci-internal, not an AWS member: identifies this incarnation of the vault name, so
+    // sub-resources and in-flight jobs bind to the vault rather than to a name that a
+    // delete-and-recreate can hand to a different vault within the same second. Persisted,
+    // but BackupController strips it from every response. Null on vaults stored before it
+    // existed; BackupService falls back to the creation date for those.
+    @JsonProperty(VAULT_ID_FIELD)
+    private String vaultId;
+
+    public static final String VAULT_ID_FIELD = "FlociVaultId";
+
+    // Stored only on logically air-gapped vaults; a standard vault leaves VaultType null and
+    // BackupController reports it as BACKUP_VAULT. VaultState is set on air-gapped vaults only.
+    @JsonProperty("VaultType")
+    private String vaultType;
+
+    @JsonProperty("VaultState")
+    private String vaultState;
 
     public BackupVault() {}
 
@@ -58,6 +96,9 @@ public class BackupVault {
 
     public String getBackupVaultArn() { return backupVaultArn; }
     public void setBackupVaultArn(String backupVaultArn) { this.backupVaultArn = backupVaultArn; }
+
+    public String getVaultId() { return vaultId; }
+    public void setVaultId(String vaultId) { this.vaultId = vaultId; }
 
     public String getEncryptionKeyArn() { return encryptionKeyArn; }
     public void setEncryptionKeyArn(String encryptionKeyArn) { this.encryptionKeyArn = encryptionKeyArn; }
@@ -73,4 +114,22 @@ public class BackupVault {
 
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags != null ? tags : new HashMap<>(); }
+
+    public boolean isLocked() { return locked; }
+    public void setLocked(boolean locked) { this.locked = locked; }
+
+    public Long getLockDate() { return lockDate; }
+    public void setLockDate(Long lockDate) { this.lockDate = lockDate; }
+
+    public Long getMinRetentionDays() { return minRetentionDays; }
+    public void setMinRetentionDays(Long minRetentionDays) { this.minRetentionDays = minRetentionDays; }
+
+    public Long getMaxRetentionDays() { return maxRetentionDays; }
+    public void setMaxRetentionDays(Long maxRetentionDays) { this.maxRetentionDays = maxRetentionDays; }
+
+    public String getVaultType() { return vaultType; }
+    public void setVaultType(String vaultType) { this.vaultType = vaultType; }
+
+    public String getVaultState() { return vaultState; }
+    public void setVaultState(String vaultState) { this.vaultState = vaultState; }
 }

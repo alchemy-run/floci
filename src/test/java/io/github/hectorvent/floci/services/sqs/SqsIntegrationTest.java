@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.sqs;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.path.xml.XmlPath;
+import io.restassured.specification.RequestSpecification;
 import org.junit.jupiter.api.*;
 
 import java.util.LinkedHashMap;
@@ -10,10 +11,10 @@ import java.util.List;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.hamcrest.Matchers.*;
 
 @QuarkusTest
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
@@ -105,6 +106,91 @@ class SqsIntegrationTest {
 
         // Store for delete test — use static field
         SqsIntegrationTest.receiptHandle = receiptHandle;
+    }
+
+    @Test
+    void receiveMessage_messageAttributeNamesFiltersOutput() {
+        String filterQueueUrl = given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateQueue")
+            .formParam("QueueName", "query-message-attribute-filter-queue")
+        .when().post("/").then().statusCode(200)
+            .extract().xmlPath().getString("CreateQueueResponse.CreateQueueResult.QueueUrl");
+
+        try {
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "SendMessage")
+                .formParam("QueueUrl", filterQueueUrl)
+                .formParam("MessageBody", "filter-test")
+                .formParam("MessageAttribute.1.Name", "color.primary")
+                .formParam("MessageAttribute.1.Value.DataType", "String")
+                .formParam("MessageAttribute.1.Value.StringValue", "red")
+                .formParam("MessageAttribute.2.Name", "secret")
+                .formParam("MessageAttribute.2.Value.DataType", "String")
+                .formParam("MessageAttribute.2.Value.StringValue", "private")
+                .formParam("MessageAttribute.3.Name", "color")
+                .formParam("MessageAttribute.3.Value.DataType", "String")
+                .formParam("MessageAttribute.3.Value.StringValue", "blue")
+                .formParam("MessageAttribute.4.Name", "colorful")
+                .formParam("MessageAttribute.4.Value.DataType", "String")
+                .formParam("MessageAttribute.4.Value.StringValue", "bright")
+            .when().post("/").then().statusCode(200);
+
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "ReceiveMessage")
+                .formParam("QueueUrl", filterQueueUrl)
+                .formParam("VisibilityTimeout", "0")
+            .when().post("/").then().statusCode(200)
+                .body(containsString("<Body>filter-test</Body>"))
+                .body(not(containsString("<MessageAttribute>")))
+                .body(not(containsString("<MD5OfMessageAttributes>")));
+
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "ReceiveMessage")
+                .formParam("QueueUrl", filterQueueUrl)
+                .formParam("VisibilityTimeout", "0")
+                .formParam("MessageAttributeName.1", "color.primary")
+            .when().post("/").then().statusCode(200)
+                .body(containsString("<Name>color.primary</Name>"))
+                .body(not(containsString("<Name>color</Name>")))
+                .body(not(containsString("<Name>colorful</Name>")))
+                .body(not(containsString("<Name>secret</Name>")))
+                .body(containsString("<MD5OfMessageAttributes>d1cf84dfbac1cbe5c78ed09a1768b0d9</MD5OfMessageAttributes>"));
+
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "ReceiveMessage")
+                .formParam("QueueUrl", filterQueueUrl)
+                .formParam("VisibilityTimeout", "0")
+                .formParam("MessageAttributeName.1", "color.*")
+            .when().post("/").then().statusCode(200)
+                .body(containsString("<Name>color.primary</Name>"))
+                .body(containsString("<Name>color</Name>"))
+                .body(containsString("<Name>colorful</Name>"))
+                .body(not(containsString("<Name>secret</Name>")))
+                .body(containsString("<MD5OfMessageAttributes>46db9885b8f221ea04082f03e3a63d14</MD5OfMessageAttributes>"));
+
+            for (String allSelector : new String[]{"All", ".*"}) {
+                given()
+                    .contentType("application/x-www-form-urlencoded")
+                    .formParam("Action", "ReceiveMessage")
+                    .formParam("QueueUrl", filterQueueUrl)
+                    .formParam("VisibilityTimeout", "0")
+                    .formParam("MessageAttributeName.1", allSelector)
+                .when().post("/").then().statusCode(200)
+                    .body(containsString("<Name>color.primary</Name>"))
+                    .body(containsString("<Name>secret</Name>"));
+            }
+        } finally {
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "DeleteQueue")
+                .formParam("QueueUrl", filterQueueUrl)
+            .when().post("/");
+        }
     }
 
     private static String receiptHandle;
@@ -505,6 +591,76 @@ class SqsIntegrationTest {
     }
 
     @Test
+    void createQueue_conflictOnDerivedSqsManagedSseEnabled_returns400() {
+        String queueName = "conflict-sse-queue";
+
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateQueue")
+            .formParam("QueueName", queueName)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        // The queue reports SqsManagedSseEnabled=true without storing it.
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateQueue")
+            .formParam("QueueName", queueName)
+            .formParam("Attribute.1.Name", "SqsManagedSseEnabled")
+            .formParam("Attribute.1.Value", "false")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("ErrorResponse.Error.Code", equalTo("QueueAlreadyExists"));
+
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateQueue")
+            .formParam("QueueName", queueName)
+            .formParam("Attribute.1.Name", "SqsManagedSseEnabled")
+            .formParam("Attribute.1.Value", "true")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "DeleteQueue")
+            .formParam("QueueUrl", "http://localhost:4566/000000000000/" + queueName)
+        .when()
+            .post("/");
+    }
+
+    @Test
+    void createQueue_recreateWithSameEmptyMaximumMessageSize_returnsExistingQueue() {
+        String queueName = "empty-max-size-queue";
+        for (int i = 0; i < 2; i++) {
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "CreateQueue")
+                .formParam("QueueName", queueName)
+                .formParam("Attribute.1.Name", "MaximumMessageSize")
+                .formParam("Attribute.1.Value", "")
+            .when()
+                .post("/")
+            .then()
+                .statusCode(200)
+                .body("CreateQueueResponse.CreateQueueResult.QueueUrl", endsWith("/" + queueName));
+        }
+
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "DeleteQueue")
+            .formParam("QueueUrl", "http://localhost:4566/000000000000/" + queueName)
+        .when()
+            .post("/");
+    }
+
+    @Test
     void jsonProtocol_nonExistentQueue_returnsQueueDoesNotExist() {
         given()
             .contentType("application/x-amz-json-1.0")
@@ -873,6 +1029,95 @@ class SqsIntegrationTest {
                 .contentType("application/x-www-form-urlencoded")
                 .formParam("Action", "DeleteQueue")
                 .formParam("QueueUrl", sourceUrl)
+    void setQueueAttributesRejectsMessageRetentionPeriodOutsideTheAwsRange() {
+        String retentionQueueUrl = given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateQueue")
+            .formParam("QueueName", "query-retention-range-queue")
+        .when().post("/").then().statusCode(200)
+            .extract().xmlPath().getString("CreateQueueResponse.CreateQueueResult.QueueUrl");
+
+        try {
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "SetQueueAttributes")
+                .formParam("QueueUrl", retentionQueueUrl)
+                .formParam("Attribute.1.Name", "MessageRetentionPeriod")
+                .formParam("Attribute.1.Value", "0")
+            .when().post("/").then()
+                .statusCode(400)
+                .body(containsString("<Code>InvalidAttributeValue</Code>"))
+                .body(containsString("<Message>Invalid value for the parameter MessageRetentionPeriod.</Message>"));
+
+            assertEquals("345600", allQueueAttributes(retentionQueueUrl).get("MessageRetentionPeriod"));
+        } finally {
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "DeleteQueue")
+                .formParam("QueueUrl", retentionQueueUrl)
+            .when().post("/");
+        }
+    }
+
+    @Test
+    void receiveMessageReturnsPerMessageSenderId() {
+        String testQueueUrl = given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateQueue")
+            .formParam("QueueName", "per-message-sender-id-queue")
+        .when().post("/").then().statusCode(200)
+            .extract().xmlPath().getString("CreateQueueResponse.CreateQueueResult.QueueUrl");
+
+        try {
+            String auth1 = "AWS4-HMAC-SHA256 Credential=111122223333/20260215/us-east-1/sqs/aws4_request, "
+                    + "SignedHeaders=host, Signature=abc";
+            String auth2 = "AWS4-HMAC-SHA256 Credential=444455556666/20260215/us-east-1/sqs/aws4_request, "
+                    + "SignedHeaders=host, Signature=abc";
+
+            given()
+                .header("Authorization", auth1)
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "SendMessage")
+                .formParam("QueueUrl", testQueueUrl)
+                .formParam("MessageBody", "msg-sender-1")
+            .when().post("/").then().statusCode(200);
+
+            given()
+                .header("Authorization", auth2)
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "SendMessage")
+                .formParam("QueueUrl", testQueueUrl)
+                .formParam("MessageBody", "msg-sender-2")
+            .when().post("/").then().statusCode(200);
+
+            XmlPath xml = given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "ReceiveMessage")
+                .formParam("QueueUrl", testQueueUrl)
+                .formParam("MaxNumberOfMessages", "10")
+                .formParam("VisibilityTimeout", "0")
+                .formParam("MessageSystemAttributeName.1", "SenderId")
+            .when().post("/").then().statusCode(200)
+                .body(containsString("<Value>111122223333</Value>"))
+                .body(containsString("<Value>444455556666</Value>"))
+                .extract().xmlPath();
+
+            List<String> bodies = xml.getList(
+                    "ReceiveMessageResponse.ReceiveMessageResult.Message.Body", String.class);
+            assertEquals(2, bodies.size());
+            int idx1 = bodies.indexOf("msg-sender-1");
+            int idx2 = bodies.indexOf("msg-sender-2");
+            assertTrue(idx1 >= 0 && idx2 >= 0);
+
+            List<String> senderIds = xml.getList(
+                    "ReceiveMessageResponse.ReceiveMessageResult.Message.Attribute.Value", String.class);
+            assertEquals("111122223333", senderIds.get(idx1));
+            assertEquals("444455556666", senderIds.get(idx2));
+        } finally {
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "DeleteQueue")
+                .formParam("QueueUrl", testQueueUrl)
             .when().post("/");
         }
     }
@@ -896,5 +1141,233 @@ class SqsIntegrationTest {
             attributes.put(names.get(i), values.get(i));
         }
         return attributes;
+    }
+
+    @Test
+    void batchRequestsWithMoreThanTenEntriesAreRejectedWithoutProcessingAnyEntry() {
+        String batchQueueUrl = given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateQueue")
+            .formParam("QueueName", "query-batch-limit-queue")
+        .when().post("/")
+        .then().statusCode(200)
+            .extract().xmlPath().getString("CreateQueueResponse.CreateQueueResult.QueueUrl");
+        try {
+            // 1. SendMessageBatch with 11 entries rejects and stores nothing
+            RequestSpecification sendRequest = given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "SendMessageBatch")
+                .formParam("QueueUrl", batchQueueUrl);
+            for (int i = 1; i <= 11; i++) {
+                sendRequest = sendRequest
+                    .formParam("SendMessageBatchRequestEntry." + i + ".Id", "e" + i)
+                    .formParam("SendMessageBatchRequestEntry." + i + ".MessageBody", "m" + i);
+            }
+            sendRequest.when().post("/")
+                .then().statusCode(400)
+                .body(containsString("AWS.SimpleQueueService.TooManyEntriesInBatchRequest"));
+
+            assertEquals("0", allQueueAttributes(batchQueueUrl).get("ApproximateNumberOfMessages"));
+            assertEquals("0", allQueueAttributes(batchQueueUrl).get("ApproximateNumberOfMessagesNotVisible"));
+
+            // 2. Seed 2 messages and receive them to get valid receipt handles
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "SendMessage")
+                .formParam("QueueUrl", batchQueueUrl)
+                .formParam("MessageBody", "seed-1")
+            .when().post("/")
+            .then().statusCode(200);
+
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "SendMessage")
+                .formParam("QueueUrl", batchQueueUrl)
+                .formParam("MessageBody", "seed-2")
+            .when().post("/")
+            .then().statusCode(200);
+
+            XmlPath receiveXml = given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "ReceiveMessage")
+                .formParam("QueueUrl", batchQueueUrl)
+                .formParam("MaxNumberOfMessages", "10")
+                .formParam("VisibilityTimeout", "300")
+            .when().post("/")
+            .then().statusCode(200)
+                .extract().xmlPath();
+            List<String> receiptHandles = receiveXml.getList(
+                    "ReceiveMessageResponse.ReceiveMessageResult.Message.ReceiptHandle", String.class);
+            assertEquals(2, receiptHandles.size());
+
+            assertEquals("0", allQueueAttributes(batchQueueUrl).get("ApproximateNumberOfMessages"));
+            assertEquals("2", allQueueAttributes(batchQueueUrl).get("ApproximateNumberOfMessagesNotVisible"));
+
+            // 3. ChangeMessageVisibilityBatch with 11 entries rejects and does not change visibility
+            addReceiptHandleEntries(
+                    given()
+                        .contentType("application/x-www-form-urlencoded")
+                        .formParam("Action", "ChangeMessageVisibilityBatch")
+                        .formParam("QueueUrl", batchQueueUrl),
+                    "ChangeMessageVisibilityBatchRequestEntry", "v", receiptHandles,
+                    Map.of("VisibilityTimeout", "0"))
+            .when().post("/")
+            .then().statusCode(400)
+                .body(containsString("AWS.SimpleQueueService.TooManyEntriesInBatchRequest"));
+
+            assertEquals("0", allQueueAttributes(batchQueueUrl).get("ApproximateNumberOfMessages"));
+            assertEquals("2", allQueueAttributes(batchQueueUrl).get("ApproximateNumberOfMessagesNotVisible"));
+
+            // 4. DeleteMessageBatch with 11 entries rejects and preserves seeded messages
+            addReceiptHandleEntries(
+                    given()
+                        .contentType("application/x-www-form-urlencoded")
+                        .formParam("Action", "DeleteMessageBatch")
+                        .formParam("QueueUrl", batchQueueUrl),
+                    "DeleteMessageBatchRequestEntry", "d", receiptHandles, Map.of())
+            .when().post("/")
+            .then().statusCode(400)
+                .body(containsString("AWS.SimpleQueueService.TooManyEntriesInBatchRequest"));
+
+            assertEquals("0", allQueueAttributes(batchQueueUrl).get("ApproximateNumberOfMessages"));
+            assertEquals("2", allQueueAttributes(batchQueueUrl).get("ApproximateNumberOfMessagesNotVisible"));
+        } finally {
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "DeleteQueue")
+                .formParam("QueueUrl", batchQueueUrl)
+            .when().post("/");
+        }
+    }
+
+    @Test
+    void batchRequestsWithNumberingGapAreRejectedWhenTotalEntriesExceedTen() {
+        String batchQueueUrl = given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateQueue")
+            .formParam("QueueName", "query-batch-gap-queue")
+        .when().post("/")
+        .then().statusCode(200)
+            .extract().xmlPath().getString("CreateQueueResponse.CreateQueueResult.QueueUrl");
+        try {
+            // Indices 1..4 and 6..12: gap at 5, total 11 entries
+            RequestSpecification request = given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "SendMessageBatch")
+                .formParam("QueueUrl", batchQueueUrl);
+            int[] indices = {1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12};
+            for (int idx : indices) {
+                request = request
+                    .formParam("SendMessageBatchRequestEntry." + idx + ".Id", "e" + idx)
+                    .formParam("SendMessageBatchRequestEntry." + idx + ".MessageBody", "m" + idx);
+            }
+            request.when().post("/")
+                .then()
+                .statusCode(400)
+                .body(containsString("AWS.SimpleQueueService.TooManyEntriesInBatchRequest"));
+
+            assertEquals("0", allQueueAttributes(batchQueueUrl).get("ApproximateNumberOfMessages"));
+        } finally {
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "DeleteQueue")
+                .formParam("QueueUrl", batchQueueUrl)
+            .when().post("/");
+        }
+    }
+
+    @Test
+    void batchRequestsWithEleventhEntryMissingIdAreRejectedWhenTotalEntriesExceedTen() {
+        String batchQueueUrl = given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateQueue")
+            .formParam("QueueName", "query-batch-no-id-queue")
+        .when().post("/")
+        .then().statusCode(200)
+            .extract().xmlPath().getString("CreateQueueResponse.CreateQueueResult.QueueUrl");
+        try {
+            // Entries 1..10 have Id and MessageBody; entry 11 has MessageBody but no Id
+            RequestSpecification request = given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "SendMessageBatch")
+                .formParam("QueueUrl", batchQueueUrl);
+            for (int i = 1; i <= 10; i++) {
+                request = request
+                    .formParam("SendMessageBatchRequestEntry." + i + ".Id", "e" + i)
+                    .formParam("SendMessageBatchRequestEntry." + i + ".MessageBody", "m" + i);
+            }
+            request = request
+                .formParam("SendMessageBatchRequestEntry.11.MessageBody", "m11");
+
+            request.when().post("/")
+                .then()
+                .statusCode(400)
+                .body(containsString("AWS.SimpleQueueService.TooManyEntriesInBatchRequest"));
+
+            assertEquals("0", allQueueAttributes(batchQueueUrl).get("ApproximateNumberOfMessages"));
+        } finally {
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "DeleteQueue")
+                .formParam("QueueUrl", batchQueueUrl)
+            .when().post("/");
+        }
+    }
+
+    @Test
+    void batchRequestsWithNoEntriesAreRejected() {
+        String batchQueueUrl = given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateQueue")
+            .formParam("QueueName", "query-batch-empty-queue")
+        .when().post("/")
+        .then().statusCode(200)
+            .extract().xmlPath().getString("CreateQueueResponse.CreateQueueResult.QueueUrl");
+        try {
+            Map<String, String> expectedMessages = Map.of(
+                    "SendMessageBatch", "There should be at least one SendMessageBatchRequestEntry in the request.",
+                    "DeleteMessageBatch", "There should be at least one DeleteMessageBatchRequestEntry in the request.",
+                    "ChangeMessageVisibilityBatch", "There should be at least one ChangeMessageVisibilityBatchRequestEntry in the request."
+            );
+            for (Map.Entry<String, String> testCase : expectedMessages.entrySet()) {
+                given()
+                    .contentType("application/x-www-form-urlencoded")
+                    .formParam("Action", testCase.getKey())
+                    .formParam("QueueUrl", batchQueueUrl)
+                .when().post("/")
+                .then().statusCode(400)
+                    .body(containsString("AWS.SimpleQueueService.EmptyBatchRequest"))
+                    .body(containsString(testCase.getValue()));
+            }
+        } finally {
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "DeleteQueue")
+                .formParam("QueueUrl", batchQueueUrl)
+            .when().post("/");
+        }
+    }
+
+    // Eleven entries: the real handles first, "dummy-rh" for the rest. extraParams are appended to each entry.
+    private static RequestSpecification addReceiptHandleEntries(
+            RequestSpecification request, String entryPrefix, String idPrefix,
+            List<String> receiptHandles, Map<String, String> extraParams) {
+        for (int i = 1; i <= 11; i++) {
+            String rh = i <= receiptHandles.size() ? receiptHandles.get(i - 1) : "dummy-rh";
+            request = request
+                .formParam(entryPrefix + "." + i + ".Id", idPrefix + i)
+                .formParam(entryPrefix + "." + i + ".ReceiptHandle", rh);
+            for (Map.Entry<String, String> extra : extraParams.entrySet()) {
+                request = request.formParam(entryPrefix + "." + i + "." + extra.getKey(), extra.getValue());
+            }
+        }
+        return request;
+    }
+
+    @Test
+    void queueUrlsUseTheFlociFormByDefault() {
+        SqsQueueUrlRoundTrip.query("floci-url-queue",
+                "http://localhost:4566/000000000000/floci-url-queue",
+                "https://sqs.us-east-1.amazonaws.com/000000000000/floci-url-queue");
     }
 }

@@ -23,24 +23,58 @@ import io.github.hectorvent.floci.services.sns.model.Subscription;
 import io.github.hectorvent.floci.services.sns.model.Topic;
 import io.github.hectorvent.floci.services.sqs.SqsService;
 import io.github.hectorvent.floci.services.sqs.model.MessageAttributeValue;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
+import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.AwsRegions;
+import io.github.hectorvent.floci.core.common.Digests;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
+import io.github.hectorvent.floci.core.common.Pagination;
+import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.Resettable;
+import io.github.hectorvent.floci.core.common.ServicePrincipals;
+import io.github.hectorvent.floci.core.common.SsrfProtection;
+import io.github.hectorvent.floci.core.resource.ExplorerResource;
+import io.github.hectorvent.floci.core.resource.ResourceProvider;
+import io.github.hectorvent.floci.core.resource.SupportedResourceType;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
+import io.github.hectorvent.floci.core.storage.InMemoryStorage;
+import io.github.hectorvent.floci.core.storage.StorageBackend;
+import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.firehose.FirehoseService;
+import io.github.hectorvent.floci.services.firehose.model.Record;
+import io.github.hectorvent.floci.services.lambda.LambdaService;
+import io.github.hectorvent.floci.services.lambda.model.InvocationType;
+import io.github.hectorvent.floci.services.sns.model.PlatformApplication;
+import io.github.hectorvent.floci.services.sns.model.PlatformEndpoint;
+import io.github.hectorvent.floci.services.sns.model.PushNotification;
+import io.github.hectorvent.floci.services.sns.model.SentSms;
+import io.github.hectorvent.floci.services.sns.model.SmsSandboxPhoneNumber;
+import io.github.hectorvent.floci.services.sns.model.Subscription;
+import io.github.hectorvent.floci.services.sns.model.Topic;
+import io.github.hectorvent.floci.services.sqs.SqsService;
+import io.github.hectorvent.floci.services.sqs.model.MessageAttributeValue;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.io.IOException;
 import java.math.BigDecimal;
+import java.net.InetAddress;
 import java.net.URI;
+import java.net.UnknownHostException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
@@ -50,20 +84,67 @@ import java.util.Collections;
 import java.util.Deque;
 import java.util.HexFormat;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.function.Predicate;
+import java.util.regex.Pattern;
 
 @ApplicationScoped
 public class SnsService implements Resettable, ResourceProvider {
 
     private static final Logger LOG = Logger.getLogger(SnsService.class);
     private static final Duration FIFO_DEDUP_WINDOW = Duration.ofMinutes(5);
+    private static final Set<String> SMS_ATTRIBUTE_NAMES = Set.of("MonthlySpendLimit",
+            "DeliveryStatusIAMRole", "DeliveryStatusSuccessSamplingRate", "DefaultSenderID",
+            "DefaultSMSType", "UsageReportS3Bucket");
+    private static final Pattern SMS_SENDER_ID = Pattern.compile("(?=.*[A-Za-z])[A-Za-z0-9]{1,11}");
+    /** The format AWS accepts for a number it opts in or checks the opt-out status of. */
+    private static final Pattern E164_PHONE_NUMBER = Pattern.compile("\\+[1-9][0-9]{1,14}");
+    /** A sandbox destination number, as the {@code PhoneNumberString} shape in SNS's model constrains it. */
+    private static final Pattern SANDBOX_PHONE_NUMBER = Pattern.compile("\\+[0-9]{8,}|[0-9]{0,9}");
+    private static final int SANDBOX_PHONE_NUMBER_MAX_LENGTH = 20;
+    /** The {@code OTPCode} shape in SNS's model. */
+    private static final Pattern ONE_TIME_PASSWORD = Pattern.compile("[0-9]{5,8}");
+    /** The {@code LanguageCodeString} enum in SNS's model, the languages a verification text can be sent in. */
+    private static final Set<String> SANDBOX_LANGUAGE_CODES = Set.of("en-US", "en-GB", "es-419", "es-ES",
+            "de-DE", "fr-CA", "fr-FR", "it-IT", "ja-JP", "pt-BR", "kr-KR", "zh-CN", "zh-TW");
+    /** An AWS account ID, the only principal {@code AddPermission} takes. */
+    private static final Pattern ACCOUNT_ID = Pattern.compile("[0-9]{12}");
+    /** The {@code MaxItems} ceiling on {@code ListSMSSandboxPhoneNumbers}, which is also its page size. */
+    private static final int SANDBOX_PAGE_SIZE = 100;
+    /**
+     * The actions a topic policy statement can grant, which are SNS's actions in AWS's service
+     * reference (https://servicereference.us-east-1.amazonaws.com/v1/sns/sns.json).
+     * {@code AddPermission} refuses any other name.
+     */
+    private static final Set<String> SNS_POLICY_ACTIONS = Set.of(
+            "AddPermission", "CheckIfPhoneNumberIsOptedOut", "ConfirmSubscription",
+            "CreatePlatformApplication", "CreatePlatformEndpoint", "CreateSMSSandboxPhoneNumber",
+            "CreateTopic", "DeleteEndpoint", "DeletePlatformApplication", "DeleteSMSSandboxPhoneNumber",
+            "DeleteTopic", "GetDataProtectionPolicy", "GetEndpointAttributes",
+            "GetPlatformApplicationAttributes", "GetSMSAttributes", "GetSMSSandboxAccountStatus",
+            "GetSubscriptionAttributes", "GetTopicAttributes", "ListEndpointsByPlatformApplication",
+            "ListOriginationNumbers", "ListPhoneNumbersOptedOut", "ListPlatformApplications",
+            "ListSMSSandboxPhoneNumbers", "ListSubscriptions", "ListSubscriptionsByTopic",
+            "ListTagsForResource", "ListTopics", "OptInPhoneNumber", "Publish", "PutDataProtectionPolicy",
+            "RemovePermission", "SetEndpointAttributes", "SetPlatformApplicationAttributes",
+            "SetSMSAttributes", "SetSubscriptionAttributes", "SetTopicAttributes", "Subscribe",
+            "TagResource", "Unsubscribe", "UntagResource", "VerifySMSSandboxPhoneNumber");
+    /** What the default statement of a topic's policy grants its owner. */
+    private static final List<String> DEFAULT_TOPIC_POLICY_ACTIONS = List.of(
+            "SNS:GetTopicAttributes", "SNS:SetTopicAttributes", "SNS:AddPermission",
+            "SNS:RemovePermission", "SNS:DeleteTopic", "SNS:Subscribe",
+            "SNS:ListSubscriptionsByTopic", "SNS:Publish");
+    /** Includes the original send and two immediate retries for local SQS fan-out. */
+    private static final int SQS_SUBSCRIPTION_DELIVERY_ATTEMPTS = 3;
+    private static final String SUBSCRIPTION_REDRIVE_POLICY = "RedrivePolicy";
     /** Default value of the {@code MaximumMessageSize} topic attribute, and the ceiling below
      *  which a topic carries no subscription restrictions. AWS raised the maximum to 1 MiB in
      *  September 2026 but left the default at 256 KiB, so an unconfigured topic is unchanged. */
@@ -72,10 +153,14 @@ public class SnsService implements Resettable, ResourceProvider {
     private static final int MAX_MAX_MESSAGE_SIZE = 1_048_576;
     /** The only protocols allowed on a topic above {@link #DEFAULT_MAX_MESSAGE_SIZE}. */
     private static final Set<String> LARGE_PAYLOAD_PROTOCOLS = Set.of("sqs", "firehose", "lambda");
+    private static final String SUBSCRIPTION_ROLE_ARN = "SubscriptionRoleArn";
+    private static final Pattern IAM_ROLE_ARN = Pattern.compile(
+            "arn:" + AwsArnUtils.PARTITION_REGEX + ":iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+");
     /** How many subscriptions a topic above {@link #DEFAULT_MAX_MESSAGE_SIZE} may carry. */
     private static final int LARGE_PAYLOAD_SUBSCRIPTION_LIMIT = 100;
     private static final String MAXIMUM_MESSAGE_SIZE = "MaximumMessageSize";
     private static final int PUSH_CAPTURE_LIMIT = 1000;
+    private static final int MAX_SUBJECT_LENGTH = 100;
     private static final String CONTROL_TOWER_AGGREGATE_SECURITY_TOPIC =
             "aws-controltower-AggregateSecurityNotifications";
     private static final List<String> PENDING_CONFIRMATION_PROTOCOLS =
@@ -103,6 +188,9 @@ public class SnsService implements Resettable, ResourceProvider {
     private final StorageBackend<String, PlatformEndpoint> platformEndpointStore;
     private final Deque<PushNotification> pushCapture = new ConcurrentLinkedDeque<>();
     private final StorageBackend<String, SentSms> smsStore;
+    private final StorageBackend<String, Map<String, String>> smsAttributesStore;
+    private final StorageBackend<String, SmsSandboxPhoneNumber> smsSandboxStore;
+    private final SecureRandom random = new SecureRandom();
     private final RegionResolver regionResolver;
     private final SqsService sqsService;
     private final LambdaService lambdaService;
@@ -110,6 +198,7 @@ public class SnsService implements Resettable, ResourceProvider {
     private final String baseUrl;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
+    private final SnsMessageSigner messageSigner;
     private final Map<String, Instant> fifoDeduplicationCache = new ConcurrentHashMap<>();
     private final Map<String, Map<String, String>> smsAttributesByRegion = new ConcurrentHashMap<>();
     private final Set<String> optedOutNumbers = ConcurrentHashMap.newKeySet();
@@ -120,7 +209,7 @@ public class SnsService implements Resettable, ResourceProvider {
     public SnsService(StorageFactory storageFactory, EmulatorConfig config,
                       RegionResolver regionResolver, SqsService sqsService,
                       LambdaService lambdaService, FirehoseService firehoseService,
-                      ObjectMapper objectMapper) {
+                      ObjectMapper objectMapper, SnsMessageSigner messageSigner) {
         this(
                 storageFactory.create("sns", "sns-topics.json",
                         new TypeReference<Map<String, Topic>>() {
@@ -137,12 +226,19 @@ public class SnsService implements Resettable, ResourceProvider {
                 storageFactory.create("sns", "sns-sms.json",
                         new TypeReference<Map<String, SentSms>>() {
                         }),
+                storageFactory.create("sns", "sns-sms-attributes.json",
+                        new TypeReference<Map<String, Map<String, String>>>() {
+                        }),
+                storageFactory.create("sns", "sns-sms-sandbox.json",
+                        new TypeReference<Map<String, SmsSandboxPhoneNumber>>() {
+                        }),
                 regionResolver,
                 sqsService,
                 lambdaService,
                 firehoseService,
                 config.effectiveBaseUrl(),
-                objectMapper
+                objectMapper,
+                messageSigner
         );
     }
 
@@ -189,6 +285,8 @@ public class SnsService implements Resettable, ResourceProvider {
         this.platformAppStore = platformAppStore;
         this.platformEndpointStore = platformEndpointStore;
         this.smsStore = new InMemoryStorage<>();
+        this.smsAttributesStore = new InMemoryStorage<>();
+        this.smsSandboxStore = new InMemoryStorage<>();
         this.regionResolver = regionResolver;
         this.sqsService = sqsService;
         this.lambdaService = lambdaService;
@@ -196,6 +294,7 @@ public class SnsService implements Resettable, ResourceProvider {
         this.baseUrl = "http://localhost:4566";
         this.objectMapper = new ObjectMapper();
         this.httpClient = null;
+        this.messageSigner = SnsMessageSigner.inMemory(baseUrl);
     }
 
     SnsService(StorageBackend<String, Topic> topicStore,
@@ -217,11 +316,56 @@ public class SnsService implements Resettable, ResourceProvider {
                RegionResolver regionResolver, SqsService sqsService,
                LambdaService lambdaService, FirehoseService firehoseService,
                String baseUrl, ObjectMapper objectMapper) {
+        this(topicStore, subscriptionStore, platformAppStore, platformEndpointStore,
+                smsStore, new InMemoryStorage<>(), regionResolver, sqsService,
+                lambdaService, firehoseService, baseUrl, objectMapper);
+    }
+
+    SnsService(StorageBackend<String, Topic> topicStore,
+               StorageBackend<String, Subscription> subscriptionStore,
+               StorageBackend<String, PlatformApplication> platformAppStore,
+               StorageBackend<String, PlatformEndpoint> platformEndpointStore,
+               StorageBackend<String, SentSms> smsStore,
+               StorageBackend<String, Map<String, String>> smsAttributesStore,
+               RegionResolver regionResolver, SqsService sqsService,
+               LambdaService lambdaService, FirehoseService firehoseService,
+               String baseUrl, ObjectMapper objectMapper) {
+        this(topicStore, subscriptionStore, platformAppStore, platformEndpointStore, smsStore,
+                smsAttributesStore, regionResolver, sqsService, lambdaService, firehoseService,
+                baseUrl, objectMapper, SnsMessageSigner.inMemory(baseUrl));
+    }
+
+    SnsService(StorageBackend<String, Topic> topicStore,
+               StorageBackend<String, Subscription> subscriptionStore,
+               StorageBackend<String, PlatformApplication> platformAppStore,
+               StorageBackend<String, PlatformEndpoint> platformEndpointStore,
+               StorageBackend<String, SentSms> smsStore,
+               StorageBackend<String, Map<String, String>> smsAttributesStore,
+               RegionResolver regionResolver, SqsService sqsService,
+               LambdaService lambdaService, FirehoseService firehoseService,
+               String baseUrl, ObjectMapper objectMapper, SnsMessageSigner messageSigner) {
+        this(topicStore, subscriptionStore, platformAppStore, platformEndpointStore, smsStore,
+                smsAttributesStore, new InMemoryStorage<>(), regionResolver, sqsService,
+                lambdaService, firehoseService, baseUrl, objectMapper, messageSigner);
+    }
+
+    SnsService(StorageBackend<String, Topic> topicStore,
+               StorageBackend<String, Subscription> subscriptionStore,
+               StorageBackend<String, PlatformApplication> platformAppStore,
+               StorageBackend<String, PlatformEndpoint> platformEndpointStore,
+               StorageBackend<String, SentSms> smsStore,
+               StorageBackend<String, Map<String, String>> smsAttributesStore,
+               StorageBackend<String, SmsSandboxPhoneNumber> smsSandboxStore,
+               RegionResolver regionResolver, SqsService sqsService,
+               LambdaService lambdaService, FirehoseService firehoseService,
+               String baseUrl, ObjectMapper objectMapper, SnsMessageSigner messageSigner) {
         this.topicStore = topicStore;
         this.subscriptionStore = subscriptionStore;
         this.platformAppStore = platformAppStore;
         this.platformEndpointStore = platformEndpointStore;
         this.smsStore = smsStore;
+        this.smsAttributesStore = smsAttributesStore;
+        this.smsSandboxStore = smsSandboxStore;
         this.regionResolver = regionResolver;
         this.sqsService = sqsService;
         this.lambdaService = lambdaService;
@@ -229,6 +373,7 @@ public class SnsService implements Resettable, ResourceProvider {
         this.baseUrl = baseUrl;
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+        this.messageSigner = messageSigner;
     }
 
     public void clear() {
@@ -237,6 +382,208 @@ public class SnsService implements Resettable, ResourceProvider {
         smsAttributesByRegion.clear();
         optedOutNumbers.clear();
         sandboxNumbers.clear();
+    }
+
+    public synchronized void setSmsAttributes(Map<String, String> attributes, String region) {
+        String key = smsAttributesKey(region);
+        Map<String, String> updated = new LinkedHashMap<>(smsAttributesStore.get(key).orElse(Map.of()));
+        for (Map.Entry<String, String> entry : attributes.entrySet()) {
+            String name = entry.getKey();
+            String value = entry.getValue();
+            if (!SMS_ATTRIBUTE_NAMES.contains(name) || value == null) {
+                throw new AwsException("InvalidParameter", "Invalid SMS attribute: " + name, 400);
+            }
+            if (value.isEmpty()) {
+                updated.remove(name);
+                continue;
+            }
+            if ("DefaultSMSType".equals(name)
+                    && !"Promotional".equals(value) && !"Transactional".equals(value)) {
+                throw new AwsException("InvalidParameter", "Invalid DefaultSMSType: " + value, 400);
+            }
+            if ("DefaultSenderID".equals(name) && !SMS_SENDER_ID.matcher(value).matches()) {
+                throw new AwsException("InvalidParameter", "Invalid DefaultSenderID: " + value, 400);
+            }
+            if ("MonthlySpendLimit".equals(name)) {
+                try {
+                    if (new BigDecimal(value).signum() < 0) {
+                        throw new NumberFormatException("negative amount");
+                    }
+                } catch (NumberFormatException e) {
+                    throw new AwsException("InvalidParameter", "Invalid MonthlySpendLimit: " + value, 400);
+                }
+            }
+            if ("DeliveryStatusSuccessSamplingRate".equals(name)) {
+                try {
+                    int rate = Integer.parseInt(value);
+                    if (rate < 0 || rate > 100) {
+                        throw new NumberFormatException("out of range");
+                    }
+                } catch (NumberFormatException e) {
+                    throw new AwsException("InvalidParameter",
+                            "Invalid DeliveryStatusSuccessSamplingRate: " + value, 400);
+                }
+            }
+            updated.put(name, value);
+        }
+        smsAttributesStore.put(key, updated);
+    }
+
+    public Map<String, String> getSmsAttributes(List<String> names, String region) {
+        String key = smsAttributesKey(region);
+        Map<String, String> stored = smsAttributesStore.get(key).orElse(Map.of());
+        if (names == null || names.isEmpty()) {
+            return new LinkedHashMap<>(stored);
+        }
+        Map<String, String> selected = new LinkedHashMap<>();
+        for (String name : names) {
+            if (stored.containsKey(name)) {
+                selected.put(name, stored.get(name));
+            }
+        }
+        return selected;
+    }
+
+    /**
+     * Whether the account is in the SMS sandbox, where AWS sends SMS only to verified numbers. A
+     * new AWS account starts in it, but Floci delivers SMS to any number, so it answers as an
+     * account that has left the sandbox, which is how it actually behaves. The sandbox numbers
+     * below still work, without the limits AWS lifts on leaving: ten verified numbers, and no
+     * deleting one until 24 hours after its last verification attempt.
+     */
+    public boolean isInSmsSandbox() {
+        return false;
+    }
+
+    /**
+     * Adds a destination number to the SMS sandbox and texts it a one-time password, which
+     * {@code GET /_aws/sns?phone=} then shows, as it does any SMS. The text is Floci's; AWS does
+     * not publish its own. A number already pending gets a fresh password, and one already
+     * verified stays verified with nothing sent. If the text cannot be recorded, the number is
+     * put back as it was, since a password nobody received could never verify it.
+     *
+     * <p>The sandbox edits are synchronized: each reads a number's record, changes it and writes
+     * it back, so two overlapping requests could otherwise lose one's change, or a verification
+     * could write back a number deleted meanwhile.
+     */
+    public synchronized void createSmsSandboxPhoneNumber(String phoneNumber, String languageCode, String region) {
+        requireSandboxPhoneNumber(phoneNumber);
+        if (languageCode != null && !SANDBOX_LANGUAGE_CODES.contains(languageCode)) {
+            throw new AwsException("InvalidParameter", "Invalid parameter: LanguageCode", 400);
+        }
+        String key = smsSandboxKey(region, phoneNumber);
+        SmsSandboxPhoneNumber previous = smsSandboxStore.get(key).orElse(null);
+        if (previous != null && SmsSandboxPhoneNumber.VERIFIED.equals(previous.getStatus())) {
+            return;
+        }
+        String oneTimePassword = String.format("%06d", random.nextInt(1_000_000));
+        smsSandboxStore.put(key,
+                new SmsSandboxPhoneNumber(phoneNumber, SmsSandboxPhoneNumber.PENDING, oneTimePassword));
+        try {
+            recordSms(phoneNumber, "Your verification code is " + oneTimePassword, null, region);
+        } catch (RuntimeException e) {
+            try {
+                if (previous == null) {
+                    smsSandboxStore.delete(key);
+                } else {
+                    smsSandboxStore.put(key, previous);
+                }
+            } catch (RuntimeException restoreFailure) {
+                e.addSuppressed(restoreFailure);
+            }
+            throw e;
+        }
+    }
+
+    /** Verifies a pending sandbox number with the password it was sent. A verified one stays so. */
+    public synchronized void verifySmsSandboxPhoneNumber(String phoneNumber, String oneTimePassword, String region) {
+        requireSandboxPhoneNumber(phoneNumber);
+        if (oneTimePassword == null || !ONE_TIME_PASSWORD.matcher(oneTimePassword).matches()) {
+            throw new AwsException("InvalidParameter", "Invalid parameter: OneTimePassword", 400);
+        }
+        String key = smsSandboxKey(region, phoneNumber);
+        SmsSandboxPhoneNumber number = smsSandboxStore.get(key)
+                .orElseThrow(SnsService::sandboxPhoneNumberNotFound);
+        if (SmsSandboxPhoneNumber.VERIFIED.equals(number.getStatus())) {
+            return;
+        }
+        if (!oneTimePassword.equals(number.getOneTimePassword())) {
+            // Status is a required member of the error and AWS documents no values for it, so it carries
+            // the number's own verification status, which a wrong password leaves Pending: the only
+            // statuses SNS publishes for a sandbox number are Pending and Verified.
+            throw new AwsException("VerificationException",
+                    "The one-time password does not match the one sent to " + phoneNumber + ".", 400,
+                    Map.of("Status", number.getStatus()));
+        }
+        number.setStatus(SmsSandboxPhoneNumber.VERIFIED);
+        number.setOneTimePassword(null);
+        smsSandboxStore.put(key, number);
+    }
+
+    public synchronized void deleteSmsSandboxPhoneNumber(String phoneNumber, String region) {
+        requireSandboxPhoneNumber(phoneNumber);
+        String key = smsSandboxKey(region, phoneNumber);
+        if (smsSandboxStore.get(key).isEmpty()) {
+            throw sandboxPhoneNumberNotFound();
+        }
+        smsSandboxStore.delete(key);
+    }
+
+    public PaginatedResult<SmsSandboxPhoneNumber> listSmsSandboxPhoneNumbers(Integer maxResults,
+                                                                             String nextToken,
+                                                                             String region) {
+        String prefix = smsAttributesKey(region) + "::";
+        return Pagination.paginate(smsSandboxStore.scan(key -> key.startsWith(prefix)),
+                SmsSandboxPhoneNumber::getPhoneNumber, maxResults, nextToken, SANDBOX_PAGE_SIZE,
+                "InvalidParameter");
+    }
+
+    /**
+     * Whether a number has opted out of SMS from this account. AWS opts a number out when its
+     * owner replies STOP, and nothing reaches Floci that way, so no number is ever opted out.
+     */
+    public boolean isPhoneNumberOptedOut(String phoneNumber) {
+        requireE164PhoneNumber(phoneNumber);
+        return false;
+    }
+
+    /** The numbers opted out of SMS from this account, which for the reason above is none. */
+    public List<String> listPhoneNumbersOptedOut() {
+        return List.of();
+    }
+
+    /**
+     * Opts a number back in to SMS. None is ever opted out here, and AWS answers success for a
+     * number that is not opted out, so only the format is checked. AWS's limit of one opt-in per
+     * number every 30 days can therefore never apply.
+     */
+    public void optInPhoneNumber(String phoneNumber) {
+        requireE164PhoneNumber(phoneNumber);
+    }
+
+    private static void requireE164PhoneNumber(String phoneNumber) {
+        if (phoneNumber == null || !E164_PHONE_NUMBER.matcher(phoneNumber).matches()) {
+            throw invalidPhoneNumber();
+        }
+    }
+
+    private static void requireSandboxPhoneNumber(String phoneNumber) {
+        if (phoneNumber == null || phoneNumber.isEmpty()
+                || phoneNumber.length() > SANDBOX_PHONE_NUMBER_MAX_LENGTH
+                || !SANDBOX_PHONE_NUMBER.matcher(phoneNumber).matches()) {
+            throw invalidPhoneNumber();
+        }
+    }
+
+    /** The answer AWS gives {@code OptInPhoneNumber} for a malformed number. */
+    private static AwsException invalidPhoneNumber() {
+        return new AwsException("InvalidParameter",
+                "Invalid parameter: PhoneNumber Reason: input incorrectly formatted", 400);
+    }
+
+    private static AwsException sandboxPhoneNumberNotFound() {
+        return new AwsException("ResourceNotFound",
+                "The phone number is not in the SMS sandbox.", 404);
     }
 
     public Topic createTopic(String name, Map<String, String> attributes,
@@ -296,6 +643,11 @@ public class SnsService implements Resettable, ResourceProvider {
     }
 
     public boolean topicExists(String topicArn, String region) {
+        if (topicStore instanceof AccountAwareStorageBackend<Topic> aware) {
+            String accountId = AwsArnUtils.accountOrDefault(topicArn, regionResolver.getAccountId());
+            return aware.getForAccountMigratingLegacy(accountId, topicKey(region, topicArn),
+                    topic -> topicArn.equals(topic.getTopicArn())).isPresent();
+        }
         return topicStore.get(topicKey(region, topicArn)).isPresent();
     }
 
@@ -303,7 +655,7 @@ public class SnsService implements Resettable, ResourceProvider {
         String key = topicKey(region, topicArn);
         Topic topic = topicStore.get(key)
                 .orElseThrow(() -> new AwsException("NotFound", "Topic does not exist.", 404));
-        var attrs = new java.util.LinkedHashMap<>(topic.getAttributes());
+        LinkedHashMap<String, String> attrs = new LinkedHashMap<>(topic.getAttributes());
         List<Subscription> subs = subscriptionsByTopic(topicArn, region);
         long confirmed = subs.stream()
                 .filter(s -> !"true".equals(s.getAttributes().get("PendingConfirmation")))
@@ -319,94 +671,53 @@ public class SnsService implements Resettable, ResourceProvider {
         attrs.putIfAbsent("Owner", regionResolver.getAccountId());
         attrs.putIfAbsent("EffectiveDeliveryPolicy", "{\"http\":{\"defaultHealthyRetryPolicy\":{\"minDelayTarget\":20,\"maxDelayTarget\":20,\"numRetries\":3,\"numMaxDelayRetries\":0,\"numNoDelayRetries\":0,\"numMinDelayRetries\":0,\"backoffFunction\":\"linear\"},\"disableSubscriptionOverrides\":false}}");
         if (!attrs.containsKey("Policy") || attrs.get("Policy") == null || attrs.get("Policy").isBlank()) {
-            attrs.put("Policy", defaultTopicPolicy(topicArn));
+            attrs.put("Policy", defaultTopicPolicy(topicArn, regionResolver.getAccountId()).toString());
         }
         return attrs;
     }
 
-    public void addPermission(String topicArn, String label, List<String> awsAccountIds,
-                              List<String> actionNames, String region) {
-        if (label == null || label.isBlank()) {
-            throw new AwsException("InvalidParameter", "Invalid parameter: Label", 400);
-        }
-        if (awsAccountIds == null || awsAccountIds.isEmpty()) {
-            throw new AwsException("InvalidParameter",
-                    "Invalid parameter: AWSAccountId Reason: no value for required parameter AWSAccountId", 400);
-        }
-        if (actionNames == null || actionNames.isEmpty()) {
-            throw new AwsException("InvalidParameter",
-                    "Invalid parameter: ActionName Reason: no value for required parameter ActionName", 400);
-        }
-        String key = topicKey(region, topicArn);
-        Topic topic = topicStore.get(key)
-                .orElseThrow(() -> new AwsException("NotFound", "Topic does not exist.", 404));
+    /**
+     * The access policy of the topic an ARN names, read in the account and Region the ARN names
+     * rather than the caller's: its {@code Policy} attribute, or the default a new topic has when
+     * that is not set. Empty when there is no such topic.
+     */
+    public Optional<String> findTopicPolicy(String topicArn) {
+        AwsArnUtils.Arn arn = AwsArnUtils.parse(topicArn);
+        String key = topicKey(arn.region(), topicArn);
+        Optional<Topic> topic = topicStore instanceof AccountAwareStorageBackend<Topic> aware
+                ? aware.getForAccountMigratingLegacy(arn.accountId(), key,
+                        stored -> topicArn.equals(stored.getTopicArn()))
+                : topicStore.get(key);
+        return topic.map(stored -> {
+            String policy = stored.getAttributes().get("Policy");
+            return policy == null || policy.isBlank()
+                    ? defaultTopicPolicy(topicArn, arn.accountId()).toString()
+                    : policy;
+        });
+    }
 
-        ObjectNode policy = parseTopicPolicy(topic.getAttributes().get("Policy"), topicArn);
-        ArrayNode statements = ensureStatementArray(policy);
-        for (JsonNode stmt : statements) {
-            if (label.equals(stmt.path("Sid").asText(null))) {
-                throw new AwsException("InvalidParameter",
-                        "Invalid parameter: Policy statement with this Sid already exists", 400);
-            }
-        }
-
-        ObjectNode statement = objectMapper.createObjectNode();
-        statement.put("Sid", label);
+    /**
+     * The policy a topic has until one is set, as AWS returns it for a new topic: its owner may
+     * manage it, subscribe to it and publish to it.
+     */
+    private ObjectNode defaultTopicPolicy(String topicArn, String ownerAccountId) {
+        ObjectNode policy = objectMapper.createObjectNode();
+        policy.put("Version", "2008-10-17");
+        policy.put("Id", "__default_policy_ID");
+        ObjectNode statement = policy.putArray("Statement").addObject();
+        statement.put("Sid", "__default_statement_ID");
         statement.put("Effect", "Allow");
-        ObjectNode principal = statement.putObject("Principal");
-        if (awsAccountIds.size() == 1) {
-            principal.put("AWS", "arn:aws:iam::" + awsAccountIds.getFirst() + ":root");
-        } else {
-            ArrayNode awsArns = principal.putArray("AWS");
-            for (String accountId : awsAccountIds) {
-                awsArns.add("arn:aws:iam::" + accountId + ":root");
-            }
-        }
-        if (actionNames.size() == 1) {
-            statement.put("Action", snsAction(actionNames.getFirst()));
-        } else {
-            ArrayNode actions = statement.putArray("Action");
-            for (String action : actionNames) {
-                actions.add(snsAction(action));
-            }
-        }
+        statement.putObject("Principal").put("AWS", "*");
+        ArrayNode actions = statement.putArray("Action");
+        DEFAULT_TOPIC_POLICY_ACTIONS.forEach(actions::add);
         statement.put("Resource", topicArn);
-        statements.add(statement);
-
-        topic.getAttributes().put("Policy", policy.toString());
-        topicStore.put(key, topic);
-        LOG.infov("Added permission {0} to topic {1}", label, topicArn);
+        statement.putObject("Condition").putObject("StringEquals")
+                .put("AWS:SourceOwner", ownerAccountId);
+        return policy;
     }
 
-    public void removePermission(String topicArn, String label, String region) {
-        if (label == null || label.isBlank()) {
-            throw new AwsException("InvalidParameter", "Invalid parameter: Label", 400);
-        }
-        String key = topicKey(region, topicArn);
-        Topic topic = topicStore.get(key)
-                .orElseThrow(() -> new AwsException("NotFound", "Topic does not exist.", 404));
-
-        ObjectNode policy = parseTopicPolicy(topic.getAttributes().get("Policy"), topicArn);
-        ArrayNode statements = ensureStatementArray(policy);
-        int removeIndex = -1;
-        for (int i = 0; i < statements.size(); i++) {
-            if (label.equals(statements.get(i).path("Sid").asText(null))) {
-                removeIndex = i;
-                break;
-            }
-        }
-        if (removeIndex < 0) {
-            throw new AwsException("InvalidParameter",
-                    "Invalid parameter: Policy statement with this Sid does not exist", 400);
-        }
-        statements.remove(removeIndex);
-        topic.getAttributes().put("Policy", policy.toString());
-        topicStore.put(key, topic);
-        LOG.infov("Removed permission {0} from topic {1}", label, topicArn);
-    }
-
-    public void setTopicAttributes(String topicArn, String attributeName,
-                                   String attributeValue, String region) {
+    public synchronized void setTopicAttributes(String topicArn, String attributeName,
+                                                String attributeValue, String region) {
         String key = topicKey(region, topicArn);
         Topic topic = topicStore.get(key)
                 .orElseThrow(() -> new AwsException("NotFound", "Topic does not exist.", 404));
@@ -416,6 +727,125 @@ public class SnsService implements Resettable, ResourceProvider {
         }
         topic.getAttributes().put(attributeName, attributeValue);
         topicStore.put(key, topic);
+    }
+
+    /**
+     * Adds a statement to the topic's policy granting {@code accountIds} the named SNS actions,
+     * written as AWS writes it: the label is its {@code Sid}, each account becomes its
+     * {@code root} principal, and a single account or action is a string rather than a list of
+     * one. A topic with no policy set gets the statement added to its default one.
+     *
+     * <p>The policy is stored and returned by {@code GetTopicAttributes}. Floci does not evaluate
+     * topic policies when authorizing a request, so the grant has no effect beyond that.
+     *
+     * <p>This, {@link #removePermission} and {@link #setTopicAttributes} are synchronized: each
+     * reads the policy, changes it and writes it back, so overlapping edits would otherwise lose
+     * all but the last, and two grants under one label could both pass the duplicate check.
+     */
+    public synchronized void addPermission(String topicArn, String label, List<String> accountIds,
+                                           List<String> actionNames, String region) {
+        requirePermissionParameter("TopicArn", topicArn != null && !topicArn.isBlank());
+        requirePermissionParameter("Label", label != null && !label.isBlank());
+        requirePermissionParameter("AWSAccountId", accountIds != null && !accountIds.isEmpty()
+                && accountIds.stream().allMatch(id -> id != null && ACCOUNT_ID.matcher(id).matches()));
+        requirePermissionParameter("ActionName", actionNames != null && !actionNames.isEmpty());
+        String key = topicKey(region, topicArn);
+        Topic topic = topicStore.get(key).orElseThrow(SnsService::permissionTopicNotFound);
+        for (String action : actionNames) {
+            if (!SNS_POLICY_ACTIONS.contains(action)) {
+                throw new AwsException("InvalidParameter",
+                        "Invalid parameter: Policy statement action out of service scope!", 400);
+            }
+        }
+        ObjectNode policy = topicPolicy(topic, topicArn);
+        ArrayNode statements = (ArrayNode) policy.get("Statement");
+        for (JsonNode existing : statements) {
+            if (label.equals(existing.path("Sid").asText(null))) {
+                throw new AwsException("InvalidParameter", "Invalid parameter: Statement already exists", 400);
+            }
+        }
+        String partition = AwsRegions.partitionFor(region);
+        ObjectNode statement = statements.addObject();
+        statement.put("Sid", label);
+        statement.put("Effect", "Allow");
+        putOneOrMany(statement.putObject("Principal"), "AWS", accountIds.stream()
+                .map(accountId -> AwsArnUtils.Arn.global(partition, "iam", accountId, "root").toString())
+                .toList());
+        putOneOrMany(statement, "Action", actionNames.stream().map(action -> "SNS:" + action).toList());
+        statement.put("Resource", topicArn);
+        topic.getAttributes().put("Policy", policy.toString());
+        topicStore.put(key, topic);
+    }
+
+    /**
+     * Removes the statement {@code label} names from the topic's policy. A label the policy does
+     * not hold leaves it as it is: AWS's reference names no error for that case and no recording
+     * shows one, so this answers success rather than invent one.
+     */
+    public synchronized void removePermission(String topicArn, String label, String region) {
+        requirePermissionParameter("TopicArn", topicArn != null && !topicArn.isBlank());
+        requirePermissionParameter("Label", label != null && !label.isBlank());
+        String key = topicKey(region, topicArn);
+        Topic topic = topicStore.get(key).orElseThrow(SnsService::permissionTopicNotFound);
+        ObjectNode policy = topicPolicy(topic, topicArn);
+        ArrayNode statements = (ArrayNode) policy.get("Statement");
+        boolean removed = false;
+        for (int i = statements.size() - 1; i >= 0; i--) {
+            if (label.equals(statements.get(i).path("Sid").asText(null))) {
+                statements.remove(i);
+                removed = true;
+            }
+        }
+        if (removed) {
+            topic.getAttributes().put("Policy", policy.toString());
+            topicStore.put(key, topic);
+        }
+    }
+
+    /** The topic's policy as a document to edit, the default one if none is set, with its statements in a list. */
+    private ObjectNode topicPolicy(Topic topic, String topicArn) {
+        String stored = topic.getAttributes().get("Policy");
+        if (stored == null || stored.isBlank()) {
+            return defaultTopicPolicy(topicArn, regionResolver.getAccountId());
+        }
+        JsonNode parsed;
+        try {
+            parsed = objectMapper.readTree(stored);
+        } catch (JsonProcessingException e) {
+            parsed = null;
+        }
+        if (!(parsed instanceof ObjectNode policy)) {
+            throw new AwsException("InvalidParameter",
+                    "Invalid parameter: Policy Error: the topic's policy is not a JSON object", 400);
+        }
+        JsonNode statement = policy.get("Statement");
+        if (!(statement instanceof ArrayNode)) {
+            ArrayNode statements = objectMapper.createArrayNode();
+            if (statement != null && !statement.isNull()) {
+                statements.add(statement);
+            }
+            policy.set("Statement", statements);
+        }
+        return policy;
+    }
+
+    private static void putOneOrMany(ObjectNode node, String field, List<String> values) {
+        if (values.size() == 1) {
+            node.put(field, values.get(0));
+        } else {
+            values.forEach(node.putArray(field)::add);
+        }
+    }
+
+    private static void requirePermissionParameter(String name, boolean present) {
+        if (!present) {
+            throw new AwsException("InvalidParameter", "Invalid parameter: " + name, 400);
+        }
+    }
+
+    /** What AWS answers {@code AddPermission} and {@code RemovePermission} for a missing topic. */
+    private static AwsException permissionTopicNotFound() {
+        return new AwsException("NotFound", "Topic does not exist", 404);
     }
 
     /**
@@ -525,6 +955,12 @@ public class SnsService implements Resettable, ResourceProvider {
                 || ("https".equals(protocol) && endpoint != null && !endpoint.startsWith("https://"))) {
             throw new AwsException("InvalidParameter",
                     "Invalid parameter: Endpoint scheme does not match protocol '" + protocol + "'.", 400);
+        }
+        if ("http".equals(protocol) || "https".equals(protocol)) {
+            requireDeliverableEndpoint(endpoint);
+        }
+        if ("firehose".equals(protocol)) {
+            requireFirehoseRoleArn(attributes == null ? null : attributes.get(SUBSCRIPTION_ROLE_ARN));
         }
         if (topicMaxMessageSize(topicArn, region) > DEFAULT_MAX_MESSAGE_SIZE) {
             requireLargePayloadProtocol(protocol);
@@ -640,17 +1076,12 @@ public class SnsService implements Resettable, ResourceProvider {
         // The limit is a per-topic attribute, so it cannot be applied until the topic is in
         // hand. SMS and mobile-push publishes never reach a topic and keep the AWS default.
         int payloadSize = computePublishSize(messageBytes, messageAttributes);
+        validateSubject(subject);
 
         // Send SMS
         if (phoneNumber != null) {
             requireWithinMaxMessageSize(payloadSize, DEFAULT_MAX_MESSAGE_SIZE);
-            String messageId = UUID.randomUUID().toString();
-            String effectiveRegion = region != null ? region : "us-east-1";
-            SentSms sms = new SentSms(messageId, effectiveRegion, phoneNumber,
-                    message, subject, Instant.now());
-            smsStore.put("sms::" + effectiveRegion + "::" + messageId, sms);
-            LOG.infov("SNS SMS published: messageId={0} phone={1}", messageId, phoneNumber);
-            return messageId;
+            return recordSms(phoneNumber, message, subject, region);
         }
 
         // Send a message to topic or directly to a target ARN
@@ -689,7 +1120,7 @@ public class SnsService implements Resettable, ResourceProvider {
                         "MessageGroupId is required for FIFO topics.", 400);
             }
             if (dedupId == null && "true".equals(topic.getAttributes().get("ContentBasedDeduplication"))) {
-                dedupId = sha256(message);
+                dedupId = Digests.sha256Hex(message);
             }
             if (dedupId != null && isDuplicate(effectiveArn, messageGroupId, dedupId,
                     isGroupScopedDeduplication(topic))) {
@@ -713,7 +1144,8 @@ public class SnsService implements Resettable, ResourceProvider {
             if (!matchesFilterPolicy(sub, parsedBody, messageAttributes)) {
                 continue;
             }
-            deliverMessage(sub, message, subject, messageAttributes, messageId, effectiveArn, messageGroupId, dedupId, messageStructure);
+            deliverMessage(sub, message, subject, messageAttributes, messageId, effectiveArn, messageGroupId, dedupId, messageStructure,
+                    signatureVersion(topic));
         }
         LOG.infov("Published message {0} to topic {1}", messageId, effectiveArn);
         return messageId;
@@ -1007,6 +1439,23 @@ public class SnsService implements Resettable, ResourceProvider {
         }
     }
 
+    /**
+     * Subjects must be UTF-8 text with no line breaks or control characters and at most 100
+     * characters long. A null or empty subject is the absent optional parameter and is accepted.
+     */
+    static void validateSubject(String subject) {
+        if (subject == null || subject.isEmpty()) {
+            return;
+        }
+        if (subject.length() > MAX_SUBJECT_LENGTH
+                || subject.chars().anyMatch(Character::isISOControl)) {
+            throw new AwsException("InvalidParameter",
+                    "Invalid parameter: Subject Reason: Subjects must be UTF-8 text with no line"
+                            + " breaks or control characters, and at most 100 characters long.",
+                    400);
+        }
+    }
+
     private void recordPushNotification(PushNotification notification) {
         pushCapture.addFirst(notification);
         while (pushCapture.size() > PUSH_CAPTURE_LIMIT) {
@@ -1059,7 +1508,7 @@ public class SnsService implements Resettable, ResourceProvider {
         String key = subKey(region, subscriptionArn);
         Subscription sub = subscriptionStore.get(key)
                 .orElseThrow(() -> new AwsException("NotFound", "Subscription does not exist.", 404));
-        var attrs = new java.util.LinkedHashMap<>(sub.getAttributes());
+        LinkedHashMap<String, String> attrs = new LinkedHashMap<>(sub.getAttributes());
         attrs.put("SubscriptionArn", sub.getSubscriptionArn());
         attrs.put("TopicArn", sub.getTopicArn());
         attrs.put("Protocol", sub.getProtocol());
@@ -1078,8 +1527,19 @@ public class SnsService implements Resettable, ResourceProvider {
         String key = subKey(region, subscriptionArn);
         Subscription sub = subscriptionStore.get(key)
                 .orElseThrow(() -> new AwsException("NotFound", "Subscription does not exist.", 404));
+        if ("firehose".equals(sub.getProtocol()) && SUBSCRIPTION_ROLE_ARN.equals(attributeName)) {
+            requireFirehoseRoleArn(attributeValue);
+        }
         sub.getAttributes().put(attributeName, attributeValue);
         subscriptionStore.put(key, sub);
+    }
+
+    private static void requireFirehoseRoleArn(String roleArn) {
+        if (roleArn == null || !IAM_ROLE_ARN.matcher(roleArn).matches()) {
+            throw new AwsException("InvalidParameter",
+                    "Invalid parameter: SubscriptionRoleArn must be a valid IAM role ARN for firehose subscriptions.",
+                    400);
+        }
     }
 
     public record BatchPublishResult(List<String[]> successful, List<String[]> failed) {
@@ -1121,6 +1581,7 @@ public class SnsService implements Resettable, ResourceProvider {
             String messageDeduplicationId = (String) entry.get("MessageDeduplicationId");
 
             try {
+                validateSubject(subject);
                 validateTopicMessageStructure(message, messageStructure);
             } catch (AwsException e) {
                 failed.add(new String[]{id, e.getErrorCode(), e.getMessage(), "true"});
@@ -1134,7 +1595,7 @@ public class SnsService implements Resettable, ResourceProvider {
             }
             // Derive deduplication ID if ContentBasedDeduplication is enabled and not provided
             if (isFifo && messageDeduplicationId == null && "true".equals(topic.getAttributes().get("ContentBasedDeduplication"))) {
-                messageDeduplicationId = sha256(message);
+                messageDeduplicationId = Digests.sha256Hex(message);
             }
             if (isFifo && messageDeduplicationId != null && isDuplicate(topicArn, messageGroupId,
                     messageDeduplicationId, groupScopedDedup)) {
@@ -1154,7 +1615,8 @@ public class SnsService implements Resettable, ResourceProvider {
                     bodyParseAttempted = true;
                 }
                 if (!matchesFilterPolicy(sub, parsedBody, attrs)) continue;
-                deliverMessage(sub, message, subject, attrs, messageId, topicArn, messageGroupId, messageDeduplicationId, messageStructure);
+                deliverMessage(sub, message, subject, attrs, messageId, topicArn, messageGroupId, messageDeduplicationId, messageStructure,
+                        signatureVersion(topic));
             }
             LOG.debugv("Batch published message {0} (id={1}) to {2}", messageId, id, topicArn);
             successful.add(new String[]{id, messageId});
@@ -1316,9 +1778,17 @@ public class SnsService implements Resettable, ResourceProvider {
         if (!policy.isObject()) {
             return false;
         }
-        var fields = policy.fields();
+        if (body != null && body.isArray()) {
+            for (JsonNode element : body) {
+                if (matchesBodyPolicy(policy, element)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        Iterator<Map.Entry<String, JsonNode>> fields = policy.fields();
         while (fields.hasNext()) {
-            var entry = fields.next();
+            Map.Entry<String, JsonNode> entry = fields.next();
             String key = entry.getKey();
             JsonNode ruleOrNested = entry.getValue();
             if (isOrOperator(key, ruleOrNested)) {
@@ -1412,11 +1882,29 @@ public class SnsService implements Resettable, ResourceProvider {
         if (rule.has("prefix")) {
             return stringValue != null && stringValue.startsWith(rule.get("prefix").asText());
         }
+        if (rule.has("suffix")) {
+            return matchesStringOperator("suffix", rule.get("suffix"), stringValue);
+        }
+        if (rule.has("equals-ignore-case")) {
+            return matchesStringOperator("equals-ignore-case", rule.get("equals-ignore-case"), stringValue);
+        }
+        if (rule.has("wildcard")) {
+            return matchesStringOperator("wildcard", rule.get("wildcard"), stringValue);
+        }
+        if (rule.has("cidr")) {
+            return matchesStringOperator("cidr", rule.get("cidr"), stringValue);
+        }
         if (rule.has("anything-but")) {
-            return matchesAnythingButForNode(rule.get("anything-but"), actual, stringValue, present);
+            JsonNode anythingBut = rule.get("anything-but");
+            if (anythingBut.isObject()) {
+                // A missing or JSON-null property does not match, even when the nested operator
+                // would also reject it. A present value matches only when that operator does not.
+                return present && excludesNestedOperator(anythingBut, actual, stringValue, false);
+            }
+            return matchesAnythingButForNode(anythingBut, actual, stringValue, present);
         }
         if (rule.has("numeric") && present && actual.isNumber()) {
-            return evaluateNumericCondition(actual.decimalValue(), rule.get("numeric"));
+            return evaluateNumericCondition(actual.decimalValue(), rule.get("numeric")).orElse(false);
         }
         return false;
     }
@@ -1622,8 +2110,8 @@ public class SnsService implements Resettable, ResourceProvider {
     }
 
     /**
-     * Evaluates a single object-type filter rule (exists, prefix, anything-but, numeric)
-     * against the actual attribute value.
+     * Evaluates a single object-type filter rule (exists, prefix, suffix, equals-ignore-case,
+     * wildcard, cidr, anything-but, numeric) against the actual attribute value.
      */
     private boolean matchesObjectRule(JsonNode rule, String actualValue) {
         if (rule.has("exists")) {
@@ -1633,16 +2121,294 @@ public class SnsService implements Resettable, ResourceProvider {
         if (rule.has("prefix") && actualValue != null) {
             return actualValue.startsWith(rule.get("prefix").asText());
         }
+        if (rule.has("suffix")) {
+            return matchesStringOperator("suffix", rule.get("suffix"), actualValue);
+        }
+        if (rule.has("equals-ignore-case")) {
+            return matchesStringOperator("equals-ignore-case", rule.get("equals-ignore-case"), actualValue);
+        }
+        if (rule.has("wildcard")) {
+            return matchesStringOperator("wildcard", rule.get("wildcard"), actualValue);
+        }
+        if (rule.has("cidr")) {
+            return matchesStringOperator("cidr", rule.get("cidr"), actualValue);
+        }
         if (rule.has("anything-but") && actualValue != null) {
-            return !containsValue(rule.get("anything-but"), actualValue);
+            JsonNode anythingBut = rule.get("anything-but");
+            if (anythingBut.isObject()) {
+                return excludesNestedOperator(anythingBut, null, actualValue, true);
+            }
+            return !containsValue(anythingBut, actualValue);
         }
         if (rule.has("numeric") && actualValue != null) {
             try {
-                return evaluateNumericCondition(new BigDecimal(actualValue), rule.get("numeric"));
+                return evaluateNumericCondition(new BigDecimal(actualValue), rule.get("numeric")).orElse(false);
             } catch (NumberFormatException ignored) {
             }
         }
         return false;
+    }
+
+    /**
+     * suffix, equals-ignore-case, wildcard, and cidr apply to a string the way prefix does.
+     * The operand must be textual; numbers and objects are not coerced with {@code asText()}.
+     * A null value does not match.
+     */
+    private static boolean matchesStringOperator(String operator, JsonNode operand, String value) {
+        if (value == null || operand == null || !operand.isTextual()) {
+            return false;
+        }
+        String expected = operand.asText();
+        return switch (operator) {
+            case "prefix" -> value.startsWith(expected);
+            case "suffix" -> value.endsWith(expected);
+            case "equals-ignore-case" -> value.equalsIgnoreCase(expected);
+            case "wildcard" -> wildcardMatches(expected, value);
+            case "cidr" -> cidrContains(expected, value);
+            default -> false;
+        };
+    }
+
+    /**
+     * {@code anything-but} of exactly one nested positive operator. A present value matches only
+     * when that operator does not. An empty object, an unknown key, more than one key, or a
+     * malformed operand fails closed. Does not recurse into {@code anything-but} or {@code exists}.
+     *
+     * @param attributeValue when true, {@code stringValue} is the attribute and {@code numeric}
+     *                       parses it; otherwise {@code numeric} matches only a JSON number
+     */
+    private boolean excludesNestedOperator(JsonNode operator, JsonNode actual, String stringValue,
+                                           boolean attributeValue) {
+        if (operator.size() != 1) {
+            return false;
+        }
+        String name = operator.fieldNames().next();
+        JsonNode operand = operator.get(name);
+        if ("prefix".equals(name) || "suffix".equals(name) || "equals-ignore-case".equals(name)
+                || "wildcard".equals(name) || "cidr".equals(name)) {
+            if (operand == null || !operand.isTextual()) {
+                return false;
+            }
+            return !matchesStringOperator(name, operand, stringValue);
+        }
+        if (!"numeric".equals(name)) {
+            return false;
+        }
+        BigDecimal number = null;
+        try {
+            if (attributeValue) {
+                if (stringValue != null) {
+                    number = new BigDecimal(stringValue);
+                }
+            } else if (actual != null && actual.isNumber()) {
+                number = actual.decimalValue();
+            }
+        } catch (NumberFormatException ignored) {
+        }
+        Optional<Boolean> matched = evaluateNumericCondition(number, operand);
+        return matched.isPresent() && !matched.get();
+    }
+
+    /**
+     * Anchored, case-sensitive glob. Each {@code *} matches any run of characters, including an
+     * empty one, and every other character matches only itself. This is a scan, not a regular
+     * expression, so {@code .} and other metacharacters stay literal.
+     */
+    private static boolean wildcardMatches(String pattern, String value) {
+        int patternIndex = 0;
+        int valueIndex = 0;
+        int starPattern = -1;
+        int starValue = -1;
+        while (valueIndex < value.length()) {
+            if (patternIndex < pattern.length() && pattern.charAt(patternIndex) == '*') {
+                starPattern = patternIndex++;
+                starValue = valueIndex;
+            } else if (patternIndex < pattern.length()
+                    && pattern.charAt(patternIndex) == value.charAt(valueIndex)) {
+                patternIndex++;
+                valueIndex++;
+            } else if (starPattern >= 0) {
+                patternIndex = starPattern + 1;
+                valueIndex = ++starValue;
+            } else {
+                return false;
+            }
+        }
+        while (patternIndex < pattern.length() && pattern.charAt(patternIndex) == '*') {
+            patternIndex++;
+        }
+        return patternIndex == pattern.length();
+    }
+
+    /**
+     * True when {@code value} is a literal IP in the same address family as {@code cidr} and the
+     * two share the prefix bits. Host bits in the CIDR address are masked off. A zone id, a prefix
+     * outside the address width, a family mismatch, or any non-address returns false. The value is
+     * never name-resolved.
+     */
+    private static boolean cidrContains(String cidr, String value) {
+        if (cidr == null || value == null) {
+            return false;
+        }
+        int slash = cidr.indexOf('/');
+        if (slash <= 0 || slash != cidr.lastIndexOf('/')) {
+            return false;
+        }
+        String prefixText = cidr.substring(slash + 1);
+        if (!isDecimalPrefix(prefixText)) {
+            return false;
+        }
+        byte[] network = parseIpLiteral(cidr.substring(0, slash));
+        byte[] address = parseIpLiteral(value);
+        if (network == null || address == null || network.length != address.length) {
+            return false;
+        }
+        int prefix = Integer.parseInt(prefixText);
+        if (prefix > network.length * 8) {
+            return false;
+        }
+        return sameNetwork(network, address, prefix);
+    }
+
+    private static boolean isDecimalPrefix(String text) {
+        if (text.isEmpty() || text.length() > 3) {
+            return false;
+        }
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c < '0' || c > '9') {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** A literal IPv4 or IPv6 address, or null when {@code text} is not one. */
+    private static byte[] parseIpLiteral(String text) {
+        if (text.indexOf(':') >= 0) {
+            return parseIpv6Literal(text);
+        }
+        return parseIpv4Literal(text);
+    }
+
+    private static byte[] parseIpv4Literal(String text) {
+        if (text.isEmpty() || text.indexOf('%') >= 0 || text.indexOf('/') >= 0) {
+            return null;
+        }
+        String[] parts = text.split("\\.", -1);
+        if (parts.length != 4) {
+            return null;
+        }
+        byte[] address = new byte[4];
+        for (int i = 0; i < 4; i++) {
+            String part = parts[i];
+            if (part.isEmpty() || part.length() > 3 || (part.length() > 1 && part.charAt(0) == '0')) {
+                return null;
+            }
+            int octet = 0;
+            for (int c = 0; c < part.length(); c++) {
+                char ch = part.charAt(c);
+                if (ch < '0' || ch > '9') {
+                    return null;
+                }
+                octet = octet * 10 + (ch - '0');
+            }
+            if (octet > 255) {
+                return null;
+            }
+            address[i] = (byte) octet;
+        }
+        return address;
+    }
+
+    private static byte[] parseIpv6Literal(String text) {
+        if (text.isEmpty() || text.indexOf('%') >= 0 || text.indexOf('/') >= 0) {
+            return null;
+        }
+        String address = text;
+        if (text.indexOf('.') >= 0) {
+            int lastColon = text.lastIndexOf(':');
+            if (lastColon < 0) {
+                return null;
+            }
+            byte[] v4 = parseIpv4Literal(text.substring(lastColon + 1));
+            if (v4 == null) {
+                return null;
+            }
+            String high = Integer.toHexString(((v4[0] & 0xff) << 8) | (v4[1] & 0xff));
+            String low = Integer.toHexString(((v4[2] & 0xff) << 8) | (v4[3] & 0xff));
+            address = text.substring(0, lastColon + 1) + high + ":" + low;
+        }
+        int compress = address.indexOf("::");
+        if (compress != address.lastIndexOf("::")) {
+            return null;
+        }
+        String left = compress < 0 ? address : address.substring(0, compress);
+        String right = compress < 0 ? null : address.substring(compress + 2);
+        int[] leftGroups = parseHextets(left);
+        int[] rightGroups = right == null ? null : parseHextets(right);
+        if (leftGroups == null || (right != null && rightGroups == null)) {
+            return null;
+        }
+        int rightCount = rightGroups == null ? 0 : rightGroups.length;
+        int total = leftGroups.length + rightCount;
+        if (rightGroups == null ? total != 8 : total > 7) {
+            return null;
+        }
+        byte[] out = new byte[16];
+        int index = writeHextets(out, 0, leftGroups);
+        if (rightGroups != null) {
+            writeHextets(out, index + (8 - total) * 2, rightGroups);
+        }
+        return out;
+    }
+
+    /** Hextets of a colon-separated piece, or null when a group is empty or not 1-4 hex digits. */
+    private static int[] parseHextets(String part) {
+        if (part.isEmpty()) {
+            return new int[0];
+        }
+        String[] groups = part.split(":", -1);
+        int[] values = new int[groups.length];
+        for (int i = 0; i < groups.length; i++) {
+            String group = groups[i];
+            if (group.isEmpty() || group.length() > 4) {
+                return null;
+            }
+            int value = 0;
+            for (int c = 0; c < group.length(); c++) {
+                int digit = Character.digit(group.charAt(c), 16);
+                if (digit < 0) {
+                    return null;
+                }
+                value = (value << 4) | digit;
+            }
+            values[i] = value;
+        }
+        return values;
+    }
+
+    private static int writeHextets(byte[] out, int index, int[] groups) {
+        for (int group : groups) {
+            out[index++] = (byte) (group >> 8);
+            out[index++] = (byte) group;
+        }
+        return index;
+    }
+
+    private static boolean sameNetwork(byte[] network, byte[] address, int prefixBits) {
+        int fullBytes = prefixBits / 8;
+        int remainder = prefixBits % 8;
+        for (int i = 0; i < fullBytes; i++) {
+            if (network[i] != address[i]) {
+                return false;
+            }
+        }
+        if (remainder == 0) {
+            return true;
+        }
+        int mask = (0xff << (8 - remainder)) & 0xff;
+        return (network[fullBytes] & mask) == (address[fullBytes] & mask);
     }
 
     private boolean containsValue(JsonNode node, String value) {
@@ -1659,27 +2425,38 @@ public class SnsService implements Resettable, ResourceProvider {
     /**
      * Evaluates a numeric condition array against a value.
      * The conditions array contains alternating operator-target pairs (e.g. [">=", 100, "<", 200]).
-     * All pairs must match for the condition to pass (AND logic).
+     * All pairs must match for the condition to pass (AND logic). Empty when the operand is not
+     * comparator/number pairs, so a caller does not negate a malformed condition. A null value
+     * misses a well-formed condition.
      */
-    private boolean evaluateNumericCondition(BigDecimal value, JsonNode conditions) {
-        if (!conditions.isArray() || conditions.size() % 2 != 0) {
-            return false;
+    private Optional<Boolean> evaluateNumericCondition(BigDecimal value, JsonNode conditions) {
+        if (conditions == null || !conditions.isArray() || conditions.size() % 2 != 0) {
+            return Optional.empty();
         }
+        boolean missed = value == null;
         for (int i = 0; i < conditions.size(); i += 2) {
-            String op = conditions.get(i).asText();
-            BigDecimal target = conditions.get(i + 1).decimalValue();
-            int cmp = value.compareTo(target);
-            boolean matches = switch (op) {
+            JsonNode op = conditions.get(i);
+            JsonNode target = conditions.get(i + 1);
+            if (!op.isTextual() || !target.isNumber()) {
+                return Optional.empty();
+            }
+            int cmp = value == null ? 0 : value.compareTo(target.decimalValue());
+            Boolean matches = switch (op.asText()) {
                 case "=" -> cmp == 0;
                 case ">" -> cmp > 0;
                 case ">=" -> cmp >= 0;
                 case "<" -> cmp < 0;
                 case "<=" -> cmp <= 0;
-                default -> false;
+                default -> null;
             };
-            if (!matches) return false;
+            if (matches == null) {
+                return Optional.empty();
+            }
+            if (!matches) {
+                missed = true;
+            }
         }
-        return true;
+        return Optional.of(!missed);
     }
 
     /**
@@ -1773,7 +2550,7 @@ public class SnsService implements Resettable, ResourceProvider {
     private void deliverMessage(Subscription sub, String message, String subject,
                                 Map<String, MessageAttributeValue> messageAttributes, String messageId,
                                 String topicArn, String messageGroupId, String messageDeduplicationId,
-                                String messageStructure) {
+                                String messageStructure, String signatureVersion) {
         try {
             // Under MessageStructure="json" every subscriber gets the value under its own
             // protocol key, falling back to "default". The application case resolves against
@@ -1791,28 +2568,31 @@ public class SnsService implements Resettable, ResourceProvider {
                     boolean rawDelivery = "true".equalsIgnoreCase(sub.getAttributes().get("RawMessageDelivery"));
                     String body = rawDelivery
                             ? protocolMessage
-                            : buildSnsEnvelope(protocolMessage, subject, messageAttributes, topicArn, messageId);
+                            : buildSnsEnvelope(protocolMessage, subject, messageAttributes, topicArn, messageId,
+                                    sub.getSubscriptionArn(), signatureVersion);
                     Map<String, MessageAttributeValue> sqsAttributes = rawDelivery
                             ? toSqsMessageAttributes(messageAttributes)
                             : Collections.emptyMap();
-                    sqsService.sendMessage(queueUrl, body, 0, messageGroupId, messageDeduplicationId, sqsAttributes, region);
-                    LOG.debugv("Delivered SNS message to SQS: {0} ({1}) raw={2}", sub.getEndpoint(), queueUrl, rawDelivery);
+                    deliverToSqsSubscription(sub, queueUrl, body, messageId, messageGroupId,
+                            messageDeduplicationId, sqsAttributes, region, rawDelivery);
                 }
                 case "lambda" -> {
-                    String fnName = extractFunctionName(sub.getEndpoint());
                     String region = extractRegionFromArn(sub.getEndpoint());
                     String eventJson = buildSnsLambdaEvent(topicArn, messageId, protocolMessage,
-                            subject, messageAttributes, sub.getSubscriptionArn());
-                    lambdaService.invoke(region, fnName, eventJson.getBytes(), InvocationType.Event);
+                            subject, messageAttributes, sub.getSubscriptionArn(), signatureVersion);
+                    lambdaService.invoke(region, sub.getEndpoint(), eventJson.getBytes(), InvocationType.Event);
                     LOG.debugv("Delivered SNS message to Lambda: {0}", sub.getEndpoint());
                 }
                 case "http", "https" -> {
-                    if (httpClient == null) break;
+                    if (httpClient == null) {
+                        break;
+                    }
                     boolean rawDelivery = "true".equalsIgnoreCase(sub.getAttributes().get("RawMessageDelivery"));
                     String body = rawDelivery
                             ? protocolMessage
-                            : buildSnsHttpNotification(protocolMessage, subject, messageAttributes, topicArn, messageId, sub.getSubscriptionArn());
-                    var requestBuilder = HttpRequest.newBuilder()
+                            : buildSnsHttpNotification(protocolMessage, subject, messageAttributes, topicArn, messageId,
+                                    sub.getSubscriptionArn(), signatureVersion);
+                    HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                             .uri(URI.create(sub.getEndpoint()))
                             .timeout(Duration.ofSeconds(5))
                             .header("Content-Type", "text/plain; charset=UTF-8")
@@ -1827,9 +2607,9 @@ public class SnsService implements Resettable, ResourceProvider {
                             .POST(HttpRequest.BodyPublishers.ofString(body))
                             .build();
                     String endpoint = sub.getEndpoint();
-                    httpClient.sendAsync(request, HttpResponse.BodyHandlers.discarding())
-                            .thenAccept(response -> logHttpResult("Delivered SNS notification", endpoint, response.statusCode()))
-                            .exceptionally(ex -> { LOG.warnv("Failed to deliver SNS message to {0}: {1}", endpoint, ex.getMessage()); return null; });
+                    // Screened off this thread: Publish fans out to every subscriber here, and a
+                    // slow DNS answer for one endpoint must not hold up the others or the caller.
+                    postScreenedAsync(request, endpoint, "Delivered SNS notification");
                 }
                 case "application" -> {
                     String region = extractRegionFromArn(sub.getEndpoint());
@@ -1887,6 +2667,8 @@ public class SnsService implements Resettable, ResourceProvider {
                     String body = rawDelivery
                             ? protocolMessage
                             : buildSnsEnvelope(protocolMessage, subject, messageAttributes, topicArn, messageId);
+                            : buildSnsEnvelope(protocolMessage, subject, messageAttributes, topicArn, messageId,
+                                    null, null);
                     byte[] data = body.getBytes(StandardCharsets.UTF_8);
                     firehoseService.putRecord(accountId, region, streamName, new Record(data));
                     LOG.debugv("Delivered SNS message to Firehose: {0} ({1}) raw={2}", sub.getEndpoint(), streamName, rawDelivery);
@@ -1910,9 +2692,77 @@ public class SnsService implements Resettable, ResourceProvider {
         }
     }
 
+    private void deliverToSqsSubscription(Subscription sub, String queueUrl, String body, String messageId,
+                                          String messageGroupId, String messageDeduplicationId,
+                                          Map<String, MessageAttributeValue> sqsAttributes,
+                                          String region, boolean rawDelivery) {
+        RuntimeException deliveryFailure = null;
+        for (int attempt = 1; attempt <= SQS_SUBSCRIPTION_DELIVERY_ATTEMPTS; attempt++) {
+            try {
+                sqsService.sendMessage(queueUrl, body, null, messageGroupId,
+                        messageDeduplicationId, sqsAttributes, null, ServicePrincipals.of("sns"), region);
+                LOG.debugv("Delivered SNS message to SQS: {0} ({1}) raw={2}",
+                        sub.getEndpoint(), queueUrl, rawDelivery);
+                return;
+            } catch (RuntimeException e) {
+                deliveryFailure = e;
+            }
+        }
+
+        String deadLetterTargetArn = subscriptionDeadLetterTargetArn(sub);
+        if (deadLetterTargetArn != null) {
+            try {
+                String deadLetterRegion = extractRegionFromArn(deadLetterTargetArn);
+                if (deadLetterRegion == null) {
+                    deadLetterRegion = region;
+                }
+                boolean fifoDeadLetterQueue = AwsArnUtils.parse(deadLetterTargetArn)
+                        .resource().endsWith(".fifo");
+                String deadLetterGroupId = messageGroupId;
+                String deadLetterDeduplicationId = messageDeduplicationId;
+                if (fifoDeadLetterQueue) {
+                    if (deadLetterGroupId == null || deadLetterGroupId.isBlank()) {
+                        deadLetterGroupId = messageId;
+                    }
+                    // Each failed subscription is a distinct DLQ delivery, even when
+                    // several subscriptions share this queue for the same publish.
+                    deadLetterDeduplicationId = Digests.sha256Hex(messageId + "\0" + sub.getSubscriptionArn());
+                }
+                sqsService.sendMessage(sqsArnToUrl(deadLetterTargetArn), body, null,
+                        deadLetterGroupId, deadLetterDeduplicationId, sqsAttributes, null,
+                        ServicePrincipals.of("sns"), deadLetterRegion);
+                LOG.warnv("SNS delivery to {0} failed after {1} attempts; sent notification to subscription DLQ {2}",
+                        sub.getEndpoint(), SQS_SUBSCRIPTION_DELIVERY_ATTEMPTS, deadLetterTargetArn);
+                return;
+            } catch (RuntimeException deadLetterFailure) {
+                LOG.warnv("SNS delivery to {0} and subscription DLQ {1} failed: {2}",
+                        sub.getEndpoint(), deadLetterTargetArn, deadLetterFailure.getMessage());
+            }
+        }
+        LOG.warnv("SNS delivery to {0} failed after {1} attempts: {2}",
+                sub.getEndpoint(), SQS_SUBSCRIPTION_DELIVERY_ATTEMPTS,
+                deliveryFailure == null ? "unknown failure" : deliveryFailure.getMessage());
+    }
+
+    private String subscriptionDeadLetterTargetArn(Subscription sub) {
+        String redrivePolicy = sub.getAttributes().get(SUBSCRIPTION_REDRIVE_POLICY);
+        if (redrivePolicy == null || redrivePolicy.isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode policy = objectMapper.readTree(redrivePolicy);
+            String targetArn = policy.path("deadLetterTargetArn").asText(null);
+            return AwsArnUtils.isArnFor(targetArn, "sqs") ? targetArn : null;
+        } catch (Exception e) {
+            LOG.warnv("Ignoring invalid SNS subscription RedrivePolicy for {0}: {1}",
+                    sub.getSubscriptionArn(), e.getMessage());
+            return null;
+        }
+    }
+
     private String buildSnsLambdaEvent(String topicArn, String messageId, String message,
                                        String subject, Map<String, MessageAttributeValue> messageAttributes,
-                                       String subscriptionArn) {
+                                       String subscriptionArn, String signatureVersion) {
         try {
             String timestamp = DateTimeFormatter.ISO_INSTANT.format(Instant.now());
             ObjectNode snsNode = objectMapper.createObjectNode();
@@ -1926,13 +2776,11 @@ public class SnsService implements Resettable, ResourceProvider {
             }
             snsNode.put("Message", message);
             snsNode.put("Timestamp", timestamp);
-            snsNode.put("SignatureVersion", "1");
-            snsNode.put("Signature", "EXAMPLE");
-            snsNode.put("SigningCertUrl", "EXAMPLE");
-            snsNode.put("UnsubscribeUrl", "EXAMPLE");
+            messageSigner.sign(snsNode, signatureVersion, "SigningCertUrl");
+            snsNode.put("UnsubscribeUrl", unsubscribeUrl(subscriptionArn));
             ObjectNode attrs = snsNode.putObject("MessageAttributes");
             if (messageAttributes != null) {
-                for (var entry : messageAttributes.entrySet()) {
+                for (Map.Entry<String, MessageAttributeValue> entry : messageAttributes.entrySet()) {
                     ObjectNode attr = attrs.putObject(entry.getKey());
                     attr.put("Type", entry.getValue().getDataType());
                     if (entry.getValue().getBinaryValue() != null) {
@@ -1951,33 +2799,9 @@ public class SnsService implements Resettable, ResourceProvider {
             ObjectNode root = objectMapper.createObjectNode();
             root.putArray("Records").add(record);
             return objectMapper.writeValueAsString(root);
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             return "{\"Records\":[]}";
         }
-    }
-
-    private static final String FUNCTION_MARKER = ":function:";
-
-    /**
-     * Function name out of a Lambda ARN, which may carry a qualifier:
-     * {@code arn:aws:lambda:<region>:<account>:function:<name>[:<alias-or-version>]}.
-     *
-     * <p>Taking the segment after the last colon reads the qualifier as the function name, so a
-     * subscription to {@code ...:function:order-processor:PROD} invoked a function called
-     * {@code PROD} and the message went nowhere. Cut after {@code :function:} instead, matching
-     * what S3 and Step Functions already do for the same ARN.
-     */
-    static String extractFunctionName(String functionArn) {
-        if (functionArn == null) {
-            return null;
-        }
-        int functionMarker = functionArn.indexOf(FUNCTION_MARKER);
-        if (functionMarker < 0) {
-            return functionArn;
-        }
-        String suffix = functionArn.substring(functionMarker + FUNCTION_MARKER.length());
-        int qualifierSeparator = suffix.indexOf(':');
-        return qualifierSeparator >= 0 ? suffix.substring(0, qualifierSeparator) : suffix;
     }
 
     private static String extractRegionFromArn(String arn) {
@@ -1995,9 +2819,15 @@ public class SnsService implements Resettable, ResourceProvider {
         return new java.util.HashMap<>(snsAttributes);
     }
 
+    /**
+     * The JSON notification envelope SQS and Firehose share. With a {@code subscriptionArn} it is
+     * signed and carries {@code UnsubscribeURL}, as a non-raw SQS delivery does; without one it is
+     * the unsigned form Firehose receives.
+     */
     private String buildSnsEnvelope(String message, String subject,
                                     Map<String, MessageAttributeValue> messageAttributes,
-                                    String topicArn, String messageId) {
+                                    String topicArn, String messageId, String subscriptionArn,
+                                    String signatureVersion) {
         try {
             String timestamp = DateTimeFormatter.ISO_INSTANT.format(Instant.now());
             ObjectNode node = objectMapper.createObjectNode();
@@ -2009,9 +2839,13 @@ public class SnsService implements Resettable, ResourceProvider {
                 node.put("Subject", subject);
             }
             node.put("Message", message);
+            if (subscriptionArn != null) {
+                messageSigner.sign(node, signatureVersion, "SigningCertURL");
+                node.put("UnsubscribeURL", unsubscribeUrl(subscriptionArn));
+            }
             ObjectNode attrs = node.putObject("MessageAttributes");
             if (messageAttributes != null) {
-                for (var entry : messageAttributes.entrySet()) {
+                for (Map.Entry<String, MessageAttributeValue> entry : messageAttributes.entrySet()) {
                     ObjectNode attr = attrs.putObject(entry.getKey());
                     attr.put("Type", entry.getValue().getDataType());
                     if (entry.getValue().getBinaryValue() != null) {
@@ -2023,14 +2857,25 @@ public class SnsService implements Resettable, ResourceProvider {
                 }
             }
             return objectMapper.writeValueAsString(node);
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
+            LOG.warnv("Failed to build SNS envelope for message {0}: {1}", messageId, e.getMessage());
             return "{}";
         }
     }
 
+    private String unsubscribeUrl(String subscriptionArn) {
+        return baseUrl + "/?Action=Unsubscribe&SubscriptionArn=" + subscriptionArn;
+    }
+
+    private String signatureVersion(Topic topic) {
+        return SnsMessageSigner.normalizeSignatureVersion(
+                topic == null ? null : topic.getAttributes().get("SignatureVersion"));
+    }
+
     private String buildSnsHttpNotification(String message, String subject,
                                              Map<String, MessageAttributeValue> messageAttributes,
-                                             String topicArn, String messageId, String subscriptionArn) {
+                                             String topicArn, String messageId, String subscriptionArn,
+                                             String signatureVersion) {
         try {
             String timestamp = DateTimeFormatter.ISO_INSTANT.format(Instant.now());
             ObjectNode node = objectMapper.createObjectNode();
@@ -2042,13 +2887,11 @@ public class SnsService implements Resettable, ResourceProvider {
                 node.put("Subject", subject);
             }
             node.put("Message", message);
-            node.put("SignatureVersion", "1");
-            node.put("Signature", "EXAMPLE");
-            node.put("SigningCertURL", "EXAMPLE");
-            node.put("UnsubscribeURL", baseUrl + "/?Action=Unsubscribe&SubscriptionArn=" + subscriptionArn);
+            messageSigner.sign(node, signatureVersion, "SigningCertURL");
+            node.put("UnsubscribeURL", unsubscribeUrl(subscriptionArn));
             ObjectNode attrs = node.putObject("MessageAttributes");
             if (messageAttributes != null) {
-                for (var entry : messageAttributes.entrySet()) {
+                for (Map.Entry<String, MessageAttributeValue> entry : messageAttributes.entrySet()) {
                     ObjectNode attr = attrs.putObject(entry.getKey());
                     attr.put("Type", entry.getValue().getDataType());
                     if (entry.getValue().getBinaryValue() != null) {
@@ -2060,7 +2903,7 @@ public class SnsService implements Resettable, ResourceProvider {
                 }
             }
             return objectMapper.writeValueAsString(node);
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             return "{}";
         }
     }
@@ -2087,9 +2930,8 @@ public class SnsService implements Resettable, ResourceProvider {
             node.put("Message", "You have chosen to subscribe to the topic " + topicArn + ".\nTo confirm the subscription, visit the SubscribeURL included in this message.");
             node.put("SubscribeURL", subscribeUrl);
             node.put("Token", token);
-            node.put("SignatureVersion", "1");
-            node.put("Signature", "EXAMPLE");
-            node.put("SigningCertURL", "EXAMPLE");
+            messageSigner.sign(node, signatureVersion(topicStore.get(topicKey(region, topicArn)).orElse(null)),
+                    "SigningCertURL");
             String body = objectMapper.writeValueAsString(node);
 
             HttpRequest request = HttpRequest.newBuilder()
@@ -2101,13 +2943,93 @@ public class SnsService implements Resettable, ResourceProvider {
                     .header("x-amz-sns-subscription-arn", "PendingConfirmation")
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
-            String endpoint = subscription.getEndpoint();
-            httpClient.sendAsync(request, HttpResponse.BodyHandlers.discarding())
-                    .thenAccept(response -> logHttpResult("Sent SubscriptionConfirmation", endpoint, response.statusCode()))
-                    .exceptionally(ex -> { LOG.warnv("Failed to send SubscriptionConfirmation to {0}: {1}", endpoint, ex.getMessage()); return null; });
+            postScreenedAsync(request, subscription.getEndpoint(), "Sent SubscriptionConfirmation");
         } catch (Exception e) {
             LOG.warnv("Failed to send SubscriptionConfirmation to {0}: {1}", subscription.getEndpoint(), e.getMessage());
         }
+    }
+
+    /**
+     * Rejects an endpoint that resolves to a link-local or cloud instance-metadata address. Floci
+     * posts to a subscribed endpoint itself, so without this an unauthenticated Subscribe turns the
+     * emulator into a blind request forwarder against addresses only it can reach. Loopback and
+     * private ranges stay allowed: a local topic delivering to a neighbouring container is the
+     * normal case here.
+     */
+    private static void requireDeliverableEndpoint(String endpoint) {
+        if (endpoint == null) {
+            return;
+        }
+        String host;
+        try {
+            host = URI.create(endpoint).getHost();
+        } catch (IllegalArgumentException e) {
+            throw new AwsException("InvalidParameter", "Invalid parameter: Endpoint is not a valid URL.", 400);
+        }
+        if (host == null || host.isBlank()) {
+            throw new AwsException("InvalidParameter", "Invalid parameter: Endpoint is not a valid URL.", 400);
+        }
+        try {
+            SsrfProtection.rejectMetadataAddresses(InetAddress.getAllByName(host), host);
+        } catch (UnknownHostException e) {
+            // Unresolvable now does not mean unresolvable at delivery time, and AWS accepts an
+            // endpoint whose DNS is not yet live, so this is not the place to refuse it.
+            LOG.debugv("SNS endpoint host {0} did not resolve at subscribe time: {1}", host, e.getMessage());
+        } catch (IOException e) {
+            throw new AwsException("InvalidParameter",
+                    "Invalid parameter: Endpoint " + endpoint + " is not a permitted address.", 400);
+        }
+    }
+
+    /** Screens the endpoint, then posts. Nothing here resolves a name, so nothing here blocks. */
+    private void postScreenedAsync(HttpRequest request, String endpoint, String what) {
+        if (!deliverable(endpoint)) {
+            return;
+        }
+        httpClient.sendAsync(request, HttpResponse.BodyHandlers.discarding())
+                .thenAccept(response -> logHttpResult(what, endpoint, response.statusCode()))
+                .exceptionally(ex -> {
+                    LOG.warnv("Failed to reach SNS endpoint {0}: {1}", endpoint, ex.getMessage());
+                    return null;
+                });
+    }
+
+    /**
+     * Whether this endpoint may be posted to, judged without resolving anything. Subscribe is where
+     * a name gets resolved and screened; this catches the endpoint that names an address outright,
+     * including a subscription stored before Subscribe began refusing them.
+     *
+     * <p>Deliberately not a second DNS lookup. {@link HttpClient} resolves the name again when it
+     * connects and cannot be handed the result of a check, so a lookup here could never be the thing
+     * that decides where the request goes: it would cost a resolution per delivery and still leave
+     * the same rebinding residual.
+     */
+    static boolean deliverable(String endpoint) {
+        String host;
+        try {
+            host = URI.create(endpoint).getHost();
+        } catch (IllegalArgumentException e) {
+            LOG.warnv("Refusing to deliver to SNS endpoint {0}: not a valid URL", endpoint);
+            return false;
+        }
+        if (host == null || !isIpLiteral(host)) {
+            return true;
+        }
+        try {
+            SsrfProtection.rejectMetadataAddresses(InetAddress.getAllByName(host), host);
+            return true;
+        } catch (IOException e) {
+            LOG.warnv("Refusing to deliver to SNS endpoint {0}: {1}", endpoint, e.getMessage());
+            return false;
+        }
+    }
+
+    /** True for a bracketed IPv6 literal or a dotted IPv4 one, neither of which needs resolving. */
+    private static boolean isIpLiteral(String host) {
+        String bare = host.startsWith("[") && host.endsWith("]")
+                ? host.substring(1, host.length() - 1)
+                : host;
+        return bare.indexOf(':') >= 0 || bare.matches("[0-9.]+");
     }
 
     private String sqsArnToUrl(String arn) {
@@ -2145,14 +3067,22 @@ public class SnsService implements Resettable, ResourceProvider {
         return total;
     }
 
-    private static String sha256(String message) {
-        try {
-        	MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] hash = md.digest(message.getBytes(StandardCharsets.UTF_8));
-            return HEX.formatHex(hash);
-        } catch (NoSuchAlgorithmException e) {
-            return UUID.randomUUID().toString();
-        }
+    private String smsAttributesKey(String region) {
+        return regionResolver.getAccountId() + "::" + region;
+    }
+
+    private String smsSandboxKey(String region, String phoneNumber) {
+        return smsAttributesKey(region) + "::" + phoneNumber;
+    }
+
+    /** Sends an SMS, which here means storing it for {@code GET /_aws/sns} to read back. */
+    private String recordSms(String phoneNumber, String message, String subject, String region) {
+        String messageId = UUID.randomUUID().toString();
+        String effectiveRegion = region != null ? region : regionResolver.getDefaultRegion();
+        SentSms sms = new SentSms(messageId, effectiveRegion, phoneNumber, message, subject, Instant.now());
+        smsStore.put("sms::" + effectiveRegion + "::" + messageId, sms);
+        LOG.infov("SNS SMS published: messageId={0} phone={1}", messageId, phoneNumber);
+        return messageId;
     }
 
     private static String topicKey(String region, String arn) {

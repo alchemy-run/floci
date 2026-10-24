@@ -1,18 +1,64 @@
 package io.github.hectorvent.floci.testutil;
 
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.iam.model.AccessKey;
+import io.github.hectorvent.floci.services.iam.model.IamUser;
 import io.github.hectorvent.floci.services.iam.model.SessionCredential;
 
 import java.lang.reflect.Constructor;
 import java.time.Instant;
+import java.util.Map;
 
 public final class IamServiceTestHelper {
 
     private IamServiceTestHelper() {
+    }
+
+    /**
+     * An IAM service holding one user whose only permissions are the given inline policy
+     * document, plus an access key that belongs to that user.
+     */
+    public static IamService iamServiceWithUserPolicy(String accessKeyId, String secretAccessKey,
+                                                      String userName, String inlinePolicyDocument) {
+        try {
+            Constructor<IamService> constructor = IamService.class.getDeclaredConstructor(
+                    StorageBackend.class,
+                    StorageBackend.class,
+                    StorageBackend.class,
+                    StorageBackend.class,
+                    StorageBackend.class,
+                    StorageBackend.class,
+                    StorageBackend.class,
+                    RegionResolver.class
+            );
+            constructor.setAccessible(true);
+
+            InMemoryStorage<String, IamUser> users = new InMemoryStorage<>();
+            IamUser user = new IamUser("AIDA" + userName.toUpperCase(), userName, "/",
+                    "arn:aws:iam::123456789012:user/" + userName);
+            user.setInlinePolicies(Map.of("inline", inlinePolicyDocument));
+            users.put(userName, user);
+
+            InMemoryStorage<String, AccessKey> accessKeys = new InMemoryStorage<>();
+            accessKeys.put(accessKeyId, new AccessKey(accessKeyId, secretAccessKey, userName));
+
+            return constructor.newInstance(
+                    users,
+                    new InMemoryStorage<>(),
+                    new InMemoryStorage<>(),
+                    new InMemoryStorage<>(),
+                    accessKeys,
+                    new InMemoryStorage<>(),
+                    new InMemoryStorage<>(),
+                    new RegionResolver("us-east-1", "123456789012")
+            );
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("Failed to construct IamService test fixture", e);
+        }
     }
 
     public static IamService iamServiceWithAccessKey(String accessKeyId, String secretAccessKey) {
@@ -42,6 +88,42 @@ public final class IamServiceTestHelper {
                     null,
                     new RegionResolver("us-east-1", "123456789012")
             );
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("Failed to construct IamService test fixture", e);
+        }
+    }
+
+    /**
+     * Like {@link #iamServiceWithAccessKey}, but on account-aware storage, as production runs, with
+     * the key owned by {@code accountId}, so code that asks which account a key belongs to sees it.
+     */
+    public static IamService iamServiceWithAccessKeyInAccount(String accessKeyId, String secretAccessKey,
+                                                             String accountId) {
+        return iamServiceWithAccessKeyInAccount(accessKeyId, secretAccessKey, accountId, accountId);
+    }
+
+    /** As above, but with {@code defaultAccountId} as the account a request without one falls back to. */
+    public static IamService iamServiceWithAccessKeyInAccount(String accessKeyId, String secretAccessKey,
+                                                             String accountId, String defaultAccountId) {
+        try {
+            Constructor<IamService> constructor = IamService.class.getDeclaredConstructor(
+                    StorageBackend.class,
+                    StorageBackend.class,
+                    StorageBackend.class,
+                    StorageBackend.class,
+                    StorageBackend.class,
+                    StorageBackend.class,
+                    StorageBackend.class,
+                    RegionResolver.class
+            );
+            constructor.setAccessible(true);
+
+            AccountAwareStorageBackend<AccessKey> accessKeys =
+                    new AccountAwareStorageBackend<>(new InMemoryStorage<>(), null, defaultAccountId);
+            accessKeys.putForAccount(accountId, accessKeyId, new AccessKey(accessKeyId, secretAccessKey, "test-user"));
+
+            return constructor.newInstance(null, null, null, null, accessKeys, null, null,
+                    new RegionResolver("us-east-1", defaultAccountId));
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException("Failed to construct IamService test fixture", e);
         }
@@ -78,6 +160,8 @@ public final class IamServiceTestHelper {
             InMemoryStorage<String, SessionCredential> sessions = new InMemoryStorage<>();
             SessionCredential cred = new SessionCredential(
                     accessKeyId, secretAccessKey, sessionToken, null, expiration, null);
+            // A GetSessionToken session the account root minted: one with no issuer is no credential.
+            cred.setIssuerArn("arn:aws:iam::123456789012:root");
             sessions.put(accessKeyId, cred);
 
             return constructor.newInstance(

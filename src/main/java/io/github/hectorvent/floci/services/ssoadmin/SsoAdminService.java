@@ -12,30 +12,30 @@ import io.github.hectorvent.floci.core.common.Resettable;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
-import io.github.hectorvent.floci.services.ssoadmin.model.Assignment;
-import io.github.hectorvent.floci.services.ssoadmin.model.AssignmentOperation;
-import io.github.hectorvent.floci.services.ssoadmin.model.AssignmentDeletionOperation;
+import io.github.hectorvent.floci.services.identitystore.IdentityStoreService;
+import io.github.hectorvent.floci.services.organizations.OrganizationsService;
+import io.github.hectorvent.floci.services.ssoadmin.model.AccessControlAttribute;
 import io.github.hectorvent.floci.services.ssoadmin.model.ApplicationAccessScope;
 import io.github.hectorvent.floci.services.ssoadmin.model.ApplicationAssignment;
 import io.github.hectorvent.floci.services.ssoadmin.model.ApplicationAuthenticationMethod;
 import io.github.hectorvent.floci.services.ssoadmin.model.ApplicationGrant;
 import io.github.hectorvent.floci.services.ssoadmin.model.ApplicationPortalOptions;
 import io.github.hectorvent.floci.services.ssoadmin.model.ApplicationSignInOptions;
-import io.github.hectorvent.floci.services.ssoadmin.model.AccessControlAttribute;
+import io.github.hectorvent.floci.services.ssoadmin.model.Assignment;
+import io.github.hectorvent.floci.services.ssoadmin.model.AssignmentDeletionOperation;
+import io.github.hectorvent.floci.services.ssoadmin.model.AssignmentOperation;
 import io.github.hectorvent.floci.services.ssoadmin.model.CustomerManagedPolicyReference;
 import io.github.hectorvent.floci.services.ssoadmin.model.InstanceAccessControlAttributeConfiguration;
 import io.github.hectorvent.floci.services.ssoadmin.model.InstanceUpdateState;
 import io.github.hectorvent.floci.services.ssoadmin.model.OidcJwtIssuerConfiguration;
 import io.github.hectorvent.floci.services.ssoadmin.model.PermissionSet;
-import io.github.hectorvent.floci.services.ssoadmin.model.PermissionsBoundary;
 import io.github.hectorvent.floci.services.ssoadmin.model.PermissionSetProvisioning;
 import io.github.hectorvent.floci.services.ssoadmin.model.PermissionSetProvisioningOperation;
+import io.github.hectorvent.floci.services.ssoadmin.model.PermissionsBoundary;
 import io.github.hectorvent.floci.services.ssoadmin.model.RegionMetadata;
 import io.github.hectorvent.floci.services.ssoadmin.model.SsoApplication;
 import io.github.hectorvent.floci.services.ssoadmin.model.SsoInstance;
 import io.github.hectorvent.floci.services.ssoadmin.model.TrustedTokenIssuer;
-import io.github.hectorvent.floci.services.identitystore.IdentityStoreService;
-import io.github.hectorvent.floci.services.organizations.OrganizationsService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -45,18 +45,18 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
 @ApplicationScoped
 public class SsoAdminService implements Resettable {
-    private static final String INSTANCE_ARN = globalArn("sso", "us-east-1", "", "instance/ssoins-7223b02a5d9f7c8e");
+    private static final String BOOTSTRAP_INSTANCE = "instance/ssoins-7223b02a5d9f7c8e";
     private static final String IDENTITY_STORE_ID = "d-9067f2a3c1";
-    private static final String PRIMARY_REGION = "us-east-1";
-    private static final Pattern INSTANCE_ARN_PATTERN = Pattern.compile("arn:aws(?:-[a-z]{1,5}){0,3}:sso:::instance/(?:sso)?ins-[a-zA-Z0-9-.]{16}");
+    private static final Pattern INSTANCE_ARN_PATTERN = Pattern.compile("arn:" + AwsArnUtils.PARTITION_REGEX + ":sso:::instance/(?:sso)?ins-[a-zA-Z0-9-.]{16}");
     private static final Pattern PERMISSION_SET_NAME = Pattern.compile("[\\w+=,.@-]+");
-    private static final Pattern PERMISSION_SET_ARN = Pattern.compile("arn:aws(?:-[a-z]{1,5}){0,3}:sso:::permissionSet/(?:sso)?ins-[a-zA-Z0-9-.]{16}/ps-[a-zA-Z0-9-./]{16}");
+    private static final Pattern PERMISSION_SET_ARN = Pattern.compile("arn:" + AwsArnUtils.PARTITION_REGEX + ":sso:::permissionSet/(?:sso)?ins-[a-zA-Z0-9-.]{16}/ps-[a-zA-Z0-9-./]{16}");
     private static final Pattern PRINCIPAL_ID = Pattern.compile("([0-9a-f]{10}-|)[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}");
     /**
      * The model's own {@code ManagedPolicyArn} pattern. The previous
@@ -64,16 +64,16 @@ public class SsoAdminService implements Resettable {
      * partition, and its {@code .+} tail accepted a policy name containing characters AWS rejects.
      */
     private static final Pattern MANAGED_POLICY_ARN = Pattern.compile(
-            "arn:aws(?:-[a-z]{1,5}){0,3}:iam::aws:policy((?:/[A-Za-z0-9\\.,\\+@=_-]+)*)"
+            "arn:" + AwsArnUtils.PARTITION_REGEX + ":iam::aws:policy((?:/[A-Za-z0-9\\.,\\+@=_-]+)*)"
                     + "/(?:[A-Za-z0-9\\.,\\+=@_-]+)");
     private static final Pattern CUSTOMER_MANAGED_POLICY_NAME = Pattern.compile("[\\w+=,.@-]+");
     private static final Pattern CUSTOMER_MANAGED_POLICY_PATH = Pattern.compile("((/[A-Za-z0-9\\.,\\+@=_-]+)*)/");
     private static final Pattern REGION_NAME = Pattern.compile("([a-z]+-){2,3}\\d");
-    private static final Pattern APPLICATION_PROVIDER_ARN = Pattern.compile("arn:aws(?:-[a-z]{1,5}){0,3}:sso::aws:applicationProvider/[a-zA-Z0-9-/]+");
-    private static final Pattern APPLICATION_ARN = Pattern.compile("arn:aws(?:-[a-z]{1,5}){0,3}:sso::\\d{12}:application/(?:sso)?ins-[a-zA-Z0-9-.]{16}/apl-[a-zA-Z0-9]{16}");
-    private static final Pattern TRUSTED_TOKEN_ISSUER_ARN = Pattern.compile("arn:aws(?:-[a-z]{1,5}){0,3}:sso::\\d{12}:trustedTokenIssuer/(?:sso)?ins-[a-zA-Z0-9-.]{16}/tti-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}");
+    private static final Pattern APPLICATION_PROVIDER_ARN = Pattern.compile("arn:" + AwsArnUtils.PARTITION_REGEX + ":sso::aws:applicationProvider/[a-zA-Z0-9-/]+");
+    private static final Pattern APPLICATION_ARN = Pattern.compile("arn:" + AwsArnUtils.PARTITION_REGEX + ":sso::\\d{12}:application/(?:sso)?ins-[a-zA-Z0-9-.]{16}/apl-[a-zA-Z0-9]{16}");
+    private static final Pattern TRUSTED_TOKEN_ISSUER_ARN = Pattern.compile("arn:" + AwsArnUtils.PARTITION_REGEX + ":sso::\\d{12}:trustedTokenIssuer/(?:sso)?ins-[a-zA-Z0-9-.]{16}/tti-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}");
     private static final Pattern APPLICATION_ACCESS_SCOPE = Pattern.compile("([A-Za-z0-9_]{1,50})(:[A-Za-z0-9_]{1,50}){0,1}(:[A-Za-z0-9_]{1,50}){0,1}");
-    private static final Pattern APPLICATION_ACCESS_TARGET = Pattern.compile("arn:aws(?:-[a-z]{1,5}){0,3}:sso::(?:\\d{12}:application/(?:sso)?ins-[a-zA-Z0-9-.]{16}/apl-[a-zA-Z0-9]{16}|:instance/(?:sso)?ins-[a-zA-Z0-9-.]{16})");
+    private static final Pattern APPLICATION_ACCESS_TARGET = Pattern.compile("arn:" + AwsArnUtils.PARTITION_REGEX + ":sso::(?:\\d{12}:application/(?:sso)?ins-[a-zA-Z0-9-.]{16}/apl-[a-zA-Z0-9]{16}|:instance/(?:sso)?ins-[a-zA-Z0-9-.]{16})");
     private static final Pattern CLIENT_TOKEN = Pattern.compile("[!-~]+");
     private static final Pattern APPLICATION_URL = Pattern.compile("http(s)?://[-a-zA-Z0-9+&@#/%?=~_|!:,.;]*[-a-zA-Z0-9+&@#/%?=~_|]");
     private static final Pattern TAG_VALUE = Pattern.compile("[\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*");
@@ -84,7 +84,7 @@ public class SsoAdminService implements Resettable {
     private static final Pattern OIDC_CLAIM_ATTRIBUTE_PATH = Pattern.compile("\\p{L}+(?:(\\.|_)\\p{L}+){0,2}");
     private static final Pattern OIDC_IDENTITY_STORE_ATTRIBUTE_PATH = Pattern.compile("\\p{L}+(?:\\.\\p{L}+){0,2}");
     private static final Pattern OIDC_ISSUER_URL = Pattern.compile("https?://[-a-zA-Z0-9+&@/%=~_|!:,.;]*[-a-zA-Z0-9+&@/%=~_|]");
-    private static final Pattern KMS_KEY_ARN = Pattern.compile("arn:aws(?:-[a-z]{1,5}){0,3}:kms:([a-z]{2,}(-[a-z0-9]+)+):[0-9]{12}:key/(?:mrk-[a-f0-9]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})");
+    private static final Pattern KMS_KEY_ARN = Pattern.compile("arn:" + AwsArnUtils.PARTITION_REGEX + ":kms:([a-z]{2,}(-[a-z0-9]+)+):[0-9]{12}:key/(?:mrk-[a-f0-9]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})");
     private static final int PERMISSION_SET_QUOTA = 3500;
     private static final int REGION_QUOTA = 6;
     private static final int MANAGED_POLICY_QUOTA = 25;
@@ -127,6 +127,8 @@ public class SsoAdminService implements Resettable {
     private final OrganizationsService organizationsService;
     private final String defaultAccountId;
     private final String defaultRegion;
+    /** The seeded instance lives in the deployment's home region, so its ARN takes that partition. */
+    private final String bootstrapInstanceArn;
 
     @Inject
     public SsoAdminService(StorageFactory storageFactory, IdentityStoreService identityStoreService,
@@ -221,10 +223,11 @@ public class SsoAdminService implements Resettable {
         this.organizationsService = organizationsService;
         this.defaultAccountId = defaultAccountId;
         this.defaultRegion = defaultRegion;
+        this.bootstrapInstanceArn = globalArn("sso", defaultRegion, "", BOOTSTRAP_INSTANCE);
         ensureBootstrapInstance(defaultAccountId, defaultRegion);
     }
 
-    public String getInstanceArn() { return INSTANCE_ARN; }
+    public String getInstanceArn() { return bootstrapInstanceArn; }
     public String getIdentityStoreId() { return IDENTITY_STORE_ID; }
 
     public boolean hasIdentityStore(String identityStoreId) {
@@ -251,10 +254,22 @@ public class SsoAdminService implements Resettable {
         if (instanceDeletionMarkers.get(ownerAccountId).orElse(false)) {
             return;
         }
-        if (instances.get(ownerAccountId).isEmpty()) {
-            instances.put(ownerAccountId, new SsoInstance(INSTANCE_ARN, IDENTITY_STORE_ID, "floci-identity-center",
-                    ownerAccountId, region, System.currentTimeMillis(), "ACTIVE", null, false,
-                    new LinkedHashMap<>()));
+        Optional<SsoInstance> stored = instances.get(ownerAccountId);
+        if (stored.isEmpty()) {
+            instances.put(ownerAccountId, new SsoInstance(bootstrapInstanceArn, IDENTITY_STORE_ID,
+                    "floci-identity-center", ownerAccountId, region, System.currentTimeMillis(), "ACTIVE",
+                    null, false, new LinkedHashMap<>()));
+            return;
+        }
+        // Before the seeded instance took its partition it was stored as arn:aws: in every
+        // deployment, while permission sets were already minted in the instance's own partition,
+        // so a persisted outside-aws instance is moved to the ARN those permission sets name.
+        SsoInstance instance = stored.get();
+        String expectedArn = globalArn("sso", instance.primaryRegion(), "", BOOTSTRAP_INSTANCE);
+        if (instance.instanceArn().endsWith(":" + BOOTSTRAP_INSTANCE) && !instance.instanceArn().equals(expectedArn)) {
+            instances.put(ownerAccountId, new SsoInstance(expectedArn, instance.identityStoreId(), instance.name(),
+                    instance.ownerAccountId(), instance.primaryRegion(), instance.createdDateEpochMillis(),
+                    instance.status(), instance.statusReason(), instance.accountInstance(), instance.tags()));
         }
     }
 
@@ -337,7 +352,7 @@ public class SsoAdminService implements Resettable {
         }
         String tokenKey = clientToken == null ? null : instanceArn + "::" + clientToken;
         if (tokenKey != null) {
-            var priorArn = trustedTokenIssuerClientTokens.get(tokenKey);
+            Optional<String> priorArn = trustedTokenIssuerClientTokens.get(tokenKey);
             if (priorArn.isPresent()) {
                 TrustedTokenIssuer prior = trustedTokenIssuers.get(priorArn.get()).orElse(null);
                 if (prior != null && trustedTokenIssuerMatches(prior, name, issuerType, oidcConfiguration, tags)) {
@@ -632,7 +647,7 @@ public class SsoAdminService implements Resettable {
             }
         }
         String tokenKey = callerAccountId + "::" + clientToken;
-        var priorArn = instanceClientTokens.get(tokenKey);
+        Optional<String> priorArn = instanceClientTokens.get(tokenKey);
         if (priorArn.isPresent()) {
             SsoInstance prior = findInstanceByArn(priorArn.get());
             if (prior != null && java.util.Objects.equals(prior.name(), name)
@@ -971,7 +986,7 @@ public class SsoAdminService implements Resettable {
             return false;
         }
         JsonNode aws = principal.get("AWS");
-        Pattern rootArn = Pattern.compile("arn:aws(?:-[a-z]{1,5}){0,3}:iam::" + accountId + ":root");
+        Pattern rootArn = Pattern.compile("arn:" + AwsArnUtils.PARTITION_REGEX + ":iam::" + accountId + ":root");
         return policyStringOrArrayMatches(aws, value -> "*".equals(value)
                 || accountId.equals(value) || rootArn.matcher(value).matches());
     }
@@ -1374,7 +1389,7 @@ public class SsoAdminService implements Resettable {
 
         String tokenKey = clientToken == null ? null : callerAccountId + "::" + region + "::" + clientToken;
         if (tokenKey != null) {
-            var existingArn = applicationClientTokens.get(tokenKey);
+            Optional<String> existingArn = applicationClientTokens.get(tokenKey);
             if (existingArn.isPresent()) {
                 SsoApplication existing = applications.get(existingArn.get()).orElse(null);
                 if (existing != null && applicationMatches(existing, providerArn, description, name, portalOptions, status, tags)) {
@@ -1445,9 +1460,9 @@ public class SsoAdminService implements Resettable {
     }
 
     public synchronized RegionMetadata addRegion(JsonNode request) {
-        requireInstance(required(request, "InstanceArn"));
+        SsoInstance instance = requireInstance(required(request, "InstanceArn"));
         String regionName = validateRegionName(required(request, "RegionName"));
-        if (PRIMARY_REGION.equals(regionName) || regions.get(regionName).isPresent()) {
+        if (instance.primaryRegion().equals(regionName) || regions.get(regionName).isPresent()) {
             throw conflict("Region is already enabled for this IAM Identity Center instance: " + regionName);
         }
         if (regions.scan(key -> true).size() >= REGION_QUOTA - 1) {

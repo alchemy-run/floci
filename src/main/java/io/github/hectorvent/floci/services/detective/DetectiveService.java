@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.Resettable;
@@ -15,6 +16,7 @@ import io.github.hectorvent.floci.services.cloudtrail.CloudTrailEventService;
 import io.github.hectorvent.floci.services.detective.model.DetectiveMember;
 import io.github.hectorvent.floci.services.detective.model.DetectiveState;
 import io.github.hectorvent.floci.services.organizations.OrganizationsService;
+import io.github.hectorvent.floci.services.organizations.model.Organization;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -334,7 +336,7 @@ public class DetectiveService implements Resettable {
 
     public synchronized void enableAdmin(String region, String callerAccountId, String accountId) {
         requireAccountId(accountId);
-        var organization = organizationsService.describeOrganization(callerAccountId);
+        Organization organization = organizationsService.describeOrganization(callerAccountId);
         if (!callerAccountId.equals(organization.getMasterAccountId())) {
             throw new AwsException("AccessDeniedException",
                     "Only the organization management account can designate the Detective administrator account.", 403);
@@ -501,8 +503,8 @@ public class DetectiveService implements Resettable {
         }
     }
 
-    private static String graphArnForAccount(String accountId, String region, String id) {
-        return "arn:aws:detective:" + region + ":" + accountId + ":graph:" + id;
+    private static String graphArnForAccount(String accountId, String region) {
+        return AwsArnUtils.Arn.of("detective", region, accountId, "graph:00000000000000000000000000000001").toString();
     }
 
     private static void requireAccountId(String accountId) {

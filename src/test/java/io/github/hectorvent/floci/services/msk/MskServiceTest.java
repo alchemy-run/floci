@@ -1,37 +1,37 @@
 package io.github.hectorvent.floci.services.msk;
 
-import io.github.hectorvent.floci.config.EmulatorConfig;
-import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.core.storage.InMemoryStorage;
-import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
-import io.github.hectorvent.floci.core.storage.StorageBackend;
-import io.github.hectorvent.floci.core.storage.StorageFactory;
-import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.core.common.PaginatedResult;
-import io.github.hectorvent.floci.services.msk.model.ClusterState;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
+import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
+import io.github.hectorvent.floci.core.storage.InMemoryStorage;
+import io.github.hectorvent.floci.core.storage.StorageBackend;
+import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.msk.model.BrokerNodeGroupInfo;
 import io.github.hectorvent.floci.services.msk.model.ClientAuthentication;
+import io.github.hectorvent.floci.services.msk.model.ClusterState;
 import io.github.hectorvent.floci.services.msk.model.ConfigurationInfo;
 import io.github.hectorvent.floci.services.msk.model.ConfigurationRevision;
 import io.github.hectorvent.floci.services.msk.model.ConfigurationRevisionDetail;
 import io.github.hectorvent.floci.services.msk.model.ConfigurationState;
 import io.github.hectorvent.floci.services.msk.model.CreateClusterRequest;
 import io.github.hectorvent.floci.services.msk.model.CreateClusterV2Request;
-import io.github.hectorvent.floci.services.msk.model.EncryptionInTransit;
 import io.github.hectorvent.floci.services.msk.model.EbsStorageInfo;
+import io.github.hectorvent.floci.services.msk.model.EncryptionInTransit;
 import io.github.hectorvent.floci.services.msk.model.EncryptionInfo;
 import io.github.hectorvent.floci.services.msk.model.Iam;
 import io.github.hectorvent.floci.services.msk.model.JmxExporter;
 import io.github.hectorvent.floci.services.msk.model.LoggingInfo;
-import io.github.hectorvent.floci.services.msk.model.OpenMonitoring;
-import io.github.hectorvent.floci.services.msk.model.Prometheus;
-import io.github.hectorvent.floci.services.msk.model.Rebalancing;
 import io.github.hectorvent.floci.services.msk.model.MskCluster;
 import io.github.hectorvent.floci.services.msk.model.MskConfiguration;
+import io.github.hectorvent.floci.services.msk.model.OpenMonitoring;
+import io.github.hectorvent.floci.services.msk.model.Prometheus;
 import io.github.hectorvent.floci.services.msk.model.ProvisionedRequest;
+import io.github.hectorvent.floci.services.msk.model.Rebalancing;
 import io.github.hectorvent.floci.services.msk.model.Sasl;
 import io.github.hectorvent.floci.services.msk.model.Scram;
 import io.github.hectorvent.floci.services.msk.model.Serverless;
@@ -80,8 +80,8 @@ class MskServiceTest {
                 });
 
         config = Mockito.mock(EmulatorConfig.class);
-        var servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
-        var mskConfig = Mockito.mock(EmulatorConfig.MskServiceConfig.class);
+        EmulatorConfig.ServicesConfig servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.MskServiceConfig mskConfig = Mockito.mock(EmulatorConfig.MskServiceConfig.class);
         
         when(config.services()).thenReturn(servicesConfig);
         when(servicesConfig.msk()).thenReturn(mskConfig);
@@ -179,6 +179,24 @@ class MskServiceTest {
         assertThrows(AwsException.class, () -> mskService.describeCluster(east.getClusterArn()));
         assertThrows(AwsException.class, () -> mskService.deleteCluster(east.getClusterArn()));
         assertEquals(0, mskService.listClusters().size());
+    }
+
+    @Test
+    void configurationsAreRegionalLikeClusters() {
+        MskConfiguration east = mskService.createConfiguration("shared-config", "desc", List.of("3.6.0"), "props");
+
+        when(regionResolver.getRegion()).thenReturn("eu-west-1");
+        // The same name is free in another region, and each region lists and reads only its own.
+        MskConfiguration west = mskService.createConfiguration("shared-config", "desc", List.of("3.6.0"), "props");
+        assertEquals(List.of(west), mskService.listConfigurations(null, null).items());
+        AwsException describe = assertThrows(AwsException.class,
+                () -> mskService.describeConfiguration(east.getArn()));
+        assertEquals("BadRequestException", describe.getErrorCode());
+        assertThrows(AwsException.class, () -> mskService.listTagsForResource(east.getArn()));
+
+        when(regionResolver.getRegion()).thenReturn("us-east-1");
+        assertEquals(List.of(east), mskService.listConfigurations(null, null).items());
+        assertEquals(east, mskService.describeConfiguration(east.getArn()));
     }
 
     @Test
@@ -1081,5 +1099,26 @@ class MskServiceTest {
         request.setServerless(new Serverless());
 
         assertThrows(AwsException.class, () -> mskService.createCluster(request));
+    }
+
+    @Test
+    void createServerlessClusterWithoutDockerDaemonStillReachesActive() {
+        when(config.services().msk().mock()).thenReturn(false);
+        Mockito.doThrow(new RuntimeException("Cannot connect to the Docker daemon"))
+                .when(redpandaManager).startContainer(Mockito.any());
+        when(redpandaManager.tryStartContainer(Mockito.any())).thenReturn(false);
+
+        Serverless serverless = new Serverless();
+        serverless.setVpcConfigs(List.of(new VpcConfig()));
+        CreateClusterV2Request request = new CreateClusterV2Request();
+        request.setClusterName("no-docker-serverless");
+        request.setServerless(serverless);
+
+        MskCluster cluster = mskService.createCluster(request);
+
+        assertEquals(ClusterState.ACTIVE, cluster.getState());
+        assertEquals("localhost:9092", cluster.getBootstrapBrokers());
+        assertEquals(ClusterState.ACTIVE,
+                mskService.describeCluster(cluster.getClusterArn()).getState());
     }
 }

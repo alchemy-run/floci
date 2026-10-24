@@ -1,11 +1,13 @@
 package io.github.hectorvent.floci.services.redshift.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * A zero-ETL integration between a source (for example a DynamoDB table) and a Redshift target.
@@ -14,6 +16,7 @@ import java.util.Map;
  * ({@code active}), and {@code errors} is present but empty on a healthy integration.
  */
 @RegisterForReflection
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class Integration {
     private String integrationArn;
     private String accountId;
@@ -24,6 +27,11 @@ public class Integration {
     private String targetClusterIdentifier;
     private String landingTableName;
     private String checkpointSequenceNumber;
+    /**
+     * The newest DynamoDB Stream sequence written to the landing table, by shard. Concurrent because
+     * a store flush can serialize it while the consumer commits.
+     */
+    private Map<String, String> shardSequenceNumbers = new ConcurrentHashMap<>();
     private String backfillLastEvaluatedKey;
     private boolean backfillCompleted;
     private int retryCount;
@@ -57,6 +65,11 @@ public class Integration {
     public void setLandingTableName(String landingTableName) { this.landingTableName = landingTableName; }
     public String getCheckpointSequenceNumber() { return checkpointSequenceNumber; }
     public void setCheckpointSequenceNumber(String checkpointSequenceNumber) { this.checkpointSequenceNumber = checkpointSequenceNumber; }
+    public Map<String, String> getShardSequenceNumbers() { return shardSequenceNumbers; }
+    public void setShardSequenceNumbers(Map<String, String> shardSequenceNumbers) {
+        this.shardSequenceNumbers = shardSequenceNumbers == null
+                ? new ConcurrentHashMap<>() : new ConcurrentHashMap<>(shardSequenceNumbers);
+    }
     public String getBackfillLastEvaluatedKey() { return backfillLastEvaluatedKey; }
     public void setBackfillLastEvaluatedKey(String backfillLastEvaluatedKey) { this.backfillLastEvaluatedKey = backfillLastEvaluatedKey; }
     public boolean isBackfillCompleted() { return backfillCompleted; }

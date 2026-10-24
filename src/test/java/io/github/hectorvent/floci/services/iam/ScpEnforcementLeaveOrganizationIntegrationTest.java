@@ -1,15 +1,18 @@
 package io.github.hectorvent.floci.services.iam;
 
+import io.github.hectorvent.floci.testing.IamEnforcementProfile;
+import io.github.hectorvent.floci.testing.PartitionCleanup;
+import io.quarkus.test.common.http.TestHTTPResource;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.config.EncoderConfig;
 import io.restassured.http.ContentType;
 import io.restassured.path.json.JsonPath;
 import io.restassured.response.Response;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
-import java.util.Map;
+import java.net.URI;
 import java.util.UUID;
 
 import static io.restassured.RestAssured.config;
@@ -26,9 +29,13 @@ import static org.hamcrest.Matchers.containsString;
  * stop the member from leaving. This test drives the full Organizations control plane over HTTP
  * (management sets up org + OU + deny-SCP + member) and asserts that the member's
  * {@code LeaveOrganization} is denied with 403 while a non-denied action still succeeds.</p>
+ *
+ * <p>SCP enforcement comes from {@link IamEnforcementProfile}, which this class shares with the
+ * other IAM enforcement tests, so it removes the organization, OU, SCP and member account it
+ * builds once the test ends.</p>
  */
 @QuarkusTest
-@TestProfile(ScpEnforcementLeaveOrganizationIntegrationTest.ScpEnforcementProfile.class)
+@TestProfile(IamEnforcementProfile.class)
 class ScpEnforcementLeaveOrganizationIntegrationTest {
 
     private static final String MGMT = "000000000000";
@@ -38,35 +45,54 @@ class ScpEnforcementLeaveOrganizationIntegrationTest {
               {"Sid":"DenyLeaveOrg","Effect":"Deny",
                "Action":"organizations:LeaveOrganization","Resource":"*"}]}""";
 
+    @RegisterExtension
+    final PartitionCleanup cleanup = new PartitionCleanup();
+
+    @TestHTTPResource
+    URI endpoint;
+
     @Test
     void scpDeniesMemberLeaveOrganizationButAllowsOtherActions() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
 
         // --- management sets up the organization -----------------------------------------------
         org(MGMT, "CreateOrganization", "{\"FeatureSet\":\"ALL\"}").then().statusCode(200);
+        cleanup.register(() -> org(MGMT, "DeleteOrganization", "{}").then().statusCode(200));
 
-        // FeatureSet=ALL already enables the SERVICE_CONTROL_POLICY type on the root and seeds
-        // FullAWSAccess, so no explicit EnablePolicyType is needed for SCPs to participate.
+        // A new root has no policy types enabled; SCPs only participate once EnablePolicyType
+        // turns them on. FullAWSAccess is already attached, so enabling them denies nothing alone.
         String rootId = JsonPath.from(org(MGMT, "ListRoots", "{}").asString()).getString("Roots[0].Id");
+        org(MGMT, "EnablePolicyType",
+                "{\"RootId\":\"" + rootId + "\",\"PolicyType\":\"SERVICE_CONTROL_POLICY\"}")
+                .then().statusCode(200);
 
         String policyId = JsonPath.from(org(MGMT, "CreatePolicy",
                 "{\"Name\":\"deny-leave-" + suffix + "\",\"Type\":\"SERVICE_CONTROL_POLICY\","
                         + "\"Description\":\"deny leave org\",\"Content\":"
                         + jsonString(DENY_LEAVE_ORG_SCP) + "}").asString())
                 .getString("Policy.PolicySummary.Id");
+        cleanup.register(() -> org(MGMT, "DeletePolicy", "{\"PolicyId\":\"" + policyId + "\"}")
+                .then().statusCode(200));
 
         String ouId = JsonPath.from(org(MGMT, "CreateOrganizationalUnit",
                 "{\"ParentId\":\"" + rootId + "\",\"Name\":\"Denied-" + suffix + "\"}").asString())
                 .getString("OrganizationalUnit.Id");
+        cleanup.register(() -> org(MGMT, "DeleteOrganizationalUnit",
+                "{\"OrganizationalUnitId\":\"" + ouId + "\"}").then().statusCode(200));
 
         org(MGMT, "AttachPolicy",
                 "{\"PolicyId\":\"" + policyId + "\",\"TargetId\":\"" + ouId + "\"}")
                 .then().statusCode(200);
+        cleanup.register(() -> org(MGMT, "DetachPolicy",
+                "{\"PolicyId\":\"" + policyId + "\",\"TargetId\":\"" + ouId + "\"}")
+                .then().statusCode(200));
 
         // CreateAccount is synchronous in floci: the account id is present on the returned status.
         String memberId = JsonPath.from(org(MGMT, "CreateAccount",
                 "{\"AccountName\":\"member-" + suffix + "\",\"Email\":\"member-" + suffix + "@floci.test\"}")
                 .asString()).getString("CreateAccountStatus.AccountId");
+        cleanup.register(() -> org(MGMT, "RemoveAccountFromOrganization",
+                "{\"AccountId\":\"" + memberId + "\"}").then().statusCode(200));
 
         org(MGMT, "MoveAccount",
                 "{\"AccountId\":\"" + memberId + "\",\"SourceParentId\":\"" + rootId
@@ -76,17 +102,33 @@ class ScpEnforcementLeaveOrganizationIntegrationTest {
         // --- the member is now bounded by the OU's deny SCP ------------------------------------
         org(memberId, "LeaveOrganization", "{}")
                 .then()
-                .statusCode(403)
+                .statusCode(400)
                 .body(containsString("AccessDeniedException"));
 
         // An action the SCP does not deny must still succeed (FullAWSAccess baseline holds).
         org(memberId, "DescribeOrganization", "{}")
                 .then()
                 .statusCode(200);
+
+        // A GetSessionToken session the member's root minted is bounded by the same SCP.
+        String sessionKey = given()
+                .header("Authorization", "AWS4-HMAC-SHA256 Credential=" + memberId + "/20260629/" + REGION
+                        + "/sts/aws4_request, SignedHeaders=host, Signature=abc")
+                .formParam("Action", "GetSessionToken")
+                .when()
+                .post("/")
+                .then()
+                .statusCode(200)
+                .extract().path("GetSessionTokenResponse.GetSessionTokenResult.Credentials.AccessKeyId");
+        org(sessionKey, "LeaveOrganization", "{}")
+                .then()
+                .statusCode(400)
+                .body(containsString("AccessDeniedException"));
     }
 
-    private static Response org(String account, String action, String body) {
+    private Response org(String account, String action, String body) {
         return given()
+                .port(endpoint.getPort())
                 .config(config().encoderConfig(EncoderConfig.encoderConfig()
                         .encodeContentTypeAs("application/x-amz-json-1.1", ContentType.JSON)))
                 .header("Authorization", auth(account))
@@ -117,14 +159,5 @@ class ScpEnforcementLeaveOrganizationIntegrationTest {
             }
         }
         return sb.append('"').toString();
-    }
-
-    public static final class ScpEnforcementProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of(
-                    "floci.services.iam.enforcement-enabled", "true",
-                    "floci.services.organizations.scp-enforcement-enabled", "true");
-        }
     }
 }

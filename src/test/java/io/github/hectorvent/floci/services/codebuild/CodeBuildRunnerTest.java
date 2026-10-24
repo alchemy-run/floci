@@ -2,268 +2,101 @@ package io.github.hectorvent.floci.services.codebuild;
 
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
-import com.github.dockerjava.api.command.CopyArchiveFromContainerCmd;
 import com.github.dockerjava.api.command.ExecCreateCmd;
 import com.github.dockerjava.api.command.ExecCreateCmdResponse;
 import com.github.dockerjava.api.command.ExecStartCmd;
 import com.github.dockerjava.api.command.InspectExecCmd;
 import com.github.dockerjava.api.command.InspectExecResponse;
 import com.github.dockerjava.api.model.Frame;
+import com.github.dockerjava.api.model.StreamType;
 import io.github.hectorvent.floci.config.EmulatorConfig;
-import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
 import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
-import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
-import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
-import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
-import io.github.hectorvent.floci.services.codebuild.model.Build;
-import io.github.hectorvent.floci.services.codebuild.model.Project;
-import io.github.hectorvent.floci.services.codebuild.model.ProjectEnvironment;
-import io.github.hectorvent.floci.services.codebuild.model.ProjectSource;
-import io.github.hectorvent.floci.services.s3.S3Service;
-import io.github.hectorvent.floci.services.secretsmanager.SecretsManagerService;
-import io.github.hectorvent.floci.services.ssm.SsmService;
+import io.github.hectorvent.floci.core.common.docker.ContainerReachableEndpoint;
 import org.junit.jupiter.api.Test;
 
-import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.RETURNS_SELF;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class CodeBuildRunnerTest {
-    private static final String IMAGE = "aws/codebuild/amazonlinux2-x86_64-standard:5.0";
-    private static final String RESOLVED_IMAGE = "public.ecr.aws/codebuild/amazonlinux-x86_64-standard:5.0";
-    private static final String BUILDSPEC = """
-            version: 0.2
-            phases:
-              install:
-                commands:
-                  - echo install
-              pre_build:
-                commands:
-                  - echo pre-build
-              build:
-                commands:
-                  - echo first
-                  - echo second
-              post_build:
-                commands:
-                  - echo post-build
-            """;
 
     @Test
-    void resolvesManagedImagesWithoutReplacingCustomImages() {
-        assertEquals(RESOLVED_IMAGE, CodeBuildRunner.resolveBuildImage(IMAGE));
-        assertEquals("public.ecr.aws/codebuild/standard:7.0",
-                CodeBuildRunner.resolveBuildImage("aws/codebuild/standard:7.0"));
-        assertEquals("alpine:3.21", CodeBuildRunner.resolveBuildImage("alpine:3.21"));
-        assertEquals(RESOLVED_IMAGE, CodeBuildRunner.resolveBuildImage(RESOLVED_IMAGE));
+    void phaseWithMoreOutputThanOneBufferCanHoldStillReportsItsLastOutput() {
+        byte[] chunk = new byte[8 * 1024 * 1024];
+        Arrays.fill(chunk, (byte) 'x');
+        // 2.5 GiB in total: more than a single Java byte array can hold.
+        int chunkCount = 320;
+        String lastLine = "error: build step failed\n";
+        DockerClient dockerClient = dockerClientStreaming(chunk, chunkCount, lastLine, 2L);
+        CodeBuildRunner runner = new CodeBuildRunner(dockerClient, null, null, null, null, null, null, null, null, null, null);
+
+        CodeBuildRunner.PhaseResult result = runner.runPhase("container-1", "/src", List.of(),
+                List.of("./build.sh"), 60, new AtomicBoolean(false));
+
+        assertTrue(result.failed());
+        String expectedTail = "x".repeat(512 - "error: build step failed".length()) + "error: build step failed";
+        assertEquals("Exit code 2: " + expectedTail, result.errorMessage());
     }
 
     @Test
-    void runsEveryCommandAndRequiresSuccessfulExecExitCodes() {
-        Harness harness = new Harness();
-        harness.run();
-        assertEquals("SUCCEEDED", harness.build.getBuildStatus());
-        verify(harness.containerBuilder).newContainer(RESOLVED_IMAGE);
-        verify(harness.builder).withEntrypoint(List.of("sh", "-c"));
-        verify(harness.lifecycle).create(harness.spec, "linux/amd64");
-        verify(harness.execCreate).withCmd(new String[]{"sh", "-e", "-c", "echo install"});
-        verify(harness.execCreate).withCmd(new String[]{"sh", "-e", "-c", "echo pre-build"});
-        verify(harness.execCreate).withCmd(new String[]{"sh", "-e", "-c", "echo first\necho second"});
-        verify(harness.execCreate).withCmd(new String[]{"sh", "-e", "-c", "echo post-build"});
-        verify(harness.logStreamer, never()).attach(anyString(), anyString(), anyString(), anyString(), anyString());
-        verify(harness.lifecycle).stopAndRemove("worker", null);
+    void failureMessageIgnoresLongTrailingWhitespace() {
+        DockerClient dockerClient = dockerClientStreaming(new byte[0], 0, "tests failed" + "\n".repeat(10_000), 1L);
+        CodeBuildRunner runner = new CodeBuildRunner(dockerClient, null, null, null, null, null, null, null, null, null, null);
+
+        CodeBuildRunner.PhaseResult result = runner.runPhase("container-1", "/src", List.of(),
+                List.of("./test.sh"), 60, new AtomicBoolean(false));
+
+        assertEquals("Exit code 1: tests failed", result.errorMessage());
     }
 
     @Test
-    void curatedImagesUseTheirOwnPlatformSoACachedCopyIsNotRepulled() {
-        assertEquals("linux/amd64", CodeBuildRunner.curatedImagePlatform(RESOLVED_IMAGE));
-        assertEquals("linux/arm64", CodeBuildRunner.curatedImagePlatform(
-                "public.ecr.aws/codebuild/amazonlinux-aarch64-standard:3.0"));
-        assertNull(CodeBuildRunner.curatedImagePlatform("public.ecr.aws/codebuild/standard:7.0"));
-        assertNull(CodeBuildRunner.curatedImagePlatform("example.com/x86_64-tools:1"));
+    void endpointUrlUsesListenPortNotFlociPort() {
+        // QUARKUS_HTTP_PORT=4811 with floci.port left at 4566: the server listens on 4811.
+        EmulatorConfig config = mock(EmulatorConfig.class);
+        when(config.tls()).thenReturn(mock(EmulatorConfig.TlsConfig.class));
+        when(config.port()).thenReturn(4566);
+        ContainerDetector containerDetector = mock(ContainerDetector.class);
+        ContainerReachableEndpoint endpoint = new ContainerReachableEndpoint(config, null, null, 4811);
+        CodeBuildRunner runner = new CodeBuildRunner(null, null, null, null, null, null, null,
+                config, containerDetector, null, endpoint);
 
-        Harness harness = new Harness(false);
-        harness.run();
-        assertEquals("SUCCEEDED", harness.build.getBuildStatus());
-        verify(harness.lifecycle).create(harness.spec, "linux/amd64");
-        verify(harness.lifecycle, never()).create(harness.spec);
+        assertEquals("http://host.docker.internal:4811", runner.resolveEndpointUrl());
     }
 
-    @Test
-    void usesHostPlatformUnlessEnvironmentTypeIsHonoured() {
-        Harness harness = new Harness(false);
-        harness.build.getEnvironment().setImage("alpine:3.21");
-        harness.run();
-        assertEquals("SUCCEEDED", harness.build.getBuildStatus());
-        verify(harness.lifecycle).create(harness.spec);
-        verify(harness.lifecycle, never()).create(eq(harness.spec), anyString());
+    private static DockerClient dockerClientStreaming(byte[] chunk, int chunkCount, String lastLine, long exitCode) {
+        DockerClient dockerClient = mock(DockerClient.class);
 
-        Harness arm = new Harness(true);
-        arm.build.getEnvironment().setType("ARM_CONTAINER");
-        when(arm.lifecycle.create(arm.spec, "linux/arm64")).thenReturn("worker");
-        arm.run();
-        assertEquals("SUCCEEDED", arm.build.getBuildStatus());
-        verify(arm.lifecycle).create(arm.spec, "linux/arm64");
-    }
+        ExecCreateCmd createCmd = mock(ExecCreateCmd.class, RETURNS_SELF);
+        ExecCreateCmdResponse createResponse = mock(ExecCreateCmdResponse.class);
+        when(createResponse.getId()).thenReturn("exec-1");
+        when(createCmd.exec()).thenReturn(createResponse);
+        when(dockerClient.execCreateCmd("container-1")).thenReturn(createCmd);
 
-    @Test
-    void pullFailurePreservesFaultAndDiagnosticContext() {
-        Harness harness = new Harness();
-        when(harness.lifecycle.create(harness.spec, "linux/amd64"))
-                .thenThrow(new IllegalStateException("pull access denied for managed image"));
-        harness.run();
-        assertEquals("FAULT", harness.build.getBuildStatus());
-        assertTrue(harness.build.getBuildComplete());
-        assertTrue(harness.build.getPhases().getLast().getContexts().getFirst().get("message")
-                .contains("pull access denied"));
-        verify(harness.execCreate, never()).exec();
-    }
-
-    @Test
-    void stopDuringPullDoesNotBecomeFaultAndDoesNotRunCommands() {
-        Harness harness = new Harness();
-        when(harness.lifecycle.create(harness.spec, "linux/amd64")).thenAnswer(invocation -> {
-            harness.stop.set(true);
-            throw new IllegalStateException("pull cancelled");
-        });
-        harness.run();
-        assertEquals("STOPPED", harness.build.getBuildStatus());
-        verify(harness.execCreate, never()).exec();
-    }
-
-    @Test
-    void cancellationAfterCreateCleansUpWithoutStartingWorker() {
-        Harness harness = new Harness();
-        when(harness.lifecycle.create(harness.spec, "linux/amd64")).thenAnswer(invocation -> {
-            harness.stop.set(true);
-            return "worker";
-        });
-        harness.run();
-        assertEquals("STOPPED", harness.build.getBuildStatus());
-        verify(harness.lifecycle, never()).startCreated(anyString(), any());
-        verify(harness.lifecycle).stopAndRemove("worker", null);
-    }
-
-    @Test
-    void commandFailureNeverBecomesSuccess() {
-        Harness harness = new Harness();
-        when(harness.inspection.getExitCodeLong()).thenReturn(0L, 9L, 0L);
-        harness.run();
-        assertEquals("FAILED", harness.build.getBuildStatus());
-        verify(harness.execCreate).withCmd(new String[]{"sh", "-e", "-c", "echo post-build"});
-        verify(harness.execCreate, never()).withCmd(new String[]{"sh", "-e", "-c", "echo first\necho second"});
-    }
-
-    @Test
-    void missingExitCodeAndStreamErrorsFailThePhase() {
-        Harness harness = new Harness();
-        when(harness.inspection.getExitCodeLong()).thenReturn(null);
-        CodeBuildRunner.PhaseResult missingExit = harness.runner.runPhase("worker", "/", List.of(),
-                List.of("echo hello"), 1, harness.stop);
-        assertTrue(missingExit.failed());
-        assertTrue(missingExit.errorMessage().contains("without an exit code"));
-
-        doAnswer(invocation -> {
-            ResultCallback<Frame> callback = invocation.getArgument(0);
-            callback.onError(new IllegalStateException("stream disconnected"));
+        ExecStartCmd startCmd = mock(ExecStartCmd.class);
+        when(startCmd.exec(any())).thenAnswer(invocation -> {
+            ResultCallback.Adapter<Frame> callback = invocation.getArgument(0);
+            for (int i = 0; i < chunkCount; i++) {
+                callback.onNext(new Frame(StreamType.STDOUT, chunk));
+            }
+            callback.onNext(new Frame(StreamType.STDERR, lastLine.getBytes(StandardCharsets.UTF_8)));
+            callback.onComplete();
             return callback;
-        }).when(harness.execStart).exec(any());
-        CodeBuildRunner.PhaseResult streamFailure = harness.runner.runPhase("worker", "/", List.of(),
-                List.of("echo hello"), 1, harness.stop);
-        assertTrue(streamFailure.failed());
-        assertTrue(streamFailure.errorMessage().contains("stream disconnected"));
-    }
+        });
+        when(dockerClient.execStartCmd("exec-1")).thenReturn(startCmd);
 
-    @Test
-    void unsupportedExecutionIsRejectedRatherThanSilentlySkipped() {
-        Harness harness = new Harness();
-        harness.project.getSource().setType("GITHUB");
-        assertEquals("InvalidInputException", assertThrows(AwsException.class,
-                () -> harness.runner.validateExecution(harness.build, harness.project)).getErrorCode());
-        for (String spec : List.of(
-                BUILDSPEC + "reports:\n  reports: {}\n",
-                "version: 0.2\nphases:\n  build:\n    finally:\n      - echo required\n",
-                "version: 0.2\nphases:\n  build:\n    commands:\n      - key: value\n")) {
-            assertEquals("InvalidInputException", assertThrows(AwsException.class,
-                    () -> BuildspecParser.parse(spec)).getErrorCode());
-        }
-    }
-
-    private static final class Harness {
-        final DockerClient docker = mock(DockerClient.class);
-        final ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
-        final ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
-        final ContainerSpec spec = mock(ContainerSpec.class);
-        final ContainerLifecycleManager lifecycle = mock(ContainerLifecycleManager.class);
-        final ContainerLogStreamer logStreamer = mock(ContainerLogStreamer.class);
-        final ExecCreateCmd execCreate = mock(ExecCreateCmd.class, RETURNS_SELF);
-        final ExecStartCmd execStart = mock(ExecStartCmd.class);
-        final InspectExecResponse inspection = mock(InspectExecResponse.class);
-        final AtomicBoolean stop = new AtomicBoolean();
-        final Build build = new Build();
-        final Project project = new Project();
-        final CodeBuildRunner runner;
-
-        Harness() {
-            this(true);
-        }
-
-        Harness(boolean honourEnvironmentType) {
-            EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
-            when(config.services().codebuild().honourEnvironmentType()).thenReturn(honourEnvironmentType);
-            RegionResolver regionResolver = mock(RegionResolver.class);
-            when(regionResolver.getAccountId()).thenReturn("000000000000");
-            when(logStreamer.generateLogStreamName(anyString())).thenReturn("build-log");
-            when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-            when(builder.build()).thenReturn(spec);
-            when(lifecycle.create(spec, "linux/amd64")).thenReturn("worker");
-            when(lifecycle.create(spec)).thenReturn("worker");
-            when(docker.execCreateCmd("worker")).thenReturn(execCreate);
-            ExecCreateCmdResponse created = mock(ExecCreateCmdResponse.class);
-            when(created.getId()).thenReturn("exec");
-            when(execCreate.exec()).thenReturn(created);
-            when(docker.execStartCmd("exec")).thenReturn(execStart);
-            when(execStart.exec(any())).thenAnswer(invocation -> {
-                ResultCallback<Frame> callback = invocation.getArgument(0);
-                callback.onComplete();
-                return callback;
-            });
-            InspectExecCmd inspect = mock(InspectExecCmd.class);
-            when(docker.inspectExecCmd("exec")).thenReturn(inspect);
-            when(inspect.exec()).thenReturn(inspection);
-            when(inspection.getExitCodeLong()).thenReturn(0L);
-            CopyArchiveFromContainerCmd copy = mock(CopyArchiveFromContainerCmd.class);
-            when(docker.copyArchiveFromContainerCmd("worker", "/codebuild/output/src/src")).thenReturn(copy);
-            when(copy.exec()).thenAnswer(invocation -> new ByteArrayInputStream(new byte[1024]));
-            runner = new CodeBuildRunner(docker, containerBuilder, lifecycle, logStreamer,
-                    mock(S3Service.class), mock(SsmService.class), mock(SecretsManagerService.class),
-                    config, mock(ContainerDetector.class), regionResolver);
-            ProjectEnvironment environment = new ProjectEnvironment();
-            environment.setImage(IMAGE);
-            environment.setType("LINUX_CONTAINER");
-            project.setName("worker-test");
-            project.setEnvironment(environment);
-            ProjectSource source = new ProjectSource();
-            source.setType("NO_SOURCE");
-            source.setBuildspec(BUILDSPEC);
-            project.setSource(source);
-            project.setLogsConfig(Map.of("cloudWatchLogs", Map.of("status", "DISABLED")));
-            build.setId("worker-test:1");
-            build.setArn("arn:aws:codebuild:us-east-1:000000000000:build/worker-test:1");
-            build.setEnvironment(environment);
-            build.setPhases(new CopyOnWriteArrayList<>());
-        }
-
-        void run() {
-            runner.runBuild("us-east-1", build, project, null, stop, build.getArn());
-        }
+        InspectExecCmd inspectCmd = mock(InspectExecCmd.class);
+        InspectExecResponse inspectResponse = mock(InspectExecResponse.class);
+        when(inspectResponse.getExitCodeLong()).thenReturn(exitCode);
+        when(inspectCmd.exec()).thenReturn(inspectResponse);
+        when(dockerClient.inspectExecCmd("exec-1")).thenReturn(inspectCmd);
+        return dockerClient;
     }
 }

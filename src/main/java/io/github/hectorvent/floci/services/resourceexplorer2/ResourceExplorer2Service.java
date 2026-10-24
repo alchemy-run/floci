@@ -174,7 +174,7 @@ public class ResourceExplorer2Service {
         String viewArn = regionResolver.buildArn("resource-explorer-2", region,
                 "view/default-view/" + viewId);
         View view = new View(viewArn, "default-view", accountId,
-                "arn:aws:iam::" + accountId + ":root",
+                regionResolver.buildGlobalArn("iam", accountId, "root"),
                 null,
                 List.of(new IncludedProperty("tags")),
                 new HashMap<>(), Instant.now());
@@ -318,7 +318,7 @@ public class ResourceExplorer2Service {
         String accountId = regionResolver.getAccountId();
         String viewArn = regionResolver.buildArn("resource-explorer-2", region,
                 "view/" + viewName + "/" + UUID.randomUUID());
-        String effectiveScope = (scope != null) ? scope : "arn:aws:iam::" + accountId + ":root";
+        String effectiveScope = (scope != null) ? scope : regionResolver.buildGlobalArn("iam", accountId, "root");
         View view = new View(viewArn, viewName, accountId,
                 effectiveScope,
                 filters, includedProperties,
@@ -1027,7 +1027,7 @@ public class ResourceExplorer2Service {
         if (includeTags && r.tags() != null && !r.tags().isEmpty()) {
             ObjectNode tagProp = objectMapper.createObjectNode();
             ArrayNode tagData = objectMapper.createArrayNode();
-            for (var entry : r.tags().entrySet()) {
+            for (Map.Entry<String, String> entry : r.tags().entrySet()) {
                 ObjectNode tagEntry = objectMapper.createObjectNode();
                 tagEntry.put("Key", entry.getKey());
                 tagEntry.put("Value", entry.getValue());

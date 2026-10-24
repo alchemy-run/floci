@@ -30,7 +30,8 @@ class OpenSearchDomainOptionsIntegrationTest {
     @AfterEach
     void cleanup() {
         // Delete every domain we touch so test order is irrelevant.
-        for (String name : new String[]{"opts-vpc", "opts-adv", "opts-enc", "opts-endpoint", "opts-update", "opts-access"}) {
+        for (String name : new String[]{"opts-vpc", "opts-adv", "opts-enc", "opts-endpoint", "opts-update", "opts-access",
+                "opts-partial"}) {
             given().header("Authorization", AUTH_HEADER)
                 .when().delete("/2021-01-01/opensearch/domain/" + name);
         }
@@ -257,5 +258,115 @@ class OpenSearchDomainOptionsIntegrationTest {
             .when().get("/2021-01-01/opensearch/domain/opts-access")
             .then().statusCode(200)
             .body("DomainStatus.AccessPolicies", equalTo(""));
+    }
+
+    // ── Partial UpdateDomainConfig ──────────────────────────────────────
+    // AWS applies only the fields an update supplies; an omitted field keeps its value.
+
+    private static final String PARTIAL_CREATE = "{\"DomainName\":\"opts-partial\","
+            + "\"EngineVersion\":\"OpenSearch_2.19\","
+            + "\"ClusterConfig\":{\"InstanceType\":\"r6g.large.search\",\"InstanceCount\":3,"
+            + "\"DedicatedMasterEnabled\":true,\"ZoneAwarenessEnabled\":true},"
+            + "\"EBSOptions\":{\"EBSEnabled\":true,\"VolumeType\":\"gp3\",\"VolumeSize\":50}}";
+
+    private void createPartialDomain() {
+        given().contentType("application/json").header("Authorization", AUTH_HEADER).body(PARTIAL_CREATE)
+            .when().post("/2021-01-01/opensearch/domain")
+            .then().statusCode(200);
+    }
+
+    @Test
+    void partialClusterConfigUpdateKeepsOmittedFields() {
+        createPartialDomain();
+
+        // Only InstanceCount, and no EBSOptions block at all.
+        given().contentType("application/json").header("Authorization", AUTH_HEADER)
+            .body("{\"ClusterConfig\":{\"InstanceCount\":5}}")
+            .when().post("/2021-01-01/opensearch/domain/opts-partial/config")
+            .then().statusCode(200);
+
+        given().header("Authorization", AUTH_HEADER)
+            .when().get("/2021-01-01/opensearch/domain/opts-partial")
+            .then().statusCode(200)
+            .body("DomainStatus.ClusterConfig.DedicatedMasterEnabled", equalTo(true))
+            .body("DomainStatus.ClusterConfig.ZoneAwarenessEnabled", equalTo(true))
+            .body("DomainStatus.ClusterConfig.InstanceCount", equalTo(5))
+            .body("DomainStatus.ClusterConfig.InstanceType", equalTo("r6g.large.search"))
+            .body("DomainStatus.EBSOptions.EBSEnabled", equalTo(true))
+            .body("DomainStatus.EBSOptions.VolumeType", equalTo("gp3"))
+            .body("DomainStatus.EBSOptions.VolumeSize", equalTo(50));
+    }
+
+    @Test
+    void emptyClusterConfigUpdateChangesNothing() {
+        createPartialDomain();
+
+        given().contentType("application/json").header("Authorization", AUTH_HEADER)
+            .body("{\"ClusterConfig\":{}}")
+            .when().post("/2021-01-01/opensearch/domain/opts-partial/config")
+            .then().statusCode(200);
+
+        given().header("Authorization", AUTH_HEADER)
+            .when().get("/2021-01-01/opensearch/domain/opts-partial")
+            .then().statusCode(200)
+            .body("DomainStatus.ClusterConfig.DedicatedMasterEnabled", equalTo(true))
+            .body("DomainStatus.ClusterConfig.ZoneAwarenessEnabled", equalTo(true))
+            .body("DomainStatus.ClusterConfig.InstanceCount", equalTo(3))
+            .body("DomainStatus.ClusterConfig.InstanceType", equalTo("r6g.large.search"));
+    }
+
+    @Test
+    void partialEbsOptionsUpdateKeepsOmittedFields() {
+        createPartialDomain();
+
+        given().contentType("application/json").header("Authorization", AUTH_HEADER)
+            .body("{\"EBSOptions\":{\"VolumeSize\":100}}")
+            .when().post("/2021-01-01/opensearch/domain/opts-partial/config")
+            .then().statusCode(200);
+
+        given().header("Authorization", AUTH_HEADER)
+            .when().get("/2021-01-01/opensearch/domain/opts-partial")
+            .then().statusCode(200)
+            .body("DomainStatus.EBSOptions.VolumeSize", equalTo(100))
+            .body("DomainStatus.EBSOptions.VolumeType", equalTo("gp3"))
+            .body("DomainStatus.EBSOptions.EBSEnabled", equalTo(true));
+    }
+
+    @Test
+    void explicitFalseStillTurnsSettingsOff() {
+        createPartialDomain();
+
+        given().contentType("application/json").header("Authorization", AUTH_HEADER)
+            .body("{\"ClusterConfig\":{\"DedicatedMasterEnabled\":false,\"ZoneAwarenessEnabled\":false},"
+                    + "\"EBSOptions\":{\"EBSEnabled\":false}}")
+            .when().post("/2021-01-01/opensearch/domain/opts-partial/config")
+            .then().statusCode(200);
+
+        given().header("Authorization", AUTH_HEADER)
+            .when().get("/2021-01-01/opensearch/domain/opts-partial")
+            .then().statusCode(200)
+            .body("DomainStatus.ClusterConfig.DedicatedMasterEnabled", equalTo(false))
+            .body("DomainStatus.ClusterConfig.ZoneAwarenessEnabled", equalTo(false))
+            .body("DomainStatus.ClusterConfig.InstanceCount", equalTo(3))
+            .body("DomainStatus.EBSOptions.EBSEnabled", equalTo(false))
+            .body("DomainStatus.EBSOptions.VolumeType", equalTo("gp3"));
+    }
+
+    @Test
+    void legacyEsPartialClusterConfigUpdateKeepsOmittedFields() {
+        createPartialDomain();
+
+        given().contentType("application/json").header("Authorization", AUTH_HEADER)
+            .body("{\"ElasticsearchClusterConfig\":{\"InstanceCount\":4}}")
+            .when().post("/2015-01-01/es/domain/opts-partial/config")
+            .then().statusCode(200);
+
+        given().header("Authorization", AUTH_HEADER)
+            .when().get("/2021-01-01/opensearch/domain/opts-partial")
+            .then().statusCode(200)
+            .body("DomainStatus.ClusterConfig.DedicatedMasterEnabled", equalTo(true))
+            .body("DomainStatus.ClusterConfig.ZoneAwarenessEnabled", equalTo(true))
+            .body("DomainStatus.ClusterConfig.InstanceCount", equalTo(4))
+            .body("DomainStatus.ClusterConfig.InstanceType", equalTo("r6g.large.search"));
     }
 }

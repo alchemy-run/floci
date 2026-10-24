@@ -43,28 +43,6 @@ public class Route53Controller {
     private static final String NS = AwsNamespaces.ROUTE53;
     private static final String XML = "application/xml";
 
-    /**
-     * The {@code VPCRegion} enum, verbatim from the Route 53 model. Deliberately not
-     * {@code AwsRegions.KNOWN_IDS}: the enum admits the ISO and European Sovereign
-     * partitions that this emulator never advertises, and rejecting those would refuse
-     * requests AWS accepts.
-     */
-    private static final Set<String> VPC_REGIONS = Set.of(
-            "us-east-1", "us-east-2", "us-west-1", "us-west-2",
-            "eu-west-1", "eu-west-2", "eu-west-3", "eu-central-1", "eu-central-2",
-            "ap-east-1", "ap-east-2", "me-south-1", "me-central-1",
-            "us-gov-west-1", "us-gov-east-1",
-            "us-iso-east-1", "us-iso-west-1", "us-isob-east-1", "us-isob-west-1",
-            "us-isof-south-1", "us-isof-east-1", "eu-isoe-west-1", "eusc-de-east-1",
-            "ap-southeast-1", "ap-southeast-2", "ap-southeast-3", "ap-southeast-4",
-            "ap-southeast-5", "ap-southeast-6", "ap-southeast-7",
-            "ap-south-1", "ap-south-2",
-            "ap-northeast-1", "ap-northeast-2", "ap-northeast-3",
-            "eu-north-1", "sa-east-1", "ca-central-1", "ca-west-1",
-            "cn-north-1", "cn-northwest-1",
-            "af-south-1", "eu-south-1", "eu-south-2",
-            "il-central-1", "mx-central-1");
-
     private static final Set<String> CHANGE_ACTIONS = Set.of("CREATE", "DELETE", "UPSERT");
 
     @Inject
@@ -505,7 +483,7 @@ public class Route53Controller {
                 throw new AwsException("InvalidInput", "CallerReference is required.", 400);
             }
             HealthCheckConfig cfg = parseHealthCheckConfig(body);
-            HealthCheck hc = service.createHealthCheck(callerRef, cfg);
+            HealthCheck hc = service.createHealthCheck(callerRef, cfg, healthCheckSettings(body));
             String xml = new XmlBuilder()
                     .start("CreateHealthCheckResponse", NS)
                     .raw(xmlHealthCheck(hc))
@@ -675,7 +653,7 @@ public class Route53Controller {
                     .start("HealthCheckObservations")
                     .start("HealthCheckObservation")
                     .elem("IPAddress", "1.2.3.4")
-                    .elem("Region", "us-east-1")
+                    .elem("Region", "us-east-1") // partition-literal: health-check observation fixture
                     .start("StatusReport")
                     .elem("Status", "Success: HTTP Status Code 200, OK")
                     .elem("CheckedTime", now)
@@ -1116,7 +1094,7 @@ public class Route53Controller {
      * the later disassociate and ListHostedZonesByVPC silently miss it.
      */
     private static void requireModelledVpcRegion(String vpcRegion) {
-        if (!VPC_REGIONS.contains(vpcRegion)) {
+        if (!Route53VpcRegions.VPC_REGIONS.contains(vpcRegion)) {
             throw new AwsException("InvalidInput",
                     "Invalid value '" + vpcRegion + "' at 'VPCRegion' failed to satisfy constraint: "
                             + "Member must satisfy enum value set.", 400);
@@ -1373,21 +1351,63 @@ public class Route53Controller {
         HealthCheckConfig cfg = new HealthCheckConfig();
         cfg.setType(XmlParser.extractFirst(body, "Type", null));
         cfg.setIpAddress(XmlParser.extractFirst(body, "IPAddress", null));
-        String portStr = XmlParser.extractFirst(body, "Port", null);
-        if (portStr != null) {
-            try { cfg.setPort(Integer.parseInt(portStr)); } catch (NumberFormatException ignored) {}
-        }
+        cfg.setPort(integerElement(body, "Port"));
         cfg.setResourcePath(XmlParser.extractFirst(body, "ResourcePath", null));
         cfg.setFullyQualifiedDomainName(XmlParser.extractFirst(body, "FullyQualifiedDomainName", null));
-        String riStr = XmlParser.extractFirst(body, "RequestInterval", null);
-        if (riStr != null) {
-            try { cfg.setRequestInterval(Integer.parseInt(riStr)); } catch (NumberFormatException ignored) {}
-        }
-        String ftStr = XmlParser.extractFirst(body, "FailureThreshold", null);
-        if (ftStr != null) {
-            try { cfg.setFailureThreshold(Integer.parseInt(ftStr)); } catch (NumberFormatException ignored) {}
-        }
+        cfg.setRequestInterval(integerElement(body, "RequestInterval"));
+        cfg.setFailureThreshold(integerElement(body, "FailureThreshold"));
         return cfg;
+    }
+
+    private static Integer integerElement(String body, String name) {
+        String value = XmlParser.extractFirst(body, name, null);
+        if (value == null) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            throw new AwsException("InvalidInput", "Invalid value for " + name + ": " + value, 400);
+        }
+    }
+
+    /**
+     * The create request's settings in a canonical form, so a retry can be told from a different
+     * request: every value under {@code HealthCheckConfig} as {@code path=value}, sorted, because
+     * {@code Regions} and {@code ChildHealthChecks} are sets. An omitted {@code RequestInterval} or
+     * {@code FailureThreshold} counts as AWS's default (30 and 3), except for {@code RECOVERY_CONTROL},
+     * which takes neither, so stating the default explicitly is still the same request.
+     */
+    static String healthCheckSettings(String body) {
+        // Null for malformed XML as well as a missing element; HealthCheckConfig is required either way.
+        XmlParser.XmlElement config = XmlParser.extractElementTree(body, "HealthCheckConfig");
+        if (config == null) {
+            throw new AwsException("InvalidInput", "Could not parse the request body.", 400);
+        }
+        List<String> entries = new ArrayList<>();
+        collectSettings(config, "", entries);
+        if (!entries.contains("Type=RECOVERY_CONTROL")) {
+            addDefault(entries, "RequestInterval", "30");
+            addDefault(entries, "FailureThreshold", "3");
+        }
+        entries.sort(null);
+        return String.join("\n", entries);
+    }
+
+    private static void collectSettings(XmlParser.XmlElement element, String prefix, List<String> entries) {
+        for (XmlParser.XmlElement child : element.children()) {
+            String path = prefix + child.name();
+            if (!child.text().isEmpty()) {
+                entries.add(path + "=" + child.text());
+            }
+            collectSettings(child, path + "/", entries);
+        }
+    }
+
+    private static void addDefault(List<String> entries, String name, String value) {
+        if (entries.stream().noneMatch(entry -> entry.startsWith(name + "="))) {
+            entries.add(name + "=" + value);
+        }
     }
 
     /**

@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.detective;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.JsonErrorResponseUtils;
@@ -44,8 +45,8 @@ public class DetectiveController {
         JsonNode request = parse(body);
         validatePageRequest(request);
         DetectiveState state = service.state(region(headers));
-        var response = objectMapper.createObjectNode();
-        var administrators = response.putArray("Administrators");
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode administrators = response.putArray("Administrators");
         if (state.getAdminAccountId() != null) {
             administrators.addObject().put("AccountId", state.getAdminAccountId());
         }
@@ -100,6 +101,7 @@ public class DetectiveController {
         }
         DetectiveState state = service.state(region);
         ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode graphs = response.putArray("GraphList");
         if (state.isGraph()) {
             ObjectNode graph = response.putArray("GraphList").addObject().put("Arn", state.getGraphArn());
             if (state.getCreatedTime() != null) {
@@ -118,7 +120,7 @@ public class DetectiveController {
         JsonNode request = parse(body);
         service.requireGraphArn(region, request.path("GraphArn").asText(null));
         DetectiveState state = service.requireGraph(region);
-        var response = objectMapper.createObjectNode();
+        ObjectNode response = objectMapper.createObjectNode();
         response.put("AutoEnable", state.isAutoEnable());
         return Response.ok(response).build();
     }
@@ -151,8 +153,8 @@ public class DetectiveController {
         }
         int offset = offset(request.path("NextToken").asText(null), all.size());
         int end = Math.min(all.size(), offset + limit);
-        var response = objectMapper.createObjectNode();
-        var members = response.putArray("MemberDetails");
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode members = response.putArray("MemberDetails");
         for (DetectiveMember member : all.subList(offset, end)) {
             members.add(memberNode(region, member));
         }
@@ -338,9 +340,9 @@ public class DetectiveController {
         }
         service.validateCreateMembers(region, graphArn, accountIds);
 
-        var response = objectMapper.createObjectNode();
-        var members = response.putArray("Members");
-        var unprocessed = response.putArray("UnprocessedAccounts");
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode members = response.putArray("Members");
+        ArrayNode unprocessed = response.putArray("UnprocessedAccounts");
         for (JsonNode account : accounts) {
             String accountId = account.path("AccountId").asText(null);
             try {

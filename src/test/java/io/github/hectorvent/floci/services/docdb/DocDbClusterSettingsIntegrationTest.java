@@ -3,18 +3,14 @@ package io.github.hectorvent.floci.services.docdb;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
 import io.github.hectorvent.floci.services.ec2.model.SecurityGroup;
 import io.github.hectorvent.floci.services.kms.KmsService;
+import io.github.hectorvent.floci.testing.RdsAndDocDbMockProfile;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
-import io.restassured.specification.RequestSpecification;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-import java.util.Map;
-
-import static io.restassured.RestAssured.given;
-import static io.restassured.http.ContentType.URLENC;
+import static io.github.hectorvent.floci.testing.RdsRequests.rds;
 import static org.hamcrest.Matchers.containsString;
 
 /**
@@ -23,15 +19,8 @@ import static org.hamcrest.Matchers.containsString;
  * default subnet group, parameter group and security group.
  */
 @QuarkusTest
-@TestProfile(DocDbClusterSettingsIntegrationTest.NoContainersProfile.class)
+@TestProfile(RdsAndDocDbMockProfile.class)
 class DocDbClusterSettingsIntegrationTest {
-
-    public static class NoContainersProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci.services.rds.mock", "true", "floci.services.docdb.mock", "true");
-        }
-    }
 
     private static final String ID = "settings-cluster";
 
@@ -40,15 +29,6 @@ class DocDbClusterSettingsIntegrationTest {
 
     @Inject
     Ec2Service ec2Service;
-
-    private static RequestSpecification rds(String action) {
-        return given().header("Authorization",
-                        "AWS4-HMAC-SHA256 Credential=test/20260615/us-east-1/rds/aws4_request, "
-                        + "SignedHeaders=content-type;host, Signature=test")
-                .contentType(URLENC)
-                .formParam("Action", action)
-                .formParam("Version", "2014-10-31");
-    }
 
     @AfterEach
     void cleanUp() {

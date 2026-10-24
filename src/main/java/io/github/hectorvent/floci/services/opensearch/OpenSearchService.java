@@ -1,10 +1,16 @@
 package io.github.hectorvent.floci.services.opensearch;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.config.TlsCertificateManager;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.AwsRegions;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.docker.ContainerStorageHelper;
+import io.github.hectorvent.floci.core.resource.ExplorerResource;
+import io.github.hectorvent.floci.core.resource.ResourceProvider;
+import io.github.hectorvent.floci.core.resource.SupportedResourceType;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -16,8 +22,8 @@ import io.github.hectorvent.floci.services.opensearch.model.DomainMaintenance;
 import io.github.hectorvent.floci.services.opensearch.model.EbsOptions;
 import io.github.hectorvent.floci.services.opensearch.model.EncryptionAtRestOptions;
 import io.github.hectorvent.floci.services.opensearch.model.NodeToNodeEncryptionOptions;
+import io.github.hectorvent.floci.services.opensearch.model.VolumeOwnership;
 import io.github.hectorvent.floci.services.opensearch.model.VpcOptions;
-import com.fasterxml.jackson.core.type.TypeReference;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -35,9 +41,6 @@ import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import io.github.hectorvent.floci.core.resource.ExplorerResource;
-import io.github.hectorvent.floci.core.resource.ResourceProvider;
-import io.github.hectorvent.floci.core.resource.SupportedResourceType;
 
 @ApplicationScoped
 public class OpenSearchService implements ResourceProvider {
@@ -121,7 +124,7 @@ public class OpenSearchService implements ResourceProvider {
     @PreDestroy
     public void shutdown() {
         poller.shutdownNow();
-        if (!config.services().opensearch().mock()) {
+        if (!config.services().opensearch().mock() && !config.services().opensearch().keepRunningOnShutdown()) {
             for (Domain domain : allDomains()) {
                 domainManager.stopDomain(domain);
             }
@@ -175,13 +178,17 @@ public class OpenSearchService implements ResourceProvider {
         domain.setEndpoint("");
         domain.setCreatedAt(Instant.now());
         domain.setVolumeId(String.format("%06x", new SecureRandom().nextInt(0xFFFFFF)));
+        // Stamp the volume name now, with the current prefix, so it is persisted rather than
+        // recomputed later. Only records predating this field fall back to the legacy name.
+        domain.setDockerVolumeName(ContainerStorageHelper.resourceName(
+                config, "opensearch", domain.getVolumeId(), domain.getDomainName()));
+        // The ownership marker travels with the name, so deletion removes what was persisted
+        // instead of recomputing ownership against whatever configuration holds at delete time.
+        // A configured data volume overwrites both when startDomain mounts operator storage.
+        domain.setVolumeOwnership(VolumeOwnership.FLOCI_MANAGED);
 
-        if (clusterConfig != null) {
-            domain.setClusterConfig(clusterConfig);
-        }
-        if (ebsOptions != null) {
-            domain.setEbsOptions(ebsOptions);
-        }
+        applyClusterConfig(domain.getClusterConfig(), clusterConfig);
+        applyEbsOptions(domain.getEbsOptions(), ebsOptions);
         if (tags != null) {
             domain.setTags(tags);
         }
@@ -189,10 +196,12 @@ public class OpenSearchService implements ResourceProvider {
 
         if (config.services().opensearch().mock()) {
             domain.setProcessing(false);
+            domain.setEndpoint(synthesizedEndpoint(domainName, region));
         } else {
             domain.setProcessing(true);
             if (!domainManager.tryStartDomain(domain)) {
                 domain.setProcessing(false);
+                domain.setEndpoint(synthesizedEndpoint(domainName, region));
             }
         }
 
@@ -200,6 +209,24 @@ public class OpenSearchService implements ResourceProvider {
         ensureEndpointCertificate(region);
         LOG.infov("Created OpenSearch domain: {0}", domainName);
         return domain;
+    }
+
+    /**
+     * The endpoint reported for a domain with no container behind it. Two cases reach this: the
+     * service is mocked, and no Docker daemon is reachable, which is the only condition under which
+     * {@link OpenSearchDomainManager#tryStartDomain} returns false rather than rethrowing.
+     *
+     * <p>It reports an AWS-shaped endpoint in place of a blank one,
+     * {@code search-<domain>-<suffix>.<region>.es.<dnsSuffix>}, taking the DNS suffix from the
+     * region's partition rather than assuming the commercial one, with the name suffix derived from the
+     * domain name so it survives a restart. A domain reporting {@code Processing false} alongside
+     * {@code Endpoint ""} describes a state AWS never returns, and a client that reads the endpoint
+     * to address the domain gets an empty string to connect to.
+     */
+    private static String synthesizedEndpoint(String domainName, String region) {
+        String suffix = Integer.toHexString(domainName.hashCode() & 0x7fffffff);
+        return "search-" + domainName + "-" + suffix + "." + region + ".es."
+                + AwsRegions.dnsSuffixFor(region);
     }
 
     public Domain describeDomain(String domainName) {
@@ -242,31 +269,47 @@ public class OpenSearchService implements ResourceProvider {
         if (accessPolicies != null) {
             domain.setAccessPolicies(accessPolicies);
         }
-        if (clusterConfig != null) {
-            ClusterConfig existing = domain.getClusterConfig();
-            if (clusterConfig.getInstanceType() != null) {
-                existing.setInstanceType(clusterConfig.getInstanceType());
-            }
-            if (clusterConfig.getInstanceCount() > 0) {
-                existing.setInstanceCount(clusterConfig.getInstanceCount());
-            }
-            existing.setDedicatedMasterEnabled(clusterConfig.isDedicatedMasterEnabled());
-            existing.setZoneAwarenessEnabled(clusterConfig.isZoneAwarenessEnabled());
-        }
-        if (ebsOptions != null) {
-            EbsOptions existing = domain.getEbsOptions();
-            existing.setEbsEnabled(ebsOptions.isEbsEnabled());
-            if (ebsOptions.getVolumeType() != null) {
-                existing.setVolumeType(ebsOptions.getVolumeType());
-            }
-            if (ebsOptions.getVolumeSize() > 0) {
-                existing.setVolumeSize(ebsOptions.getVolumeSize());
-            }
-        }
+        applyClusterConfig(domain.getClusterConfig(), clusterConfig);
+        applyEbsOptions(domain.getEbsOptions(), ebsOptions);
         applyDomainOptions(domain, options);
 
         domainStore.put(domainName, domain);
         return domain;
+    }
+
+    /** Copies only the fields the request supplied (non-null) onto {@code existing}. */
+    private static void applyClusterConfig(ClusterConfig existing, ClusterConfig supplied) {
+        if (supplied == null) {
+            return;
+        }
+        if (supplied.getInstanceType() != null) {
+            existing.setInstanceType(supplied.getInstanceType());
+        }
+        if (supplied.getInstanceCount() != null && supplied.getInstanceCount() > 0) {
+            existing.setInstanceCount(supplied.getInstanceCount());
+        }
+        if (supplied.isDedicatedMasterEnabled() != null) {
+            existing.setDedicatedMasterEnabled(supplied.isDedicatedMasterEnabled());
+        }
+        if (supplied.isZoneAwarenessEnabled() != null) {
+            existing.setZoneAwarenessEnabled(supplied.isZoneAwarenessEnabled());
+        }
+    }
+
+    /** Copies only the fields the request supplied (non-null) onto {@code existing}. */
+    private static void applyEbsOptions(EbsOptions existing, EbsOptions supplied) {
+        if (supplied == null) {
+            return;
+        }
+        if (supplied.isEbsEnabled() != null) {
+            existing.setEbsEnabled(supplied.isEbsEnabled());
+        }
+        if (supplied.getVolumeType() != null) {
+            existing.setVolumeType(supplied.getVolumeType());
+        }
+        if (supplied.getVolumeSize() != null && supplied.getVolumeSize() > 0) {
+            existing.setVolumeSize(supplied.getVolumeSize());
+        }
     }
 
     public Domain deleteDomain(String domainName) {

@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.config;
 
 import io.quarkus.runtime.Startup;
+import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.net.NetClient;
@@ -17,8 +18,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * A TCP proxy server that enables HTTP and HTTPS on the same port (LocalStack parity).
@@ -55,7 +56,7 @@ public class TlsProxyServer {
     private static final Logger LOG = Logger.getLogger(TlsProxyServer.class);
 
     /** TLS record content type for Handshake (ClientHello). */
-    private static final byte TLS_HANDSHAKE = 0x16;
+    public static final byte TLS_HANDSHAKE = 0x16;
 
     private static final int HTTP_BACKEND_PORT = TlsConfigSource.HTTP_INTERNAL_PORT;
     private static final int HTTPS_BACKEND_PORT = TlsConfigSource.HTTPS_INTERNAL_PORT;
@@ -119,7 +120,7 @@ public class TlsProxyServer {
             NetServer server = vertx.createNetServer(options);
             server.connectHandler(connectHandler);
             proxyServers.add(server);
-            var bind = server.listen();
+            Future<NetServer> bind = server.listen();
             bind.onComplete(ar -> {
                 if (ar.succeeded()) {
                     failedPorts.remove(port);

@@ -1,11 +1,10 @@
 package io.github.hectorvent.floci.services.apigateway;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hectorvent.floci.core.common.Base64Url;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -26,17 +25,16 @@ class JwtClaimsWireFormatTest {
     @BeforeEach
     void setUp() {
         controller = new ApiGatewayExecuteController(
-                null, null, null,
+                null, null, null, null,
                 null, new ObjectMapper(), null,
                 null, null, null, null, new ApiGatewayExecuteRouteContext(), null,
                 null, null
-        );
+        , null, null);
     }
 
     private static String unsignedToken(String claimsJson) {
-        Base64.Encoder enc = Base64.getUrlEncoder().withoutPadding();
-        String header = enc.encodeToString("{\"alg\":\"RS256\",\"typ\":\"JWT\"}".getBytes(StandardCharsets.UTF_8));
-        String payload = enc.encodeToString(claimsJson.getBytes(StandardCharsets.UTF_8));
+        String header = Base64Url.encode("{\"alg\":\"RS256\",\"typ\":\"JWT\"}");
+        String payload = Base64Url.encode(claimsJson);
         return header + "." + payload + ".sig";
     }
 

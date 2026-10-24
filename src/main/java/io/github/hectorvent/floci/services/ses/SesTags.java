@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.ses;
 
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.services.ses.model.Tag;
 
 import java.util.ArrayList;
@@ -84,9 +85,7 @@ final class SesTags {
             }
         }
         if (!lengthErrors.isEmpty()) {
-            throw new AwsException("BadRequestException",
-                    lengthErrors.size() + " validation error" + (lengthErrors.size() > 1 ? "s" : "")
-                            + " detected: " + String.join("; ", lengthErrors), 400);
+            throw SmithyValidationErrors.badRequest(lengthErrors);
         }
         // An empty key is rejected with an empty body, matching AWS.
         for (Tag tag : tags) {

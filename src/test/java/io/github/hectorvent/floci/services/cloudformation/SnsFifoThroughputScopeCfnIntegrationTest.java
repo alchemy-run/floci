@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.cloudformation;
 
 import io.github.hectorvent.floci.core.common.XmlParser;
+import io.github.hectorvent.floci.testing.CfnStackWaits;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.ValidatableResponse;
 import io.restassured.specification.RequestSpecification;
@@ -10,7 +11,6 @@ import static io.restassured.RestAssured.given;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * A FIFO topic fanning out to a FIFO queue, the shape a template takes to publish one event per
@@ -69,7 +69,7 @@ class SnsFifoThroughputScopeCfnIntegrationTest {
         """;
 
     @Test
-    void aTemplateAskingForPerGroupDeduplicationGetsIt() throws InterruptedException {
+    void aTemplateAskingForPerGroupDeduplicationGetsIt() {
         cloudFormation("CreateStack", "MessageGroup");
         String created = describeStacks("CREATE_COMPLETE");
         String topicArn = outputValue(created, "TopicArn");
@@ -103,7 +103,7 @@ class SnsFifoThroughputScopeCfnIntegrationTest {
                 "Topic scope must keep deduplicating across groups: " + topicWide);
 
         cloudFormation("DeleteStack", null);
-        awaitStackDeleted();
+        CfnStackWaits.awaitStackDeleted(STACK);
         topicAttributes(topicArn).statusCode(404);
     }
 
@@ -133,24 +133,6 @@ class SnsFifoThroughputScopeCfnIntegrationTest {
     }
 
     /** DeleteStack runs asynchronously; a successful delete removes the stack entirely. */
-    private static void awaitStackDeleted() throws InterruptedException {
-        for (int i = 0; i < 100; i++) {
-            String body = given()
-                .contentType("application/x-www-form-urlencoded")
-                .header("Authorization", CFN_AUTH)
-                .formParam("Action", "DescribeStacks")
-                .formParam("StackName", STACK)
-            .when().post("/").then().extract().asString();
-            if (body.contains("does not exist")) {
-                return;
-            }
-            if (body.contains("<StackStatus>DELETE_FAILED</StackStatus>")) {
-                fail("stack delete failed: " + body);
-            }
-            Thread.sleep(50);
-        }
-        fail("stack " + STACK + " was not deleted within the timeout");
-    }
 
     private static String outputValue(String xml, String key) {
         return XmlParser.extractPairs(xml, "Outputs", "OutputKey", "OutputValue").get(key);

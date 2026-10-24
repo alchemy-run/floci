@@ -5,8 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
-import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.ResourceUsageEnumerator;
+import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.core.common.UsageLine;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -84,8 +84,8 @@ public class CostExplorerService {
                 request.path("Granularity").asText(null));
         Set<String> metrics = GroupAggregator.parseMetrics(request.path("Metrics"));
         if (metrics.isEmpty()) {
-            throw new AwsException("ValidationException",
-                    "1 validation error detected: Value at 'Metrics' failed to satisfy constraint: Member must contain at least 1 element.", 400);
+            throw SmithyValidationErrors.validationException(
+                    "Value at 'Metrics' failed to satisfy constraint: Member must contain at least 1 element.");
         }
         List<GroupAggregator.GroupBy> groupBys = GroupAggregator.parseGroupBy(request.path("GroupBy"));
         JsonNode filter = request.has("Filter") ? request.get("Filter") : null;
@@ -137,8 +137,8 @@ public class CostExplorerService {
         TimeWindow window = parseTimeWindow(request);
         String dimension = request.path("Dimension").asText(null);
         if (dimension == null || dimension.isEmpty()) {
-            throw new AwsException("ValidationException",
-                    "1 validation error detected: Value at 'Dimension' failed to satisfy constraint: Member must not be null.", 400);
+            throw SmithyValidationErrors.validationException(
+                    "Value at 'Dimension' failed to satisfy constraint: Member must not be null.");
         }
         String search = request.path("SearchString").asText(null);
         JsonNode filter = request.has("Filter") ? request.get("Filter") : null;
@@ -280,8 +280,8 @@ public class CostExplorerService {
     private TimeWindow parseTimeWindow(JsonNode request) {
         JsonNode tp = request.path("TimePeriod");
         if (!tp.isObject() || tp.isEmpty()) {
-            throw new AwsException("ValidationException",
-                    "1 validation error detected: Value at 'TimePeriod' failed to satisfy constraint: Member must not be null.", 400);
+            throw SmithyValidationErrors.validationException(
+                    "Value at 'TimePeriod' failed to satisfy constraint: Member must not be null.");
         }
         Instant start = TimeBucketing.parseDate(tp.path("Start").asText(null), "TimePeriod.Start");
         Instant end = TimeBucketing.parseDate(tp.path("End").asText(null), "TimePeriod.End");

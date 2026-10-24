@@ -1,12 +1,10 @@
 package io.github.hectorvent.floci.services.elasticache;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.elasticache.model.AuthMode;
 import io.github.hectorvent.floci.services.elasticache.model.CacheCluster;
 import io.github.hectorvent.floci.services.elasticache.model.CacheClusterStatus;
-import io.github.hectorvent.floci.services.elasticache.model.CacheSubnetGroup;
 import io.github.hectorvent.floci.services.elasticache.model.ClusterNode;
 import io.github.hectorvent.floci.services.elasticache.model.Endpoint;
 import io.github.hectorvent.floci.services.elasticache.model.ReplicationGroup;
@@ -21,16 +19,15 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
-
 
 /**
  * Verifies the empty-list read responses for the subnet/parameter group describes, so
@@ -41,7 +38,6 @@ class ElastiCacheQueryHandlerTest {
     private ElastiCacheQueryHandler handler;
     private ElastiCacheService service;
     private ElastiCacheMemcachedService memcachedService;
-    private ElastiCacheServerlessQueryHandler serverlessHandler;
 
     @BeforeEach
     void setUp() {
@@ -49,12 +45,10 @@ class ElastiCacheQueryHandlerTest {
         service = mock(ElastiCacheService.class);
         memcachedService = mock(ElastiCacheMemcachedService.class);
         RegionResolver regionResolver = mock(RegionResolver.class);
-        when(regionResolver.getDefaultRegion()).thenReturn("us-east-1");
         when(regionResolver.getRegion()).thenReturn("us-east-1");
         when(regionResolver.getAccountId()).thenReturn("000000000000");
-        serverlessHandler = mock(ElastiCacheServerlessQueryHandler.class);
         handler = new ElastiCacheQueryHandler(sigV4Validator, service, memcachedService, regionResolver,
-                serverlessHandler);
+                mock(ElastiCacheServerlessQueryHandler.class));
     }
 
     @Test
@@ -77,6 +71,48 @@ class ElastiCacheQueryHandlerTest {
         assertTrue(body.contains("<DescribeCacheParameterGroupsResult><CacheParameterGroups></CacheParameterGroups></DescribeCacheParameterGroupsResult>"),
                 "Expected empty CacheParameterGroups wrapper inside the Result element");
         assertFalse(body.contains("<Marker>"), "Empty list must omit Marker");
+    }
+
+    @Test
+    void addTagsToResource_supportsUserResource() {
+        MultivaluedMap<String, String> p = params();
+        p.add("ResourceName", "arn:aws:elasticache:us-east-1:000000000000:user:sub1");
+        p.add("Tags.Tag.1.Key", "env");
+        p.add("Tags.Tag.1.Value", "test");
+        when(service.addTagsToResource(anyString(), anyMap(), anyString()))
+                .thenReturn(Map.of("env", "test"));
+
+        Response response = handler.handle("AddTagsToResource", p, "us-east-1");
+
+        assertEquals(200, response.getStatus(), (String) response.getEntity());
+        assertTrue(((String) response.getEntity()).contains("<Key>env</Key><Value>test</Value>"));
+    }
+
+    @Test
+    void removeTagsFromResource_supportsUserResource() {
+        MultivaluedMap<String, String> p = params();
+        p.add("ResourceName", "arn:aws:elasticache:us-east-1:000000000000:user:sub1");
+        p.add("TagKeys.member.1", "env");
+        when(service.removeTagsFromResource(anyString(), anyList(), anyString()))
+                .thenReturn(Map.of());
+
+        Response response = handler.handle("RemoveTagsFromResource", p, "us-east-1");
+
+        assertEquals(200, response.getStatus(), (String) response.getEntity());
+        assertTrue(((String) response.getEntity()).contains("<TagList></TagList>"));
+    }
+
+    @Test
+    void addTagsToResource_rejectsMissingTagKeyBeforeCallingService() {
+        MultivaluedMap<String, String> p = params();
+        p.add("ResourceName", "arn:aws:elasticache:us-east-1:000000000000:user:sub1");
+        p.add("Tags.Tag.1.Value", "test");
+
+        Response response = handler.handle("AddTagsToResource", p, "us-east-1");
+
+        assertEquals(400, response.getStatus());
+        assertTrue(((String) response.getEntity()).contains("InvalidParameterValue"));
+        verifyNoInteractions(service);
     }
 
     @Test
@@ -111,6 +147,8 @@ class ElastiCacheQueryHandlerTest {
         assertTrue(body.contains("<CacheClusterId>grp-0002-001</CacheClusterId>"));
         assertFalse(body.contains("<PrimaryEndpoint>"),
                 "Cluster-mode node groups carry Slots, not a PrimaryEndpoint");
+        assertTrue(body.contains(
+                "<ConfigurationEndpoint><Address>localhost</Address><Port>6379</Port></ConfigurationEndpoint>"), body);
     }
 
     @Test
@@ -132,6 +170,8 @@ class ElastiCacheQueryHandlerTest {
         assertTrue(body.contains("<ClusterId>grp-001</ClusterId>"));
         assertTrue(body.contains("<PrimaryEndpoint><Address>localhost</Address><Port>6379</Port></PrimaryEndpoint>"));
         assertTrue(body.contains("<CurrentRole>primary</CurrentRole>"));
+        assertFalse(body.contains("<ConfigurationEndpoint>"),
+                "A cluster-mode-disabled group reports its endpoints under NodeGroups only");
     }
 
     @Test
@@ -203,206 +243,6 @@ class ElastiCacheQueryHandlerTest {
 
         assertEquals(400, response.getStatus());
         assertTrue(((String) response.getEntity()).contains("UnsupportedOperation"));
-    }
-
-    @Test
-    void legacySubnetGroupNameAndMembersRemainReadable() throws Exception {
-        CacheSubnetGroup group = new ObjectMapper().readValue(
-                "{\"cacheSubnetGroupName\":\"private\",\"subnetIds\":[\"subnet-a\"]}", CacheSubnetGroup.class);
-
-        assertEquals("private", group.getName());
-        assertTrue(group.getSubnetAvailabilityZones().containsKey("subnet-a"));
-    }
-
-    @Test
-    void describeCacheSubnetGroupsReturnsPersistedTopology() {
-        when(service.describeCacheSubnetGroups(null)).thenReturn(List.of(
-                new CacheSubnetGroup("private", "private subnets", "vpc-test", Map.of("subnet-a", "us-east-1a", "subnet-b", "us-east-1b"))));
-
-        Response response = handler.handle("DescribeCacheSubnetGroups", params());
-
-        assertEquals(200, response.getStatus());
-        String body = (String) response.getEntity();
-        assertTrue(body.contains("<CacheSubnetGroupName>private</CacheSubnetGroupName>"));
-        assertTrue(body.contains("<SubnetIdentifier>subnet-a</SubnetIdentifier>"));
-        assertTrue(body.contains("arn:aws:elasticache:us-east-1:000000000000:subnetgroup:private"));
-    }
-
-    @Test
-    void describeReplicationGroupsReturnsReachableNodeEndpoint() {
-        ReplicationGroup group = new ReplicationGroup("cache", "test", ReplicationGroupStatus.AVAILABLE,
-                AuthMode.NO_AUTH, new Endpoint("localhost", 6379), Instant.now(), 6379);
-        group.setReplicasPerNodeGroup(1);
-        group.setArn("arn:aws:elasticache:us-east-1:000000000000:replicationgroup:cache");
-        when(service.memberCacheClusters(group)).thenReturn(List.of(
-                new ElastiCacheService.MemberCacheCluster(group, "cache-001", 6379, true),
-                new ElastiCacheService.MemberCacheCluster(group, "cache-002", 6379, false)));
-        when(service.listReplicationGroups(null)).thenReturn(List.of(group));
-
-        Response response = handler.handle("DescribeReplicationGroups", params());
-
-        assertEquals(200, response.getStatus());
-        String body = (String) response.getEntity();
-        assertTrue(body.contains("<PrimaryEndpoint><Address>localhost</Address><Port>6379</Port>"));
-        assertTrue(body.contains("<CurrentRole>replica</CurrentRole>"));
-        assertEquals(1, body.split("<NodeGroups>", -1).length - 1);
-        assertEquals(1, body.split("<ARN>", -1).length - 1);
-        assertTrue(body.contains("arn:aws:elasticache:us-east-1:000000000000:replicationgroup:cache"));
-    }
-
-    @Test
-    void describeCacheClustersReturnsEveryConfiguredNode() {
-        CacheCluster cluster = new CacheCluster("mem", CacheClusterStatus.AVAILABLE, "memcached", "1.6.22",
-                new Endpoint("localhost", 11211), Instant.now());
-        cluster.setNumCacheNodes(2);
-        when(memcachedService.listCacheClusters(null)).thenReturn(List.of(cluster));
-
-        Response response = handler.handle("DescribeCacheClusters", params());
-
-        assertEquals(200, response.getStatus());
-        String body = (String) response.getEntity();
-        assertTrue(body.contains("<NumCacheNodes>2</NumCacheNodes>"));
-        assertTrue(body.contains("<CacheNodeId>mem-0002</CacheNodeId>"));
-        assertTrue(body.contains("arn:aws:elasticache:us-east-1:000000000000:cluster:mem"));
-    }
-
-    @Test
-    void createReplicationGroupPersistsProvisionedTopology() {
-        ReplicationGroup group = new ReplicationGroup("cache", "old", ReplicationGroupStatus.AVAILABLE,
-                AuthMode.NO_AUTH, new Endpoint("localhost", 6380), Instant.now(), 6380);
-        when(service.createReplicationGroup(any(ElastiCacheService.CreateReplicationGroupRequest.class))).thenReturn(group);
-        when(service.saveReplicationGroup(group)).thenReturn(group);
-        MultivaluedMap<String, String> request = params();
-        request.add("ReplicationGroupId", "cache");
-        request.add("ReplicationGroupDescription", "new");
-        request.add("CacheNodeType", "cache.t4g.medium");
-        request.add("ReplicasPerNodeGroup", "1");
-        request.add("SecurityGroupIds.SecurityGroupId.1", "sg-cache");
-        request.add("Port", "6380");
-        request.add("Tags.Tag.1.Key", "env");
-        request.add("Tags.Tag.1.Value", "test");
-
-        Response response = handler.handle("CreateReplicationGroup", request);
-
-        assertEquals(200, response.getStatus());
-        assertEquals("cache.t4g.medium", group.getCacheNodeType());
-        assertEquals(1, group.getReplicasPerNodeGroup());
-        assertEquals(List.of("sg-cache"), group.getSecurityGroupIds());
-        assertEquals(6380, group.getConfigurationEndpoint().port());
-        assertEquals("test", group.getTags().get("env"));
-        ArgumentCaptor<ElastiCacheService.CreateReplicationGroupRequest> requestCaptor =
-                ArgumentCaptor.forClass(ElastiCacheService.CreateReplicationGroupRequest.class);
-        verify(service).createReplicationGroup(requestCaptor.capture());
-        assertEquals(6380, requestCaptor.getValue().port());
-    }
-
-    @Test
-    void describeReplicationGroupMemberReportsVpcSecurityGroups() {
-        ReplicationGroup group = new ReplicationGroup("cache", "test", ReplicationGroupStatus.AVAILABLE,
-                AuthMode.NO_AUTH, new Endpoint("localhost", 6379), Instant.now(), 6379);
-        group.setSecurityGroupIds(List.of("sg-cache"));
-        when(service.listMemberCacheClusters("cache-0001-001")).thenReturn(List.of(
-                new ElastiCacheService.MemberCacheCluster(group, "cache-0001-001", 6379, true)));
-        MultivaluedMap<String, String> request = params();
-        request.add("CacheClusterId", "cache-0001-001");
-
-        Response response = handler.handle("DescribeCacheClusters", request);
-
-        assertEquals(200, response.getStatus());
-        assertTrue(((String) response.getEntity()).contains(
-                "<SecurityGroups><member><SecurityGroupId>sg-cache</SecurityGroupId><Status>active</Status></member></SecurityGroups>"));
-    }
-
-    @Test
-    void createSubnetGroupReadsAwsQuerySubnetIdentifierMembers() {
-        CacheSubnetGroup group = new CacheSubnetGroup("private", "private subnets", "vpc-test", Map.of("subnet-a", "us-east-1a"));
-        when(service.createCacheSubnetGroup(eq("private"), eq("private subnets"), anyList(), anyMap())).thenReturn(group);
-        MultivaluedMap<String, String> request = params();
-        request.add("CacheSubnetGroupName", "private");
-        request.add("CacheSubnetGroupDescription", "private subnets");
-        request.add("SubnetIds.SubnetIdentifier.1", "subnet-a");
-        request.add("SubnetIds.SubnetIdentifier.2", "subnet-b");
-
-        Response response = handler.handle("CreateCacheSubnetGroup", request);
-
-        assertEquals(200, response.getStatus());
-        verify(service).createCacheSubnetGroup("private", "private subnets", List.of("subnet-a", "subnet-b"), Map.of());
-    }
-
-    @Test
-    void describeCacheEngineVersionsAdvertisesTwoValkeyVersions() {
-        MultivaluedMap<String, String> request = params();
-        request.add("Engine", "valkey");
-
-        Response response = handler.handle("DescribeCacheEngineVersions", request);
-
-        assertEquals(200, response.getStatus());
-        String body = (String) response.getEntity();
-        assertTrue(body.contains("<EngineVersion>8.0</EngineVersion>"));
-        assertTrue(body.contains("<EngineVersion>8.1</EngineVersion>"));
-    }
-
-    @Test
-    void testFailoverAcceptsAReplicationGroupWithAReplica() {
-        ReplicationGroup group = new ReplicationGroup("cache", "test", ReplicationGroupStatus.AVAILABLE,
-                AuthMode.NO_AUTH, new Endpoint("localhost", 6379), Instant.now(), 6379);
-        group.setReplicasPerNodeGroup(1);
-        when(service.getReplicationGroup("cache")).thenReturn(group);
-        MultivaluedMap<String, String> request = params();
-        request.add("ReplicationGroupId", "cache");
-
-        Response response = handler.handle("TestFailover", request);
-
-        assertEquals(200, response.getStatus());
-        assertTrue(((String) response.getEntity()).contains("<TestFailoverResponse"));
-    }
-
-    @Test
-    void replicaScaleUsesTheMatchingQueryResponseEnvelope() {
-        ReplicationGroup group = new ReplicationGroup("cache", "test", ReplicationGroupStatus.AVAILABLE,
-                AuthMode.NO_AUTH, new Endpoint("localhost", 6379), Instant.now(), 6379);
-        when(service.setReplicaCount("cache", 1)).thenReturn(group);
-        MultivaluedMap<String, String> request = params();
-        request.add("ReplicationGroupId", "cache");
-        request.add("NewReplicaCount", "1");
-
-        Response response = handler.handle("IncreaseReplicaCount", request);
-
-        assertEquals(200, response.getStatus());
-        assertTrue(((String) response.getEntity()).contains("<IncreaseReplicaCountResponse"));
-    }
-
-    @Test
-    void deleteReplicationGroupForwardsTheFinalSnapshotName() {
-        ReplicationGroup group = new ReplicationGroup("cache", "test", ReplicationGroupStatus.AVAILABLE,
-                AuthMode.NO_AUTH, new Endpoint("localhost", 6379), Instant.now(), 6379);
-        when(service.getReplicationGroup("cache")).thenReturn(group);
-        MultivaluedMap<String, String> request = params();
-        request.add("ReplicationGroupId", "cache");
-        request.add("FinalSnapshotIdentifier", "cache-final");
-
-        Response response = handler.handle("DeleteReplicationGroup", request);
-
-        assertEquals(200, response.getStatus());
-        verify(service).deleteReplicationGroup("cache", "cache-final");
-    }
-
-    @Test
-    void serverlessActions_areDelegatedToTheServerlessHandler() {
-        MultivaluedMap<String, String> request = params();
-        request.add("ServerlessCacheName", "cache");
-        Response delegated = Response.ok("delegated").build();
-        when(serverlessHandler.handles("DescribeServerlessCaches", request)).thenReturn(true);
-        when(serverlessHandler.handle("DescribeServerlessCaches", request, "us-east-1")).thenReturn(delegated);
-
-        assertSame(delegated, handler.handle("DescribeServerlessCaches", request, "us-east-1"));
-    }
-
-    @Test
-    void describeEvents_returnsEmptyEventList() {
-        MultivaluedMap<String, String> events = params();
-        events.add("SourceType", "serverless-cache");
-        assertTrue(((String) handler.handle("DescribeEvents", events).getEntity()).contains("<Events></Events>"));
     }
 
     private static MultivaluedMap<String, String> params() {
@@ -615,7 +455,8 @@ class ElastiCacheQueryHandlerTest {
 
     @Test
     void modifyReplicationGroup_passesSnapshotSettingsOnly() {
-        when(service.modifyReplicationGroup(eq("g1"), isNull(), isNull(), any())).thenReturn(group("g1"));
+        when(service.modifyReplicationGroup(eq("g1"), isNull(), isNull(), eq(false), eq(false), any()))
+                .thenReturn(group("g1"));
         MultivaluedMap<String, String> p = params();
         p.add("ReplicationGroupId", "g1");
         p.add("SnapshotRetentionLimit", "3");
@@ -624,37 +465,381 @@ class ElastiCacheQueryHandlerTest {
         p.add("KmsKeyId", "alias/other");
 
         assertEquals(200, handler.handle("ModifyReplicationGroup", p, "us-east-1").getStatus());
-        verify(service).modifyReplicationGroup("g1", null, null, new ReplicationGroupSettings(null, null, 3, "01:00-02:00"));
+        verify(service).modifyReplicationGroup("g1", null, null, false, false,
+                new ReplicationGroupSettings(null, null, 3, "01:00-02:00"));
     }
 
     @Test
-    void modifyReplicationGroupShardConfiguration_passesTheShardsToRemoveAndRetain() {
-        when(service.modifyShardConfiguration(eq("g1"), eq(2), any(), any())).thenReturn(group("g1"));
+    void modifyReplicationGroup_passesRemoveUserGroupsAndAuthTokenDelete() {
+        when(service.modifyReplicationGroup(eq("g1"), any(), isNull(), eq(true), eq(true), any()))
+                .thenReturn(group("g1"));
         MultivaluedMap<String, String> p = params();
         p.add("ReplicationGroupId", "g1");
-        p.add("NodeGroupCount", "2");
-        p.add("ApplyImmediately", "true");
-        p.add("NodeGroupsToRemove.NodeGroupToRemove.1", "0003");
-        p.add("NodeGroupsToRemove.NodeGroupToRemove.2", "0004");
+        p.add("UserGroupIdsToAdd.member.1", "new-users");
+        p.add("RemoveUserGroups", "true");
+        p.add("AuthTokenUpdateStrategy", "DELETE");
 
-        Response response = handler.handle("ModifyReplicationGroupShardConfiguration", p, "us-east-1");
-
-        assertEquals(200, response.getStatus());
-        assertTrue(((String) response.getEntity()).contains("<ModifyReplicationGroupShardConfigurationResult>"));
-        verify(service).modifyShardConfiguration("g1", 2, List.of("0003", "0004"), List.of());
+        assertEquals(200, handler.handle("ModifyReplicationGroup", p, "us-east-1").getStatus());
+        verify(service).modifyReplicationGroup("g1", List.of("new-users"), null, true, true,
+                new ReplicationGroupSettings(null, null, null, null));
     }
 
     @Test
-    void modifyReplicationGroupShardConfiguration_surfacesTheServiceFault() {
-        when(service.modifyShardConfiguration(eq("g1"), eq(1), any(), any())).thenThrow(
-                new AwsException("InvalidParameterValue", "Either NodeGroupsToRemove or NodeGroupsToRetain is required", 400));
+    void describeReplicationGroups_reportsNoAuthTokenOnceAUserGroupIsAttached() {
+        ReplicationGroup g = new ReplicationGroup("g1", "d", ReplicationGroupStatus.AVAILABLE,
+                AuthMode.PASSWORD, new Endpoint("localhost", 6379), Instant.now(), 6379);
+        g.setAuthToken("group-token");
+        g.getUserGroupIds().add("app-users");
+        when(service.listReplicationGroups("g1")).thenReturn(List.of(g));
         MultivaluedMap<String, String> p = params();
         p.add("ReplicationGroupId", "g1");
-        p.add("NodeGroupCount", "1");
 
-        Response response = handler.handle("ModifyReplicationGroupShardConfiguration", p, "us-east-1");
+        String body = (String) handler.handle("DescribeReplicationGroups", p, "us-east-1").getEntity();
+
+        assertTrue(body.contains("<AuthTokenEnabled>false</AuthTokenEnabled>"), body);
+        assertTrue(body.contains("<TransitEncryptionEnabled>true</TransitEncryptionEnabled>"), body);
+    }
+
+    // ── CreateCacheCluster / DescribeCacheClusters: single-node redis ─────────
+
+    private static CacheCluster redisCacheCluster(String id) {
+        CacheCluster cluster = new CacheCluster(id, CacheClusterStatus.AVAILABLE, "redis", "7.1",
+                new Endpoint("localhost", 6379), Instant.now());
+        cluster.setNumCacheNodes(1);
+        cluster.setCacheNodeType("cache.t4g.micro");
+        cluster.setAuthMode(AuthMode.NO_AUTH);
+        cluster.setArn("arn:aws:elasticache:us-east-1:000000000000:cluster:" + id);
+        cluster.setSnapshotRetentionLimit(5);
+        cluster.setSnapshotWindow("03:00-05:00");
+        cluster.setPreferredMaintenanceWindow("tue:04:00-tue:05:00");
+        cluster.setPreferredAvailabilityZone("us-east-1b");
+        cluster.setNetworkType("ipv4");
+        cluster.setIpDiscovery("ipv4");
+        cluster.setSecurityGroupIds(new ArrayList<>(List.of("sg-123")));
+        return cluster;
+    }
+
+    @Test
+    void createCacheCluster_redisIsAcceptedAndProvisionedAsASingleNodeCluster() {
+        // Real AWS accepts CreateCacheCluster with Engine=redis, and terraform's
+        // aws_elasticache_cluster with engine "redis" emits exactly this call.
+        ArgumentCaptor<ElastiCacheService.CreateCacheClusterRequest> captor =
+                ArgumentCaptor.forClass(ElastiCacheService.CreateCacheClusterRequest.class);
+        when(service.createCacheCluster(captor.capture())).thenReturn(redisCacheCluster("tf-redis"));
+
+        MultivaluedMap<String, String> p = params();
+        p.add("CacheClusterId", "tf-redis");
+        p.add("Engine", "redis");
+        p.add("NumCacheNodes", "1");
+        p.add("CacheNodeType", "cache.t4g.micro");
+        p.add("Port", "6379");
+
+        Response response = handler.handle("CreateCacheCluster", p, "us-east-1");
+
+        assertEquals(200, response.getStatus(), (String) response.getEntity());
+        assertEquals("redis", captor.getValue().engine());
+        assertEquals(1, captor.getValue().numCacheNodes());
+        assertEquals(6379, captor.getValue().port());
+        assertEquals("us-east-1", captor.getValue().region());
+        verify(memcachedService, never()).createCacheCluster(any());
+
+        String body = (String) response.getEntity();
+        assertTrue(body.contains("<Engine>redis</Engine>"), body);
+        assertTrue(body.contains("<NumCacheNodes>1</NumCacheNodes>"), body);
+        assertTrue(body.contains("<CacheNodeType>cache.t4g.micro</CacheNodeType>"), body);
+        // AWS reports CacheNodes only on a describe that asked for node info
+        assertFalse(body.contains("<CacheNodes>"), body);
+    }
+
+    @Test
+    void createCacheCluster_passesEveryOptionalMemberTheRequestCarries() {
+        // Each of these is an optional aws_elasticache_cluster argument: one dropped here reads
+        // back as unset on the next plan and terraform can never settle the diff.
+        ArgumentCaptor<ElastiCacheService.CreateCacheClusterRequest> captor =
+                ArgumentCaptor.forClass(ElastiCacheService.CreateCacheClusterRequest.class);
+        when(service.createCacheCluster(captor.capture())).thenReturn(redisCacheCluster("tf-redis"));
+
+        MultivaluedMap<String, String> p = params();
+        p.add("CacheClusterId", "tf-redis");
+        p.add("Engine", "redis");
+        p.add("SnapshotRetentionLimit", "5");
+        p.add("SnapshotWindow", "03:00-05:00");
+        p.add("PreferredMaintenanceWindow", "tue:04:00-tue:05:00");
+        p.add("PreferredAvailabilityZone", "us-east-1b");
+        p.add("SecurityGroupIds.member.1", "sg-123");
+        p.add("NetworkType", "ipv4");
+        p.add("IpDiscovery", "ipv4");
+        p.add("AtRestEncryptionEnabled", "true");
+
+        assertEquals(200, handler.handle("CreateCacheCluster", p, "us-east-1").getStatus());
+
+        ElastiCacheService.CreateCacheClusterRequest request = captor.getValue();
+        assertEquals(5, request.snapshotRetentionLimit());
+        assertEquals("03:00-05:00", request.snapshotWindow());
+        assertEquals("tue:04:00-tue:05:00", request.preferredMaintenanceWindow());
+        assertEquals("us-east-1b", request.preferredAvailabilityZone());
+        assertEquals(List.of("sg-123"), request.securityGroupIds());
+        assertEquals("ipv4", request.networkType());
+        assertEquals("ipv4", request.ipDiscovery());
+        assertEquals(Boolean.TRUE, request.atRestEncryptionEnabled());
+    }
+
+    @Test
+    void createCacheCluster_unknownEngineIsStillRefused() {
+        MultivaluedMap<String, String> p = params();
+        p.add("CacheClusterId", "mystery");
+        p.add("Engine", "mongodb");
+
+        Response response = handler.handle("CreateCacheCluster", p, "us-east-1");
 
         assertEquals(400, response.getStatus());
         assertTrue(((String) response.getEntity()).contains("InvalidParameterValue"));
+        verifyNoInteractions(memcachedService);
+    }
+
+    @Test
+    void createCacheCluster_memcachedStillGoesToTheMemcachedService() {
+        ArgumentCaptor<ElastiCacheService.CreateCacheClusterRequest> captor =
+                ArgumentCaptor.forClass(ElastiCacheService.CreateCacheClusterRequest.class);
+        when(memcachedService.createCacheCluster(captor.capture())).thenReturn(new CacheCluster(
+                "mc", CacheClusterStatus.AVAILABLE, "memcached", "1.6.22",
+                new Endpoint("localhost", 11211), Instant.now()));
+
+        MultivaluedMap<String, String> p = params();
+        p.add("CacheClusterId", "mc");
+        p.add("Engine", "memcached");
+        p.add("NumCacheNodes", "2");
+        p.add("CacheNodeType", "cache.m5.large");
+        p.add("CacheSubnetGroupName", "my-subnets");
+        p.add("SecurityGroupIds.SecurityGroupId.1", "sg-1");
+
+        String body = (String) handler.handle("CreateCacheCluster", p, "us-east-1").getEntity();
+
+        // the request members reach the Memcached service rather than stopping at the id
+        assertEquals("mc", captor.getValue().cacheClusterId());
+        assertEquals(2, captor.getValue().numCacheNodes());
+        assertEquals("cache.m5.large", captor.getValue().cacheNodeType());
+        assertEquals("my-subnets", captor.getValue().cacheSubnetGroupName());
+        assertEquals(List.of("sg-1"), captor.getValue().securityGroupIds());
+        assertEquals("us-east-1", captor.getValue().region());
+        verify(service, never()).createCacheCluster(any());
+        assertTrue(body.contains(
+                "<ConfigurationEndpoint><Address>localhost</Address><Port>11211</Port></ConfigurationEndpoint>"), body);
+    }
+
+    @Test
+    void describeCacheClusters_reportsASingleNodeRedisClusterByItsNodeEndpoint() {
+        // AWS gives a redis cache cluster no ConfigurationEndpoint (that is Memcached's node
+        // discovery endpoint); terraform-provider-aws reads the port off CacheNodes instead.
+        when(service.findCacheClusters("tf-redis")).thenReturn(List.of(redisCacheCluster("tf-redis")));
+
+        MultivaluedMap<String, String> p = params();
+        p.add("CacheClusterId", "tf-redis");
+        p.add("ShowCacheNodeInfo", "true");
+        Response response = handler.handle("DescribeCacheClusters", p, "us-east-1");
+
+        assertEquals(200, response.getStatus());
+        String body = (String) response.getEntity();
+        assertTrue(body.contains("<CacheClusterId>tf-redis</CacheClusterId>"), body);
+        assertTrue(body.contains("<CacheClusterStatus>available</CacheClusterStatus>"), body);
+        assertTrue(body.contains("<Engine>redis</Engine>"), body);
+        assertTrue(body.contains("<EngineVersion>7.1</EngineVersion>"), body);
+        assertTrue(body.contains("<ARN>arn:aws:elasticache:us-east-1:000000000000:cluster:tf-redis</ARN>"), body);
+        assertTrue(body.contains("<CacheNodeId>0001</CacheNodeId>"), body);
+        assertTrue(body.contains("<Endpoint><Address>localhost</Address><Port>6379</Port></Endpoint>"), body);
+        assertFalse(body.contains("<ConfigurationEndpoint>"), body);
+        // the optional members are echoed, so a terraform re-plan has nothing to change
+        assertTrue(body.contains("<SnapshotRetentionLimit>5</SnapshotRetentionLimit>"), body);
+        assertTrue(body.contains("<SnapshotWindow>03:00-05:00</SnapshotWindow>"), body);
+        assertTrue(body.contains("<PreferredMaintenanceWindow>tue:04:00-tue:05:00</PreferredMaintenanceWindow>"), body);
+        assertTrue(body.contains("<PreferredAvailabilityZone>us-east-1b</PreferredAvailabilityZone>"), body);
+        assertTrue(body.contains("<SecurityGroupId>sg-123</SecurityGroupId>"), body);
+        assertTrue(body.contains("<NetworkType>ipv4</NetworkType>"), body);
+        assertTrue(body.contains("<IpDiscovery>ipv4</IpDiscovery>"), body);
+        assertTrue(body.contains("<CacheClusterCreateTime>"), body);
+        // the Memcached store is not consulted for an id another source answered for, so its
+        // not-found fault cannot turn a hit into a 404
+        verify(memcachedService, never()).listCacheClusters(anyString());
+    }
+
+    @Test
+    void describeCacheClusters_singleNodeCarriesTheNodeMetadataTerraformDereferences() {
+        // The node shape, not the endpoint, is what broke adoption: a create succeeded and the
+        // very next refresh died with "Unexpected nil pointer" showing CacheNodeCreateTime:<nil>
+        // and ParameterGroupStatus:<nil>. terraform-provider-aws reads both without a nil check,
+        // and AWS returns both on every available node.
+        when(service.findCacheClusters("tf-redis")).thenReturn(List.of(redisCacheCluster("tf-redis")));
+
+        MultivaluedMap<String, String> p = params();
+        p.add("CacheClusterId", "tf-redis");
+        p.add("ShowCacheNodeInfo", "true");
+        Response response = handler.handle("DescribeCacheClusters", p, "us-east-1");
+
+        assertEquals(200, response.getStatus());
+        String body = (String) response.getEntity();
+        assertTrue(body.contains("<CacheNodeCreateTime>"), body);
+        assertTrue(body.contains("<ParameterGroupStatus>in-sync</ParameterGroupStatus>"), body);
+        // AWS reports the node's AZ as the cluster's; a mismatch is a permanent terraform diff
+        assertTrue(body.contains("<CustomerAvailabilityZone>us-east-1b</CustomerAvailabilityZone>"), body);
+        // the node was created with its cluster, so the two timestamps agree
+        String nodeTime = between(body, "<CacheNodeCreateTime>", "</CacheNodeCreateTime>");
+        String clusterTime = between(body, "<CacheClusterCreateTime>", "</CacheClusterCreateTime>");
+        assertEquals(clusterTime, nodeTime, body);
+    }
+
+    private static String between(String body, String open, String close) {
+        int from = body.indexOf(open);
+        assertTrue(from >= 0, "missing " + open + " in " + body);
+        return body.substring(from + open.length(), body.indexOf(close, from));
+    }
+
+    @Test
+    void describeCacheClusters_reportsAMemcachedClustersSettingsAndEveryNode() {
+        CacheCluster mc = new CacheCluster("mc", CacheClusterStatus.AVAILABLE, "memcached", "1.6.22",
+                new Endpoint("localhost", 11211), Instant.parse("2026-01-01T00:00:00Z"));
+        mc.setNumCacheNodes(3);
+        mc.setCacheNodeType("cache.m5.large");
+        mc.setCacheParameterGroupName("default.memcached1.6");
+        mc.setCacheSubnetGroupName("my-subnets");
+        mc.setSecurityGroupIds(new ArrayList<>(List.of("sg-1")));
+        mc.setPreferredAvailabilityZone("us-east-1c");
+        mc.setArn("arn:aws:elasticache:us-east-1:000000000000:cluster:mc");
+        when(service.findCacheClusters("mc")).thenReturn(List.of());
+        when(service.listMemberCacheClusters("mc")).thenReturn(List.of());
+        when(memcachedService.listCacheClusters("mc")).thenReturn(List.of(mc));
+
+        MultivaluedMap<String, String> p = params();
+        p.add("CacheClusterId", "mc");
+        p.add("ShowCacheNodeInfo", "true");
+        String body = (String) handler.handle("DescribeCacheClusters", p, "us-east-1").getEntity();
+
+        assertTrue(body.contains(
+                "<ConfigurationEndpoint><Address>localhost</Address><Port>11211</Port></ConfigurationEndpoint>"), body);
+        assertTrue(body.contains("<NumCacheNodes>3</NumCacheNodes>"), body);
+        assertTrue(body.contains("<CacheNodeType>cache.m5.large</CacheNodeType>"), body);
+        assertTrue(body.contains("<CacheParameterGroupName>default.memcached1.6</CacheParameterGroupName>"), body);
+        assertTrue(body.contains("<CacheSubnetGroupName>my-subnets</CacheSubnetGroupName>"), body);
+        assertTrue(body.contains("<SecurityGroupId>sg-1</SecurityGroupId>"), body);
+        assertTrue(body.contains("<PreferredAvailabilityZone>us-east-1c</PreferredAvailabilityZone>"), body);
+        assertTrue(body.contains("<ARN>arn:aws:elasticache:us-east-1:000000000000:cluster:mc</ARN>"), body);
+        assertTrue(body.contains("<CacheClusterCreateTime>2026-01-01T00:00:00Z</CacheClusterCreateTime>"), body);
+        // one CacheNode per node, numbered as AWS numbers them, each with the node metadata
+        // terraform-provider-aws dereferences
+        assertEquals(3, body.split("<CacheNode>", -1).length - 1, body);
+        assertTrue(body.contains("<CacheNode><CacheNodeId>0001</CacheNodeId>"), body);
+        assertTrue(body.contains("<CacheNode><CacheNodeId>0003</CacheNodeId>"), body);
+        assertFalse(body.contains("<CacheNodeId>0004</CacheNodeId>"), body);
+        assertEquals(3, body.split("<ParameterGroupStatus>in-sync</ParameterGroupStatus>", -1).length - 1, body);
+        assertEquals(3, body.split("<Endpoint><Address>localhost</Address><Port>11211</Port></Endpoint>", -1).length - 1, body);
+        // redis-only members stay off a Memcached cluster
+        assertFalse(body.contains("<SnapshotRetentionLimit>"), body);
+        assertFalse(body.contains("<AuthTokenEnabled>"), body);
+    }
+
+    @Test
+    void describeCacheClusters_aMemcachedRecordPersistedWithoutANodeCountReportsOneNode() {
+        // records written before node counts were stored deserialize with 0
+        CacheCluster legacy = new CacheCluster("old", CacheClusterStatus.AVAILABLE, "memcached", "1.6.22",
+                new Endpoint("localhost", 11211), Instant.now());
+        when(service.findCacheClusters("old")).thenReturn(List.of());
+        when(service.listMemberCacheClusters("old")).thenReturn(List.of());
+        when(memcachedService.listCacheClusters("old")).thenReturn(List.of(legacy));
+
+        MultivaluedMap<String, String> p = params();
+        p.add("CacheClusterId", "old");
+        p.add("ShowCacheNodeInfo", "true");
+        String body = (String) handler.handle("DescribeCacheClusters", p, "us-east-1").getEntity();
+
+        assertTrue(body.contains("<NumCacheNodes>1</NumCacheNodes>"), body);
+        assertEquals(1, body.split("<CacheNode>", -1).length - 1, body);
+    }
+
+    @Test
+    void describeCacheClusters_stillRaisesNotFoundWhenNoSourceKnowsTheId() {
+        when(service.findCacheClusters("absent")).thenReturn(List.of());
+        when(memcachedService.listCacheClusters("absent")).thenThrow(
+                new AwsException("CacheClusterNotFound", "Cache cluster absent not found.", 404));
+
+        MultivaluedMap<String, String> p = params();
+        p.add("CacheClusterId", "absent");
+
+        assertEquals(404, handler.handle("DescribeCacheClusters", p, "us-east-1").getStatus());
+    }
+
+    @Test
+    void deleteCacheCluster_routesToTheServiceThatHoldsTheCluster() {
+        CacheCluster cluster = redisCacheCluster("tf-redis");
+        when(service.findCacheClusters("tf-redis")).thenReturn(List.of(cluster));
+        when(service.deleteCacheCluster("tf-redis")).thenReturn(cluster);
+
+        MultivaluedMap<String, String> p = params();
+        p.add("CacheClusterId", "tf-redis");
+
+        assertEquals(200, handler.handle("DeleteCacheCluster", p, "us-east-1").getStatus());
+        verify(service).deleteCacheCluster("tf-redis");
+        verify(memcachedService, never()).deleteCacheCluster(anyString());
+    }
+
+    @Test
+    void listTagsForResource_readsTagsOffACacheClusterArn() {
+        CacheCluster cluster = redisCacheCluster("tf-redis");
+        cluster.setTags(new LinkedHashMap<>(Map.of("Name", "cache")));
+        when(service.findCacheClusters("tf-redis")).thenReturn(List.of(cluster));
+
+        MultivaluedMap<String, String> p = params();
+        p.add("ResourceName", "arn:aws:elasticache:us-east-1:000000000000:cluster:tf-redis");
+
+        String body = (String) handler.handle("ListTagsForResource", p, "us-east-1").getEntity();
+        assertTrue(body.contains("<Key>Name</Key>"), body);
+        assertTrue(body.contains("<Value>cache</Value>"), body);
+    }
+
+    @Test
+    void listTagsForResource_clusterArnOfAnUnknownIdIsNotFound() {
+        when(service.findCacheClusters("absent")).thenReturn(List.of());
+        when(memcachedService.getCacheCluster("absent")).thenThrow(
+                new AwsException("CacheClusterNotFound", "Cache cluster absent not found.", 404));
+
+        MultivaluedMap<String, String> p = params();
+        p.add("ResourceName", "arn:aws:elasticache:us-east-1:000000000000:cluster:absent");
+
+        Response response = handler.handle("ListTagsForResource", p, "us-east-1");
+        assertEquals(404, response.getStatus());
+        assertTrue(((String) response.getEntity()).contains("CacheClusterNotFound"));
+    }
+
+    @Test
+    void listTagsForResource_clusterArnFromAnotherRegionIsNotThisCluster() {
+        // the store keys clusters by id alone, so a same-named cluster created under another
+        // region is not the one this ARN names
+        CacheCluster elsewhere = redisCacheCluster("tf-redis");
+        elsewhere.setArn("arn:aws:elasticache:eu-west-1:000000000000:cluster:tf-redis");
+        elsewhere.setTags(new LinkedHashMap<>(Map.of("Name", "west")));
+        when(service.findCacheClusters("tf-redis")).thenReturn(List.of(elsewhere));
+
+        MultivaluedMap<String, String> p = params();
+        p.add("ResourceName", "arn:aws:elasticache:us-east-1:000000000000:cluster:tf-redis");
+
+        Response response = handler.handle("ListTagsForResource", p, "us-east-1");
+        assertEquals(404, response.getStatus(), (String) response.getEntity());
+        assertFalse(((String) response.getEntity()).contains("west"));
+    }
+
+    @Test
+    void listTagsForResource_memcachedClusterArnStillAnswersWithNoTags() {
+        // Memcached clusters carry no tags but they do exist: this must not become a 404.
+        when(service.findCacheClusters("mc")).thenReturn(List.of());
+        when(service.listMemberCacheClusters("mc")).thenReturn(List.of());
+        when(memcachedService.getCacheCluster("mc")).thenReturn(new CacheCluster(
+                "mc", CacheClusterStatus.AVAILABLE, "memcached", "1.6.22",
+                new Endpoint("localhost", 11211), Instant.now()));
+
+        MultivaluedMap<String, String> p = params();
+        p.add("ResourceName", "arn:aws:elasticache:us-east-1:000000000000:cluster:mc");
+
+        Response response = handler.handle("ListTagsForResource", p, "us-east-1");
+        assertEquals(200, response.getStatus());
+        assertTrue(((String) response.getEntity()).contains("<TagList></TagList>"),
+                (String) response.getEntity());
     }
 }

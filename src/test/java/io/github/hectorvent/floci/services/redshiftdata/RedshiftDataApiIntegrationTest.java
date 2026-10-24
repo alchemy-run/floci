@@ -2,7 +2,10 @@ package io.github.hectorvent.floci.services.redshiftdata;
 
 import io.github.hectorvent.floci.services.redshift.RedshiftService;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
+import io.quarkus.test.common.http.TestHTTPResource;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.ExtractableResponse;
+import io.restassured.response.Response;
 import jakarta.inject.Inject;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterAll;
@@ -10,13 +13,23 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.redshiftdata.RedshiftDataClient;
+import software.amazon.awssdk.services.redshiftdata.model.ExecuteStatementResponse;
+import software.amazon.awssdk.services.redshiftdata.model.ResourceNotFoundException;
 
+import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
@@ -27,6 +40,9 @@ class RedshiftDataApiIntegrationTest {
 
     @Inject
     RedshiftService redshift;
+
+    @TestHTTPResource("/")
+    URI endpoint;
 
     private String clusterId;
 
@@ -71,16 +87,50 @@ class RedshiftDataApiIntegrationTest {
     private void awaitFinished(String id) {
         Awaitility.await().atMost(Duration.ofSeconds(30)).pollDelay(Duration.ZERO)
                 .pollInterval(Duration.ofMillis(250)).until(() -> {
-            String status = RestAssuredJsonUtils.awsAction("RedshiftData", "DescribeStatement",
-                    "{\"Id\":\"" + id + "\"}").then().statusCode(200).extract().path("Status");
+            ExtractableResponse<Response> described = RestAssuredJsonUtils.awsAction("RedshiftData", "DescribeStatement",
+                    "{\"Id\":\"" + id + "\"}").then().statusCode(200).extract();
+            String status = described.path("Status");
             assertTrue(!"FAILED".equals(status) && !"ABORTED".equals(status),
-                    () -> "statement " + id + " ended " + status);
+                    () -> "statement " + id + " ended " + status + ": " + described.path("Error"));
             return "FINISHED".equals(status);
         });
     }
 
     private static int asInt(Object value) {
         return ((Number) value).intValue();
+    }
+
+    @Test
+    void sdkSessionPreservesPostgresTemporaryTablesAcrossExecuteAndBatch() {
+        try (RedshiftDataClient data = RedshiftDataClient.builder().endpointOverride(endpoint).region(Region.US_EAST_1)
+                .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test"))).build()) {
+            ExecuteStatementResponse created = data.executeStatement(request -> request.clusterIdentifier(clusterId)
+                    .dbUser("admin").database("dev").sessionKeepAliveSeconds(60)
+                    .sql("CREATE TEMP TABLE session_rows(id integer)"));
+            assertNotNull(created.sessionId());
+            awaitFinished(created.id());
+            String session = created.sessionId();
+            awaitFinished(data.batchExecuteStatement(request -> request.sessionId(session)
+                    .sqls("INSERT INTO session_rows VALUES (41)", "INSERT INTO session_rows VALUES (42)")).id());
+            awaitFinished(data.executeStatement(request -> request.sessionId(session).sql("VACUUM")).id());
+            awaitFinished(data.executeStatement(request -> request.sessionId(session).sql("BEGIN")).id());
+            awaitFinished(data.executeStatement(request -> request.sessionId(session).sql("INSERT INTO session_rows VALUES (99)")).id());
+            awaitFinished(data.executeStatement(request -> request.sessionId(session).sql("ROLLBACK")).id());
+            String query = data.executeStatement(request -> request.sessionId(session).sql("SELECT id FROM session_rows ORDER BY id")).id();
+            awaitFinished(query);
+            assertEquals(session, data.describeStatement(request -> request.id(query)).sessionId());
+            assertEquals(2L, data.getStatementResult(request -> request.id(query)).totalNumRows());
+            assertEquals(41L, data.getStatementResult(request -> request.id(query)).records().getFirst().getFirst().longValue());
+            String last = data.executeStatement(request -> request.sessionId(session).sessionKeepAliveSeconds(0).sql("SELECT 1")).id();
+            awaitFinished(last);
+            assertThrows(ResourceNotFoundException.class,
+                    () -> data.executeStatement(request -> request.sessionId(session).sql("SELECT 1")));
+        }
+    }
+
+    @Test
+    void vacuumPreservesAutoCommitExecution() {
+        executeAndWait("VACUUM");
     }
 
     @Test
@@ -92,7 +142,7 @@ class RedshiftDataApiIntegrationTest {
         assertEquals(2, asInt(insertRows));
 
         String selectId = executeAndWait("SELECT id, name FROM t ORDER BY id");
-        var result = RestAssuredJsonUtils.awsAction("RedshiftData", "GetStatementResult",
+        ExtractableResponse<Response> result = RestAssuredJsonUtils.awsAction("RedshiftData", "GetStatementResult",
                 "{\"Id\":\"" + selectId + "\"}").then().statusCode(200).extract();
         assertEquals(2, asInt(result.path("TotalNumRows")));
         assertEquals("id", result.path("ColumnMetadata[0].name"));
@@ -187,5 +237,45 @@ class RedshiftDataApiIntegrationTest {
                 .pollInterval(Duration.ofMillis(250)).until(() ->
                 "FAILED".equals(RestAssuredJsonUtils.awsAction("RedshiftData", "DescribeStatement",
                         "{\"Id\":\"" + id + "\"}").then().statusCode(200).extract().path("Status")));
+    }
+
+    @Test
+    void slowSqlReturnsEarlyAndCanBeCancelled() {
+        long started = System.nanoTime();
+        String id = RestAssuredJsonUtils.awsAction("RedshiftData", "ExecuteStatement", """
+                {"Sql":"SELECT pg_sleep(20)","ClusterIdentifier":"%s","DbUser":"admin","Database":"dev"}
+                """.formatted(clusterId)).then().statusCode(200).extract().path("Id");
+        assertTrue(Duration.ofNanos(System.nanoTime() - started).compareTo(Duration.ofSeconds(10)) < 0);
+        Awaitility.await().atMost(Duration.ofSeconds(10)).until(() -> "STARTED".equals(
+                RestAssuredJsonUtils.awsAction("RedshiftData", "DescribeStatement", "{\"Id\":\"" + id + "\"}")
+                        .then().statusCode(200).extract().path("Status")));
+        RestAssuredJsonUtils.awsAction("RedshiftData", "CancelStatement", "{\"Id\":\"" + id + "\"}")
+                .then().statusCode(200).body("Status", is(true));
+        Awaitility.await().atMost(Duration.ofSeconds(10)).until(() -> "ABORTED".equals(
+                RestAssuredJsonUtils.awsAction("RedshiftData", "DescribeStatement", "{\"Id\":\"" + id + "\"}")
+                        .then().statusCode(200).extract().path("Status")));
+    }
+
+    @Test
+    void cancellingBatchRollsBackEarlierWrites() {
+        executeAndWait("CREATE TABLE cancel_batch (id int)");
+        String id = RestAssuredJsonUtils.awsAction("RedshiftData", "BatchExecuteStatement", """
+                {"Sqls":["INSERT INTO cancel_batch VALUES (1)","SELECT pg_sleep(20)",
+                "INSERT INTO cancel_batch VALUES (2)"],"ClusterIdentifier":"%s","DbUser":"admin","Database":"dev"}
+                """.formatted(clusterId)).then().statusCode(200).extract().path("Id");
+        Awaitility.await().atMost(Duration.ofSeconds(10)).until(() -> {
+            List<?> children = RestAssuredJsonUtils.awsAction("RedshiftData", "DescribeStatement", "{\"Id\":\"" + id + "\"}")
+                    .then().statusCode(200).extract().path("SubStatements");
+            return children != null && !children.isEmpty();
+        });
+        RestAssuredJsonUtils.awsAction("RedshiftData", "CancelStatement", "{\"Id\":\"" + id + "\"}")
+                .then().statusCode(200).body("Status", is(true));
+        Awaitility.await().atMost(Duration.ofSeconds(10)).until(() -> "ABORTED".equals(
+                RestAssuredJsonUtils.awsAction("RedshiftData", "DescribeStatement", "{\"Id\":\"" + id + "\"}")
+                        .then().statusCode(200).extract().path("Status")));
+        String countId = executeAndWait("SELECT count(*) FROM cancel_batch");
+        Object count = RestAssuredJsonUtils.awsAction("RedshiftData", "GetStatementResult", "{\"Id\":\"" + countId + "\"}")
+                .then().statusCode(200).extract().path("Records[0][0].longValue");
+        assertEquals(0, asInt(count));
     }
 }

@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Test;
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
-
 import java.util.List;
 import java.util.Map;
 
@@ -180,7 +179,7 @@ class XmlParserTest {
 
     @Test
     void extractElementTreePreservesNestedNamespaceQualifiedBlocks() {
-        var root = XmlParser.extractElementTree("""
+        XmlParser.XmlElement root = XmlParser.extractElementTree("""
                 <Envelope xmlns:cf="https://cloudfront.amazonaws.com/doc/2020-05-31/">
                   <cf:Config>
                     <cf:First><cf:Value>one</cf:Value></cf:First>
@@ -202,6 +201,34 @@ class XmlParserTest {
         assertNull(XmlParser.extractElementTree(null, "Target"));
     }
 
+    // --- parseDocumentElementTree: the whole document or nothing ---
+
+    @Test
+    void parseDocumentElementTreeReturnsTheDocumentElement() {
+        XmlParser.XmlElement root = XmlParser.parseDocumentElementTree("""
+                <?xml version="1.0" encoding="UTF-8"?>
+                <Root xmlns="urn:test"><Item><Name>a</Name></Item></Root>
+                <!-- a trailing comment is well-formed -->
+                """);
+
+        assertEquals("Root", root.name());
+        assertEquals("a", root.child("Item").child("Name").text());
+    }
+
+    @Test
+    void parseDocumentElementTreeRejectsMalformedContentAfterTheDocumentElement() {
+        // extractElementTree stops at the end of the element it found; this keeps reading.
+        String trailingElement = "<Root><Item>a</Item></Root><Item>b</Item>";
+        String trailingText = "<Root><Item>a</Item></Root>junk";
+
+        assertNotNull(XmlParser.extractElementTree(trailingElement, "Root"));
+        assertNull(XmlParser.parseDocumentElementTree(trailingElement));
+        assertNull(XmlParser.parseDocumentElementTree(trailingText));
+        assertNull(XmlParser.parseDocumentElementTree("<Root><Item></Root>"));
+        assertNull(XmlParser.parseDocumentElementTree(""));
+        assertNull(XmlParser.parseDocumentElementTree(null));
+    }
+
     // --- extractDeleteObjectEntries: batch delete Key/VersionId pairing ---
 
     @Test
@@ -218,6 +245,24 @@ class XmlParserTest {
         assertEquals(2, entries.size());
         assertEquals(new XmlParser.KeyVersion("a.txt", "v1"), entries.get(0));
         assertEquals(new XmlParser.KeyVersion("b.txt", "v2"), entries.get(1));
+    }
+
+    @Test
+    void extractDeleteObjectEntriesKeepsEachObjectsETag() {
+        String xml = """
+                <Delete>
+                  <Object><Key>a.txt</Key><ETag>"abc"</ETag></Object>
+                  <Object><Key>b.txt</Key><VersionId>v2</VersionId></Object>
+                  <Object><Key>c.txt</Key><ETag>*</ETag></Object>
+                </Delete>
+                """;
+
+        List<XmlParser.KeyVersion> entries = XmlParser.extractDeleteObjectEntries(xml);
+
+        assertEquals(List.of(
+                new XmlParser.KeyVersion("a.txt", null, "\"abc\""),
+                new XmlParser.KeyVersion("b.txt", "v2", null),
+                new XmlParser.KeyVersion("c.txt", null, "*")), entries);
     }
 
     @Test
@@ -368,8 +413,8 @@ class XmlParserTest {
                 </Conf>
                 """;
 
-        var groups = XmlParser.extractGroupsMulti(xml, "QueueConfiguration");
-        var filters = XmlParser.extractPairsPerGroup(xml, "QueueConfiguration",
+        List<Map<String, List<String>>> groups = XmlParser.extractGroupsMulti(xml, "QueueConfiguration");
+        List<Map<String, String>> filters = XmlParser.extractPairsPerGroup(xml, "QueueConfiguration",
                 "FilterRule", "Name", "Value");
 
         assertEquals(2, groups.size());

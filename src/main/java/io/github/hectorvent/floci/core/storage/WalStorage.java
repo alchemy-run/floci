@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.core.storage;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -7,29 +8,42 @@ import com.fasterxml.jackson.dataformat.cbor.CBORFactory;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.jboss.logging.Logger;
 
-import java.io.*;
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.EOFException;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 /**
  * Write-Ahead Log storage: in-memory reads with append-only binary WAL for durability.
- * Periodic compaction writes a full snapshot and truncates the WAL.
+ * Periodic compaction writes a full snapshot and truncates the WAL, and is skipped while
+ * nothing has changed since the last snapshot.
  * On startup: load snapshot, then replay WAL entries after snapshot.
  *
  * Binary WAL entry format:
  *   PUT:    [0x01] [4-byte key length] [key bytes] [4-byte value length] [value bytes]
  *   DELETE: [0x02] [4-byte key length] [key bytes]
+ *   BATCH:  [0x03] [4-byte map length] [CBOR map bytes]
+ *   DELETE_BATCH: [0x04] [4-byte array length] [CBOR key array bytes]
  *
  * Key and value bytes are serialized via Jackson CBOR (compact binary format).
  * Snapshot files use indented JSON for debuggability.
@@ -40,8 +54,10 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
 
     static final byte OP_PUT = 0x01;
     static final byte OP_DELETE = 0x02;
+    static final byte OP_BATCH = 0x03;
+    static final byte OP_DELETE_BATCH = 0x04;
 
-    private final ConcurrentHashMap<K, V> store = new ConcurrentHashMap<>();
+    private volatile ConcurrentHashMap<K, V> store = new ConcurrentHashMap<>();
     private final Path snapshotPath;
     private final Path walPath;
     private final ObjectMapper snapshotMapper;
@@ -50,6 +66,9 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
     private final ReentrantReadWriteLock compactionLock = new ReentrantReadWriteLock();
     private final ScheduledExecutorService scheduler;
     private volatile DataOutputStream walWriter;
+    // Set under the read lock by every mutation and cleared under the write lock by compaction,
+    // so an idle store does not rewrite its snapshot on every compaction tick.
+    private volatile boolean dirty;
 
     public WalStorage(Path snapshotPath, Path walPath, TypeReference<Map<K, V>> typeReference,
                       long compactionIntervalMs) {
@@ -66,13 +85,7 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
         this.walMapper.registerModule(new JavaTimeModule());
         this.walMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
-        this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "wal-storage-compaction");
-            t.setDaemon(true);
-            return t;
-        });
-        this.scheduler.scheduleAtFixedRate(this::compact, compactionIntervalMs, compactionIntervalMs,
-                TimeUnit.MILLISECONDS);
+        this.scheduler = StorageFiles.scheduleEvery("wal-storage-compaction", compactionIntervalMs, this::compact);
     }
 
     @Override
@@ -80,9 +93,106 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
         compactionLock.readLock().lock();
         try {
             store.put(key, value);
+            dirty = true;
             appendPut(key, value);
         } finally {
             compactionLock.readLock().unlock();
+        }
+    }
+
+    /**
+     * Appends the whole batch as one contiguous run of WAL records with a single flush, so a
+     * batch costs one write instead of one per entry. An empty batch touches nothing.
+     */
+    @Override
+    public void putAll(Map<K, V> entries) {
+        if (entries.isEmpty()) {
+            return;
+        }
+        compactionLock.readLock().lock();
+        try {
+            store.putAll(entries);
+            dirty = true;
+            appendPuts(entries);
+        } finally {
+            compactionLock.readLock().unlock();
+        }
+    }
+
+    /** A batch is one length-delimited CBOR map, applied only after the entire frame decodes. */
+    @Override
+    public void putAllAtomically(Map<K, V> entries) {
+        Map<K, V> replacements = Map.copyOf(entries);
+        if (replacements.isEmpty()) {
+            return;
+        }
+        byte[] payload;
+        try {
+            payload = walMapper.writeValueAsBytes(replacements);
+        } catch (IOException exception) {
+            throw new UncheckedIOException("Failed to encode atomic WAL batch", exception);
+        }
+        commitBatch(OP_BATCH, payload, replacements, Set.of());
+    }
+
+    @Override
+    public void deleteAllAtomically(Set<K> keys) {
+        Set<K> deletions = Set.copyOf(keys);
+        if (deletions.isEmpty()) {
+            return;
+        }
+        byte[] payload;
+        try {
+            payload = walMapper.writeValueAsBytes(deletions);
+        } catch (IOException exception) {
+            throw new UncheckedIOException("Failed to encode atomic WAL deletions", exception);
+        }
+        commitBatch(OP_DELETE_BATCH, payload, Map.of(), deletions);
+    }
+
+    private void commitBatch(byte operation, byte[] payload, Map<K, V> replacements, Set<K> deletions) {
+        compactionLock.writeLock().lock();
+        try {
+            if (walWriter == null) {
+                throw new IllegalStateException("WAL writer is not open");
+            }
+            ConcurrentHashMap<K, V> candidate = new ConcurrentHashMap<>(store);
+            candidate.putAll(replacements);
+            candidate.keySet().removeAll(deletions);
+            walWriter.flush();
+            FileChannel channel = FileChannel.open(walPath, StandardOpenOption.WRITE);
+            try {
+                long offset = channel.size();
+                channel.position(offset);
+                ByteBuffer record = ByteBuffer.allocate(1 + Integer.BYTES + payload.length);
+                record.put(operation).putInt(payload.length).put(payload).flip();
+                try {
+                    while (record.hasRemaining()) {
+                        channel.write(record);
+                    }
+                    channel.force(true);
+                } catch (IOException exception) {
+                    try {
+                        channel.truncate(offset);
+                        channel.force(true);
+                    } catch (IOException rollbackFailure) {
+                        exception.addSuppressed(rollbackFailure);
+                    }
+                    throw exception;
+                }
+            } finally {
+                try {
+                    channel.close();
+                } catch (IOException exception) {
+                    LOG.warnv(exception, "Failed to close atomic batch channel for {0}", walPath);
+                }
+            }
+            store = candidate;
+            dirty = true;
+        } catch (IOException exception) {
+            throw new UncheckedIOException("Failed to commit atomic WAL batch to " + walPath, exception);
+        } finally {
+            compactionLock.writeLock().unlock();
         }
     }
 
@@ -96,6 +206,7 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
         compactionLock.readLock().lock();
         try {
             store.remove(key);
+            dirty = true;
             appendDelete(key);
         } finally {
             compactionLock.readLock().unlock();
@@ -112,7 +223,7 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
 
     @Override
     public Set<K> keys() {
-        return Collections.unmodifiableSet(store.keySet());
+        return Set.copyOf(store.keySet());
     }
 
     @Override
@@ -129,13 +240,17 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
                 store.putAll(data);
                 LOG.infov("Loaded {0} entries from snapshot {1}", store.size(), snapshotPath);
             } catch (IOException e) {
-                LOG.errorv(e, "Failed to load snapshot from {0}", snapshotPath);
+                StorageQuarantine.quarantine(snapshotPath, e, LOG);
             }
         }
 
         if (Files.exists(walPath)) {
             int replayed = replayWal();
             LOG.infov("Replayed {0} WAL entries from {1}", replayed, walPath);
+            if (replayed > 0) {
+                // The snapshot is behind the log; the next compaction folds the log in.
+                dirty = true;
+            }
         }
 
         openWalWriter();
@@ -150,8 +265,11 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
             try {
                 Files.deleteIfExists(walPath);
                 Files.deleteIfExists(snapshotPath);
+                dirty = false;
             } catch (IOException e) {
                 LOG.errorv(e, "Failed to delete WAL/snapshot files");
+                // A snapshot that survived must be overwritten by the next compaction.
+                dirty = true;
             }
             openWalWriter();
         } finally {
@@ -160,31 +278,56 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
     }
 
     public void shutdown() {
-        scheduler.shutdown();
+        StorageFiles.stop(scheduler);
+        compactionLock.writeLock().lock();
         try {
-            if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
-                scheduler.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            scheduler.shutdownNow();
-            Thread.currentThread().interrupt();
+            compact();
+            closeWalWriter();
+        } finally {
+            compactionLock.writeLock().unlock();
         }
-        compact();
-        closeWalWriter();
+    }
+
+    /**
+     * Reads the store a snapshot and its log hold, replaying the log over the snapshot, and
+     * leaves both files as they are: nothing is compacted or deleted.
+     */
+    static <K, V> Map<K, V> readContents(Path snapshotPath, Path walPath, TypeReference<Map<K, V>> typeReference) {
+        WalStorage<K, V> reader = new WalStorage<>(snapshotPath, walPath, typeReference, Long.MAX_VALUE);
+        boolean hadLog = Files.exists(walPath);
+        try {
+            reader.load();
+            return new HashMap<>(reader.store);
+        } finally {
+            StorageFiles.stop(reader.scheduler);
+            reader.closeWalWriter();
+            if (!hadLog) {
+                // load() opens the log for appends, creating it; this read must leave no file behind.
+                try {
+                    Files.deleteIfExists(walPath);
+                } catch (IOException e) {
+                    LOG.warnv(e, "Failed to remove the empty log {0} a read created", walPath);
+                }
+            }
+        }
     }
 
     private void compact() {
         compactionLock.writeLock().lock();
         try {
-            Files.createDirectories(snapshotPath.getParent());
-            Path tempFile = snapshotPath.resolveSibling(snapshotPath.getFileName() + ".tmp");
-            snapshotMapper.writeValue(tempFile.toFile(), store);
-            Files.move(tempFile, snapshotPath, StandardCopyOption.REPLACE_EXISTING,
-                    StandardCopyOption.ATOMIC_MOVE);
+            if (!dirty) {
+                return;
+            }
+            StorageFiles.writeAtomically(snapshotPath, tempFile -> snapshotMapper.writeValue(tempFile.toFile(), store));
+            dirty = false;
 
             closeWalWriter();
-            Files.deleteIfExists(walPath);
-            openWalWriter();
+            try {
+                Files.deleteIfExists(walPath);
+            } finally {
+                // Reopen even when the delete failed, so later records are still appended.
+                openWalWriter();
+            }
 
             LOG.debugv("Compacted {0} entries to snapshot, WAL truncated", store.size());
         } catch (IOException e) {
@@ -201,16 +344,44 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
             byte[] keyBytes = walMapper.writeValueAsBytes(key);
             byte[] valueBytes = walMapper.writeValueAsBytes(value);
             synchronized (out) {
-                out.writeByte(OP_PUT);
-                out.writeInt(keyBytes.length);
-                out.write(keyBytes);
-                out.writeInt(valueBytes.length);
-                out.write(valueBytes);
+                writePutRecord(out, keyBytes, valueBytes);
                 out.flush();
             }
         } catch (IOException e) {
             LOG.errorv(e, "Failed to append PUT WAL entry");
         }
+    }
+
+    private void appendPuts(Map<K, V> entries) {
+        DataOutputStream out = walWriter;
+        if (out == null) {
+            return;
+        }
+        try {
+            // Encode the whole batch off the shared writer so the lock is held for one write.
+            ByteArrayOutputStream batch = new ByteArrayOutputStream();
+            DataOutputStream records = new DataOutputStream(batch);
+            for (Map.Entry<K, V> entry : entries.entrySet()) {
+                writePutRecord(records, walMapper.writeValueAsBytes(entry.getKey()),
+                        walMapper.writeValueAsBytes(entry.getValue()));
+            }
+            records.flush();
+            synchronized (out) {
+                batch.writeTo(out);
+                out.flush();
+            }
+        } catch (IOException e) {
+            LOG.errorv(e, "Failed to append {0} PUT WAL entries", entries.size());
+        }
+    }
+
+    private static void writePutRecord(DataOutputStream out, byte[] keyBytes, byte[] valueBytes)
+            throws IOException {
+        out.writeByte(OP_PUT);
+        out.writeInt(keyBytes.length);
+        out.write(keyBytes);
+        out.writeInt(valueBytes.length);
+        out.write(valueBytes);
     }
 
     private void appendDelete(K key) {
@@ -229,47 +400,110 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
         }
     }
 
+    /**
+     * Replays the log on top of the snapshot and returns the number of records applied.
+     * <p>
+     * Replay stops at the first record that cannot be framed or decoded: a tail torn by a crash,
+     * a length header that is negative or points past the end of the file, an unknown op byte, or
+     * a payload CBOR cannot read. The store is never failed by such a record; the bytes from that
+     * record onwards are cut off before the writer reopens, so records appended afterwards sit
+     * behind a valid record and are replayed on the next load instead of being lost behind the
+     * garbage. A read error that is not a framing problem leaves the file alone.
+     */
     @SuppressWarnings("unchecked")
     private int replayWal() {
         int replayed = 0;
+        long fileSize;
+        try {
+            fileSize = Files.size(walPath);
+        } catch (IOException e) {
+            LOG.errorv(e, "Failed to read the size of WAL {0}", walPath);
+            return 0;
+        }
+        long consumed = 0;
+        boolean cutTail = true;
         try (DataInputStream in = new DataInputStream(
                 new BufferedInputStream(Files.newInputStream(walPath)))) {
-            while (true) {
-                int op;
-                try {
-                    op = in.readByte();
-                } catch (EOFException e) {
+            while (consumed < fileSize) {
+                int op = in.readByte();
+                byte[] keyBytes = readFrame(in, fileSize - consumed - 1);
+                if (keyBytes == null) {
                     break;
                 }
-
-                int keyLen = in.readInt();
-                byte[] keyBytes = in.readNBytes(keyLen);
-                if (keyBytes.length < keyLen) break; // truncated entry
-
-                if (op == OP_PUT) {
-                    int valueLen = in.readInt();
-                    byte[] valueBytes = in.readNBytes(valueLen);
-                    if (valueBytes.length < valueLen) break; // truncated entry
-
+                long recordLength = 1 + 4 + keyBytes.length;
+                if (op == OP_BATCH) {
+                    Map<K, V> batch = walMapper.readValue(keyBytes, typeReference);
+                    if (batch == null || batch.entrySet().stream()
+                            .anyMatch(entry -> entry.getKey() == null || entry.getValue() == null)) {
+                        LOG.warnv("Invalid WAL batch at offset {0} in {1}, stopping replay", consumed, walPath);
+                        break;
+                    }
+                    store.putAll(batch);
+                } else if (op == OP_DELETE_BATCH) {
+                    List<K> keys = walMapper.readValue(keyBytes, walMapper.getTypeFactory().constructCollectionType(
+                            List.class, walMapper.constructType(typeReference.getType()).getKeyType()));
+                    if (keys == null || keys.stream().anyMatch(key -> key == null)) {
+                        LOG.warnv("Invalid WAL deletion batch at offset {0} in {1}, stopping replay", consumed, walPath);
+                        break;
+                    }
+                    keys.forEach(store::remove);
+                } else if (op == OP_PUT) {
+                    byte[] valueBytes = readFrame(in, fileSize - consumed - recordLength);
+                    if (valueBytes == null) {
+                        break;
+                    }
+                    recordLength += 4 + valueBytes.length;
                     K key = (K) walMapper.readValue(keyBytes, Object.class);
                     V value = walMapper.readValue(valueBytes,
                             walMapper.constructType(typeReference.getType()).getContentType());
                     store.put(key, value);
-                    replayed++;
                 } else if (op == OP_DELETE) {
                     K key = (K) walMapper.readValue(keyBytes, Object.class);
                     store.remove(key);
-                    replayed++;
                 } else {
-                    LOG.errorv("Unknown WAL op byte: {0}, stopping replay", op);
+                    LOG.warnv("Unknown WAL op byte {0} at offset {1} in {2}, stopping replay",
+                            op, consumed, walPath);
                     break;
                 }
+                consumed += recordLength;
+                replayed++;
             }
+        } catch (EOFException | JsonProcessingException e) {
+            LOG.warnv("WAL {0} is unreadable from offset {1}: {2}", walPath, consumed, e.getMessage());
         } catch (IOException e) {
+            cutTail = false;
             LOG.errorv(e, "Failed to replay WAL from {0} (replayed {1} entries before error)",
                     walPath, replayed);
         }
+        if (cutTail && consumed < fileSize) {
+            cutWalTail(consumed, fileSize);
+        }
         return replayed;
+    }
+
+    /**
+     * Reads one length-prefixed frame, or returns {@code null} when the length is negative or
+     * larger than the bytes left in the file, which marks the record as torn or corrupt.
+     */
+    private static byte[] readFrame(DataInputStream in, long bytesLeft) throws IOException {
+        int length = in.readInt();
+        if (length < 0 || length > bytesLeft - 4) {
+            return null;
+        }
+        byte[] bytes = in.readNBytes(length);
+        return bytes.length == length ? bytes : null;
+    }
+
+    private void cutWalTail(long lastGoodOffset, long fileSize) {
+        try (FileChannel channel = FileChannel.open(walPath, StandardOpenOption.WRITE)) {
+            channel.truncate(lastGoodOffset);
+            LOG.warnv("Cut {0} unreadable bytes from the end of WAL {1} at offset {2}; "
+                    + "the entries in them are lost, entries appended from now on are replayed on the next load",
+                    fileSize - lastGoodOffset, walPath, lastGoodOffset);
+        } catch (IOException e) {
+            LOG.errorv(e, "Failed to cut the unreadable tail of WAL {0}; entries appended after it "
+                    + "will not be replayed until the next compaction", walPath);
+        }
     }
 
     private void openWalWriter() {
@@ -277,8 +511,7 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
             Files.createDirectories(walPath.getParent());
             walWriter = new DataOutputStream(
                     new BufferedOutputStream(Files.newOutputStream(walPath,
-                            java.nio.file.StandardOpenOption.CREATE,
-                            java.nio.file.StandardOpenOption.APPEND)));
+                            StandardOpenOption.CREATE, StandardOpenOption.APPEND)));
         } catch (IOException e) {
             LOG.errorv(e, "Failed to open WAL writer at {0}", walPath);
         }

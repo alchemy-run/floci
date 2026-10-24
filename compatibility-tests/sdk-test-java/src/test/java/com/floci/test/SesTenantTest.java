@@ -7,7 +7,6 @@ import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
-
 import software.amazon.awssdk.services.sesv2.SesV2Client;
 import software.amazon.awssdk.services.sesv2.model.AlreadyExistsException;
 import software.amazon.awssdk.services.sesv2.model.BadRequestException;
@@ -46,8 +45,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * associations (CreateTenantResourceAssociation / DeleteTenantResourceAssociation /
  * ListTenantResources / ListResourceTenants), and tenant suppression (PutTenantSuppressionAttributes
  * plus the TenantName-scoped suppression-list operations). One AWS quirk drives the association
- * assertions: the service's wire values for ResourceType, in responses and as the RESOURCE_TYPE
- * filter value, are the ARN segments (identity / configuration-set / template), not the SDK's
+ * assertions: the service's wire values for ResourceType — in responses and as the RESOURCE_TYPE
+ * filter value — are the ARN segments (identity / configuration-set / template), not the SDK's
  * EMAIL_IDENTITY-style enum constants. Real AWS rejects the enum spelling as a filter and returns
  * values the SDK maps to UNKNOWN_TO_SDK_VERSION, so the test asserts resourceTypeAsString. The
  * suppression block asserts the all-or-nothing attribute pair (a bare TenantName clears it), the
@@ -72,7 +71,7 @@ class SesTenantTest {
     @BeforeAll
     static void setup() {
         sesV2 = TestFixtures.sesV2Client();
-        // Tenant sends from this domain (order 22), and SES only sends from verified identities.
+        // Verified, so tenantSend_gatesOnAssociations can send from an address under it.
         TestFixtures.verifySesDomainIdentityViaRoute53(sesV2, IDENTITY);
         sesV2.createConfigurationSet(CreateConfigurationSetRequest.builder()
                 .configurationSetName(CONFIG_SET).build());

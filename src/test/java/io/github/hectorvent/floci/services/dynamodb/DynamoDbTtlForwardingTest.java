@@ -25,11 +25,17 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -55,6 +61,11 @@ class DynamoDbTtlForwardingTest {
             };
 
     private static final String REGION = "us-east-1";
+    private static final String KINESIS_TTL_IDENTITY =
+            "{\"type\":\"Service\",\"principalId\":\"dynamodb.amazonaws.com\"}";
+    /** The DynamoDB Streams API capitalises the Identity members, as real AWS returns them. */
+    private static final String STREAMS_TTL_IDENTITY =
+            "{\"Type\":\"Service\",\"PrincipalId\":\"dynamodb.amazonaws.com\"}";
 
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -135,6 +146,8 @@ class DynamoDbTtlForwardingTest {
         for (KinesisRecord record : drained) {
             JsonNode payload = mapper.readTree(record.getData());
             assertEquals("REMOVE", payload.get("eventName").asText(), "TTL deletions forward as REMOVE");
+            assertEquals(mapper.readTree(KINESIS_TTL_IDENTITY), payload.get("userIdentity"),
+                    "TTL deletions forward as made by the DynamoDB service");
         }
         assertEquals(0L, forwarder.getForwardFailureCount(), "happy path drops nothing");
 
@@ -182,10 +195,8 @@ class DynamoDbTtlForwardingTest {
         }
 
         // Direct proof of persistence: the sweep must have written the trimmed map back to the
-        // underlying item store. Inspecting the stored map (rather than getItem) is what makes this
-        // fail if persistItemsForAccount is dropped: getItem would still return null for expired
-        // rows via isExpired even though the stale rows remained physically persisted. putItem
-        // during seeding persisted 'expired' rows here, so the store must now hold none of them.
+        // underlying item store, independently of the live cache. putItem during seeding
+        // persisted expired rows here, so the store must now hold none of them.
         Map<String, JsonNode> persisted = itemStore.get("us-east-1::TtlTable").orElseGet(Map::of);
         assertTrue(persisted.isEmpty(),
                 () -> "TTL removals must be persisted to the item store; stale rows still present: "
@@ -199,6 +210,127 @@ class DynamoDbTtlForwardingTest {
             key.set("pk", stringAttr("row-" + i));
             assertNull(reloaded.getItem("TtlTable", key, REGION), "expired removal must be persisted");
         }
+    }
+
+    @Test
+    void ttlSweepDoesNotPersistItemsOfATableDeletedMidSweep() {
+        StorageBackend<String, TableDefinition> tableStore = new InMemoryStorage<>();
+        StorageBackend<String, Map<String, JsonNode>> itemStore = new InMemoryStorage<>();
+        DynamoDbStreamService streamService = mock(DynamoDbStreamService.class);
+        DynamoDbService svc = new DynamoDbService(
+                tableStore, itemStore, new RegionResolver("us-east-1", "000000000000"), streamService, null);
+        seedTtlTable(svc, 1);
+        doAnswer(invocation -> {
+            svc.deleteTable("TtlTable", REGION);
+            return null;
+        }).when(streamService).captureEvent(eq("REMOVE"), any(), any(), any(), any(), eq(true));
+
+        svc.deleteExpiredItems();
+
+        assertTrue(itemStore.get("us-east-1::TtlTable").isEmpty(),
+                "the sweep must not write items back for a table deleted while it ran");
+    }
+
+    @Test
+    void aSweepDoesNotDeleteFromATableRecreatedAfterItsScan() {
+        StorageBackend<String, TableDefinition> tableStore = new InMemoryStorage<>();
+        StorageBackend<String, Map<String, JsonNode>> itemStore = new InMemoryStorage<>();
+        DynamoDbService svc = new DynamoDbService(
+                tableStore, itemStore, new RegionResolver("us-east-1", "000000000000"));
+        long past = Instant.now().getEpochSecond() - 3600;
+        svc.createTable("TtlTable",
+                List.of(new KeySchemaElement("pk", "HASH")),
+                List.of(new AttributeDefinition("pk", "S")),
+                5L, 5L, REGION);
+        svc.updateTimeToLive("TtlTable", "expireAt", true, REGION);
+        ObjectNode expired = mapper.createObjectNode();
+        expired.set("pk", stringAttr("row-0"));
+        expired.set("expireAt", numberAttr(past));
+        svc.putItem("TtlTable", expired, REGION);
+        List<DynamoDbService.ExpiredTableScan> scans = svc.scanExpiredItems();
+        assertEquals(1, scans.stream().mapToInt(scan -> scan.itemKeys().size()).sum(),
+                "the expired row must be a scan candidate");
+
+        svc.deleteTable("TtlTable", REGION);
+        svc.createTable("TtlTable",
+                List.of(new KeySchemaElement("pk", "HASH")),
+                List.of(new AttributeDefinition("pk", "S")),
+                5L, 5L, REGION);
+        ObjectNode recreated = mapper.createObjectNode();
+        recreated.set("pk", stringAttr("row-0"));
+        recreated.set("expireAt", numberAttr(past));
+        svc.putItem("TtlTable", recreated, REGION);
+        svc.deleteScannedItems(scans);
+
+        ObjectNode key = mapper.createObjectNode();
+        key.set("pk", stringAttr("row-0"));
+        assertNotNull(svc.getItem("TtlTable", key, REGION),
+                "a scan of the deleted table must not delete the recreated table's item");
+    }
+
+    @Test
+    void aTableDeletedDuringASweepEmitsNoFurtherRemoves() {
+        StorageBackend<String, TableDefinition> tableStore = new InMemoryStorage<>();
+        StorageBackend<String, Map<String, JsonNode>> itemStore = new InMemoryStorage<>();
+        DynamoDbStreamService streamService = mock(DynamoDbStreamService.class);
+        DynamoDbService svc = new DynamoDbService(
+                tableStore, itemStore, new RegionResolver("us-east-1", "000000000000"), streamService, null);
+        seedTtlTable(svc, 3);
+        List<DynamoDbService.ExpiredTableScan> scans = svc.scanExpiredItems();
+        assertEquals(3, scans.stream().mapToInt(scan -> scan.itemKeys().size()).sum(),
+                "every expired row must be a scan candidate");
+        doAnswer(invocation -> {
+            svc.deleteTable("TtlTable", REGION);
+            return null;
+        }).doNothing().when(streamService).captureEvent(eq("REMOVE"), any(), any(), any(), any(), eq(true));
+
+        svc.deleteScannedItems(scans);
+
+        verify(streamService, times(1)).captureEvent(eq("REMOVE"), any(), any(), any(), any(), eq(true));
+    }
+
+    @Test
+    void deleteTableWaitsForASweepPersistingTheTable() throws Exception {
+        CountDownLatch persisting = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        StorageBackend<String, TableDefinition> tableStore = new InMemoryStorage<>();
+        StorageBackend<String, Map<String, JsonNode>> itemStore = new InMemoryStorage<>() {
+            @Override
+            public void put(String key, Map<String, JsonNode> value) {
+                if ("ttl-sweep".equals(Thread.currentThread().getName())) {
+                    persisting.countDown();
+                    try {
+                        release.await(10, TimeUnit.SECONDS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+                super.put(key, value);
+            }
+        };
+        DynamoDbService svc = new DynamoDbService(
+                tableStore, itemStore, new RegionResolver("us-east-1", "000000000000"));
+        seedTtlTable(svc, 1);
+        Thread sweep = new Thread(svc::deleteExpiredItems, "ttl-sweep");
+        sweep.start();
+        assertTrue(persisting.await(10, TimeUnit.SECONDS));
+
+        Thread delete = new Thread(() -> svc.deleteTable("TtlTable", REGION));
+        delete.start();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (delete.getState() != Thread.State.BLOCKED) {
+            if (System.nanoTime() > deadline) {
+                fail("DeleteTable did not wait for the sweep persisting the table");
+            }
+            Thread.onSpinWait();
+        }
+        release.countDown();
+        sweep.join(10_000);
+        delete.join(10_000);
+
+        assertEquals(Thread.State.TERMINATED, delete.getState());
+        assertTrue(itemStore.get("us-east-1::TtlTable").isEmpty(),
+                "DeleteTable must delete the stored items after the sweep wrote them");
     }
 
     // A write landing between scanExpiredItems() and deleteScannedItems() must not be lost.
@@ -265,5 +397,59 @@ class DynamoDbTtlForwardingTest {
         }
         assertEquals(1, kinesisRemoves.size(), "a skipped delete must not forward a Kinesis REMOVE record");
         assertEquals("row-1", kinesisRemoves.get(0).get("dynamodb").get("Keys").get("pk").get("S").asText());
+    }
+
+    @Test
+    void getRecords_ttlSweepRemoval_carriesTheDynamoDbServiceIdentity() throws Exception {
+        StreamedTtlTable streamed = streamedTtlTable();
+        streamed.service().deleteExpiredItems();
+
+        JsonNode record = onlyRecord(streamed);
+        assertEquals("REMOVE", record.path("eventName").asText());
+        assertEquals("row-0", record.path("dynamodb").path("Keys").path("pk").path("S").asText());
+        assertEquals(mapper.readTree(STREAMS_TTL_IDENTITY), record.path("userIdentity"));
+    }
+
+    @Test
+    void getRecords_deleteItemRemoval_carriesNoIdentity() throws Exception {
+        StreamedTtlTable streamed = streamedTtlTable();
+        ObjectNode key = mapper.createObjectNode();
+        key.set("pk", stringAttr("row-0"));
+        streamed.service().deleteItem("TtlTable", key, REGION);
+
+        JsonNode record = onlyRecord(streamed);
+        assertEquals("REMOVE", record.path("eventName").asText());
+        assertFalse(record.has("userIdentity"), "a DeleteItem removal is not made by the DynamoDB service");
+    }
+
+    private record StreamedTtlTable(DynamoDbService service, NativeDynamoDbStreamsJsonHandler handler,
+                                    String streamArn) {}
+
+    /** A TTL table holding one expired item, whose stream starts after the item was written. */
+    private StreamedTtlTable streamedTtlTable() {
+        StorageBackend<String, TableDefinition> tableStore = new InMemoryStorage<>();
+        DynamoDbStreamService streamService = new DynamoDbStreamService(mapper, tableStore);
+        RegionResolver regionResolver = new RegionResolver(REGION, "000000000000");
+        DynamoDbService svc = new DynamoDbService(
+                tableStore, new InMemoryStorage<>(), regionResolver, streamService, null);
+        seedTtlTable(svc, 1);
+        TableDefinition table = tableStore.get("us-east-1::TtlTable").orElseThrow();
+        StreamDescription sd = streamService.enableStream(
+                table.getTableName(), table.getTableArn(), "NEW_AND_OLD_IMAGES", REGION);
+        return new StreamedTtlTable(svc,
+                new NativeDynamoDbStreamsJsonHandler(streamService, svc, regionResolver, mapper), sd.getStreamArn());
+    }
+
+    private JsonNode onlyRecord(StreamedTtlTable streamed) {
+        ObjectNode iteratorRequest = mapper.createObjectNode()
+                .put("StreamArn", streamed.streamArn())
+                .put("ShardId", DynamoDbStreamService.SHARD_ID)
+                .put("ShardIteratorType", "TRIM_HORIZON");
+        JsonNode iterator = (JsonNode) streamed.handler().handle("GetShardIterator", iteratorRequest, REGION).getEntity();
+        ObjectNode recordsRequest = mapper.createObjectNode().put("ShardIterator", iterator.path("ShardIterator").asText());
+        JsonNode records = ((JsonNode) streamed.handler().handle("GetRecords", recordsRequest, REGION).getEntity())
+                .path("Records");
+        assertEquals(1, records.size(), "one stream record: " + records);
+        return records.get(0);
     }
 }

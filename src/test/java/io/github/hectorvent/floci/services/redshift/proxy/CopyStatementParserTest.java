@@ -6,11 +6,26 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CopyStatementParserTest {
+
+    @Test
+    void copyAndUnloadAcceptDefaultIamRole() {
+        CopyStatementParser.S3CopyFrom copy = assertInstanceOf(CopyStatementParser.S3CopyFrom.class,
+                CopyStatementParser.parse("COPY people FROM 's3://bucket/data' IAM_ROLE default CSV"));
+        assertNull(copy.iamRoleArn());
+        assertTrue(copy.defaultIamRoleRequested());
+        CopyStatementParser.S3Unload unload = assertInstanceOf(CopyStatementParser.S3Unload.class,
+                CopyStatementParser.parse("UNLOAD ('SELECT 1') TO 's3://bucket/out/' IAM_ROLE DEFAULT CSV"));
+        assertNull(unload.iamRoleArn());
+        assertTrue(unload.defaultIamRoleRequested());
+        assertNull(CopyStatementParser.parse("COPY people FROM 's3://bucket/data' IAM_ROLE defaultRole"));
+        assertNull(CopyStatementParser.parse("COPY people FROM 's3://bucket/data' IAM_ROLE default IAM_ROLE default"));
+    }
 
     /** parse() returns S3Statement now; every COPY test wants the S3CopyFrom view. */
     private static CopyStatementParser.S3CopyFrom copyFrom(String sql) {
@@ -99,13 +114,59 @@ class CopyStatementParserTest {
     void copyWithoutIamRoleLeavesItNull() {
         CopyStatementParser.S3CopyFrom c = copyFrom("COPY t FROM 's3://b/k'");
         assertNull(c.iamRoleArn());
+        assertFalse(c.defaultIamRoleRequested());
     }
 
     @Test
-    void iamRoleDefaultKeywordIsStillUnsupported() {
-        // Bare `default` (no quotes) does not match the quoted-ARN clause, so it falls through
-        // to the existing catch-all and the whole statement is rejected (fail-open), same as today.
-        assertNull(CopyStatementParser.parse("COPY t FROM 's3://b/k' IAM_ROLE default"));
+    void quotedDefaultRemainsLiteralRegardlessOfClusterDefault() {
+        for (String defaultRole : new String[]{null, "arn:aws:iam::111111111111:role/copy"}) {
+            for (String authorization : List.of("IAM_ROLE 'default'", "IAM_ROLE \"default\"",
+                    "CREDENTIALS 'aws_iam_role=default'")) {
+                CopyStatementParser.S3Statement copy = CopyStatementParser.parse(
+                        "COPY people FROM 's3://bucket/data' " + authorization, defaultRole);
+                CopyStatementParser.S3Statement unload = CopyStatementParser.parse(
+                        "UNLOAD ('SELECT 1') TO 's3://bucket/out/' " + authorization, defaultRole);
+                assertNotNull(copy);
+                assertNotNull(unload);
+                assertEquals("default", copy.iamRoleArn());
+                assertEquals("default", unload.iamRoleArn());
+                assertFalse(copy.defaultIamRoleRequested());
+                assertFalse(unload.defaultIamRoleRequested());
+            }
+        }
+    }
+
+    @Test
+    void defaultIamRoleResolvesWithoutChangingCopyOptionsOrExplicitRoles() {
+        String role = "arn:aws:iam::111111111111:role/copy";
+        CopyStatementParser.S3CopyFrom copy = assertInstanceOf(CopyStatementParser.S3CopyFrom.class,
+                CopyStatementParser.parse("COPY t FROM 's3://b/k' IAM_ROLE default CSV GZIP TRUNCATECOLUMNS", role));
+        assertEquals(role, copy.iamRoleArn());
+        assertTrue(copy.defaultIamRoleRequested());
+        assertTrue(copy.csv());
+        assertTrue(copy.gzip());
+        assertTrue(copy.transforms().truncateColumns());
+        CopyStatementParser.S3CopyFrom explicit = assertInstanceOf(CopyStatementParser.S3CopyFrom.class,
+                CopyStatementParser.parse("COPY t FROM 's3://b/k' IAM_ROLE 'other-role'", role));
+        assertEquals("other-role", explicit.iamRoleArn());
+        assertFalse(explicit.defaultIamRoleRequested());
+        assertNull(CopyStatementParser.parse("SELECT 1", role));
+        assertNull(CopyStatementParser.parse("COPY t FROM 's3://b/k' IAM_ROLE default ACCESS_KEY_ID 'x' "
+                + "SECRET_ACCESS_KEY 'y'", role));
+    }
+
+    @Test
+    void defaultIamRoleResolvesWithoutChangingUnloadOptions() {
+        String role = "arn:aws:iam::111111111111:role/unload";
+        CopyStatementParser.S3Unload unload = assertInstanceOf(CopyStatementParser.S3Unload.class,
+                CopyStatementParser.parse("UNLOAD ('SELECT 1') TO 's3://b/k' IAM_ROLE default CSV GZIP HEADER MANIFEST", role));
+        assertEquals(role, unload.iamRoleArn());
+        assertTrue(unload.defaultIamRoleRequested());
+        assertEquals("SELECT 1", unload.selectQuery());
+        assertTrue(unload.csv());
+        assertTrue(unload.gzip());
+        assertTrue(unload.header());
+        assertTrue(unload.manifest());
     }
 
     @Test
@@ -307,8 +368,8 @@ class CopyStatementParserTest {
     void unloadRejectsUnsupportedOptions() {
         assertNull(CopyStatementParser.parse("UNLOAD ('select 1') TO 's3://b/p/' PARQUET"));
         assertNull(CopyStatementParser.parse("UNLOAD ('select 1') TO 's3://b/p/' ENCRYPTED"));
-        assertNull(CopyStatementParser.parse("UNLOAD ('select 1') TO 's3://b/p/' REGION 'us-west-2'"));
-        assertNull(CopyStatementParser.parse("UNLOAD ('select 1') TO 's3://b/p/' EXTENSION 'csv'"));
+        assertNull(CopyStatementParser.parse("UNLOAD ('select 1') TO 's3://b/p/' MASTER_SYMMETRIC_KEY 'k'"));
+        assertNull(CopyStatementParser.parse("UNLOAD ('select 1') TO 's3://b/p/' KMS_KEY_ID 'k'"));
         assertNull(CopyStatementParser.parse("UNLOAD ('select 1') TO 's3://b/p/' ZSTD"));
         assertNull(CopyStatementParser.parse("UNLOAD ('select 1') TO 's3://b/p/' PARTITION BY (dt)"));
     }
@@ -325,6 +386,185 @@ class CopyStatementParserTest {
         CopyStatementParser.S3Unload u = unload("UNLOAD ('select 1') TO 's3://b/p/' NULL AS 'csv'");
         assertFalse(u.csv());
         assertEquals("csv", u.nullAs());
+    }
+
+    @Test
+    void copyAcceptsAndIgnoresRegion() {
+        CopyStatementParser.S3CopyFrom c = copyFrom(
+                "COPY t FROM 's3://b/k' REGION 'eu-west-1'");
+        assertNotNull(c);
+        assertNull(c.iamRoleArn());
+    }
+
+    @Test
+    void copyMapsCredentialsIamRoleToIamRoleArn() {
+        CopyStatementParser.S3CopyFrom c = copyFrom(
+                "COPY t FROM 's3://b/k' CREDENTIALS 'aws_iam_role=arn:aws:iam::000000000000:role/r'");
+        assertEquals("arn:aws:iam::000000000000:role/r", c.iamRoleArn());
+    }
+
+    @Test
+    void copyAcceptsKeyCredentialsWithoutRole() {
+        CopyStatementParser.S3CopyFrom c = copyFrom(
+                "COPY t FROM 's3://b/k' ACCESS_KEY_ID 'test' SECRET_ACCESS_KEY 'test' SESSION_TOKEN 'test'");
+        assertNotNull(c);
+        assertNull(c.iamRoleArn());
+    }
+
+    @Test
+    void copyAcceptsKeyCredentialsInsideCredentialsString() {
+        CopyStatementParser.S3CopyFrom c = copyFrom(
+                "COPY t FROM 's3://b/k' CREDENTIALS 'aws_access_key_id=test;aws_secret_access_key=test'");
+        assertNotNull(c);
+        assertNull(c.iamRoleArn());
+    }
+
+    @Test
+    void copyRejectsConflictingOrIncompleteAuthorization() {
+        assertNull(CopyStatementParser.parse(
+                "COPY t FROM 's3://b/k' IAM_ROLE 'arn:aws:iam::000000000000:role/r' "
+                        + "CREDENTIALS 'aws_iam_role=arn:aws:iam::000000000000:role/r2'"));
+        assertNull(CopyStatementParser.parse(
+                "COPY t FROM 's3://b/k' IAM_ROLE 'arn:aws:iam::000000000000:role/r' "
+                        + "ACCESS_KEY_ID 'test' SECRET_ACCESS_KEY 'test'"));
+        assertNull(CopyStatementParser.parse("COPY t FROM 's3://b/k' ACCESS_KEY_ID 'test'"));
+        assertNull(CopyStatementParser.parse("COPY t FROM 's3://b/k' ACCESS_KEY_ID '' SECRET_ACCESS_KEY ''"));
+        assertNull(CopyStatementParser.parse("COPY t FROM 's3://b/k' ACCESS_KEY_ID 'test' SECRET_ACCESS_KEY ' '"));
+        assertNull(CopyStatementParser.parse(
+                "COPY t FROM 's3://b/k' ACCESS_KEY_ID 'test' SECRET_ACCESS_KEY 'test' SESSION_TOKEN ''"));
+        assertNull(CopyStatementParser.parse("COPY t FROM 's3://b/k' IAM_ROLE ''"));
+        assertNull(CopyStatementParser.parse(
+                "UNLOAD ('select 1') TO 's3://b/out/' ACCESS_KEY_ID '' SECRET_ACCESS_KEY ''"));
+        assertNull(CopyStatementParser.parse("COPY t FROM 's3://b/k' SESSION_TOKEN 'test'"));
+        assertNull(CopyStatementParser.parse("COPY t FROM 's3://b/k' REGION 'a' REGION 'b'"));
+        assertNull(CopyStatementParser.parse("COPY t FROM 's3://b/k' CREDENTIALS 'aws_access_key_id=test'"));
+        assertNull(CopyStatementParser.parse("COPY t FROM 's3://b/k' CREDENTIALS 'something_else=1'"));
+    }
+
+    @Test
+    void copyStillRejectsEncryptionClauses() {
+        assertNull(CopyStatementParser.parse("COPY t FROM 's3://b/k' ENCRYPTED"));
+        assertNull(CopyStatementParser.parse("COPY t FROM 's3://b/k' MASTER_SYMMETRIC_KEY 'k'"));
+    }
+
+    @Test
+    void unloadAcceptsRegionAndCredentials() {
+        CopyStatementParser.S3Unload u = unload(
+                "UNLOAD ('select 1') TO 's3://b/out/' REGION 'us-east-1' "
+                        + "CREDENTIALS 'aws_iam_role=arn:aws:iam::000000000000:role/r'");
+        assertEquals("arn:aws:iam::000000000000:role/r", u.iamRoleArn());
+        assertNotNull(unload("UNLOAD ('select 1') TO 's3://b/out/' ACCESS_KEY_ID 'test' SECRET_ACCESS_KEY 'test'"));
+    }
+
+    @Test
+    void unloadParsesExtensionVerbatim() {
+        CopyStatementParser.S3Unload u = unload(
+                "UNLOAD ('select 1') TO 's3://b/out/' EXTENSION '.csv'");
+        assertEquals(".csv", u.extension());
+        assertNull(unload("UNLOAD ('select 1') TO 's3://b/out/'").extension());
+    }
+
+    @Test
+    void unloadRejectsUnsafeOrRepeatedExtension() {
+        assertNull(CopyStatementParser.parse("UNLOAD ('select 1') TO 's3://b/out/' EXTENSION ''"));
+        assertNull(CopyStatementParser.parse("UNLOAD ('select 1') TO 's3://b/out/' EXTENSION 'a/b'"));
+        assertNull(CopyStatementParser.parse(
+                "UNLOAD ('select 1') TO 's3://b/out/' EXTENSION '.a' EXTENSION '.b'"));
+    }
+
+    @Test
+    void copyParsesFieldContentOptions() {
+        CopyStatementParser.S3CopyFrom c = copyFrom(
+                "COPY t FROM 's3://b/k' EMPTYASNULL BLANKSASNULL REMOVEQUOTES ACCEPTINVCHARS AS '#'");
+        assertTrue(c.transforms().emptyAsNull());
+        assertTrue(c.transforms().blanksAsNull());
+        assertTrue(c.transforms().removeQuotes());
+        assertEquals('#', c.transforms().invalidCharReplacement());
+    }
+
+    @Test
+    void copyParsesTruncateColumns() {
+        assertTrue(copyFrom("COPY t FROM 's3://b/k' TRUNCATECOLUMNS").transforms().truncateColumns());
+        assertNull(CopyStatementParser.parse("COPY t FROM 's3://b/k' TRUNCATECOLUMNS TRUNCATECOLUMNS"));
+        assertNull(CopyStatementParser.parse(
+                "COPY t FROM 's3://b/k' FORMAT AS JSON 'auto' TRUNCATECOLUMNS"));
+    }
+
+    @Test
+    void acceptInvCharsDefaultsToQuestionMark() {
+        CopyStatementParser.S3CopyFrom c = copyFrom("COPY t FROM 's3://b/k' ACCEPTINVCHARS");
+        assertEquals('?', c.transforms().invalidCharReplacement());
+        assertEquals(CopyStatementParser.CopyTransforms.NONE, copyFrom("COPY t FROM 's3://b/k'").transforms());
+    }
+
+    @Test
+    void acceptInvCharsReplacementCannotBeFramingSyntax() {
+        assertNull(CopyStatementParser.parse("COPY t FROM 's3://b/k' ACCEPTINVCHARS AS '|'"));
+        assertNull(CopyStatementParser.parse("COPY t FROM 's3://b/k' ACCEPTINVCHARS AS '\\'"));
+        assertNull(CopyStatementParser.parse("COPY t FROM 's3://b/k' CSV ACCEPTINVCHARS AS '\"'"));
+        assertNotNull(CopyStatementParser.parse("COPY t FROM 's3://b/k' ACCEPTINVCHARS AS '#'"));
+    }
+
+    @Test
+    void copyRejectsInvalidTransformCombinations() {
+        assertNull(CopyStatementParser.parse("COPY t FROM 's3://b/k' CSV REMOVEQUOTES"));
+        assertNull(CopyStatementParser.parse(
+                "COPY t FROM 's3://b/k' FORMAT AS JSON 'auto' EMPTYASNULL"));
+        assertNull(CopyStatementParser.parse("COPY t FROM 's3://b/k' DELIMITER 'é' EMPTYASNULL"));
+        assertNull(CopyStatementParser.parse("COPY t FROM 's3://b/k' EMPTYASNULL EMPTYASNULL"));
+    }
+
+    @Test
+    void unloadParsesEscapeOnlyWhenFramingStaysText() {
+        assertTrue(unload("UNLOAD ('select 1') TO 's3://b/out/' ESCAPE").escape());
+        assertNull(CopyStatementParser.parse("UNLOAD ('select 1') TO 's3://b/out/' CSV ESCAPE"));
+        assertNull(CopyStatementParser.parse("UNLOAD ('select 1') TO 's3://b/out/' ADDQUOTES ESCAPE"));
+        assertNull(CopyStatementParser.parse("UNLOAD ('select 1') TO 's3://b/out/' HEADER ESCAPE"));
+        assertNull(CopyStatementParser.parse("UNLOAD ('select 1') TO 's3://b/out/' ESCAPE ESCAPE"));
+    }
+
+    @Test
+    void unloadParsesCleanPathAndFailsOpenWhenItCouldBeUnsafe() {
+        assertTrue(unload("UNLOAD ('select 1') TO 's3://b/out/' CLEANPATH").cleanPath());
+        assertNull(CopyStatementParser.parse("UNLOAD ('select 1') TO 's3://b/out/' CLEANPATH ALLOWOVERWRITE"));
+        assertNull(CopyStatementParser.parse("UNLOAD ('select 1') TO 's3://b/' CLEANPATH"));
+        assertNull(CopyStatementParser.parse("UNLOAD ('select 1') TO 's3://b/out/' CLEANPATH CLEANPATH"));
+    }
+
+    @Test
+    void unloadParsesServerSideEncryptionOptions() {
+        CopyStatementParser.S3Unload kms = unload(
+                "UNLOAD ('select 1') TO 's3://b/out/' ENCRYPTED KMS_KEY_ID 'key-1'");
+        assertTrue(kms.encrypted());
+        assertEquals("key-1", kms.sseKmsKeyId());
+
+        CopyStatementParser.S3Unload reversed = unload(
+                "UNLOAD ('select 1') TO 's3://b/out/' KMS_KEY_ID 'key-2' ENCRYPTED");
+        assertEquals("key-2", reversed.sseKmsKeyId());
+
+        CopyStatementParser.S3Unload auto = unload("UNLOAD ('select 1') TO 's3://b/out/' ENCRYPTED AUTO");
+        assertTrue(auto.encrypted());
+        assertNull(auto.sseKmsKeyId());
+        assertFalse(unload("UNLOAD ('select 1') TO 's3://b/out/'").encrypted());
+    }
+
+    @Test
+    void unloadEncryptionFailsOpenWhenItWouldNeedClientSideKeys() {
+        assertNull(CopyStatementParser.parse("UNLOAD ('select 1') TO 's3://b/out/' ENCRYPTED"));
+        assertNull(CopyStatementParser.parse("UNLOAD ('select 1') TO 's3://b/out/' KMS_KEY_ID 'k'"));
+        assertNull(CopyStatementParser.parse("UNLOAD ('select 1') TO 's3://b/out/' ENCRYPTED KMS_KEY_ID '  '"));
+        assertNull(CopyStatementParser.parse(
+                "UNLOAD ('select 1') TO 's3://b/out/' ENCRYPTED AUTO KMS_KEY_ID 'k'"));
+        assertNull(CopyStatementParser.parse(
+                "UNLOAD ('select 1') TO 's3://b/out/' ENCRYPTED MASTER_SYMMETRIC_KEY 'k'"));
+    }
+
+    @Test
+    void unloadRejectsConflictingAuthorization() {
+        assertNull(CopyStatementParser.parse(
+                "UNLOAD ('select 1') TO 's3://b/out/' IAM_ROLE 'arn:aws:iam::000000000000:role/r' "
+                        + "ACCESS_KEY_ID 'test' SECRET_ACCESS_KEY 'test'"));
+        assertNull(CopyStatementParser.parse("UNLOAD ('select 1') TO 's3://b/out/' REGION 'a' REGION 'b'"));
     }
 
     @Test
@@ -389,3 +629,4 @@ class CopyStatementParserTest {
         assertNull(CopyStatementParser.parse("COPY tbl FROM 's3://b/k' PARQUET"));
     }
 }
+

@@ -1,8 +1,7 @@
 package io.github.hectorvent.floci.services.apigateway.model;
 
-import io.quarkus.runtime.annotations.RegisterForReflection;
-
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -23,6 +22,7 @@ public class Stage {
     private String cacheClusterStatus = "NOT_AVAILABLE";
     private AccessLogSettings accessLogSettings;
     private boolean tracingEnabled;
+    private Map<String, String> tags = new HashMap<>();
 
     @RegisterForReflection
     public record AccessLogSettings(String destinationArn, String format) {}
@@ -41,6 +41,14 @@ public class Stage {
 
     public void setTracingEnabled(boolean tracingEnabled) {
         this.tracingEnabled = tracingEnabled;
+    }
+
+    public Map<String, String> getTags() {
+        return tags;
+    }
+
+    public void setTags(Map<String, String> tags) {
+        this.tags = tags != null ? tags : new HashMap<>();
     }
 
     public boolean isCacheClusterEnabled() {

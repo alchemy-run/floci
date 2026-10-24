@@ -17,7 +17,8 @@ import java.util.List;
  * <p>Exists so IAM condition-key extraction can reuse the expression parser without making
  * the whole {@link DynamoDbAccessPathValidator} public. Everything here is best effort: a
  * malformed or unsupported expression yields {@code null}, and the caller treats that as
- * "the leading key could not be determined", which fails closed at the policy layer.
+ * "the leading key could not be determined". A {@code ForAllValues} policy needs a
+ * {@code Null:false} guard to require that key.
  */
 final class DynamoDbKeyConditionParser {
 
@@ -43,22 +44,24 @@ final class DynamoDbKeyConditionParser {
         try {
             root = ExpressionEvaluator.parse(keyConditionExpression);
         } catch (RuntimeException e) {
-            return null; // unparseable expression → leading key unknown → fail closed upstream
+            return null; // Unparseable expression: omit the unknown leading key from the context.
         }
         if (root == null) {
             return null;
         }
         List<Expr> conditions = root instanceof AndExpr and ? and.operands() : List.of(root);
         for (Expr condition : conditions) {
-            if (!(condition instanceof CompareExpr compare)
-                    || compare.op() != TokenType.EQ
-                    || !(compare.right() instanceof PlaceholderOperand placeholder)) {
+            if (!(condition instanceof CompareExpr compare) || compare.op() != TokenType.EQ) {
                 continue;
             }
-            if (!pkName.equals(topLevelAttribute(compare.left(), exprAttrNames))) {
-                continue;
+            if (compare.right() instanceof PlaceholderOperand placeholder
+                    && pkName.equals(topLevelAttribute(compare.left(), exprAttrNames))) {
+                return scalarValue(exprAttrValues.get(placeholder.name()));
             }
-            return scalarValue(exprAttrValues.get(placeholder.name()));
+            if (compare.left() instanceof PlaceholderOperand placeholder
+                    && pkName.equals(topLevelAttribute(compare.right(), exprAttrNames))) {
+                return scalarValue(exprAttrValues.get(placeholder.name()));
+            }
         }
         return null;
     }

@@ -13,12 +13,16 @@ public class SessionCredential {
     private String secretAccessKey;
     private String sessionToken;
     private String roleArn;
+    private String roleSessionName;
+    private String assumedRoleId;
     private Instant expiration;
     /** Inline session policy passed to AssumeRole/GetFederationToken — further restricts role policies. */
     private String sessionPolicyDocument;
     /**
      * Account of the caller that minted this session, captured at mint time. Used to route
-     * temporary credentials that carry no role ARN (e.g. GetSessionToken) back to the caller.
+     * temporary credentials that carry no role ARN (e.g. GetSessionToken) back to the caller. A
+     * delegated session holds the customer's account here instead of the partner's that redeemed
+     * the token, that being the account the credentials act in.
      */
     private String originAccountId;
     /** True when this session belongs to a Floci-launched Lambda container. */
@@ -27,6 +31,25 @@ public class SessionCredential {
     private String ec2RoleId;
     /** Exact ECS task ARN this session was minted for, when this is a task-role session. */
     private String ecsTaskArn;
+    /** Exact object action and ARN for an internally generated S3 presigned URL. */
+    private String presignedAction;
+    private String presignedResourceArn;
+    /**
+     * The long-term identity whose key minted this session through GetSessionToken or
+     * GetFederationToken: an IAM user's ARN, or the account root's. Null for every other session.
+     */
+    private String issuerArn;
+    /** The unique ID of the IAM user named by {@link #issuerArn}, so a same-named replacement is not it. */
+    private String issuerUserId;
+    /**
+     * The identity that approved the delegation request these credentials were exchanged for, which
+     * AcceptDelegationRequest records as the one "that gets mapped to the delegated credential" and
+     * GetDelegatedAccessToken reports as its {@code AssumedPrincipal}. Null for every other
+     * session. It is held apart from {@link #roleArn} because it is whatever identity approved the
+     * request, an IAM user or the account root as much as a role, and reading it as a role would
+     * resolve it by name.
+     */
+    private String delegatedApproverArn;
 
     public SessionCredential() {}
 
@@ -86,6 +109,12 @@ public class SessionCredential {
     public String getRoleArn() { return roleArn; }
     public void setRoleArn(String roleArn) { this.roleArn = roleArn; }
 
+    public String getRoleSessionName() { return roleSessionName; }
+    public void setRoleSessionName(String roleSessionName) { this.roleSessionName = roleSessionName; }
+
+    public String getAssumedRoleId() { return assumedRoleId; }
+    public void setAssumedRoleId(String assumedRoleId) { this.assumedRoleId = assumedRoleId; }
+
     public Instant getExpiration() { return expiration; }
     public void setExpiration(Instant expiration) { this.expiration = expiration; }
 
@@ -104,6 +133,21 @@ public class SessionCredential {
     public String getEcsTaskArn() { return ecsTaskArn; }
     public void setEcsTaskArn(String ecsTaskArn) { this.ecsTaskArn = ecsTaskArn; }
 
+    public String getPresignedAction() { return presignedAction; }
+    public void setPresignedAction(String presignedAction) { this.presignedAction = presignedAction; }
+
+    public String getPresignedResourceArn() { return presignedResourceArn; }
+    public void setPresignedResourceArn(String presignedResourceArn) { this.presignedResourceArn = presignedResourceArn; }
+
     public boolean isLambdaExecutionRole() { return lambdaExecutionRole; }
     public void setLambdaExecutionRole(boolean lambdaExecutionRole) { this.lambdaExecutionRole = lambdaExecutionRole; }
+
+    public String getIssuerArn() { return issuerArn; }
+    public void setIssuerArn(String issuerArn) { this.issuerArn = issuerArn; }
+
+    public String getIssuerUserId() { return issuerUserId; }
+    public void setIssuerUserId(String issuerUserId) { this.issuerUserId = issuerUserId; }
+
+    public String getDelegatedApproverArn() { return delegatedApproverArn; }
+    public void setDelegatedApproverArn(String arn) { this.delegatedApproverArn = arn; }
 }

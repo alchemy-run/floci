@@ -6,8 +6,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
+import io.github.hectorvent.floci.core.common.AwsEndpoints;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.AwsRegions;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.ServicePrincipals;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.cloudtrail.model.AdvancedEventSelector;
@@ -34,6 +37,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 @ApplicationScoped
 public class CloudTrailService {
@@ -41,7 +45,7 @@ public class CloudTrailService {
     private static final Logger LOG = Logger.getLogger(CloudTrailService.class);
 
     private static final String EVENT_VERSION = "1.11";
-    private static final String S3_EVENT_SOURCE = "s3.amazonaws.com";
+    private static final String S3_EVENT_SOURCE = ServicePrincipals.of("s3");
     static final int MAX_PENDING_RECORDS_PER_TRAIL = 1024;
     static final long MAX_PENDING_BYTES_PER_TRAIL = 4L * 1024L * 1024L;
 
@@ -430,7 +434,7 @@ public class CloudTrailService {
             if (matched.isEmpty()) {
                 return;
             }
-            ObjectNode record = buildS3Record(in);
+            ObjectNode record = buildS3Record(in, region);
             for (MatchedTrail mt : matched) {
                 ObjectNode copy = record.deepCopy();
                 copy.put("recipientAccountId", regionResolver.getAccountId());
@@ -761,7 +765,7 @@ public class CloudTrailService {
     }
 
     private boolean matchesAnyAdvancedSelector(List<AdvancedEventSelector> selectors, S3EventInput in) {
-        String arn = "arn:aws:s3:::" + in.bucketName() + (in.key() != null ? "/" + in.key() : "");
+        String arn = regionResolver.buildGlobalArn("s3", "", in.bucketName() + (in.key() != null ? "/" + in.key() : ""));
         // Bucket-level operations (e.g. ListObjects) have no object key and are reported
         // by CloudTrail as AWS::S3::Bucket resources, not AWS::S3::Object: matching real
         // AWS behavior, an AWS::S3::Object DataResource selector must never match them.
@@ -824,20 +828,21 @@ public class CloudTrailService {
         return values == null || values.isEmpty();
     }
 
+    private static final Pattern BARE_S3_ARN = Pattern.compile("arn:" + AwsArnUtils.PARTITION_REGEX + ":s3");
+
     // Package-private for unit testing.
     static boolean matchesS3DataResourceArn(String configured, String bucketName, String key) {
         if (configured == null) return false;
-        // "arn:aws:s3" (bare, no ":::") is shorthand for all buckets + all objects.
-        if (configured.equals("arn:aws:s3")) return true;
-        // Forms accepted:
+        // "arn:<partition>:s3" (bare, no ":::") is shorthand for all buckets + all objects.
+        if (BARE_S3_ARN.matcher(configured).matches()) return true;
+        // Forms accepted, in any partition:
         //   arn:aws:s3:::                    → all buckets, all keys
         //   arn:aws:s3:::*                   → all buckets (wildcard)
         //   arn:aws:s3:::bucket/             → all keys in bucket
         //   arn:aws:s3:::bucket/prefix       → keys with the given prefix in bucket
         //   arn:aws:s3:::*/*                 → all objects (wildcard bucket + any key)
-        String prefix = "arn:aws:s3:::";
-        if (!configured.startsWith(prefix)) return false;
-        String tail = configured.substring(prefix.length());
+        String tail = AwsArnUtils.resourceIfArnFor(configured, "s3").orElse(null);
+        if (tail == null) return false;
         if (tail.isEmpty() || tail.equals("/")) {
             return true;
         }
@@ -858,18 +863,28 @@ public class CloudTrailService {
         return key.startsWith(configKeyPart);
     }
 
-    // Package-private for unit testing.
+    // Package-private for unit testing. A read-only event is one that doesn't change a resource, so
+    // SelectObjectContent is one although it is sent as a POST.
     static boolean isReadOnlyEvent(String eventName) {
         if (eventName == null) return true;
         return switch (eventName) {
             case "GetObject", "HeadObject", "ListObjects", "ListObjectsV2",
-                 "GetObjectAcl", "GetObjectTagging", "ListMultipartUploads",
-                 "GetObjectAnnotation", "ListObjectAnnotations" -> true;
+                 "GetObjectAcl", "GetObjectTagging", "GetObjectAttributes", "ListMultipartUploads",
+                 "GetObjectAnnotation", "ListObjectAnnotations", "SelectObjectContent" -> true;
             default -> false;
         };
     }
 
-    private ObjectNode buildS3Record(S3EventInput in) {
+    /**
+     * {@code region} is the event's region, resolved by the caller. Hosts and ARNs are built from it
+     * rather than from the request scope, because the log writer emits its own deliveries from the
+     * flush thread, where the request region falls back to the deployment default.
+     */
+    private ObjectNode buildS3Record(S3EventInput in, String region) {
+        String s3Host = in.bucketName() == null
+                ? "s3." + AwsRegions.dnsSuffixFor(region)
+                : AwsEndpoints.s3Host(in.bucketName(), region);
+        String partition = AwsRegions.partitionFor(region);
         ObjectNode record = mapper.createObjectNode();
         record.put("eventVersion", EVENT_VERSION);
         record.set("userIdentity", buildUserIdentity(in.accessKeyId()));
@@ -879,7 +894,7 @@ public class CloudTrailService {
                         .truncatedTo(java.time.temporal.ChronoUnit.SECONDS)));
         record.put("eventSource", S3_EVENT_SOURCE);
         record.put("eventName", in.eventName());
-        record.put("awsRegion", in.region());
+        record.put("awsRegion", region);
         record.put("sourceIPAddress", in.sourceIp() == null ? "127.0.0.1" : in.sourceIp());
         record.put("userAgent", in.userAgent() == null ? "" : in.userAgent());
 
@@ -892,9 +907,7 @@ public class CloudTrailService {
 
         ObjectNode reqParams = mapper.createObjectNode();
         if (in.bucketName() != null) reqParams.put("bucketName", in.bucketName());
-        reqParams.put("Host", in.bucketName() == null
-                ? "s3.amazonaws.com"
-                : in.bucketName() + ".s3.amazonaws.com");
+        reqParams.put("Host", s3Host);
         if (in.key() != null) reqParams.put("key", in.key());
         record.set("requestParameters", reqParams);
         record.set("responseElements", mapper.nullNode());
@@ -916,12 +929,13 @@ public class CloudTrailService {
             ObjectNode bucketRes = mapper.createObjectNode();
             bucketRes.put("accountId", regionResolver.getAccountId());
             bucketRes.put("type", "AWS::S3::Bucket");
-            bucketRes.put("ARN", "arn:aws:s3:::" + in.bucketName());
+            bucketRes.put("ARN", AwsArnUtils.Arn.global(partition, "s3", "", in.bucketName()).toString());
             resources.add(bucketRes);
             if (in.key() != null) {
                 ObjectNode objRes = mapper.createObjectNode();
                 objRes.put("type", "AWS::S3::Object");
-                objRes.put("ARN", "arn:aws:s3:::" + in.bucketName() + "/" + in.key());
+                objRes.put("ARN",
+                        AwsArnUtils.Arn.global(partition, "s3", "", in.bucketName() + "/" + in.key()).toString());
                 resources.add(objRes);
             }
             record.set("resources", resources);
@@ -934,9 +948,7 @@ public class CloudTrailService {
         ObjectNode tls = mapper.createObjectNode();
         tls.put("tlsVersion", "TLSv1.3");
         tls.put("cipherSuite", "TLS_AES_128_GCM_SHA256");
-        tls.put("clientProvidedHostHeader", in.bucketName() == null
-                ? "s3.amazonaws.com"
-                : in.bucketName() + ".s3.amazonaws.com");
+        tls.put("clientProvidedHostHeader", s3Host);
         record.set("tlsDetails", tls);
 
         return record;
@@ -949,7 +961,7 @@ public class CloudTrailService {
         if (accessKeyId == null || "test".equals(accessKeyId)) {
             identity.put("type", "IAMUser");
             identity.put("principalId", "AIDA" + repeat('A', 17));
-            identity.put("arn", "arn:aws:iam::" + accountId + ":root");
+            identity.put("arn", regionResolver.buildGlobalArn("iam", accountId, "root"));
             identity.put("accountId", accountId);
             identity.put("accessKeyId", accessKeyId == null ? "" : accessKeyId);
             identity.put("userName", "root");
@@ -972,7 +984,7 @@ public class CloudTrailService {
 
         identity.put("type", "IAMUser");
         identity.put("principalId", "AIDA" + repeat('A', 17));
-        identity.put("arn", "arn:aws:iam::" + accountId + ":user/anonymous");
+        identity.put("arn", regionResolver.buildGlobalArn("iam", accountId, "user/anonymous"));
         identity.put("accountId", accountId);
         identity.put("accessKeyId", accessKeyId);
         identity.put("userName", "anonymous");

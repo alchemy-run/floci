@@ -2,21 +2,12 @@ package io.github.hectorvent.floci.services.stepfunctions;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.hectorvent.floci.config.EmulatorConfig;
-import io.github.hectorvent.floci.services.dynamodb.DynamoDbJsonHandler;
-import io.github.hectorvent.floci.services.dynamodb.DynamoDbService;
-import io.github.hectorvent.floci.services.lambda.LambdaExecutorService;
-import io.github.hectorvent.floci.services.lambda.LambdaFunctionStore;
-import io.github.hectorvent.floci.services.sns.SnsJsonHandler;
-import io.github.hectorvent.floci.services.sqs.SqsJsonHandler;
-import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
 
 /**
  * A {@code $.} argument of a {@code States.*} intrinsic that matches nothing fails with
@@ -33,31 +24,15 @@ class AslExecutorIntrinsicMissingArgumentTest {
     @BeforeEach
     @SuppressWarnings("unchecked")
     void setUp() {
-        executor = new AslExecutor(
-                mock(LambdaExecutorService.class),
-                mock(LambdaFunctionStore.class),
-                mock(DynamoDbService.class),
-                mock(DynamoDbJsonHandler.class),
-                mock(SqsJsonHandler.class), mock(SnsJsonHandler.class),
-                mock(io.github.hectorvent.floci.services.cloudformation.CloudFormationQueryHandler.class),
-                mock(io.github.hectorvent.floci.services.ec2.Ec2Service.class),
-                mock(io.github.hectorvent.floci.services.s3.S3Service.class),
-                mock(io.github.hectorvent.floci.services.ecs.EcsService.class),
-                mock(io.github.hectorvent.floci.services.ecs.EcsJsonHandler.class),
-                mock(io.github.hectorvent.floci.services.eventbridge.EventBridgeHandler.class),
-                mock(io.github.hectorvent.floci.services.scheduler.SchedulerService.class),
-                mock(io.github.hectorvent.floci.services.scheduler.SchedulerController.class),
-                mapper,
-                new JsonataEvaluator(mapper),
-                mock(Instance.class),
-                mock(EmulatorConfig.class),
-                null,
-                null);
+        executor = AslExecutorFixture.builder()
+                .objectMapper(mapper)
+                .customResourceLiveness(null)
+                .build();
     }
 
     @Test
     void unresolvableArgumentFailsWithTheCauseAwsWrites() throws Exception {
-        var failure = assertThrows(AslExecutor.FailStateException.class,
+        AslExecutor.FailStateException failure = assertThrows(AslExecutor.FailStateException.class,
                 () -> resolve("{\"v.$\":\"States.Format('{}', $.nope)\"}", "{\"other\":1}"));
 
         assertEquals("States.Runtime", failure.error);
@@ -69,7 +44,7 @@ class AslExecutorIntrinsicMissingArgumentTest {
     /** The expression is echoed as written, spacing included. */
     @Test
     void theCauseEchoesTheExpressionVerbatim() throws Exception {
-        var failure = assertThrows(AslExecutor.FailStateException.class,
+        AslExecutor.FailStateException failure = assertThrows(AslExecutor.FailStateException.class,
                 () -> resolve("{\"v.$\":\"States.Format('{}',$.nope)\"}", "{\"other\":1}"));
 
         assertEquals("The function 'States.Format('{}',$.nope)' had the following error: "
@@ -80,7 +55,7 @@ class AslExecutorIntrinsicMissingArgumentTest {
     /** A later argument fails alike, and the cause names that argument rather than the first. */
     @Test
     void aLaterArgumentNamesItself() throws Exception {
-        var failure = assertThrows(AslExecutor.FailStateException.class,
+        AslExecutor.FailStateException failure = assertThrows(AslExecutor.FailStateException.class,
                 () -> resolve("{\"v.$\":\"States.Format('{} {}', $.other, $.a.b)\"}", "{\"other\":1}"));
 
         assertEquals("The function 'States.Format('{} {}', $.other, $.a.b)' had the following "
@@ -94,7 +69,7 @@ class AslExecutorIntrinsicMissingArgumentTest {
      */
     @Test
     void aReferencePathAsTheFormatTemplateIsResolvedAndFailsWhenItMatchesNothing() throws Exception {
-        var failure = assertThrows(AslExecutor.FailStateException.class,
+        AslExecutor.FailStateException failure = assertThrows(AslExecutor.FailStateException.class,
                 () -> resolve("{\"v.$\":\"States.Format($.nope, 1)\"}", "{\"other\":1}"));
 
         assertEquals("States.Runtime", failure.error);
@@ -106,7 +81,7 @@ class AslExecutorIntrinsicMissingArgumentTest {
     /** A reference path in the template position that does resolve is used as the template. */
     @Test
     void aReferencePathAsTheFormatTemplateThatResolvesIsUsedAsTheTemplate() throws Exception {
-        var resolved = resolve("{\"v.$\":\"States.Format($.tpl, 1)\"}", "{\"tpl\":\"n={}\"}");
+        JsonNode resolved = resolve("{\"v.$\":\"States.Format($.tpl, 1)\"}", "{\"tpl\":\"n={}\"}");
 
         assertEquals("\"n=1\"", resolved.path("v").toString());
     }
@@ -114,7 +89,7 @@ class AslExecutorIntrinsicMissingArgumentTest {
     /** The whole expression is named, not the inner function that took the failing argument. */
     @Test
     void nestedIntrinsicNamesTheWholeExpression() throws Exception {
-        var failure = assertThrows(AslExecutor.FailStateException.class,
+        AslExecutor.FailStateException failure = assertThrows(AslExecutor.FailStateException.class,
                 () -> resolve("{\"v.$\":\"States.Format('{}', States.Format('{}', $.nope))\"}",
                         "{\"other\":1}"));
 
@@ -138,7 +113,7 @@ class AslExecutorIntrinsicMissingArgumentTest {
     /** Only absence fails. A present but explicitly null argument still formats as null. */
     @Test
     void explicitNullArgumentStillFormats() throws Exception {
-        var resolved = resolve("{\"v.$\":\"States.Format('{}', $.nul)\"}", "{\"nul\":null}");
+        JsonNode resolved = resolve("{\"v.$\":\"States.Format('{}', $.nul)\"}", "{\"nul\":null}");
 
         assertEquals("\"null\"", resolved.path("v").toString());
     }
@@ -146,7 +121,7 @@ class AslExecutorIntrinsicMissingArgumentTest {
     /** A wildcard projection that matches nothing is an empty array, not an absent argument. */
     @Test
     void wildcardMatchingNothingIsAnEmptyArray() throws Exception {
-        var resolved = resolve("{\"v.$\":\"States.ArrayLength($.items[*].nope)\"}", "{\"items\":[1,2]}");
+        JsonNode resolved = resolve("{\"v.$\":\"States.ArrayLength($.items[*].nope)\"}", "{\"items\":[1,2]}");
 
         assertEquals(0, resolved.path("v").asInt());
     }
@@ -158,7 +133,7 @@ class AslExecutorIntrinsicMissingArgumentTest {
      */
     @Test
     void indexPastTheEndOfAnArrayFails() throws Exception {
-        var failure = assertThrows(AslExecutor.FailStateException.class,
+        AslExecutor.FailStateException failure = assertThrows(AslExecutor.FailStateException.class,
                 () -> resolve("{\"v.$\":\"States.Format('{}', $.items[5])\"}", "{\"items\":[1,2]}"));
 
         assertEquals("The function 'States.Format('{}', $.items[5])' had the following error: "
@@ -169,7 +144,7 @@ class AslExecutorIntrinsicMissingArgumentTest {
     /** The plain form of the same path is not a miss. AWS resolves it to null and the execution succeeds. */
     @Test
     void plainReferencePastTheEndOfAnArrayResolvesToNull() throws Exception {
-        var resolved = resolve("{\"v.$\":\"$.items[5]\"}", "{\"items\":[1,2]}");
+        JsonNode resolved = resolve("{\"v.$\":\"$.items[5]\"}", "{\"items\":[1,2]}");
 
         assertTrue(resolved.path("v").isNull());
     }
@@ -177,7 +152,7 @@ class AslExecutorIntrinsicMissingArgumentTest {
     /** Reading a field off the absent element fails alike. */
     @Test
     void navigatingPastAnOutOfRangeIndexFails() throws Exception {
-        var failure = assertThrows(AslExecutor.FailStateException.class,
+        AslExecutor.FailStateException failure = assertThrows(AslExecutor.FailStateException.class,
                 () -> resolve("{\"v.$\":\"States.Format('{}', $.items[5].x)\"}", "{\"items\":[1]}"));
 
         assertEquals("The function 'States.Format('{}', $.items[5].x)' had the following error: "
@@ -192,7 +167,7 @@ class AslExecutorIntrinsicMissingArgumentTest {
      */
     @Test
     void indexingANonArrayFails() throws Exception {
-        var failure = assertThrows(AslExecutor.FailStateException.class,
+        AslExecutor.FailStateException failure = assertThrows(AslExecutor.FailStateException.class,
                 () -> resolve("{\"v.$\":\"States.Format('{}', $.other[0])\"}", "{\"other\":1}"));
 
         assertEquals("States.Runtime", failure.error);
@@ -209,10 +184,10 @@ class AslExecutorIntrinsicMissingArgumentTest {
      */
     @Test
     void unresolvableContextArgumentNamesTheRewrittenPathAndTheStateInput() throws Exception {
-        var context = mapper.readTree("{\"State\":{\"Name\":\"P\"}}");
-        var template = mapper.readTree("{\"v.$\":\"States.Format('{}', $$.Nope.Deep)\"}");
+        JsonNode context = mapper.readTree("{\"State\":{\"Name\":\"P\"}}");
+        JsonNode template = mapper.readTree("{\"v.$\":\"States.Format('{}', $$.Nope.Deep)\"}");
 
-        var failure = assertThrows(AslExecutor.FailStateException.class,
+        AslExecutor.FailStateException failure = assertThrows(AslExecutor.FailStateException.class,
                 () -> executor.resolveParameters(template, mapper.readTree("{\"other\":1}"), context));
 
         assertEquals("The function 'States.Format('{}', $$.Nope.Deep)' had the following error: "
@@ -223,7 +198,7 @@ class AslExecutorIntrinsicMissingArgumentTest {
     /** A bare $ argument is the whole input, so it never misses. */
     @Test
     void wholeInputArgumentResolves() throws Exception {
-        var resolved = resolve("{\"v.$\":\"States.JsonToString($)\"}", "{\"other\":1}");
+        JsonNode resolved = resolve("{\"v.$\":\"States.JsonToString($)\"}", "{\"other\":1}");
 
         assertEquals("{\"other\":1}", resolved.path("v").asText());
     }
@@ -231,7 +206,7 @@ class AslExecutorIntrinsicMissingArgumentTest {
     /** ResultSelector and ItemSelector run through the same resolver, so they fail the same way. */
     @Test
     void resultSelectorFailsOnAnUnresolvableArgument() throws Exception {
-        var failure = assertThrows(AslExecutor.FailStateException.class,
+        AslExecutor.FailStateException failure = assertThrows(AslExecutor.FailStateException.class,
                 () -> resolve("{\"v.$\":\"States.Format('{}', $[0].nope)\"}", "[{\"other\":1}]"));
 
         assertEquals("The function 'States.Format('{}', $[0].nope)' had the following error: "
@@ -240,7 +215,7 @@ class AslExecutorIntrinsicMissingArgumentTest {
     }
 
     private void assertIntrinsicFails(String expression, String argument) {
-        var failure = assertThrows(AslExecutor.FailStateException.class,
+        AslExecutor.FailStateException failure = assertThrows(AslExecutor.FailStateException.class,
                 () -> resolve("{\"v.$\":\"" + expression + "\"}", "{\"other\":1}"),
                 expression);
 

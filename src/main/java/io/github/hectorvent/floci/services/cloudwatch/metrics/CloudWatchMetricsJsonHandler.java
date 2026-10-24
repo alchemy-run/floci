@@ -8,6 +8,7 @@ import io.github.hectorvent.floci.core.common.AwsErrorResponse;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.services.cloudwatch.dashboards.CloudWatchDashboardsService;
 import io.github.hectorvent.floci.services.cloudwatch.dashboards.model.Dashboard;
+import io.github.hectorvent.floci.services.cloudwatch.metrics.model.AlarmMetricDataQuery;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.Dimension;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricAlarm;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricDatum;
@@ -118,10 +119,14 @@ public class CloudWatchMetricsJsonHandler {
 
     private Response handlePutMetricData(JsonNode request, String region) {
         String namespace = request.path("Namespace").asText();
-        LOG.infov("JSON PutMetricData raw: {0}", request);
-        List<MetricDatum> datums = parseMetricDataJson(request.path("MetricData"));
-        LOG.infov("JSON PutMetricData parsed {0} datums, sums={1}", datums.size(),
-                datums.stream().map(d -> d.getMetricName() + "=" + d.getSum()).toList());
+        List<MetricDatum> datums = parseMetricDataJson(request.path("MetricData"), "MetricData");
+        int entityIndex = 0;
+        for (JsonNode entityMetricData : request.path("EntityMetricData")) {
+            entityIndex++;
+            datums.addAll(parseMetricDataJson(entityMetricData.path("MetricData"),
+                    "EntityMetricData.member." + entityIndex + ".MetricData"));
+        }
+        LOG.debugv("JSON PutMetricData parsed {0} datums for namespace {1}", datums.size(), namespace);
         metricsService.putMetricData(namespace, datums, region);
         return Response.ok(objectMapper.createObjectNode()).build();
     }
@@ -136,7 +141,7 @@ public class CloudWatchMetricsJsonHandler {
 
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode metricsArray = response.putArray("Metrics");
-        for (var m : metrics) {
+        for (CloudWatchMetricsService.MetricIdentity m : metrics) {
             ObjectNode mNode = metricsArray.addObject();
             mNode.put("Namespace", m.namespace());
             mNode.put("MetricName", m.metricName());
@@ -173,7 +178,7 @@ public class CloudWatchMetricsJsonHandler {
         ObjectNode response = objectMapper.createObjectNode();
         response.put("Label", metricName);
         ArrayNode dps = response.putArray("Datapoints");
-        for (var dp : datapoints) {
+        for (CloudWatchMetricsService.Datapoint dp : datapoints) {
             ObjectNode dpNode = dps.addObject();
             dpNode.put("Timestamp", dp.timestamp().getEpochSecond());
             if (statistics.contains("Average")) dpNode.put("Average", dp.average());
@@ -193,7 +198,13 @@ public class CloudWatchMetricsJsonHandler {
         alarm.setMetricName(request.path("MetricName").asText(null));
         alarm.setNamespace(request.path("Namespace").asText(null));
         alarm.setStatistic(request.path("Statistic").asText(null));
-        alarm.setPeriod(request.path("Period").asInt(60));
+        JsonNode metrics = request.path("Metrics");
+        if (metrics.isArray()) {
+            for (JsonNode query : metrics) {
+                alarm.getMetrics().add(objectMapper.convertValue(query, AlarmMetricDataQuery.class));
+            }
+        }
+        alarm.setPeriod(alarm.getMetrics().isEmpty() ? request.path("Period").asInt(60) : null);
         alarm.setUnit(request.path("Unit").asText(null));
         alarm.setEvaluationPeriods(request.path("EvaluationPeriods").asInt(1));
         alarm.setDatapointsToAlarm(request.hasNonNull("DatapointsToAlarm")
@@ -256,17 +267,31 @@ public class CloudWatchMetricsJsonHandler {
             a.getOkActions().forEach(okActions::add);
             ArrayNode insufficientDataActions = node.putArray("InsufficientDataActions");
             a.getInsufficientDataActions().forEach(insufficientDataActions::add);
-            if (a.getMetricName() != null) node.put("MetricName", a.getMetricName());
-            if (a.getNamespace() != null) node.put("Namespace", a.getNamespace());
-            if (a.getStatistic() != null) node.put("Statistic", a.getStatistic());
-            ArrayNode dimensions = node.putArray("Dimensions");
-            a.getDimensions().forEach(d -> {
-                ObjectNode dimNode = dimensions.addObject();
-                dimNode.put("Name", d.name());
-                dimNode.put("Value", d.value());
-            });
-            node.put("Period", a.getPeriod());
-            if (a.getUnit() != null) node.put("Unit", a.getUnit());
+            if (!a.getMetrics().isEmpty()) {
+                node.set("Metrics", objectMapper.valueToTree(a.getMetrics()));
+            } else {
+                if (a.getMetricName() != null) {
+                    node.put("MetricName", a.getMetricName());
+                }
+                if (a.getNamespace() != null) {
+                    node.put("Namespace", a.getNamespace());
+                }
+                if (a.getStatistic() != null) {
+                    node.put("Statistic", a.getStatistic());
+                }
+                ArrayNode dimensions = node.putArray("Dimensions");
+                a.getDimensions().forEach(d -> {
+                    ObjectNode dimNode = dimensions.addObject();
+                    dimNode.put("Name", d.name());
+                    dimNode.put("Value", d.value());
+                });
+                if (a.getPeriod() != null) {
+                    node.put("Period", a.getPeriod());
+                }
+                if (a.getUnit() != null) {
+                    node.put("Unit", a.getUnit());
+                }
+            }
             node.put("EvaluationPeriods", a.getEvaluationPeriods());
             if (a.getDatapointsToAlarm() != null) {
                 node.put("DatapointsToAlarm", a.getDatapointsToAlarm());
@@ -304,6 +329,8 @@ public class CloudWatchMetricsJsonHandler {
             }
             if (page.has("NextToken")) response.set("NextToken", page.get("NextToken"));
         }
+        response.putArray("CompositeAlarms");
+        response.putArray("LogAlarms");
         return Response.ok(response).build();
     }
 
@@ -473,7 +500,7 @@ public class CloudWatchMetricsJsonHandler {
 
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode resultsArray = response.putArray("MetricDataResults");
-        for (var r : results) {
+        for (CloudWatchMetricsService.MetricDataResult r : results) {
             ObjectNode rNode = resultsArray.addObject();
             rNode.put("Id", r.id());
             rNode.put("Label", r.label());
@@ -662,7 +689,7 @@ public class CloudWatchMetricsJsonHandler {
         for (MetricStreamStatisticsConfiguration configuration : configurations) {
             ObjectNode node = array.addObject();
             ArrayNode includeMetrics = node.putArray("IncludeMetrics");
-            for (var metric : configuration.getIncludeMetrics()) {
+            for (MetricStreamStatisticsConfiguration.IncludeMetric metric : configuration.getIncludeMetrics()) {
                 includeMetrics.addObject()
                         .put("Namespace", metric.namespace())
                         .put("MetricName", metric.metricName());
@@ -706,12 +733,18 @@ public class CloudWatchMetricsJsonHandler {
         return configurations;
     }
 
-    private List<MetricDatum> parseMetricDataJson(JsonNode node) {
+    private List<MetricDatum> parseMetricDataJson(JsonNode node, String listPath) {
         List<MetricDatum> datums = new ArrayList<>();
         if (!node.isArray()) return datums;
+        int index = 0;
         for (JsonNode item : node) {
+            index++;
+            JsonNode metricName = item.path("MetricName");
+            if (!metricName.isTextual() || metricName.asText().isEmpty()) {
+                throw CloudWatchMetricsException.missingParameter(listPath + ".member." + index + ".MetricName");
+            }
             MetricDatum datum = new MetricDatum();
-            datum.setMetricName(item.path("MetricName").asText());
+            datum.setMetricName(metricName.asText());
             datum.setValue(item.path("Value").asDouble(0));
             datum.setUnit(item.path("Unit").asText(null));
             JsonNode ts = item.path("Timestamp");

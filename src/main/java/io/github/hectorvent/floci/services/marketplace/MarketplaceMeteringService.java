@@ -5,7 +5,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.Base64Url;
+import io.github.hectorvent.floci.core.common.Digests;
 import io.github.hectorvent.floci.core.common.RequestContext;
 import io.github.hectorvent.floci.core.common.Resettable;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
@@ -17,7 +20,6 @@ import jakarta.inject.Inject;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
-import java.security.MessageDigest;
 import java.security.Signature;
 import java.security.spec.MGF1ParameterSpec;
 import java.security.spec.PSSParameterSpec;
@@ -26,8 +28,8 @@ import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -156,7 +158,7 @@ public class MarketplaceMeteringService implements Resettable {
             }
             String productIdentity = licenseArn != null ? licenseArn : requestProduct;
             String customerIdentity = customerAccount != null ? customerAccount : customerId;
-            String key = region + "/batch/" + digest(productIdentity + "|" + customerIdentity + "|" + dimension + "|"
+            String key = region + "/batch/" + Digests.sha256Hex(productIdentity + "|" + customerIdentity + "|" + dimension + "|"
                     + timestamp.truncatedTo(ChronoUnit.HOURS));
             JsonNode prior = meterRecords.get(key).orElse(null);
             String status = "Success";
@@ -200,10 +202,10 @@ public class MarketplaceMeteringService implements Resettable {
         if (nonce != null) {
             payload.put("Nonce", nonce);
         }
-        String encodedHeader = base64Url(header.toString());
-        String encodedPayload = base64Url(payload.toString());
+        String encodedHeader = Base64Url.encode(header.toString());
+        String encodedPayload = Base64Url.encode(payload.toString());
         String signingInput = encodedHeader + "." + encodedPayload;
-        String signature = Base64.getUrlEncoder().withoutPadding().encodeToString(signPs256(signingInput));
+        String signature = Base64Url.encode(signPs256(signingInput));
         ObjectNode response = mapper.createObjectNode();
         response.put("Signature", signingInput + "." + signature);
         return response;
@@ -220,18 +222,18 @@ public class MarketplaceMeteringService implements Resettable {
             return (ObjectNode) existing.deepCopy();
         }
 
-        byte[] hash = sha256(token);
+        byte[] hash = Digests.sha256(token.getBytes(StandardCharsets.UTF_8));
         long number = 0;
         for (int i = 0; i < 6; i++) {
             number = (number << 8) | (hash[i] & 0xffL);
         }
         String customerAccount = String.format(Locale.ROOT, "%012d", number % 1_000_000_000_000L);
         String productCode = localProductCode(region);
-        String licenseId = toHex(hash).substring(0, 24);
+        String licenseId = HexFormat.of().formatHex(hash).substring(0, 24);
         ObjectNode response = mapper.createObjectNode();
         response.put("ProductCode", productCode);
         response.put("CustomerAWSAccountId", customerAccount);
-        response.put("LicenseArn", "arn:aws:license-manager:" + region + ":" + customerAccount + ":license:l-" + licenseId);
+        response.put("LicenseArn", AwsArnUtils.Arn.of("license-manager", region, customerAccount, "license:l-" + licenseId).toString());
         customerMappings.put(region + "/" + token, response);
         return response.deepCopy();
     }
@@ -410,11 +412,6 @@ public class MarketplaceMeteringService implements Resettable {
             throw new IllegalStateException("Unable to sign Marketplace metering JWT", e);
         }
     }
-
-    private static byte[] sha256(String value) { try { return MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)); } catch (Exception e) { throw new IllegalStateException(e); } }
-    private static String digest(String value) { return toHex(sha256(value)); }
-    private static String base64Url(String value) { return Base64.getUrlEncoder().withoutPadding().encodeToString(value.getBytes(StandardCharsets.UTF_8)); }
-    private static String toHex(byte[] bytes) { StringBuilder out=new StringBuilder(); for(byte b:bytes) out.append(String.format(Locale.ROOT,"%02x",b)); return out.toString(); }
 
     @Override public void clear() { meterRecords.clear(); clientTokens.clear(); customerMappings.clear(); }
 }

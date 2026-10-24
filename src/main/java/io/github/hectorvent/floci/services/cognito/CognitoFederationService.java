@@ -40,28 +40,38 @@ public class CognitoFederationService {
         this.clock = clock;
     }
 
+    /** Grants exactly the requested {@code scopes}. */
     public String beginAuthorization(String userPoolId, String clientId, String redirectUri, List<String> scopes,
                                      String nonce, String providerName) {
-        return beginAuthorization(userPoolId, clientId, redirectUri, scopes, nonce, providerName, null);
+        return beginAuthorization(userPoolId, clientId, redirectUri, scopes, scopes, nonce, providerName, null, null);
     }
 
-    public String beginAuthorization(String userPoolId, String clientId, String redirectUri, List<String> scopes,
-                                     String nonce, String providerName, String relyingPartyState) {
-        IdentityProvider provider = cognitoService.describeIdentityProvider(userPoolId, providerName);
-        requireOidcProvider(provider);
+    /**
+     * @param requestedScopes the scopes the authorization request named, which the provider is asked
+     *                        for when it has no {@code authorize_scopes}
+     * @param grantedScopes   the scopes Cognito granted the request, which the transaction and then
+     *                        the authorization code keep; they never reach the provider
+     * @param codeChallenge   the relying party's S256 PKCE challenge, or null. It stays with Cognito:
+     *                        the relying party proves it at Cognito's token endpoint, not the provider's.
+     */
+    public String beginAuthorization(String userPoolId, String clientId, String redirectUri,
+                                     List<String> requestedScopes, List<String> grantedScopes, String nonce,
+                                     String providerName, String relyingPartyState, String codeChallenge) {
+        IdentityProvider provider = federationProvider(userPoolId, providerName);
         String authorizeEndpoint = requiredProviderDetail(provider, "authorize_url", "authorize endpoint");
         String providerClientId = requiredProviderDetail(provider, "client_id", "client_id");
         validateAuthorizeEndpoint(authorizeEndpoint, provider.getProviderName());
         Instant expiresAt = clock.instant().plus(TRANSACTION_LIFETIME);
-        CognitoAuthorizationTransaction transaction = new CognitoAuthorizationTransaction(
-                userPoolId, clientId, redirectUri, scopes, nonce, providerName, relyingPartyState, expiresAt);
+        CognitoAuthorizationTransaction transaction = new CognitoAuthorizationTransaction(userPoolId, clientId,
+                redirectUri, grantedScopes, nonce, providerName, relyingPartyState, codeChallenge,
+                provider.getProviderDetails(), expiresAt);
         String state = stateStore.putTransaction(transaction);
 
         Map<String, String> parameters = new LinkedHashMap<>();
         parameters.put("response_type", "code");
         parameters.put("client_id", providerClientId);
         parameters.put("redirect_uri", cognitoService.getIdentityProviderCallbackEndpoint(userPoolId));
-        parameters.put("scope", providerScopes(provider, scopes));
+        parameters.put("scope", providerScopes(provider, requestedScopes));
         parameters.put("state", state);
         if (nonce != null && !nonce.isBlank()) {
             parameters.put("nonce", nonce);
@@ -76,9 +86,7 @@ public class CognitoFederationService {
     }
 
     String completeAuthorization(CognitoAuthorizationTransaction transaction, String providerCode) {
-        IdentityProvider provider = cognitoService.describeIdentityProvider(
-                transaction.userPoolId(), transaction.providerName());
-        requireOidcProvider(provider);
+        IdentityProvider provider = transactionProvider(transaction);
         String providerCallback = cognitoService.getIdentityProviderCallbackEndpoint(transaction.userPoolId());
         JsonNode tokenResponse = oidcClient.exchangeCode(provider, providerCode, providerCallback);
         String accessToken = requiredText(tokenResponse, "access_token", "access token");
@@ -87,10 +95,39 @@ public class CognitoFederationService {
         String issuer = optionalText(claims, "iss");
         CognitoUser user = cognitoService.provisionFederatedUser(transaction.userPoolId(), provider,
                 subject, issuer, mapAttributes(provider, claims));
+        Instant signedInAt = clock.instant();
         CognitoAuthorizationCode authorizationCode = new CognitoAuthorizationCode(
                 transaction.userPoolId(), transaction.clientId(), user.getUsername(), transaction.redirectUri(),
-                transaction.scopes(), clock.instant().plus(AUTHORIZATION_CODE_LIFETIME));
+                transaction.scopes(), transaction.nonce(), transaction.codeChallenge(),
+                signedInAt, signedInAt.plus(AUTHORIZATION_CODE_LIFETIME));
         return stateStore.putAuthorizationCode(authorizationCode);
+    }
+
+    private IdentityProvider transactionProvider(CognitoAuthorizationTransaction transaction) {
+        IdentityProvider stored = cognitoService.describeIdentityProvider(transaction.userPoolId(),
+                transaction.providerName());
+        if ("Google".equals(stored.getProviderType())) {
+            if (transaction.providerDetails() != null && !transaction.providerDetails().isEmpty()) {
+                Map<String, String> details = new LinkedHashMap<>(stored.getProviderDetails());
+                details.putAll(transaction.providerDetails());
+                IdentityProvider resolved = new IdentityProvider();
+                resolved.setUserPoolId(stored.getUserPoolId());
+                resolved.setProviderName(stored.getProviderName());
+                resolved.setProviderType(stored.getProviderType());
+                resolved.setProviderDetails(details);
+                resolved.setAttributeMapping(stored.getAttributeMapping());
+                resolved.setIdpIdentifiers(stored.getIdpIdentifiers());
+                resolved.setCreationDate(stored.getCreationDate());
+                resolved.setLastModifiedDate(stored.getLastModifiedDate());
+                return resolved;
+            }
+            return oidcClient.googleProvider(stored);
+        }
+        if (!OIDC_PROVIDER_TYPE.equals(stored.getProviderType())) {
+            throw new AwsException("InvalidParameterException", "Identity provider " + stored.getProviderName()
+                    + " must have ProviderType OIDC or Google", 400);
+        }
+        return stored;
     }
 
     private Map<String, String> mapAttributes(IdentityProvider provider, JsonNode claims) {
@@ -119,6 +156,9 @@ public class CognitoFederationService {
     }
 
     private String optionalText(JsonNode json, String fieldName) {
+        if (json == null) {
+            return null;
+        }
         JsonNode value = json.get(fieldName);
         if (value == null || value.isNull() || !value.isValueNode() || value.asText().isBlank()) {
             return null;
@@ -135,11 +175,16 @@ public class CognitoFederationService {
         return value;
     }
 
-    private void requireOidcProvider(IdentityProvider provider) {
+    private IdentityProvider federationProvider(String userPoolId, String providerName) {
+        IdentityProvider provider = cognitoService.describeIdentityProvider(userPoolId, providerName);
+        if ("Google".equals(provider.getProviderType())) {
+            return oidcClient.googleProvider(provider);
+        }
         if (!OIDC_PROVIDER_TYPE.equals(provider.getProviderType())) {
             throw new AwsException("InvalidParameterException", "Identity provider " + provider.getProviderName()
-                    + " must have ProviderType OIDC", 400);
+                    + " must have ProviderType OIDC or Google", 400);
         }
+        return provider;
     }
 
     private void validateAuthorizeEndpoint(String endpoint, String providerName) {

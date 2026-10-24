@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.lambda;
 
+import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -12,6 +13,9 @@ import io.github.hectorvent.floci.services.lambda.model.InvocationType;
 import io.github.hectorvent.floci.services.lambda.model.InvokeResult;
 import io.github.hectorvent.floci.services.lambda.model.LambdaAlias;
 import io.github.hectorvent.floci.services.lambda.model.LambdaFunction;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
+import io.github.hectorvent.floci.core.common.Digests;
+import io.github.hectorvent.floci.services.s3.PreSignedUrlGenerator;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
@@ -26,17 +30,14 @@ import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
-import jakarta.ws.rs.core.UriBuilder;
 import jakarta.ws.rs.core.UriInfo;
 import org.jboss.logging.Logger;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
+import java.io.IOException;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
-import java.util.HexFormat;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
@@ -55,14 +56,16 @@ public class LambdaController {
     private final LambdaDurableService durableService;
     private final RegionResolver regionResolver;
     private final ObjectMapper objectMapper;
+    private final PreSignedUrlGenerator presignGenerator;
 
     @Inject
-    public LambdaController(LambdaService lambdaService, LambdaDurableService durableService,
-                            RegionResolver regionResolver, ObjectMapper objectMapper) {
+    public LambdaController(LambdaService lambdaService, RegionResolver regionResolver, ObjectMapper objectMapper,
+                            PreSignedUrlGenerator presignGenerator) {
         this.lambdaService = lambdaService;
         this.durableService = durableService;
         this.regionResolver = regionResolver;
         this.objectMapper = objectMapper;
+        this.presignGenerator = presignGenerator;
     }
 
     // ──────────────────────────── CreateFunction ────────────────────────────
@@ -107,12 +110,14 @@ public class LambdaController {
             code.put("ResolvedImageUri", fn.getResolvedImageUri() != null
                     ? fn.getResolvedImageUri() : fn.getImageUri());
         } else {
-            // Path-style URL to the package in Floci's own S3, built from the
-            // request so it targets the same endpoint the client is talking to.
-            String location = UriBuilder.fromUri(uriInfo.getBaseUri())
-                    .path(LambdaService.tasksBucketName(region))
-                    .path(LambdaService.codeObjectKey(fn))
-                    .build().toString();
+            String base = uriInfo.getBaseUri().toString();
+            if (base.endsWith("/")) {
+                base = base.substring(0, base.length() - 1);
+            }
+            String codeRegion = AwsArnUtils.regionOrDefault(fn.getFunctionArn(), region);
+            String location = presignGenerator.generatePresignedUrl(base,
+                    LambdaService.tasksBucketName(codeRegion), LambdaService.codeObjectKey(fn),
+                    "GET", 0, codeRegion, LambdaService.ownerAccount(fn));
             code.put("Location", location);
             code.put("RepositoryType", "S3");
         }
@@ -126,6 +131,12 @@ public class LambdaController {
         if (tags != null && !tags.isEmpty()) {
             ObjectNode tagsNode = root.putObject("Tags");
             tags.forEach(tagsNode::put);
+        }
+
+        Integer reservedConcurrency = fn.getReservedConcurrentExecutions();
+        String effectiveQualifier = LambdaArnUtils.resolveWithQualifier(functionName, qualifier).qualifier();
+        if (effectiveQualifier == null && reservedConcurrency != null) {
+            root.putObject("Concurrency").put("ReservedConcurrentExecutions", reservedConcurrency);
         }
 
         return Response.ok(root).build();
@@ -237,9 +248,13 @@ public class LambdaController {
     @Path("/functions/{functionName}/invocations")
     @Consumes(MediaType.WILDCARD)
     public Response invoke(@Context HttpHeaders headers,
+                           @Context UriInfo uriInfo,
                            @PathParam("functionName") String functionName,
                            @QueryParam("Qualifier") String qualifier,
                            byte[] payload) {
+        // Read from the query itself: @QueryParam reports a present but empty Qualifier as null, which
+        // would hide it from the Qualifier validation.
+        String qualifier = uriInfo.getQueryParameters().getFirst("Qualifier");
         String region = regionResolver.resolveRegion(headers);
         String invocationTypeHeader = headers.getHeaderString("X-Amz-Invocation-Type");
         InvocationType type = InvocationType.parse(invocationTypeHeader);
@@ -269,9 +284,12 @@ public class LambdaController {
                     .build();
         }
 
-        String target = qualifier == null || qualifier.isBlank()
-                ? functionName : functionName + ":" + qualifier;
-        InvokeResult result = lambdaService.invoke(region, target, payload, type);
+        String clientContext = type == InvocationType.RequestResponse
+                ? decodeClientContext(headers.getHeaderString("X-Amz-Client-Context")) : null;
+        String durableExecutionName = headers.getHeaderString("X-Amz-Durable-Execution-Name");
+
+        InvokeResult result = lambdaService.invoke(region, functionName, qualifier, payload, type, clientContext,
+                durableExecutionName);
 
         if (type != InvocationType.Event
                 && result.getPayload() != null
@@ -292,6 +310,9 @@ public class LambdaController {
         }
         builder.header("X-Amz-Executed-Version", result.getExecutedVersion());
         builder.header("X-Amz-Request-Id", result.getRequestId());
+        if (result.getDurableExecutionArn() != null) {
+            builder.header("X-Amz-Durable-Execution-Arn", result.getDurableExecutionArn());
+        }
 
         if (result.getPayload() != null && result.getPayload().length > 0) {
             builder.entity(result.getPayload())
@@ -299,6 +320,20 @@ public class LambdaController {
         }
 
         return builder.build();
+    }
+
+    private String decodeClientContext(String encoded) {
+        if (encoded == null || encoded.isEmpty()) {
+            return null;
+        }
+        try {
+            byte[] decoded = Base64.getDecoder().decode(encoded);
+            return objectMapper.writer().with(JsonGenerator.Feature.ESCAPE_NON_ASCII)
+                    .writeValueAsString(objectMapper.readTree(decoded));
+        } catch (IOException | IllegalArgumentException e) {
+            throw new AwsException("InvalidRequestContentException",
+                    "Could not parse the client context: it must be base64-encoded JSON.", 400);
+        }
     }
 
     // ──────────────────────────── Event Source Mappings ────────────────────────────
@@ -330,7 +365,7 @@ public class LambdaController {
     @Path("/event-source-mappings")
     public Response listEventSourceMappings(@QueryParam("FunctionName") String functionArn,
                                             @QueryParam("EventSourceArn") String eventSourceArn) {
-        List<EventSourceMapping> esms = lambdaService.listEventSourceMappings(functionArn);
+        List<EventSourceMapping> esms = lambdaService.listEventSourceMappings(functionArn, eventSourceArn);
         ObjectNode root = objectMapper.createObjectNode();
         ArrayNode items = root.putArray("EventSourceMappings");
         for (EventSourceMapping esm : esms) {
@@ -373,6 +408,8 @@ public class LambdaController {
             node.put("EventSourceMappingArn", "arn:aws:lambda:" + esm.getRegion() + ":"
                     + esm.getAccountId() + ":event-source-mapping:" + esm.getUuid());
         }
+        node.put("EventSourceMappingArn",
+                LambdaArnUtils.eventSourceMappingArn(esm.getRegion(), esm.getAccountId(), esm.getUuid()));
         node.put("FunctionArn", esm.getFunctionArn());
         if (esm.getEventSourceArn() != null) {
             node.put("EventSourceArn", esm.getEventSourceArn());
@@ -792,10 +829,24 @@ public class LambdaController {
         putSnapStart(node, fn);
         putLoggingConfig(node, fn);
         putRuntimeVersionConfig(node, fn);
+        putDurableConfig(node, fn);
 
         @SuppressWarnings("unchecked")
         Map<String, Object> result = objectMapper.convertValue(node, Map.class);
         return result;
+    }
+
+    /** Only durable functions carry a DurableConfig; AWS omits the member for every other function. */
+    private void putDurableConfig(ObjectNode node, LambdaFunction fn) {
+        if (!fn.isDurable()) {
+            return;
+        }
+        ObjectNode durable = node.putObject("DurableConfig");
+        durable.put("ExecutionTimeout", fn.getDurableExecutionTimeout());
+        durable.put("RetentionPeriodInDays", fn.getDurableRetentionPeriodInDays());
+        if (fn.getDurableKmsKeyArn() != null) {
+            durable.put("KMSKeyArn", fn.getDurableKmsKeyArn());
+        }
     }
 
     /**
@@ -849,9 +900,7 @@ public class LambdaController {
             logging.put("SystemLogLevel",
                     fn.getSystemLogLevel() != null ? fn.getSystemLogLevel() : "INFO");
         }
-        logging.put("LogGroup", fn.getLogGroup() != null && !fn.getLogGroup().isBlank()
-                ? fn.getLogGroup()
-                : "/aws/lambda/" + fn.getFunctionName());
+        logging.put("LogGroup", LambdaLogDestinations.logGroup(fn));
     }
 
     /** Managed-runtime only: AWS omits it for container images, which pin their own runtime. */
@@ -863,13 +912,13 @@ public class LambdaController {
                 .put("RuntimeVersionArn", runtimeVersionArn(fn));
     }
 
-    private static String runtimeVersionArn(LambdaFunction fn) {
-        String region = "us-east-1";
+    private String runtimeVersionArn(LambdaFunction fn) {
+        String region = regionResolver.getDefaultRegion();
         String[] arnParts = fn.getFunctionArn() != null ? fn.getFunctionArn().split(":") : new String[0];
         if (arnParts.length > 3 && !arnParts[3].isBlank()) {
             region = arnParts[3];
         }
-        return "arn:aws:lambda:" + region + "::runtime:" + runtimeVersionId(fn.getRuntime());
+        return AwsArnUtils.Arn.of("lambda", region, "", "runtime:" + runtimeVersionId(fn.getRuntime())).toString();
     }
 
     /**
@@ -878,13 +927,7 @@ public class LambdaController {
      * perpetual diff in anything that records it.
      */
     private static String runtimeVersionId(String runtime) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(runtime.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 unavailable", e);
-        }
+        return Digests.sha256Hex(runtime);
     }
 
     private static List<String> stringList(Map<String, Object> config, String key) {

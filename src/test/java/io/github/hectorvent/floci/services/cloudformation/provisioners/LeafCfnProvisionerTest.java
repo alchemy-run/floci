@@ -10,7 +10,6 @@ import io.github.hectorvent.floci.services.ecr.model.Repository;
 import io.github.hectorvent.floci.services.firehose.FirehoseService;
 import io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription;
 import io.github.hectorvent.floci.services.kms.KmsService;
-import io.github.hectorvent.floci.services.kms.model.KmsAlias;
 import io.github.hectorvent.floci.services.kms.model.KmsKey;
 import io.github.hectorvent.floci.services.ssm.SsmService;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,11 +17,11 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -35,9 +34,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * The single-service CloudFormation provisioners extracted from
- * {@code CloudFormationResourceProvisioner} together, since each is a handful of lines with one
- * service call.
+ * The single-service CloudFormation provisioners extracted from the former CloudFormation
+ * monolith together, since each is a handful of lines with one service call.
  *
  * <p>Every case asserts the exact physical id and the exact {@code Fn::GetAtt} attribute keys.
  * Asserting status alone would prove nothing: an unmapped type still reports CREATE_COMPLETE via
@@ -59,6 +57,7 @@ class LeafCfnProvisionerTest {
             return node == null || node.isMissingNode() || node.isNull() ? null : node.asText();
         });
         when(engine.resolveNode(any())).thenAnswer(i -> i.getArgument(0));
+        when(engine.resolveNodeOmittingNoValue(any())).thenAnswer(i -> i.getArgument(0));
         ctx = new ProvisionContext(engine, REGION, "000000000000", "my-stack");
     }
 
@@ -138,66 +137,6 @@ class LeafCfnProvisionerTest {
         }
 
         @Test
-        void keyUpdateReusesTheLiveKeyAndConvergesDescriptionAndTags() {
-            KmsKey key = new KmsKey();
-            key.setKeyId("k-123");
-            key.setArn("arn:aws:kms:us-east-1:000000000000:key/k-123");
-            key.setDescription("old");
-            key.setTags(new HashMap<>(Map.of("stale", "1")));
-            when(kms.describeKey("k-123", REGION)).thenReturn(key);
-            ProvisionContext update = new ProvisionContext(engine, REGION, "000000000000", "my-stack", "k-123");
-
-            StackResource r = resource("Key", "AWS::KMS::Key");
-            provisioner.provision(r, props("""
-                    {"Description": "new", "Tags": [{"Key": "env", "Value": "dev"}]}
-                    """), update);
-
-            verify(kms, never()).createKey(any(), any(), any(), anyString());
-            verify(kms).updateKeyDescription("k-123", "new", REGION);
-            verify(kms).untagResource("k-123", List.of("stale"), REGION);
-            verify(kms).tagResource("k-123", Map.of("env", "dev"), REGION);
-            assertEquals("k-123", r.getPhysicalId());
-        }
-
-        @Test
-        void aliasUpdateWithTheSameTargetLeavesTheAliasAlone() {
-            KmsKey key = new KmsKey();
-            key.setKeyId("k-123");
-            when(kms.describeKey("k-123", REGION)).thenReturn(key);
-            when(kms.listAliases(REGION)).thenReturn(List.of(
-                    new KmsAlias(
-                            "alias/app", "arn:aws:kms:us-east-1:000000000000:alias/app", "k-123")));
-            ProvisionContext update = new ProvisionContext(engine, REGION, "000000000000", "my-stack", "alias/app");
-
-            StackResource r = resource("Alias", "AWS::KMS::Alias");
-            provisioner.provision(r, props("""
-                    {"AliasName": "alias/app", "TargetKeyId": "k-123"}
-                    """), update);
-
-            verify(kms, never()).createAlias(anyString(), anyString(), anyString());
-            verify(kms, never()).updateAlias(anyString(), anyString(), anyString());
-            assertEquals("alias/app", r.getPhysicalId());
-        }
-
-        @Test
-        void aliasUpdateWithANewTargetRepointsTheAlias() {
-            KmsKey key = new KmsKey();
-            key.setKeyId("k-456");
-            when(kms.describeKey("k-456", REGION)).thenReturn(key);
-            when(kms.listAliases(REGION)).thenReturn(List.of(
-                    new KmsAlias(
-                            "alias/app", "arn:aws:kms:us-east-1:000000000000:alias/app", "k-123")));
-            ProvisionContext update = new ProvisionContext(engine, REGION, "000000000000", "my-stack", "alias/app");
-
-            provisioner.provision(resource("Alias", "AWS::KMS::Alias"), props("""
-                    {"AliasName": "alias/app", "TargetKeyId": "k-456"}
-                    """), update);
-
-            verify(kms, never()).createAlias(anyString(), anyString(), anyString());
-            verify(kms).updateAlias("alias/app", "k-456", REGION);
-        }
-
-        @Test
         void deletingAKeyIsANoOpBecauseKmsOnlySchedulesDeletion() {
             provisioner.delete("AWS::KMS::Key", "k-123", REGION);
             verify(kms, never()).deleteAlias(anyString(), anyString());
@@ -216,12 +155,6 @@ class LeafCfnProvisionerTest {
         private final SsmService ssm = mock(SsmService.class);
         private final SsmCfnProvisioner provisioner = new SsmCfnProvisioner(ssm);
 
-        @BeforeEach
-        void observedParameters() {
-            when(ssm.getParameter(anyString(), eq(REGION))).thenAnswer(invocation ->
-                    new io.github.hectorvent.floci.services.ssm.model.Parameter(invocation.getArgument(0), "secret", "String"));
-        }
-
         @Test
         void refIsTheParameterNameAndAttributesEchoTheStoredValue() {
             StackResource r = resource("Param", "AWS::SSM::Parameter");
@@ -229,8 +162,8 @@ class LeafCfnProvisionerTest {
                     {"Name": "/app/db", "Value": "secret", "Type": "String"}
                     """), ctx);
 
-            verify(ssm).putParameter("/app/db", "secret", "String", null, false, REGION,
-                    Map.of(), "Standard", null, "", "text");
+            // A create never overwrites: a parameter already under that name is not the stack's.
+            verify(ssm).putParameter("/app/db", "secret", "String", null, false, Map.of(), REGION);
             assertEquals("/app/db", r.getPhysicalId());
             assertEquals(Map.of("Name", "/app/db", "Type", "String", "Value", "secret",
                     "Arn", "arn:aws:ssm:us-east-1:000000000000:parameter/app/db"), r.getAttributes());
@@ -251,12 +184,13 @@ class LeafCfnProvisionerTest {
         @Test
         void anUnnamedParameterGetsAGeneratedStackScopedName() {
             StackResource r = resource("Param", "AWS::SSM::Parameter");
-            provisioner.provision(r, props("{\"Value\":\"secret\"}"), ctx);
+            provisioner.provision(r, props("{}"), ctx);
 
             assertTrue(r.getPhysicalId().startsWith("my-stack-Param-"),
                     "generated names stay stack-scoped: " + r.getPhysicalId());
-            verify(ssm).putParameter(anyString(), eq("secret"), eq("String"), eq(null), eq(false), eq(REGION),
-                    eq(Map.of()), eq("Standard"), eq(null), eq(""), eq("text"));
+            // Absent Value and Type fall back rather than reaching the service as null.
+            verify(ssm).putParameter(anyString(), eq(""), eq("String"), eq(null), eq(false), eq(Map.of()),
+                    eq(REGION));
         }
 
         @Test
@@ -277,6 +211,16 @@ class LeafCfnProvisionerTest {
             repository.setRepositoryArn(arn);
             repository.setRepositoryUri(uri);
             return repository;
+        }
+
+        @Test
+        void servesNothingWhileTheEcrServiceIsDisabled() {
+            assertFalse(provisioner.serviceDisabled());
+
+            when(ecr.isDisabled()).thenReturn(true);
+
+            assertTrue(provisioner.serviceDisabled());
+            assertEquals("floci.services.ecr.enabled", provisioner.serviceEnabledFlag());
         }
 
         @Test
@@ -415,6 +359,114 @@ class LeafCfnProvisionerTest {
                     """), ctx);
 
             assertNull(s3.getValue().getPrefix());
+        }
+
+        @Test
+        void processingLoggingRoleAndErrorPrefixReachTheStream() {
+            ArgumentCaptor<DeliveryStreamDescription.S3Destination> s3 =
+                    ArgumentCaptor.forClass(DeliveryStreamDescription.S3Destination.class);
+            when(firehose.createDeliveryStream(anyString(), s3.capture(), any())).thenReturn("arn");
+
+            provisioner.provision(resource("Stream", "AWS::KinesisFirehose::DeliveryStream"), props("""
+                    {
+                      "DeliveryStreamName": "s",
+                      "ExtendedS3DestinationConfiguration": {
+                        "BucketARN": "arn:bucket",
+                        "RoleARN": "arn:aws:iam::000000000000:role/delivery",
+                        "ErrorOutputPrefix": "errors/!{firehose:error-output-type}/",
+                        "CloudWatchLoggingOptions": {"Enabled": true, "LogGroupName": "g", "LogStreamName": "st"},
+                        "ProcessingConfiguration": {
+                          "Enabled": true,
+                          "Processors": [{"Type": "Lambda", "Parameters": [
+                            {"ParameterName": "LambdaArn", "ParameterValue": "arn:aws:lambda:us-east-1:000000000000:function:f"}
+                          ]}]
+                        }
+                      }
+                    }
+                    """), ctx);
+
+            DeliveryStreamDescription.S3Destination destination = s3.getValue();
+            assertEquals("arn:aws:iam::000000000000:role/delivery", destination.getRoleArn());
+            assertEquals("errors/!{firehose:error-output-type}/", destination.getErrorOutputPrefix());
+            assertEquals(Boolean.TRUE, destination.getCloudWatchLoggingOptions().getEnabled());
+            assertEquals("g", destination.getCloudWatchLoggingOptions().getLogGroupName());
+            assertEquals("st", destination.getCloudWatchLoggingOptions().getLogStreamName());
+            assertTrue(destination.isProcessingEnabled());
+            assertEquals("arn:aws:lambda:us-east-1:000000000000:function:f", destination.getProcessingConfiguration()
+                    .getProcessors().get(0).getParameters().get(0).getParameterValue());
+        }
+
+        @Test
+        void theLegacyDestinationCarriesLoggingButNoProcessor() {
+            ArgumentCaptor<DeliveryStreamDescription.S3Destination> s3 =
+                    ArgumentCaptor.forClass(DeliveryStreamDescription.S3Destination.class);
+            when(firehose.createDeliveryStream(anyString(), s3.capture(), any())).thenReturn("arn");
+
+            provisioner.provision(resource("Stream", "AWS::KinesisFirehose::DeliveryStream"), props("""
+                    {
+                      "DeliveryStreamName": "s",
+                      "S3DestinationConfiguration": {
+                        "BucketARN": "arn:bucket",
+                        "CloudWatchLoggingOptions": {"LogGroupName": "g"},
+                        "ProcessingConfiguration": {"Enabled": true, "Processors": []}
+                      }
+                    }
+                    """), ctx);
+
+            assertEquals("g", s3.getValue().getCloudWatchLoggingOptions().getLogGroupName());
+            assertNull(s3.getValue().getProcessingConfiguration(),
+                    "S3DestinationConfiguration models no processor, as on the API path");
+        }
+
+        @Test
+        void anUnreadableLoggingBlockFailsTheResource() {
+            AwsException error = assertThrows(AwsException.class, () -> provisioner.provision(
+                    resource("Stream", "AWS::KinesisFirehose::DeliveryStream"), props("""
+                    {
+                      "DeliveryStreamName": "s",
+                      "ExtendedS3DestinationConfiguration": {
+                        "BucketARN": "arn:bucket",
+                        "CloudWatchLoggingOptions": {"Enabled": {"not": "a boolean"}}
+                      }
+                    }
+                    """), ctx));
+            assertEquals("ValidationError", error.getErrorCode());
+        }
+
+        @Test
+        void aBlockThatIsNotAnObjectFailsTheResource() {
+            AwsException error = assertThrows(AwsException.class, () -> provisioner.provision(
+                    resource("Stream", "AWS::KinesisFirehose::DeliveryStream"), props("""
+                    {
+                      "DeliveryStreamName": "s",
+                      "ExtendedS3DestinationConfiguration": {
+                        "BucketARN": "arn:bucket",
+                        "ProcessingConfiguration": []
+                      }
+                    }
+                    """), ctx));
+            assertEquals("ValidationError", error.getErrorCode());
+        }
+
+        @Test
+        void anUnknownProcessorTypeFailsTheResource() {
+            AwsException error = assertThrows(AwsException.class, () -> provisioner.provision(
+                    resource("Stream", "AWS::KinesisFirehose::DeliveryStream"), props("""
+                    {
+                      "DeliveryStreamName": "s",
+                      "ExtendedS3DestinationConfiguration": {
+                        "BucketARN": "arn:bucket",
+                        "ProcessingConfiguration": {
+                          "Enabled": true,
+                          "Processors": [{"Type": "Lambd", "Parameters": [
+                            {"ParameterName": "LambdaArn", "ParameterValue": "arn:aws:lambda:us-east-1:000000000000:function:f"}
+                          ]}]
+                        }
+                      }
+                    }
+                    """), ctx));
+            assertEquals("ValidationException", error.getErrorCode());
+            verify(firehose, never()).createDeliveryStream(anyString(), any(), any());
         }
 
         @Test

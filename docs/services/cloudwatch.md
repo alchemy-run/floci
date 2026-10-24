@@ -33,7 +33,7 @@ Floci supports both CloudWatch Logs and CloudWatch Metrics.
 | `TagResource` | Tag a log group by ARN |
 | `UntagResource` | Remove tags from a log group by ARN |
 | `ListTagsForResource` | List tags for a log group ARN |
-| `PutSubscriptionFilter` | Create or update a subscription filter and deliver matching events |
+| `PutSubscriptionFilter` | Create or update a subscription filter (see [Subscription filters](#subscription-filters)) |
 | `DescribeSubscriptionFilters` | List subscription filters on a log group |
 | `DeleteSubscriptionFilter` | Delete a subscription filter |
 | `PutDestination` | Create or update a logs destination (Kinesis target + delivery role) |
@@ -55,28 +55,48 @@ Floci supports both CloudWatch Logs and CloudWatch Metrics.
 | `GetQueryResults` | Get the status and results of a Logs Insights query |
 | `StopQuery` | Stop a query that has not completed yet |
 
+`DescribeLogGroups` returns names in ASCII order, with up to 50 groups per page by default.
+Set `limit` to an integer from 1 to 50 and pass the returned `nextToken` with the same region
+and name prefix to continue. The final page omits `nextToken`.
+
+`CreateLogGroup` stores `logGroupClass` as `STANDARD` (the default), `INFREQUENT_ACCESS`, or
+`DELIVERY`. `DescribeLogGroups` returns the stored class and applies an optional `logGroupClass`
+filter before pagination. Continue with the same class filter when using `nextToken`.
+Stored groups without a class default to `STANDARD`. Class metadata does not change retention,
+delivery behavior, or the features available on a group.
+
 Log group deletion protection defaults to disabled and is persisted with the log group. When it is
 enabled, `DeleteLogGroup` returns `ValidationException` until protection is explicitly disabled
 with `PutLogGroupDeletionProtection`.
 
-Behavior and limitations:
+One action is currently simplified:
 
-- **`CreateLogGroup`** stores `logGroupClass` (default `STANDARD`) and
-  `deletionProtectionEnabled`. `DescribeLogGroups` always returns both, plus
-  `arn` (with `:*`) and `logGroupArn` (without).
-- **`PutLogEvents`** rejects events more than two hours in the future via
-  `rejectedLogEventsInfo.tooNewLogEventStartIndex` and still ingests the rest.
-- **`PutSubscriptionFilter`** delivers matching events to Lambda (gzipped
-  `awslogs.data` envelope) and Kinesis. Same-account pass-role / Lambda
-  targeting compares the ARN account to both the request identity and Floci's
-  canonical account `000000000000`; a local IAM role or Lambda still counts as
-  in-account when those IDs differ. Cross-account Lambda targets require a
-  logs Destination.
 - **`GetDataProtectionPolicy`** does not model data-protection policies. It returns
-  HTTP 200 with the resolved `logGroupIdentifier` and no `policyDocument` : including for
+  HTTP 200 with the resolved `logGroupIdentifier` and no `policyDocument`, including for
   a log group that does not exist, where real AWS returns `ResourceNotFoundException`.
-- **`FilterLogEvents`** and subscription delivery match plain substrings, quoted phrases,
-  and `?` optional terms. The full filter pattern syntax described below is applied by metric filters.
+
+`FilterLogEvents` reads `filterPattern` with the filter pattern syntax described below, the one
+metric filters and subscription filters use: terms, quoted phrases, `?` alternatives, `-`
+exclusions, JSON and space-delimited patterns. An invalid pattern is refused with
+`InvalidParameterException`.
+
+### Subscription filters {#subscription-filters}
+
+Subscription filters deliver newly ingested log events to a downstream destination. Floci delivers
+matching events to Lambda functions, Kinesis data streams, and Firehose delivery streams. Delivery
+happens synchronously on the calling thread when `PutLogEvents` persists events. A destination error,
+missing destination stream/function, or unresolvable destination ARN is logged and does not fail the
+log ingestion request.
+
+The delivered payload is a gzip-compressed JSON object containing `messageType` (`DATA_MESSAGE`),
+`owner` (the account ID), `logGroup`, `logStream`, `subscriptionFilters` (the matched filter names),
+and `logEvents` (an array of `{id, timestamp, message}`). Lambda receives the payload base64-encoded
+under `awslogs.data`. Kinesis and Firehose receive the gzip-compressed JSON bytes directly as record data.
+
+For Kinesis destinations, `distribution` controls the partition key: `ByLogStream` uses the log stream
+name, while `Random` assigns a randomized UUID partition key. Cross-account Logs destinations
+(`PutDestination`), IAM role permission checks, and the `CONTROL_MESSAGE` ping on filter creation
+are deferred.
 
 ### Metric filters {#metric-filters}
 
@@ -197,6 +217,15 @@ scenarios tagged **Verified on Live AWS**, the recorded fixtures and their evide
 
 ### Logs Insights {#logs-insights}
 
+`StartQuery` accepts log group names and canonical log group ARNs in `logGroupIdentifiers`.
+Floci also accepts the `:*` suffix and the bare trailing `:` produced when Grafana removes
+the `*` from `DescribeLogGroups.arn`. Equivalent identifiers scan the group only once.
+The bare-colon tolerance applies only to `logGroupIdentifiers`, requires a complete Logs ARN,
+and does not rewrite values supplied through `logGroupName` or `logGroupNames`.
+The bare-colon spelling is a client-compatibility tolerance: the
+[AWS reference](https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_StartQuery.html#CWL-StartQuery-request-logGroupIdentifiers)
+documents the canonical ARN, not that spelling. This tolerance does not change other APIs' ARN handling.
+
 `StartQuery` / `GetQueryResults` / `StopQuery` run a **subset** of the Logs Insights
 query language. Supported commands:
 
@@ -212,23 +241,26 @@ Fields may be `@timestamp`, `@message`, `@ingestionTime`, `@ptr`, or a dotted pa
 a JSON log message (for example `level` or `params.job_id`). A `@ptr` column is always
 included in each result row, appended unless `fields` already names it.
 
-Unsupported syntax never fails the query, so it is worth knowing how each case degrades:
+A command or filter operator outside this subset fails the query instead of being dropped:
+`StartQuery` still returns a query id, and `GetQueryResults` reports `status: Failed` with no
+rows. The reason is not part of the response (the AWS `GetQueryResults` shape has no such field);
+it is written to the server log as `Logs Insights query <id> will fail: ...`. A few inputs still
+degrade silently, so it is worth knowing how each case behaves:
 
 | Input | Result |
 |---|---|
-| An unsupported command (`stats`, `parse`, ...) | Skipped with a warning in the server log. No aggregation happens |
-| A `filter` whose operator is not `=`, `!=` or `==` : for example `<`, `<=`, `>`, `>=`, `like /ERROR/` or `=~ /ERROR/` | The whole stage is dropped with a warning, so **every** row is returned |
-| A `filter` combining conditions with `and` / `or` : for example `filter level = 'ERROR' and status = 200` | Only the leftmost operator is parsed; the rest of the line becomes the compared value, so nothing matches and you get **no** rows. No warning is logged |
+| An unsupported command (`stats`, `parse`, ...) | The query fails. Logged as `Unsupported command: stats` |
+| A `filter` whose operator is not `=`, `!=` or `==` — for example `<`, `<=`, `>`, `>=`, `like /ERROR/` or `=~ /ERROR/` | The query fails. Logged as `Unsupported filter expression: ...`. Exception: an unquoted `=` anywhere in the expression, as in `like /a=b/`, is taken as the equality operator, so that query completes with **no** rows and no warning |
+| A `filter` combining conditions with `and` / `or` — for example `filter level = 'ERROR' and status = 200` | Only the leftmost operator is parsed; the rest of the line becomes the compared value. With `=` nothing matches and you get **no** rows; with `!=` everything matches and you get **every** row (up to the limit). `status` is `Complete` and no warning is logged |
 | A projected field that does not exist | Rendered as an empty string. No warning |
 | A `sort` direction other than `asc` / `desc` | Treated as ascending. No warning |
 
-In short, a query can come back either wider or narrower than intended without any error. When a
-result set looks wrong, check the server log for `Ignoring unsupported Logs Insights ...` : and note
-that the compound-filter case above produces no log line at all.
+When a `Complete` result set looks narrower or wider than intended, check the query for a
+compound `filter` or a stray `=` first: those cases produce neither a failure nor a warning. The
+only log line is the usual INFO summary, `Logs Insights query <id>: scanned ... -> <n> row(s)`.
 
-For simple substring matching, `FilterLogEvents` is the more predictable option today. Note that
-Floci matches `--filter-pattern` as a plain substring of the message; the real filter-pattern
-syntax (`?ERROR ?WARN`, `{ $.level = "ERROR" }`, and so on) is not parsed.
+For matching events by a pattern, `FilterLogEvents` is the more predictable option today: it
+applies the filter pattern syntax (`?ERROR ?WARN`, `{ $.level = "ERROR" }`, and so on) as AWS does.
 
 ### Reading events past the limit
 
@@ -254,6 +286,18 @@ given rather than by omitting it, which is what its SDK paginators expect.
 | `FLOCI_SERVICES_CLOUDWATCHLOGS_ENABLED` | `true` | Enable or disable the CloudWatch Logs service |
 | `FLOCI_SERVICES_CLOUDWATCHLOGS_MAX_EVENTS_PER_QUERY` | `10000` | Maximum events returned per `FilterLogEvents` / `GetLogEvents` call, and the upper bound for a Logs Insights `limit` |
 | `FLOCI_SERVICES_CLOUDWATCHLOGS_QUERY_COMPLETION_DELAY_MS` | `0` | Artificial Logs Insights query delay. With `0` a query completes immediately. A positive value emulates the real asynchronous lifecycle (`Running` → `Complete` after the delay), which also makes `StopQuery` on a still-running query return `success=true` |
+
+### Storage
+
+Log groups, streams, filters and resource policies follow the configured storage mode as every
+other service does. The event store is the one CloudWatch Logs store under steady append load, so
+under `persistent` mode it is journaled instead of rewritten on every `PutLogEvents` call: a
+batch is appended to `cwlogs-events.wal`, and `cwlogs-events.json` is rewritten from memory on
+the `FLOCI_STORAGE_WAL_COMPACTION_INTERVAL_MS` cadence and at shutdown. The store keeps at most
+20,000 events per account (`FLOCI_SERVICES_CLOUDWATCHLOGS_MAX_STORED_EVENTS`), which bounds both
+the memory footprint and the size of each snapshot. `hybrid` remains the alternative when a
+bounded delay for every CloudWatch Logs store is acceptable. See
+[Storage Modes](../configuration/storage.md#journaled-stores-under-persistent-mode).
 
 ### Examples
 
@@ -311,8 +355,24 @@ aws logs put-retention-policy \
 
 ## CloudWatch Metrics {#metrics}
 
-**Protocol:** Query (XML) and JSON 1.1 (both supported)
-**Endpoint:** `POST http://localhost:4566/`
+**Protocol:** Query (XML) and JSON 1.0 (both supported)
+
+CloudWatch Query operations accept form-encoded POST requests and root GET requests with
+URL query parameters. GET uses the existing handlers, signature validation and IAM policy checks. A `monitoring`
+credential in the Authorization header or presigned URL selects CloudWatch, including
+requests with browser Accept headers or unrelated target headers. Unsigned GET requests
+select it only for unambiguous supported actions; ordinary S3, SNS and browser requests
+retain their existing routing. Only a Query protocol claim can dispatch a CloudWatch GET;
+an unclaimed request cannot perform a CloudWatch operation. Header-signed and presigned
+requests use the account and region in their credential scope.
+`Action` takes precedence over `Operation`.
+
+Use `Version=2010-08-01` for current GET operations. Omitting the version selects the
+legacy `2009-05-15` API, which supports only `ListMetrics` and `GetMetricStatistics`.
+An invalid version or action returns HTTP 404 `InvalidAction`; an absent action returns
+HTTP 404 `UnknownOperationException`. IAM policies use the `cloudwatch` action prefix.
+
+**Endpoint:** `http://localhost:4566/`. Query: GET or POST; JSON: POST.
 
 ### Supported Actions
 
@@ -343,6 +403,29 @@ aws logs put-retention-policy \
 
 Metric streams are stored as definitions with their `running` or `stopped` state. Floci never
 delivers metrics to the Firehose delivery stream a metric stream names.
+
+SQS publishes its queue metrics under `AWS/SQS` once a minute; see
+[SQS CloudWatch Metrics](sqs.md#cloudwatch-metrics).
+
+### SNS alarm actions
+
+State transitions publish to same-account standard SNS topics in `AlarmActions`, `OKActions`, or
+`InsufficientDataActions`, including transitions from `SetAlarmState`. Unchanged states and
+`ActionsEnabled=false` suppress notifications. Scaling action retries remain independent.
+Failures are logged per target without blocking other targets. Notifications include a
+single-metric `Trigger`; durable retries, FIFO topics, and metric-math payloads are not covered.
+
+### Metric-math alarm definitions
+
+`PutMetricAlarm` stores the `Metrics` query definitions and `DescribeAlarms` returns them over
+both JSON and Query protocols. Expressions, labels, `ReturnData`, account IDs, query periods,
+and nested metric statistics (including dimensions and units) survive storage reloads.
+Metric-math alarm responses omit the single-metric fields, including top-level `Period`.
+Updating an alarm replaces its metric definition, so changing between `Metrics` and a single
+metric does not retain the previous definition.
+
+This is management-plane support: the alarm evaluator currently evaluates only single-metric
+alarms, not metric-math expressions. `SetAlarmState` remains available for manual transitions.
 
 ### Examples
 

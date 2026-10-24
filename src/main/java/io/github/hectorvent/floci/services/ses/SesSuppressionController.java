@@ -1,11 +1,11 @@
 package io.github.hectorvent.floci.services.ses;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.ses.model.SuppressedDestination;
 import jakarta.inject.Inject;
@@ -21,13 +21,15 @@ import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriInfo;
 import org.jboss.logging.Logger;
 
 import java.util.List;
 
+import static io.github.hectorvent.floci.services.ses.SesV2Json.putTimestamp;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.readOptionBody;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.readRequiredStringField;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.remapV1Exception;
-import static io.github.hectorvent.floci.services.ses.SesV2Json.requireJsonObject;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.stringMemberOrAbsent;
 
 /**
@@ -61,11 +63,10 @@ public class SesSuppressionController {
     public Response putSuppressedDestination(@Context HttpHeaders headers, String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            if (body == null || body.isBlank()) {
+            if (body == null || body.isEmpty()) {
                 throw new AwsException("BadRequestException", "Request body is required.", 400);
             }
-            JsonNode request = objectMapper.readTree(body);
-            requireJsonObject(request);
+            JsonNode request = readOptionBody(objectMapper, body);
             String emailAddress = readRequiredStringField(request, "EmailAddress");
             String reason = readRequiredStringField(request, "Reason");
             String tenantName = stringMemberOrAbsent(request, "TenantName");
@@ -74,8 +75,6 @@ public class SesSuppressionController {
             return Response.ok(objectMapper.createObjectNode()).build();
         } catch (AwsException e) {
             throw remapV1Exception(e);
-        } catch (JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
         }
     }
 
@@ -92,9 +91,7 @@ public class SesSuppressionController {
             ObjectNode entry = result.putObject("SuppressedDestination");
             entry.put("EmailAddress", suppressed.getEmailAddress());
             entry.put("Reason", suppressed.getReason());
-            if (suppressed.getLastUpdateTime() != null) {
-                entry.put("LastUpdateTime", suppressed.getLastUpdateTime().getEpochSecond());
-            }
+            putTimestamp(entry, "LastUpdateTime", suppressed.getLastUpdateTime());
             // AWS renders TenantName on every entry: an explicit null for account-level ones.
             entry.put("TenantName", suppressed.getTenantName());
             return Response.ok(result).build();
@@ -122,25 +119,29 @@ public class SesSuppressionController {
     @Path("/suppression/addresses")
     public Response listSuppressedDestinations(@Context HttpHeaders headers,
                                                 @QueryParam("Reason") List<String> reasons,
-                                                @QueryParam("TenantName") String tenantName) {
+                                                @QueryParam("TenantName") String tenantName,
+                                                @QueryParam("PageSize") String pageSize,
+                                                @Context UriInfo uriInfo) {
         String region = regionResolver.resolveRegion(headers);
-        List<SuppressedDestination> entries;
+        String nextToken = SesListPaging.queryToken(uriInfo);
+        PaginatedResult<SuppressedDestination> page;
         try {
-            entries = sesService.listSuppressedDestinations(region, reasons, tenantName);
+            page = sesService.listSuppressedDestinations(region, reasons, tenantName,
+                    SesListPaging.V2_LIST_SUPPRESSED_DESTINATIONS, SesListPaging.parseQueryPageSize(pageSize),
+                    nextToken);
         } catch (AwsException e) {
             throw remapV1Exception(e);
         }
         ObjectNode result = objectMapper.createObjectNode();
         ArrayNode summaries = result.putArray("SuppressedDestinationSummaries");
-        for (SuppressedDestination s : entries) {
+        for (SuppressedDestination s : page.items()) {
             ObjectNode item = objectMapper.createObjectNode();
             item.put("EmailAddress", s.getEmailAddress());
             item.put("Reason", s.getReason());
-            if (s.getLastUpdateTime() != null) {
-                item.put("LastUpdateTime", s.getLastUpdateTime().getEpochSecond());
-            }
+            putTimestamp(item, "LastUpdateTime", s.getLastUpdateTime());
             summaries.add(item);
         }
+        result.put("NextToken", page.nextToken());
         return Response.ok(result).build();
     }
 }

@@ -2,26 +2,19 @@ package io.github.hectorvent.floci.services.route53resolver;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
-import io.github.hectorvent.floci.services.ec2.Ec2Service;
-import io.github.hectorvent.floci.services.ec2.model.NetworkInterface;
-import io.quarkus.test.junit.QuarkusTest;
-import jakarta.inject.Inject;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-
-import java.util.List;
-import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * What {@code CreateResolverEndpoint} does when a stored endpoint has no recorded
- * {@code IpAddressRequests}, a state the public API cannot produce, so it needs the
+ * {@code IpAddressRequests} — a state the public API cannot produce, so it needs the
  * hermetic constructor.
  *
  * <p>The recorded addresses are what a replayed {@code CreatorRequestId} is checked
@@ -31,7 +24,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  * a spurious {@code ResourceExistsException} is loud and recoverable, while a wrong
  * success is silent.</p>
  */
-@QuarkusTest
 class Route53ResolverReplayFallbackTest {
 
     private static final String REGION = "us-east-1";
@@ -40,32 +32,13 @@ class Route53ResolverReplayFallbackTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private InMemoryStorage<String, ObjectNode> endpointIpRequests;
     private Route53ResolverService service;
-    private String vpcId;
-    private String subnetId;
-    private String groupId;
-
-    @Inject
-    Ec2Service ec2;
 
     @BeforeEach
     void setUp() {
         endpointIpRequests = new InMemoryStorage<>();
         service = new Route53ResolverService(new InMemoryStorage<>(), new InMemoryStorage<>(),
-                new InMemoryStorage<>(), new InMemoryStorage<>(), endpointIpRequests, objectMapper, ec2);
-        vpcId = ec2.createVpc(REGION, "10.0.0.0/16", false).getVpcId();
-        subnetId = ec2.createSubnet(REGION, vpcId, "10.0.0.0/24", REGION + "a").getSubnetId();
-        groupId = ec2.describeSecurityGroups(REGION, List.of(), List.of(),
-                Map.of("vpc-id", List.of(vpcId))).getFirst().getGroupId();
-    }
-
-    @AfterEach
-    void releaseNetwork() {
-        for (NetworkInterface networkInterface : ec2.describeNetworkInterfaces(REGION, List.of(),
-                Map.of("vpc-id", List.of(vpcId)), 0, null).networkInterfaces()) {
-            ec2.deleteNetworkInterface(REGION, networkInterface.getNetworkInterfaceId());
-        }
-        ec2.deleteSubnet(REGION, subnetId);
-        ec2.deleteVpc(REGION, vpcId);
+                new InMemoryStorage<>(), new InMemoryStorage<>(), endpointIpRequests, new InMemoryStorage<>(),
+                objectMapper);
     }
 
     private JsonNode createRequest(String token, String ip) {
@@ -73,10 +46,14 @@ class Route53ResolverReplayFallbackTest {
         request.put("Name", "ab-fallback");
         request.put("Direction", "INBOUND");
         request.put("CreatorRequestId", token);
-        request.putArray("SecurityGroupIds").add(groupId);
-        ObjectNode ipRequest = request.putArray("IpAddresses").addObject();
-        ipRequest.put("SubnetId", subnetId);
+        request.putArray("SecurityGroupIds").add("sg-abc123");
+        ArrayNode ipRequests = request.putArray("IpAddressRequests");
+        ObjectNode ipRequest = ipRequests.addObject();
+        ipRequest.put("SubnetId", "subnet-aaa");
         ipRequest.put("Ip", ip);
+        ipRequest = ipRequests.addObject();
+        ipRequest.put("SubnetId", "subnet-bbb");
+        ipRequest.put("Ip", "10.0.0.6");
         return request;
     }
 
@@ -108,6 +85,21 @@ class Route53ResolverReplayFallbackTest {
         AwsException conflict = assertThrows(AwsException.class,
                 () -> service.createResolverEndpoint(createRequest(token, "10.0.0.5"), REGION, ACCOUNT));
         assertEquals("ResourceExistsException", conflict.jsonType());
+    }
+
+    @Test
+    void listingIpAddressesWithoutARecordFailsInsteadOfReturningEmpty() {
+        // An empty list beside IpAddressCount=2 would be a silent wrong answer; the modeled
+        // InternalServiceErrorException says the state is broken.
+        ObjectNode created = service.createResolverEndpoint(createRequest("tok-list", "10.0.0.5"), REGION, ACCOUNT);
+        String id = created.get("Id").asText();
+        assertEquals(2, service.listResolverEndpointIpAddresses(id).size());
+
+        endpointIpRequests.delete(id);
+        AwsException broken = assertThrows(AwsException.class,
+                () -> service.listResolverEndpointIpAddresses(id));
+        assertEquals("InternalServiceErrorException", broken.jsonType());
+        assertEquals(400, broken.getHttpStatus());
     }
 
     @Test

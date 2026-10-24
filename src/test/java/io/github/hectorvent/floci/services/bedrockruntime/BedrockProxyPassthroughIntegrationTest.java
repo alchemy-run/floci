@@ -3,8 +3,8 @@ package io.github.hectorvent.floci.services.bedrockruntime;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
+import io.github.hectorvent.floci.testing.BedrockProxyBackendProfile;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.AfterEach;
@@ -14,9 +14,9 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static io.github.hectorvent.floci.testing.BedrockProxyBackendProfile.PORT;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -24,16 +24,17 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /**
  * Verifies that with {@code proxy.passthrough=true} the raw Bedrock model id is forwarded
  * as-is to the OpenAI-compatible backend, bypassing the mapping/default-model requirement.
- * Kept in a separate class/profile since {@code @TestProfile} config overrides require a
- * fresh Quarkus application context, one per distinct override set.
+ *
+ * <p>Passthrough and the backend URL come from {@link BedrockProxyBackendProfile}, which this class
+ * shares with the other proxy classes that talk to a stand-in. The raw model id is not in that
+ * profile's mapping, so it reaches the backend through passthrough alone.
  */
 @QuarkusTest
-@TestProfile(BedrockProxyPassthroughIntegrationTest.PassthroughProfile.class)
+@TestProfile(BedrockProxyBackendProfile.class)
 class BedrockProxyPassthroughIntegrationTest {
 
     private static final String AUTH_HEADER =
             "AWS4-HMAC-SHA256 Credential=AKID/20260101/us-east-1/bedrock/aws4_request";
-    private static final int PORT = 18931;
     private static final String RAW_MODEL_ID = "meta.llama3-8b-instruct-v1:0";
 
     @Inject
@@ -86,16 +87,5 @@ class BedrockProxyPassthroughIntegrationTest {
 
         JsonNode sentRequest = objectMapper.readTree(receivedBody.get());
         assertEquals(RAW_MODEL_ID, sentRequest.path("model").asText());
-    }
-
-    public static final class PassthroughProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of(
-                    "floci.services.bedrock-runtime.backend", "proxy",
-                    "floci.services.bedrock-runtime.proxy.url", "http://127.0.0.1:" + PORT + "/v1",
-                    "floci.services.bedrock-runtime.proxy.passthrough", "true"
-            );
-        }
     }
 }

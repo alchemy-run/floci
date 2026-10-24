@@ -387,6 +387,81 @@ class Route53IntegrationTest {
 
     // ── Health Checks ─────────────────────────────────────────────────────────
 
+    private static String healthCheckRequest(String callerReference, String resourcePath) {
+        return """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <CreateHealthCheckRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
+                  <CallerReference>%s</CallerReference>
+                  <HealthCheckConfig>
+                    <Type>HTTPS</Type>
+                    <FullyQualifiedDomainName>example.com</FullyQualifiedDomainName>
+                    <Port>443</Port>
+                    <ResourcePath>%s</ResourcePath>
+                    <RequestInterval>30</RequestInterval>
+                    <FailureThreshold>3</FailureThreshold>
+                  </HealthCheckConfig>
+                </CreateHealthCheckRequest>
+                """.formatted(callerReference, resourcePath);
+    }
+
+    @Test
+    @Order(26)
+    void createHealthCheck_nonNumericFailureThreshold_isInvalidInput() {
+        given()
+                .contentType(XML)
+                .body(healthCheckRequest("hc-bad-" + System.nanoTime(), "/health")
+                        .replace("<FailureThreshold>3</FailureThreshold>", "<FailureThreshold>three</FailureThreshold>"))
+                .when().post("/2013-04-01/healthcheck")
+                .then().statusCode(400)
+                .body("ErrorResponse.Error.Code", equalTo("InvalidInput"));
+    }
+
+    // Catches: an SDK retry of CreateHealthCheck (same caller reference and settings) answered with
+    // HealthCheckAlreadyExists instead of the health check it already created.
+    @Test
+    @Order(25)
+    void createHealthCheck_retryWithSameReferenceAndSettings_returnsTheSameHealthCheck() {
+        String reference = "hc-retry-" + System.nanoTime();
+        String firstId = given()
+                .contentType(XML).body(healthCheckRequest(reference, "/health"))
+                .when().post("/2013-04-01/healthcheck")
+                .then().statusCode(201)
+                .extract().path("CreateHealthCheckResponse.HealthCheck.Id");
+        try {
+            given()
+                    .contentType(XML).body(healthCheckRequest(reference, "/health"))
+                    .when().post("/2013-04-01/healthcheck")
+                    .then().statusCode(201)
+                    .body("CreateHealthCheckResponse.HealthCheck.Id", equalTo(firstId));
+
+            given()
+                    .contentType(XML).body(healthCheckRequest(reference, "/other"))
+                    .when().post("/2013-04-01/healthcheck")
+                    .then().statusCode(409)
+                    .body("ErrorResponse.Error.Code", equalTo("HealthCheckAlreadyExists"));
+
+            given()
+                    .contentType(XML)
+                    .body(healthCheckRequest(reference, "/health")
+                            .replace("<FailureThreshold>3</FailureThreshold>",
+                                    "<FailureThreshold>3</FailureThreshold><EnableSNI>false</EnableSNI>"))
+                    .when().post("/2013-04-01/healthcheck")
+                    .then().statusCode(409)
+                    .body("ErrorResponse.Error.Code", equalTo("HealthCheckAlreadyExists"));
+
+            given()
+                    .contentType(XML)
+                    .body(healthCheckRequest(reference, "/health")
+                            .replace("<RequestInterval>30</RequestInterval>", "")
+                            .replace("<FailureThreshold>3</FailureThreshold>", ""))
+                    .when().post("/2013-04-01/healthcheck")
+                    .then().statusCode(201)
+                    .body("CreateHealthCheckResponse.HealthCheck.Id", equalTo(firstId));
+        } finally {
+            given().when().delete("/2013-04-01/healthcheck/" + firstId).then().statusCode(200);
+        }
+    }
+
     @Test
     @Order(16)
     void createHealthCheck_returns201() {
@@ -845,6 +920,93 @@ class Route53IntegrationTest {
                 .then().statusCode(201)
                 .extract().header("Location");
         return location.substring(location.lastIndexOf('/') + 1);
+    void updateHostedZoneComment_replacesTheCommentAndClearsItWhenOmitted() {
+        String ownZoneId = createZoneForCommentTest("comment-zone-1", "before the import");
+
+        given()
+                .contentType(XML)
+                .body("""
+                        <?xml version="1.0" encoding="UTF-8"?>
+                        <UpdateHostedZoneCommentRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
+                          <Comment>after the import</Comment>
+                        </UpdateHostedZoneCommentRequest>
+                        """)
+                .when().post("/2013-04-01/hostedzone/" + ownZoneId)
+                .then()
+                .statusCode(200)
+                .contentType(XML)
+                .body("UpdateHostedZoneCommentResponse.HostedZone.Id", equalTo("/hostedzone/" + ownZoneId))
+                .body("UpdateHostedZoneCommentResponse.HostedZone.Config.Comment", equalTo("after the import"));
+
+        given()
+                .when().get("/2013-04-01/hostedzone/" + ownZoneId)
+                .then()
+                .statusCode(200)
+                .body("GetHostedZoneResponse.HostedZone.Config.Comment", equalTo("after the import"));
+
+        // AWS deletes the existing comment when the request carries none.
+        given()
+                .contentType(XML)
+                .body("""
+                        <?xml version="1.0" encoding="UTF-8"?>
+                        <UpdateHostedZoneCommentRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/"/>
+                        """)
+                .when().post("/2013-04-01/hostedzone/" + ownZoneId)
+                .then()
+                .statusCode(200)
+                .body(not(containsString("<Comment>")));
+
+        // Cleanup
+        given().when().delete("/2013-04-01/hostedzone/" + ownZoneId).then().statusCode(200);
+    }
+
+    @Test
+    @Order(23)
+    void updateHostedZoneComment_unknownZoneIsNoSuchHostedZone() {
+        given()
+                .contentType(XML)
+                .body("""
+                        <?xml version="1.0" encoding="UTF-8"?>
+                        <UpdateHostedZoneCommentRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
+                          <Comment>nope</Comment>
+                        </UpdateHostedZoneCommentRequest>
+                        """)
+                .when().post("/2013-04-01/hostedzone/ZNOPE000000000")
+                .then()
+                .statusCode(404)
+                .body(containsString("NoSuchHostedZone"));
+    }
+
+    @Test
+    @Order(24)
+    void updateHostedZoneComment_rejectsABodyThatIsNotAnUpdateRequest() {
+        String zoneId = createZoneForCommentTest("comment-zone-2", "keep me");
+
+        // A truncated document parses to no root, so it must not read as "no Comment given".
+        given()
+                .contentType(XML)
+                .body("<UpdateHostedZoneCommentRequest><Comment>gone</Comment>")
+                .when().post("/2013-04-01/hostedzone/" + zoneId)
+                .then()
+                .statusCode(400)
+                .body(containsString("InvalidInput"));
+
+        given()
+                .contentType(XML)
+                .body("<DeleteHostedZoneRequest/>")
+                .when().post("/2013-04-01/hostedzone/" + zoneId)
+                .then()
+                .statusCode(400)
+                .body(containsString("InvalidInput"));
+
+        given()
+                .when().get("/2013-04-01/hostedzone/" + zoneId)
+                .then()
+                .statusCode(200)
+                .body("GetHostedZoneResponse.HostedZone.Config.Comment", equalTo("keep me"));
+
+        // Cleanup
+        given().when().delete("/2013-04-01/hostedzone/" + zoneId).then().statusCode(200);
     }
 
     private String createZoneForCommentTest(String callerReference, String comment) {

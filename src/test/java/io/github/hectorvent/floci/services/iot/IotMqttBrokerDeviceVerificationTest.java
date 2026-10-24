@@ -1,11 +1,15 @@
 package io.github.hectorvent.floci.services.iot;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.config.FlociCertificateAuthority;
+import io.github.hectorvent.floci.core.common.Pem;
 import io.github.hectorvent.floci.services.acm.CertificateGenerator;
 import io.github.hectorvent.floci.services.acm.model.KeyAlgorithm;
 import io.github.hectorvent.floci.services.iot.IotService.RegisteredDevice;
 import io.github.hectorvent.floci.services.iot.model.IotCertificate;
+import io.github.hectorvent.floci.testutil.FreePorts;
 import io.quarkus.tls.TlsConfiguration;
 import io.quarkus.tls.TlsConfigurationRegistry;
 import io.vertx.core.Vertx;
@@ -23,17 +27,18 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 
 import javax.net.ssl.KeyManager;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManagerFactory;
 import java.io.IOException;
-import java.net.ServerSocket;
 import java.nio.file.Path;
 import java.security.KeyStore;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -49,6 +54,7 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -59,8 +65,6 @@ import static org.mockito.Mockito.when;
  * evaluation is given, and that a refusal touches nothing else.
  */
 class IotMqttBrokerDeviceVerificationTest {
-
-    private static final CertificateGenerator GENERATOR = new CertificateGenerator();
 
     private static Vertx vertx;
     private static FlociCertificateAuthority ca;
@@ -94,10 +98,9 @@ class IotMqttBrokerDeviceVerificationTest {
 
     @BeforeEach
     void brokerWithTlsOn() throws IOException {
-        plainPort = freePort();
-        do {
-            tlsPort = freePort();
-        } while (tlsPort == plainPort);
+        int[] ports = FreePorts.anyInterfacePorts(2);
+        plainPort = ports[0];
+        tlsPort = ports[1];
         when(config.services().iot().enabled()).thenReturn(true);
         when(config.services().iot().mqtt().enabled()).thenReturn(true);
         when(config.services().iot().mqtt().host()).thenReturn("127.0.0.1");
@@ -109,7 +112,7 @@ class IotMqttBrokerDeviceVerificationTest {
                 .addCertValue(Buffer.buffer(serverLeaf.certificatePem()))
                 .addKeyValue(Buffer.buffer(serverLeaf.privateKeyPem())));
         when(iotService.get()).thenReturn(service);
-        broker = new IotMqttBrokerService(config, vertx, iotService, registry);
+        broker = new IotMqttBrokerService(config, vertx, iotService, mock(IotCustomAuthorizer.class), registry);
         broker.startIfEnabled();
     }
 
@@ -189,6 +192,49 @@ class IotMqttBrokerDeviceVerificationTest {
     }
 
     @Test
+    void anAdmittedDevicesLifecycleEventsCarryItsCertificateIdAsPrincipal() throws Exception {
+        RegisteredDevice device = registered(deviceLeaf);
+        when(service.findRegisteredCertificate(certificate(deviceLeaf))).thenReturn(Optional.of(device));
+        when(service.isConnectAllowed(eq(device), eq("sensor-1"), eq("127.0.0.1"), isNull())).thenReturn(true);
+
+        MqttClient client = connectTls("sensor-1", deviceLeaf, null);
+        client.disconnect();
+        client.close();
+
+        JsonNode connected = publishedEvent("$aws/events/presence/connected/sensor-1");
+        JsonNode disconnected = publishedEvent("$aws/events/presence/disconnected/sensor-1");
+        assertEquals(List.of("clientId", "timestamp", "eventType", "sessionIdentifier", "principalIdentifier",
+                "versionNumber", "ipAddress"), fieldNames(connected));
+        assertEquals(device.certificate().getCertificateId(), connected.get("principalIdentifier").asText());
+        assertEquals(device.certificate().getCertificateId(), disconnected.get("principalIdentifier").asText());
+    }
+
+    /**
+     * A TLS session counts in its device certificate's account and region for fleet indexing, not
+     * in the default ones: connected there while live, then how it ended, and nothing elsewhere.
+     */
+    @Test
+    void aTlsSessionsConnectivityCountsInItsCertificatesAccountAndRegion() throws Exception {
+        when(config.defaultAccountId()).thenReturn("000000000000");
+        when(config.defaultRegion()).thenReturn("us-east-1");
+        RegisteredDevice device = new RegisteredDevice("123456789012", "eu-west-1", registered(deviceLeaf).certificate());
+        when(service.findRegisteredCertificate(certificate(deviceLeaf))).thenReturn(Optional.of(device));
+        when(service.isConnectAllowed(eq(device), eq("sensor-1"), eq("127.0.0.1"), isNull())).thenReturn(true);
+
+        MqttClient client = connectTls("sensor-1", deviceLeaf, null);
+        assertTrue(broker.connectivity("123456789012", "eu-west-1", "sensor-1").orElseThrow().connected());
+        assertTrue(broker.connectivity("000000000000", "us-east-1", "sensor-1").isEmpty());
+        client.disconnect();
+        client.close();
+        publishedEvent("$aws/events/presence/disconnected/sensor-1");
+
+        assertEquals("CLIENT_INITIATED_DISCONNECT",
+                broker.connectivity("123456789012", "eu-west-1", "sensor-1").orElseThrow().disconnectReason());
+        assertTrue(broker.connectivity("000000000000", "us-east-1", "sensor-1").isEmpty());
+        assertTrue(broker.connectivity("123456789012", "us-east-1", "sensor-1").isEmpty());
+    }
+
+    @Test
     void aDeniedDeviceIsAnsweredWithConnackNotAuthorized() throws Exception {
         RegisteredDevice device = registered(deviceLeaf);
         when(service.findRegisteredCertificate(certificate(deviceLeaf))).thenReturn(Optional.of(device));
@@ -256,7 +302,8 @@ class IotMqttBrokerDeviceVerificationTest {
             client.connect();
 
             assertTrue(client.isConnected());
-            verifyNoInteractions(service);
+            verify(service, never()).findRegisteredCertificate(any());
+            verify(service, never()).isConnectAllowed(any(), anyString(), any(), any());
         } finally {
             client.disconnect();
             client.close();
@@ -308,6 +355,19 @@ class IotMqttBrokerDeviceVerificationTest {
         assertFalse(refused.getMessage().isBlank());
     }
 
+    /** The payload the broker handed the IoT service for the one publish on {@code topic}, an MQTT client's publish. */
+    private JsonNode publishedEvent(String topic) throws IOException {
+        ArgumentCaptor<byte[]> payload = ArgumentCaptor.forClass(byte[].class);
+        verify(service, timeout(10_000)).publish(eq(topic), payload.capture(), eq(false), eq(0), isNull(), eq("sensor-1"), any());
+        return new ObjectMapper().readTree(payload.getValue());
+    }
+
+    private static List<String> fieldNames(JsonNode node) {
+        List<String> names = new ArrayList<>();
+        node.fieldNames().forEachRemaining(names::add);
+        return names;
+    }
+
     private static RegisteredDevice registered(CertificateGenerator.GeneratedCertificate leaf) {
         IotCertificate certificate = new IotCertificate();
         certificate.setCertificateId("id-" + leaf.hashCode());
@@ -318,7 +378,7 @@ class IotMqttBrokerDeviceVerificationTest {
     }
 
     private static X509Certificate certificate(CertificateGenerator.GeneratedCertificate leaf) {
-        return GENERATOR.parseCertificate(leaf.certificatePem());
+        return Pem.parseCertificate(leaf.certificatePem());
     }
 
     private static SSLContext sslContext(KeyManager[] clientKeys) throws Exception {
@@ -335,16 +395,10 @@ class IotMqttBrokerDeviceVerificationTest {
     private static KeyManager[] keyManagers(CertificateGenerator.GeneratedCertificate leaf) throws Exception {
         KeyStore keys = KeyStore.getInstance(KeyStore.getDefaultType());
         keys.load(null, null);
-        keys.setKeyEntry("device", GENERATOR.parsePrivateKey(leaf.privateKeyPem()), new char[0],
-                new Certificate[] {GENERATOR.parseCertificate(leaf.certificatePem())});
+        keys.setKeyEntry("device", Pem.parsePrivateKey(leaf.privateKeyPem()), new char[0],
+                new Certificate[] {Pem.parseCertificate(leaf.certificatePem())});
         KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
         kmf.init(keys, new char[0]);
         return kmf.getKeyManagers();
-    }
-
-    private static int freePort() throws IOException {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
-        }
     }
 }

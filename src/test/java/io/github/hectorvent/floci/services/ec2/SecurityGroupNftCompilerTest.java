@@ -103,6 +103,18 @@ class SecurityGroupNftCompilerTest {
         SecurityGroupNftCompiler.Endpoint target = endpoint("eni-a", "10.0.1.77", "10.0.1.77", group);
         String nft = SecurityGroupNftCompiler.privateAddressTranslation(target, List.of(target));
         assertFalse(nft.contains("dnat"));
+    void vpcResolversStayReachableWhenTheGroupsAllowNoEgress() {
+        SecurityGroup group = new SecurityGroup();
+        group.setVpcId("vpc-1");
+        group.setOwnerId("000000000000");
+
+        String nft = SecurityGroupNftCompiler.compile(endpoint("eni-a", "10.0.0.2", "172.17.0.2", group),
+                List.of(), Map.of(), List.of("172.18.0.2", "fd00::53"));
+
+        assertTrue(nft.contains("egress ip daddr 172.18.0.2 udp dport 53 accept"));
+        assertTrue(nft.contains("egress ip daddr 172.18.0.2 tcp dport 53 accept"));
+        assertTrue(nft.contains("egress ip6 daddr fd00::53 udp dport 53 accept"));
+        assertFalse(nft.contains("daddr 172.18.0.2 accept"), "only DNS is allowed to the resolver");
     }
 
     private static SecurityGroupNftCompiler.Endpoint endpoint(String eni, String logical,

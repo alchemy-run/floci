@@ -51,10 +51,9 @@ public class Route53ResolverJsonHandler {
                         service.deleteResolverEndpoint(text(request, "ResolverEndpointId")));
                 case "GetResolverEndpoint" -> resolverEndpointResponse(
                         service.getResolverEndpoint(text(request, "ResolverEndpointId")));
-                case "ListResolverEndpoints" -> Response.ok(
-                        service.listResources("ResolverEndpoints", request, region, accountId)).build();
-                case "ListResolverEndpointIpAddresses" -> Response.ok(
-                        service.listResolverEndpointIpAddresses(request, region)).build();
+                case "ListResolverEndpoints" -> handleListResolverEndpoints();
+                case "ListResolverEndpointIpAddresses" -> handleListResolverEndpointIpAddresses(
+                        text(request, "ResolverEndpointId"));
                 case "UpdateResolverEndpoint" -> resolverEndpointResponse(
                         service.updateResolverEndpoint(text(request, "ResolverEndpointId"), request));
 
@@ -86,6 +85,18 @@ public class Route53ResolverJsonHandler {
                     service.untagResource(request, region);
                     yield Response.ok(objectMapper.createObjectNode()).build();
                 }
+
+                case "TagResource" -> {
+                    service.tagResource(text(request, "ResourceArn"), request.get("Tags"), region, accountId);
+                    yield Response.ok(objectMapper.createObjectNode()).build();
+                }
+                case "UntagResource" -> {
+                    service.untagResource(text(request, "ResourceArn"), request.get("TagKeys"), region, accountId);
+                    yield Response.ok(objectMapper.createObjectNode()).build();
+                }
+                case "ListTagsForResource" -> Response.ok(service.listTagsForResource(
+                        text(request, "ResourceArn"), request.get("MaxResults"),
+                        text(request, "NextToken"), region, accountId)).build();
 
                 default -> Response.status(400)
                         .entity(new AwsErrorResponse("UnknownOperationException",
@@ -149,6 +160,21 @@ public class Route53ResolverJsonHandler {
 
     private Response resolverEndpointResponse(ObjectNode endpoint) {
         return Response.ok(objectMapper.createObjectNode().set("ResolverEndpoint", endpoint)).build();
+    }
+
+    private Response handleListResolverEndpoints() {
+        ObjectNode result = objectMapper.createObjectNode();
+        ArrayNode endpoints = result.putArray("ResolverEndpoints");
+        for (ObjectNode endpoint : service.listResolverEndpoints()) {
+            endpoints.add(endpoint);
+        }
+        return Response.ok(result).build();
+    }
+
+    private Response handleListResolverEndpointIpAddresses(String endpointId) {
+        ObjectNode result = objectMapper.createObjectNode();
+        result.putArray("IpAddresses").addAll(service.listResolverEndpointIpAddresses(endpointId));
+        return Response.ok(result).build();
     }
 
     // ---------- Resolver rules ----------

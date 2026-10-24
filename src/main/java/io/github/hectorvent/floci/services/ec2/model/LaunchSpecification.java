@@ -16,6 +16,7 @@ public class LaunchSpecification {
     private String subnetId;
     private List<GroupIdentifier> securityGroups = new ArrayList<>();
     private String userData;
+    private String encodedUserData;
     private String iamInstanceProfileArn;
 
     public LaunchSpecification() {}
@@ -66,6 +67,14 @@ public class LaunchSpecification {
 
     public void setUserData(String userData) {
         this.userData = userData;
+    }
+
+    public String getEncodedUserData() {
+        return encodedUserData;
+    }
+
+    public void setEncodedUserData(String encodedUserData) {
+        this.encodedUserData = encodedUserData;
     }
 
     public String getIamInstanceProfileArn() {

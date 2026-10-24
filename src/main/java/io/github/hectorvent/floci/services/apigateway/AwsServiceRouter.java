@@ -1,7 +1,7 @@
 package io.github.hectorvent.floci.services.apigateway;
 
-import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import com.fasterxml.jackson.databind.JsonNode;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.acm.AcmJsonHandler;
 import io.github.hectorvent.floci.services.cloudwatch.logs.CloudWatchLogsHandler;
@@ -22,6 +22,7 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
+
 import java.util.regex.Matcher;
 
 /**
@@ -151,7 +152,7 @@ public class AwsServiceRouter {
                 case "sqs" -> sqsHandler.handle(action, requestBody, region);
                 case "sns" -> snsHandler.handle(action, requestBody, region);
                 case "events" -> eventBridgeHandler.handle(action, requestBody, region);
-                case "ssm" -> ssmHandler.handle(action, requestBody, region);
+                case "ssm" -> ssmHandler.handle(action, requestBody, region, null);
                 case "kinesis" -> kinesisHandler.handle(action, requestBody, region);
                 case "logs" -> logsHandler.handle(action, requestBody, region);
                 case "monitoring" -> metricsHandler.handle(action, requestBody, region);

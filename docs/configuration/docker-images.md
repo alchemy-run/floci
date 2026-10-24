@@ -10,7 +10,7 @@ Every image tag combines two independent choices: **what's inside** (variant) an
 |---|---|---|
 | **Standard** | Floci native binary only | General use: CI, local dev, Testcontainers **(recommended)** |
 | **Baseline** | Floci native binary compiled for ARMv8.0 (`armv8-a`) | ARM64 hosts without LSE, including Raspberry Pi 4-class CPUs |
-| **Compat** | Floci + Python 3 + AWS CLI + boto3 | Workflows that need AWS tooling available inside the container |
+| **Compat** | Floci + Python 3.12 + AWS CLI + boto3 | Workflows that need AWS tooling available inside the container |
 
 The compat image runs the same native binary as the standard image, so startup time and memory footprint are identical. Only the image size increases. The baseline image is different: it is an ARM64-only release artifact compiled for the ARMv8.0 ISA floor and is not published on nightly channels.
 
@@ -20,7 +20,7 @@ The standard image is built on Red Hat UBI 9 micro. Besides Floci it contains on
 
 | Channel | Source | Published |
 |---|---|---|
-| **Release** | Tagged version (e.g. `x.y.z`) | 1st and 3rd Tuesday of each month |
+| **Release** | Tagged version (e.g. `x.y.z`) | 15th and last day of each month, 00:30 CT |
 | **Nightly** | Tip of `main` | Every night at 23:00 CT |
 
 Release images are stable and recommended for most use cases. Between trains, `nightly` carries every merged fix from the following morning. Nightly images track active development and may include unreleased changes.
@@ -63,6 +63,47 @@ image: floci/floci:nightly
 ## Multi-Architecture
 
 Standard and compat images are published as multi-arch manifests supporting `linux/amd64` and `linux/arm64`. Baseline images are intentionally `linux/arm64` only.
+
+## Verifying Image Signatures
+
+Release images are signed with [cosign](https://docs.sigstore.dev/) in keyless mode: the release workflow trades its GitHub Actions OIDC token for a short-lived Fulcio certificate and records the signature in the Rekor transparency log. There is no public key to distribute: you verify *who* produced the image instead of *which key* signed it.
+
+```sh
+cosign verify \
+  --certificate-identity-regexp '^https://github\.com/floci-io/floci/\.github/workflows/release\.yml@refs/tags/' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  floci/floci:x.y.z
+```
+
+The signing identity is the release workflow's own ref, so the regexp above accepts any release tag. To accept exactly one release, drop the regexp and pin the identity:
+
+```sh
+--certificate-identity 'https://github.com/floci-io/floci/.github/workflows/release.yml@refs/tags/x.y.z'
+```
+
+Both registries carry the same signatures: substitute `public.ecr.aws/floci/floci:x.y.z` and the command is otherwise identical. Tags are mutable, so for a check you can rely on, verify a digest (`floci/floci@sha256:...`) rather than a tag.
+
+Only release images are signed. Nightly images are not.
+
+!!! note "Requires cosign v2.6.3 or later"
+    These signatures use the standardized Sigstore bundle format. cosign v2.6.3 and later (including v3) read it automatically. Older versions cannot verify these signatures.
+
+### Provenance and SBOM Attestations
+
+Release images carry BuildKit provenance (SLSA) and SPDX SBOM attestations, attached to the manifest index as separate manifests. Signing is recursive, so the index, every per-platform image, and every attestation manifest are each signed individually. Tampering with an attestation changes its digest, which changes the index descriptor pointing at it, which changes the signed index digest.
+
+List the attached manifests and verify one by its own digest:
+
+```sh
+docker buildx imagetools inspect floci/floci:x.y.z --format '{{json .Manifest}}'
+
+cosign verify \
+  --certificate-identity-regexp '^https://github\.com/floci-io/floci/\.github/workflows/release\.yml@refs/tags/' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  floci/floci@sha256:<attestation-manifest-digest>
+```
+
+Use `cosign verify`, not `cosign verify-attestation`. The latter targets cosign's own DSSE-wrapped attestations; BuildKit's attestations are plain in-toto manifests with no signature envelope of their own, so they are signed, and verified, by digest.
 
 ## Raspberry Pi 4 and older ARM64 CPUs
 
@@ -152,7 +193,7 @@ ghcr.io/example/floci@sha256:...
 
 The compat image adds the following to the standard image contents:
 
-- Python 3 + pip
+- Python 3.12 + pip (`python3`, `python`, `pip3` and `pip` all point at 3.12)
 - [AWS CLI](https://pypi.org/project/awscli/) (via pip)
 - [boto3](https://pypi.org/project/boto3/) (via pip)
 
@@ -193,3 +234,12 @@ build:
   context: .
   dockerfile: docker/Dockerfile.native   # or docker/Dockerfile for fast JVM dev build
 ```
+
+Faster for iteration: `make native native-image` builds the binary once and packages it as
+`floci:local-native`, and `make native-up` runs that image through the `docker/compose.native.yml`
+overlay, which also sets the variables the compatibility workflow passes. `make compat
+SUITES="sdk-test-java compat-cdk"` then runs the named suites from `compatibility-tests/` in Docker
+against it. The suites expect a fresh emulator: `make clean-sidecars clean-volumes` first removes
+the containers and named volumes Floci left behind (the ECR registry's volume in particular, whose
+repositories Floci re-adopts on the next start), and `make native-down` removes the containers
+after a run.

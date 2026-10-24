@@ -109,6 +109,31 @@ public class DynamoDbPartiQLParser {
     }
 
     /**
+     * The IAM action for a single statement, using the same keyword tokens as execution. A statement
+     * the tokenizer refuses has no action here, so it is authorized as ExecuteStatement and the
+     * handler reports why it is malformed, as {@link #extractTable} leaves it.
+     */
+    public static String iamAction(String statement) {
+        if (statement == null || statement.isBlank()) {
+            return null;
+        }
+        List<Token> tokens;
+        try {
+            tokens = tokenize(statement.trim());
+        } catch (Exception ignored) {
+            // Execution reports malformed statements after credential and policy checks have run.
+            return null;
+        }
+        return switch (tokens.getFirst().type()) {
+            case SELECT -> "dynamodb:PartiQLSelect";
+            case INSERT -> "dynamodb:PartiQLInsert";
+            case UPDATE -> "dynamodb:PartiQLUpdate";
+            case DELETE -> "dynamodb:PartiQLDelete";
+            default -> null;
+        };
+    }
+
+    /**
      * Extracts the target table name from a PartiQL statement using the parser tokenizer,
      * ensuring quoted attribute names containing SQL keywords are not mistakenly treated as table names.
      */
@@ -1046,7 +1071,7 @@ public class DynamoDbPartiQLParser {
             throw validationEx("Not enough parameters supplied for ? placeholders");
         }
         JsonNode p = parameters.get(paramIdx++);
-        var type = DynamoDbAttributeValueValidator.typeOf(p);
+        String type = DynamoDbAttributeValueValidator.typeOf(p);
         return switch (type) {
             case "S"    -> new PVal.Str(p.get("S").asText());
             case "N"    -> new PVal.Num(p.get("N").asText());

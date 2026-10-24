@@ -17,8 +17,8 @@ import java.util.List;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
-import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -262,6 +262,74 @@ class CloudFormationCloudFrontDistributionIntegrationTest {
                 distribution.getConfig().getDefaultCacheBehavior().getTrustedKeyGroups());
         assertEquals(List.of(orderedKeyGroupA.getId(), orderedKeyGroupB.getId()),
                 distribution.getConfig().getCacheBehaviors().getFirst().getTrustedKeyGroups());
+    }
+
+    @Test
+    void createStackWithAnOutOfRangeOriginConnectionSettingFailsTheStack() {
+        String suffix = Long.toString(System.nanoTime(), 36);
+        String stackName = "cfn-cloudfront-bad-attempts-" + suffix;
+
+        String template = """
+                {
+                  "Resources": {
+                    "Dist": {
+                      "Type": "AWS::CloudFront::Distribution",
+                      "Properties": {
+                        "DistributionConfig": {
+                          "Enabled": true,
+                          "Origins": [{
+                            "Id": "o1",
+                            "DomainName": "origin.example.com",
+                            "ConnectionAttempts": 4,
+                            "CustomOriginConfig": {"OriginProtocolPolicy": "https-only"}
+                          }],
+                          "DefaultCacheBehavior": {
+                            "TargetOriginId": "o1",
+                            "ViewerProtocolPolicy": "allow-all"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+                """;
+
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .header("Authorization", CFN_AUTH)
+            .formParam("Action", "CreateStack")
+            .formParam("StackName", stackName)
+            .formParam("TemplateBody", template)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        // On AWS the stack fails because CloudFront rejects the out-of-range value; the
+        // service-level check makes the CloudFormation path share that one copy.
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .header("Authorization", CFN_AUTH)
+            .formParam("Action", "DescribeStacks")
+            .formParam("StackName", stackName)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body(containsString("<StackStatus>ROLLBACK_COMPLETE</StackStatus>"))
+            .body(containsString("failed to create: [Dist]"));
+
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .header("Authorization", CFN_AUTH)
+            .formParam("Action", "DescribeStackEvents")
+            .formParam("StackName", stackName)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body(containsString(
+                    "The parameter ConnectionAttempts must be between 1 and 3."));
     }
 
     private KeyGroup createKeyGroup(String name, String publicKeyId) {

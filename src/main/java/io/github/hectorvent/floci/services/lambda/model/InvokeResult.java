@@ -12,6 +12,7 @@ public class InvokeResult {
     private String requestId;
     private String executedVersion;
     private StreamingPayload stream;
+    private String durableExecutionArn;
 
     public InvokeResult() {
     }
@@ -95,5 +96,13 @@ public class InvokeResult {
 
     public void setExecutedVersion(String executedVersion) {
         this.executedVersion = executedVersion;
+    }
+
+    public String getDurableExecutionArn() {
+        return durableExecutionArn;
+    }
+
+    public void setDurableExecutionArn(String durableExecutionArn) {
+        this.durableExecutionArn = durableExecutionArn;
     }
 }

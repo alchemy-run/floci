@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.ses;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.ses.model.CustomVerificationEmailTemplate;
@@ -30,7 +31,7 @@ import java.util.Set;
  * a domain used by the send path is not turned into a cross-service dependency.
  */
 @ApplicationScoped
-public class SesCvetService {
+public class SesCvetService implements SesTaggable {
 
     private static final Logger LOG = Logger.getLogger(SesCvetService.class);
 
@@ -72,6 +73,13 @@ public class SesCvetService {
         return cvetStore.get(cvetKey(region, templateName)).orElseThrow(() -> cvetNotFound(templateName));
     }
 
+    public PaginatedResult<CustomVerificationEmailTemplate> listCustomVerificationEmailTemplates(
+            String region, SesListPaging paging, Integer pageSize, String nextToken) {
+        return paging.page(region, listCustomVerificationEmailTemplates(region),
+                CustomVerificationEmailTemplate::getTemplateName, pageSize, nextToken);
+    }
+
+    /** By name; SES's own order could not be observed, since creating one needs a verified sender. */
     public List<CustomVerificationEmailTemplate> listCustomVerificationEmailTemplates(String region) {
         String prefix = "cvet::" + region + "::";
         return cvetStore.scan(k -> k.startsWith(prefix)).stream()
@@ -117,6 +125,7 @@ public class SesCvetService {
         return cvetStore.get(cvetKey(region, templateName));
     }
 
+    @Override
     public List<Tag> listTags(String templateName, String region) {
         CustomVerificationEmailTemplate template = cvetStore.get(cvetKey(region, templateName))
                 .orElseThrow(() -> tagTargetNotFound(templateName));
@@ -128,6 +137,7 @@ public class SesCvetService {
      * lock so a concurrent update can't be overwritten with a stale object and a concurrent delete
      * can't be resurrected.
      */
+    @Override
     public void tag(String templateName, String region, List<Tag> newTags) {
         String key = cvetKey(region, templateName);
         synchronized (cvetMutationLock) {
@@ -140,6 +150,7 @@ public class SesCvetService {
                 templateName, region, newTags.size());
     }
 
+    @Override
     public void untag(String templateName, String region, List<String> tagKeys) {
         String key = cvetKey(region, templateName);
         synchronized (cvetMutationLock) {

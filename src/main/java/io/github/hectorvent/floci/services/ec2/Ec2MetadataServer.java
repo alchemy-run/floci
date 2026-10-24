@@ -1,11 +1,16 @@
 package io.github.hectorvent.floci.services.ec2;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.services.ec2.model.GroupIdentifier;
 import io.github.hectorvent.floci.services.ec2.model.Instance;
+import io.github.hectorvent.floci.services.ec2.model.Tag;
 import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.iam.model.IamRole;
+import io.github.hectorvent.floci.services.iam.model.InstanceProfile;
 import io.github.hectorvent.floci.services.iam.model.SessionCredential;
 import io.vertx.core.Vertx;
+import io.vertx.core.buffer.Buffer;
+import io.vertx.core.http.HttpMethod;
 import io.vertx.core.http.HttpServer;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.Router;
@@ -17,23 +22,22 @@ import org.jboss.logging.Logger;
 
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
-import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * IMDS-compatible HTTP server bound to port 9169 on the Floci host.
- * EC2 guests reach this server through an authenticated link-local proxy.
+ * EC2 containers are launched with AWS_EC2_METADATA_SERVICE_ENDPOINT pointing here.
  *
  * Implements IMDSv2 (token-based) and IMDSv1 (no token) — containers using the
  * standard AWS SDK credential chain will hit /latest/meta-data/iam/security-credentials/
@@ -45,27 +49,24 @@ public class Ec2MetadataServer {
     private static final Logger LOG = Logger.getLogger(Ec2MetadataServer.class);
     private static final DateTimeFormatter ISO = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'")
             .withZone(ZoneOffset.UTC);
+    /** IMDSv2 tokens live from one second up to six hours. */
+    private static final int MAX_TOKEN_TTL_SECONDS = 21_600;
+    private static final String IDENTITY_ROLE = "ec2-instance";
     private static final String INSTANCE_TAGS_PREFIX = "/latest/meta-data/tags/instance/";
 
     private final Vertx vertx;
     private final EmulatorConfig config;
-    static final String PROXY_HEADER = "X-Floci-IMDS-Capability";
-
     private final Ec2InstanceCredentials credentials;
     private final Clock clock;
-    private final SecureRandom random = new SecureRandom();
-    private final Map<String, MetadataToken> tokens = new ConcurrentHashMap<>();
-    private final Map<String, GuestIdentity> capabilities = new ConcurrentHashMap<>();
-    private final Map<Instance, GuestIdentity> identities = new ConcurrentHashMap<>();
-    /** Source-address authentication is retained for the existing EKS relay. */
-    private final Map<String, Instance> containerIpToInstance = new ConcurrentHashMap<>();
 
-    private record GuestIdentity(Instance instance, String accountId, String containerId, String capability) {}
-    private record MetadataToken(GuestIdentity identity, Instant expiresAt) {}
+    /** IMDSv2: token value → Instance */
+    private final Map<String, SessionToken> tokens = new ConcurrentHashMap<>();
+    /** IMDSv1 fallback: container bridge IP → Instance */
+    private final Map<String, Instance> containerIpToInstance = new ConcurrentHashMap<>();
+    /** Cluster nodes whose instance-profile identity their registrar synthesizes rather than IAM holding it. */
+    private final Set<Instance> synthesizedProfiles = ConcurrentHashMap.newKeySet();
 
     private volatile HttpServer httpServer;
-    private CompletableFuture<Void> starting = CompletableFuture.completedFuture(null);
-    private CompletableFuture<Void> stopping = CompletableFuture.completedFuture(null);
 
     @Inject
     public Ec2MetadataServer(Vertx vertx, EmulatorConfig config, IamService iamService) {
@@ -79,68 +80,9 @@ public class Ec2MetadataServer {
         this.clock = clock;
     }
 
-    /** Rotates the guest generation. The capability is delivered only through Docker's archive API. */
-    public synchronized String registerProxy(Instance instance) {
-        String accountId = accountId(instance);
-        // A restored model object replaces the old registration of the same scoped guest.
-        for (GuestIdentity previous : List.copyOf(identities.values())) {
-            if (previous.instance() != instance && Objects.equals(previous.accountId(), accountId)
-                    && Objects.equals(previous.instance().getRegion(), instance.getRegion())
-                    && Objects.equals(previous.instance().getInstanceId(), instance.getInstanceId())) {
-                unregisterInstance(previous.instance());
-            }
-        }
-        revokeIdentity(instance);
-        String capability = randomToken();
-        GuestIdentity identity = new GuestIdentity(instance, accountId, instance.getDockerContainerId(), capability);
-        identities.put(instance, identity);
-        capabilities.put(capability, identity);
-        credentials.register(instance);
-        return capability;
-    }
-
-    public synchronized void unregisterProxy(Instance instance, String capability) {
-        GuestIdentity identity = identities.get(instance);
-        if (identity != null && Objects.equals(identity.capability(), capability)) {
-            unregisterInstance(instance);
-        }
-    }
-
-    private void revokeIdentity(Instance instance) {
-        GuestIdentity previous = identities.remove(instance);
-        if (previous != null) {
-            if (previous.capability() != null) {
-                capabilities.remove(previous.capability(), previous);
-            }
-            tokens.entrySet().removeIf(entry -> entry.getValue().identity() == previous);
-        }
-        credentials.unregister(instance);
-    }
-
-    private String accountId(Instance instance) {
-        return instanceAccountId(instance, config == null ? null : config.defaultAccountId());
-    }
-
-    static String instanceAccountId(Instance instance, String defaultAccountId) {
-        if (!instance.getNetworkInterfaces().isEmpty()
-                && instance.getNetworkInterfaces().getFirst().getOwnerId() != null) {
-            return instance.getNetworkInterfaces().getFirst().getOwnerId();
-        }
-        String profile = instance.getIamInstanceProfileArn();
-        if (profile != null) {
-            String[] parts = profile.split(":", 6);
-            if (parts.length == 6 && parts[4].matches("[0-9]{12}")) {
-                return parts[4];
-            }
-        }
-        return defaultAccountId;
-    }
-
     /** Called by Ec2ContainerManager after a container starts to register its IP. */
-    public synchronized void registerContainer(String containerIp, String instanceId, Instance instance) {
+    public void registerContainer(String containerIp, String instanceId, Instance instance) {
         if (containerIp != null && !containerIp.isBlank()) {
-            identities.computeIfAbsent(instance, key ->
-                    new GuestIdentity(instance, accountId(instance), instance.getDockerContainerId(), null));
             credentials.register(instance);
             containerIpToInstance.put(containerIp, instance);
             LOG.debugv("IMDS: registered container {0} → instance {1}", containerIp, instanceId);
@@ -163,9 +105,21 @@ public class Ec2MetadataServer {
                 entry.getValue() == instance && !addresses.contains(entry.getKey()));
     }
 
-    public synchronized void unregisterInstance(Instance instance) {
+    /**
+     * Registers a cluster node that another service synthesizes instead of EC2 launching it. Its
+     * instance-profile ARN and ID are the registrar's own, so {@code iam/info} reports them while IAM
+     * holds no such profile.
+     */
+    public void reconcileClusterNodeAddresses(Set<String> addresses, Instance instance) {
+        synthesizedProfiles.add(instance);
+        reconcileContainerAddresses(addresses, instance);
+    }
+
+    public void unregisterInstance(Instance instance) {
         if (instance != null) {
-            revokeIdentity(instance);
+            synthesizedProfiles.remove(instance);
+            credentials.unregister(instance);
+            tokens.values().removeIf(token -> token.instance() == instance);
             containerIpToInstance.entrySet().removeIf(entry -> entry.getValue() == instance);
         }
     }
@@ -175,21 +129,18 @@ public class Ec2MetadataServer {
     }
 
     public synchronized CompletableFuture<Void> start() {
-        if (!stopping.isDone()) {
-            return stopping.thenCompose(ignored -> start());
-        }
-        if (stopping.isCompletedExceptionally()) {
-            return stopping;
-        }
         if (httpServer != null) {
-            return starting;
+            return CompletableFuture.completedFuture(null);
         }
         CompletableFuture<Void> future = new CompletableFuture<>();
-        starting = future;
         int port = config.services().ec2().imdsPort();
 
         Router router = Router.router(vertx);
         router.route().handler(BodyHandler.create());
+        // Ahead of every route, so a path IMDS does not serve also answers 401 when the instance
+        // requires tokens, as on AWS. A method-free route, so methods IMDS does not serve keep the
+        // router's own answers rather than all becoming 405.
+        router.route().handler(this::refuseTokenlessReadsWhenTokensAreRequired);
 
         // IMDSv2 token endpoint
         router.put("/latest/api/token").handler(this::handleToken);
@@ -206,11 +157,24 @@ public class Ec2MetadataServer {
         router.get("/latest/meta-data/mac").handler(ctx -> handleMac(ctx));
         router.get("/latest/meta-data/security-groups").handler(ctx -> handleSecurityGroups(ctx));
         router.get("/latest/meta-data/placement/availability-zone").handler(ctx -> handleText(ctx, inst ->
-                inst.getPlacement() != null ? inst.getPlacement().getAvailabilityZone() : "us-east-1a"));
+                inst.getPlacement() != null
+                        ? inst.getPlacement().getAvailabilityZone()
+                        : config.defaultAvailabilityZone()));
         router.get("/latest/meta-data/placement/region").handler(ctx -> handleText(ctx, inst -> inst.getRegion()));
         router.get("/latest/meta-data/iam/info").handler(ctx -> handleIamInfo(ctx));
         router.get("/latest/meta-data/iam/security-credentials/").handler(ctx -> handleCredentialsList(ctx));
         router.get("/latest/meta-data/iam/security-credentials/:role").handler(ctx -> handleCredentials(ctx));
+        router.get("/latest/meta-data/identity-credentials").handler(ctx -> handleListing(ctx, "ec2/"));
+        router.get("/latest/meta-data/identity-credentials/").handler(ctx -> handleListing(ctx, "ec2/"));
+        router.get("/latest/meta-data/identity-credentials/ec2").handler(ctx -> handleListing(ctx, "info\nsecurity-credentials/"));
+        router.get("/latest/meta-data/identity-credentials/ec2/").handler(ctx -> handleListing(ctx, "info\nsecurity-credentials/"));
+        router.get("/latest/meta-data/identity-credentials/ec2/info").handler(ctx -> handleIdentityInfo(ctx));
+        router.get("/latest/meta-data/identity-credentials/ec2/security-credentials")
+                .handler(ctx -> handleListing(ctx, IDENTITY_ROLE));
+        router.get("/latest/meta-data/identity-credentials/ec2/security-credentials/")
+                .handler(ctx -> handleListing(ctx, IDENTITY_ROLE));
+        router.get("/latest/meta-data/identity-credentials/ec2/security-credentials/" + IDENTITY_ROLE)
+                .handler(ctx -> handleIdentityCredentials(ctx));
         router.get("/latest/meta-data/tags/instance").handler(ctx -> handleInstanceTagKeys(ctx));
         router.get("/latest/meta-data/tags/instance/").handler(ctx -> handleInstanceTagKeys(ctx));
         router.getWithRegex("/latest/meta-data/tags/instance/.+").handler(ctx -> handleInstanceTagValue(ctx));
@@ -233,52 +197,60 @@ public class Ec2MetadataServer {
     public synchronized void stop() {
         credentials.clear();
         tokens.clear();
-        capabilities.clear();
-        identities.clear();
         containerIpToInstance.clear();
+        synthesizedProfiles.clear();
         if (httpServer != null) {
-            stopping = httpServer.close().toCompletionStage().toCompletableFuture();
+            httpServer.close();
             httpServer = null;
         }
     }
 
     // ── Token (IMDSv2) ────────────────────────────────────────────────────────
 
-    private synchronized void handleToken(RoutingContext ctx) {
+    private void handleToken(RoutingContext ctx) {
         String ttlHeader = ctx.request().getHeader("x-aws-ec2-metadata-token-ttl-seconds");
-        int ttl;
-        try {
-            ttl = Integer.parseInt(ttlHeader);
-        } catch (NumberFormatException invalid) {
-            ctx.response().setStatusCode(400).end("Invalid x-aws-ec2-metadata-token-ttl-seconds");
+        Integer ttlSeconds = parseTokenTtl(ttlHeader);
+        if (ttlSeconds == null) {
+            ctx.response().setStatusCode(400).end(
+                    "x-aws-ec2-metadata-token-ttl-seconds must be an integer from 1 to " + MAX_TOKEN_TTL_SECONDS);
             return;
         }
-        if (ttl < 1 || ttl > 21600
-                || ctx.request().headers().getAll("x-aws-ec2-metadata-token-ttl-seconds").size() != 1) {
-            ctx.response().setStatusCode(400).end("Token TTL must be between 1 and 21600 seconds");
-            return;
+
+        Instance inst = resolveInstanceByIp(ctx);
+        String token = UUID.randomUUID().toString().replace("-", "");
+        if (inst != null) {
+            Instant now = clock.instant();
+            tokens.values().removeIf(existing -> existing.isExpiredAt(now));
+            tokens.put(token, new SessionToken(inst, now.plusSeconds(ttlSeconds)));
         }
-        if (ctx.request().getHeader("X-Forwarded-For") != null) {
-            ctx.response().setStatusCode(403).end();
-            return;
+        else {
+            LOG.debugv("IMDS: token requested from {0}, which is not a registered EC2 container; "
+                    + "metadata requests with this token will fail", ctx.request().remoteAddress().host());
         }
-        GuestIdentity identity = resolveIdentity(ctx);
-        if (identity == null) {
-            return;
-        }
-        Instant now = clock.instant();
-        tokens.entrySet().removeIf(entry -> !entry.getValue().expiresAt().isAfter(now));
-        String token = randomToken();
-        tokens.put(token, new MetadataToken(identity, now.plusSeconds(ttl)));
-        ctx.response().setStatusCode(200)
+
+        ctx.response()
+                .setStatusCode(200)
                 .putHeader("x-aws-ec2-metadata-token-ttl-seconds", ttlHeader)
                 .end(token);
     }
 
-    private String randomToken() {
-        byte[] bytes = new byte[32];
-        random.nextBytes(bytes);
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    /** Returns the TTL in seconds, or null when the header is missing or outside 1..21600. */
+    private static Integer parseTokenTtl(String ttlHeader) {
+        if (ttlHeader == null) {
+            return null;
+        }
+        try {
+            int ttl = Integer.parseInt(ttlHeader.trim());
+            return ttl >= 1 && ttl <= MAX_TOKEN_TTL_SECONDS ? ttl : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private record SessionToken(Instance instance, Instant expiresAt) {
+        boolean isExpiredAt(Instant now) {
+            return !now.isBefore(expiresAt);
+        }
     }
 
     // ── Metadata helpers ──────────────────────────────────────────────────────
@@ -322,7 +294,7 @@ public class Ec2MetadataServer {
             return;
         }
         StringBuilder sb = new StringBuilder();
-        for (var sg : inst.getSecurityGroups()) {
+        for (GroupIdentifier sg : inst.getSecurityGroups()) {
             if (!sb.isEmpty()) {
                 sb.append("\n");
             }
@@ -333,31 +305,38 @@ public class Ec2MetadataServer {
                 .end(sb.toString());
     }
 
-    private synchronized void handleIamInfo(RoutingContext ctx) {
+    private void handleIamInfo(RoutingContext ctx) {
         Instance inst = resolveInstance(ctx);
         if (inst == null) {
             return;
         }
-        String profileArn = inst.getIamInstanceProfileArn();
-        if (profileArn == null || !profileBelongsToGuest(inst)) {
+        Optional<InstanceProfile> resolved = credentials.profile(inst);
+        String profileArn;
+        String profileId;
+        if (resolved.isPresent()) {
+            profileArn = resolved.get().getArn();
+            profileId = resolved.get().getInstanceProfileId();
+        } else if (synthesizedProfiles.contains(inst) && inst.getIamInstanceProfileArn() != null
+                && !credentials.holdsProfile(inst)) {
+            profileArn = inst.getIamInstanceProfileArn();
+            profileId = inst.getIamInstanceProfileId();
+        } else {
             ctx.response().setStatusCode(404).end("{}");
             return;
         }
-        String profileId = "AIPA" + inst.getInstanceId().toUpperCase().substring(2, 16);
-        String body = "{\"Code\":\"Success\",\"LastUpdated\":\"" + now() + "\","
-                + "\"InstanceProfileArn\":\"" + profileArn + "\","
-                + "\"InstanceProfileId\":\"" + profileId + "\"}";
         ctx.response().setStatusCode(200)
                 .putHeader("content-type", "application/json")
-                .end(body);
+                .end(new JsonObject().put("Code", "Success").put("LastUpdated", now())
+                        .put("InstanceProfileArn", profileArn)
+                        .put("InstanceProfileId", profileId).encode());
     }
 
-    private synchronized void handleCredentialsList(RoutingContext ctx) {
+    private void handleCredentialsList(RoutingContext ctx) {
         Instance inst = resolveInstance(ctx);
         if (inst == null) {
             return;
         }
-        Optional<IamRole> role = profileBelongsToGuest(inst) ? credentials.role(inst) : Optional.empty();
+        Optional<IamRole> role = credentials.role(inst);
         if (role.isEmpty()) {
             ctx.response().setStatusCode(404).end();
             return;
@@ -365,26 +344,66 @@ public class Ec2MetadataServer {
         ctx.response().putHeader("content-type", "text/plain").end(role.get().getRoleName());
     }
 
-    private synchronized void handleCredentials(RoutingContext ctx) {
+    private void handleCredentials(RoutingContext ctx) {
         Instance inst = resolveInstance(ctx);
         if (inst == null) {
             return;
         }
-        Optional<SessionCredential> result = profileBelongsToGuest(inst)
-                ? credentials.get(inst, ctx.pathParam("role"), clock.instant()) : Optional.empty();
+        Optional<SessionCredential> result = credentials.get(inst, ctx.pathParam("role"), Instant.now());
         if (result.isEmpty()) {
             ctx.response().setStatusCode(404).end();
             return;
         }
         SessionCredential session = result.get();
+        ctx.response().putHeader("content-type", "application/json").end(credentialsJson(session));
+    }
+
+    private void handleListing(RoutingContext ctx, String entries) {
+        Instance inst = resolveInstance(ctx);
+        if (inst == null) {
+            return;
+        }
+        ctx.response().setStatusCode(200).putHeader("content-type", "text/plain").end(entries);
+    }
+
+    private void handleIdentityInfo(RoutingContext ctx) {
+        Instance inst = resolveInstance(ctx);
+        if (inst == null) {
+            return;
+        }
         ctx.response().putHeader("content-type", "application/json").end(new JsonObject()
+                .put("Code", "Success")
+                .put("LastUpdated", ISO.format(clock.instant()))
+                .put("AccountId", ownerAccount(inst)).encode());
+    }
+
+    private void handleIdentityCredentials(RoutingContext ctx) {
+        Instance inst = resolveInstance(ctx);
+        if (inst == null) {
+            return;
+        }
+        Optional<SessionCredential> result = credentials.identity(inst, ownerAccount(inst), clock.instant());
+        if (result.isEmpty()) {
+            ctx.response().setStatusCode(404).end();
+            return;
+        }
+        ctx.response().putHeader("content-type", "application/json").end(credentialsJson(result.get()));
+    }
+
+    /** The account that launched the instance; instances persisted before it was recorded belong to the default one. */
+    private String ownerAccount(Instance inst) {
+        return inst.getOwnerId() != null ? inst.getOwnerId() : config.defaultAccountId();
+    }
+
+    private static String credentialsJson(SessionCredential session) {
+        return new JsonObject()
                 .put("Code", "Success")
                 .put("LastUpdated", ISO.format(session.getExpiration().minusSeconds(3600)))
                 .put("Type", "AWS-HMAC")
                 .put("AccessKeyId", session.getAccessKeyId())
                 .put("SecretAccessKey", session.getSecretAccessKey())
                 .put("Token", session.getSessionToken())
-                .put("Expiration", ISO.format(session.getExpiration())).encode());
+                .put("Expiration", ISO.format(session.getExpiration())).encode();
     }
 
     private void handleInstanceTagKeys(RoutingContext ctx) {
@@ -422,41 +441,44 @@ public class Ec2MetadataServer {
         if (inst == null) {
             return;
         }
-        String userData = inst.getUserData();
-        if (userData == null || userData.isBlank()) {
+        String encoded = inst.getEncodedUserData();
+        byte[] userData;
+        if (encoded != null) {
+            try {
+                userData = encoded.isBlank() ? null : Base64.getDecoder().decode(encoded);
+            } catch (IllegalArgumentException e) {
+                LOG.warnv("Ignoring malformed saved user-data encoding for instance {0}", inst.getInstanceId());
+                userData = inst.getUserData() == null ? null : inst.getUserData().getBytes(StandardCharsets.UTF_8);
+            }
+        } else {
+            userData = inst.getUserData() == null ? null : inst.getUserData().getBytes(StandardCharsets.UTF_8);
+        }
+        if (userData == null || userData.length == 0) {
             ctx.response().setStatusCode(404).end();
             return;
         }
         ctx.response().setStatusCode(200)
-                .putHeader("content-type", "text/plain")
-                .end(userData);
+                .putHeader("content-type", "application/octet-stream")
+                .end(Buffer.buffer(userData));
     }
 
-    private boolean profileBelongsToGuest(Instance instance) {
-        GuestIdentity identity = identities.get(instance);
-        String arn = instance.getIamInstanceProfileArn();
-        String[] parts = arn == null ? new String[0] : arn.split(":", 6);
-        if (identity == null || parts.length != 6 || !Objects.equals(identity.accountId(), parts[4])) {
-            credentials.unregister(instance);
-            return false;
-        }
-        credentials.register(instance);
-        return true;
-    }
-
-    private synchronized void handleIdentityDocument(RoutingContext ctx) {
+    private void handleIdentityDocument(RoutingContext ctx) {
         Instance inst = resolveInstance(ctx);
         if (inst == null) {
             return;
         }
-        String body = instanceIdentityDocument(inst, identities.get(inst).accountId());
+        String body = instanceIdentityDocument(inst, ownerAccount(inst), config.defaultAvailabilityZone());
         ctx.response().setStatusCode(200)
                 .putHeader("content-type", "application/json")
                 .end(body);
     }
 
-    static String instanceIdentityDocument(Instance inst, String accountId) {
-        String az = inst.getPlacement() != null ? inst.getPlacement().getAvailabilityZone() : "us-east-1a";
+    /**
+     * {@code defaultAvailabilityZone} answers for an instance with no placement, the same configured
+     * zone {@code /latest/meta-data/placement/availability-zone} reports for it.
+     */
+    static String instanceIdentityDocument(Instance inst, String accountId, String defaultAvailabilityZone) {
+        String az = inst.getPlacement() != null ? inst.getPlacement().getAvailabilityZone() : defaultAvailabilityZone;
         String architecture = inst.getArchitecture() == null || inst.getArchitecture().isBlank()
                 ? "x86_64"
                 : inst.getArchitecture();
@@ -474,63 +496,65 @@ public class Ec2MetadataServer {
 
     // ── Instance resolution ───────────────────────────────────────────────────
 
-    private GuestIdentity resolveIdentity(RoutingContext ctx) {
-        String capability = ctx.request().getHeader(PROXY_HEADER);
-        GuestIdentity identity;
-        if (capability != null) {
-            identity = capabilities.get(capability);
-            if (ctx.request().headers().getAll(PROXY_HEADER).size() != 1 || identity == null) {
-                ctx.response().setStatusCode(401).end();
-                return null;
-            }
-        } else {
-            String remoteIp = ctx.request().remoteAddress().host();
-            Instance instance = containerIpToInstance.get(remoteIp);
-            identity = instance == null ? null : identities.get(instance);
-            if (identity == null) {
-                ctx.response().setStatusCode(404).end(unregisteredContainerMessage(remoteIp));
-                return null;
-            }
-            // An EC2 proxy registration cannot be bypassed through its bridge address.
-            if (identity.capability() != null) {
-                ctx.response().setStatusCode(401).end();
-                return null;
-            }
-        }
-        Instance instance = identity.instance();
-        String state = instance.getState() == null ? null : instance.getState().getName();
-        if (identities.get(instance) != identity
-                || !Objects.equals(identity.containerId(), instance.getDockerContainerId())
-                || "stopping".equals(state) || "stopped".equals(state)
-                || "shutting-down".equals(state) || "terminated".equals(state)) {
-            ctx.response().setStatusCode(401).end();
-            return null;
-        }
-        if ("disabled".equals(instance.effectiveMetadataOptions().getHttpEndpoint())) {
-            ctx.response().setStatusCode(403).end();
-            return null;
-        }
-        return identity;
+    private Instance resolveInstanceByIp(RoutingContext ctx) {
+        String remoteIp = ctx.request().remoteAddress().host();
+        return containerIpToInstance.get(remoteIp);
     }
 
-    private synchronized Instance resolveInstance(RoutingContext ctx) {
-        GuestIdentity identity = resolveIdentity(ctx);
-        if (identity == null) {
-            return null;
-        }
+    /**
+     * An instance whose HttpTokens is required refuses IMDSv1: as AWS does, a GET or HEAD without a
+     * token gets 401 before any data is looked up, whatever the path. (No route serves HEAD, so one
+     * with a token gets the router's answer: 405 on a path a GET route serves, 404 elsewhere.)
+     */
+    private void refuseTokenlessReadsWhenTokensAreRequired(RoutingContext ctx) {
+        HttpMethod method = ctx.request().method();
         String token = ctx.request().getHeader("x-aws-ec2-metadata-token");
-        if (token != null) {
-            MetadataToken issued = tokens.get(token);
-            if (ctx.request().headers().getAll("x-aws-ec2-metadata-token").size() != 1
-                    || issued == null || issued.identity() != identity || !issued.expiresAt().isAfter(clock.instant())) {
+        if ((HttpMethod.GET.equals(method) || HttpMethod.HEAD.equals(method)) && (token == null || token.isBlank())) {
+            Instance inst = resolveInstanceByIp(ctx);
+            if (inst != null && "required".equals(inst.effectiveMetadataOptions().getHttpTokens())) {
+                ctx.response().setStatusCode(401).end();
+                return;
+            }
+        }
+        ctx.next();
+    }
+
+    private Instance resolveInstance(RoutingContext ctx) {
+        String remoteIp = ctx.request().remoteAddress().host();
+        Instance inst = containerIpToInstance.get(remoteIp);
+
+        // IMDSv2: a presented token must be valid; an invalid or expired one gets 401 so the
+        // caller fetches a new token. A token is not valid on another instance, so a caller whose
+        // IP maps to a different instance also gets 401; an unregistered IP defers to the token.
+        // Requests without a token fall back to IMDSv1; one whose instance requires tokens has
+        // already been refused before routing.
+        String token = ctx.request().getHeader("x-aws-ec2-metadata-token");
+        if (token != null && !token.isBlank()) {
+            SessionToken session = tokens.get(token);
+            if (session != null && !session.isExpiredAt(clock.instant())) {
+                if (inst != null && !Objects.equals(inst.getInstanceId(), session.instance().getInstanceId())) {
+                    ctx.response().setStatusCode(401).end();
+                    return null;
+                }
+                return session.instance();
+            }
+            if (session != null) {
+                tokens.remove(token, session);
+            }
+            if (inst != null) {
                 ctx.response().setStatusCode(401).end();
                 return null;
             }
-        } else if ("required".equals(identity.instance().effectiveMetadataOptions().getHttpTokens())) {
-            ctx.response().setStatusCode(401).end();
-            return null;
         }
-        return identity.instance();
+
+        if (inst == null) {
+            String message = unregisteredContainerMessage(remoteIp);
+            LOG.warnv("IMDS: {0}", message);
+            ctx.response().setStatusCode(404)
+                    .putHeader("content-type", "text/plain")
+                    .end(message);
+        }
+        return inst;
     }
 
     /**
@@ -563,7 +587,7 @@ public class Ec2MetadataServer {
         if (instance == null || instance.getTags() == null) {
             return "";
         }
-        for (var tag : instance.getTags()) {
+        for (Tag tag : instance.getTags()) {
             if (tag.getKey() == null || tag.getKey().isBlank()) {
                 continue;
             }
@@ -579,7 +603,7 @@ public class Ec2MetadataServer {
         if (instance == null || instance.getTags() == null || key == null) {
             return Optional.empty();
         }
-        for (var tag : instance.getTags()) {
+        for (Tag tag : instance.getTags()) {
             if (key.equals(tag.getKey())) {
                 return Optional.of(nvl(tag.getValue()));
             }

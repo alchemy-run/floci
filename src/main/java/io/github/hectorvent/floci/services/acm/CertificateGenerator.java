@@ -1,5 +1,7 @@
 package io.github.hectorvent.floci.services.acm;
 
+import io.github.hectorvent.floci.core.common.CertificateMaterialException;
+import io.github.hectorvent.floci.core.common.Pem;
 import io.github.hectorvent.floci.services.acm.model.KeyAlgorithm;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.bouncycastle.asn1.ASN1Primitive;
@@ -22,6 +24,7 @@ import org.bouncycastle.asn1.x9.X962Parameters;
 import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.cert.X509v3CertificateBuilder;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
+import org.bouncycastle.cert.jcajce.JcaX509ExtensionUtils;
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
 import org.bouncycastle.openssl.PEMKeyPair;
 import org.bouncycastle.openssl.PEMParser;
@@ -34,6 +37,11 @@ import org.bouncycastle.pkcs.PKCS8EncryptedPrivateKeyInfo;
 import org.bouncycastle.util.io.pem.PemObject;
 import org.jboss.logging.Logger;
 
+import javax.crypto.Cipher;
+import javax.crypto.SecretKey;
+import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.PBEKeySpec;
+import javax.crypto.spec.PBEParameterSpec;
 import java.io.StringReader;
 import java.io.StringWriter;
 import java.math.BigInteger;
@@ -146,7 +154,7 @@ public class CertificateGenerator {
             return toGenerated(cert, keyPair.getPrivate(), dn.toString(), dn.toString());
         } catch (Exception e) {
             LOG.error("Failed to generate CA certificate", e);
-            throw new CertificateGenerationException("CA generation failed: " + e.getMessage(), e);
+            throw new CertificateMaterialException("CA generation failed: " + e.getMessage(), e);
         }
     }
 
@@ -174,20 +182,21 @@ public class CertificateGenerator {
             if (subjectKeyPair != null && !isOfAlgorithm(subjectKeyPair.getPublic(), keyAlgorithm)) {
                 throw new IllegalArgumentException("supplied key pair is not the requested " + keyAlgorithm);
             }
-            if (subjectKeyPair != null && !isPair(subjectKeyPair.getPrivate(), subjectKeyPair.getPublic())) {
+            if (subjectKeyPair != null && !Pem.isPair(subjectKeyPair.getPrivate(), subjectKeyPair.getPublic())) {
                 throw new IllegalArgumentException("supplied private key does not match its public key");
             }
             KeyPair keyPair = subjectKeyPair != null ? subjectKeyPair : generateKeyPair(keyAlgorithm);
             X500Name subject = new X500Name("CN=" + domainName);
             X500Name issuerDn = X500Name.getInstance(issuer.certificate().getSubjectX500Principal().getEncoded());
             X509Certificate cert = signCertificate(subject, keyPair.getPublic(), issuerDn, issuer.key(),
-                    withDomainFirst(domainName, sans), false, usage, Instant.now(), notAfter);
+                    withDomainFirst(domainName, sans), false, usage, Instant.now(), notAfter,
+                    issuer.certificate().getPublicKey());
             cert.verify(issuer.certificate().getPublicKey());
             return toGenerated(cert, keyPair.getPrivate(), subject.toString(),
                     issuer.certificate().getSubjectX500Principal().getName());
         } catch (Exception e) {
             LOG.error("Failed to generate issued certificate", e);
-            throw new CertificateGenerationException("Certificate generation failed: " + e.getMessage(), e);
+            throw new CertificateMaterialException("Certificate generation failed: " + e.getMessage(), e);
         }
     }
 
@@ -209,20 +218,7 @@ public class CertificateGenerator {
         return !(key instanceof ECKey) && detectKeyAlgorithm(key) == keyAlgorithm;
     }
 
-    /** True when {@code privateKey} signs what {@code publicKey} verifies. */
-    public static boolean isPair(PrivateKey privateKey, PublicKey publicKey) throws Exception {
-        String algorithm = privateKey instanceof ECKey ? "SHA256withECDSA" : "SHA256withRSA";
-        byte[] probe = "floci".getBytes(StandardCharsets.US_ASCII);
-        Signature signer = Signature.getInstance(algorithm);
-        signer.initSign(privateKey);
-        signer.update(probe);
-        byte[] signature = signer.sign();
-        Signature verifier = Signature.getInstance(algorithm);
-        verifier.initVerify(publicKey);
-        verifier.update(probe);
-        return verifier.verify(signature);
-    }
-
+    
     private GeneratedCertificate buildSelfSignedCertificate(String domainName, List<String> sans,
                                                             KeyAlgorithm keyAlgorithm, KeyPair suppliedKeyPair) {
         try {
@@ -234,7 +230,7 @@ public class CertificateGenerator {
             return toGenerated(cert, keyPair.getPrivate(), dn, dn);
         } catch (Exception e) {
             LOG.error("Failed to generate certificate", e);
-            throw new CertificateGenerationException("Certificate generation failed: " + e.getMessage(), e);
+            throw new CertificateMaterialException("Certificate generation failed: " + e.getMessage(), e);
         }
     }
 
@@ -258,9 +254,27 @@ public class CertificateGenerator {
     public X509Certificate signCertificate(X500Name subject, PublicKey subjectKey, X500Name issuerDn,
                                            PrivateKey issuerKey, List<String> sans, boolean asCa,
                                            LeafUsage usage, Instant notBefore, Instant notAfter) throws Exception {
+        PublicKey issuerPublicKey = asCa && subject.equals(issuerDn) ? subjectKey : null;
+        return signCertificate(subject, subjectKey, issuerDn, issuerKey, sans, asCa, usage,
+                notBefore, notAfter, issuerPublicKey);
+    }
+
+    /** Supply the issuer's public key for CA-signed leaves so their AKI matches the CA's SKI. */
+    public X509Certificate signCertificate(X500Name subject, PublicKey subjectKey, X500Name issuerDn,
+                                           PrivateKey issuerKey, List<String> sans, boolean asCa,
+                                           LeafUsage usage, Instant notBefore, Instant notAfter,
+                                           PublicKey issuerPublicKey) throws Exception {
         BigInteger serial = new BigInteger(128, SECURE_RANDOM);
         X509v3CertificateBuilder certBuilder = new JcaX509v3CertificateBuilder(
                 issuerDn, serial, Date.from(notBefore), Date.from(notAfter), subject, subjectKey);
+
+        JcaX509ExtensionUtils extensionUtils = new JcaX509ExtensionUtils();
+        certBuilder.addExtension(Extension.subjectKeyIdentifier, false,
+                extensionUtils.createSubjectKeyIdentifier(subjectKey));
+        if (issuerPublicKey != null) {
+            certBuilder.addExtension(Extension.authorityKeyIdentifier, false,
+                    extensionUtils.createAuthorityKeyIdentifier(issuerPublicKey));
+        }
 
         if (sans != null && !sans.isEmpty()) {
             List<GeneralName> sanList = new ArrayList<>();
@@ -423,7 +437,7 @@ public class CertificateGenerator {
     /**
      * PEM for a certificate or key. A JDK EC private key goes out as PKCS#8 ({@code PRIVATE KEY}):
      * {@link JcaPEMWriter} would write it as a bare SEC1 structure without the curve, which neither
-     * OpenSSL nor {@link #parsePrivateKey} can read. RSA keys stay PKCS#1 ({@code RSA PRIVATE KEY}),
+     * OpenSSL nor {@link Pem#parsePrivateKey} can read. RSA keys stay PKCS#1 ({@code RSA PRIVATE KEY}),
      * the form AWS IoT hands out.
      */
     public String toPem(Object obj) throws Exception {
@@ -447,7 +461,7 @@ public class CertificateGenerator {
      */
     public String encryptPrivateKey(String privateKeyPem, String passphrase) {
         try {
-            PrivateKey privateKey = parsePrivateKey(privateKeyPem);
+            PrivateKey privateKey = Pem.parsePrivateKey(privateKeyPem);
 
             // PBES2 with AES-256-CBC, run through the JDK so no JCE provider has to be
             // registered. The algorithm name fixes the PBKDF2 PRF to HMAC-SHA256, and the
@@ -476,23 +490,10 @@ public class CertificateGenerator {
 
         } catch (Exception e) {
             LOG.error("Failed to encrypt private key", e);
-            throw new CertificateGenerationException("Private key encryption failed: " + e.getMessage(), e);
+            throw new CertificateMaterialException("Private key encryption failed: " + e.getMessage(), e);
         }
     }
 
-    public X509Certificate parseCertificate(String certPem) {
-        try (PEMParser parser = new PEMParser(new StringReader(certPem))) {
-            Object obj = parser.readObject();
-            if (obj instanceof X509CertificateHolder holder) {
-                return new JcaX509CertificateConverter()
-                    .getCertificate(holder);
-            }
-            throw new IllegalArgumentException("Invalid certificate PEM format");
-        } catch (Exception e) {
-            LOG.error("Failed to parse certificate", e);
-            throw new CertificateGenerationException("Certificate parsing failed: " + e.getMessage(), e);
-        }
-    }
 
     public PrivateKey parsePrivateKey(String keyPem) {
         try (PEMParser parser = new PEMParser(new StringReader(keyPem))) {

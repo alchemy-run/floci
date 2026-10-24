@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.kms.keytype;
 
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.services.kms.CipherUtils;
 import io.github.hectorvent.floci.services.kms.model.KmsKey;
 import io.github.hectorvent.floci.services.kms.model.KmsKeySpec;
 import io.github.hectorvent.floci.services.kms.model.KmsMessageType;
@@ -15,9 +16,9 @@ import org.bouncycastle.crypto.digests.SHA384Digest;
 import org.bouncycastle.crypto.digests.SHA512Digest;
 import org.bouncycastle.crypto.engines.RSABlindedEngine;
 import org.bouncycastle.crypto.params.ParametersWithRandom;
+import org.bouncycastle.crypto.params.RSAKeyParameters;
+import org.bouncycastle.crypto.params.RSAPrivateCrtKeyParameters;
 import org.bouncycastle.crypto.signers.PSSSigner;
-import org.bouncycastle.crypto.util.PrivateKeyFactory;
-import org.bouncycastle.crypto.util.PublicKeyFactory;
 import org.jboss.logging.Logger;
 
 import javax.crypto.Cipher;
@@ -29,7 +30,10 @@ import java.security.KeyPairGenerator;
 import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.SecureRandom;
+import java.security.interfaces.RSAPrivateCrtKey;
+import java.security.interfaces.RSAPublicKey;
 import java.security.spec.MGF1ParameterSpec;
+import java.util.Base64;
 
 import static io.github.hectorvent.floci.services.kms.model.KmsMessageType.RAW;
 
@@ -58,7 +62,7 @@ final class RsaKeyType implements KmsKeyType {
             return AsymmetricKeys.sign(privateKey, algorithm.getJavaName(), message);
         }
         if (isPss(algorithm)) {
-            return signPssDigest(privateKey, message, algorithm);
+            return signPssDigest((RSAPrivateCrtKey) privateKey, message, algorithm);
         }
         return AsymmetricKeys.sign(privateKey, "NONEwithRSA", wrapInDigestInfo(message, algorithm));
     }
@@ -71,7 +75,7 @@ final class RsaKeyType implements KmsKeyType {
             return AsymmetricKeys.verify(publicKey, algorithm.getJavaName(), message, signature);
         }
         if (isPss(algorithm)) {
-            return verifyPssDigest(publicKey, message, signature, algorithm);
+            return verifyPssDigest((RSAPublicKey) publicKey, message, signature, algorithm);
         }
         return AsymmetricKeys.verify(publicKey, "NONEwithRSA", wrapInDigestInfo(message, algorithm), signature);
     }
@@ -85,6 +89,52 @@ final class RsaKeyType implements KmsKeyType {
     @Override
     public byte[] decrypt(KmsKey key, KmsKeySpec.Algorithm algorithm, byte[] ciphertext) {
         return oaep(Cipher.DECRYPT_MODE, key, algorithm, ciphertext);
+    }
+
+    @Override
+    public void importKeyMaterial(KmsKey key, byte[] material) {
+        PrivateKey privateKey = parsePrivateKey(material);
+
+        if (!(privateKey instanceof RSAPrivateCrtKey rsaPrivateKey)) {
+            throw new AwsException("IncorrectKeyMaterialException",
+                    "Imported RSA key material must be a PKCS#8-encoded two-prime RSA private key.", 400);
+        }
+
+        requireExpectedModulusSize(key.getKeySpec(), rsaPrivateKey);
+
+        PublicKey publicKey = generatePublicKey(rsaPrivateKey);
+
+        Base64.Encoder encoder = Base64.getEncoder();
+        key.setPrivateKeyEncoded(encoder.encodeToString(material));
+        key.setPublicKeyEncoded(encoder.encodeToString(publicKey.getEncoded()));
+    }
+
+    private static PrivateKey parsePrivateKey(byte[] material) {
+        try {
+            return CipherUtils.generateRsaPrivateKey(material);
+        } catch (GeneralSecurityException e) {
+            throw new AwsException("IncorrectKeyMaterialException",
+                    "Imported RSA key material is not a valid PKCS#8 RSA private key.", 400);
+        }
+    }
+
+    private static PublicKey generatePublicKey(RSAPrivateCrtKey privateKey) {
+        try {
+            return CipherUtils.generateRsaPublicKey(privateKey);
+        } catch (GeneralSecurityException e) {
+            throw new AwsException("InternalFailure",
+                    "Failed to derive RSA public key: " + e.getMessage(), 500);
+        }
+    }
+
+    private static void requireExpectedModulusSize(KmsKeySpec spec, RSAPrivateCrtKey privateKey) {
+        int expectedBits = keySize(spec);
+        int actualBits = privateKey.getModulus().bitLength();
+        if (actualBits != expectedBits) {
+            throw new AwsException("IncorrectKeyMaterialException",
+                    "Key material for key spec " + spec + " must have a " + expectedBits
+                            + "-bit RSA modulus but was " + actualBits + " bits.", 400);
+        }
     }
 
     private static int keySize(KmsKeySpec spec) {
@@ -148,18 +198,22 @@ final class RsaKeyType implements KmsKeyType {
     }
 
     // The JDK RSASSA-PSS Signature always hashes its input, so a DIGEST request needs BC's raw PSS signer.
-    private byte[] signPssDigest(PrivateKey privateKey, byte[] digest, KmsKeySpec.Algorithm algorithm)
+    private byte[] signPssDigest(RSAPrivateCrtKey privateKey, byte[] digest, KmsKeySpec.Algorithm algorithm)
             throws Exception {
+        RSAPrivateCrtKeyParameters parameters = new RSAPrivateCrtKeyParameters(privateKey.getModulus(),
+                privateKey.getPublicExponent(), privateKey.getPrivateExponent(), privateKey.getPrimeP(),
+                privateKey.getPrimeQ(), privateKey.getPrimeExponentP(), privateKey.getPrimeExponentQ(),
+                privateKey.getCrtCoefficient());
         PSSSigner signer = rawPssSigner(algorithm);
-        signer.init(true, new ParametersWithRandom(PrivateKeyFactory.createKey(privateKey.getEncoded()), random));
+        signer.init(true, new ParametersWithRandom(parameters, random));
         signer.update(digest, 0, digest.length);
         return signer.generateSignature();
     }
 
-    private static boolean verifyPssDigest(PublicKey publicKey, byte[] digest, byte[] signature,
-                                           KmsKeySpec.Algorithm algorithm) throws IOException {
+    private static boolean verifyPssDigest(RSAPublicKey publicKey, byte[] digest, byte[] signature,
+                                           KmsKeySpec.Algorithm algorithm) {
         PSSSigner signer = rawPssSigner(algorithm);
-        signer.init(false, PublicKeyFactory.createKey(publicKey.getEncoded()));
+        signer.init(false, new RSAKeyParameters(false, publicKey.getModulus(), publicKey.getPublicExponent()));
         signer.update(digest, 0, digest.length);
         return signer.verifySignature(signature);
     }

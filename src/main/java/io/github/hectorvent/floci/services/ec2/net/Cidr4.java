@@ -104,12 +104,20 @@ public final class Cidr4 {
     }
 
     public boolean isRfc1918() {
+        return rfc1918Range().isPresent();
+    }
+
+    /**
+     * @return the RFC 1918 range that wholly contains this block, or empty when it sits outside
+     *         all three. A block that only straddles one, such as 0.0.0.0/0, is not in it.
+     */
+    public Optional<Cidr4> rfc1918Range() {
         for (Cidr4 range : RFC_1918) {
             if (range.contains(this)) {
-                return true;
+                return Optional.of(range);
             }
         }
-        return false;
+        return Optional.empty();
     }
 
     /**

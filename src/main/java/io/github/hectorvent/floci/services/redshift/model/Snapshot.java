@@ -1,6 +1,8 @@
 package io.github.hectorvent.floci.services.redshift.model;
 
 import io.quarkus.runtime.annotations.RegisterForReflection;
+
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -17,6 +19,9 @@ public class Snapshot {
     // Database captured in the dump. Null on snapshots persisted before it was recorded,
     // which always captured the default "dev" database.
     private String dbName;
+    private String snapshotArn;
+    private Instant snapshotCreateTime;
+    private Integer manualSnapshotRetentionPeriod;
 
     public Snapshot() {}
 
@@ -107,6 +112,30 @@ public class Snapshot {
 
     public void setSqlDump(String sqlDump) {
         this.sqlDump = sqlDump;
+    }
+
+    public String getSnapshotArn() {
+        return snapshotArn;
+    }
+
+    public void setSnapshotArn(String snapshotArn) {
+        this.snapshotArn = snapshotArn;
+    }
+
+    public Instant getSnapshotCreateTime() {
+        return snapshotCreateTime;
+    }
+
+    public void setSnapshotCreateTime(Instant snapshotCreateTime) {
+        this.snapshotCreateTime = snapshotCreateTime;
+    }
+
+    public Integer getManualSnapshotRetentionPeriod() {
+        return manualSnapshotRetentionPeriod == null ? -1 : manualSnapshotRetentionPeriod;
+    }
+
+    public void setManualSnapshotRetentionPeriod(Integer manualSnapshotRetentionPeriod) {
+        this.manualSnapshotRetentionPeriod = manualSnapshotRetentionPeriod;
     }
 
     private Map<String, String> tags = new LinkedHashMap<>();

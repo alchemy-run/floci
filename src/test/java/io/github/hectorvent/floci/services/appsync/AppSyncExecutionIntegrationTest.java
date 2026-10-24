@@ -3,7 +3,9 @@ package io.github.hectorvent.floci.services.appsync;
 import io.github.hectorvent.floci.services.appsync.graphql.AppSyncErrorFormatter;
 import io.github.hectorvent.floci.services.appsync.graphql.SchemaRegistry;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
+import io.github.hectorvent.floci.testing.SidecarContainersProfile;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,7 +22,9 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/** Runs against the real GraphQL sidecar image, started by {@link GraphqlSidecarManager}. */
 @QuarkusTest
+@TestProfile(SidecarContainersProfile.class)
 class AppSyncExecutionIntegrationTest {
 
     private static final String AUTH = "AWS4-HMAC-SHA256 Credential=test/20260205/us-east-1/appsync/aws4_request";
@@ -33,6 +37,7 @@ class AppSyncExecutionIntegrationTest {
 
     @BeforeAll
     static void configureRestAssured() {
+        SidecarContainersProfile.requireDockerAndImage("floci.services.appsync.graphql-image");
         RestAssuredJsonUtils.configureAwsContentTypes();
     }
 
@@ -393,6 +398,49 @@ class AppSyncExecutionIntegrationTest {
     @Test
     void fragmentCycleAgainstProtectedFieldNeverLeaksRealData() {
         // Invalid fragment cycles must be rejected before resolver execution.
+        // Proves the real AWSDateTime Coercing actually runs through the sidecar's schema
+        // build, not just that StartSchemaCreation accepts the type name (issue #2917).
+        String scalarApi = createApi("scalar-" + UUID.randomUUID().toString().substring(0, 8));
+        String scalarKey = createApiKey(scalarApi);
+        startSchema(scalarApi, "type Query { echo(t: AWSDateTime): AWSDateTime }");
+        awaitSchemaSuccess(scalarApi);
+
+        given()
+            .header("x-api-key", scalarKey)
+            .contentType("application/json")
+            .body("""
+                {
+                  "query": "query($t: AWSDateTime) { echo(t: $t) }",
+                  "variables": {"t": "not-a-date"}
+                }
+                """)
+        .when()
+            .post("/v1/apis/" + scalarApi + "/graphql")
+        .then()
+            .statusCode(200)
+            .body("errors[0].errorType", equalTo("ValidationError"))
+            .body("errors[0].message", containsString("Invalid AWSDateTime"));
+
+        given()
+            .header("x-api-key", scalarKey)
+            .contentType("application/json")
+            .body("""
+                {
+                  "query": "query($t: AWSDateTime) { echo(t: $t) }",
+                  "variables": {"t": "2026-01-01T00:00:00Z"}
+                }
+                """)
+        .when()
+            .post("/v1/apis/" + scalarApi + "/graphql")
+        .then()
+            .statusCode(200)
+            .body("errors", nullValue());
+    }
+
+    @Test
+    void fragmentCycleAgainstProtectedFieldNeverLeaksRealData() {
+        // Proves the sidecar's fail-closed /v1/plan behavior: a query the planner can't
+        // analyze must never fall back to "nothing to authorize, run it anyway."
         String protectedApi = createApi("protected-" + UUID.randomUUID().toString().substring(0, 8));
         String protectedKey = createApiKey(protectedApi);
         startSchema(protectedApi, "type Query { hello: String secret: String @aws_iam }");

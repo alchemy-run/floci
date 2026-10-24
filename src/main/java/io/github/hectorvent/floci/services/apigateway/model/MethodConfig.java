@@ -1,11 +1,13 @@
 package io.github.hectorvent.floci.services.apigateway.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 @RegisterForReflection
@@ -14,11 +16,12 @@ public class MethodConfig {
     private String httpMethod;
     private String authorizationType;
     private String authorizerId;
+    private List<String> authorizationScopes = new ArrayList<>();
     private String requestValidatorId;
     private boolean apiKeyRequired;
     private Map<String, Boolean> requestParameters = new HashMap<>();
     private Map<String, String> requestModels = new HashMap<>();
-    private Map<String, MethodResponse> methodResponses = new HashMap<>();
+    private Map<String, MethodResponse> methodResponses = new ConcurrentHashMap<>();
     private Integration methodIntegration;
 
     public String getHttpMethod() { return httpMethod; }
@@ -29,6 +32,11 @@ public class MethodConfig {
 
     public String getAuthorizerId() { return authorizerId; }
     public void setAuthorizerId(String authorizerId) { this.authorizerId = authorizerId; }
+
+    public List<String> getAuthorizationScopes() { return authorizationScopes; }
+    public void setAuthorizationScopes(List<String> authorizationScopes) {
+        this.authorizationScopes = authorizationScopes != null ? new ArrayList<>(authorizationScopes) : new ArrayList<>();
+    }
 
     public String getRequestValidatorId() { return requestValidatorId; }
     public void setRequestValidatorId(String requestValidatorId) { this.requestValidatorId = requestValidatorId; }
@@ -48,7 +56,7 @@ public class MethodConfig {
 
     public Map<String, MethodResponse> getMethodResponses() { return methodResponses; }
     public void setMethodResponses(Map<String, MethodResponse> methodResponses) {
-        this.methodResponses = methodResponses != null ? methodResponses : new HashMap<>();
+        this.methodResponses = methodResponses != null ? new ConcurrentHashMap<>(methodResponses) : new ConcurrentHashMap<>();
     }
 
     public Integration getMethodIntegration() { return methodIntegration; }

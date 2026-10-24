@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.lambdamicrovms;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.StorageBackedMap;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -21,6 +22,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
@@ -31,6 +33,8 @@ import java.util.stream.Stream;
 public class LambdaMicrovmsService {
 
     private static final int MAX_CONNECTOR_SUBNETS = 16;
+    /** The one AWS-managed base image the catalog serves. */
+    private static final String MANAGED_IMAGE = "al2023-1";
 
     private final StorageFactory storageFactory;
 
@@ -247,9 +251,19 @@ public class LambdaMicrovmsService {
         return List.of(version);
     }
 
+    /** True when {@code identifier} names the managed image, as {@link #listManagedImageVersions} reads it. */
+    public static boolean namesManagedImage(String identifier) {
+        return identifier.contains(MANAGED_IMAGE);
+    }
+
+    /** The managed image's ARN in {@code region}, owned by {@code aws} rather than the caller's account. */
+    public static String managedImageArn(String region) {
+        return AwsArnUtils.Arn.of("lambda", region, "aws", "microvm-image:" + MANAGED_IMAGE).toString();
+    }
+
     private Map<String, Object> managedImage(String region) {
         Map<String, Object> entry = new LinkedHashMap<>();
-        entry.put("imageArn", "arn:aws:lambda:" + region + ":aws:microvm-image:al2023-1");
+        entry.put("imageArn", managedImageArn(region));
         entry.put("createdAt", 1781833144.754d);
         entry.put("updatedAt", 1784165932.388d);
         return entry;
@@ -393,7 +407,7 @@ public class LambdaMicrovmsService {
         NetworkConnector connector = new NetworkConnector();
         connector.id = "nc-" + UUID.randomUUID().toString().replace("-", "").substring(0, 17);
         connector.name = name;
-        connector.arn = "arn:aws:lambda:" + region + ":" + accountId + ":network-connector:" + connector.id;
+        connector.arn = AwsArnUtils.Arn.of("lambda", region, accountId, "network-connector:" + connector.id).toString();
         connector.state = "PENDING";
         connector.operatorRole = operatorRole;
         connector.subnetIds = List.copyOf(subnetIds);
@@ -444,6 +458,9 @@ public class LambdaMicrovmsService {
     /**
      * Applies an UpdateNetworkConnector. Every member of the VPC egress configuration and the
      * operator role is mutable; members absent from the request keep their stored value.
+     * UpdateNetworkConnector: every member is optional and a null one leaves the connector's value
+     * as it is. The model lets an update change the operator role, the network protocol and the
+     * associated compute resource types as well as the subnets and security groups.
      */
     public NetworkConnector updateConnector(String region, String id,
                                             List<String> subnetIds, List<String> securityGroupIds,
@@ -480,6 +497,18 @@ public class LambdaMicrovmsService {
         connector.lastModified = Instant.now();
         connector.lastUpdateStatus = "Successful";
         connector.lastUpdateStatusReason = changed ? null : "No configuration changes detected";
+        if (operatorRole != null && !operatorRole.isBlank()) {
+            connector.operatorRole = operatorRole;
+            connector.lastModified = Instant.now();
+        }
+        if (networkProtocol != null && !networkProtocol.isBlank()) {
+            connector.networkProtocol = networkProtocol;
+            connector.lastModified = Instant.now();
+        }
+        if (computeResourceTypes != null && !computeResourceTypes.isEmpty()) {
+            connector.associatedComputeResourceTypes = List.copyOf(computeResourceTypes);
+            connector.lastModified = Instant.now();
+        }
         persist(connectors, region, connector.id, connector);
         return connector;
     }

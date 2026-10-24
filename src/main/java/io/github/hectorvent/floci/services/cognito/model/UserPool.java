@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.cognito.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.quarkus.runtime.annotations.RegisterForReflection;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -37,6 +38,9 @@ public class UserPool {
     private String mfaConfiguration = "OFF";
     /** Null until SetUserPoolMfaConfig sets it; absent from responses while null, as AWS omits it. */
     private Boolean softwareTokenMfaEnabled;
+    private WebAuthnConfiguration webAuthnConfiguration;
+    private Map<String, Object> smsMfaConfiguration;
+    private Map<String, Object> emailMfaConfiguration;
     private Map<String, Object> deviceConfiguration = new HashMap<>();
     private int estimatedNumberOfUsers = 0;
     private Map<String, Object> emailConfiguration = new HashMap<>();
@@ -136,6 +140,23 @@ public class UserPool {
         this.softwareTokenMfaEnabled = softwareTokenMfaEnabled;
     }
     public void setMfaConfiguration(String mfaConfiguration) { this.mfaConfiguration = mfaConfiguration; }
+
+    public WebAuthnConfiguration getWebAuthnConfiguration() { return webAuthnConfiguration; }
+    public void setWebAuthnConfiguration(WebAuthnConfiguration webAuthnConfiguration) {
+        this.webAuthnConfiguration = webAuthnConfiguration;
+    }
+
+    /** SetUserPoolMfaConfig's SmsMfaConfiguration; null while SMS MFA is not configured. */
+    public Map<String, Object> getSmsMfaConfiguration() { return smsMfaConfiguration; }
+    public void setSmsMfaConfiguration(Map<String, Object> smsMfaConfiguration) {
+        this.smsMfaConfiguration = smsMfaConfiguration;
+    }
+
+    /** SetUserPoolMfaConfig's EmailMfaConfiguration; null while email MFA is not configured. */
+    public Map<String, Object> getEmailMfaConfiguration() { return emailMfaConfiguration; }
+    public void setEmailMfaConfiguration(Map<String, Object> emailMfaConfiguration) {
+        this.emailMfaConfiguration = emailMfaConfiguration;
+    }
 
     public Map<String, Object> getDeviceConfiguration() { return deviceConfiguration; }
     public void setDeviceConfiguration(Map<String, Object> deviceConfiguration) { this.deviceConfiguration = deviceConfiguration; }

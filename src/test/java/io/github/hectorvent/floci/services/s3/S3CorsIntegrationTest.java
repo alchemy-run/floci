@@ -165,7 +165,8 @@ class S3CorsIntegrationTest {
             .options("/" + BUCKET + "/some-key")
         .then()
             .statusCode(200)
-            .header("Access-Control-Allow-Origin", equalTo("*"));
+            .header("Access-Control-Allow-Origin", equalTo("*"))
+            .header("Access-Control-Allow-Credentials", nullValue());
     }
 
     @Test
@@ -260,7 +261,8 @@ class S3CorsIntegrationTest {
             .get("/" + BUCKET + "/hello.txt")
         .then()
             .statusCode(200)
-            .header("Access-Control-Allow-Origin", equalTo("*"));
+            .header("Access-Control-Allow-Origin", equalTo("*"))
+            .header("Access-Control-Allow-Credentials", nullValue());
     }
 
     @Test
@@ -324,7 +326,21 @@ class S3CorsIntegrationTest {
         .then()
             .statusCode(200)
             .header("Access-Control-Allow-Origin", equalTo("https://example.com"))
+            .header("Access-Control-Allow-Credentials", equalTo("true"))
             .header("Access-Control-Max-Age", equalTo("600"));
+    }
+
+    @Test
+    @Order(38)
+    void actualGetRequestSpecificOriginReceivesAllowCredentials() {
+        given()
+            .header("Origin", "https://example.com")
+        .when()
+            .get("/" + BUCKET + "/hello.txt")
+        .then()
+            .statusCode(200)
+            .header("Access-Control-Allow-Origin", equalTo("https://example.com"))
+            .header("Access-Control-Allow-Credentials", equalTo("true"));
     }
 
     @Test
@@ -478,7 +494,8 @@ class S3CorsIntegrationTest {
             .options("/" + BUCKET + "/k")
         .then()
             .statusCode(200)
-            .header("Access-Control-Allow-Origin", equalTo("http://foo.example.com"));
+            .header("Access-Control-Allow-Origin", equalTo("http://foo.example.com"))
+            .header("Access-Control-Allow-Credentials", equalTo("true"));
     }
 
     @Test
@@ -637,5 +654,109 @@ class S3CorsIntegrationTest {
         long count = resp.headers().getList("Access-Control-Allow-Origin").stream().count();
         org.junit.jupiter.api.Assertions.assertEquals(1, count,
                 "Access-Control-Allow-Origin must appear exactly once");
+    }
+
+    // ── Regression: filter must not apply to non-S3 routes ──────────────────────
+
+    @Test
+    @Order(80)
+    void putCorsConfigOnExecuteApiBucket() {
+        String executeApiCorsXml = "<CORSConfiguration>" +
+                "  <CORSRule>" +
+                "    <AllowedOrigin>https://example.com</AllowedOrigin>" +
+                "    <AllowedMethod>GET</AllowedMethod>" +
+                "    <AllowedHeader>*</AllowedHeader>" +
+                "    <MaxAgeSeconds>600</MaxAgeSeconds>" +
+                "  </CORSRule>" +
+                "</CORSConfiguration>";
+        given()
+        .when()
+            .put("/execute-api")
+        .then()
+            .statusCode(200);
+
+        given()
+            .contentType("application/xml")
+            .body(executeApiCorsXml)
+        .when()
+            .put("/execute-api?cors")
+        .then()
+            .statusCode(200);
+    }
+
+    @Test
+    @Order(81)
+    void nonS3RouteWithMatchingBucketNameDoesNotReceiveCorsCredentials() {
+        // Request to API Gateway path format /execute-api/{apiId}/{stage}/...
+        // should not get S3 CORS headers even if a bucket named "execute-api" has matching CORS
+        given()
+            .header("Origin", "https://example.com")
+        .when()
+            .get("/execute-api/abc123/prod/some-path")
+        .then()
+            .statusCode(404) // API Gateway returns 404 for unknown paths
+            .header("Access-Control-Allow-Origin", nullValue())
+            .header("Access-Control-Allow-Credentials", nullValue());
+    }
+
+    @Test
+    @Order(82)
+    void nonS3RouteWithMatchingBucketNameDoesNotReceiveCorsCredentialsOnOptions() {
+        // OPTIONS to API Gateway path should not get S3 CORS preflight headers
+        given()
+            .header("Origin", "https://example.com")
+            .header("Access-Control-Request-Method", "GET")
+        .when()
+            .options("/execute-api/abc123/prod/some-path")
+        .then()
+            .statusCode(404)
+            .header("Access-Control-Allow-Origin", nullValue())
+            .header("Access-Control-Allow-Credentials", nullValue());
+    }
+
+    // ── S3 bucket named execute-api still works ─────────────────────────────────
+
+    @Test
+    @Order(83)
+    void s3BucketNamedExecuteApiGetsCorsCredentialsOnActualRequest() {
+        // S3 request to bucket "execute-api" (not API Gateway path) should get credentials
+        given()
+            .header("Origin", "https://example.com")
+        .when()
+            .get("/execute-api/some-key")
+        .then()
+            .statusCode(404) // object doesn't exist, but CORS headers should be present
+            .header("Access-Control-Allow-Origin", equalTo("https://example.com"))
+            .header("Access-Control-Allow-Credentials", equalTo("true"));
+    }
+
+    @Test
+    @Order(84)
+    void s3BucketNamedExecuteApiWildcardOriginGetsNoCredentials() {
+        // Wildcard origin on S3 bucket "execute-api" should not get credentials
+        String wildcardCorsXml = "<CORSConfiguration>" +
+                "  <CORSRule>" +
+                "    <AllowedOrigin>*</AllowedOrigin>" +
+                "    <AllowedMethod>GET</AllowedMethod>" +
+                "    <AllowedHeader>*</AllowedHeader>" +
+                "    <MaxAgeSeconds>600</MaxAgeSeconds>" +
+                "  </CORSRule>" +
+                "</CORSConfiguration>";
+        given()
+            .contentType("application/xml")
+            .body(wildcardCorsXml)
+        .when()
+            .put("/execute-api?cors")
+        .then()
+            .statusCode(200);
+
+        given()
+            .header("Origin", "https://anything.com")
+        .when()
+            .get("/execute-api/some-key")
+        .then()
+            .statusCode(404)
+            .header("Access-Control-Allow-Origin", equalTo("*"))
+            .header("Access-Control-Allow-Credentials", nullValue());
     }
 }

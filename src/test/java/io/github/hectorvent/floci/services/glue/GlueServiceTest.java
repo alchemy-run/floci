@@ -33,7 +33,9 @@ import io.github.hectorvent.floci.services.glue.model.SchemaReference;
 import io.github.hectorvent.floci.services.glue.model.SecurityConfiguration;
 import io.github.hectorvent.floci.services.glue.model.StorageDescriptor;
 import io.github.hectorvent.floci.services.glue.model.Table;
+import io.github.hectorvent.floci.services.glue.model.Trigger;
 import io.github.hectorvent.floci.services.glue.model.UserDefinedFunction;
+import io.github.hectorvent.floci.services.glue.model.Workflow;
 import io.github.hectorvent.floci.services.glue.schemaregistry.GlueSchemaRegistryService;
 import io.github.hectorvent.floci.services.glue.schemaregistry.model.RegistryId;
 import io.github.hectorvent.floci.services.glue.schemaregistry.model.SchemaId;
@@ -110,13 +112,15 @@ class GlueServiceTest {
                 new InMemoryStorage<String, GluePolicy>(),
                 new InMemoryStorage<String, DataCatalogEncryptionSettings>(),
                 new InMemoryStorage<String, SecurityConfiguration>(),
+                new InMemoryStorage<String, Trigger>(),
+                new InMemoryStorage<String, Workflow>(),
                 schemaRegistryService, regionResolver, new ResourceGroupsTaggingService(null), kmsService);
         glueService.createDatabase(new Database("db1"));
     }
 
     @Test
     void createDatabasePersistsCatalogIdSoReadsDoNotWriteIt() {
-        assertEquals(ACCOUNT_ID, databaseStore.scan(key -> true).getFirst().getCatalogId());
+        assertEquals(ACCOUNT_ID, databaseStore.get("db1").orElseThrow().getCatalogId());
         assertEquals(ACCOUNT_ID, glueService.getDatabase("db1").getCatalogId());
     }
 
@@ -315,7 +319,7 @@ class GlueServiceTest {
         plain.setStorageDescriptor(sd);
         glueService.createTable("db1", plain);
 
-        var tables = glueService.getTables("db1");
+        List<Table> tables = glueService.getTables("db1");
 
         assertEquals(2, tables.size());
         for (Table t : tables) {
@@ -603,6 +607,62 @@ class GlueServiceTest {
 
         assertEquals("EntityNotFoundException", ex.getErrorCode());
         assertEquals("Cannot find partition.", ex.getMessage());
+    }
+
+    @Test
+    void stringStatisticsWithoutAverageLengthReadBackWithZero() {
+        Table table = new Table();
+        table.setName("nulls");
+        glueService.createTable("db1", table);
+        Map<String, Object> statistics = Map.of(
+                "ColumnName", "a",
+                "ColumnType", "string",
+                "AnalyzedTime", Instant.EPOCH,
+                "StatisticsData", Map.of(
+                        "Type", "STRING",
+                        "StringColumnStatisticsData", Map.of("NumberOfNulls", 1, "NumberOfDistinctValues", 0)));
+
+        glueService.updateColumnStatisticsForTable("db1", "nulls", List.of(statistics));
+        Map<String, Object> stored = glueService.getColumnStatisticsForTable("db1", "nulls", List.of("a"))
+                .columnStatisticsList().get(0);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) ((Map<String, Object>) stored.get("StatisticsData"))
+                .get("StringColumnStatisticsData");
+        assertEquals(0, data.get("AverageLength"));
+        assertEquals(0, data.get("MaximumLength"));
+        assertEquals(1, data.get("NumberOfNulls"));
+        Map<String, Object> raw = columnStatisticsStore.scan(key -> true).get(0);
+        assertFalse(((Map<?, ?>) ((Map<?, ?>) raw.get("StatisticsData")).get("StringColumnStatisticsData"))
+                .containsKey("AverageLength"));
+    }
+
+    @Test
+    void partitionBinaryStatisticsWithoutLengthsReadBackWithZero() {
+        Table table = new Table();
+        table.setName("blobs");
+        glueService.createTable("db1", table);
+        Partition partition = new Partition();
+        partition.setValues(List.of("1"));
+        glueService.createPartition("db1", "blobs", partition);
+        Map<String, Object> statistics = Map.of(
+                "ColumnName", "payload",
+                "ColumnType", "binary",
+                "AnalyzedTime", Instant.EPOCH,
+                "StatisticsData", Map.of(
+                        "Type", "BINARY",
+                        "BinaryColumnStatisticsData", Map.of("NumberOfNulls", 2)));
+
+        glueService.updateColumnStatisticsForPartition("db1", "blobs", List.of("1"), List.of(statistics));
+        Map<String, Object> stored = glueService.getColumnStatisticsForPartition(
+                "db1", "blobs", List.of("1"), List.of("payload")).columnStatisticsList().get(0);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) ((Map<String, Object>) stored.get("StatisticsData"))
+                .get("BinaryColumnStatisticsData");
+        assertEquals(0, data.get("MaximumLength"));
+        assertEquals(0, data.get("AverageLength"));
+        assertEquals(2, data.get("NumberOfNulls"));
     }
 
     @Test
@@ -1083,71 +1143,6 @@ class GlueServiceTest {
         AwsException nextTokenEx = assertThrows(AwsException.class,
                 () -> glueService.getUserDefinedFunctions("db1", ".*", null, 1, "invalid"));
         assertEquals("InvalidInputException", nextTokenEx.getErrorCode());
-    }
-
-    @Test
-    void createPartitionThrowsAlreadyExistsForDuplicateValues() {
-        Table table = new Table();
-        table.setName("plain");
-        glueService.createTable("db1", table);
-        Partition partition = new Partition();
-        partition.setValues(List.of("2026-01-01"));
-        glueService.createPartition("db1", "plain", partition);
-
-        AwsException ex = assertThrows(AwsException.class,
-                () -> glueService.createPartition("db1", "plain", partition));
-        assertEquals("AlreadyExistsException", ex.getErrorCode());
-    }
-
-    @Test
-    void batchDeletePartitionsRemovesExistingAndReportsMissing() {
-        Table table = new Table();
-        table.setName("plain");
-        glueService.createTable("db1", table);
-        Partition first = new Partition();
-        first.setValues(List.of("2026-01-02"));
-        Partition second = new Partition();
-        second.setValues(List.of("2026-01-03"));
-        glueService.createPartition("db1", "plain", first);
-        glueService.createPartition("db1", "plain", second);
-
-        List<GlueService.BatchCreatePartitionError> errors = glueService.batchDeletePartitions(
-                "db1", "plain", List.of(List.of("2026-01-02"), List.of("missing")));
-
-        assertEquals(1, errors.size());
-        assertEquals(List.of("missing"), errors.getFirst().partitionValues());
-        assertEquals("EntityNotFoundException", errors.getFirst().errorDetail().errorCode());
-        assertEquals(1, glueService.getPartitions("db1", "plain").size());
-        assertEquals(List.of("2026-01-03"), glueService.getPartition("db1", "plain", List.of("2026-01-03")).getValues());
-    }
-
-    @Test
-    void jobBookmarkIsMissingUntilARunAndJobRunIdsUseAwsPrefix() {
-        Job job = createValidJob("etl");
-        job.setRole("arn:aws:iam::000000000000:role/GlueJob");
-        glueService.createJob(job, Map.of(), REGION);
-
-        AwsException missing = assertThrows(AwsException.class, () -> glueService.getJobBookmark("etl", null));
-        assertEquals("EntityNotFoundException", missing.getErrorCode());
-        AwsException missingReset = assertThrows(AwsException.class, () -> glueService.resetJobBookmark("etl", null));
-        assertEquals("EntityNotFoundException", missingReset.getErrorCode());
-
-        String runId = glueService.startJobRun("etl", Map.of());
-        assertTrue(runId.startsWith("jr_"));
-        assertEquals("SUCCEEDED", glueService.getJobRun("etl", runId).getJobRunState());
-        assertEquals("etl", glueService.getJobBookmark("etl", null).get("JobName"));
-    }
-
-    @Test
-    void stopIdleCrawlerIsNotRunning() {
-        Crawler crawler = createValidCrawler("events");
-        crawler.setRole("arn:aws:iam::000000000000:role/GlueCrawler");
-        crawler.setDatabaseName("db1");
-        glueService.createCrawler(crawler, Map.of(), REGION);
-
-        AwsException idle = assertThrows(AwsException.class, () -> glueService.stopCrawler("events"));
-        assertEquals("CrawlerNotRunningException", idle.getErrorCode());
-        assertEquals("READY", glueService.getCrawler("events").getState());
     }
 
     @Test

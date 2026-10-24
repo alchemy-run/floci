@@ -22,6 +22,7 @@ import java.util.TreeMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Pins which {@code Fn::GetAtt} attributes declared by the CloudFormation registry schemas Floci
@@ -106,6 +107,19 @@ class CfnSchemaCoverageTest {
         }
     }
 
+    @Test
+    void sesDkimDnsAttributesAreVisibleToTheCoverageScan() {
+        Set<String> expected = Set.of("DkimDNSTokenName1", "DkimDNSTokenName2", "DkimDNSTokenName3",
+                "DkimDNSTokenValue1", "DkimDNSTokenValue2", "DkimDNSTokenValue3");
+        Set<String> actual = scanProvisioners().get("SesCfnProvisioner")
+                .attributesFor("AWS::SES::EmailIdentity");
+        Set<String> missing = new HashSet<>(expected);
+        missing.removeAll(actual);
+        if (!missing.isEmpty()) {
+            throw new AssertionError("SES DKIM DNS attributes are invisible to schema coverage: " + missing);
+        }
+    }
+
     /** "AWS::SNS::Topic\tTopicArn" -> reason. */
     private static Map<String, String> recordedGaps() {
         Map<String, String> gaps = new TreeMap<>();
@@ -134,10 +148,6 @@ class CfnSchemaCoverageTest {
         for (Map.Entry<String, String> entry : inventory().entrySet()) {
             String type = entry.getKey();
             String owner = entry.getValue();
-            if ("LEGACY_SWITCH".equals(owner)) {
-                // The switch is being dismantled type by type; its arms are audited as they move.
-                continue;
-            }
             Set<String> declared = schemaReadOnlyAttributes(type);
             ProvisionerScan scan = scans.get(owner);
             Set<String> set = scan == null ? Set.of() : scan.attributesFor(type);
@@ -187,7 +197,7 @@ class CfnSchemaCoverageTest {
 
     private static Map<String, ProvisionerScan> scanProvisioners() {
         Map<String, ProvisionerScan> scans = new TreeMap<>();
-        try (var files = Files.list(PROVISIONERS)) {
+        try (Stream<Path> files = Files.list(PROVISIONERS)) {
             for (Path file : files.filter(f -> f.getFileName().toString().endsWith("CfnProvisioner.java"))
                     .sorted()
                     .toList()) {

@@ -142,6 +142,61 @@ class S3RequestAuthorizationParserTest {
         assertTrue(S3RequestAuthorizationParser.isSigned(null, query));
     }
 
+    @Test
+    void parsesSigV4aAuthorizationHeaderAccessKeyFromARegionlessScope() {
+        S3Service.RequestAuthorization authorization = parse(
+                "AWS4-ECDSA-P256-SHA256 Credential=AKIDEXAMPLE/20260702/s3/aws4_request, "
+                        + "SignedHeaders=host;x-amz-region-set, Signature=test", query());
+
+        assertTrue(authorization.signed());
+        assertEquals("AKIDEXAMPLE", authorization.accessKeyId());
+    }
+
+    @Test
+    void rejectsASigV4aHeaderWhoseScopeStillCarriesARegion() {
+        assertThrows(AwsException.class, () -> parse(
+                "AWS4-ECDSA-P256-SHA256 Credential=AKIDEXAMPLE/20260702/us-east-1/s3/aws4_request, "
+                        + "SignedHeaders=host, Signature=test", query()));
+    }
+
+    @Test
+    void parsesSigV4aPresignedQueryAccessKey() {
+        MultivaluedMap<String, String> query = sigV4aPresignedQuery();
+
+        assertEquals("AKIDEXAMPLE", parse(null, query).accessKeyId());
+    }
+
+    @Test
+    void rejectsASigV4aPresignedQueryWithoutARegionSet() {
+        MultivaluedMap<String, String> query = sigV4aPresignedQuery();
+        query.remove("X-Amz-Region-Set");
+
+        assertThrows(AwsException.class, () -> parse(null, query));
+    }
+
+    @Test
+    void rejectsAuthorizationHeaderWithDuplicateCredentialComponent() {
+        String authorization = "AWS4-HMAC-SHA256 Credential=KEY1/20260702/us-east-1/s3/aws4_request, "
+                + "SignedHeaders=host, Signature=test, "
+                + "Credential=KEY2/20260702/us-east-1/s3/aws4_request";
+
+        AwsException e = assertThrows(AwsException.class, () -> parse(authorization, query()));
+        assertEquals("AuthorizationHeaderMalformed", e.getErrorCode());
+        assertEquals(400, e.getHttpStatus());
+    }
+
+    private static MultivaluedMap<String, String> sigV4aPresignedQuery() {
+        MultivaluedMap<String, String> query = query();
+        query.add("X-Amz-Algorithm", "AWS4-ECDSA-P256-SHA256");
+        query.add("X-Amz-Credential", "AKIDEXAMPLE/20260702/s3/aws4_request");
+        query.add("X-Amz-Date", "20260702T120000Z");
+        query.add("X-Amz-Expires", "3600");
+        query.add("X-Amz-Region-Set", "*");
+        query.add("X-Amz-SignedHeaders", "host");
+        query.add("X-Amz-Signature", "test");
+        return query;
+    }
+
     private static S3Service.RequestAuthorization parse(String authorization, MultivaluedMap<String, String> query) {
         return S3RequestAuthorizationParser.parse(authorization, query);
     }

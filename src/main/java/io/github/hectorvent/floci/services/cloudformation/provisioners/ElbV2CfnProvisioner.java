@@ -6,6 +6,7 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.cloudformation.model.StackResource;
 import io.github.hectorvent.floci.services.elbv2.ElbV2Service;
 import io.github.hectorvent.floci.services.elbv2.model.Action;
+import io.github.hectorvent.floci.services.elbv2.model.AvailabilityZone;
 import io.github.hectorvent.floci.services.elbv2.model.Listener;
 import io.github.hectorvent.floci.services.elbv2.model.LoadBalancer;
 import io.github.hectorvent.floci.services.elbv2.model.Rule;
@@ -24,7 +25,7 @@ import java.util.UUID;
 /**
  * CloudFormation provisioning for the Elastic Load Balancing v2 types,
  * {@code AWS::ElasticLoadBalancingV2::LoadBalancer}, {@code TargetGroup}, {@code Listener} and
- * {@code ListenerRule}, moved out of the {@code CloudFormationResourceProvisioner} switch.
+ * {@code ListenerRule}, moved out of the former CloudFormation monolith's switch.
  */
 @ApplicationScoped
 public class ElbV2CfnProvisioner implements CfnResourceProvisioner {
@@ -35,6 +36,8 @@ public class ElbV2CfnProvisioner implements CfnResourceProvisioner {
     private static final String TARGET_GROUP = "AWS::ElasticLoadBalancingV2::TargetGroup";
     private static final String LISTENER = "AWS::ElasticLoadBalancingV2::Listener";
     private static final String LISTENER_RULE = "AWS::ElasticLoadBalancingV2::ListenerRule";
+    /** Prefixes one uses attribute per subnet a load balancer is on, numbered from 1. */
+    private static final String USED_SUBNET_ATTR_PREFIX = CfnRollback.USES_ATTR_PREFIX + "Subnet.";
 
     private final ElbV2Service elbV2Service;
 
@@ -50,6 +53,7 @@ public class ElbV2CfnProvisioner implements CfnResourceProvisioner {
 
     @Override
     public void provision(StackResource r, JsonNode props, ProvisionContext ctx) {
+        r.getAttributes().remove(CfnRollback.LOAD_BALANCER_SUBNETS_UPDATE_SNAPSHOT_ATTR);
         Map<String, String> attributesBefore = Map.copyOf(r.getAttributes());
         switch (r.getResourceType()) {
             case LOAD_BALANCER -> provisionLoadBalancer(r, props, ctx);
@@ -99,19 +103,23 @@ public class ElbV2CfnProvisioner implements CfnResourceProvisioner {
 
     @Override
     public UpdateCleanupResult completeUpdate(StackResource resource) {
+        if ("UPDATE_COMPLETE".equals(resource.getStatus())) {
+            resource.getAttributes().remove(CfnRollback.LOAD_BALANCER_SUBNETS_UPDATE_SNAPSHOT_ATTR);
+        }
         return ReplacementCleanup.complete(resource, this::delete);
     }
 
     @Override
     public void clearUpdate(StackResource resource) {
+        resource.getAttributes().remove(CfnRollback.LOAD_BALANCER_SUBNETS_UPDATE_SNAPSHOT_ATTR);
         ReplacementCleanup.clear(resource);
     }
 
     /**
-     * A replacement is undone through the cleanup record. Without one, a load balancer or target
-     * group has nothing to put back: this provisioner never modifies an existing one (an update that
-     * kept the name only described it, the way the switch did), so nothing changed. A listener or
-     * rule without a record was modified in place, and putting that back needs a snapshot this
+     * A replacement is undone through the cleanup record. Without one, a load balancer is moved
+     * back to the subnets an update took it off, and otherwise it and a target group have nothing to
+     * put back: an update that kept the name changed nothing else, the way the switch did. A listener
+     * or rule without a record was modified in place, and putting that back needs a snapshot this
      * provisioner does not keep, so the engine reports it as not rolled back, as it did for the switch.
      */
     @Override
@@ -119,7 +127,27 @@ public class ElbV2CfnProvisioner implements CfnResourceProvisioner {
         if (ReplacementCleanup.rollback(resource, this::delete)) {
             return true;
         }
-        return LOAD_BALANCER.equals(resource.getResourceType()) || TARGET_GROUP.equals(resource.getResourceType());
+        if (LOAD_BALANCER.equals(resource.getResourceType())) {
+            return restorePriorSubnets(resource);
+        }
+        return TARGET_GROUP.equals(resource.getResourceType());
+    }
+
+    /**
+     * A failed move back propagates, so the engine reports its reason rather than an unimplemented
+     * rollback, and the snapshot stays until a move back succeeds.
+     */
+    private boolean restorePriorSubnets(StackResource resource) {
+        String prior = resource.getAttributes().get(CfnRollback.LOAD_BALANCER_SUBNETS_UPDATE_SNAPSHOT_ATTR);
+        if (prior == null) {
+            return true;
+        }
+        String arn = resource.getPhysicalId();
+        List<String> priorSubnets = prior.isEmpty() ? List.of() : List.of(prior.split(","));
+        elbV2Service.setSubnets(AwsArnUtils.parse(arn).region(), arn, priorSubnets);
+        recordUsedSubnets(resource, priorSubnets);
+        resource.getAttributes().remove(CfnRollback.LOAD_BALANCER_SUBNETS_UPDATE_SNAPSHOT_ATTR);
+        return true;
     }
 
     /**
@@ -135,19 +163,24 @@ public class ElbV2CfnProvisioner implements CfnResourceProvisioner {
         String scheme = ctx.resolveOptional(props, "Scheme");
         String type = ctx.resolveOptional(props, "Type");
         String ipAddressType = ctx.resolveOptional(props, "IpAddressType");
-        List<String> subnets = ctx.resolveStringList(props, "Subnets");
+        List<String> subnets = templateSubnets(props, ctx);
         List<String> securityGroups = ctx.resolveStringList(props, "SecurityGroups");
         Map<String, String> tags = ctx.resolveTags(props, "Tags");
 
         LoadBalancer lb;
+        List<String> onSubnets;
         try {
             lb = elbV2Service.createLoadBalancer(ctx.region(), name, scheme, type, ipAddressType,
                     subnets, securityGroups, tags);
+            onSubnets = subnetIds(lb);
         } catch (AwsException e) {
             if (!"DuplicateLoadBalancerName".equals(e.getErrorCode())) {
                 throw e;
             }
             lb = elbV2Service.describeLoadBalancers(ctx.region(), null, List.of(name), null, null).get(0);
+            onSubnets = ctx.reusesPriorEntity(lb.getLoadBalancerArn())
+                    ? moveToTemplateSubnets(r, lb, subnets, ctx)
+                    : subnetIds(lb);
         }
 
         r.setPhysicalId(lb.getLoadBalancerArn());
@@ -156,6 +189,72 @@ public class ElbV2CfnProvisioner implements CfnResourceProvisioner {
         r.getAttributes().put("CanonicalHostedZoneID", lb.getCanonicalHostedZoneId());
         r.getAttributes().put("LoadBalancerName", lb.getLoadBalancerName());
         r.getAttributes().put("LoadBalancerFullName", loadBalancerFullName(lb.getLoadBalancerArn()));
+        recordUsedSubnets(r, onSubnets);
+    }
+
+    private static List<String> subnetIds(LoadBalancer lb) {
+        return lb.getAvailabilityZones().stream().map(AvailabilityZone::getSubnetId).toList();
+    }
+
+    /**
+     * Records the subnets the balancer is on as uses attributes. EC2 refuses to delete a subnet a
+     * load balancer still uses, and once the template no longer names the balancer, as when an
+     * update removes it together with a subnet it is on, these are what orders it before them.
+     */
+    private static void recordUsedSubnets(StackResource r, List<String> subnetIds) {
+        r.getAttributes().keySet().removeIf(key -> key.startsWith(USED_SUBNET_ATTR_PREFIX));
+        for (int i = 0; i < subnetIds.size(); i++) {
+            r.getAttributes().put(USED_SUBNET_ATTR_PREFIX + (i + 1), subnetIds.get(i));
+        }
+    }
+
+    /**
+     * The template's subnets: {@code Subnets}, or else the {@code SubnetId} of each
+     * {@code SubnetMappings} entry, the form a Network Load Balancer uses to give a zone an Elastic IP.
+     * Both non-empty fails the resource with the error CreateLoadBalancer gives, through
+     * {@link ElbV2Service#requestedSubnets}, as the resource allows one or the other; an empty side, such
+     * as one an Fn::If drops, does not count. {@code SubnetId} is required in a mapping, so one without it
+     * fails the resource before anything is created or moved, with the error the resource schema gives.
+     * A blank one counts as a mapping and, with no {@code Subnets}, is passed on as given for ELBv2 to
+     * refuse; dropping it would create or move the balancer without it.
+     */
+    private static List<String> templateSubnets(JsonNode props, ProvisionContext ctx) {
+        List<String> subnets = ctx.resolveStringList(props, "Subnets");
+        if (props == null || !props.has("SubnetMappings")) {
+            return subnets;
+        }
+        List<String> mapped = new ArrayList<>();
+        // A mapping, or its SubnetId, that an Fn::If drops with AWS::NoValue is left out, as on AWS.
+        JsonNode mappings = ctx.engine().resolveNodeOmittingNoValue(props.get("SubnetMappings"));
+        if (mappings != null && mappings.isArray()) {
+            for (int i = 0; i < mappings.size(); i++) {
+                String subnetId = ctx.resolveOptional(mappings.get(i), "SubnetId");
+                if (subnetId == null) {
+                    throw new AwsException("InvalidRequest",
+                            "Model validation failed (#/SubnetMappings/" + i + ": required key [SubnetId] not found)", 400);
+                }
+                mapped.add(subnetId);
+            }
+        }
+        return ElbV2Service.requestedSubnets(subnets, mapped);
+    }
+
+    /**
+     * {@code Subnets} and {@code SubnetMappings} are not create-only, so an update that keeps the
+     * balancer moves it onto the template's subnets in place, as SetSubnets does. That also releases
+     * the subnets it leaves, which EC2 refuses to delete while a load balancer still uses them, so the
+     * update cleanup can delete a subnet the template dropped or replaced. The prior list is kept for
+     * a rollback. Returns the subnets the balancer is on afterwards.
+     */
+    private List<String> moveToTemplateSubnets(StackResource r, LoadBalancer lb, List<String> subnets,
+                                               ProvisionContext ctx) {
+        List<String> current = subnetIds(lb);
+        if (subnets.isEmpty() || Set.copyOf(subnets).equals(Set.copyOf(current))) {
+            return current;
+        }
+        elbV2Service.setSubnets(ctx.region(), lb.getLoadBalancerArn(), subnets);
+        r.getAttributes().put(CfnRollback.LOAD_BALANCER_SUBNETS_UPDATE_SNAPSHOT_ATTR, String.join(",", current));
+        return subnets;
     }
 
     private void provisionTargetGroup(StackResource r, JsonNode props, ProvisionContext ctx) {
@@ -163,17 +262,17 @@ public class ElbV2CfnProvisioner implements CfnResourceProvisioner {
                 ctx, r.getLogicalId());
         String protocol = ctx.resolveOptional(props, "Protocol");
         String protocolVersion = ctx.resolveOptional(props, "ProtocolVersion");
-        Integer port = parseIntOrNull(ctx.resolveOptional(props, "Port"));
+        Integer port = optionalInt(props, ctx, "Port");
         String vpcId = ctx.resolveOptional(props, "VpcId");
         String targetType = ctx.resolveOptional(props, "TargetType");
         String hcProtocol = ctx.resolveOptional(props, "HealthCheckProtocol");
         String hcPort = ctx.resolveOptional(props, "HealthCheckPort");
         Boolean hcEnabled = parseBooleanOrNull(ctx.resolveOptional(props, "HealthCheckEnabled"));
         String hcPath = ctx.resolveOptional(props, "HealthCheckPath");
-        Integer hcInterval = parseIntOrNull(ctx.resolveOptional(props, "HealthCheckIntervalSeconds"));
-        Integer hcTimeout = parseIntOrNull(ctx.resolveOptional(props, "HealthCheckTimeoutSeconds"));
-        Integer healthyThreshold = parseIntOrNull(ctx.resolveOptional(props, "HealthyThresholdCount"));
-        Integer unhealthyThreshold = parseIntOrNull(ctx.resolveOptional(props, "UnhealthyThresholdCount"));
+        Integer hcInterval = optionalInt(props, ctx, "HealthCheckIntervalSeconds");
+        Integer hcTimeout = optionalInt(props, ctx, "HealthCheckTimeoutSeconds");
+        Integer healthyThreshold = optionalInt(props, ctx, "HealthyThresholdCount");
+        Integer unhealthyThreshold = optionalInt(props, ctx, "UnhealthyThresholdCount");
         String matcher = parseMatcher(props, ctx);
         String ipAddressType = ctx.resolveOptional(props, "IpAddressType");
         Map<String, String> tags = ctx.resolveTags(props, "Tags");
@@ -471,21 +570,32 @@ public class ElbV2CfnProvisioner implements CfnResourceProvisioner {
         try {
             return Integer.parseInt(value.trim());
         } catch (NumberFormatException e) {
-            throw new AwsException("ValidationError", "Value of property " + property + " must be an integer.", 400);
+            throw notAnInteger(property);
         }
     }
 
-    /** The switch treated an unparsable optional integer as unset; kept so a stray value does not fail a stack. */
-    private static Integer parseIntOrNull(String value) {
-        if (value == null || value.isBlank()) {
+    /**
+     * An omitted property stays unset for the service to default, and so does one an intrinsic resolves
+     * to nothing: the engine resolves {@code AWS::NoValue} to blank, which is how the common
+     * {@code Fn::If [cond, value, AWS::NoValue]} drops a property. A value written into the template
+     * has to be an integer, a literal blank included, as CloudFormation's schema type check requires.
+     * A {@code Ref} to a parameter whose value is blank cannot be told apart from {@code AWS::NoValue}
+     * here, so it stays unset too.
+     */
+    private static Integer optionalInt(JsonNode props, ProvisionContext ctx, String property) {
+        String value = ctx.resolveOptional(props, property);
+        if (value == null || (value.isBlank() && !props.get(property).isTextual())) {
             return null;
         }
         try {
-            return Integer.valueOf(value.trim());
+            return Integer.parseInt(value.trim());
         } catch (NumberFormatException e) {
-            LOG.debugv("Ignoring non-integer value {0}", value);
-            return null;
+            throw notAnInteger(property);
         }
+    }
+
+    private static AwsException notAnInteger(String property) {
+        return new AwsException("ValidationError", "Value of property " + property + " must be an integer.", 400);
     }
 
     private static Boolean parseBooleanOrNull(String value) {

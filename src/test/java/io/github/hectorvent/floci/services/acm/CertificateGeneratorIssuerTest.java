@@ -1,9 +1,15 @@
 package io.github.hectorvent.floci.services.acm;
 
+import io.github.hectorvent.floci.core.common.CertificateMaterialException;
+import io.github.hectorvent.floci.core.common.Pem;
 import io.github.hectorvent.floci.services.acm.CertificateGenerator.GeneratedCertificate;
 import io.github.hectorvent.floci.services.acm.CertificateGenerator.Issuer;
 import io.github.hectorvent.floci.services.acm.CertificateGenerator.LeafUsage;
 import io.github.hectorvent.floci.services.acm.model.KeyAlgorithm;
+import org.bouncycastle.asn1.ASN1OctetString;
+import org.bouncycastle.asn1.x509.AuthorityKeyIdentifier;
+import org.bouncycastle.asn1.x509.Extension;
+import org.bouncycastle.asn1.x509.SubjectKeyIdentifier;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -16,6 +22,7 @@ import java.security.cert.X509Certificate;
 import java.security.spec.ECGenParameterSpec;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -42,13 +49,13 @@ class CertificateGeneratorIssuerTest {
     private static Issuer newIssuer() {
         GeneratedCertificate ca = generator.generateCaCertificate("Floci Local CA");
         return new Issuer(
-                generator.parseCertificate(ca.certificatePem()), generator.parsePrivateKey(ca.privateKeyPem()));
+                Pem.parseCertificate(ca.certificatePem()), Pem.parsePrivateKey(ca.privateKeyPem()));
     }
 
     @Test
     void caCertificateIsSelfSignedAndCanSign() throws Exception {
         GeneratedCertificate ca = generator.generateCaCertificate("Floci Local CA");
-        X509Certificate cert = generator.parseCertificate(ca.certificatePem());
+        X509Certificate cert = Pem.parseCertificate(ca.certificatePem());
 
         assertEquals(cert.getSubjectX500Principal(), cert.getIssuerX500Principal());
         assertEquals("CN=Floci Local CA", cert.getSubjectX500Principal().getName());
@@ -58,6 +65,7 @@ class CertificateGeneratorIssuerTest {
         assertNull(cert.getExtendedKeyUsage(), "a CA carries no EKU");
         assertNull(cert.getSubjectAlternativeNames(), "a CA carries no SAN");
         cert.verify(cert.getPublicKey());
+        assertArrayEquals(subjectKeyIdentifier(cert), authorityKeyIdentifier(cert));
         assertEquals(ca.subject(), ca.issuer());
     }
 
@@ -67,7 +75,7 @@ class CertificateGeneratorIssuerTest {
 
         GeneratedCertificate leaf = generator.generateIssuedCertificate("api.example.test", List.of("*.example.test"),
                 KeyAlgorithm.RSA_2048, null, issuer, LeafUsage.SERVER);
-        X509Certificate cert = generator.parseCertificate(leaf.certificatePem());
+        X509Certificate cert = Pem.parseCertificate(leaf.certificatePem());
 
         assertEquals(issuer.certificate().getSubjectX500Principal(), cert.getIssuerX500Principal());
         assertNotEquals(cert.getSubjectX500Principal(), cert.getIssuerX500Principal());
@@ -89,6 +97,20 @@ class CertificateGeneratorIssuerTest {
         assertEquals("CN=api.example.test", leaf.subject());
         assertEquals(issuer.certificate().getSubjectX500Principal().getName(), leaf.issuer());
         cert.verify(issuer.certificate().getPublicKey());
+        assertTrue(cert.getExtensionValue(Extension.subjectKeyIdentifier.getId()) != null);
+        assertArrayEquals(subjectKeyIdentifier(issuer.certificate()), authorityKeyIdentifier(cert));
+    }
+
+    private static byte[] subjectKeyIdentifier(X509Certificate certificate) throws Exception {
+        byte[] encoded = ASN1OctetString.getInstance(
+                certificate.getExtensionValue(Extension.subjectKeyIdentifier.getId())).getOctets();
+        return SubjectKeyIdentifier.getInstance(encoded).getKeyIdentifier();
+    }
+
+    private static byte[] authorityKeyIdentifier(X509Certificate certificate) throws Exception {
+        byte[] encoded = ASN1OctetString.getInstance(
+                certificate.getExtensionValue(Extension.authorityKeyIdentifier.getId())).getOctets();
+        return AuthorityKeyIdentifier.getInstance(encoded).getKeyIdentifier();
     }
 
     @Test
@@ -97,12 +119,12 @@ class CertificateGeneratorIssuerTest {
         GeneratedCertificate first = generator.generateIssuedCertificate("device-1", List.of(), KeyAlgorithm.RSA_2048, null, issuer,
                 LeafUsage.CLIENT);
         KeyPair keyPair = new KeyPair(
-                generator.parseCertificate(first.certificatePem()).getPublicKey(),
-                generator.parsePrivateKey(first.privateKeyPem()));
+                Pem.parseCertificate(first.certificatePem()).getPublicKey(),
+                Pem.parsePrivateKey(first.privateKeyPem()));
 
         GeneratedCertificate second = generator.generateIssuedCertificate("device-1", List.of(), KeyAlgorithm.RSA_2048, keyPair, issuer,
                 LeafUsage.CLIENT);
-        X509Certificate cert = generator.parseCertificate(second.certificatePem());
+        X509Certificate cert = Pem.parseCertificate(second.certificatePem());
 
         assertEquals(keyPair.getPublic(), cert.getPublicKey(), "supplied key pair must be reused");
         assertEquals(first.privateKeyPem(), second.privateKeyPem(), "the same private key is returned");
@@ -117,7 +139,7 @@ class CertificateGeneratorIssuerTest {
 
         GeneratedCertificate leaf = generator.generateIssuedCertificate("ec.example.test", null, KeyAlgorithm.EC_prime256v1, null,
                 issuer, LeafUsage.SERVER);
-        X509Certificate cert = generator.parseCertificate(leaf.certificatePem());
+        X509Certificate cert = Pem.parseCertificate(leaf.certificatePem());
 
         assertEquals("EC", cert.getPublicKey().getAlgorithm());
         assertEquals("SHA512WITHRSA", leaf.signatureAlgorithm(), "the signature is the RSA issuer's");
@@ -132,9 +154,9 @@ class CertificateGeneratorIssuerTest {
         GeneratedCertificate one = generator.generateCaCertificate("One");
         GeneratedCertificate other = generator.generateCaCertificate("Other");
         Issuer mismatched = new Issuer(
-                generator.parseCertificate(one.certificatePem()), generator.parsePrivateKey(other.privateKeyPem()));
+                Pem.parseCertificate(one.certificatePem()), Pem.parsePrivateKey(other.privateKeyPem()));
 
-        CertificateGenerationException refused = assertThrows(CertificateGenerationException.class,
+        CertificateMaterialException refused = assertThrows(CertificateMaterialException.class,
                 () -> generator.generateIssuedCertificate("x.example.test", List.of(), KeyAlgorithm.RSA_2048, null,
                         mismatched, LeafUsage.SERVER));
         assertTrue(refused.getMessage().contains("Signature"), refused.getMessage());
@@ -147,10 +169,10 @@ class CertificateGeneratorIssuerTest {
                 LeafUsage.CLIENT);
         GeneratedCertificate b = generator.generateIssuedCertificate("b", List.of(), KeyAlgorithm.RSA_2048, null, issuer,
                 LeafUsage.CLIENT);
-        KeyPair notAPair = new KeyPair(generator.parseCertificate(a.certificatePem()).getPublicKey(),
-                generator.parsePrivateKey(b.privateKeyPem()));
+        KeyPair notAPair = new KeyPair(Pem.parseCertificate(a.certificatePem()).getPublicKey(),
+                Pem.parsePrivateKey(b.privateKeyPem()));
 
-        CertificateGenerationException refused = assertThrows(CertificateGenerationException.class,
+        CertificateMaterialException refused = assertThrows(CertificateMaterialException.class,
                 () -> generator.generateIssuedCertificate("a", List.of(), KeyAlgorithm.RSA_2048, notAPair, issuer,
                         LeafUsage.CLIENT));
         assertTrue(refused.getMessage().contains("does not match"), refused.getMessage());
@@ -161,10 +183,10 @@ class CertificateGeneratorIssuerTest {
         Issuer issuer = newIssuer();
         GeneratedCertificate rsa = generator.generateIssuedCertificate("a", List.of(), KeyAlgorithm.RSA_2048, null, issuer,
                 LeafUsage.CLIENT);
-        KeyPair rsaPair = new KeyPair(generator.parseCertificate(rsa.certificatePem()).getPublicKey(),
-                generator.parsePrivateKey(rsa.privateKeyPem()));
+        KeyPair rsaPair = new KeyPair(Pem.parseCertificate(rsa.certificatePem()).getPublicKey(),
+                Pem.parsePrivateKey(rsa.privateKeyPem()));
 
-        CertificateGenerationException refused = assertThrows(CertificateGenerationException.class,
+        CertificateMaterialException refused = assertThrows(CertificateMaterialException.class,
                 () -> generator.generateIssuedCertificate("a", List.of(), KeyAlgorithm.EC_prime256v1, rsaPair, issuer,
                         LeafUsage.CLIENT));
         assertTrue(refused.getMessage().contains("not the requested EC_prime256v1"), refused.getMessage());
@@ -182,20 +204,20 @@ class CertificateGeneratorIssuerTest {
         kpg.initialize(new ECGenParameterSpec("secp256r1"));
         KeyPair p256 = kpg.generateKeyPair();
 
-        CertificateGenerationException refused = assertThrows(CertificateGenerationException.class,
+        CertificateMaterialException refused = assertThrows(CertificateMaterialException.class,
                 () -> generator.generateIssuedCertificate("a", List.of(), KeyAlgorithm.EC_prime256v1, k1, issuer,
                         LeafUsage.CLIENT));
         assertTrue(refused.getMessage().contains("not the requested EC_prime256v1"), refused.getMessage());
         GeneratedCertificate accepted = generator.generateIssuedCertificate("a", List.of(), KeyAlgorithm.EC_prime256v1, p256, issuer,
                 LeafUsage.CLIENT);
-        assertEquals(p256.getPublic(), generator.parseCertificate(accepted.certificatePem()).getPublicKey());
+        assertEquals(p256.getPublic(), Pem.parseCertificate(accepted.certificatePem()).getPublicKey());
     }
 
     @Test
     void duplicateSansAreWrittenOnce() throws Exception {
         GeneratedCertificate leaf = generator.generateIssuedCertificate("dup.example.test", List.of("dup.example.test", "other.example.test",
                 "other.example.test"), KeyAlgorithm.RSA_2048, null, newIssuer(), LeafUsage.SERVER);
-        X509Certificate cert = generator.parseCertificate(leaf.certificatePem());
+        X509Certificate cert = Pem.parseCertificate(leaf.certificatePem());
 
         assertEquals(List.of("dup.example.test", "other.example.test"),
                 cert.getSubjectAlternativeNames().stream().map(san -> san.get(1)).toList());
@@ -204,7 +226,7 @@ class CertificateGeneratorIssuerTest {
     @Test
     void existingSelfSignedPathIsUnchanged() throws Exception {
         GeneratedCertificate selfSigned = generator.generateSelfSignedCertificate("localhost", List.of("localhost"), KeyAlgorithm.RSA_2048);
-        X509Certificate ss = generator.parseCertificate(selfSigned.certificatePem());
+        X509Certificate ss = Pem.parseCertificate(selfSigned.certificatePem());
         assertEquals(ss.getSubjectX500Principal(), ss.getIssuerX500Principal());
         assertTrue(ss.getBasicConstraints() >= 0);
         assertNull(ss.getExtendedKeyUsage(), "the self-signed trust anchor carries no EKU, as before");
@@ -222,8 +244,8 @@ class CertificateGeneratorIssuerTest {
 
         assertTrue(ec.privateKeyPem().startsWith("-----BEGIN PRIVATE KEY-----"), "PKCS#8 carries the curve");
         assertTrue(rsa.privateKeyPem().startsWith("-----BEGIN RSA PRIVATE KEY-----"), "RSA stays PKCS#1, as AWS IoT hands out");
-        assertTrue(CertificateGenerator.isPair(generator.parsePrivateKey(ec.privateKeyPem()),
-                generator.parseCertificate(ec.certificatePem()).getPublicKey()), "the EC key reads back and matches");
+        assertTrue(Pem.isPair(Pem.parsePrivateKey(ec.privateKeyPem()),
+                Pem.parseCertificate(ec.certificatePem()).getPublicKey()), "the EC key reads back and matches");
     }
 
     @Test

@@ -1,11 +1,11 @@
 package io.github.hectorvent.floci.services.ec2;
 
-import static io.restassured.RestAssured.given;
-import static org.hamcrest.Matchers.equalTo;
-
+import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.Test;
 
-import io.quarkus.test.junit.QuarkusTest;
+import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.startsWith;
 
 /**
  * AssociateVpcCidrBlock returned cidrBlockState as a bare string
@@ -61,5 +61,30 @@ class Ec2VpcCidrBlockAssociationIntegrationTest {
             .body("DescribeVpcsResponse.vpcSet.item.cidrBlockAssociationSet.item.find { "
                     + "it.associationId == '" + associationId + "' }.cidrBlockState.state",
                     equalTo("associated"));
+    }
+
+    @Test
+    void associateVpcCidrBlockRefusesABlockFromAnotherRfc1918Range() {
+        String vpcId = given()
+            .formParam("Action", "CreateVpc")
+            .formParam("CidrBlock", "10.93.0.0/24")
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .extract().path("CreateVpcResponse.vpc.vpcId");
+
+        given()
+            .formParam("Action", "AssociateVpcCidrBlock")
+            .formParam("VpcId", vpcId)
+            .formParam("CidrBlock", "192.168.0.0/16")
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("Response.Errors.Error.Code", equalTo("InvalidVpc.Range"))
+            .body("Response.Errors.Error.Message", startsWith("The CIDR '192.168.0.0/16' is restricted."));
     }
 }

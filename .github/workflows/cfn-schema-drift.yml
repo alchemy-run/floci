@@ -1,0 +1,50 @@
+name: CloudFormation Schema Drift
+# Checks the vendored CloudFormation property types against the resource schemas AWS publishes.
+# They come from AWS's live schema archive rather than from a pinned dependency, so, as with the
+# IAM data in iam-data-drift.yml, this check can fail without anything in the repository having
+# changed, and it runs on its own, never as part of a job that ordinary changes trigger.
+#
+# Two triggers, for two different failures:
+#
+#   - On a pull request that touches the vendored file or its generator, where a hand-edited type
+#     would enter the repository.
+#   - Weekly, because the file also goes stale without anyone touching it: AWS changes resource
+#     schemas, and a property Floci types by an old schema would refuse a template AWS accepts.
+#
+# The fix for a real failure is `make cfn-property-types-sync` and committing the result. The
+# offline shape check is hermetic and runs per pull request in partition-literals.yml instead.
+on:
+  pull_request:
+    paths:
+      - 'src/main/resources/aws/cfn-property-types.json'
+      - 'tools/aws/regen_cfn_property_types.py'
+      - 'tools/aws/test_regen_cfn_property_types.py'
+      - '.github/workflows/cfn-schema-drift.yml'
+  schedule:
+    # Mondays at 06:10 UTC, beside the IAM data drift check.
+    - cron: '10 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cfn-schema-drift:
+    name: Vendored CloudFormation property types still match AWS
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.x"
+
+      # No dependency install: the generator is stdlib-only.
+      - name: Check the vendored property types still match AWS's schemas
+        run: make cfn-property-types-verify

@@ -1,9 +1,15 @@
 package io.github.hectorvent.floci.services.ses;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
+import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.ServiceCallAuthorizer;
+import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.iam.IamPolicyEvaluator.Decision;
 import io.github.hectorvent.floci.services.lambda.LambdaService;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.ses.model.ReceiptAction;
@@ -58,9 +64,9 @@ public class SesReceiptRuleService {
     // Probed: a value that is not a well-formed topic/function ARN (a bare name, or an ARN with
     // missing segments) gets the "Invalid ..." message before any existence lookup. There is no
     // recipient-count limit (101 recipients are accepted).
-    private static final Pattern SNS_TOPIC_ARN = Pattern.compile("^arn:aws[a-zA-Z-]*:sns:[a-z0-9-]+:\\d{12}:.+$");
+    private static final Pattern SNS_TOPIC_ARN = Pattern.compile("^arn:" + AwsArnUtils.PARTITION_REGEX + ":sns:[a-z0-9-]+:\\d{12}:.+$");
     private static final Pattern LAMBDA_FUNCTION_ARN =
-            Pattern.compile("^arn:aws[a-zA-Z-]*:lambda:[a-z0-9-]+:\\d{12}:function:.+$");
+            Pattern.compile("^arn:" + AwsArnUtils.PARTITION_REGEX + ":lambda:[a-z0-9-]+:\\d{12}:function:.+$");
     // RFC 5322 ftext: printable US-ASCII excluding the colon. Real SES rejects anything else with
     // "Invalid header name: <name>" (probed 2026-09).
     private static final Pattern HEADER_NAME_CHARS = Pattern.compile("^[\\x21-\\x39\\x3B-\\x7E]+$");
@@ -88,11 +94,15 @@ public class SesReceiptRuleService {
     private final LambdaService lambdaService;
     // Serializes filter create (duplicate check, then the 100-filter cap, then put).
     private final Object receiptFilterLock = new Object();
+    private final ServiceCallAuthorizer serviceCallAuthorizer;
+    private final RegionResolver regionResolver;
     private final Clock clock;
 
     @Inject
     public SesReceiptRuleService(StorageFactory storageFactory, S3Service s3Service,
-                                 SnsService snsService, LambdaService lambdaService, Clock clock) {
+                                 SnsService snsService, LambdaService lambdaService,
+                                 ServiceCallAuthorizer serviceCallAuthorizer, RegionResolver regionResolver,
+                                 Clock clock) {
         this.receiptRuleSetStore = storageFactory.create("ses", "ses-receipt-rule-sets.json",
                 new TypeReference<Map<String, ReceiptRuleSet>>() {});
         this.receiptFilterStore = storageFactory.create("ses", "ses-receipt-filters.json",
@@ -100,18 +110,23 @@ public class SesReceiptRuleService {
         this.s3Service = s3Service;
         this.snsService = snsService;
         this.lambdaService = lambdaService;
+        this.serviceCallAuthorizer = serviceCallAuthorizer;
+        this.regionResolver = regionResolver;
         this.clock = clock;
     }
 
     SesReceiptRuleService(StorageBackend<String, ReceiptRuleSet> receiptRuleSetStore,
                           StorageBackend<String, ReceiptFilter> receiptFilterStore,
                           S3Service s3Service, SnsService snsService, LambdaService lambdaService,
+                          ServiceCallAuthorizer serviceCallAuthorizer, RegionResolver regionResolver,
                           Clock clock) {
         this.receiptRuleSetStore = receiptRuleSetStore;
         this.receiptFilterStore = receiptFilterStore;
         this.s3Service = s3Service;
         this.snsService = snsService;
         this.lambdaService = lambdaService;
+        this.serviceCallAuthorizer = serviceCallAuthorizer;
+        this.regionResolver = regionResolver;
         this.clock = clock;
     }
 
@@ -135,12 +150,19 @@ public class SesReceiptRuleService {
                 .orElseThrow(() -> ruleSetDoesNotExist(name));
     }
 
+    public PaginatedResult<ReceiptRuleSet> listReceiptRuleSets(String region, SesListPaging paging,
+                                                               String nextToken) {
+        return paging.page(region, listReceiptRuleSets(region), SesReceiptRuleService::cursor, null, nextToken);
+    }
+
+    private static String cursor(ReceiptRuleSet ruleSet) {
+        return SesListPaging.oldestFirst(ruleSet.getCreatedTimestamp(), ruleSet.getName());
+    }
+
     public List<ReceiptRuleSet> listReceiptRuleSets(String region) {
         String prefix = "receiptRuleSet::" + region + "::";
         List<ReceiptRuleSet> all = new ArrayList<>(receiptRuleSetStore.scan(k -> k.startsWith(prefix)));
-        all.sort(Comparator.comparing(ReceiptRuleSet::getCreatedTimestamp,
-                        Comparator.nullsLast(Comparator.naturalOrder()))
-                .thenComparing(ReceiptRuleSet::getName, Comparator.nullsLast(Comparator.naturalOrder())));
+        all.sort(Comparator.comparing(SesReceiptRuleService::cursor));
         return all;
     }
 
@@ -218,7 +240,7 @@ public class SesReceiptRuleService {
             // AWS inserts at the FRONT when After is absent (probed); After places the rule
             // immediately behind the named one.
             int index = after == null ? 0 : indexOfRule(rules, after) + 1;
-            validateActionTargets(rule, region, verifiedSender);
+            validateActionTargets(rule, ruleSetName, region, verifiedSender);
             applyRuleDefaults(rule);
             rules.add(index, rule);
             replaceRules(ruleSet, rules, ruleSetName, region);
@@ -248,7 +270,7 @@ public class SesReceiptRuleService {
             // AWS replaces the whole rule in place (omitted members reset to their defaults) and
             // keeps its position; an unknown name is an error, so update cannot rename.
             int index = indexOfRule(rules, rule.getName());
-            validateActionTargets(rule, region, verifiedSender);
+            validateActionTargets(rule, ruleSetName, region, verifiedSender);
             applyRuleDefaults(rule);
             rules.set(index, rule);
             replaceRules(ruleSet, rules, ruleSetName, region);
@@ -472,9 +494,7 @@ public class SesReceiptRuleService {
         if (violations.isEmpty()) {
             return;
         }
-        String label = violations.size() == 1 ? "1 validation error detected: "
-                : violations.size() + " validation errors detected: ";
-        throw new AwsException("ValidationError", label + String.join("; ", violations), 400);
+        throw SmithyValidationErrors.validationError(violations);
     }
 
     /**
@@ -561,8 +581,14 @@ public class SesReceiptRuleService {
      * checks real SES runs on create/update: any TopicArn must be a publishable SNS topic, an
      * S3 bucket must exist, a Lambda function must be invokable, and a bounce sender must be a
      * verified identity. Each check fires only when its member is present, matching AWS.
+     *
+     * <p>A topic is publishable when it exists and, under IAM enforcement, its policy lets SES publish
+     * for this rule: {@code InvalidSnsTopic} covers a topic SES "could not publish to, possibly due
+     * to permissions issues" (SES API Reference, {@code CreateReceiptRule}), and the SES Developer
+     * Guide's grant for it names the rule's ARN as {@code aws:SourceArn}.
      */
-    private void validateActionTargets(ReceiptRule rule, String region, Predicate<String> verifiedSender) {
+    private void validateActionTargets(ReceiptRule rule, String ruleSetName, String region,
+                                       Predicate<String> verifiedSender) {
         if (rule.getActions().size() > MAX_ACTIONS_PER_RULE) {
             // Probed: the 11th action is rejected at the service layer, like the rules-per-set cap.
             throw new AwsException("LimitExceeded", "Too many actions", 400);
@@ -588,7 +614,8 @@ public class SesReceiptRuleService {
                 if (!SNS_TOPIC_ARN.matcher(topicArn).matches()) {
                     throw new AwsException("InvalidSnsTopic", "Invalid SNS topic: " + topicArn, 400);
                 }
-                if (!snsService.topicExists(topicArn, region)) {
+                if (!snsService.topicExists(topicArn, region)
+                        || !sesMayPublish(topicArn, ruleSetName, rule, region)) {
                     throw new AwsException("InvalidSnsTopic",
                             "Could not publish to SNS topic: " + topicArn, 400);
                 }
@@ -679,6 +706,12 @@ public class SesReceiptRuleService {
             }
         }
         return true;
+    /** Whether the topic's policy lets SES publish to it for {@code rule}, as the rule's account. */
+    private boolean sesMayPublish(String topicArn, String ruleSetName, ReceiptRule rule, String region) {
+        String account = regionResolver.getAccountId();
+        String ruleArn = AwsArnUtils.Arn.of("ses", region, account,
+                "receipt-rule-set/" + ruleSetName + ":receipt-rule/" + rule.getName()).toString();
+        return serviceCallAuthorizer.authorize("ses", "sns:Publish", topicArn, ruleArn, account) == Decision.ALLOW;
     }
 
     private static void applyRuleDefaults(ReceiptRule rule) {
@@ -748,9 +781,9 @@ public class SesReceiptRuleService {
         if (filterName == null) {
             // Probed: an absent FilterName is the one case the wire rejects; deleting a missing
             // or malformed name succeeds without error.
-            throw new AwsException("ValidationError",
-                    "1 validation error detected: Value at 'filterName' failed to satisfy "
-                            + "constraint: Member must not be null", 400);
+            throw SmithyValidationErrors.validationError(
+                    "Value at 'filterName' failed to satisfy "
+                            + "constraint: Member must not be null");
         }
         receiptFilterStore.delete(receiptFilterKey(region, filterName));
         LOG.infov("Deleted SES receipt filter: {0} in region {1}", filterName, region);
@@ -767,8 +800,8 @@ public class SesReceiptRuleService {
      */
     private static void validateFilterShape(ReceiptFilter filter) {
         if (filter == null) {
-            throw new AwsException("ValidationError",
-                    "1 validation error detected: " + notNullViolation("filter"), 400);
+            throw SmithyValidationErrors.validationError(
+                    notNullViolation("filter"));
         }
         List<String> violations = new ArrayList<>();
         if (filter.getName() == null) {
@@ -789,9 +822,7 @@ public class SesReceiptRuleService {
             }
         }
         if (!violations.isEmpty()) {
-            String label = violations.size() == 1 ? "1 validation error detected: "
-                    : violations.size() + " validation errors detected: ";
-            throw new AwsException("ValidationError", label + String.join("; ", violations), 400);
+            throw SmithyValidationErrors.validationError(violations);
         }
     }
 
@@ -918,9 +949,9 @@ public class SesReceiptRuleService {
             throw new AwsException("InvalidParameterValue", "RuleSetName is required.", 400);
         }
         if (!RULE_SET_NAME_CHARS.matcher(name).matches()) {
-            throw new AwsException("ValidationError",
-                    "1 validation error detected: Value at 'ruleSetName' failed to satisfy constraint: "
-                            + "Member must satisfy regular expression pattern: ^[a-zA-Z0-9_.-]+$", 400);
+            throw SmithyValidationErrors.validationError(
+                    "Value at 'ruleSetName' failed to satisfy constraint: "
+                            + "Member must satisfy regular expression pattern: ^[a-zA-Z0-9_.-]+$");
         }
         requireValidRuleSetName(name);
     }

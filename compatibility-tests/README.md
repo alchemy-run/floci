@@ -75,6 +75,12 @@ just setup-typescript  # npm install
 just setup-awscli      # Clone bats-core, bats-support, bats-assert
 ```
 
+The boto3 and botocore versions in `sdk-test-python/requirements.txt` pin the test clients,
+not the AWS models used to generate Floci's vendored data. For model audits and data
+regeneration, use the pin in `tools/aws/requirements.txt` at the repository root and check
+the selected model source. See [Botocore pin of record](../CONTRIBUTING.md#botocore-pin-of-record)
+for the distinction and the generators' data-source precedence.
+
 ## Running Tests
 
 ### All SDKs

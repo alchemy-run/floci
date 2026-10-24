@@ -1,11 +1,15 @@
 package io.github.hectorvent.floci.services.s3vectors.model;
 
 import io.quarkus.runtime.annotations.RegisterForReflection;
+
+import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 @RegisterForReflection
 public class VectorBucket {
+    private Instant creationTime;
+    private Map<String, String> tags = new ConcurrentHashMap<>();
     private String vectorBucketName;
     private String vectorBucketArn;
     private long creationTime = System.currentTimeMillis() / 1000;
@@ -21,6 +25,12 @@ public class VectorBucket {
         this.vectorBucketArn = vectorBucketArn;
         this.encryptionConfiguration = encryptionConfiguration;
     }
+
+    public Instant getCreationTime() { return creationTime; }
+    public void setCreationTime(Instant creationTime) { this.creationTime = creationTime; }
+
+    public Map<String, String> getTags() { return tags; }
+    public void setTags(Map<String, String> tags) { this.tags = tags; }
 
     public String getVectorBucketName() { return vectorBucketName; }
     public void setVectorBucketName(String vectorBucketName) { this.vectorBucketName = vectorBucketName; }

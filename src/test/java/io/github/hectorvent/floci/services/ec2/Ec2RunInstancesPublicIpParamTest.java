@@ -1,12 +1,15 @@
 package io.github.hectorvent.floci.services.ec2;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.ec2.model.LaunchTemplateData;
 import io.github.hectorvent.floci.services.ec2.model.Reservation;
 import jakarta.ws.rs.core.MultivaluedHashMap;
 import jakarta.ws.rs.core.MultivaluedMap;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -60,12 +63,15 @@ class Ec2RunInstancesPublicIpParamTest {
                 anyInt(), anyInt(), nullable(String.class), anyList(), nullable(String.class),
                 nullable(String.class), anyList(), nullable(String.class), nullable(String.class),
                 nullable(Boolean.class), nullable(String.class), anyInt(), nullable(String.class),
-                nullable(LaunchTemplateData.MetadataOptions.class), nullable(String.class), nullable(String.class), eq(false), nullable(String.class)))
+                nullable(LaunchTemplateData.MetadataOptions.class), nullable(String.class), nullable(String.class), eq(false),
+                nullable(String.class), nullable(String.class), nullable(List.class), eq(false), nullable(String.class),
+                nullable(LaunchTemplateData.CapacityReservationSpecification.class)))
                 .thenReturn(new Reservation());
 
         Ec2QueryHandler handler = new Ec2QueryHandler(service, mock(EmulatorConfig.class),
                 mock(FlowLogService.class), mock(Ec2EbsEncryptionService.class),
-                mock(Ec2SnapshotBlockPublicAccessService.class), mock(Ec2IpamService.class));
+                mock(Ec2SnapshotBlockPublicAccessService.class), mock(Ec2IpamService.class),
+                mock(RegionResolver.class));
         handler.handle("RunInstances", p, REGION);
 
         ArgumentCaptor<Boolean> associatePublicIp = ArgumentCaptor.forClass(Boolean.class);
@@ -73,7 +79,9 @@ class Ec2RunInstancesPublicIpParamTest {
                 anyInt(), anyInt(), nullable(String.class), anyList(), nullable(String.class),
                 nullable(String.class), anyList(), nullable(String.class), nullable(String.class),
                 associatePublicIp.capture(), nullable(String.class), anyInt(), nullable(String.class),
-                nullable(LaunchTemplateData.MetadataOptions.class), nullable(String.class), nullable(String.class), eq(false), nullable(String.class));
+                nullable(LaunchTemplateData.MetadataOptions.class), nullable(String.class), nullable(String.class), eq(false),
+                nullable(String.class), nullable(String.class), nullable(List.class), eq(false), nullable(String.class),
+                nullable(LaunchTemplateData.CapacityReservationSpecification.class));
         if (expected == null) {
             assertNull(associatePublicIp.getValue(),
                     "an absent override must stay null so the subnet default decides");

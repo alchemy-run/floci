@@ -1,23 +1,29 @@
 package io.github.hectorvent.floci.services.bedrockruntime;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpServer;
+import io.github.hectorvent.floci.testing.BedrockProxyBackendProfile;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
-import java.util.Map;
+import java.util.Base64;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static io.github.hectorvent.floci.testing.BedrockProxyBackendProfile.MAPPED_MODEL_ID;
+import static io.github.hectorvent.floci.testing.BedrockProxyBackendProfile.PORT;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
@@ -25,21 +31,26 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Verifies the Bedrock Runtime {@code proxy} backend translates Converse requests to
  * OpenAI Chat Completions and translates the response back to the Bedrock shape,
  * against a real (mock) OpenAI-compatible backend.
+ *
+ * <p>The backend, its URL, the API key and the model mapping come from
+ * {@link BedrockProxyBackendProfile}, which this class shares with the other proxy classes that
+ * talk to a stand-in. That profile also turns passthrough on, which no test here reaches, since
+ * every call names the mapped model id. The case with no mapping, no default model and no
+ * passthrough is in {@code BedrockProxyTimeoutIntegrationTest}, where passthrough stays off.
  */
 @QuarkusTest
-@TestProfile(BedrockProxyIntegrationTest.ProxyBackendProfile.class)
+@TestProfile(BedrockProxyBackendProfile.class)
 class BedrockProxyIntegrationTest {
 
     private static final String AUTH_HEADER =
             "AWS4-HMAC-SHA256 Credential=AKID/20260101/us-east-1/bedrock/aws4_request";
-    private static final int PORT = 18930;
-    private static final String MAPPED_MODEL_ID = "anthropic.claude-3-haiku-20240307-v1:0";
 
     @Inject
     ObjectMapper objectMapper;
@@ -100,6 +111,410 @@ class BedrockProxyIntegrationTest {
             .body("usage.inputTokens", equalTo(7))
             .body("usage.outputTokens", equalTo(9))
             .body("usage.totalTokens", equalTo(16));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"low", "medium", "high", "xhigh", "max"})
+    void effortReachesProxyWithAndWithoutTextFormat(String effort) throws IOException {
+        for (String operation : new String[]{"converse", "converse-stream"}) {
+            nextResponseBody.set(operation.equals("converse")
+                    ? """
+                        {"choices":[{"finish_reason":"stop","message":{"content":"{}"}}]}
+                        """
+                    : """
+                        data: {"choices":[{"delta":{"content":"{}"},"finish_reason":"stop"}]}
+
+                        data: [DONE]
+                        """);
+            for (boolean withTextFormat : new boolean[]{false, true}) {
+                ObjectNode request = (ObjectNode) objectMapper.readTree("""
+                    {"messages":[{"role":"user","content":[{"text":"Return a label"}]}]}
+                    """);
+                ObjectNode outputConfig = request.putObject("outputConfig").put("effort", effort);
+                if (withTextFormat) {
+                    outputConfig.putObject("textFormat").put("type", "json_schema")
+                            .putObject("structure").putObject("jsonSchema").put("schema", "{\"type\":\"object\"}");
+                }
+                given()
+                    .contentType("application/json")
+                    .header("Authorization", AUTH_HEADER)
+                    .body(request.toString())
+                .when()
+                    .post("/model/" + MAPPED_MODEL_ID + "/" + operation)
+                .then()
+                    .statusCode(200);
+                JsonNode sent = objectMapper.readTree(received.get().body());
+                assertEquals(effort, sent.path("reasoning_effort").asText());
+                assertEquals(withTextFormat, sent.has("response_format"));
+                assertFalse(sent.has("outputConfig"));
+                assertFalse(sent.has("effort"));
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"converse", "converse-stream"})
+    void structuredOutputSchemaReachesProxy(String operation) throws IOException {
+        nextResponseBody.set(operation.equals("converse")
+                ? """
+                    {"choices":[{"finish_reason":"stop","message":{"content":"{}"}}]}
+                    """
+                : """
+                    data: {"choices":[{"delta":{"content":"{}"},"finish_reason":"stop"}]}
+
+                    data: [DONE]
+                    """);
+        ObjectNode request = (ObjectNode) objectMapper.readTree("""
+            {"messages":[{"role":"user","content":[{"text":"Extract a label"}]}]}
+            """);
+        JsonNode schema = objectMapper.readTree("""
+            {"type":"object","properties":{"label":{"$ref":"#/$defs/label"}},
+             "additionalProperties":false,
+             "$defs":{"label":{"type":"string","enum":["ready","pending"]}}}
+            """);
+        ObjectNode definition = request.putObject("outputConfig").putObject("textFormat")
+                .put("type", "json_schema").putObject("structure").putObject("jsonSchema");
+        definition.put("name", "label_response");
+        definition.put("description", "A readiness label");
+        definition.put("schema", schema.toString());
+
+        given()
+            .contentType("application/json")
+            .header("Authorization", AUTH_HEADER)
+            .body(request.toString())
+        .when()
+            .post("/model/" + MAPPED_MODEL_ID + "/" + operation)
+        .then()
+            .statusCode(200);
+
+        JsonNode responseFormat = objectMapper.readTree(received.get().body()).path("response_format");
+        assertEquals("json_schema", responseFormat.path("type").asText());
+        JsonNode forwarded = responseFormat.path("json_schema");
+        assertEquals("label_response", forwarded.path("name").asText());
+        assertEquals("A readiness label", forwarded.path("description").asText());
+        assertFalse(forwarded.has("strict"), "Bedrock schemas must not acquire OpenAI-only strict restrictions");
+        assertEquals(schema, forwarded.path("schema"));
+    }
+
+    @Test
+    void structuredOutputPreservesDecimalConstraints() throws IOException {
+        nextResponseBody.set("""
+            {"choices":[{"finish_reason":"stop","message":{"content":"{}"}}]}
+            """);
+        ObjectNode request = (ObjectNode) objectMapper.readTree("""
+            {"messages":[{"role":"user","content":[{"text":"Return a number"}]}]}
+            """);
+        String schema = """
+            {"type":"object","properties":{"value":{"const":0.1234567890123456789}}}
+            """;
+        request.putObject("outputConfig").putObject("textFormat").put("type", "json_schema")
+                .putObject("structure").putObject("jsonSchema").put("schema", schema);
+        given()
+            .contentType("application/json")
+            .header("Authorization", AUTH_HEADER)
+            .body(request.toString())
+        .when()
+            .post("/model/" + MAPPED_MODEL_ID + "/converse")
+        .then()
+            .statusCode(200);
+        JsonNode sent = objectMapper.reader().with(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                .readTree(received.get().body());
+        assertEquals("0.1234567890123456789", sent.path("response_format").path("json_schema")
+                .path("schema").path("properties").path("value").path("const").asText());
+    }
+
+    @Test
+    void structuredOutputMetadataIsOptional() throws IOException {
+        nextResponseBody.set("""
+            {"choices":[{"finish_reason":"stop","message":{"content":"{}"}}]}
+            """);
+        given()
+            .contentType("application/json")
+            .header("Authorization", AUTH_HEADER)
+            .body("""
+                {"messages":[{"role":"user","content":[{"text":"hi"}]}],
+                 "outputConfig":{"textFormat":{"type":"json_schema","structure":{
+                    "jsonSchema":{"schema":"{\\"type\\":\\"object\\"}"}}}}}
+                """)
+        .when()
+            .post("/model/" + MAPPED_MODEL_ID + "/converse")
+        .then()
+            .statusCode(200);
+        JsonNode format = objectMapper.readTree(received.get().body()).path("response_format").path("json_schema");
+        assertEquals("response", format.path("name").asText());
+        assertFalse(format.has("description"));
+        assertEquals("object", format.path("schema").path("type").asText());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{}", "{\"outputConfig\":{}}"})
+    void absentTextFormatDoesNotConstrainResponse(String extras) throws IOException {
+        nextResponseBody.set("""
+            {"choices":[{"finish_reason":"stop","message":{"content":"hi"}}]}
+            """);
+        ObjectNode request = (ObjectNode) objectMapper.readTree(extras);
+        request.set("messages", objectMapper.readTree("""
+            [{"role":"user","content":[{"text":"hi"}]}]
+            """));
+        given()
+            .contentType("application/json")
+            .header("Authorization", AUTH_HEADER)
+            .body(request.toString())
+        .when()
+            .post("/model/" + MAPPED_MODEL_ID + "/converse")
+        .then()
+            .statusCode(200);
+        JsonNode sent = objectMapper.readTree(received.get().body());
+        assertFalse(sent.has("response_format"));
+        assertFalse(sent.has("reasoning_effort"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "null", "[]", "{\"effort\":null}", "{\"effort\":42}", "{\"effort\":{}}",
+        "{\"effort\":\"\"}", "{\"effort\":\"unknown\"}", "{\"textFormat\":null}", "{\"textFormat\":{}}",
+        "{\"textFormat\":{\"type\":\"json_object\",\"structure\":{\"jsonSchema\":{\"schema\":\"{}\"}}}}",
+        "{\"textFormat\":{\"type\":\"json_schema\",\"structure\":{}}}",
+        "{\"textFormat\":{\"type\":\"json_schema\",\"structure\":{\"jsonSchema\":{}}}}",
+        "{\"textFormat\":{\"type\":\"json_schema\",\"structure\":{\"jsonSchema\":{\"schema\":{}}}}}",
+        "{\"textFormat\":{\"type\":\"json_schema\",\"structure\":{\"jsonSchema\":{\"schema\":\"\"}}}}",
+        "{\"textFormat\":{\"type\":\"json_schema\",\"structure\":{\"jsonSchema\":{\"schema\":\"not json\"}}}}",
+        "{\"textFormat\":{\"type\":\"json_schema\",\"structure\":{\"jsonSchema\":{\"schema\":\"[]\"}}}}",
+        "{\"textFormat\":{\"type\":\"json_schema\",\"structure\":{\"jsonSchema\":{\"schema\":\"true\"}}}}",
+        "{\"textFormat\":{\"type\":\"json_schema\",\"structure\":{\"jsonSchema\":{\"schema\":\"{} {}\"}}}}",
+        "{\"textFormat\":{\"type\":\"json_schema\",\"structure\":{\"jsonSchema\":{\"schema\":\"{}\",\"name\":42}}}}",
+        "{\"textFormat\":{\"type\":\"json_schema\",\"structure\":{\"jsonSchema\":{\"schema\":\"{}\",\"description\":false}}}}"
+    })
+    void invalidOutputConfigFailsBeforeCallingProxy(String outputConfig) {
+        nextResponseBody.set("""
+            {"choices":[{"finish_reason":"stop","message":{"content":"unexpected"}}]}
+            """);
+        for (String operation : new String[]{"converse", "converse-stream"}) {
+            given()
+                .contentType("application/json")
+                .header("Authorization", AUTH_HEADER)
+                .body("""
+                    {"messages":[{"role":"user","content":[{"text":"hi"}]}],"outputConfig":%s}
+                    """.formatted(outputConfig))
+            .when()
+                .post("/model/" + MAPPED_MODEL_ID + "/" + operation)
+            .then()
+                .statusCode(400)
+                .body("__type", equalTo("ValidationException"));
+            assertNull(received.get());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"converse", "converse-stream"})
+    void imagesAndTextReachProxyInOriginalOrder(String operation) throws IOException {
+        nextResponseBody.set(operation.equals("converse")
+                ? """
+                    {"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"two images"}}]}
+                    """
+                : """
+                    data: {"choices":[{"delta":{"content":"two images"},"finish_reason":"stop"}]}
+
+                    data: [DONE]
+                    """);
+
+        given()
+            .contentType("application/json")
+            .header("Authorization", AUTH_HEADER)
+            .body("""
+                {"messages":[{"role":"user","content":[
+                    {"text":"First"},
+                    {"image":{"format":"png","source":{"bytes":"AQID"}}},
+                    {"text":"Second"},
+                    {"image":{"format":"jpeg","source":{"bytes":"BAUG"}}},
+                    {"text":"Compare them"}
+                ]}]}
+                """)
+        .when()
+            .post("/model/" + MAPPED_MODEL_ID + "/" + operation)
+        .then()
+            .statusCode(200);
+
+        JsonNode sent = objectMapper.readTree(received.get().body());
+        assertEquals(operation.equals("converse-stream"), sent.path("stream").asBoolean());
+        assertEquals(objectMapper.readTree("""
+            [{"type":"text","text":"First"},
+             {"type":"image_url","image_url":{"url":"data:image/png;base64,AQID"}},
+             {"type":"text","text":"Second"},
+             {"type":"image_url","image_url":{"url":"data:image/jpeg;base64,BAUG"}},
+             {"type":"text","text":"Compare them"}]
+            """), sent.path("messages").get(0).path("content"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"png", "jpeg", "gif", "webp"})
+    void imageOnlyMessagesReachProxy(String format) throws IOException {
+        nextResponseBody.set("""
+            {"choices":[{"finish_reason":"stop","message":{"content":"image received"}}]}
+            """);
+        given()
+            .contentType("application/json")
+            .header("Authorization", AUTH_HEADER)
+            .body("""
+                {"messages":[{"role":"user","content":[
+                    {"image":{"format":"%s","source":{"bytes":"AQID"}}}
+                ]}]}
+                """.formatted(format))
+        .when()
+            .post("/model/" + MAPPED_MODEL_ID + "/converse")
+        .then()
+            .statusCode(200);
+
+        JsonNode messages = objectMapper.readTree(received.get().body()).path("messages");
+        assertEquals(1, messages.size());
+        assertEquals("data:image/" + format + ";base64,AQID",
+                messages.get(0).path("content").get(0).path("image_url").path("url").asText());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {6143, 6144, 6145, 12288})
+    void largerImagesKeepTheirExactEncoding(int byteCount) throws IOException {
+        nextResponseBody.set("""
+            {"choices":[{"finish_reason":"stop","message":{"content":"image received"}}]}
+            """);
+        String encoded = Base64.getEncoder().encodeToString(new byte[byteCount]);
+        given()
+            .contentType("application/json")
+            .header("Authorization", AUTH_HEADER)
+            .body("""
+                {"messages":[{"role":"user","content":[
+                    {"image":{"format":"png","source":{"bytes":"%s"}}}
+                ]}]}
+                """.formatted(encoded))
+        .when()
+            .post("/model/" + MAPPED_MODEL_ID + "/converse")
+        .then()
+            .statusCode(200);
+        assertEquals("data:image/png;base64," + encoded, objectMapper.readTree(received.get().body())
+                .path("messages").get(0).path("content").get(0).path("image_url").path("url").asText());
+    }
+
+    @Test
+    void imagePaddingBeforeTheLastChunkIsRejected() {
+        nextResponseBody.set("""
+            {"choices":[{"finish_reason":"stop","message":{"content":"unexpected"}}]}
+            """);
+        String encoded = Base64.getEncoder().encodeToString(new byte[6143]) + "AQID";
+        given()
+            .contentType("application/json")
+            .header("Authorization", AUTH_HEADER)
+            .body("""
+                {"messages":[{"role":"user","content":[
+                    {"image":{"format":"png","source":{"bytes":"%s"}}}
+                ]}]}
+                """.formatted(encoded))
+        .when()
+            .post("/model/" + MAPPED_MODEL_ID + "/converse")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ValidationException"));
+        assertNull(received.get());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "null",
+        "{}",
+        "{\"format\":\"bmp\",\"source\":{\"bytes\":\"AQID\"}}",
+        "{\"format\":\"png\",\"source\":{\"s3Location\":{\"uri\":\"s3://bucket/image.png\"}}}",
+        "{\"format\":\"png\",\"source\":{\"bytes\":\"AQID\",\"s3Location\":{\"uri\":\"s3://bucket/image.png\"}}}",
+        "{\"format\":\"png\",\"source\":{\"bytes\":\"\"}}",
+        "{\"format\":\"png\",\"source\":{\"bytes\":123}}",
+        "{\"format\":\"png\",\"source\":{\"bytes\":\"not base64!\"}}"
+    })
+    void invalidImagesFailBeforeCallingProxy(String image) {
+        nextResponseBody.set("""
+            {"choices":[{"finish_reason":"stop","message":{"content":"unexpected"}}]}
+            """);
+        for (String operation : new String[]{"converse", "converse-stream"}) {
+            given()
+                .contentType("application/json")
+                .header("Authorization", AUTH_HEADER)
+                .body("""
+                    {"messages":[{"role":"user","content":[{"text":"Describe"},{"image":%s}]}]}
+                    """.formatted(image))
+            .when()
+                .post("/model/" + MAPPED_MODEL_ID + "/" + operation)
+            .then()
+                .statusCode(400)
+                .body("__type", equalTo("ValidationException"));
+            assertNull(received.get());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "[{\"image\":{\"format\":\"png\",\"source\":{\"bytes\":\"AQID\"}}}]",
+        "[{\"text\":\"result\"},{\"image\":{\"format\":\"png\",\"source\":{\"bytes\":\"AQID\"}}},{\"json\":{\"ok\":true}}]",
+        "[{\"image\":{\"format\":\"png\",\"source\":{\"s3Location\":{\"uri\":\"s3://bucket/image.png\"}}}}]",
+        "[{\"document\":{\"format\":\"txt\",\"name\":\"note\",\"source\":{\"bytes\":\"AQID\"}}}]",
+        "[{\"video\":{\"format\":\"mp4\",\"source\":{\"bytes\":\"AQID\"}}}]",
+        "[{\"searchResult\":{\"source\":\"https://example.com\",\"title\":\"result\",\"content\":[{\"text\":\"result\"}]}}]",
+        "[{\"futureMember\":{}}]",
+        "[{}]",
+        "[null]",
+        "[{\"text\":\"result\",\"json\":{\"ok\":true}}]"
+    })
+    void unsupportedToolResultContentFailsBeforeCallingProxy(String content) {
+        nextResponseBody.set("""
+            {"choices":[{"finish_reason":"stop","message":{"content":"unexpected"}}]}
+            """);
+        for (String operation : new String[]{"converse", "converse-stream"}) {
+            given()
+                .contentType("application/json")
+                .header("Authorization", AUTH_HEADER)
+                .body("""
+                    {"messages":[
+                        {"role":"assistant","content":[{"toolUse":{"toolUseId":"call_1","name":"get_image","input":{}}}]},
+                        {"role":"user","content":[{"toolResult":{"toolUseId":"call_1","content":%s}}]}
+                    ]}
+                    """.formatted(content))
+            .when()
+                .post("/model/" + MAPPED_MODEL_ID + "/" + operation)
+            .then()
+                .statusCode(400)
+                .body("__type", equalTo("ValidationException"))
+                .body("message", containsString("toolResult"));
+            assertNull(received.get());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"converse", "converse-stream"})
+    void textAndJsonToolResultsReachProxy(String operation) throws IOException {
+        nextResponseBody.set(operation.equals("converse")
+                ? """
+                    {"choices":[{"finish_reason":"stop","message":{"content":"result received"}}]}
+                    """
+                : """
+                    data: {"choices":[{"delta":{"content":"result received"},"finish_reason":"stop"}]}
+
+                    data: [DONE]
+                    """);
+        given()
+            .contentType("application/json")
+            .header("Authorization", AUTH_HEADER)
+            .body("""
+                {"messages":[
+                    {"role":"assistant","content":[{"toolUse":{"toolUseId":"call_1","name":"get_result","input":{}}}]},
+                    {"role":"user","content":[{"toolResult":{"toolUseId":"call_1","content":[
+                        {"text":"result"},{"json":{"ok":true}},{"text":"done"}
+                    ]}}]}
+                ]}
+                """)
+        .when()
+            .post("/model/" + MAPPED_MODEL_ID + "/" + operation)
+        .then()
+            .statusCode(200);
+        JsonNode toolMessage = objectMapper.readTree(received.get().body()).path("messages").get(1);
+        assertEquals("tool", toolMessage.path("role").asText());
+        assertEquals("call_1", toolMessage.path("tool_call_id").asText());
+        assertEquals("result\n{\"ok\":true}\ndone", toolMessage.path("content").asText());
     }
 
     @Test
@@ -911,33 +1326,5 @@ class BedrockProxyIntegrationTest {
         .then()
             .statusCode(400)
             .body("__type", equalTo("ValidationException"));
-    }
-
-    @Test
-    void converse_noMappingNoDefaultNoPassthrough_returns400() {
-        given()
-            .contentType("application/json")
-            .header("Authorization", AUTH_HEADER)
-            .body("""
-                {"messages": [{"role": "user", "content": [{"text": "hi"}]}]}
-                """)
-        .when()
-            .post("/model/unmapped.model-v1:0/converse")
-        .then()
-            .statusCode(400)
-            .body("__type", equalTo("ValidationException"));
-    }
-
-    public static final class ProxyBackendProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of(
-                    "floci.services.bedrock-runtime.backend", "proxy",
-                    "floci.services.bedrock-runtime.proxy.url", "http://127.0.0.1:" + PORT + "/v1",
-                    "floci.services.bedrock-runtime.proxy.api-key", "test-key",
-                    "floci.services.bedrock-runtime.proxy.model-mapping",
-                            MAPPED_MODEL_ID + "=claude-3-haiku"
-            );
-        }
     }
 }

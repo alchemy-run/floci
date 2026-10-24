@@ -1,21 +1,18 @@
 package io.github.hectorvent.floci.services.rds;
 
+import io.github.hectorvent.floci.testing.RdsMockProfile;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.TestProfile;
 import io.restassured.response.ValidatableResponse;
 import io.restassured.specification.RequestSpecification;
-import io.quarkus.test.junit.QuarkusTestProfile;
-import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-import java.util.Map;
-
-import static io.restassured.RestAssured.given;
-import static io.restassured.http.ContentType.URLENC;
+import static io.github.hectorvent.floci.testing.RdsRequests.rds;
 import static org.hamcrest.Matchers.containsString;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.not;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /**
  * CreateDBInstance and ModifyDBInstance took the monitoring, Performance Insights, engine
@@ -25,29 +22,13 @@ import static org.hamcrest.Matchers.not;
  * <p>Each member's documented default and valid values come from the RDS model.
  */
 @QuarkusTest
-@TestProfile(RdsInstanceMonitoringFieldsIntegrationTest.NoContainersProfile.class)
+@TestProfile(RdsMockProfile.class)
 class RdsInstanceMonitoringFieldsIntegrationTest {
-
-    public static class NoContainersProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci.services.rds.mock", "true");
-        }
-    }
 
     private static final String ID = "monitoring-fields-db";
     private static final String ROLE = "arn:aws:iam::000000000000:role/rds-monitoring-role";
     private static final String RESULT =
             "DescribeDBInstancesResponse.DescribeDBInstancesResult.DBInstances.DBInstance.";
-
-    private static RequestSpecification rds(String action) {
-        return given().header("Authorization",
-                        "AWS4-HMAC-SHA256 Credential=test/20260615/us-east-1/rds/aws4_request, "
-                        + "SignedHeaders=content-type;host, Signature=test")
-                .contentType(URLENC)
-                .formParam("Action", action)
-                .formParam("Version", "2014-10-31");
-    }
 
     private static RequestSpecification create() {
         return rds("CreateDBInstance")

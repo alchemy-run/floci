@@ -15,6 +15,12 @@ OIDC providers. The option permits private HTTPS targets and HTTP URLs that use 
 or loopback address. It does not permit public HTTP targets. Keep it disabled when Floci can
 receive untrusted API configuration.
 
+With TLS enabled, an issuer Floci serves itself, such as a Floci Cognito user pool, presents a
+certificate of Floci's local CA. The discovery document and JWKS are fetched trusting the same CA
+bundle Floci gives the containers it launches (see [TLS](../configuration/tls.md)), so a JWT
+authorizer on a Floci user pool verifies its tokens, as one on a Cognito user pool does on AWS. Its
+address is still a private one, so it also needs `FLOCI_SECURITY_ALLOW_PRIVATE_JWT_TARGETS=true`.
+
 ## Custom API IDs
 
 API IDs are generated randomly, which means endpoint URLs change every time you recreate an API. To pin
@@ -31,8 +37,9 @@ aws apigateway create-rest-api \
 ```
 
 The override key is consumed rather than stored, so it never appears in the tags the API returns. Any
-other tags in the same request are kept. Because an ID cannot change after creation, supplying either
-override key to `TagResource` is rejected with `BadRequestException`.
+other tags in the same request are kept. Because an ID cannot change after creation, an override that
+differs from the API's ID is rejected with `BadRequestException`. Resending the current ID is accepted,
+so CloudFormation and Terraform updates keep working.
 
 Values must be non-blank and must not contain whitespace, control characters, or `/`, `?`, `#`, since
 those would break the endpoint URL. An invalid value is rejected with `BadRequestException`.
@@ -52,6 +59,40 @@ duplicate override IDs.
 **Protocol:** REST JSON
 **Endpoint:** `http://localhost:4566/restapis/...`
 
+`ImportRestApi` and `PutRestApi` return parser warnings in the REST API's `warnings` array.
+Set the lowercase query parameter `failonwarnings=true` (SDK: `failOnWarnings`) to reject
+a warning-bearing definition with `BadRequestException` before creating or changing
+the API. The default is `false`. A successful import with no warnings clears any prior
+warnings; malformed definitions and fatal import errors remain errors in either mode.
+
+`PutRestApi` defaults to `mode=merge`. Merge keeps paths, methods, models, authorizers,
+request validators, and gateway responses omitted from the incoming definition. An incoming
+method replaces the complete existing method at the same path and HTTP verb, including its
+integration and responses. Use `mode=overwrite` to clear those API definitions before import.
+During merge, a method can reference a retained Lambda or Cognito authorizer even when the
+incoming security schemes omit it. A same-name Lambda authorizer keeps its existing URI when
+the incoming definition provides no new URI. If a same-name authorizer changes between Lambda
+and Cognito, retained methods that reference it use the new authorization type. An explicit
+operation-level `security: []` leaves that method without authorization.
+For a same-name Cognito authorizer, merge also keeps its existing pool ARNs when the incoming
+definition provides no new `providerARNs`; an explicit list replaces them, including `[]`.
+
+REST OpenAPI imports resolve `${AWS::Region}`, `${AWS::AccountId}`, and `${AWS::Partition}`
+throughout the definition before parsing it. Values come from the request region and
+account, so the same definition can be imported across regions and partitions. This
+includes mapping templates and applies to both `ImportRestApi` and `PutRestApi`.
+
+OpenAPI integration types `aws`, `aws_proxy`, `http`, `http_proxy`, and `mock`, including
+uppercase and mixed-case spellings, are
+stored as the public Integration values `AWS`, `AWS_PROXY`, `HTTP`, `HTTP_PROXY`,
+and `MOCK`. Both `GetIntegration` and `GetMethod.methodIntegration` return these
+canonical values after import, merge, or overwrite.
+The accepted type list is generated from Botocore's public API Gateway service model
+and checked by `make aws-data-check`; importing an API requires no AWS SDK or network lookup.
+Unknown integration type strings produce warnings and leave the method without an
+integration. With `failOnWarnings=true`, the import or update is rejected before
+changing the API. Leading/trailing whitespace and non-ASCII lookalikes are not accepted.
+
 ### Supported Operations
 
 | Category | Operations |
@@ -63,7 +104,7 @@ duplicate override IDs.
 | **Integrations** | PutIntegration, GetIntegration, UpdateIntegration, DeleteIntegration |
 | **Integration Responses** | PutIntegrationResponse, GetIntegrationResponse, UpdateIntegrationResponse, DeleteIntegrationResponse |
 | **Deployments** | CreateDeployment, GetDeployment, GetDeployments, UpdateDeployment, DeleteDeployment |
-| **Stages** | CreateStage, GetStage, GetStages, UpdateStage, DeleteStage, FlushStageCache, FlushStageAuthorizersCache |
+| **Stages** | CreateStage, GetStage, GetStages, UpdateStage, DeleteStage, FlushStageAuthorizersCache, GetExport |
 | **Authorizers** | CreateAuthorizer, GetAuthorizer, GetAuthorizers, UpdateAuthorizer, DeleteAuthorizer |
 | **API Keys** | CreateApiKey, GetApiKey, GetApiKeys, UpdateApiKey, DeleteApiKey, ImportApiKeys |
 | **Usage Plans** | CreateUsagePlan, GetUsagePlan, GetUsagePlans, UpdateUsagePlan, DeleteUsagePlan, GetUsage, UpdateUsage |
@@ -110,6 +151,13 @@ v2 stages persist `description` and `tags`. `TagResource` / `GetTags` /
 `UntagResource` accept stage ARNs (`…/apis/{apiId}/stages/{stageName}`) as
 well as API ARNs.
 
+`TagResource`, `UntagResource` and `GetTags` also accept API key and usage plan ARNs,
+`arn:aws:apigateway:<region>::/apikeys/<id>` and `arn:aws:apigateway:<region>::/usageplans/<id>`.
+An ARN nested under `/restapis/<id>/` other than a stage, such as a deployment or resource, is rejected with `BadRequestException`.
+An ARN with an account segment is rejected with `BadRequestException` and an ARN from another region with `NotFoundException`, as on AWS.
+Tagged REST APIs, stages, API keys, usage plans and custom domain names are discoverable through the
+[Resource Groups Tagging API](resource-groups-tagging.md), whose `TagResources` and `UntagResources`
+write REST API, stage, API key, usage plan and custom domain name tags through to API Gateway.
 
 ### API Key Behaviour Notes
 
@@ -125,7 +173,21 @@ The CSV header row is addressed by name, not position. AWS's own column set is
 column defaults to `true`. Duplicate key values are reported in the `warnings` array, and
 `failonwarnings=true` turns those warnings into a `BadRequestException`.
 
+#### `enabled` defaults to `false`
+
+`CreateApiKey` creates the key disabled when the request body has no `enabled` field, matching
+AWS. AWS SDKs that model `enabled` as a plain boolean, such as the AWS SDK for Go v2, leave the field
+out of the request when it is `false`, so a client that wants a usable key must send
+`enabled: true`. An `AWS::ApiGateway::ApiKey` CloudFormation resource that omits `Enabled` is
+likewise created, or updated, as disabled.
+
 #### `generateDistinctId`
+
+REST OpenAPI imports recognize a required `apiKey` security scheme in the `x-api-key` header
+as `apiKeyRequired`. The imported method uses the same enabled-key and usage-plan stage checks
+as an explicitly created method. An `awsSigv4` Authorization scheme remains a separate
+`AWS_IAM` requirement and is not treated as an API key. An operation's explicit `security: []`
+removes inherited requirements on overwrite.
 
 API key identifiers are generated independently from their secret values when `generateDistinctId`
 is absent, matching current AWS behavior, or explicitly set to `true`. The deprecated explicit
@@ -147,6 +209,34 @@ immediately.
 > Methods with `apiKeyRequired` reject a missing, unknown, disabled, or deleted key with
 > `403` through the `INVALID_API_KEY` gateway response. Methods without that requirement
 > may execute with a null `identity.apiKey`.
+
+### REST Lambda Authorizers
+
+TOKEN and REQUEST authorizers must return a nonempty `principalId` and an IAM policy. Floci
+checks all statements against `execute-api:Invoke` and the current method ARN, including
+wildcards, conditions and explicit deny precedence. A policy that does not grant the method
+returns `403`. Invalid policies or non-scalar context values return `500`. Scalar context keys,
+including keys such as `tenant-id`, are retained in Lambda proxy events.
+The alphanumeric and underscore restriction in the mapping reference applies to properties
+referenced through `$context.authorizer.property`, not to the returned context map.
+
+A missing TOKEN identity header returns `401` without invoking Lambda. For a REQUEST
+authorizer with caching enabled, every configured identity source must be present and nonempty.
+Creating or updating a cached REQUEST authorizer without an identity source returns `400`.
+The default TTL is 300 seconds, so omitting the TTL still requires an identity source.
+With caching disabled, REQUEST authorizers receive the request even when identity sources
+are missing. A Lambda `Unauthorized` error returns `401`; other function errors return `500`.
+
+`authorizerResultTtlInSeconds` caches the validated policy, principal and context together.
+A zero TTL disables caching. Cache entries are scoped to the account, region, API, stage,
+deployment, authorizer configuration and ordered identity values. Each cache hit evaluates
+the policy for the current method again. `FlushStageAuthorizersCache` clears a stage's entries
+through `DELETE /restapis/{apiId}/stages/{stageName}/cache/authorizers` and returns `202`.
+A flush also invalidates pending invocations, so a result started before the flush cannot
+repopulate that stage's cache afterward.
+
+See the AWS [Lambda authorizer workflow](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-use-lambda-authorizer.html)
+and [response contract](https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-lambda-authorizer-output.html).
 
 ### Custom Domain Names
 
@@ -170,9 +260,27 @@ local suffix such as `localhost.floci.io`; see [TLS](../configuration/tls.md).
 Templates can create domains and mappings with `AWS::ApiGateway::DomainName` and
 `AWS::ApiGateway::BasePathMapping`; see [CloudFormation](cloudformation.md).
 
+Custom-domain invocation resolves the domain's owner independently of the caller, then
+uses only that owner's mappings in the domain's region. If the same hostname is stored
+under multiple accounts or regions, invocation returns `409 ConflictException` instead
+of choosing one. Domain and mapping management remain scoped to the requesting account.
+Once a mapping resolves, invocation keeps its API type, account and region even if an
+API with the same ID exists elsewhere. Without a mapping, a signed request can select the
+caller's own API in its signing region; requests without a matching scope reject ambiguous IDs.
+This routing lookup does not add IAM identity or resource-policy evaluation.
+
 ### IAM Authorization (`AWS_IAM`) {#iam-authorization}
 
 A method (v1) or route (v2) whose `authorizationType` is `AWS_IAM` requires a SigV4-signed caller.
+
+REST invocation URLs identify the API owner independently of the caller's account.
+An unsigned request can therefore reach a public method, or receive the method's
+authentication error, when the API belongs to a nondefault account. Signed callers
+from another account use the same resource lookup and still undergo signature
+verification. Management requests remain scoped to the requesting account.
+When an API ID is ambiguous, signed callers retain access to their own account's API in
+the signing region; requests without a matching caller scope are rejected.
+This lookup does not add IAM identity or resource-policy evaluation.
 Before the integration runs, the signature is verified against the request as it arrived (method,
 path, query string, the headers named in `SignedHeaders`, and the SHA-256 of the body). A request
 that reaches the API through a [custom domain](#custom-domain-names) or an `execute-api` virtual
@@ -182,10 +290,12 @@ placements AWS accepts are honoured: an `Authorization` header and a presigned q
 (`X-Amz-Algorithm=AWS4-HMAC-SHA256`). The credential must be scoped to the `execute-api` service.
 
 Temporary credentials must also present the session token they were issued with, as
-`X-Amz-Security-Token` (a header, or a query parameter on a presigned request). The token is
+`X-Amz-Security-Token` (a header, or a query parameter on a presigned request). As on AWS, the
+token is read only from where the signature is, and an empty one counts as sent. The token is
 compared against the value recorded when STS minted the credential, so a missing or fabricated one
-is rejected: the secret alone is not the whole credential. Whether the token is covered by
-`SignedHeaders` is not required either way, since SigV4 leaves that service-specific.
+is rejected: the secret alone is not the whole credential. A long-term key must come with no
+token, as on AWS. Whether the token is covered by `SignedHeaders` is not required either way, since
+SigV4 leaves that service-specific.
 
 Rejections are `403`, and never reach the integration:
 
@@ -194,13 +304,20 @@ Rejections are `403`, and never reach the integration:
 | No SigV4 credentials at all | `Missing Authentication Token` / `MissingAuthenticationTokenException` | `Forbidden` |
 | Credentials present but incomplete, or scoped to another service | `Incomplete Signature` / `IncompleteSignatureException` | `Forbidden` |
 | Access key the emulator never issued | `The security token included in the request is invalid.` / `UnrecognizedClientException` | `Forbidden` |
-| Temporary credential presenting no `X-Amz-Security-Token`, or one that is not the token it was issued | `The security token included in the request is invalid.` / `UnrecognizedClientException` | `Forbidden` |
+| Temporary credential presenting no `X-Amz-Security-Token`, or an empty one with any key | `The security token included in the request is invalid.` / `UnrecognizedClientException` | `Forbidden` |
+| `X-Amz-Security-Token` that is not the token the key was issued with, or any token with a long-term key | `The security token included in the request is invalid` / `UnrecognizedClientException` | `Forbidden` |
 | `X-Amz-Date` outside the 5-minute window, or a presigned URL past `X-Amz-Expires` | `Signature expired` / `InvalidSignatureException` | `Forbidden` |
 | Signature mismatch | `The request signature we calculated does not match…` / `InvalidSignatureException` | `Forbidden` |
 
 A verified caller reaches the integration as `requestContext.identity.{accessKey, accountId, caller,
-user, userArn}` on a REST proxy event, and as `requestContext.authorizer.iam` on an HTTP API 2.0
-event.
+user, userArn}` on a REST proxy or HTTP API 1.0 event, and as `requestContext.authorizer.iam` on an
+HTTP API 2.0 event.
+
+As on AWS, a REST (v1) `AWS_PROXY` or `HTTP_PROXY` integration never receives the caller's
+`Authorization` header when the method is `AWS_IAM`, and on any method the header is dropped if it
+carries a SigV4 signature. `X-Amz-Date`, `X-Amz-Security-Token` and every other header still pass
+through, and a `Bearer` token on a method without `AWS_IAM` reaches the integration unchanged.
+HTTP API (v2) integrations receive `Authorization` as the caller sent it.
 
 Sign with any access key the emulator has issued (`CreateAccessKey`, or the temporary credentials
 from `AssumeRole`), or with the well-known local-dev `test`/`test` pair that Floci accepts across
@@ -219,6 +336,21 @@ handling; a hand-rolled signer must include it.
 > `execute-api:Invoke` against the caller's IAM policies or a resource policy, so any validly
 > signed, known caller is let through. `principalOrgId` and `cognitoIdentity` are always null -
 > Organizations membership and identity-pool federation are not modelled.
+
+### Request Model Validation
+
+Imported OpenAPI and Swagger request models can reference sibling models, including recursive
+references. Body validation resolves these schemas within the same API while preserving inline
+definitions. API Gateway model URLs (`https://apigateway.amazonaws.com/restapis/{api}/models/{name}`)
+also resolve from that deployment's snapshot in every partition, including China.
+Other schema URLs are not fetched.
+
+Rejected bodies return `Invalid request body` by default. Custom gateway responses can access
+the schema validation detail through `$context.error.validationErrorString`.
+
+Each deployment snapshots its model schemas. Updating or deleting a model does not change
+validation for an existing deployment; deploy again to apply those changes. Deployments saved
+before model snapshots were introduced retain their previous behavior until redeployed.
 
 ### Gateway Responses
 
@@ -271,9 +403,14 @@ These management-plane operations have no handler in v1. Calls will return `404`
 - Model templates: `GetModelTemplate`
 - Documentation parts and versions (the entire family, 10 operations)
 - Client Certificates (5 operations)
-- `GetExport` / `ImportDocumentationParts`
+- `ImportDocumentationParts`
 
-The execute plane (actual proxied HTTP traffic via `/restapis/{id}/{stage}/_user_request_/…`) is implemented separately and is not counted as management-plane operations. It supports these integration types; others return an error:
+The execute plane (actual proxied HTTP traffic via `/restapis/{id}/{stage}/_user_request_/…`)
+is implemented separately and is not counted as management-plane operations. A deployed REST
+API is also available at `http://{apiId}.execute-api.localhost.floci.io:4566/{stage}/{path}`
+(or with the region label, `{apiId}.execute-api.{region}.localhost.floci.io`)
+and `/execute-api/{apiId}/{stage}/{path}`. All three forms use the same method authorization
+and mappings. It supports these integration types; others return an error:
 
 | Type | Support |
 | --- | --- |
@@ -287,12 +424,102 @@ A `MOCK` integration renders its request template and uses the `statusCode` it p
 
 `HTTP_PROXY` forwards the request to the integration's `uri` : with `{param}` placeholders resolved from the matched resource's path parameters : and relays the backend's status, headers and body unchanged. Per AWS, no request templates and no integration-response selection apply to `HTTP_PROXY`, so a backend `4xx`/`5xx` reaches the caller verbatim rather than being remapped. `integration.request.{header,querystring,path}.*` → `method.request.*` mappings are applied. Hop-by-hop headers (including `Host`) are stripped. An unreachable or failing backend yields `502`.
 
+A greedy resource captures only the path segments after its parent. For example,
+`/api/v1/auth/signup/{proxy+}` captures `checkpoint/status` from
+`/api/v1/auth/signup/checkpoint/status`, so an integration URI ending in
+`/api/v1/auth/signup/{proxy}` forwards the prefix once. Greedy parameter names other
+than `proxy` are supported, including in `integration.request.path.*` mappings.
+
+REST `HTTP_PROXY` and `HTTP` integrations also accept `context.*` sources in header, query
+and path parameter mappings. Supported request fields are `accountId`, `apiId`, `deploymentId`,
+`httpMethod`, `path` (including the stage), `protocol`, `requestId`, `resourceId`, `resourcePath`,
+`stage`, `domainName`, `domainPrefix`, `extendedRequestId`, `requestTime` and `requestTimeEpoch`.
+Identity fields include the immediate TCP peer's `sourceIp`, `userAgent`, a resolved API key's
+`apiKey` and `apiKeyId`, and the verified IAM caller's `accessKey`, `accountId`, `caller`, `user`
+and `userArn`. `context.requestId` uses the same ID as the authorizer and integration templates.
+A valid UUID in `x-amzn-RequestId` overrides that ID; `extendedRequestId` is generated independently. `context.authorizer.principalId` and
+`context.authorizer.<property>` come from the successful authorizer result; authenticated Cognito
+claims are available as `context.authorizer.claims.<property>`. String, number and boolean values
+are forwarded as strings. Missing values and objects are not mapped. An explicit header mapping
+replaces all inbound values of that header, regardless of casing.
+
+For a header mapped from `context.*`, inbound values are also removed when the context value is
+missing or is not a scalar. The backend therefore cannot receive a client-supplied value in place
+of an absent authorizer claim. An unresolved `method.request.*` mapping retains the existing
+HTTP proxy passthrough behavior.
+
+`method.request.*` sources always read the original inbound headers, query parameters and path
+parameters. Mapped destinations do not change another mapping's source, regardless of mapping order.
+Scalar `method.request.header.*` and `method.request.querystring.*` sources select the first
+inbound value.
+`method.request.multivalueheader.*` and `method.request.multivaluequerystring.*` preserve repeated
+values in either HTTP integration type. `stageVariables.*`, the raw `method.request.body` and
+`method.request.body.<JSONPath>` are supported too.
+
+Use alphanumeric or underscore authorizer context keys, as required by the
+[AWS mapping contract](https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-mapping-template-reference.html).
+For example, return `userClaims` in the authorizer context and map
+`integration.request.header.X-User-Claims` from `context.authorizer.userClaims`. The HTTP header
+name can contain hyphens. REST Lambda authorizer policy evaluation, response validation and
+result caching are handled separately from these integration mappings.
+
+A backend response body larger than the 10 MB API Gateway payload quota yields `413` with `{"message":"Request Entity Too Large"}`. The same limit applies to HTTP API `HTTP_PROXY` integrations.
+
 Passthrough keeps repeated values repeated, in both directions: `?tag=a&tag=b` reaches the backend as two `tag` parameters rather than one `tag=a,b`, a header sent twice arrives twice, and a backend that returns two `Set-Cookie` headers relays two to the caller. Comma-joining them would not be reversible, since a cookie's `Expires` attribute contains a comma of its own. An explicit `integration.request.header.X` or `integration.request.querystring.X` mapping overwrites, so it replaces any repeated inbound values with the single mapped one.
 
 `HTTP` (non-proxy) transforms in both directions instead:
 
 - **Request** : the body is the rendered `requestTemplates` entry selected by the incoming `Content-Type` (falling back to the type without its charset), subject to `passthroughBehavior` (`NEVER` and `WHEN_NO_TEMPLATES` return `415`). Only headers and query parameters named by `integration.request.*` mappings are forwarded; unmapped inbound headers are **not** passed through : that passthrough is `HTTP_PROXY`'s job.
 - **Response** : the backend's reply runs through the method's integration responses. As in AWS, `selectionPattern` is matched against the backend's **HTTP status code** (for `AWS`/Lambda integrations it is matched against the error message instead), so `"5\\d{2}"` on a `502` integration response remaps any backend `5xx` to `502`. The matched response's `responseTemplates` render the body, `responseParameters` map `integration.response.header.*` (case-insensitively) or `integration.response.body.<jsonpath>` onto `method.response.header.*`, and `$context.responseOverride` assignments take precedence. With no integration responses configured, the backend's status and body are relayed as-is.
+
+### Resource Method Introspection
+
+`GetResources` and `GetResource` return the configured HTTP method names in `resourceMethods`,
+with empty objects by default. Request `embed=methods` to include the supported method fields:
+authorization settings, request parameters and models, method responses, and integration
+configuration. Resources without methods omit `resourceMethods`.
+
+For example, `aws apigateway get-resources --rest-api-id <id> --embed methods` lists method
+metadata without a separate `get-method` call for each operation.
+
+### Stage OpenAPI Export
+
+`GetExport` returns a deployed REST API as OpenAPI 3.0 (`oas30`) or Swagger 2.0 (`swagger`).
+Set `Accept: application/json` (the default) or `application/yaml`. The response contains the
+specification body with `Content-Type` and `Content-Disposition` headers.
+
+```bash
+aws apigateway get-export --rest-api-id <id> --stage-name dev --export-type oas30 \
+  --parameters extensions=apigateway --accepts application/json api.json
+```
+
+By default, integration and authorizer definitions are omitted, while the authorization-type marker
+remains in each security scheme. A protected API exported without authorizer definitions cannot be
+safely re-imported: Floci returns `BadRequestException` before changing resources. For an importable
+protected definition, include `extensions=authorizers` or `extensions=apigateway`.
+Only schemes referenced by an operation's effective security requirements need a definition;
+unused schemes do not prevent re-import. Explicit operation security overrides API-level security,
+including an empty security list that makes the operation public.
+
+Request `extensions=integrations` or `extensions=authorizers` for the respective definitions;
+`extensions=apigateway` includes both, request validators, customized gateway responses, API policy
+and binary media types. Exports include stored methods (including ANY),
+request parameters and JSON models, response headers, security requirements, and supported integration
+settings. Exported integration types and passthrough settings use OpenAPI's lowercase spelling;
+import normalizes them to management API enum values.
+
+New deployments retain an export snapshot. Undeployed edits do not change it, and exporting another
+stage uses that stage's deployment. Deployment description updates preserve the snapshot. Older
+persisted deployments without a snapshot must be redeployed before export; Floci returns an explicit
+`BadRequestException` rather than exporting the live definition.
+
+This exports Floci's stored configuration, not the original uploaded document. Unsupported metadata,
+Postman extensions and full documentation exports are outside this operation's scope. Non-JSON models are rejected. Swagger supports only one body schema per
+operation, so methods using different request models per content type cannot be exported as Swagger;
+use `oas30` instead. Swagger response headers do not retain the method-response required flag.
+Integration responses must have distinct selection patterns to fit OpenAPI's response map. Duplicate
+patterns (including multiple default responses) and the literal regex `default`, which is reserved
+in that map, return `BadRequestException` rather than silently discarding or changing a response.
 
 ### Integration Settings
 
@@ -303,6 +530,7 @@ Passthrough keeps repeated values repeated, in both directions: `?tag=a&tag=b` r
 | `requestParameters` / `requestTemplates` | Applied at invoke time and returned on read-back |
 | `passthroughBehavior` | `NEVER` and `WHEN_NO_TEMPLATES` reject an unmatched Content-Type with `415` |
 | `timeoutInMillis` | Honoured; defaults to AWS's 29,000 ms. Values below 50 are rejected. The 29s ceiling is an edge-optimized limit, so Regional APIs may exceed it |
+| `responseTransferMode` | Defaults to `BUFFERED`. `STREAM` is accepted only for `HTTP_PROXY` and `AWS_PROXY` integrations and is stored and returned by the management API, but execution responses are still buffered; response streaming is not yet implemented |
 | `tlsConfig.insecureSkipVerification` | Honoured, with AWS's semantics: it stops requiring the backend certificate to be issued by a trusted CA, so a private-CA or self-signed backend is reachable, but expiration, hostname and the presence of a root certificate authority are still checked |
 | `contentHandling` | `CONVERT_TO_TEXT` base64-encodes a binary request for mapping templates; `CONVERT_TO_BINARY` base64-decodes a text request before sending it |
 | `connectionType` / `connectionId` | `VPC_LINK` requires `connectionId` to name an existing, available VPC link; an unknown link yields `502` |
@@ -322,6 +550,12 @@ Response caching needs both switches AWS requires: `cacheClusterEnabled` on the 
 ### VPC Links
 
 The five REST VPC Link operations (`CreateVpcLink`, `GetVpcLink`, `GetVpcLinks`, `UpdateVpcLink`, `DeleteVpcLink`) are emulated at `/vpclinks`. `CreateVpcLink` requires a name and at least one target ARN, answers `202`, and provisions the link as `AVAILABLE` immediately rather than transitioning through `PENDING`. Since Floci has no real VPC, a valid link routes straight to the integration URI; what is enforced is that the link exists and is available. `UpdateVpcLink` follows AWS's patch-operation table: only `replace` on `/name` and `/description` is accepted, and any other operation or path returns `BadRequestException` rather than being applied or silently ignored.
+
+
+REST API VPC links also support `GetTags`, `TagResource` and `UntagResource` with the ARN
+`arn:{partition}:apigateway:{region}::/vpclinks/{vpcLinkId}`. Creation tags and later updates
+are shared with `GetVpcLink`; tagging does not replace the link. These are REST API (v1)
+links, separate from HTTP API (v2) VPC links.
 
 ### Examples
 
@@ -423,6 +657,16 @@ setups, and `floci:override-id` wins when both are present. Every other tag is p
 
 ---
 
+## Partitions
+
+Edge-optimized APIs and custom domains (`EDGE`) exist only in the commercial partition: China
+has CloudFront but no edge-optimized API Gateway, and GovCloud, EUSC and the ISO partitions have
+no CloudFront. Floci enforces this for REST APIs and custom domains: creating either with `EDGE`,
+or switching one to it with `UpdateRestApi` or `UpdateDomainName`, outside the commercial partition
+is a `BadRequestException`. `REGIONAL` APIs and domains work in every partition (private custom
+domains are not emulated). Invoke URLs use the partition's DNS suffix
+(`<api-id>.execute-api.cn-north-1.amazonaws.com.cn`). See [AWS Partitions](../configuration/partitions.md).
+
 ## Configuration
 
 | Variable | Default | Description |
@@ -464,12 +708,64 @@ When an API has a `$default` stage, callers may omit the stage segment:
 curl http://{apiId}.execute-api.localhost.floci.io:4566/{path}
 ```
 
+The region-bearing form a client derives from a stage's invoke URL is accepted on the
+same domain, as it is on `localhost` and the configured `FLOCI_HOSTNAME`:
+
+```bash
+curl http://{apiId}.execute-api.{region}.localhost.floci.io:4566/{stageName}/{path}
+```
+
 APIs created or updated with `disableExecuteApiEndpoint` reject requests to
 this default hostname with `404 Not Found`, matching AWS HTTP API behavior.
+
+A Lambda proxy integration's response is read as AWS reads it (measured): a function that raises, a
+format 1.0 result that is not an object with a `statusCode`, and a `statusCode` that is not a whole
+number from 100 to 599 (text that spells one, such as `"201"`, is taken) are answered `500` with
+`{"message":"Internal Server Error"}`, and so are a `body` that is an object or a list, an
+`isBase64Encoded` that Go's `strconv.ParseBool` would not read (`"True"`, `"t"` and `1` are true,
+`"yes"` and `2` are not read), and a `body` said to be base64 that does not decode. A number or a
+boolean `body` is its text. Format 2.0 takes a result without a `statusCode` as a `200` whose body
+is the result itself.
+
+A result that carries a `statusCode` and a `body` and no `Content-Type` header of its own is
+answered `text/plain; charset=utf-8`, in both payload formats (measured). A REST (v1) API keeps
+answering `application/json`.
+
+An API with a `corsConfiguration` applies it as AWS does (measured). It ignores the CORS headers an
+integration returns, and sets its own on whatever answers a route: the integration, or API Gateway
+itself refusing the request (a JWT or Lambda authorizer's `401` or `403`, an unsigned call to an
+`AWS_IAM` route's `403`) or failing it (a function that is gone, or that API Gateway may not invoke,
+answers `500` `Internal Server Error`; one Lambda throttles, `503` `Service Unavailable`). An
+`OPTIONS` request no route matches is answered `204`, preflight or not. A request whose `Origin` is
+allowed gets `Access-Control-Allow-Origin`, and `Access-Control-Allow-Credentials` and
+`Access-Control-Expose-Headers` when configured, whatever its method. A preflight (an `OPTIONS`
+request with `Origin` and `Access-Control-Request-Method`) gets the origin, credentials,
+`Access-Control-Allow-Methods`, `Access-Control-Allow-Headers` and `Access-Control-Max-Age` instead,
+and only when the method and every header it asks for are allowed; otherwise no CORS header at all.
+A preflight a route matches (an `OPTIONS` or `ANY` route, or `$default`) goes through that route, so
+its authorizer and its integration answer it; one no route matches is answered `204` by API Gateway.
+A preflight that gets them always carries `Access-Control-Allow-Headers`, empty when none are
+configured, and `Vary: origin` unless `allowOrigins` is a single exact origin or `*`; no other
+response gets a `Vary`. Lists are joined with a bare comma. A path no route matches, or a route
+without a target, answers `404` with none of them. An API without a configuration leaves CORS to its
+integrations.
 
 Routes carrying `authorizationType: AWS_IAM`: including those an OpenAPI import resolves from an
 `awsSigv4` security scheme: require a signed caller; see
 [IAM Authorization](#iam-authorization).
+
+Lambda authorizer policies are evaluated the same way for REST APIs, HTTP APIs (payload
+formats 1.0 and 2.0) and WebSocket `$connect` routes, against the request's execute-api ARN.
+An invocation requires a matching `execute-api:Invoke` Allow; a matching Deny takes
+precedence regardless of statement order. Statements may be an object or an array,
+and actions and resources may be strings or arrays with wildcards. No matching Allow
+returns 403; a malformed policy returns 500. HTTP API simple responses continue to
+use `isAuthorized` instead of an IAM policy.
+
+Conditions can test `aws:SourceIp` (IPv4 and IPv6 CIDR ranges), `aws:SecureTransport` and
+`aws:CurrentTime`. The source IP is the connection's transport address, so a
+caller-supplied `X-Forwarded-For` header does not override it. An empty `Condition`
+object places no condition on its statement, as in IAM.
 
 ### Supported Operations
 
@@ -484,12 +780,39 @@ Routes carrying `authorizationType: AWS_IAM`: including those an OpenAPI import 
 | **Stages** | CreateStage, GetStage, GetStages, UpdateStage, DeleteStage, ResetAuthorizersCache |
 | **Deployments** | CreateDeployment, GetDeployment, GetDeployments, UpdateDeployment, DeleteDeployment |
 | **Models** | CreateModel, GetModel, GetModels, UpdateModel, DeleteModel |
-| **VPC Links** | CreateVpcLink, GetVpcLink, GetVpcLinks, UpdateVpcLink, DeleteVpcLink |
 | **Domain Names** | CreateDomainName, GetDomainName, GetDomainNames, UpdateDomainName, DeleteDomainName |
-| **CORS** | DeleteCorsConfiguration |
-| **Export** | ExportApi (OAS30 JSON) |
-| **API Mappings** | CreateApiMapping, GetApiMapping, GetApiMappings, DeleteApiMapping |
+| **API Mappings** | CreateApiMapping, GetApiMapping, GetApiMappings, UpdateApiMapping, DeleteApiMapping |
+| **VPC Links** | CreateVpcLink, GetVpcLink, GetVpcLinks, UpdateVpcLink, DeleteVpcLink |
 | **Tags** | TagResource, UntagResource, GetTags |
+
+`TagResource`, `UntagResource` and `GetTags` accept API, stage and VPC link ARNs
+(`arn:<partition>:apigateway:<region>::/vpclinks/<vpcLinkId>`). `UpdateVpcLink` changes only the
+name, as in the API model.
+
+### Custom Domain Names and API Mappings
+
+A custom domain created through either API is one record, routed by its `Host` header as
+described under [Custom Domain Names](#custom-domain-names); an API mapping sends the request to
+the mapped stage of an HTTP, WebSocket or REST API. A REST API can be mapped under a key with
+several levels, such as `orders/v1`, which only the v2 API creates.
+
+`CreateDomainName` and `UpdateDomainName` take exactly one domain name configuration and refuse
+mutual TLS, ownership verification certificates, an IP address type other than `ipv4` and a routing
+mode other than `API_MAPPING_ONLY`; an update replaces the configuration as a whole. As on AWS, a v2
+domain is regional: the `EDGE` endpoint type is refused, and any other one, `PRIVATE` included,
+gives a `REGIONAL` domain, whose certificate the v1 API reports as
+`regionalCertificateArn`. The v2 API does not manage an edge-optimized domain, an HTTP API or a key
+with several levels needs a domain on the `TLS_1_2` security policy (so such a domain cannot leave
+it), and a WebSocket API cannot share a domain with an HTTP or REST API.
+
+A mapping key holds letters, digits and `$-_.+!*'(),`, with `/` between its levels, at most 300
+characters; it does not start or end with `/` or hold `//`. No key, an empty one, or on a create one
+of whitespace only, is the root mapping. `UpdateApiMapping` changes only what it names, and a
+mapping keeps its `apiMappingId` when its key changes. The keys and their messages were measured
+against API Gateway.
+
+Templates can create domains and mappings with `AWS::ApiGatewayV2::DomainName` and
+`AWS::ApiGatewayV2::ApiMapping`; see [CloudFormation](cloudformation.md).
 
 ### WebSocket Data-Plane {#websocket-data-plane}
 
@@ -550,9 +873,7 @@ DELETE /execute-api/{apiId}/{stageName}/@connections/{connectionId}  : Disconnec
 
 ### Not Implemented
 
-- `ReimportApi`, `UpdateApiMapping`
-- Domain-name routing rules
-- Real VPC connectivity behind a VPC link (control-plane CRUD is emulated; links become `AVAILABLE` immediately)
+- `ExportApi`
 
 ### Examples
 

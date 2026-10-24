@@ -5,16 +5,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.cbor.CBORFactory;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.TestProfile;
 import io.quarkus.test.junit.QuarkusTestProfile;
+import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
-import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.equalTo;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @QuarkusTest
@@ -44,6 +44,23 @@ class ServiceEnablementIntegrationTest {
     }
 
     @Test
+    void aTargetedRequestWithAnUnrecognisedSmithyProtocolIsStillRejected() {
+        // No protocol claims it, so it is served as its route is: as a call to acm, which is disabled.
+        given()
+            .contentType("application/x-amz-json-1.1")
+            .header("X-Amz-Target", "CertificateManager.ListCertificates")
+            .header("smithy-protocol", "unrecognised")
+            .body("{}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .contentType("application/json")
+            .body("__type", equalTo("ServiceNotAvailableException"))
+            .body("message", equalTo("Service acm is not enabled."));
+    }
+
+    @Test
     void ecsTargetedRequestsAreRejected() {
         given()
             .contentType("application/x-amz-json-1.1")
@@ -56,6 +73,20 @@ class ServiceEnablementIntegrationTest {
             .contentType("application/json")
             .body("__type", equalTo("ServiceNotAvailableException"))
             .body("message", equalTo("Service ecs is not enabled."));
+    }
+
+    @Test
+    void legacySwfJsonRequestsAreRejectedWhenServiceDisabled() {
+        given()
+            .contentType("application/json; charset=UTF-8")
+            .header("X-Amz-Target", "com.amazonaws.swf.service.model.SimpleWorkflowService.ListDomains")
+            .body("{\"registrationStatus\":\"REGISTERED\"}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ServiceNotAvailableException"))
+            .body("message", equalTo("Service swf is not enabled."));
     }
 
     @Test
@@ -91,6 +122,16 @@ class ServiceEnablementIntegrationTest {
     }
 
     @Test
+    void signedQueryGetIsRejectedWhenItsServiceIsDisabled() {
+        given().header("Authorization", authorization("sqs"))
+                .queryParam("Action", "ListQueues").queryParam("Version", "2012-11-05")
+                .get("/").then().statusCode(400)
+                .contentType("application/xml")
+                .body(containsString("<Code>ServiceNotAvailableException</Code>"))
+                .body(containsString("<Message>Service sqs is not enabled.</Message>"));
+    }
+
+    @Test
     void dynamodbTargetedCborRequestsReturnCborErrors() throws Exception {
         JsonNode body = cborBody(
                 given()
@@ -117,6 +158,27 @@ class ServiceEnablementIntegrationTest {
                     .contentType("application/cbor")
                     .accept("application/cbor")
                     .header("Authorization", authorization("dynamodb"))
+                    .body(CBOR_MAPPER.writeValueAsBytes(Map.of()))
+                .when()
+                    .post("/service/DynamoDB/operation/ListTables")
+                .then()
+                    .statusCode(400)
+                    .contentType("application/cbor")
+                    .extract().asByteArray()
+        );
+
+        assertEquals("ServiceNotAvailableException", body.get("__type").asText());
+        assertEquals("Service dynamodb is not enabled.", body.get("message").asText());
+    }
+
+    @Test
+    void anRpcV2CallWithAnUnrecognisedSmithyProtocolIsStillRejected() throws Exception {
+        // Unsigned, so only the path it is routed by names the service.
+        JsonNode body = cborBody(
+                given()
+                    .contentType("application/cbor")
+                    .accept("application/cbor")
+                    .header("smithy-protocol", "unrecognised")
                     .body(CBOR_MAPPER.writeValueAsBytes(Map.of()))
                 .when()
                     .post("/service/DynamoDB/operation/ListTables")
@@ -170,6 +232,49 @@ class ServiceEnablementIntegrationTest {
             .body("message", equalTo("Service fis is not enabled."));
     }
 
+    /**
+     * {@code CodeArtifactMavenController} and {@code CodeArtifactPypiController} serve a real
+     * package-manager wire protocol, not a CodeArtifact JSON API action, so nothing about a
+     * request to either carries a SigV4 signature or an {@code X-Amz-Target} for
+     * {@code ServiceEnabledFilter} to resolve a service from the normal ways. Both must still be
+     * registered in the {@code codeartifact} descriptor's own resource-class set, matched by JAX-RS
+     * routing alone: without that registration a disabled codeartifact service does not stop
+     * either from reaching its own token check and responding with a 401 instead of ever saying
+     * the service itself is unavailable. Caught after CodeArtifactPypiController needed the exact
+     * same registration CodeArtifactMavenController had been missing.
+     */
+    @Test
+    void mavenWireProtocolRequestsAreRejectedWhenServiceDisabled() {
+        given()
+            .header("Authorization", "Bearer whatever")
+        .when()
+            .get("/codeartifact/maven/some-domain/some-repo/some/path/1.0/file.jar")
+        .then()
+            .statusCode(400)
+            .contentType("application/json")
+            .header("X-Amzn-Errortype", "ServiceNotAvailableException")
+            .body("__type", equalTo("ServiceNotAvailableException"))
+            .body("message", equalTo("Service codeartifact is not enabled."));
+    }
+
+    @Test
+    void pypiWireProtocolRequestsAreRejectedWhenServiceDisabled() {
+        // Not the bare "/simple/" root: AWS doesn't support that path either (only
+        // /simple/<project>/ is), so Floci has no route for it at all, and a request to a
+        // genuinely unrouted path 404s before this filter ever runs. "/simple/<project>/" is a
+        // real, routed endpoint, so it still demonstrates the service-disabled rejection.
+        given()
+            .header("Authorization", "Bearer whatever")
+        .when()
+            .get("/codeartifact/pypi/some-domain/some-repo/simple/some-pkg/")
+        .then()
+            .statusCode(400)
+            .contentType("application/json")
+            .header("X-Amzn-Errortype", "ServiceNotAvailableException")
+            .body("__type", equalTo("ServiceNotAvailableException"))
+            .body("message", equalTo("Service codeartifact is not enabled."));
+    }
+
     @Test
     void signedRdsDataExecuteRequestsReturnJsonWhenServiceDisabled() {
         given()
@@ -203,13 +308,15 @@ class ServiceEnablementIntegrationTest {
         public Map<String, String> getConfigOverrides() {
             return Map.of(
                     "floci.services.acm.enabled", "false",
+                    "floci.services.codeartifact.enabled", "false",
                     "floci.services.dynamodb.enabled", "false",
                     "floci.services.ecs.enabled", "false",
                     "floci.services.fis.enabled", "false",
                     "floci.services.lambda.enabled", "false",
                     "floci.services.opensearch.enabled", "false",
                     "floci.services.rds-data.enabled", "false",
-                    "floci.services.sqs.enabled", "false"
+                    "floci.services.sqs.enabled", "false",
+                    "floci.services.swf.enabled", "false"
             );
         }
     }

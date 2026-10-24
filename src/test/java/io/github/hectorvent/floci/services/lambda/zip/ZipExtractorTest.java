@@ -11,10 +11,11 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Stream;
 import java.util.zip.CRC32;
 import java.util.zip.Deflater;
-import java.util.zip.ZipException;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipException;
 import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -35,7 +36,7 @@ class ZipExtractorTest {
     }
 
     /** Build a ZIP whose entry names use the given separator, as PowerShell does. */
-    private static byte[] zipWith(String entryName, String content) throws IOException {
+    static byte[] zipWith(String entryName, String content) throws IOException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         try (ZipOutputStream zos = new ZipOutputStream(baos)) {
             zos.putNextEntry(new ZipEntry(entryName));
@@ -446,10 +447,40 @@ class ZipExtractorTest {
     }
 
     private static void assertNoStagingArtefacts(Path codeStore) throws IOException {
-        try (var entries = Files.list(codeStore)) {
+        try (Stream<Path> entries = Files.list(codeStore)) {
             assertEquals(List.of("fn"), entries.map(p -> p.getFileName().toString()).sorted().toList(),
                     "no staged archive or staging directory may survive extraction, successful or failed");
         }
+    }
+
+    @Test
+    void extractsAnArchiveFileWithoutStagingACopy(@TempDir Path codeStore) throws IOException {
+        Path archive = codeStore.resolve("code.zip");
+        Files.write(archive, zipWith("index.js", "v1"));
+        Path target = codeStore.resolve("fn");
+
+        extractor.extractTo(archive, target, ZipExtractor.DEFAULT_MAX_ENTRIES);
+
+        assertEquals("v1", Files.readString(target.resolve("index.js")));
+        try (Stream<Path> entries = Files.list(codeStore)) {
+            assertEquals(List.of("code.zip", "fn"), entries.map(p -> p.getFileName().toString()).sorted().toList());
+        }
+    }
+
+    @Test
+    void aPackageMayExpandToTheLimitItIsGiven(@TempDir Path codeStore) throws IOException {
+        long limit = 512L * 1024 * 1024;
+        Path archive = codeStore.resolve("code.zip");
+        Path target = codeStore.resolve("fn");
+        Files.write(archive, zipWithDeclaredSizes(300L * 1024 * 1024, 212L * 1024 * 1024));
+
+        extractor.extractTo(archive, target, ZipExtractor.DEFAULT_MAX_ENTRIES, limit);
+        assertTrue(Files.exists(target.resolve("entry0")));
+
+        Files.write(archive, zipWithDeclaredSizes(300L * 1024 * 1024, 212L * 1024 * 1024 + 1));
+        IOException thrown = assertThrows(IOException.class,
+                () -> extractor.extractTo(archive, target, ZipExtractor.DEFAULT_MAX_ENTRIES, limit));
+        assertEquals("ZIP archive exceeds the 536870912 byte expanded limit", thrown.getMessage());
     }
 
     @Test
@@ -536,7 +567,7 @@ class ZipExtractorTest {
         assertTrue(Files.isRegularFile(target.resolve("index.js")),
                 "a failed install must put the previous package back, not leave the function empty");
         assertEquals("v1", Files.readString(target.resolve("index.js")));
-        try (var entries = Files.list(codeStore)) {
+        try (Stream<Path> entries = Files.list(codeStore)) {
             assertEquals(List.of("fn"), entries.map(p -> p.getFileName().toString()).sorted().toList(),
                     "the restored package must not leave a renamed copy behind");
         }
@@ -554,7 +585,7 @@ class ZipExtractorTest {
 
         assertEquals("v2", Files.readString(target.resolve("index.js")));
         assertFalse(Files.exists(target.resolve("removed.js")), "install must replace, not merge");
-        try (var entries = Files.list(codeStore)) {
+        try (Stream<Path> entries = Files.list(codeStore)) {
             assertEquals(List.of("fn"), entries.map(p -> p.getFileName().toString()).sorted().toList(),
                     "neither the staging tree nor the superseded package may survive");
         }
@@ -583,7 +614,7 @@ class ZipExtractorTest {
             assertEquals("v2", Files.readString(target.resolve("index.js")),
                     "the new package must be installed even though the old one could not be removed");
         } finally {
-            try (var stream = Files.list(codeStore)) {
+            try (Stream<Path> stream = Files.list(codeStore)) {
                 for (Path p : stream.toList()) {
                     Path stuck = p.resolve("locked");
                     if (Files.isDirectory(stuck)) {

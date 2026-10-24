@@ -31,11 +31,13 @@ public class TableDefinition {
     private Map<String, String> tags;
     private List<GlobalSecondaryIndex> globalSecondaryIndexes;
     private List<LocalSecondaryIndex> localSecondaryIndexes;
+    private List<VectorIndex> vectorIndexes;
     private String billingMode; // "PROVISIONED" or "PAY_PER_REQUEST"
     private String ttlAttributeName;
     private boolean ttlEnabled;
     private boolean pointInTimeRecoveryEnabled;
     private int pointInTimeRecoveryRecoveryPeriodInDays;
+    private Instant pointInTimeRecoveryStartDateTime;
     private boolean deletionProtectionEnabled;
     private boolean streamEnabled;
     private String streamArn;
@@ -53,6 +55,7 @@ public class TableDefinition {
     // Replica regions for a global table (single-process emulator backs them all with this table's
     // data; the list drives the DescribeTable Replicas/GlobalTableVersion projection).
     private List<String> replicaRegions;
+    private String globalTableHomeRegion;
     // Resource-based policy attached via PutResourcePolicy (JSON policy document text), and the
     // opaque revision id AWS hands back so callers can pass ExpectedRevisionId for optimistic
     // concurrency on subsequent Put/DeleteResourcePolicy calls. Null when no policy is attached.
@@ -65,6 +68,7 @@ public class TableDefinition {
         this.tags = new HashMap<>();
         this.globalSecondaryIndexes = new ArrayList<>();
         this.localSecondaryIndexes = new ArrayList<>();
+        this.vectorIndexes = new ArrayList<>();
         this.pointInTimeRecoveryRecoveryPeriodInDays = 35;
         this.kinesisStreamingDestinations = new ArrayList<>();
         this.contributorInsightsStatus = "DISABLED";
@@ -75,7 +79,7 @@ public class TableDefinition {
     public TableDefinition(String tableName,
                             List<KeySchemaElement> keySchema,
                             List<AttributeDefinition> attributeDefinitions) {
-        this(tableName, keySchema, attributeDefinitions, "us-east-1", "000000000000");
+        this(tableName, keySchema, attributeDefinitions, "us-east-1", "000000000000"); // partition-literal: test-shaped constructor default
     }
 
     public TableDefinition(String tableName,
@@ -95,6 +99,7 @@ public class TableDefinition {
         this.tags = new HashMap<>();
         this.globalSecondaryIndexes = new ArrayList<>();
         this.localSecondaryIndexes = new ArrayList<>();
+        this.vectorIndexes = new ArrayList<>();
         this.pointInTimeRecoveryRecoveryPeriodInDays = 35;
         this.kinesisStreamingDestinations = new ArrayList<>();
         this.contributorInsightsStatus = "DISABLED";
@@ -142,6 +147,16 @@ public class TableDefinition {
         this.localSecondaryIndexes = localSecondaryIndexes != null ? localSecondaryIndexes : new ArrayList<>();
     }
 
+    public List<VectorIndex> getVectorIndexes() {
+        if (vectorIndexes == null) {
+            vectorIndexes = new ArrayList<>();
+        }
+        return vectorIndexes;
+    }
+    public void setVectorIndexes(List<VectorIndex> vectorIndexes) {
+        this.vectorIndexes = vectorIndexes != null ? vectorIndexes : new ArrayList<>();
+    }
+
     public String getBillingMode() { return billingMode; }
     public void setBillingMode(String billingMode) { this.billingMode = billingMode; }
 
@@ -159,6 +174,11 @@ public class TableDefinition {
     public int getPointInTimeRecoveryRecoveryPeriodInDays() { return pointInTimeRecoveryRecoveryPeriodInDays; }
     public void setPointInTimeRecoveryRecoveryPeriodInDays(int pointInTimeRecoveryRecoveryPeriodInDays) {
         this.pointInTimeRecoveryRecoveryPeriodInDays = pointInTimeRecoveryRecoveryPeriodInDays;
+    }
+
+    public Instant getPointInTimeRecoveryStartDateTime() { return pointInTimeRecoveryStartDateTime; }
+    public void setPointInTimeRecoveryStartDateTime(Instant pointInTimeRecoveryStartDateTime) {
+        this.pointInTimeRecoveryStartDateTime = pointInTimeRecoveryStartDateTime;
     }
 
     public boolean isDeletionProtectionEnabled() { return deletionProtectionEnabled; }
@@ -210,6 +230,13 @@ public class TableDefinition {
     }
     public void setReplicaRegions(List<String> replicaRegions) {
         this.replicaRegions = replicaRegions != null ? replicaRegions : new ArrayList<>();
+    }
+
+    // The region that owns the table once it has become a global table. On AWS a global table lists
+    // its own home region as an ACTIVE replica alongside the others; null means a plain table.
+    public String getGlobalTableHomeRegion() { return globalTableHomeRegion; }
+    public void setGlobalTableHomeRegion(String globalTableHomeRegion) {
+        this.globalTableHomeRegion = globalTableHomeRegion;
     }
 
     public Integer getOnDemandMaxReadRequestUnits() { return onDemandMaxReadRequestUnits; }
@@ -308,6 +335,16 @@ public class TableDefinition {
         }
         return localSecondaryIndexes.stream()
                 .filter(l -> indexName.equals(l.getIndexName()))
+                .findFirst();
+    }
+
+    @JsonIgnore
+    public Optional<VectorIndex> findVectorIndex(String indexName) {
+        if (vectorIndexes == null || vectorIndexes.isEmpty() || indexName == null) {
+            return Optional.empty();
+        }
+        return vectorIndexes.stream()
+                .filter(v -> indexName.equals(v.getIndexName()))
                 .findFirst();
     }
 }

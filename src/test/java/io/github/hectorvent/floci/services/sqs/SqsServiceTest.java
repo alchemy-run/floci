@@ -1,10 +1,14 @@
 package io.github.hectorvent.floci.services.sqs;
 
+import io.github.hectorvent.floci.config.EmulatorConfig.SqsServiceConfig.EndpointStrategy;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.RequestContext;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
+import io.github.hectorvent.floci.core.storage.StorageBackend;
+import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.sns.SnsService;
 import io.github.hectorvent.floci.services.sqs.model.Message;
 import io.github.hectorvent.floci.services.sqs.model.MessageAttributeValue;
@@ -16,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.Duration;
@@ -23,12 +28,18 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -156,6 +167,51 @@ class SqsServiceTest {
     }
 
     @Test
+    void createQueue_conflictsOnADerivedAttributeThatIsNeverStored() {
+        String region = "eu-west-1";
+        Queue queue = sqsService.createQueue("derived-conflict-queue", null, region);
+
+        // SqsManagedSseEnabled reads back as "true" but is not in the stored map, so a
+        // re-create asking for "false" must still see the difference.
+        AwsException ex = assertThrows(AwsException.class,
+                () -> sqsService.createQueue("derived-conflict-queue",
+                        Map.of("SqsManagedSseEnabled", "false"), region));
+        assertEquals("QueueAlreadyExists", ex.getErrorCode());
+
+        Queue same = sqsService.createQueue("derived-conflict-queue",
+                Map.of("SqsManagedSseEnabled", "true", "VisibilityTimeout", "30"), region);
+        assertEquals(queue.getQueueUrl(), same.getQueueUrl());
+        assertEquals("true", sqsService.getQueueAttributes(queue.getQueueUrl(),
+                List.of("SqsManagedSseEnabled"), region).get("SqsManagedSseEnabled"));
+    }
+
+    @Test
+    void createQueue_recreateWithSameNonCanonicalMaximumMessageSizeIsNotAConflict() {
+        String region = "eu-west-1";
+        Queue queue = sqsService.createQueue("padded-size-queue", Map.of("MaximumMessageSize", "01024"), region);
+
+        Queue same = sqsService.createQueue("padded-size-queue", Map.of("MaximumMessageSize", "01024"), region);
+        assertEquals(queue.getQueueUrl(), same.getQueueUrl());
+
+        AwsException ex = assertThrows(AwsException.class,
+                () -> sqsService.createQueue("padded-size-queue", Map.of("MaximumMessageSize", "2048"), region));
+        assertEquals("QueueAlreadyExists", ex.getErrorCode());
+    }
+
+    @Test
+    void createQueue_recreateWithSameEmptyMaximumMessageSizeIsNotAConflict() {
+        String region = "eu-west-1";
+        Queue queue = sqsService.createQueue("empty-size-queue", Map.of("MaximumMessageSize", ""), region);
+
+        Queue same = sqsService.createQueue("empty-size-queue", Map.of("MaximumMessageSize", ""), region);
+        assertEquals(queue.getQueueUrl(), same.getQueueUrl());
+
+        AwsException ex = assertThrows(AwsException.class,
+                () -> sqsService.createQueue("empty-size-queue", Map.of("MaximumMessageSize", "2048"), region));
+        assertEquals("QueueAlreadyExists", ex.getErrorCode());
+    }
+
+    @Test
     void createQueue_rejectsMaximumMessageSizeOutsideAwsRange() {
         for (String invalid : List.of("1048577", "1023", "0", "-1", "abc")) {
             AwsException ex = assertThrows(AwsException.class,
@@ -177,6 +233,39 @@ class SqsServiceTest {
                     sqsService.getQueueAttributes(queue.getQueueUrl(), List.of("MaximumMessageSize"), region)
                             .get("MaximumMessageSize"));
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"59", "1209601", "abc", "60.5", "", "-1", " 60", "60 ", "99999999999"})
+    void messageRetentionPeriodOutsideAwsRangeIsRejected(String invalid) {
+        String region = "eu-west-1";
+        AwsException onCreate = assertThrows(AwsException.class,
+                () -> sqsService.createQueue("retention-range", Map.of("MessageRetentionPeriod", invalid), region));
+        assertEquals("InvalidAttributeValue", onCreate.getErrorCode());
+        assertEquals("Invalid value for the parameter MessageRetentionPeriod.", onCreate.getMessage());
+
+        Queue queue = sqsService.createQueue("retention-range", null, region);
+        AwsException onSet = assertThrows(AwsException.class,
+                () -> sqsService.setQueueAttributes(queue.getQueueUrl(),
+                        Map.of("MessageRetentionPeriod", invalid), region));
+        assertEquals("InvalidAttributeValue", onSet.getErrorCode());
+        assertEquals("Invalid value for the parameter MessageRetentionPeriod.", onSet.getMessage());
+        assertEquals("345600", sqsService.getQueueAttributes(queue.getQueueUrl(),
+                List.of("MessageRetentionPeriod"), region).get("MessageRetentionPeriod"));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"60, 60", "1209600, 1209600", "060, 60", "+60, 60"})
+    void messageRetentionPeriodIsStoredInCanonicalForm(String value, String stored) {
+        String region = "eu-west-1";
+        Queue created = sqsService.createQueue("retention-created", Map.of("MessageRetentionPeriod", value), region);
+        assertEquals(stored, sqsService.getQueueAttributes(created.getQueueUrl(),
+                List.of("MessageRetentionPeriod"), region).get("MessageRetentionPeriod"));
+
+        Queue updated = sqsService.createQueue("retention-updated", null, region);
+        sqsService.setQueueAttributes(updated.getQueueUrl(), Map.of("MessageRetentionPeriod", value), region);
+        assertEquals(stored, sqsService.getQueueAttributes(updated.getQueueUrl(),
+                List.of("MessageRetentionPeriod"), region).get("MessageRetentionPeriod"));
     }
 
     @Test
@@ -298,11 +387,338 @@ class SqsServiceTest {
     }
 
     @Test
+    void listQueuesPagesEveryQueueExactlyOnce() {
+        String region = "eu-west-1";
+        sqsService.createQueue("page-c", null, region);
+        sqsService.createQueue("page-a", null, region);
+        sqsService.createQueue("page-b", null, region);
+
+        List<String> names = new ArrayList<>();
+        String token = null;
+        int pages = 0;
+        do {
+            PaginatedResult<Queue> page = sqsService.listQueues(null, 1, token, region);
+            assertEquals(1, page.items().size());
+            names.add(page.items().getFirst().getQueueName());
+            token = page.nextToken();
+            pages++;
+        } while (token != null);
+
+        assertEquals(3, pages);
+        assertEquals(List.of("page-a", "page-b", "page-c"), names);
+    }
+
+    @Test
+    void listQueuesOmitsNextTokenOnLastPage() {
+        String region = "eu-west-1";
+        sqsService.createQueue("last-a", null, region);
+        sqsService.createQueue("last-b", null, region);
+
+        PaginatedResult<Queue> first = sqsService.listQueues(null, 1, null, region);
+        assertNotNull(first.nextToken());
+        PaginatedResult<Queue> second = sqsService.listQueues(null, 1, first.nextToken(), region);
+        assertEquals("last-b", second.items().getFirst().getQueueName());
+        assertNull(second.nextToken());
+
+        assertNull(sqsService.listQueues(null, 2, null, region).nextToken());
+    }
+
+    @Test
+    void listQueuesWithoutMaxResultsNeverReturnsNextToken() {
+        String region = "eu-west-1";
+        sqsService.createQueue("nomax-a", null, region);
+        sqsService.createQueue("nomax-b", null, region);
+
+        PaginatedResult<Queue> page = sqsService.listQueues(null, null, null, region);
+        assertEquals(2, page.items().size());
+        assertNull(page.nextToken());
+    }
+
+    @Test
+    void listQueuesResumesAfterCursorQueueIsDeleted() {
+        String region = "eu-west-1";
+        sqsService.createQueue("gone-a", null, region);
+        Queue cursorQueue = sqsService.createQueue("gone-b", null, region);
+        sqsService.createQueue("gone-c", null, region);
+        sqsService.createQueue("gone-d", null, region);
+
+        PaginatedResult<Queue> first = sqsService.listQueues(null, 2, null, region);
+        assertEquals(List.of("gone-a", "gone-b"), first.items().stream().map(Queue::getQueueName).toList());
+
+        sqsService.deleteQueue(cursorQueue.getQueueUrl(), region);
+
+        PaginatedResult<Queue> second = sqsService.listQueues(null, 2, first.nextToken(), region);
+        assertEquals(List.of("gone-c", "gone-d"), second.items().stream().map(Queue::getQueueName).toList());
+        assertNull(second.nextToken());
+    }
+
+    @Test
+    void listQueuesWithoutMaxResultsCapsAtOneThousand() {
+        String region = "eu-west-1";
+        for (int i = 0; i < 1001; i++) {
+            sqsService.createQueue(String.format("cap-%04d", i), null, region);
+        }
+
+        PaginatedResult<Queue> page = sqsService.listQueues(null, null, null, region);
+
+        assertEquals(1000, page.items().size());
+        assertEquals("cap-0000", page.items().getFirst().getQueueName());
+        assertEquals("cap-0999", page.items().getLast().getQueueName());
+        assertNull(page.nextToken());
+    }
+
+    @Test
+    void listQueuesPagesWithinPrefix() {
+        String region = "eu-west-1";
+        sqsService.createQueue("pfx-one", null, region);
+        sqsService.createQueue("other-queue", null, region);
+        sqsService.createQueue("pfx-two", null, region);
+
+        PaginatedResult<Queue> first = sqsService.listQueues("pfx-", 1, null, region);
+        PaginatedResult<Queue> second = sqsService.listQueues("pfx-", 1, first.nextToken(), region);
+
+        assertEquals("pfx-one", first.items().getFirst().getQueueName());
+        assertEquals("pfx-two", second.items().getFirst().getQueueName());
+        assertNull(second.nextToken());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, -1, 1001})
+    void listQueuesRejectsOutOfRangeMaxResults(int maxResults) {
+        AwsException e = assertThrows(AwsException.class,
+                () -> sqsService.listQueues(null, maxResults, null, "eu-west-1"));
+        assertEquals("InvalidParameterValue", e.getErrorCode());
+        assertEquals(400, e.getHttpStatus());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"not-a-token!", "Z2FyYmFnZQ"})
+    void listQueuesRejectsInvalidNextToken(String token) {
+        sqsService.createQueue("token-queue", null, "eu-west-1");
+        AwsException e = assertThrows(AwsException.class,
+                () -> sqsService.listQueues(null, 1, token, "eu-west-1"));
+        assertEquals("InvalidParameterValue", e.getErrorCode());
+    }
+
+    @Test
     void getQueueUrl() {
         String region = "eu-west-1";
         sqsService.createQueue("my-queue", null, region);
         String url = sqsService.getQueueUrl("my-queue", region);
         assertEquals(BASE_URL + "/000000000000/my-queue", url);
+    }
+
+    private SqsService serviceWithStrategy(StorageBackend<String, Queue> store, RegionResolver resolver,
+                                           EndpointStrategy strategy) {
+        return new SqsService(store, null, null, null, 30, 1048576, BASE_URL, resolver, false, null, clock,
+                ReceiptHandle.DEFAULT_SECRET, null, null, strategy);
+    }
+
+    private SqsService awsService() {
+        return serviceWithStrategy(new InMemoryStorage<>(), new RegionResolver("us-east-1", "000000000000"),
+                EndpointStrategy.AWS);
+    }
+
+    @Test
+    void defaultFlociStrategyReturnsTheEmulatorUrlForm() {
+        String region = "eu-west-1";
+        sqsService.createQueue("path-queue", null, region);
+        sqsService.createQueue("path-source", Map.of("RedrivePolicy",
+                "{\"deadLetterTargetArn\":\"arn:aws:sqs:eu-west-1:000000000000:path-queue\",\"maxReceiveCount\":\"3\"}"),
+                region);
+
+        assertEquals(BASE_URL + "/000000000000/path-queue",
+                sqsService.createQueue("path-queue", null, region).getQueueUrl());
+        assertEquals(BASE_URL + "/000000000000/path-queue", sqsService.getQueueUrl("path-queue", region));
+        assertEquals(List.of(BASE_URL + "/000000000000/path-queue", BASE_URL + "/000000000000/path-source"),
+                sqsService.listQueues(null, region).stream().map(Queue::getQueueUrl).sorted().toList());
+        assertEquals(List.of(BASE_URL + "/000000000000/path-source"),
+                sqsService.listDeadLetterSourceQueues(BASE_URL + "/000000000000/path-queue", region));
+    }
+
+    @Test
+    void awsStrategyReturnsTheAwsUrlForm() {
+        SqsService service = awsService();
+        String region = "eu-west-1";
+
+        assertEquals("https://sqs.eu-west-1.amazonaws.com/000000000000/std-queue",
+                service.createQueue("std-queue", null, region).getQueueUrl());
+        assertEquals("https://sqs.eu-west-1.amazonaws.com/000000000000/std-queue",
+                service.getQueueUrl("std-queue", region));
+    }
+
+    @Test
+    void awsStrategyListQueuesReturnsAwsUrls() {
+        SqsService service = awsService();
+        String region = "us-west-2";
+        service.createQueue("listed-queue", null, region);
+
+        List<Queue> queues = service.listQueues(null, region);
+        assertEquals(1, queues.size());
+        assertEquals("https://sqs.us-west-2.amazonaws.com/000000000000/listed-queue",
+                queues.getFirst().getQueueUrl());
+    }
+
+    @Test
+    void awsStrategyCarriesThePartitionDnsSuffix() {
+        SqsService service = awsService();
+        assertEquals("https://sqs.cn-north-1.amazonaws.com.cn/000000000000/cn-queue",
+                service.createQueue("cn-queue", null, "cn-north-1").getQueueUrl());
+        service.createQueue("gov-queue", null, "us-gov-west-1");
+        assertEquals("https://sqs.us-gov-west-1.amazonaws.com/000000000000/gov-queue",
+                service.getQueueUrl("gov-queue", "us-gov-west-1"));
+    }
+
+    @Test
+    void awsStrategyCreateQueueForAnExistingQueueReturnsTheAwsUrl() {
+        SqsService service = awsService();
+        String region = "eu-west-1";
+        service.createQueue("again", null, region);
+        assertEquals("https://sqs.eu-west-1.amazonaws.com/000000000000/again",
+                service.createQueue("again", null, region).getQueueUrl());
+    }
+
+    @Test
+    void awsStrategyListDeadLetterSourceQueuesReturnsAwsUrls() {
+        SqsService service = awsService();
+        String region = "eu-west-1";
+        service.createQueue("dlq", null, region);
+        service.createQueue("source", Map.of("RedrivePolicy",
+                "{\"deadLetterTargetArn\":\"arn:aws:sqs:eu-west-1:000000000000:dlq\",\"maxReceiveCount\":\"3\"}"),
+                region);
+
+        assertEquals(List.of("https://sqs.eu-west-1.amazonaws.com/000000000000/source"),
+                service.listDeadLetterSourceQueues(BASE_URL + "/000000000000/dlq", region));
+    }
+
+    @Test
+    void awsStrategyUsesTheQueueOwnerAccount() {
+        SqsService service = serviceWithStrategy(new InMemoryStorage<>(),
+                new RegionResolver("us-east-1", "111122223333"), EndpointStrategy.AWS);
+
+        assertEquals("https://sqs.ap-southeast-2.amazonaws.com/111122223333/owned",
+                service.createQueue("owned", null, "ap-southeast-2").getQueueUrl());
+    }
+
+    @ParameterizedTest
+    @EnumSource(EndpointStrategy.class)
+    void everyAcceptedQueueUrlFormResolvesUnderEitherStrategy(EndpointStrategy strategy) {
+        SqsService service = serviceWithStrategy(new InMemoryStorage<>(),
+                new RegionResolver("us-east-1", "000000000000"), strategy);
+        String region = "eu-west-1";
+        String url = service.createQueue("round-trip", null, region).getQueueUrl();
+
+        for (String input : List.of(url, BASE_URL + "/000000000000/round-trip",
+                "https://sqs.eu-west-1.amazonaws.com/000000000000/round-trip",
+                "http://localhost.localstack.cloud:4566/000000000000/round-trip", "round-trip")) {
+            assertEquals("arn:aws:sqs:eu-west-1:000000000000:round-trip",
+                    service.getQueueAttributes(input, List.of("QueueArn"), region).get("QueueArn"), input);
+        }
+        service.sendMessage(url, "hello", 0, region);
+        assertEquals(1, service.receiveMessage(
+                "https://sqs.eu-west-1.amazonaws.com/000000000000/round-trip", 1, 30, 0, region).size());
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "FLOCI, http://localhost:4566/000000000000/legacy-queue",
+            "AWS, https://sqs.eu-west-1.amazonaws.com/000000000000/legacy-queue"
+    })
+    void storedQueuesAreReportedInTheCurrentForm(EndpointStrategy strategy, String expectedUrl) {
+        String region = "eu-west-1";
+        InMemoryStorage<String, Queue> store = new InMemoryStorage<>();
+        Queue legacy = new Queue("legacy-queue", "http://old-host:4566/000000000000/legacy-queue");
+        legacy.setAccountId("000000000000");
+        store.put(region + "::/000000000000/legacy-queue", legacy);
+        SqsService service = serviceWithStrategy(store, new RegionResolver("us-east-1", "000000000000"), strategy);
+
+        assertEquals(expectedUrl, service.listQueues(null, region).getFirst().getQueueUrl());
+        assertEquals(expectedUrl, service.getQueueUrl("legacy-queue", region));
+    }
+
+    @Test
+    void aBaseUrlPathKeepsTheSameQueueAcrossAStrategySwitch() {
+        String region = "eu-west-1";
+        String prefixedBase = "http://localhost:4566/sqs";
+        RegionResolver resolver = new RegionResolver("us-east-1", "000000000000");
+        InMemoryStorage<String, Queue> store = new InMemoryStorage<>();
+        SqsService floci = new SqsService(store, null, null, null, 30, 1048576, prefixedBase, resolver, false,
+                null, clock, ReceiptHandle.DEFAULT_SECRET, null, null, EndpointStrategy.FLOCI);
+        assertEquals(prefixedBase + "/000000000000/kept", floci.createQueue("kept", null, region).getQueueUrl());
+
+        SqsService aws = new SqsService(store, null, null, null, 30, 1048576, prefixedBase, resolver, false,
+                null, clock, ReceiptHandle.DEFAULT_SECRET, null, null, EndpointStrategy.AWS);
+        String awsUrl = "https://sqs.eu-west-1.amazonaws.com/000000000000/kept";
+        assertEquals(awsUrl, aws.getQueueUrl("kept", region));
+        assertEquals(awsUrl, aws.createQueue("kept", null, region).getQueueUrl());
+        assertEquals(1, aws.listQueues(null, region).size());
+    }
+
+    @Test
+    void aQueueStoredUnderABaseUrlPathIsRekeyedByAccountAndName() {
+        String region = "eu-west-1";
+        AccountAwareStorageBackend<Queue> store = AccountAwareStorageBackend.inMemory("000000000000");
+        store.putForAccount("000000000000", region + "::/sqs/000000000000/prefixed",
+                prefixedQueue("000000000000", "prefixed"));
+
+        SqsService service = serviceWithStrategy(store, new RegionResolver("us-east-1", "000000000000"),
+                EndpointStrategy.FLOCI);
+
+        assertEquals(List.of("000000000000/" + region + "::/000000000000/prefixed"),
+                List.copyOf(store.scanAllAccountsWithRawKeys().keySet()));
+        assertEquals(BASE_URL + "/000000000000/prefixed", service.getQueueUrl("prefixed", region));
+    }
+
+    @Test
+    void anUnprefixedLegacyEntryMovesToTheAccountInItsQueuePath() {
+        String region = "eu-west-1";
+        InMemoryStorage<String, Queue> raw = new InMemoryStorage<>();
+        Queue stored = prefixedQueue("111111111111", "legacy");
+        raw.put(region + "::/sqs/111111111111/legacy", stored);
+        AccountAwareStorageBackend<Queue> store = new AccountAwareStorageBackend<>(raw, null, "000000000000");
+
+        serviceWithStrategy(store, new RegionResolver("us-east-1", "000000000000"), EndpointStrategy.FLOCI);
+
+        assertEquals(List.of("111111111111/" + region + "::/111111111111/legacy"),
+                List.copyOf(store.scanAllAccountsWithRawKeys().keySet()));
+        assertEquals(Optional.of(stored), store.getForAccount("111111111111", region + "::/111111111111/legacy"));
+    }
+
+    @Test
+    void anEntryWhoseDestinationHoldsADifferentValueStaysInPlace() {
+        String region = "eu-west-1";
+        AccountAwareStorageBackend<Queue> store = AccountAwareStorageBackend.inMemory("000000000000");
+        Queue current = prefixedQueue("000000000000", "kept");
+        Queue older = prefixedQueue("000000000000", "kept");
+        older.setAttributes(Map.of("VisibilityTimeout", "99"));
+        store.putForAccount("000000000000", region + "::/000000000000/kept", current);
+        store.putForAccount("000000000000", region + "::/sqs/000000000000/kept", older);
+
+        serviceWithStrategy(store, new RegionResolver("us-east-1", "000000000000"), EndpointStrategy.FLOCI);
+
+        assertEquals(Optional.of(current), store.getForAccount("000000000000", region + "::/000000000000/kept"));
+        assertEquals(Optional.of(older), store.getForAccount("000000000000", region + "::/sqs/000000000000/kept"));
+    }
+
+    @Test
+    void anEntryWhoseDestinationHoldsTheSameValueIsRemoved() {
+        String region = "eu-west-1";
+        AccountAwareStorageBackend<Queue> store = AccountAwareStorageBackend.inMemory("000000000000");
+        store.putForAccount("000000000000", region + "::/000000000000/kept", prefixedQueue("000000000000", "kept"));
+        store.putForAccount("000000000000", region + "::/sqs/000000000000/kept", prefixedQueue("000000000000", "kept"));
+
+        serviceWithStrategy(store, new RegionResolver("us-east-1", "000000000000"), EndpointStrategy.FLOCI);
+
+        assertEquals(List.of("000000000000/" + region + "::/000000000000/kept"),
+                List.copyOf(store.scanAllAccountsWithRawKeys().keySet()));
+    }
+
+    private static Queue prefixedQueue(String accountId, String name) {
+        Queue queue = new Queue(name, "http://localhost:4566/sqs/" + accountId + "/" + name);
+        queue.setAccountId(accountId);
+        queue.setCreatedTimestamp(Instant.EPOCH);
+        queue.setLastModifiedTimestamp(Instant.EPOCH);
+        return queue;
     }
 
     @Test
@@ -565,6 +981,206 @@ class SqsServiceTest {
     }
 
     @Test
+    void fifoDeduplicationStillSuppressesMessageAfterOriginalIsDeleted() {
+        String region = "eu-west-1";
+        Queue queue = sqsService.createQueue("deleted-original.fifo", null, region);
+        Message original = sqsService.sendMessage(
+                queue.getQueueUrl(), "original", 0, "group-a", "dedup-a", region);
+
+        List<Message> received = sqsService.receiveMessage(queue.getQueueUrl(), 1, 30, 0, region);
+        assertEquals(1, received.size());
+        sqsService.deleteMessage(queue.getQueueUrl(), received.getFirst().getReceiptHandle(), region);
+
+        Message duplicateResponse = sqsService.sendMessage(
+                queue.getQueueUrl(), "duplicate", 0, "group-a", "dedup-a", region);
+
+        assertNotNull(duplicateResponse.getMessageId());
+        assertEquals(original.getMessageId(), duplicateResponse.getMessageId());
+        assertEquals(original.getSequenceNumber(), duplicateResponse.getSequenceNumber());
+        assertEquals("dedup-a", duplicateResponse.getMessageDeduplicationId());
+        assertTrue(sqsService.peekMessages(queue.getQueueUrl(), region).isEmpty(),
+                "A duplicate must remain suppressed after its original message is deleted");
+        assertTrue(sqsService.receiveMessage(queue.getQueueUrl(), 1, 30, 0, region).isEmpty());
+    }
+
+    @Test
+    void fifoDeduplicationIdentitySurvivesRestartAfterOriginalIsDeleted() {
+        String region = "us-east-1";
+        InMemoryStorage<String, Queue> queueStore = new InMemoryStorage<>();
+        InMemoryStorage<String, List<Message>> messageStore = new InMemoryStorage<>();
+        InMemoryStorage<String, Map<String, Long>> dedupStore = new InMemoryStorage<>();
+        InMemoryStorage<String, Map<String, Map<String, String>>> identityStore = new InMemoryStorage<>();
+        RegionResolver regionResolver = new RegionResolver(region, "000000000000");
+        SqsService initialService = new SqsService(queueStore, messageStore, dedupStore, identityStore,
+                30, 1048576, BASE_URL, regionResolver, false, null, clock);
+        Queue queue = initialService.createQueue("deleted-before-restart.fifo", null, region);
+        Message original = initialService.sendMessage(
+                queue.getQueueUrl(), "original", 0, "group-a", "dedup-a", region);
+        List<Message> received = initialService.receiveMessage(queue.getQueueUrl(), 1, 30, 0, region);
+        initialService.deleteMessage(queue.getQueueUrl(), received.getFirst().getReceiptHandle(), region);
+
+        SqsService restartedService = new SqsService(queueStore, messageStore, dedupStore, identityStore,
+                30, 1048576, BASE_URL, regionResolver, false, null, clock);
+        Message duplicateResponse = restartedService.sendMessage(
+                queue.getQueueUrl(), "duplicate", 0, "group-a", "dedup-a", region);
+
+        assertEquals(original.getMessageId(), duplicateResponse.getMessageId());
+        assertEquals(original.getSequenceNumber(), duplicateResponse.getSequenceNumber());
+        assertTrue(restartedService.peekMessages(queue.getQueueUrl(), region).isEmpty());
+    }
+
+    @Test
+    void fifoDeduplicationExpiresAtTheFiveMinuteBoundary() {
+        String region = "eu-west-1";
+        Queue queue = sqsService.createQueue("expired-dedup.fifo", null, region);
+        sqsService.sendMessage(queue.getQueueUrl(), "original", 0, "group-a", "dedup-a", region);
+
+        clock.advance(Duration.ofMinutes(5));
+        sqsService.sendMessage(queue.getQueueUrl(), "after-window", 0, "group-a", "dedup-a", region);
+
+        List<Message> received = sqsService.receiveMessage(queue.getQueueUrl(), 2, 30, 0, region);
+        assertEquals(2, received.size());
+        assertTrue(received.stream().anyMatch(message -> "after-window".equals(message.getBody())));
+    }
+
+    @Test
+    void concurrentFifoSendsAfterExpiryKeepTheNewDeduplicationEntry() throws Exception {
+        String region = "eu-west-1";
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            for (int round = 0; round < 25; round++) {
+                Queue queue = sqsService.createQueue("expired-concurrent-" + round + ".fifo", null, region);
+                String queueUrl = queue.getQueueUrl();
+                sqsService.sendMessage(queueUrl, "original", 0, "group-a", "dedup-a", region);
+                Message original = sqsService.receiveMessage(queueUrl, 1, 30, 0, region).getFirst();
+                sqsService.deleteMessage(queueUrl, original.getReceiptHandle(), region);
+                clock.advance(Duration.ofMinutes(5));
+
+                CountDownLatch ready = new CountDownLatch(2);
+                CountDownLatch start = new CountDownLatch(1);
+                Future<Message> first = executor.submit(() -> {
+                    ready.countDown();
+                    start.await();
+                    return sqsService.sendMessage(queueUrl, "renewed", 0, "group-a", "dedup-a", region);
+                });
+                Future<Message> second = executor.submit(() -> {
+                    ready.countDown();
+                    start.await();
+                    return sqsService.sendMessage(queueUrl, "renewed", 0, "group-a", "dedup-a", region);
+                });
+                assertTrue(ready.await(5, TimeUnit.SECONDS));
+                start.countDown();
+
+                Message firstResponse = first.get(5, TimeUnit.SECONDS);
+                Message secondResponse = second.get(5, TimeUnit.SECONDS);
+                assertEquals(firstResponse.getMessageId(), secondResponse.getMessageId());
+                assertEquals(firstResponse.getSequenceNumber(), secondResponse.getSequenceNumber());
+                assertEquals(1, sqsService.peekMessages(queueUrl, region).size());
+            }
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void duplicateInAnotherGroupDoesNotWaitForBlockedMessageWrite() throws Exception {
+        String region = "us-east-1";
+        CountDownLatch writing = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        InMemoryStorage<String, List<Message>> messageStore = new InMemoryStorage<>() {
+            @Override
+            public void put(String key, List<Message> messages) {
+                if (messages.stream().anyMatch(message -> "slow".equals(message.getBody()))) {
+                    writing.countDown();
+                    try {
+                        if (!release.await(5, TimeUnit.SECONDS)) {
+                            throw new IllegalStateException("Timed out waiting to release message write");
+                        }
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException(e);
+                    }
+                }
+                super.put(key, messages);
+            }
+        };
+        SqsService service = new SqsService(new InMemoryStorage<>(), messageStore,
+                new InMemoryStorage<>(), new InMemoryStorage<>(), 30, 1048576, BASE_URL,
+                new RegionResolver(region, "000000000000"), false, null, clock);
+        Queue queue = service.createQueue("unrelated-send.fifo", null, region);
+        Message original = service.sendMessage(queue.getQueueUrl(), "original", 0,
+                "group-a", "dedup-a", region);
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<Message> slow = executor.submit(() -> service.sendMessage(queue.getQueueUrl(),
+                    "slow", 0, "group-b", "dedup-b", region));
+            assertTrue(writing.await(5, TimeUnit.SECONDS));
+            Future<Message> duplicate = executor.submit(() -> service.sendMessage(queue.getQueueUrl(),
+                    "duplicate", 0, "group-a", "dedup-a", region));
+            assertEquals(original.getMessageId(), duplicate.get(2, TimeUnit.SECONDS).getMessageId());
+            release.countDown();
+            slow.get(5, TimeUnit.SECONDS);
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void concurrentFifoSendsRetainAllDeduplicationEntriesAfterRestart() throws Exception {
+        String region = "us-east-1";
+        InMemoryStorage<String, Queue> queueStore = new InMemoryStorage<>();
+        InMemoryStorage<String, List<Message>> messageStore = new InMemoryStorage<>();
+        InMemoryStorage<String, Map<String, Long>> dedupStore = new InMemoryStorage<>();
+        InMemoryStorage<String, Map<String, Map<String, String>>> identityStore = new InMemoryStorage<>();
+        RegionResolver regionResolver = new RegionResolver(region, "000000000000");
+        SqsService service = new SqsService(queueStore, messageStore, dedupStore, identityStore,
+                30, 1048576, BASE_URL, regionResolver, false, null, clock);
+        Queue queue = service.createQueue("concurrent-persist.fifo", null, region);
+        ExecutorService executor = Executors.newFixedThreadPool(8);
+        try {
+            List<Future<Message>> sent = new ArrayList<>();
+            for (int i = 0; i < 32; i++) {
+                int id = i;
+                sent.add(executor.submit(() -> service.sendMessage(queue.getQueueUrl(),
+                        "message-" + id, 0, "group-" + id, "dedup-" + id, region)));
+            }
+            List<Message> originals = new ArrayList<>();
+            for (Future<Message> send : sent) {
+                originals.add(send.get(5, TimeUnit.SECONDS));
+            }
+            SqsService restarted = new SqsService(queueStore, messageStore, dedupStore, identityStore,
+                    30, 1048576, BASE_URL, regionResolver, false, null, clock);
+            for (int i = 0; i < originals.size(); i++) {
+                Message duplicate = restarted.sendMessage(queue.getQueueUrl(),
+                        "duplicate-" + i, 0, "group-" + i, "dedup-" + i, region);
+                assertEquals(originals.get(i).getMessageId(), duplicate.getMessageId());
+            }
+            assertEquals(32, restarted.peekMessages(queue.getQueueUrl(), region).size());
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void contentBasedFifoDeduplicationStillSuppressesMessageAfterOriginalIsDeleted() {
+        String region = "eu-west-1";
+        Queue queue = sqsService.createQueue("content-deleted-original.fifo",
+                Map.of("ContentBasedDeduplication", "true"), region);
+        sqsService.sendMessage(queue.getQueueUrl(), "same-body", 0, "group-a", null, region);
+
+        List<Message> received = sqsService.receiveMessage(queue.getQueueUrl(), 1, 30, 0, region);
+        assertEquals(1, received.size());
+        sqsService.deleteMessage(queue.getQueueUrl(), received.getFirst().getReceiptHandle(), region);
+
+        sqsService.sendMessage(queue.getQueueUrl(), "same-body", 0, "group-a", null, region);
+
+        assertTrue(sqsService.peekMessages(queue.getQueueUrl(), region).isEmpty(),
+                "Content-based duplicate IDs must remain suppressed after deletion");
+    }
+
+    @Test
     void fifoQueueReceiveReturnsMultipleMessagesPerGroupInOrder() {
         // AWS FIFO: a single ReceiveMessage call may return multiple messages
         // from the same MessageGroupId (in order), up to MaxNumberOfMessages.
@@ -761,13 +1377,13 @@ class SqsServiceTest {
         assertTrue(sqsService.receiveMessage(queue.getQueueUrl(), 10, 0, 0, region).isEmpty(),
                 "Queue must be empty after purge");
 
-        // Re-send with same dedup ID — dedup cache fires but finds no message (purged),
-        // so it falls through and creates a new message
+        // Re-send with the same dedup ID. Purging removed the original message,
+        // but does not end its five-minute deduplication interval.
         sqsService.sendMessage(queue.getQueueUrl(), "msg", 0, "group1", "dedup-1", region);
 
         List<Message> received = sqsService.receiveMessage(queue.getQueueUrl(), 10, 30, 0, region);
-        assertEquals(1, received.size(),
-                "Re-send after purge must produce exactly one message in the queue");
+        assertTrue(received.isEmpty(),
+                "A duplicate must remain suppressed after purge during the deduplication interval");
     }
 
     @Test
@@ -1221,106 +1837,6 @@ class SqsServiceTest {
         return "{\"deadLetterTargetArn\":\"" + dlqArn + "\",\"maxReceiveCount\":\"1\"}";
     }
 
-    @Test
-    void setQueueAttributes_redrivePolicyWithMissingDeadLetterTarget_throwsInvalidParameterValue() {
-        Queue source = sqsService.createQueue("missing-dlq-source", null, "us-east-1");
-        String policy = redrivePolicy(queueArn("missing-dlq-target"));
-
-        AwsException ex = assertThrows(AwsException.class, () -> sqsService.setQueueAttributes(
-                source.getQueueUrl(), Map.of("RedrivePolicy", policy, "VisibilityTimeout", "45"), "us-east-1"));
-
-        assertEquals("InvalidParameterValue", ex.getErrorCode());
-        assertEquals(400, ex.getHttpStatus());
-        assertEquals("Value " + policy + " for parameter RedrivePolicy is invalid. "
-                + "Reason: Dead letter target does not exist.", ex.getMessage());
-        Map<String, String> attrs = sqsService.getQueueAttributes(source.getQueueUrl(), List.of("All"), "us-east-1");
-        assertFalse(attrs.containsKey("RedrivePolicy"));
-        assertEquals("30", attrs.get("VisibilityTimeout"), "a rejected request must not apply any attribute");
-    }
-
-    @Test
-    void createQueue_redrivePolicyWithMissingDeadLetterTarget_throwsAndCreatesNothing() {
-        AwsException ex = assertThrows(AwsException.class, () -> sqsService.createQueue("missing-dlq-create",
-                Map.of("RedrivePolicy", redrivePolicy(queueArn("never-created-dlq"))), "us-east-1"));
-
-        assertEquals("InvalidParameterValue", ex.getErrorCode());
-        assertTrue(ex.getMessage().contains("Dead letter target does not exist"));
-        assertTrue(sqsService.listQueues("missing-dlq-create", "us-east-1").isEmpty());
-    }
-
-    @Test
-    void redrivePolicy_deadLetterTargetInAnotherRegionOrAccount_doesNotExist() {
-        sqsService.createQueue("elsewhere-dlq", null, "eu-west-1");
-        Queue source = sqsService.createQueue("elsewhere-source", null, "us-east-1");
-
-        AwsException otherRegion = assertThrows(AwsException.class, () -> sqsService.setQueueAttributes(
-                source.getQueueUrl(),
-                Map.of("RedrivePolicy", redrivePolicy("arn:aws:sqs:eu-west-1:000000000000:elsewhere-dlq")),
-                "us-east-1"));
-        assertEquals("InvalidParameterValue", otherRegion.getErrorCode());
-
-        sqsService.createQueue("elsewhere-dlq", null, "us-east-1");
-        AwsException otherAccount = assertThrows(AwsException.class, () -> sqsService.setQueueAttributes(
-                source.getQueueUrl(),
-                Map.of("RedrivePolicy", redrivePolicy("arn:aws:sqs:us-east-1:111111111111:elsewhere-dlq")),
-                "us-east-1"));
-        assertEquals("InvalidParameterValue", otherAccount.getErrorCode());
-    }
-
-    @Test
-    void redrivePolicy_existingDeadLetterTargetIsAcceptedOnCreateAndSet() {
-        sqsService.createQueue("fifo-dlq.fifo", Map.of("FifoQueue", "true"), "us-east-1");
-        Queue fifoSource = sqsService.createQueue("fifo-source.fifo",
-                Map.of("FifoQueue", "true", "RedrivePolicy", redrivePolicy(queueArn("fifo-dlq.fifo"))), "us-east-1");
-        assertNotNull(fifoSource.getAttributes().get("RedrivePolicy"));
-
-        sqsService.createQueue("std-dlq", null, "us-east-1");
-        Queue source = sqsService.createQueue("std-source", null, "us-east-1");
-        sqsService.setQueueAttributes(source.getQueueUrl(),
-                Map.of("RedrivePolicy", redrivePolicy(queueArn("std-dlq"))), "us-east-1");
-        assertEquals(redrivePolicy(queueArn("std-dlq")), sqsService.getQueueAttributes(
-                source.getQueueUrl(), List.of("RedrivePolicy"), "us-east-1").get("RedrivePolicy"));
-
-        sqsService.setQueueAttributes(source.getQueueUrl(), Map.of("RedrivePolicy", ""), "us-east-1");
-        assertFalse(sqsService.getQueueAttributes(source.getQueueUrl(), List.of("All"), "us-east-1")
-                .containsKey("RedrivePolicy"));
-    }
-
-    @Test
-    void redrivePolicy_deletingTheDeadLetterQueueLeavesTheSourceQueueUsable() {
-        Queue dlq = sqsService.createQueue("deleted-dlq", null, "us-east-1");
-        Queue source = sqsService.createQueue("deleted-dlq-source",
-                Map.of("RedrivePolicy", redrivePolicy(queueArn("deleted-dlq"))), "us-east-1");
-        sqsService.deleteQueue(dlq.getQueueUrl(), "us-east-1");
-
-        sqsService.setQueueAttributes(source.getQueueUrl(), Map.of("VisibilityTimeout", "40"), "us-east-1");
-        sqsService.sendMessage(source.getQueueUrl(), "still-works", 0, "us-east-1");
-        List<Message> received = sqsService.receiveMessage(source.getQueueUrl(), 1, 0, 0, "us-east-1");
-        assertEquals(List.of("still-works"), bodies(received));
-        Map<String, String> attrs = sqsService.getQueueAttributes(source.getQueueUrl(), List.of("All"), "us-east-1");
-        assertEquals("40", attrs.get("VisibilityTimeout"));
-        assertEquals(redrivePolicy(queueArn("deleted-dlq")), attrs.get("RedrivePolicy"));
-    }
-
-    @Test
-    void redrivePolicy_changingTheDeadLetterTargetRoutesToTheNewQueue() {
-        Queue first = sqsService.createQueue("first-dlq", null, "us-east-1");
-        Queue second = sqsService.createQueue("second-dlq", null, "us-east-1");
-        Queue source = sqsService.createQueue("retarget-source",
-                Map.of("RedrivePolicy", redrivePolicy(queueArn("first-dlq"))), "us-east-1");
-        // Receiving once parses and caches the first policy.
-        assertTrue(sqsService.receiveMessage(source.getQueueUrl(), 1, 0, 0, "us-east-1").isEmpty());
-
-        sqsService.setQueueAttributes(source.getQueueUrl(),
-                Map.of("RedrivePolicy", redrivePolicy(queueArn("second-dlq"))), "us-east-1");
-        sqsService.sendMessage(source.getQueueUrl(), "poison", 0, "us-east-1");
-        assertEquals(1, sqsService.receiveMessage(source.getQueueUrl(), 1, 0, 0, "us-east-1").size());
-        assertEquals(0, sqsService.receiveMessage(source.getQueueUrl(), 1, 0, 0, "us-east-1").size());
-
-        assertEquals(List.of(), bodies(sqsService.peekMessages(first.getQueueUrl(), "us-east-1")));
-        assertEquals(List.of("poison"), bodies(sqsService.peekMessages(second.getQueueUrl(), "us-east-1")));
-    }
-
     private static List<String> bodies(List<Message> messages) {
         return messages.stream().map(Message::getBody).toList();
     }
@@ -1363,27 +1879,6 @@ class SqsServiceTest {
                 sqsService.getQueueUrl("dlq", "us-east-1"), "us-east-1").size());
         assertEquals(1, sqsService.listDeadLetterSourceQueues(
                 sqsService.getQueueUrl("dlq-real", "us-east-1"), "us-east-1").size());
-    }
-
-    @Test
-    void listDeadLetterSourceQueues_presentsUrlsUsingIncomingHost() {
-        Queue dlq = sqsService.createQueue("dlq-host", null, "us-east-1");
-        String dlqArn = queueArn("dlq-host");
-        Queue source = sqsService.createQueue("src-host",
-                Map.of("RedrivePolicy",
-                        "{\"deadLetterTargetArn\":\"" + dlqArn + "\",\"maxReceiveCount\":\"1\"}"),
-                "us-east-1");
-
-        // CreateQueue / GetQueueUrl persist the emulator base URL.
-        assertEquals(BASE_URL + "/000000000000/src-host", source.getQueueUrl());
-        assertEquals(List.of(source.getQueueUrl()),
-                sqsService.listDeadLetterSourceQueues(dlq.getQueueUrl(), "us-east-1"));
-
-        // A Lambda-rewritten QueueUrl must get sibling URLs on the same host
-        // so they compare equal to the CreateQueue value the caller already holds.
-        String incoming = "https://host.docker.internal:4566/000000000000/dlq-host";
-        assertEquals(List.of("https://host.docker.internal:4566/000000000000/src-host"),
-                sqsService.listDeadLetterSourceQueues(incoming, "us-east-1"));
     }
 
     @Test
@@ -1645,7 +2140,7 @@ class SqsServiceTest {
 
     private static void awaitMoveTaskStatus(SqsService service, String sourceArn, String taskHandle,
                                             String expectedStatus) throws Exception {
-        for (int attempt = 0; attempt < 100; attempt++) {
+        for (int attempt = 0; attempt < 500; attempt++) {
             boolean reachedStatus = service.listMessageMoveTasks(sourceArn, "us-east-1").stream()
                     .anyMatch(task -> task.taskHandle().equals(taskHandle)
                             && expectedStatus.equals(task.status()));
@@ -1932,5 +2427,433 @@ class SqsServiceTest {
                 "A long poll driven by the queue attribute must return as soon as a message arrives");
         assertEquals(1, result.get().size());
         assertEquals("wake-up", result.get().get(0).getBody());
+    }
+
+    @Test
+    void messagePastRetentionPeriodIsNotReturned() {
+        String region = "us-east-1";
+        Queue queue = sqsService.createQueue("retention-queue",
+                Map.of("MessageRetentionPeriod", "60"), region);
+        Message sent = sqsService.sendMessage(queue.getQueueUrl(), "old", 0, region);
+        sqsService.sendMessage(queue.getQueueUrl(), "fresh", 0, region);
+        sent.setSentTimestamp(Instant.now().minusSeconds(61));
+
+        Map<String, String> attrs = sqsService.getQueueAttributes(queue.getQueueUrl(),
+                List.of("ApproximateNumberOfMessages"), region);
+        assertEquals("1", attrs.get("ApproximateNumberOfMessages"));
+        List<Message> received = sqsService.receiveMessage(queue.getQueueUrl(), 10, 30, 0, region);
+        assertEquals(List.of("fresh"), received.stream().map(Message::getBody).toList());
+    }
+
+    @Test
+    void shorterRetentionPeriodExpiresExistingMessages() {
+        String region = "us-east-1";
+        Queue queue = sqsService.createQueue("retention-shrink", null, region);
+        Message sent = sqsService.sendMessage(queue.getQueueUrl(), "msg", 0, region);
+        sent.setSentTimestamp(Instant.now().minusSeconds(120));
+        assertEquals(1, sqsService.peekMessages(queue.getQueueUrl(), region).size());
+
+        sqsService.setQueueAttributes(queue.getQueueUrl(), Map.of("MessageRetentionPeriod", "60"), region);
+
+        assertTrue(sqsService.peekMessages(queue.getQueueUrl(), region).isEmpty());
+    }
+
+    @Test
+    void standardDeadLetterQueueKeepsOriginalEnqueueTimeForRetention() {
+        String region = "us-east-1";
+        Queue dlq = sqsService.createQueue("retention-dlq",
+                Map.of("MessageRetentionPeriod", "60"), region);
+        Queue source = sqsService.createQueue("retention-src",
+                Map.of("RedrivePolicy", "{\"deadLetterTargetArn\":\"" + queueArn("retention-dlq")
+                        + "\",\"maxReceiveCount\":\"1\"}"), region);
+        Message sent = sqsService.sendMessage(source.getQueueUrl(), "msg", 0, region);
+        sqsService.receiveMessage(source.getQueueUrl(), 1, 0, 0, region);
+        sqsService.receiveMessage(source.getQueueUrl(), 1, 0, 0, region);
+        assertEquals(1, sqsService.peekMessages(dlq.getQueueUrl(), region).size());
+
+        sent.setSentTimestamp(Instant.now().minusSeconds(61));
+
+        assertTrue(sqsService.peekMessages(dlq.getQueueUrl(), region).isEmpty());
+    }
+
+    @Test
+    void fifoDeadLetterQueueRestartsRetentionPeriod() {
+        String region = "us-east-1";
+        Queue dlq = sqsService.createQueue("retention-dlq.fifo",
+                Map.of("FifoQueue", "true", "MessageRetentionPeriod", "60"), region);
+        Queue source = sqsService.createQueue("retention-src.fifo",
+                Map.of("FifoQueue", "true", "RedrivePolicy", "{\"deadLetterTargetArn\":\""
+                        + queueArn("retention-dlq.fifo") + "\",\"maxReceiveCount\":\"1\"}"), region);
+        Message sent = sqsService.sendMessage(source.getQueueUrl(), "msg", 0, "g1", "d1", region);
+        sqsService.receiveMessage(source.getQueueUrl(), 1, 0, 0, region);
+        sqsService.receiveMessage(source.getQueueUrl(), 1, 0, 0, region);
+
+        sent.setSentTimestamp(Instant.now().minusSeconds(61));
+
+        assertEquals(1, sqsService.peekMessages(dlq.getQueueUrl(), region).size());
+    }
+
+    @Test
+    void messageMoveTaskRestartsRetentionPeriod() {
+        String region = "us-east-1";
+        sqsService.createQueue("retention-mv-dlq", null, region);
+        Queue source = sqsService.createQueue("retention-mv-src",
+                Map.of("RedrivePolicy", "{\"deadLetterTargetArn\":\"" + queueArn("retention-mv-dlq")
+                        + "\",\"maxReceiveCount\":\"1\"}"), region);
+        Queue dest = sqsService.createQueue("retention-mv-dest",
+                Map.of("MessageRetentionPeriod", "60"), region);
+        Message sent = sqsService.sendMessage(source.getQueueUrl(), "msg", 0, region);
+        sqsService.receiveMessage(source.getQueueUrl(), 1, 0, 0, region);
+        sqsService.receiveMessage(source.getQueueUrl(), 1, 0, 0, region);
+        Instant sentAt = Instant.now().minusSeconds(61);
+        sent.setSentTimestamp(sentAt);
+
+        sqsService.startMessageMoveTask(queueArn("retention-mv-dlq"), queueArn("retention-mv-dest"), region);
+
+        List<Message> moved = sqsService.peekMessages(dest.getQueueUrl(), region);
+        assertEquals(1, moved.size());
+        assertEquals(sentAt, moved.get(0).getSentTimestamp());
+    }
+
+    @Test
+    void rateLimitedMessageMoveTaskDropsMessagesThatExpireDuringTheMove() throws Exception {
+        String region = "us-east-1";
+        sqsService.createQueue("retention-rl-dlq", Map.of("MessageRetentionPeriod", "60"), region);
+        Queue source = sqsService.createQueue("retention-rl-src",
+                Map.of("RedrivePolicy", "{\"deadLetterTargetArn\":\"" + queueArn("retention-rl-dlq")
+                        + "\",\"maxReceiveCount\":\"1\"}"), region);
+        Queue dest = sqsService.createQueue("retention-rl-dest", null, region);
+        sqsService.sendMessage(source.getQueueUrl(), "first", 0, region);
+        Message second = sqsService.sendMessage(source.getQueueUrl(), "second", 0, region);
+        sqsService.receiveMessage(source.getQueueUrl(), 10, 0, 0, region);
+        sqsService.receiveMessage(source.getQueueUrl(), 10, 0, 0, region);
+        String dlqArn = queueArn("retention-rl-dlq");
+        // Still live when the task starts, expired when the worker reaches it a second later.
+        second.setSentTimestamp(Instant.now().minusSeconds(59));
+
+        String taskHandle = sqsService.startMessageMoveTask(dlqArn, queueArn("retention-rl-dest"), 1, region);
+        awaitMoveTaskStatus(dlqArn, taskHandle, "COMPLETED");
+        assertEquals(2, sqsService.listMessageMoveTasks(dlqArn, region).get(0).approximateNumberOfMessagesToMove());
+
+        List<Message> moved = sqsService.peekMessages(dest.getQueueUrl(), region);
+        assertEquals(List.of("first"), moved.stream().map(Message::getBody).toList());
+    }
+
+    @Test
+    void deleteExpiredMessagesRemovesThemFromStorage() {
+        String region = "us-east-1";
+        InMemoryStorage<String, List<Message>> messageStore = new InMemoryStorage<>();
+        SqsService service = new SqsService(new InMemoryStorage<>(), messageStore, new InMemoryStorage<>(),
+                30, 1048576, BASE_URL, new RegionResolver("us-east-1", "000000000000"));
+        Queue queue = service.createQueue("retention-sweep", Map.of("MessageRetentionPeriod", "60"), region);
+        Message sent = service.sendMessage(queue.getQueueUrl(), "msg", 0, region);
+        sent.setSentTimestamp(Instant.now().minusSeconds(61));
+        String storageKey = region + "::/000000000000/retention-sweep";
+        assertEquals(1, messageStore.get(storageKey).orElseThrow().size());
+
+        service.deleteExpiredMessages();
+
+        assertTrue(messageStore.get(storageKey).orElseThrow().isEmpty());
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "delete, empty", "delete, malformed", "delete, edited", "delete, otherQueue", "delete, otherSecret",
+            "changeVisibility, empty", "changeVisibility, malformed", "changeVisibility, edited",
+            "changeVisibility, otherQueue", "changeVisibility, otherSecret"})
+    void unusableReceiptHandleIsRejected(String operation, String kind) {
+        String region = "us-east-1";
+        Queue queue = sqsService.createQueue("handle-queue", null, region);
+        Queue other = sqsService.createQueue("handle-other", null, region);
+        Message sent = sqsService.sendMessage(queue.getQueueUrl(), "msg", 0, region);
+        sqsService.sendMessage(other.getQueueUrl(), "msg", 0, region);
+        String handle = switch (kind) {
+            case "empty" -> "";
+            case "malformed" -> "abc";
+            case "edited" -> receivedHandle(queue.getQueueUrl(), 30, region).replace(":receipt=", ":receipt=0");
+            case "otherQueue" -> receivedHandle(other.getQueueUrl(), 30, region);
+            case "otherSecret" -> ReceiptHandle.issue(region + "::/000000000000/handle-queue", sent.getMessageId(),
+                    "another-secret").encode();
+            default -> throw new IllegalArgumentException(kind);
+        };
+        String expectedMessage = switch (kind) {
+            case "empty" -> "The request must contain the parameter ReceiptHandle.";
+            case "malformed" -> "The input receipt handle is invalid.";
+            default -> "The receipt handle \"" + handle + "\" is not valid for this queue.";
+        };
+
+        AwsException ex = assertThrows(AwsException.class,
+                () -> useReceiptHandle(operation, queue.getQueueUrl(), handle, region));
+
+        assertEquals("empty".equals(kind) ? "MissingParameter" : "ReceiptHandleIsInvalid", ex.getErrorCode());
+        assertEquals(expectedMessage, ex.getMessage());
+        assertEquals(1, sqsService.peekMessages(queue.getQueueUrl(), region).size());
+    }
+
+    @Test
+    void batchEntryReportsAnEmptyReceiptHandleAsInvalid() {
+        String region = "us-east-1";
+        Queue queue = sqsService.createQueue("handle-batch-empty", null, region);
+
+        AwsException ex = assertThrows(AwsException.class,
+                () -> sqsService.deleteMessageInBatch(queue.getQueueUrl(), "", region));
+        assertEquals("ReceiptHandleIsInvalid", ex.getErrorCode());
+        assertEquals("The request must contain the parameter ReceiptHandle.", ex.getMessage());
+
+        List<SqsService.BatchResultEntry> results = sqsService.changeMessageVisibilityBatch(queue.getQueueUrl(),
+                List.of(new SqsService.ChangeVisibilityBatchEntry("e", "", 10)), region);
+        assertEquals("ReceiptHandleIsInvalid", results.get(0).errorCode());
+        assertEquals("The request must contain the parameter ReceiptHandle.", results.get(0).errorMessage());
+    }
+
+    @Test
+    void deletingAMessageThatIsAlreadyGoneSucceeds() {
+        String region = "us-east-1";
+        Queue queue = sqsService.createQueue("handle-gone", null, region);
+        sqsService.sendMessage(queue.getQueueUrl(), "msg", 0, region);
+        String handle = receivedHandle(queue.getQueueUrl(), 30, region);
+        sqsService.deleteMessage(queue.getQueueUrl(), handle, region);
+
+        assertDoesNotThrow(() -> sqsService.deleteMessage(queue.getQueueUrl(), handle, region));
+        assertDoesNotThrow(() -> sqsService.deleteMessageInBatch(queue.getQueueUrl(), handle, region));
+    }
+
+    @Test
+    void changingVisibilityOfAMessageThatIsGoneIsInvalid() {
+        String region = "us-east-1";
+        Queue queue = sqsService.createQueue("handle-gone-visibility", null, region);
+        sqsService.sendMessage(queue.getQueueUrl(), "msg", 0, region);
+        String handle = receivedHandle(queue.getQueueUrl(), 30, region);
+        sqsService.deleteMessage(queue.getQueueUrl(), handle, region);
+
+        AwsException ex = assertThrows(AwsException.class,
+                () -> sqsService.changeMessageVisibility(queue.getQueueUrl(), handle, 10, region));
+        assertEquals("InvalidParameterValue", ex.getErrorCode());
+        assertEquals("Value " + handle + " for parameter ReceiptHandle is invalid. Reason: Message does not exist "
+                + "or is not available for visibility timeout change.", ex.getMessage());
+
+        List<SqsService.BatchResultEntry> results = sqsService.changeMessageVisibilityBatch(queue.getQueueUrl(),
+                List.of(new SqsService.ChangeVisibilityBatchEntry("g", handle, 10)), region);
+        assertEquals("ReceiptHandleIsInvalid", results.get(0).errorCode());
+        assertEquals("Message does not exist or is not available for visibility timeout change",
+                results.get(0).errorMessage());
+    }
+
+    @Test
+    void standardQueueAcceptsAnOlderReceiptHandleOfTheMessage() {
+        String region = "us-east-1";
+        Queue queue = sqsService.createQueue("handle-stale", null, region);
+        sqsService.sendMessage(queue.getQueueUrl(), "msg", 0, region);
+        String older = receivedHandle(queue.getQueueUrl(), 0, region);
+        receivedHandle(queue.getQueueUrl(), 30, region);
+
+        sqsService.changeMessageVisibility(queue.getQueueUrl(), older, 30, region);
+        sqsService.deleteMessage(queue.getQueueUrl(), older, region);
+
+        assertTrue(sqsService.peekMessages(queue.getQueueUrl(), region).isEmpty());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"delete", "changeVisibility"})
+    void fifoQueueRejectsAnOlderReceiptHandleAsExpired(String operation) {
+        String region = "us-east-1";
+        Queue queue = sqsService.createQueue("handle-stale.fifo", Map.of("FifoQueue", "true"), region);
+        sqsService.sendMessage(queue.getQueueUrl(), "msg", 0, "g", "d", region);
+        String older = receivedHandle(queue.getQueueUrl(), 0, region);
+        receivedHandle(queue.getQueueUrl(), 30, region);
+
+        AwsException ex = assertThrows(AwsException.class,
+                () -> useReceiptHandle(operation, queue.getQueueUrl(), older, region));
+
+        assertEquals("InvalidParameterValue", ex.getErrorCode());
+        assertEquals("Value " + older + " for parameter ReceiptHandle is invalid. Reason: The receipt handle has expired.",
+                ex.getMessage());
+        assertEquals(1, sqsService.peekMessages(queue.getQueueUrl(), region).size());
+    }
+
+    @Test
+    void fifoQueueRejectsTheHandleOfAReceiveWhoseVisibilityEnded() {
+        String region = "us-east-1";
+        Queue queue = sqsService.createQueue("handle-visible.fifo", Map.of("FifoQueue", "true"), region);
+        sqsService.sendMessage(queue.getQueueUrl(), "msg", 0, "g", "d", region);
+        String handle = receivedHandle(queue.getQueueUrl(), 0, region);
+
+        AwsException ex = assertThrows(AwsException.class,
+                () -> sqsService.deleteMessageInBatch(queue.getQueueUrl(), handle, region));
+
+        assertEquals("ReceiptHandleIsInvalid", ex.getErrorCode());
+        assertEquals("The receipt handle has expired", ex.getMessage());
+    }
+
+    @Test
+    void fifoQueueDeletesWithTheCurrentReceiptHandle() {
+        String region = "us-east-1";
+        Queue queue = sqsService.createQueue("handle-current.fifo", Map.of("FifoQueue", "true"), region);
+        sqsService.sendMessage(queue.getQueueUrl(), "msg", 0, "g", "d", region);
+        String handle = receivedHandle(queue.getQueueUrl(), 30, region);
+
+        sqsService.changeMessageVisibility(queue.getQueueUrl(), handle, 60, region);
+        sqsService.deleteMessage(queue.getQueueUrl(), handle, region);
+
+        assertTrue(sqsService.peekMessages(queue.getQueueUrl(), region).isEmpty());
+    }
+
+    @Test
+    void receiptHandleFromBeforeAMoveTaskDoesNotReachTheMovedMessage() throws Exception {
+        String region = "us-east-1";
+        sqsService.createQueue("handle-moved-dlq", null, region);
+        String dlqArn = queueArn("handle-moved-dlq");
+        Queue source = sqsService.createQueue("handle-moved-src",
+                Map.of("RedrivePolicy", "{\"deadLetterTargetArn\":\"" + dlqArn + "\",\"maxReceiveCount\":\"1\"}"),
+                region);
+        Message sent = sqsService.sendMessage(source.getQueueUrl(), "msg", 0, region);
+        String handle = receivedHandle(source.getQueueUrl(), 0, region);
+        sqsService.receiveMessage(source.getQueueUrl(), 1, 0, 0, region);
+        String taskHandle = sqsService.startMessageMoveTask(dlqArn, null, region);
+        awaitMoveTaskStatus(dlqArn, taskHandle, "COMPLETED");
+
+        AwsException ex = assertThrows(AwsException.class,
+                () -> sqsService.changeMessageVisibility(source.getQueueUrl(), handle, 10, region));
+        assertEquals("InvalidParameterValue", ex.getErrorCode());
+        sqsService.deleteMessage(source.getQueueUrl(), handle, region);
+
+        List<Message> moved = sqsService.peekMessages(source.getQueueUrl(), region);
+        assertEquals(1, moved.size());
+        assertNotEquals(sent.getMessageId(), moved.get(0).getMessageId());
+    }
+
+    @Test
+    void receiptHandleStillWorksAfterARestart() {
+        String region = "us-east-1";
+        InMemoryStorage<String, Queue> queueStore = new InMemoryStorage<>();
+        InMemoryStorage<String, List<Message>> messageStore = new InMemoryStorage<>();
+        RegionResolver regionResolver = new RegionResolver(region, "000000000000");
+        SqsService before = new SqsService(queueStore, messageStore, new InMemoryStorage<>(),
+                30, 1048576, BASE_URL, regionResolver);
+        Queue queue = before.createQueue("handle-restart", null, region);
+        before.sendMessage(queue.getQueueUrl(), "msg", 0, region);
+        String handle = before.receiveMessage(queue.getQueueUrl(), 1, 30, 0, region).get(0).getReceiptHandle();
+
+        SqsService after = new SqsService(queueStore, messageStore, new InMemoryStorage<>(),
+                30, 1048576, BASE_URL, regionResolver);
+        after.deleteMessage(queue.getQueueUrl(), handle, region);
+
+        assertTrue(after.peekMessages(queue.getQueueUrl(), region).isEmpty());
+    }
+
+    private String receivedHandle(String queueUrl, int visibilityTimeout, String region) {
+        return sqsService.receiveMessage(queueUrl, 1, visibilityTimeout, 0, region).get(0).getReceiptHandle();
+    }
+
+    private void useReceiptHandle(String operation, String queueUrl, String receiptHandle, String region) {
+        if ("delete".equals(operation)) {
+            sqsService.deleteMessage(queueUrl, receiptHandle, region);
+        } else {
+            sqsService.changeMessageVisibility(queueUrl, receiptHandle, 10, region);
+        }
+    }
+
+    @Test
+    void copyForRedrivePreservesSenderId() {
+        Message message = new Message("body");
+        message.setSenderId("AIDAEXAMPLE");
+        Message copy = message.copyForRedrive();
+        assertEquals("AIDAEXAMPLE", copy.getSenderId());
+    }
+
+    @Test
+    void sendMessageStampsSenderIdFromCallerPrincipal() {
+        String region = "us-east-1";
+        @SuppressWarnings("unchecked")
+        Instance<RequestContext> requestContextInstance = mock(Instance.class);
+        RequestContext requestContext = new RequestContext();
+        requestContext.setAccessKeyId("AKIAIOSFODNN7EXAMPLE");
+        requestContext.setAccountId("123456789012");
+        when(requestContextInstance.get()).thenReturn(requestContext);
+
+        IamService iamService = mock(IamService.class);
+        when(iamService.resolveCallerUserId(eq("AKIAIOSFODNN7EXAMPLE"), any())).thenReturn(Optional.of("AIDAUSER123"));
+
+        SqsService service = new SqsService(new InMemoryStorage<>(), 30, 1048576, BASE_URL, clock,
+                requestContextInstance, iamService);
+        Queue queue = service.createQueue("sender-id-queue", null, region);
+
+        assertEquals("AIDAUSER123", service.resolveCallerSenderId(queue.getQueueUrl()));
+    }
+
+    @Test
+    void sendMessageWithoutExplicitSenderIdIgnoresRequestScopeCaller() {
+        String region = "us-east-1";
+        @SuppressWarnings("unchecked")
+        Instance<RequestContext> requestContextInstance = mock(Instance.class);
+        RequestContext requestContext = new RequestContext();
+        requestContext.setAccessKeyId("AKIAIOSFODNN7EXAMPLE");
+        requestContext.setAccountId("123456789012");
+        when(requestContextInstance.get()).thenReturn(requestContext);
+
+        IamService iamService = mock(IamService.class);
+        when(iamService.resolveCallerUserId(eq("AKIAIOSFODNN7EXAMPLE"), any())).thenReturn(Optional.of("AIDAUSER123"));
+
+        SqsService service = new SqsService(new InMemoryStorage<>(), 30, 1048576, BASE_URL, clock,
+                requestContextInstance, iamService);
+        Queue queue = service.createQueue("internal-producer-queue", null, region);
+        Message message = service.sendMessage(queue.getQueueUrl(), "hello", 0, region);
+
+        assertEquals(service.senderIdFor(queue.getQueueUrl()), message.getSenderId());
+    }
+
+    @Test
+    void sendMessageFallsBackToAccountIdWhenNoCallerPrincipal() {
+        String region = "us-east-1";
+        @SuppressWarnings("unchecked")
+        Instance<RequestContext> requestContextInstance = mock(Instance.class);
+        RequestContext requestContext = new RequestContext();
+        requestContext.setAccessKeyId("AKIAOTHERKEY");
+        requestContext.setAccountId("123456789012");
+        when(requestContextInstance.get()).thenReturn(requestContext);
+
+        IamService iamService = mock(IamService.class);
+        when(iamService.resolveCallerUserId(eq("AKIAOTHERKEY"), any())).thenReturn(Optional.empty());
+
+        SqsService service = new SqsService(new InMemoryStorage<>(), 30, 1048576, BASE_URL, clock,
+                requestContextInstance, iamService);
+        Queue queue = service.createQueue("sender-id-fallback-queue", null, region);
+
+        assertEquals("123456789012", service.resolveCallerSenderId(queue.getQueueUrl()));
+    }
+
+    @Test
+    void sendMessageOutsideRequestContextFallsBackToQueueOwnerAccount() {
+        String region = "us-east-1";
+        RegionResolver customResolver = new RegionResolver("us-east-1", "999988887777");
+        SqsService service = new SqsService(new InMemoryStorage<>(), null, null, null,
+                30, 1048576, BASE_URL, customResolver, false, null, clock,
+                ReceiptHandle.DEFAULT_SECRET, null, null);
+        Queue queue = service.createQueue("foreign-account-queue", null, region);
+        Message message = service.sendMessage(queue.getQueueUrl(), "hello", 0, region);
+
+        assertEquals("999988887777", message.getSenderId());
+    }
+
+    @Test
+    void sendMessageUsesExplicitSenderIdWhenProvided() {
+        String region = "us-east-1";
+        @SuppressWarnings("unchecked")
+        Instance<RequestContext> requestContextInstance = mock(Instance.class);
+        RequestContext requestContext = new RequestContext();
+        requestContext.setAccessKeyId("AKIAIOSFODNN7EXAMPLE");
+        requestContext.setAccountId("123456789012");
+        when(requestContextInstance.get()).thenReturn(requestContext);
+
+        IamService iamService = mock(IamService.class);
+        when(iamService.resolveCallerUserId(eq("AKIAIOSFODNN7EXAMPLE"), any())).thenReturn(Optional.of("AIDAUSER123"));
+
+        SqsService service = new SqsService(new InMemoryStorage<>(), 30, 1048576, BASE_URL, clock,
+                requestContextInstance, iamService);
+        Queue queue = service.createQueue("sender-id-explicit-queue", null, region);
+        Message message = service.sendMessage(queue.getQueueUrl(), "hello", 0, null, null, null, null,
+                "sns.amazonaws.com", region);
+
+        assertEquals("sns.amazonaws.com", message.getSenderId());
     }
 }

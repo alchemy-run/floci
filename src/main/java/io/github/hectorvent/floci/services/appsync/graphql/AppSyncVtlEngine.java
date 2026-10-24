@@ -5,7 +5,15 @@ import io.github.hectorvent.floci.services.apigateway.BoundedWriter;
 import io.github.hectorvent.floci.services.apigateway.VtlExecutionGuard;
 import io.github.hectorvent.floci.services.apigateway.VtlSandbox;
 import io.github.hectorvent.floci.services.appsync.graphql.util.AppSyncUtil;
+import io.github.hectorvent.floci.services.appsync.graphql.util.DynamoDbUtil;
+import io.github.hectorvent.floci.services.appsync.graphql.util.ListUtil;
+import io.github.hectorvent.floci.services.appsync.graphql.util.MapUtil;
+import io.github.hectorvent.floci.services.appsync.graphql.util.MathUtil;
+import io.github.hectorvent.floci.services.appsync.graphql.util.StrUtil;
+import io.github.hectorvent.floci.services.appsync.graphql.util.TimeUtil;
+import io.github.hectorvent.floci.services.appsync.graphql.util.TransformUtil;
 import io.github.hectorvent.floci.services.appsync.graphql.util.VtlErrorSignal;
+import io.quarkus.runtime.annotations.RegisterForReflection;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.apache.velocity.VelocityContext;
@@ -14,9 +22,31 @@ import org.apache.velocity.runtime.RuntimeConstants;
 
 import java.io.StringWriter;
 import java.time.Duration;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Velocity reaches the directive by class name and every method a template calls through
+ * reflection, so the native image needs them registered. That includes the JDK maps, lists and
+ * strings that $ctx, literals and $util results are made of.
+ */
+@RegisterForReflection(targets = {
+        ReturnDirective.class,
+        AppSyncUtil.class,
+        StrUtil.class,
+        TimeUtil.class,
+        MathUtil.class,
+        DynamoDbUtil.class,
+        TransformUtil.class,
+        ListUtil.class,
+        MapUtil.class,
+        Map.class,
+        Map.Entry.class,
+        List.class,
+        Collection.class,
+        String.class,
+})
 @ApplicationScoped
 public class AppSyncVtlEngine {
 
@@ -44,7 +74,7 @@ public class AppSyncVtlEngine {
 
     public AppSyncVtlResult evaluate(String template, AppSyncVtlContext ctx) {
         if (template == null || template.isEmpty()) {
-            return new AppSyncVtlResult("", null, List.of());
+            return new AppSyncVtlResult("", null, List.of(), false);
         }
 
         VelocityContext vc = new VelocityContext();
@@ -67,12 +97,12 @@ public class AppSyncVtlEngine {
         try {
             engine.evaluate(vc, writer, "appsync-template", template);
         } catch (ReturnSignal signal) {
-            return new AppSyncVtlResult(signal.getValue(), null, ctx.getAppendedErrors());
+            return new AppSyncVtlResult(signal.getValue(), null, ctx.getAppendedErrors(), true);
         } catch (Exception e) {
             Throwable cause = e;
             while (cause != null) {
                 if (cause instanceof VtlErrorSignal signal) {
-                    return new AppSyncVtlResult("", signal, ctx.getAppendedErrors());
+                    return new AppSyncVtlResult("", signal, ctx.getAppendedErrors(), false);
                 }
                 cause = cause.getCause();
             }
@@ -81,7 +111,7 @@ public class AppSyncVtlEngine {
             VtlExecutionGuard.end();
         }
 
-        return new AppSyncVtlResult(rawWriter.toString(), null, ctx.getAppendedErrors());
+        return new AppSyncVtlResult(rawWriter.toString(), null, ctx.getAppendedErrors(), false);
     }
 
 }

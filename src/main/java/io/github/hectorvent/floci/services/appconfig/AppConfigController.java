@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.Pagination;
+import io.github.hectorvent.floci.services.appconfig.AppConfigDataService.LegacyConfiguration;
 import io.github.hectorvent.floci.services.appconfig.model.Application;
 import io.github.hectorvent.floci.services.appconfig.model.ConfigurationProfile;
 import io.github.hectorvent.floci.services.appconfig.model.Deployment;
@@ -23,8 +24,10 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriInfo;
 
 import java.io.IOException;
 import java.util.List;
@@ -35,11 +38,14 @@ import java.util.Map;
 @Consumes(MediaType.APPLICATION_JSON)
 public class AppConfigController {
     private final AppConfigService service;
+    private final AppConfigDataService dataService;
     private final ObjectMapper objectMapper;
 
     @Inject
-    public AppConfigController(AppConfigService service, ObjectMapper objectMapper) {
+    public AppConfigController(AppConfigService service, AppConfigDataService dataService,
+                               ObjectMapper objectMapper) {
         this.service = service;
+        this.dataService = dataService;
         this.objectMapper = objectMapper;
     }
 
@@ -100,6 +106,13 @@ public class AppConfigController {
     @Path("/applications/{appId}/environments/{envId}")
     public Response getEnvironment(@PathParam("appId") String appId, @PathParam("envId") String envId) {
         return Response.ok(service.getEnvironment(appId, envId)).build();
+    }
+
+    @DELETE
+    @Path("/applications/{appId}/environments/{envId}")
+    public Response deleteEnvironment(@PathParam("appId") String appId, @PathParam("envId") String envId) {
+        service.deleteEnvironment(appId, envId);
+        return Response.noContent().build();
     }
 
     @GET
@@ -417,5 +430,29 @@ public class AppConfigController {
     public Response deleteExtensionAssociation(@PathParam("id") String id) {
         service.deleteExtensionAssociation(id);
         return Response.noContent().build();
+    // ──────────────────────────── Configuration ────────────────────────────
+
+    // The deprecated GetConfiguration: superseded by AppConfigData, but still an AppConfig operation.
+    // The response type comes from the stored version (Ion for variant flags when Accept asks for it),
+    // never from negotiation, so a non-JSON Accept header is not refused.
+    @GET
+    @Path("/applications/{appId}/environments/{envId}/configurations/{configuration}")
+    @Produces(MediaType.WILDCARD)
+    public Response getConfiguration(@PathParam("appId") String appId,
+                                     @PathParam("envId") String envId,
+                                     @PathParam("configuration") String configuration,
+                                     @QueryParam("client_id") String clientId,
+                                     @HeaderParam("Accept") String accept,
+                                     @Context UriInfo uriInfo) {
+        // Read raw: @QueryParam turns an empty value into null, but AWS rejects an empty version.
+        String clientVersion = uriInfo.getQueryParameters().getFirst("client_configuration_version");
+        LegacyConfiguration data = dataService.getConfiguration(
+                appId, envId, configuration, clientId, clientVersion, accept);
+        // A version stored without a content type would otherwise go out as the */* of @Produces.
+        String contentType = data.contentType() != null ? data.contentType() : MediaType.APPLICATION_OCTET_STREAM;
+        return Response.ok(data.content())
+                .header("Content-Type", contentType)
+                .header("Configuration-Version", data.configurationVersion())
+                .build();
     }
 }

@@ -14,7 +14,13 @@ public class EmrInstanceGroup {
     private String bidPrice;
     private int requestedInstanceCount;
     private int runningInstanceCount;
+    private int terminatedInstanceCount;
     private String state;
+    /** The AutoScalingPolicy as given (Constraints and Rules), raw JSON; null when none is attached. */
+    private String autoScalingPolicy;
+    /** The group's Configurations as given, raw JSON; null when none. Applied at once, so it is also the last applied. */
+    private String configurations;
+    private long configurationsVersion;
 
     public EmrInstanceGroup() {}
 
@@ -33,6 +39,12 @@ public class EmrInstanceGroup {
     public String getMarket() { return market; }
     public void setMarket(String market) { this.market = market; }
 
+    public String getConfigurations() { return configurations; }
+    public void setConfigurations(String configurations) { this.configurations = configurations; }
+
+    public long getConfigurationsVersion() { return configurationsVersion; }
+    public void setConfigurationsVersion(long configurationsVersion) { this.configurationsVersion = configurationsVersion; }
+
     public String getBidPrice() { return bidPrice; }
     public void setBidPrice(String bidPrice) { this.bidPrice = bidPrice; }
 
@@ -46,6 +58,14 @@ public class EmrInstanceGroup {
         this.runningInstanceCount = runningInstanceCount;
     }
 
+    public int getTerminatedInstanceCount() { return terminatedInstanceCount; }
+    public void setTerminatedInstanceCount(int terminatedInstanceCount) {
+        this.terminatedInstanceCount = terminatedInstanceCount;
+    }
+
     public String getState() { return state; }
     public void setState(String state) { this.state = state; }
+
+    public String getAutoScalingPolicy() { return autoScalingPolicy; }
+    public void setAutoScalingPolicy(String autoScalingPolicy) { this.autoScalingPolicy = autoScalingPolicy; }
 }

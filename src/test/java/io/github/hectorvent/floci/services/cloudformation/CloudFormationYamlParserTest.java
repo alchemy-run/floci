@@ -43,4 +43,23 @@ class CloudFormationYamlParserTest {
             """);
         assertEquals(longForm, shorthand);
     }
+
+    @Test
+    void getStackOutputShorthandExpandsToFnGetStackOutput() throws Exception {
+        JsonNode shorthand = parse("""
+            SubnetId: !GetStackOutput
+              StackName: Producer
+              OutputName: SubnetId
+              Region: us-west-2
+            """);
+        JsonNode longForm = parse("""
+            SubnetId:
+              Fn::GetStackOutput:
+                StackName: Producer
+                OutputName: SubnetId
+                Region: us-west-2
+            """);
+        assertEquals(longForm, shorthand);
+        assertEquals("Producer", shorthand.get("SubnetId").get("Fn::GetStackOutput").get("StackName").asText());
+    }
 }

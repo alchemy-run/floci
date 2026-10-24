@@ -20,16 +20,20 @@ import io.github.hectorvent.floci.services.organizations.model.OrganizationAccou
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.s3.model.Bucket;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
+import io.github.hectorvent.floci.services.guardduty.model.PublishingDestination;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -711,6 +715,238 @@ class GuardDutyServiceTest {
 
     private JsonNode sampleRequest() {
         return request("{\"findingTypes\":[\"Recon:EC2/PortProbeUnprotectedPort\"]}");
+    private static final String DESTINATION_NOT_FOUND =
+            "The request is rejected because the one or more input parameters have invalid values.";
+
+    @Test
+    void createPublishingDestinationWithSameClientTokenReturnsOriginal() throws Exception {
+        String detectorId = service.createDetector(REGION, ACCOUNT, request("{\"enable\":true}")).getId();
+        String body = "{\"destinationType\":\"S3\",\"clientToken\":\"tok-1\","
+                + "\"destinationProperties\":{\"destinationArn\":\"arn:aws:s3:::a\"}}";
+        String first = service.createPublishingDestination(REGION, detectorId, request(body)).destinationId();
+        String retry = service.createPublishingDestination(REGION, detectorId, request(body)).destinationId();
+        String other = service.createPublishingDestination(REGION, detectorId,
+                request(body.replace("tok-1", "tok-2"))).destinationId();
+
+        assertEquals(first, retry);
+        assertNotEquals(first, other);
+        assertEquals(2, service.listPublishingDestinations(REGION, detectorId, null, null).items().size());
+    }
+
+    @Test
+    void createPublishingDestinationRejectsClientTokenOverSixtyFourCharacters() throws Exception {
+        String detectorId = service.createDetector(REGION, ACCOUNT, request("{\"enable\":true}")).getId();
+        String body = "{\"destinationType\":\"S3\",\"clientToken\":\"%s\","
+                + "\"destinationProperties\":{\"destinationArn\":\"arn:aws:s3:::a\"}}";
+
+        AwsException error = assertThrows(AwsException.class,
+                () -> service.createPublishingDestination(REGION, detectorId, request(body.formatted("t".repeat(65)))));
+        assertEquals("BadRequestException", error.getErrorCode());
+        assertEquals(400, error.getHttpStatus());
+        assertEquals("clientToken must be at most 64 characters.", error.getMessage());
+        assertTrue(service.listPublishingDestinations(REGION, detectorId, null, null).items().isEmpty());
+
+        service.createPublishingDestination(REGION, detectorId, request(body.formatted("t".repeat(64))));
+        assertEquals(1, service.listPublishingDestinations(REGION, detectorId, null, null).items().size());
+    }
+
+    /** The model's length constraint counts Unicode code points, not UTF-16 code units. */
+    @Test
+    void createPublishingDestinationMeasuresClientTokenInCodePoints() throws Exception {
+        String detectorId = service.createDetector(REGION, ACCOUNT, request("{\"enable\":true}")).getId();
+        String body = "{\"destinationType\":\"S3\",\"clientToken\":\"%s\","
+                + "\"destinationProperties\":{\"destinationArn\":\"arn:aws:s3:::a\"}}";
+        String emoji = "😀";
+
+        service.createPublishingDestination(REGION, detectorId, request(body.formatted(emoji.repeat(64))));
+        assertEquals(1, service.listPublishingDestinations(REGION, detectorId, null, null).items().size());
+
+        AwsException error = assertThrows(AwsException.class,
+                () -> service.createPublishingDestination(REGION, detectorId, request(body.formatted(emoji.repeat(65)))));
+        assertEquals("clientToken must be at most 64 characters.", error.getMessage());
+        assertEquals(1, service.listPublishingDestinations(REGION, detectorId, null, null).items().size());
+    }
+
+    @Test
+    void publishingDestinationSurvivesPersistentStorageReloadWithClientToken(@TempDir Path tempDir)
+            throws Exception {
+        Path detectorFile = tempDir.resolve("detectors.json");
+        Path adminFile = tempDir.resolve("admins.json");
+        Path memberFile = tempDir.resolve("members.json");
+        Path destinationFile = tempDir.resolve("destinations.json");
+        GuardDutyService firstService = new GuardDutyService(
+                loadedStore(detectorFile, new TypeReference<Map<String, Detector>>() {
+                }),
+                loadedStore(adminFile, new TypeReference<Map<String, AdminAccount>>() {
+                }),
+                loadedStore(memberFile, new TypeReference<Map<String, MemberAccount>>() {
+                }),
+                new InMemoryStorage<>(),
+                loadedStore(destinationFile, new TypeReference<Map<String, PublishingDestination>>() {
+                }));
+        String detectorId = firstService.createDetector(REGION, ACCOUNT, request("{\"enable\":true}")).getId();
+        String body = "{\"destinationType\":\"S3\",\"clientToken\":\"tok-reload\","
+                + "\"destinationProperties\":{\"destinationArn\":\"arn:aws:s3:::a\","
+                + "\"kmsKeyArn\":\"arn:aws:kms:us-east-1:000000000000:key/k\"}}";
+        PublishingDestination created = firstService.createPublishingDestination(REGION, detectorId, request(body));
+
+        GuardDutyService reloadedService = new GuardDutyService(
+                loadedStore(detectorFile, new TypeReference<Map<String, Detector>>() {
+                }),
+                loadedStore(adminFile, new TypeReference<Map<String, AdminAccount>>() {
+                }),
+                loadedStore(memberFile, new TypeReference<Map<String, MemberAccount>>() {
+                }),
+                new InMemoryStorage<>(),
+                loadedStore(destinationFile, new TypeReference<Map<String, PublishingDestination>>() {
+                }));
+
+        assertEquals(created, reloadedService.describePublishingDestination(
+                REGION, detectorId, created.destinationId()));
+        assertEquals("tok-reload", reloadedService.describePublishingDestination(
+                REGION, detectorId, created.destinationId()).clientToken());
+        PublishingDestination replay = reloadedService.createPublishingDestination(REGION, detectorId, request(body));
+        assertEquals(created.destinationId(), replay.destinationId());
+        assertEquals(1, reloadedService.listPublishingDestinations(REGION, detectorId, null, null).items().size());
+    }
+
+    @Test
+    void deleteDetectorRemovesItsPublishingDestinations() throws Exception {
+        InMemoryStorage<String, PublishingDestination> destinations = new InMemoryStorage<>();
+        GuardDutyService svc = new GuardDutyService(new InMemoryStorage<>(), new InMemoryStorage<>(),
+                new InMemoryStorage<>(), new InMemoryStorage<>(), destinations);
+        String keep = svc.createDetector(REGION, ACCOUNT, request("{\"enable\":true}")).getId();
+        String dropRegion = "us-west-2";
+        String drop = svc.createDetector(dropRegion, ACCOUNT, request("{\"enable\":true}")).getId();
+        String body = "{\"destinationType\":\"S3\",\"destinationProperties\":{\"destinationArn\":\"arn:aws:s3:::a\"}}";
+        svc.createPublishingDestination(REGION, keep, request(body));
+        svc.createPublishingDestination(dropRegion, drop, request(body));
+
+        svc.deleteDetector(dropRegion, drop);
+
+        assertEquals(1, destinations.scan(k -> true).size());
+        assertEquals(1, svc.listPublishingDestinations(REGION, keep, null, null).items().size());
+    }
+
+    @Test
+    void publishingDestinationsArePartitionedByAccountEvenForTheSameDetector() throws Exception {
+        // Both services see one detector (plain store), so only the destination store's account
+        // partitioning can keep the second account away from the first account's destination.
+        InMemoryStorage<String, Detector> sharedDetectors = new InMemoryStorage<>();
+        InMemoryStorage<String, PublishingDestination> sharedDestinations = new InMemoryStorage<>();
+        GuardDutyService first = new GuardDutyService(sharedDetectors, new InMemoryStorage<>(),
+                new InMemoryStorage<>(), new InMemoryStorage<>(),
+                new AccountAwareStorageBackend<>(sharedDestinations, null, "111111111111"));
+        GuardDutyService second = new GuardDutyService(sharedDetectors, new InMemoryStorage<>(),
+                new InMemoryStorage<>(), new InMemoryStorage<>(),
+                new AccountAwareStorageBackend<>(sharedDestinations, null, "222222222222"));
+        String detectorId = first.createDetector(REGION, ACCOUNT, request("{\"enable\":true}")).getId();
+        String destinationId = first.createPublishingDestination(REGION, detectorId, request(
+                "{\"destinationType\":\"S3\",\"destinationProperties\":{\"destinationArn\":\"arn:aws:s3:::a\"}}"))
+                .destinationId();
+
+        AwsException hidden = assertThrows(AwsException.class,
+                () -> second.describePublishingDestination(REGION, detectorId, destinationId));
+        assertEquals(DESTINATION_NOT_FOUND, hidden.getMessage());
+        assertTrue(second.listPublishingDestinations(REGION, detectorId, null, null).items().isEmpty());
+        assertEquals(destinationId, first.describePublishingDestination(REGION, detectorId, destinationId)
+                .destinationId());
+    }
+
+    @Test
+    void listPublishingDestinationsPagesWithMaxResultsAndRejectsBadTokens() throws Exception {
+        String detectorId = service.createDetector(REGION, ACCOUNT, request("{\"enable\":true}")).getId();
+        List<String> created = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            created.add(createDestination(detectorId, "arn:aws:s3:::bucket-" + i).destinationId());
+        }
+        created.sort(null);
+
+        GuardDutyService.Page<PublishingDestination> firstPage =
+                service.listPublishingDestinations(REGION, detectorId, "2", null);
+        assertEquals(created.subList(0, 2),
+                firstPage.items().stream().map(PublishingDestination::destinationId).toList());
+        GuardDutyService.Page<PublishingDestination> lastPage =
+                service.listPublishingDestinations(REGION, detectorId, "2", firstPage.nextToken());
+        assertEquals(created.subList(2, 3),
+                lastPage.items().stream().map(PublishingDestination::destinationId).toList());
+        assertNull(lastPage.nextToken());
+
+        service.deletePublishingDestination(REGION, detectorId, created.get(2));
+        AwsException stale = assertThrows(AwsException.class,
+                () -> service.listPublishingDestinations(REGION, detectorId, "2", firstPage.nextToken()));
+        assertEquals("nextToken is invalid.", stale.getMessage());
+        AwsException garbage = assertThrows(AwsException.class,
+                () -> service.listPublishingDestinations(REGION, detectorId, null, "not-a-token"));
+        assertEquals("nextToken is invalid.", garbage.getMessage());
+        AwsException tooMany = assertThrows(AwsException.class,
+                () -> service.listPublishingDestinations(REGION, detectorId, "0", null));
+        assertEquals("BadRequestException", tooMany.getErrorCode());
+    }
+
+    @Test
+    void updatePublishingDestinationKeepsOmittedFieldsAndValidatesInput() throws Exception {
+        String detectorId = service.createDetector(REGION, ACCOUNT, request("{\"enable\":true}")).getId();
+        String destinationId = service.createPublishingDestination(REGION, detectorId, request(
+                "{\"destinationType\":\"S3\",\"destinationProperties\":"
+                        + "{\"destinationArn\":\"arn:aws:s3:::a\",\"kmsKeyArn\":\"arn:aws:kms:k1\"}}"))
+                .destinationId();
+
+        service.updatePublishingDestination(REGION, detectorId, destinationId,
+                request("{\"destinationProperties\":{\"kmsKeyArn\":\"arn:aws:kms:k2\"}}"));
+        PublishingDestination afterKms = service.describePublishingDestination(REGION, detectorId, destinationId);
+        assertEquals("arn:aws:s3:::a", afterKms.destinationArn());
+        assertEquals("arn:aws:kms:k2", afterKms.kmsKeyArn());
+
+        service.updatePublishingDestination(REGION, detectorId, destinationId,
+                request("{\"destinationProperties\":{\"destinationArn\":\"arn:aws:s3:::b\"}}"));
+        PublishingDestination afterArn = service.describePublishingDestination(REGION, detectorId, destinationId);
+        assertEquals("arn:aws:s3:::b", afterArn.destinationArn());
+        assertEquals("arn:aws:kms:k2", afterArn.kmsKeyArn());
+
+        service.updatePublishingDestination(REGION, detectorId, destinationId, request("{}"));
+        assertEquals(afterArn, service.describePublishingDestination(REGION, detectorId, destinationId));
+
+        AwsException notObject = assertThrows(AwsException.class,
+                () -> service.updatePublishingDestination(REGION, detectorId, destinationId,
+                        request("{\"destinationProperties\":\"arn:aws:s3:::c\"}")));
+        assertEquals("destinationProperties must be a JSON object.", notObject.getMessage());
+        AwsException notText = assertThrows(AwsException.class,
+                () -> service.updatePublishingDestination(REGION, detectorId, destinationId,
+                        request("{\"destinationProperties\":{\"destinationArn\":5}}")));
+        assertEquals("destinationArn must be a string.", notText.getMessage());
+        assertEquals(afterArn, service.describePublishingDestination(REGION, detectorId, destinationId));
+    }
+
+    @Test
+    void unknownPublishingDestinationIsRejectedWithProviderMatchedMessage() throws Exception {
+        String detectorId = service.createDetector(REGION, ACCOUNT, request("{\"enable\":true}")).getId();
+        for (Executable call : List.<Executable>of(
+                () -> service.describePublishingDestination(REGION, detectorId, "missing"),
+                () -> service.updatePublishingDestination(REGION, detectorId, "missing",
+                        request("{\"destinationProperties\":{\"destinationArn\":\"arn:aws:s3:::a\"}}")),
+                () -> service.deletePublishingDestination(REGION, detectorId, "missing"))) {
+            AwsException error = assertThrows(AwsException.class, call);
+            assertEquals("BadRequestException", error.getErrorCode());
+            assertEquals(400, error.getHttpStatus());
+            assertEquals(DESTINATION_NOT_FOUND, error.getMessage());
+        }
+    }
+
+    @Test
+    void createPublishingDestinationRequiresDestinationProperties() throws Exception {
+        String detectorId = service.createDetector(REGION, ACCOUNT, request("{\"enable\":true}")).getId();
+        AwsException error = assertThrows(AwsException.class,
+                () -> service.createPublishingDestination(REGION, detectorId,
+                        request("{\"destinationType\":\"S3\"}")));
+        assertEquals("BadRequestException", error.getErrorCode());
+        assertEquals("destinationProperties must be a JSON object.", error.getMessage());
+        assertTrue(service.listPublishingDestinations(REGION, detectorId, null, null).items().isEmpty());
+    }
+
+    private PublishingDestination createDestination(String detectorId, String bucketArn) {
+        return service.createPublishingDestination(REGION, detectorId, request(
+                "{\"destinationType\":\"S3\",\"destinationProperties\":{\"destinationArn\":\"" + bucketArn + "\"}}"));
     }
 
     private static <V> PersistentStorage<String, V> loadedStore(

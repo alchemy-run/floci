@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.stepfunctions;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.PersistentStorage;
@@ -18,17 +19,17 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mockito;
 
+import java.nio.file.Path;
 import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.nio.file.Path;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
@@ -38,12 +39,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 /** Verifies executions abandoned by a restart reach a terminal status when the emulator comes back. */
 class StepFunctionsServicePersistenceTest {
@@ -192,7 +194,8 @@ class StepFunctionsServicePersistenceTest {
             List<HistoryEvent> actualHistory = afterRestart.getExecutionHistory(started.getExecutionArn());
             aborted.setTimestamp(actualHistory.getLast().getTimestamp());
             assertHistoryEquals(expectedHistory, actualHistory);
-            assertFalse(afterRestart.sendTaskSuccess(taskToken, "{\"done\":true}"));
+            assertEquals("InvalidToken", assertThrows(AwsException.class,
+                    () -> afterRestart.sendTaskSuccess(taskToken, "{\"done\":true}")).getErrorCode());
         } finally {
             beforeRestart.abortAbandonedExecutions();
             beforeRestart.clear();
@@ -450,7 +453,7 @@ class StepFunctionsServicePersistenceTest {
 
     private StepFunctionsService serviceWithStorage(StorageFactory storage, AslExecutor executor) {
         return new StepFunctionsService(storage, regionResolver, executor,
-                new ObjectMapper(), mockLoader);
+                new ObjectMapper(), mockLoader, Mockito.mock(StepFunctionsEventPublisher.class));
     }
 
     private static AccountAwareStorageBackend<Execution> executionStore(StorageFactory storage) {

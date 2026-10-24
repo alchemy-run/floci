@@ -6,11 +6,12 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.quarkus.runtime.annotations.RegisterForReflection;
+
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.ArrayList;
 
 @RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -56,14 +57,17 @@ public class DeliveryStreamDescription {
     }
 
     public DeliveryStreamDescription(String name, String arn, S3Destination s3, KinesisStreamSource kinesisStreamSource) {
+        this(name, arn, s3, null, kinesisStreamSource);
+    }
+
+    public DeliveryStreamDescription(String name, String arn, S3Destination s3, RedshiftDestination redshift,
+                                     KinesisStreamSource kinesisStreamSource) {
         this.deliveryStreamName = name;
         this.deliveryStreamARN = arn;
         this.deliveryStreamStatus = DeliveryStreamStatus.ACTIVE;
         this.createTimestamp = Instant.now();
-        if (s3 != null) {
-            s3.applyDefaults();
-        }
-        this.destinations = List.of(new Destination(s3));
+        this.destinations = List.of(redshift != null ? new Destination(redshift) : new Destination(s3));
+        applyDefaults();
         this.deliveryStreamEncryptionConfiguration = DeliveryStreamEncryptionConfiguration.disabled();
         if (kinesisStreamSource != null) {
             this.source = new Source(kinesisStreamSource);
@@ -154,7 +158,29 @@ public class DeliveryStreamDescription {
      */
     public S3Destination s3Destination() {
         if (destinations == null || destinations.isEmpty()) return null;
-        return destinations.get(0).getExtendedS3DestinationDescription();
+        Destination first = destinations.get(0);
+        if (first.getRedshiftDestinationDescription() != null) {
+            return first.getRedshiftDestinationDescription().getS3();
+        }
+        return first.getExtendedS3DestinationDescription();
+    }
+
+    /**
+     * Fills the AWS defaults on every S3 configuration the stream describes: its S3 destination, or
+     * a Redshift destination's intermediate and backup configurations.
+     */
+    public final void applyDefaults() {
+        S3Destination s3 = s3Destination();
+        if (s3 != null) {
+            s3.applyDefaults();
+        }
+        if (destinations == null || destinations.isEmpty()) {
+            return;
+        }
+        RedshiftDestination redshift = destinations.get(0).getRedshiftDestinationDescription();
+        if (redshift != null && redshift.getS3Backup() != null) {
+            redshift.getS3Backup().applyDefaults();
+        }
     }
 
     @RegisterForReflection
@@ -170,8 +196,16 @@ public class DeliveryStreamDescription {
         // extended-only fields like S3BackupMode aren't part of the plain shape.
         private S3Destination s3;
 
+        private RedshiftDestination redshift;
+
         public Destination() {}
         public Destination(S3Destination s3) { this.s3 = s3; }
+        public Destination(RedshiftDestination redshift) { this.redshift = redshift; }
+
+        @JsonProperty("RedshiftDestinationDescription")
+        public RedshiftDestination getRedshiftDestinationDescription() { return redshift; }
+        @JsonProperty("RedshiftDestinationDescription")
+        public void setRedshiftDestinationDescription(RedshiftDestination redshift) { this.redshift = redshift; }
 
         public String getDestinationId() { return destinationId; }
         public void setDestinationId(String destinationId) { this.destinationId = destinationId; }
@@ -226,6 +260,8 @@ public class DeliveryStreamDescription {
         private DataFormatConversionConfiguration dataFormatConversionConfiguration;
         @JsonProperty("ProcessingConfiguration")
         private ProcessingConfiguration processingConfiguration;
+        @JsonProperty("CloudWatchLoggingOptions")
+        private CloudWatchLoggingOptions cloudWatchLoggingOptions;
 
         public S3Destination() {}
         public String getRoleArn() { return roleArn; }
@@ -261,6 +297,8 @@ public class DeliveryStreamDescription {
         public void setProcessingConfiguration(ProcessingConfiguration processingConfiguration) {
             this.processingConfiguration = processingConfiguration;
         }
+        public CloudWatchLoggingOptions getCloudWatchLoggingOptions() { return cloudWatchLoggingOptions; }
+        public void setCloudWatchLoggingOptions(CloudWatchLoggingOptions options) { this.cloudWatchLoggingOptions = options; }
 
         /**
          * True when a transformation applies to deliveries: the configuration is present
@@ -334,6 +372,14 @@ public class DeliveryStreamDescription {
             // not inject from whatever role is current by then.
             if (processingConfiguration != null && processingConfiguration.getEnabled() == null) {
                 processingConfiguration.setEnabled(false);
+            }
+            // AWS describes a destination that never configured logging as {"Enabled": false},
+            // and an omitted Enabled as false (probed 2026-10-22).
+            if (cloudWatchLoggingOptions == null) {
+                cloudWatchLoggingOptions = new CloudWatchLoggingOptions();
+            }
+            if (cloudWatchLoggingOptions.getEnabled() == null) {
+                cloudWatchLoggingOptions.setEnabled(false);
             }
         }
 
@@ -415,6 +461,7 @@ public class DeliveryStreamDescription {
             view.compressionFormat = compressionFormat;
             view.bufferingHints = bufferingHints;
             view.encryptionConfiguration = encryptionConfiguration;
+            view.cloudWatchLoggingOptions = cloudWatchLoggingOptions;
             return view;
         }
 
@@ -446,6 +493,31 @@ public class DeliveryStreamDescription {
         public void setEnabled(Boolean enabled) { this.enabled = enabled; }
         public List<Processor> getProcessors() { return processors; }
         public void setProcessors(List<Processor> processors) { this.processors = processors; }
+    }
+
+    /**
+     * Stored and echoed as AWS models it. Floci writes no delivery error logs to the named
+     * group. UpdateDestination merges it a member at a time (probed).
+     */
+    @RegisterForReflection
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public static class CloudWatchLoggingOptions {
+        @JsonProperty("Enabled")
+        private Boolean enabled;
+        @JsonProperty("LogGroupName")
+        private String logGroupName;
+        @JsonProperty("LogStreamName")
+        private String logStreamName;
+
+        public CloudWatchLoggingOptions() {}
+
+        public Boolean getEnabled() { return enabled; }
+        public void setEnabled(Boolean enabled) { this.enabled = enabled; }
+        public String getLogGroupName() { return logGroupName; }
+        public void setLogGroupName(String logGroupName) { this.logGroupName = logGroupName; }
+        public String getLogStreamName() { return logStreamName; }
+        public void setLogStreamName(String logStreamName) { this.logStreamName = logStreamName; }
     }
 
     @RegisterForReflection

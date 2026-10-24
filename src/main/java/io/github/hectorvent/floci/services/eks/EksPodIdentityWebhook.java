@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.eks;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.RequestScopes;
 import io.github.hectorvent.floci.services.eks.model.Cluster;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -41,8 +42,8 @@ public class EksPodIdentityWebhook {
     static final String POD_IDENTITY_ADDON = "eks-pod-identity-agent";
 
     static final String TOKEN_VOLUME_NAME = "eks-pod-identity-token";
-    static final String TOKEN_AUDIENCE = "pods.eks.amazonaws.com";
-    static final String TOKEN_MOUNT_PATH = "/var/run/secrets/pods.eks.amazonaws.com/serviceaccount";
+    static final String TOKEN_AUDIENCE = "pods.eks.amazonaws.com"; // partition-literal: pod-identity token audience; no source outside the commercial partition (P9)
+    static final String TOKEN_MOUNT_PATH = "/var/run/secrets/pods.eks.amazonaws.com/serviceaccount"; // partition-literal: the projected-token mount path the EKS agent hardcodes
     static final String TOKEN_FILE_NAME = "eks-pod-identity-token";
     static final String TOKEN_FILE_PATH = TOKEN_MOUNT_PATH + "/" + TOKEN_FILE_NAME;
     static final int TOKEN_EXPIRATION_SECONDS = 86400;
@@ -100,13 +101,16 @@ public class EksPodIdentityWebhook {
             return List.of();
         }
         Optional<Cluster> cluster = eks.findAuthenticationCluster(accountId, clusterName);
-        if (cluster.isEmpty() || !podIdentityAgentInstalled(cluster.get())) {
+        if (cluster.isEmpty()) {
             return List.of();
         }
-        if (!hasAssociation(cluster.get(), namespace, serviceAccountOf(pod))) {
-            return List.of();
-        }
-        return buildPatch(pod);
+        return RequestScopes.callAs(accountId, () -> {
+            if (!podIdentityAgentInstalled(cluster.get())
+                    || !hasAssociation(cluster.get(), namespace, serviceAccountOf(pod))) {
+                return List.of();
+            }
+            return buildPatch(pod);
+        });
     }
 
     private boolean podIdentityAgentInstalled(Cluster cluster) {

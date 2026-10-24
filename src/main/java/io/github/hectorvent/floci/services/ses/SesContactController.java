@@ -1,11 +1,11 @@
 package io.github.hectorvent.floci.services.ses;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.ses.model.Contact;
 import io.github.hectorvent.floci.services.ses.model.ContactList;
@@ -21,20 +21,24 @@ import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriInfo;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
 import java.util.List;
 
 import static io.github.hectorvent.floci.services.ses.SesV2Json.coerceBoolean;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.coerceBooleanOrFalse;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.intMemberOrAbsent;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.parseTagsArray;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.putTimestamp;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.readOptionBody;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.remapV1Exception;
-import static io.github.hectorvent.floci.services.ses.SesV2Json.requireJsonObject;
-import static io.github.hectorvent.floci.services.ses.SesV2Json.unexpectedStartError;
 
 /**
  * SES V2 contact-list and contact endpoints ({@code /v2/email/contact-lists}). Every operation
@@ -66,11 +70,11 @@ public class SesContactController {
     public Response createContactList(@Context HttpHeaders headers, String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            if (body == null || body.isBlank()) {
+            if (body == null || body.isEmpty()) {
                 throw new AwsException("BadRequestException", "Request body is required.", 400);
             }
-            JsonNode request = objectMapper.readTree(body);
-            requireJsonObject(request);
+            JsonNode request = readOptionBody(objectMapper, body);
+            SesV2RequestShapes.check("CreateContactList", request);
             // Read leniently; the service surfaces a missing ContactListName as the AWS Smithy
             // validation error rather than a custom "required" message.
             String name = request.path("ContactListName").asText(null);
@@ -82,24 +86,26 @@ public class SesContactController {
             return Response.ok(objectMapper.createObjectNode()).build();
         } catch (AwsException e) {
             throw remapV1Exception(e);
-        } catch (JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
         }
     }
 
     @GET
     @Path("/contact-lists")
-    public Response listContactLists(@Context HttpHeaders headers) {
+    public Response listContactLists(@Context HttpHeaders headers,
+                                     @QueryParam("PageSize") String pageSize,
+                                     @Context UriInfo uriInfo) {
         String region = regionResolver.resolveRegion(headers);
+        String nextToken = SesListPaging.queryToken(uriInfo);
+        PaginatedResult<ContactList> page = contactService.listContactLists(region,
+                SesListPaging.V2_LIST_CONTACT_LISTS, SesListPaging.parseQueryPageSize(pageSize), nextToken);
         ObjectNode result = objectMapper.createObjectNode();
         ArrayNode lists = result.putArray("ContactLists");
-        for (ContactList cl : contactService.listContactLists(region)) {
+        for (ContactList cl : page.items()) {
             ObjectNode item = lists.addObject();
             item.put("ContactListName", cl.getContactListName());
-            if (cl.getLastUpdatedTimestamp() != null) {
-                item.put("LastUpdatedTimestamp", cl.getLastUpdatedTimestamp().getEpochSecond());
-            }
+            putTimestamp(item, "LastUpdatedTimestamp", cl.getLastUpdatedTimestamp());
         }
+        result.put("NextToken", page.nextToken());
         return Response.ok(result).build();
     }
 
@@ -119,10 +125,8 @@ public class SesContactController {
                                       String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            JsonNode request = (body == null || body.isBlank())
-                    ? objectMapper.createObjectNode()
-                    : objectMapper.readTree(body);
-            requireJsonObject(request);
+            JsonNode request = readOptionBody(objectMapper, body);
+            SesV2RequestShapes.check("UpdateContactList", request);
             JsonNode topicsNode = request.path("Topics");
             // Treat absent or explicit-null Topics as "not provided" (keep existing), consistent
             // with Description; clearing is done via an explicit empty array [].
@@ -137,8 +141,6 @@ public class SesContactController {
             return Response.ok(objectMapper.createObjectNode()).build();
         } catch (AwsException e) {
             throw remapV1Exception(e);
-        } catch (JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
         }
     }
 
@@ -156,9 +158,6 @@ public class SesContactController {
         List<Topic> out = new ArrayList<>();
         if (topicsNode == null || topicsNode.isMissingNode() || topicsNode.isNull()) {
             return out;
-        }
-        if (!topicsNode.isArray()) {
-            throw new AwsException("BadRequestException", "Topics must be an array.", 400);
         }
         for (JsonNode t : topicsNode) {
             out.add(new Topic(
@@ -186,12 +185,8 @@ public class SesContactController {
                 to.put("Description", t.getDescription());
             }
         }
-        if (cl.getCreatedTimestamp() != null) {
-            result.put("CreatedTimestamp", cl.getCreatedTimestamp().getEpochSecond());
-        }
-        if (cl.getLastUpdatedTimestamp() != null) {
-            result.put("LastUpdatedTimestamp", cl.getLastUpdatedTimestamp().getEpochSecond());
-        }
+        putTimestamp(result, "CreatedTimestamp", cl.getCreatedTimestamp());
+        putTimestamp(result, "LastUpdatedTimestamp", cl.getLastUpdatedTimestamp());
         ArrayNode tags = result.putArray("Tags");
         for (Tag tag : cl.getTags()) {
             ObjectNode tn = tags.addObject();
@@ -207,23 +202,21 @@ public class SesContactController {
                                   @PathParam("contactListName") String contactListName, String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            if (body == null || body.isBlank()) {
+            if (body == null || body.isEmpty()) {
                 throw new AwsException("BadRequestException", "Request body is required.", 400);
             }
-            JsonNode request = objectMapper.readTree(body);
-            requireJsonObject(request);
+            JsonNode request = readOptionBody(objectMapper, body);
+            SesV2RequestShapes.check("CreateContact", request);
             String emailAddress = request.path("EmailAddress").asText(null);
             List<TopicPreference> prefs = parseTopicPreferences(request.path("TopicPreferences"));
             Boolean unsubscribeAll = parseUnsubscribeAll(request);
-            String attributesData = parseAttributesData(request);
+            String attributesData = request.path("AttributesData").asText(null);
             contactService.createContact(contactListName, emailAddress, prefs, unsubscribeAll,
                     attributesData, region);
             LOG.infov("SES V2 CreateContact: {0} in {1}", emailAddress, contactListName);
             return Response.ok(objectMapper.createObjectNode()).build();
         } catch (AwsException e) {
             throw remapV1Exception(e);
-        } catch (JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
         }
     }
 
@@ -231,27 +224,39 @@ public class SesContactController {
     @Path("/contact-lists/{contactListName}/contacts/list")
     public Response listContacts(@Context HttpHeaders headers,
                                  @PathParam("contactListName") String contactListName, String body) {
-        // AWS uses POST .../contacts/list with Filter/PageSize/NextToken in the body; Floci returns
-        // all contacts (filtering/pagination not yet implemented) but still rejects a malformed or
-        // non-object body like the other v2 endpoints.
         String region = regionResolver.resolveRegion(headers);
         try {
-            if (body != null && !body.isBlank()) {
-                requireJsonObject(objectMapper.readTree(body));
-            }
-            SesContactService.ContactsWithList listed =
-                    contactService.listContacts(contactListName, region);
+            JsonNode request = readOptionBody(objectMapper, body);
+            SesV2RequestShapes.check("ListContacts", request);
+            Integer pageSize = intMemberOrAbsent(request, "PageSize");
+            String nextToken = request.path("NextToken").asText(null);
+            SesContactService.ContactPage listed = contactService.listContacts(contactListName, region,
+                    SesListPaging.V2_LIST_CONTACTS, pageSize, nextToken, parseContactFilter(request));
             ObjectNode result = objectMapper.createObjectNode();
             ArrayNode arr = result.putArray("Contacts");
-            for (Contact c : listed.contacts()) {
+            for (Contact c : listed.contacts().items()) {
                 arr.add(contactJson(c, listed.list(), false));
             }
+            result.put("NextToken", listed.contacts().nextToken());
             return Response.ok(result).build();
         } catch (AwsException e) {
             throw remapV1Exception(e);
-        } catch (JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
         }
+    }
+
+    private static SesContactService.ContactFilter parseContactFilter(JsonNode request) {
+        JsonNode filterNode = request.path("Filter");
+        if (filterNode.isMissingNode() || filterNode.isNull()) {
+            return null;
+        }
+        JsonNode topicNode = filterNode.path("TopicFilter");
+        SesContactService.TopicFilter topicFilter = null;
+        if (!topicNode.isMissingNode() && !topicNode.isNull()) {
+            topicFilter = new SesContactService.TopicFilter(topicNode.path("TopicName").asText(null),
+                    coerceBooleanOrFalse(topicNode.path("UseDefaultIfPreferenceUnavailable")));
+        }
+        return new SesContactService.ContactFilter(filterNode.path("FilteredStatus").asText(null),
+                topicFilter);
     }
 
     @GET
@@ -272,23 +277,19 @@ public class SesContactController {
                                   @PathParam("emailAddress") String emailAddress, String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            JsonNode request = (body == null || body.isBlank())
-                    ? objectMapper.createObjectNode()
-                    : objectMapper.readTree(body);
-            requireJsonObject(request);
+            JsonNode request = readOptionBody(objectMapper, body);
+            SesV2RequestShapes.check("UpdateContact", request);
             JsonNode prefsNode = request.path("TopicPreferences");
             boolean prefsPresent = !prefsNode.isMissingNode() && !prefsNode.isNull();
             List<TopicPreference> prefs = prefsPresent ? parseTopicPreferences(prefsNode) : null;
             Boolean unsubscribeAll = parseUnsubscribeAll(request);
-            String attributesData = parseAttributesData(request);
+            String attributesData = request.path("AttributesData").asText(null);
             contactService.updateContact(contactListName, emailAddress, prefs, prefsPresent,
                     unsubscribeAll, attributesData, region);
             LOG.infov("SES V2 UpdateContact: {0} in {1}", emailAddress, contactListName);
             return Response.ok(objectMapper.createObjectNode()).build();
         } catch (AwsException e) {
             throw remapV1Exception(e);
-        } catch (JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
         }
     }
 
@@ -307,9 +308,6 @@ public class SesContactController {
         if (node == null || node.isMissingNode() || node.isNull()) {
             return null;
         }
-        if (!node.isArray()) {
-            throw new AwsException("BadRequestException", "TopicPreferences must be an array.", 400);
-        }
         List<TopicPreference> out = new ArrayList<>();
         for (JsonNode p : node) {
             out.add(new TopicPreference(
@@ -320,38 +318,12 @@ public class SesContactController {
     }
 
     // UnsubscribeAll is a Boolean; AWS coerces it the same way as any other SES v2 boolean
-    // (see parseSendingEnabled): a JSON string coerces to true, a number/null/array/object is a
-    // SerializationException. Absent leaves it unset.
+    // (see coerceBoolean). Absent leaves it unset.
     private static Boolean parseUnsubscribeAll(JsonNode request) {
         if (!request.has("UnsubscribeAll")) {
             return null;
         }
         return coerceBoolean(request.path("UnsubscribeAll"));
-    }
-
-    // AttributesData is a String; a non-string (number/boolean/array/object) is a
-    // SerializationException. Absent or explicit null leaves it unset.
-    private static String parseAttributesData(JsonNode request) {
-        if (!request.has("AttributesData")) {
-            return null;
-        }
-        JsonNode node = request.path("AttributesData");
-        if (node.isNull()) {
-            return null;
-        }
-        if (node.isTextual()) {
-            return node.textValue();
-        }
-        if (node.isNumber()) {
-            throw new AwsException("SerializationException",
-                    "NUMBER_VALUE can not be converted to a String", 400);
-        }
-        if (node.isBoolean()) {
-            throw new AwsException("SerializationException",
-                    (node.booleanValue() ? "TRUE_VALUE" : "FALSE_VALUE")
-                            + " can not be converted to a String", 400);
-        }
-        throw unexpectedStartError(node);
     }
 
     private ObjectNode contactJson(Contact c, ContactList list, boolean full) {
@@ -376,12 +348,10 @@ public class SesContactController {
         if (full && c.getAttributesData() != null) {
             result.put("AttributesData", c.getAttributesData());
         }
-        if (full && c.getCreatedTimestamp() != null) {
-            result.put("CreatedTimestamp", c.getCreatedTimestamp().getEpochSecond());
+        if (full) {
+            putTimestamp(result, "CreatedTimestamp", c.getCreatedTimestamp());
         }
-        if (c.getLastUpdatedTimestamp() != null) {
-            result.put("LastUpdatedTimestamp", c.getLastUpdatedTimestamp().getEpochSecond());
-        }
+        putTimestamp(result, "LastUpdatedTimestamp", c.getLastUpdatedTimestamp());
         return result;
     }
 }

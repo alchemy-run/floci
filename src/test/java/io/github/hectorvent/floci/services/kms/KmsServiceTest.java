@@ -1,6 +1,10 @@
 package io.github.hectorvent.floci.services.kms;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.Digests;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.ReservedTags;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
@@ -10,15 +14,39 @@ import io.github.hectorvent.floci.services.kms.model.KmsKey;
 import io.github.hectorvent.floci.services.kms.model.KmsKeySpec;
 import io.github.hectorvent.floci.services.kms.model.KmsKeyUsage;
 import io.github.hectorvent.floci.services.kms.model.KmsMessageType;
+import jakarta.ws.rs.core.Response;
+import org.bouncycastle.asn1.ASN1Encodable;
+import org.bouncycastle.asn1.ASN1EncodableVector;
+import org.bouncycastle.asn1.ASN1Integer;
+import org.bouncycastle.asn1.DERBitString;
+import org.bouncycastle.asn1.DEROctetString;
+import org.bouncycastle.asn1.DERSequence;
+import org.bouncycastle.asn1.DERTaggedObject;
+import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
+import org.bouncycastle.asn1.sec.ECPrivateKey;
+import org.bouncycastle.asn1.sec.SECObjectIdentifiers;
+import org.bouncycastle.asn1.x509.AlgorithmIdentifier;
+import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo;
+import org.bouncycastle.asn1.x9.ECNamedCurveTable;
+import org.bouncycastle.asn1.x9.X962Parameters;
+import org.bouncycastle.asn1.x9.X9ObjectIdentifiers;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import javax.crypto.Cipher;
+import javax.crypto.Mac;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.OAEPParameterSpec;
+import javax.crypto.spec.PSource;
+import javax.crypto.spec.SecretKeySpec;
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyFactory;
 import java.security.KeyPair;
@@ -61,6 +89,7 @@ class KmsServiceTest {
 
     private KmsService kmsService;
     private InMemoryStorage<String, KmsKey> keyStore;
+    private InMemoryStorage<String, KmsAlias> aliasStore;
 
     @BeforeAll
     static void registerBouncyCastle() {
@@ -72,9 +101,10 @@ class KmsServiceTest {
     @BeforeEach
     void setUp() {
         keyStore = new InMemoryStorage<>();
+        aliasStore = new InMemoryStorage<>();
         kmsService = new KmsService(
                 keyStore,
-                new InMemoryStorage<>(),
+                aliasStore,
                 new InMemoryStorage<>(),
                 new RegionResolver("us-east-1", "000000000000")
         );
@@ -105,6 +135,170 @@ class KmsServiceTest {
         assertTrue(key.getArn().contains("key/"));
         assertEquals("my test key", key.getDescription());
         assertEquals("Enabled", key.getKeyState());
+    }
+
+    @Test
+    void createMultiRegionKeyUsesMrkIdAndPrimaryMetadata() {
+        KmsKey key = kmsService.createKey("multi-region key", "ENCRYPT_DECRYPT", "SYMMETRIC_DEFAULT",
+                null, Map.of(), null, true, REGION);
+
+        assertTrue(key.isMultiRegion());
+        assertTrue(key.getKeyId().startsWith("mrk-"));
+        assertEquals("PRIMARY", key.getMultiRegionKeyType());
+        assertEquals(REGION, key.getMultiRegionPrimaryRegion());
+    }
+
+    @Test
+    void replicateMultiRegionKeySharesKeyMaterialAndIdentity() {
+        KmsKey primary = kmsService.createKey("primary", "ENCRYPT_DECRYPT", "SYMMETRIC_DEFAULT",
+                null, Map.of(), null, true, REGION);
+
+        KmsKey replica = kmsService.replicateKey(primary.getKeyId(), "replica", null,
+                Map.of("environment", "test"), "us-west-2", REGION);
+
+        assertEquals(primary.getKeyId(), replica.getKeyId());
+        assertEquals("us-west-2", replica.getArn().split(":", 6)[3]);
+        assertEquals("REPLICA", replica.getMultiRegionKeyType());
+        assertEquals(REGION, replica.getMultiRegionPrimaryRegion());
+        assertEquals(primary.getBackingKeys(), replica.getBackingKeys());
+        assertEquals(replica, kmsService.describeKey(primary.getKeyId(), "us-west-2"));
+    }
+
+    @Test
+    void replicaDecryptsCiphertextCreatedByPrimary() {
+        KmsKey primary = kmsService.createKey("primary", "ENCRYPT_DECRYPT", "SYMMETRIC_DEFAULT",
+                null, Map.of(), null, true, REGION);
+        kmsService.replicateKey(primary.getKeyId(), "replica", null, Map.of(), "us-west-2", REGION);
+        byte[] plaintext = "multi-region payload".getBytes(StandardCharsets.UTF_8);
+
+        byte[] ciphertext = kmsService.encrypt(primary.getKeyId(), plaintext, REGION);
+        KmsService.DecryptResult result = kmsService.decryptAndResolveKey(
+                ciphertext, Map.of(), "us-west-2", primary.getKeyId());
+
+        assertArrayEquals(plaintext, result.plaintext());
+        assertEquals("arn:aws:kms:us-west-2:000000000000:key/" + primary.getKeyId(), result.keyArn());
+    }
+
+    @Test
+    void rotatingPrimarySynchronizesBackingMaterialToReplica() {
+        KmsKey primary = kmsService.createKey("primary", "ENCRYPT_DECRYPT", "SYMMETRIC_DEFAULT",
+                null, Map.of(), null, true, REGION);
+        kmsService.replicateKey(primary.getKeyId(), "replica", null, Map.of(), "us-west-2", REGION);
+
+        byte[] beforePlaintext = "before".getBytes(StandardCharsets.UTF_8);
+        byte[] afterPlaintext = "after".getBytes(StandardCharsets.UTF_8);
+        byte[] beforeRotation = kmsService.encrypt(primary.getKeyId(), beforePlaintext, REGION);
+        kmsService.rotateKeyOnDemand(primary.getKeyId(), REGION);
+        byte[] afterRotation = kmsService.encrypt(primary.getKeyId(), afterPlaintext, REGION);
+
+        assertArrayEquals(beforePlaintext, kmsService.decrypt(beforeRotation, "us-west-2"));
+        assertArrayEquals(afterPlaintext, kmsService.decrypt(afterRotation, "us-west-2"));
+
+        KmsKey storedPrimary = keyStore.get(REGION + "::" + primary.getKeyId()).orElseThrow();
+        KmsKey storedReplica = keyStore.get("us-west-2::" + primary.getKeyId()).orElseThrow();
+        assertEquals(storedPrimary.getBackingKeys(), storedReplica.getBackingKeys());
+        assertEquals(storedPrimary.getCurrentBackingKeyId(), storedReplica.getCurrentBackingKeyId());
+    }
+
+    @Test
+    void rotatingMultiRegionReplicaIsRejected() {
+        KmsKey primary = kmsService.createKey("primary", "ENCRYPT_DECRYPT", "SYMMETRIC_DEFAULT",
+                null, Map.of(), null, true, REGION);
+        KmsKey replica = kmsService.replicateKey(primary.getKeyId(), "replica", null, Map.of(), "us-west-2", REGION);
+
+        AwsException exception = assertThrows(AwsException.class,
+                () -> kmsService.rotateKeyOnDemand(replica.getKeyId(), "us-west-2"));
+
+        assertEquals("UnsupportedOperationException", exception.getErrorCode());
+    }
+
+    @Test
+    void missingPrimaryUsesFallbackArnInThePrimaryRegion() {
+        KmsKey primary = kmsService.createKey("primary", "ENCRYPT_DECRYPT", "SYMMETRIC_DEFAULT",
+                null, Map.of(), null, true, REGION);
+        KmsKey replica = kmsService.replicateKey(primary.getKeyId(), "replica", null, Map.of(), "us-west-2", REGION);
+        keyStore.delete(REGION + "::" + primary.getKeyId());
+
+        ObjectMapper objectMapper = new ObjectMapper();
+        KmsJsonHandler handler = new KmsJsonHandler(kmsService, objectMapper,
+                new RegionResolver("us-east-1", "000000000000"));
+        ObjectNode request = objectMapper.createObjectNode();
+        request.put("KeyId", replica.getKeyId());
+
+        Response response = handler.handle("DescribeKey", request, "us-west-2");
+        JsonNode body = (JsonNode) response.getEntity();
+        JsonNode primaryKey = body.path("KeyMetadata").path("MultiRegionConfiguration").path("PrimaryKey");
+
+        assertEquals("us-east-1", primaryKey.path("Region").asText());
+        assertEquals("arn:aws:kms:us-east-1:000000000000:key/" + primary.getKeyId(),
+                primaryKey.path("Arn").asText());
+    }
+
+    @Test
+    void replicateNonMultiRegionKeyIsRejected() {
+        KmsKey key = kmsService.createKey("regional", REGION);
+
+        AwsException exception = assertThrows(AwsException.class, () ->
+                kmsService.replicateKey(key.getKeyId(), null, null, Map.of(), "us-west-2", REGION));
+
+        assertEquals("UnsupportedOperationException", exception.getErrorCode());
+    }
+
+    @Test
+    void replicateDisabledMultiRegionKeyIsRejected() {
+        KmsKey primary = kmsService.createKey("primary", "ENCRYPT_DECRYPT", "SYMMETRIC_DEFAULT",
+                null, Map.of(), null, true, REGION);
+        kmsService.disableKey(primary.getKeyId(), REGION);
+
+        AwsException exception = assertThrows(AwsException.class, () ->
+                kmsService.replicateKey(primary.getKeyId(), null, null, Map.of(), "us-west-2", REGION));
+
+        assertEquals("DisabledException", exception.getErrorCode());
+    }
+
+    @Test
+    void replicateMultiRegionKeyPendingDeletionIsRejected() {
+        KmsKey primary = kmsService.createKey("primary", "ENCRYPT_DECRYPT", "SYMMETRIC_DEFAULT",
+                null, Map.of(), null, true, REGION);
+        kmsService.scheduleKeyDeletion(primary.getKeyId(), 7, REGION);
+
+        AwsException exception = assertThrows(AwsException.class, () ->
+                kmsService.replicateKey(primary.getKeyId(), null, null, Map.of(), "us-west-2", REGION));
+
+        assertEquals("KMSInvalidStateException", exception.getErrorCode());
+    }
+
+    @Test
+    void replicateMultiRegionKeyPendingImportIsRejected() {
+        KmsKey primary = kmsService.createKey("imported primary", "ENCRYPT_DECRYPT", "SYMMETRIC_DEFAULT",
+                null, Map.of(), "EXTERNAL", true, REGION);
+
+        AwsException exception = assertThrows(AwsException.class, () ->
+                kmsService.replicateKey(primary.getKeyId(), null, null, Map.of(), "us-west-2", REGION));
+
+        assertEquals("KMSInvalidStateException", exception.getErrorCode());
+    }
+
+    @Test
+    void replicateToPrimaryRegionIsReportedAsAlreadyExisting() {
+        KmsKey primary = kmsService.createKey("primary", "ENCRYPT_DECRYPT", "SYMMETRIC_DEFAULT",
+                null, Map.of(), null, true, REGION);
+
+        AwsException exception = assertThrows(AwsException.class, () ->
+                kmsService.replicateKey(primary.getKeyId(), null, null, Map.of(), REGION, REGION));
+
+        assertEquals("AlreadyExistsException", exception.getErrorCode());
+    }
+
+    @Test
+    void replicateAcrossPartitionsIsRejectedAsUnsupported() {
+        KmsKey primary = kmsService.createKey("primary", "ENCRYPT_DECRYPT", "SYMMETRIC_DEFAULT",
+                null, Map.of(), null, true, REGION);
+
+        AwsException exception = assertThrows(AwsException.class, () ->
+                kmsService.replicateKey(primary.getKeyId(), null, null, Map.of(), "cn-north-1", REGION));
+
+        assertEquals("UnsupportedOperationException", exception.getErrorCode());
     }
 
     @ParameterizedTest
@@ -148,8 +342,10 @@ class KmsServiceTest {
         kmsService.createKey("key2", REGION);
         kmsService.createKey("key3", "eu-west-1");
 
-        List<KmsKey> keys = kmsService.listKeys(REGION);
-        assertEquals(2, keys.size());
+        // ListKeys also returns the region's AWS managed keys, as it does on real AWS, so the
+        // count this test is about is the customer-managed one.
+        assertEquals(2, customerKeys(REGION).size());
+        assertEquals(1, customerKeys("eu-west-1").size());
     }
 
     @Test
@@ -674,12 +870,30 @@ class KmsServiceTest {
         assertEquals(0, updated.getDeletionDate());
     }
 
+    /** The keys a test created. ListKeys also returns the region's AWS managed keys. */
+    private List<KmsKey> customerKeys(String region) {
+        return kmsService.listKeys(region).stream()
+                .filter(key -> !"AWS".equals(key.getKeyManager()))
+                .toList();
+    }
+
+    /**
+     * The aliases a test created. ListAliases also returns the alias/aws/* aliases of the AWS
+     * managed keys, which every account has and no customer creates, so a test that cares about
+     * its own alias has to say so.
+     */
+    private List<KmsAlias> customerAliases(String region) {
+        return kmsService.listAliases(region).stream()
+                .filter(alias -> !alias.getAliasName().startsWith("alias/aws/"))
+                .toList();
+    }
+
     @Test
     void createAlias() {
         KmsKey key = kmsService.createKey(null, REGION);
         kmsService.createAlias("alias/my-key", key.getKeyId(), REGION);
 
-        List<KmsAlias> aliases = kmsService.listAliases(REGION);
+        List<KmsAlias> aliases = customerAliases(REGION);
         assertEquals(1, aliases.size());
         assertEquals("alias/my-key", aliases.getFirst().getAliasName());
         assertEquals(key.getKeyId(), aliases.getFirst().getTargetKeyId());
@@ -706,7 +920,7 @@ class KmsServiceTest {
 
         kmsService.updateAlias("alias/my-key", keyB.getKeyId(), REGION);
 
-        List<KmsAlias> aliases = kmsService.listAliases(REGION);
+        List<KmsAlias> aliases = customerAliases(REGION);
         assertEquals(1, aliases.size());
         assertEquals(keyB.getKeyId(), aliases.getFirst().getTargetKeyId());
     }
@@ -729,7 +943,7 @@ class KmsServiceTest {
                 kmsService.updateAlias("alias/my-key", "no-such-key", REGION));
 
         assertEquals("NotFoundException", ex.getErrorCode());
-        assertEquals(key.getKeyId(), kmsService.listAliases(REGION).getFirst().getTargetKeyId());
+        assertEquals(key.getKeyId(), customerAliases(REGION).getFirst().getTargetKeyId());
     }
 
     @Test
@@ -743,7 +957,7 @@ class KmsServiceTest {
                 kmsService.updateAlias("alias/my-key", keyB.getKeyId(), REGION));
 
         assertEquals("KMSInvalidStateException", ex.getErrorCode());
-        assertEquals(keyA.getKeyId(), kmsService.listAliases(REGION).getFirst().getTargetKeyId());
+        assertEquals(keyA.getKeyId(), customerAliases(REGION).getFirst().getTargetKeyId());
     }
 
     @Test
@@ -756,7 +970,7 @@ class KmsServiceTest {
                 kmsService.updateAlias("alias/my-key", hmacKey.getKeyId(), REGION));
 
         assertEquals("ValidationException", ex.getErrorCode());
-        assertEquals(symmetricKey.getKeyId(), kmsService.listAliases(REGION).getFirst().getTargetKeyId());
+        assertEquals(symmetricKey.getKeyId(), customerAliases(REGION).getFirst().getTargetKeyId());
     }
 
     @Test
@@ -767,7 +981,7 @@ class KmsServiceTest {
 
         kmsService.updateAlias("alias/my-key", rsa3072.getKeyId(), REGION);
 
-        assertEquals(rsa3072.getKeyId(), kmsService.listAliases(REGION).getFirst().getTargetKeyId());
+        assertEquals(rsa3072.getKeyId(), customerAliases(REGION).getFirst().getTargetKeyId());
     }
 
     @Test
@@ -778,7 +992,7 @@ class KmsServiceTest {
 
         kmsService.updateAlias("alias/my-key", eccKey.getKeyId(), REGION);
 
-        assertEquals(eccKey.getKeyId(), kmsService.listAliases(REGION).getFirst().getTargetKeyId());
+        assertEquals(eccKey.getKeyId(), customerAliases(REGION).getFirst().getTargetKeyId());
     }
 
     @Test
@@ -791,7 +1005,7 @@ class KmsServiceTest {
                 kmsService.updateAlias("alias/my-key", rsaEncryptKey.getKeyId(), REGION));
 
         assertEquals("ValidationException", ex.getErrorCode());
-        assertEquals(symmetricKey.getKeyId(), kmsService.listAliases(REGION).getFirst().getTargetKeyId());
+        assertEquals(symmetricKey.getKeyId(), customerAliases(REGION).getFirst().getTargetKeyId());
     }
 
     @Test
@@ -800,7 +1014,7 @@ class KmsServiceTest {
         kmsService.createAlias("alias/to-delete", key.getKeyId(), REGION);
         kmsService.deleteAlias("alias/to-delete", REGION);
 
-        assertTrue(kmsService.listAliases(REGION).isEmpty());
+        assertTrue(customerAliases(REGION).isEmpty());
     }
 
     @Test
@@ -998,9 +1212,9 @@ class KmsServiceTest {
         @Test
         void decryptAcceptsCiphertextMadeLocallyWithThePublicKey() throws Exception {
             KmsKey key = createRsaKey();
-            var publicKey = KeyFactory.getInstance("RSA").generatePublic(new X509EncodedKeySpec(
+            PublicKey publicKey = KeyFactory.getInstance("RSA").generatePublic(new X509EncodedKeySpec(
                     Base64.getDecoder().decode(kmsService.getPublicKey(key.getKeyId(), REGION).getPublicKeyEncoded())));
-            var cipher = javax.crypto.Cipher.getInstance("RSA/ECB/OAEPPadding");
+            Cipher cipher = Cipher.getInstance("RSA/ECB/OAEPPadding");
             cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, publicKey, new javax.crypto.spec.OAEPParameterSpec(
                     "SHA-256", "MGF1", MGF1ParameterSpec.SHA256, javax.crypto.spec.PSource.PSpecified.DEFAULT));
             byte[] localCiphertext = cipher.doFinal(PLAINTEXT);
@@ -1641,12 +1855,7 @@ class KmsServiceTest {
     void signWithDigestMessageTypeMatchesRawSignature() {
         KmsKey key = kmsService.createKey("rsa digest key", "SIGN_VERIFY", "RSA_2048", null, Map.of(), REGION);
         byte[] message = "deterministic pkcs1".getBytes(StandardCharsets.UTF_8);
-        byte[] digest;
-        try {
-            digest = MessageDigest.getInstance("SHA-256").digest(message);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        byte[] digest = Digests.sha256(message);
 
         // PKCS#1 v1.5 is deterministic, so signing the digest (DIGEST) and signing the
         // message (RAW) with the same algorithm must produce identical signatures.
@@ -1661,7 +1870,7 @@ class KmsServiceTest {
     void signWithDigestMessageTypePssVerifiesWithExternalVerifier() throws Exception {
         KmsKey key = kmsService.createKey("rsa pss digest key", "SIGN_VERIFY", "RSA_2048", null, Map.of(), REGION);
         byte[] message = "floci kms pss round-trip".getBytes(StandardCharsets.UTF_8);
-        byte[] digest = MessageDigest.getInstance("SHA-256").digest(message);
+        byte[] digest = Digests.sha256(message);
 
         byte[] sig = kmsService.sign(key.getKeyId(), digest,
                 "RSASSA_PSS_SHA_256", KmsMessageType.DIGEST, REGION);
@@ -2249,6 +2458,8 @@ class KmsServiceTest {
     class ImportedKeyMaterial {
 
         private static final String OAEP_SHA_256 = "RSAES_OAEP_SHA_256";
+        private static final String RSA_AES_SHA_1 = "RSA_AES_KEY_WRAP_SHA_1";
+        private static final String RSA_AES_SHA_256 = "RSA_AES_KEY_WRAP_SHA_256";
 
         private KmsKey externalKey(String keySpec, String keyUsage) {
             return kmsService.createKey("external", keyUsage, keySpec, null, Map.of(), "EXTERNAL", REGION);
@@ -2265,7 +2476,7 @@ class KmsServiceTest {
         }
 
         /** Wraps material the way a caller would, with the public key GetParametersForImport returned. */
-        private byte[] wrap(String publicKeyEncoded, String wrappingAlgorithm, byte[] material) throws Exception {
+        private byte[] wrapOAEP(String publicKeyEncoded, String wrappingAlgorithm, byte[] material) throws Exception {
             PublicKey wrappingKey = KeyFactory.getInstance("RSA")
                     .generatePublic(new X509EncodedKeySpec(Base64.getDecoder().decode(publicKeyEncoded)));
             String digest = "RSAES_OAEP_SHA_1".equals(wrappingAlgorithm) ? "SHA-1" : "SHA-256";
@@ -2275,11 +2486,87 @@ class KmsServiceTest {
             return cipher.doFinal(material);
         }
 
+        private byte[] wrapRsaAes(String publicKeyEncoded, String wrappingAlgorithm, byte[] material,
+                                  byte[] aesKeyBytes) throws Exception {
+            SecretKeySpec aesKey = new SecretKeySpec(aesKeyBytes, "AES");
+            Cipher aesKwp = Cipher.getInstance("AES/KWP/NoPadding");
+            aesKwp.init(Cipher.ENCRYPT_MODE, aesKey);
+            byte[] wrappedMaterial = aesKwp.doFinal(material);
+
+            PublicKey wrappingKey = KeyFactory.getInstance("RSA")
+                    .generatePublic(new X509EncodedKeySpec(Base64.getDecoder().decode(publicKeyEncoded)));
+            String digest = RSA_AES_SHA_1.equals(wrappingAlgorithm) ? "SHA-1" : "SHA-256";
+            Cipher rsaOaep = Cipher.getInstance("RSA/ECB/OAEPPadding");
+            rsaOaep.init(Cipher.ENCRYPT_MODE, wrappingKey, new OAEPParameterSpec(digest, "MGF1",
+                    new MGF1ParameterSpec(digest), PSource.PSpecified.DEFAULT));
+            byte[] wrappedAesKey = rsaOaep.doFinal(aesKeyBytes);
+
+            byte[] payload = Arrays.copyOf(wrappedAesKey, wrappedAesKey.length + wrappedMaterial.length);
+            System.arraycopy(wrappedMaterial, 0, payload, wrappedAesKey.length, wrappedMaterial.length);
+            return payload;
+        }
+
+        private KeyPair rsaKeyPair(String keySpec) throws Exception {
+            KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+            generator.initialize(Integer.parseInt(keySpec.substring("RSA_".length())));
+            return generator.generateKeyPair();
+        }
+
+        private KeyPair ecKeyPair(String keySpec) throws Exception {
+            KeyPairGenerator generator = KeyPairGenerator.getInstance("EC", BouncyCastleProvider.PROVIDER_NAME);
+            generator.initialize(new ECGenParameterSpec(KmsKeySpec.valueOf(keySpec).curveName()));
+            return generator.generateKeyPair();
+        }
+
+        private byte[] ecPublicPoint(KeyPair keyPair) {
+            return SubjectPublicKeyInfo.getInstance(keyPair.getPublic().getEncoded()).getPublicKeyData().getBytes();
+        }
+
+        /** Re-encodes an EC private key with the given algorithm identifier and embedded public point. */
+        private byte[] ecPkcs8(KeyPair keyPair, String curveName, AlgorithmIdentifier algorithm,
+                               byte[] embeddedPublicPoint) throws Exception {
+            return ecPkcs8(keyPair, curveName, algorithm, embeddedPublicPoint, null);
+        }
+
+        /** As above, also setting the RFC 5915 ECPrivateKey's own optional curve parameters. */
+        private byte[] ecPkcs8(KeyPair keyPair, String curveName, AlgorithmIdentifier algorithm,
+                               byte[] embeddedPublicPoint, ASN1Encodable innerParameters) throws Exception {
+            BigInteger privateScalar = ECPrivateKey.getInstance(
+                    PrivateKeyInfo.getInstance(keyPair.getPrivate().getEncoded()).parsePrivateKey()).getKey();
+            int orderBits = ECNamedCurveTable.getByName(curveName).getN().bitLength();
+            ECPrivateKey ecPrivateKey = new ECPrivateKey(orderBits, privateScalar,
+                    new DERBitString(embeddedPublicPoint), innerParameters);
+            return new PrivateKeyInfo(algorithm, ecPrivateKey).getEncoded();
+        }
+
+        /** A P-256 PKCS#8 key whose RFC 5915 fields after the version are given as-is, malformed or not. */
+        private byte[] ecPkcs8WithRawFields(ASN1Encodable... fieldsAfterVersion) throws Exception {
+            ASN1EncodableVector fields = new ASN1EncodableVector();
+            fields.add(new ASN1Integer(1));
+            for (ASN1Encodable field : fieldsAfterVersion) {
+                fields.add(field);
+            }
+            return new PrivateKeyInfo(p256NamedCurve(), new DERSequence(fields)).getEncoded();
+        }
+
+        private AlgorithmIdentifier p256NamedCurve() {
+            return new AlgorithmIdentifier(X9ObjectIdentifiers.id_ecPublicKey, X9ObjectIdentifiers.prime256v1);
+        }
+
         private KmsKey importInto(KmsKey key, byte[] rawMaterial, String wrappingAlgorithm) throws Exception {
+            return importInto(key, rawMaterial, wrappingAlgorithm, "RSA_2048");
+        }
+
+        private KmsKey importInto(KmsKey key, byte[] rawMaterial, String wrappingAlgorithm,
+                                  String wrappingKeySpec) throws Exception {
             KmsService.ImportParameters parameters =
-                    kmsService.getParametersForImport(key.getKeyId(), wrappingAlgorithm, "RSA_2048", REGION);
+                    kmsService.getParametersForImport(key.getKeyId(), wrappingAlgorithm, wrappingKeySpec, REGION);
+            byte[] wrappedMaterial = wrappingAlgorithm.startsWith("RSA_AES_KEY_WRAP_")
+                    ? wrapRsaAes(parameters.publicKeyEncoded(), wrappingAlgorithm, rawMaterial,
+                            material(32, (byte) 91))
+                    : wrapOAEP(parameters.publicKeyEncoded(), wrappingAlgorithm, rawMaterial);
             return kmsService.importKeyMaterial(key.getKeyId(), parameters.importToken(),
-                    wrap(parameters.publicKeyEncoded(), wrappingAlgorithm, rawMaterial),
+                    wrappedMaterial,
                     "KEY_MATERIAL_DOES_NOT_EXPIRE", null, null, REGION);
         }
 
@@ -2291,6 +2578,24 @@ class KmsServiceTest {
             assertEquals("PendingImport", key.getKeyState());
             assertFalse(key.isEnabled());
             assertNull(key.getPrivateKeyEncoded());
+        }
+
+        @Test
+        void replicatedExternalKeyStartsPendingImportWithoutExpiration() throws Exception {
+            KmsKey primary = kmsService.createKey("external primary", "ENCRYPT_DECRYPT", "SYMMETRIC_DEFAULT",
+                    null, Map.of(), "EXTERNAL", true, REGION);
+            importInto(primary, material(32, (byte) 0x5A), OAEP_SHA_256);
+
+            KmsKey replica = kmsService.replicateKey(
+                    primary.getKeyId(), null, null, Map.of(), "us-west-2", REGION);
+
+            assertEquals("EXTERNAL", replica.getOrigin());
+            assertEquals("PendingImport", replica.getKeyState());
+            assertFalse(replica.isEnabled());
+            assertTrue(replica.getBackingKeys().isEmpty());
+            assertEquals(primary.getKeyMaterialId(), replica.getKeyMaterialId());
+            assertNull(replica.getExpirationModel());
+            assertEquals(0, replica.getValidTo());
         }
 
         @Test
@@ -2324,7 +2629,7 @@ class KmsServiceTest {
                     kmsService.getParametersForImport(otherKey.getKeyId(), OAEP_SHA_256, "RSA_2048", REGION);
             KmsService.ImportParameters own =
                     kmsService.getParametersForImport(key.getKeyId(), OAEP_SHA_256, "RSA_2048", REGION);
-            byte[] wrongly = wrap(foreign.publicKeyEncoded(), OAEP_SHA_256, material(32, (byte) 1));
+            byte[] wrongly = wrapOAEP(foreign.publicKeyEncoded(), OAEP_SHA_256, material(32, (byte) 1));
 
             String keyId = key.getKeyId();
             String token = own.importToken();
@@ -2345,12 +2650,22 @@ class KmsServiceTest {
         }
 
         @Test
+        void hmacMaterialOfTheWrongLengthIsRejected() {
+            KmsKey key = externalKey("HMAC_256", "GENERATE_VERIFY_MAC");
+
+            AwsException ex = assertThrows(AwsException.class, () ->
+                    importInto(key, material(16, (byte) 1), OAEP_SHA_256));
+
+            assertEquals("IncorrectKeyMaterialException", ex.getErrorCode());
+        }
+
+        @Test
         void aSupersededImportTokenIsRejected() throws Exception {
             KmsKey key = externalSymmetricKey();
             KmsService.ImportParameters first =
                     kmsService.getParametersForImport(key.getKeyId(), OAEP_SHA_256, "RSA_2048", REGION);
             kmsService.getParametersForImport(key.getKeyId(), OAEP_SHA_256, "RSA_2048", REGION);
-            byte[] wrapped = wrap(first.publicKeyEncoded(), OAEP_SHA_256, material(32, (byte) 1));
+            byte[] wrapped = wrapOAEP(first.publicKeyEncoded(), OAEP_SHA_256, material(32, (byte) 1));
 
             String keyId = key.getKeyId();
             String staleToken = first.importToken();
@@ -2374,7 +2689,7 @@ class KmsServiceTest {
             KmsKey key = externalSymmetricKey();
             KmsService.ImportParameters parameters =
                     kmsService.getParametersForImport(key.getKeyId(), OAEP_SHA_256, "RSA_2048", REGION);
-            byte[] wrapped = wrap(parameters.publicKeyEncoded(), OAEP_SHA_256, material(32, (byte) 3));
+            byte[] wrapped = wrapOAEP(parameters.publicKeyEncoded(), OAEP_SHA_256, material(32, (byte) 3));
             kmsService.importKeyMaterial(key.getKeyId(), parameters.importToken(), wrapped,
                     "KEY_MATERIAL_DOES_NOT_EXPIRE", null, null, REGION);
 
@@ -2394,7 +2709,7 @@ class KmsServiceTest {
             KmsKey key = externalSymmetricKey();
             KmsService.ImportParameters parameters =
                     kmsService.getParametersForImport(key.getKeyId(), OAEP_SHA_256, "RSA_2048", REGION);
-            byte[] wrapped = wrap(parameters.publicKeyEncoded(), OAEP_SHA_256, material(32, (byte) 9));
+            byte[] wrapped = wrapOAEP(parameters.publicKeyEncoded(), OAEP_SHA_256, material(32, (byte) 9));
             kmsService.importKeyMaterial(key.getKeyId(), parameters.importToken(), wrapped,
                     "KEY_MATERIAL_EXPIRES", Instant.now().getEpochSecond() + 3600, null, REGION);
 
@@ -2415,7 +2730,7 @@ class KmsServiceTest {
             KmsKey key = externalSymmetricKey();
             KmsService.ImportParameters parameters =
                     kmsService.getParametersForImport(key.getKeyId(), OAEP_SHA_256, "RSA_2048", REGION);
-            byte[] wrapped = wrap(parameters.publicKeyEncoded(), OAEP_SHA_256, material(32, (byte) 1));
+            byte[] wrapped = wrapOAEP(parameters.publicKeyEncoded(), OAEP_SHA_256, material(32, (byte) 1));
 
             String keyId = key.getKeyId();
             String token = parameters.importToken();
@@ -2430,7 +2745,7 @@ class KmsServiceTest {
             KmsKey key = externalSymmetricKey();
             KmsService.ImportParameters parameters =
                     kmsService.getParametersForImport(key.getKeyId(), OAEP_SHA_256, "RSA_2048", REGION);
-            byte[] wrapped = wrap(parameters.publicKeyEncoded(), OAEP_SHA_256, material(32, (byte) 1));
+            byte[] wrapped = wrapOAEP(parameters.publicKeyEncoded(), OAEP_SHA_256, material(32, (byte) 1));
 
             String keyId = key.getKeyId();
             String token = parameters.importToken();
@@ -2471,7 +2786,7 @@ class KmsServiceTest {
             importInto(key, material(32, (byte) 5), OAEP_SHA_256);
             KmsService.ImportParameters parameters =
                     kmsService.getParametersForImport(key.getKeyId(), OAEP_SHA_256, "RSA_2048", REGION);
-            byte[] wrapped = wrap(parameters.publicKeyEncoded(), OAEP_SHA_256, material(32, (byte) 6));
+            byte[] wrapped = wrapOAEP(parameters.publicKeyEncoded(), OAEP_SHA_256, material(32, (byte) 6));
 
             String keyId = key.getKeyId();
             String token = parameters.importToken();
@@ -2485,7 +2800,7 @@ class KmsServiceTest {
             KmsKey key = externalSymmetricKey();
             KmsService.ImportParameters parameters =
                     kmsService.getParametersForImport(key.getKeyId(), OAEP_SHA_256, "RSA_2048", REGION);
-            byte[] wrapped = wrap(parameters.publicKeyEncoded(), OAEP_SHA_256, material(32, (byte) 6));
+            byte[] wrapped = wrapOAEP(parameters.publicKeyEncoded(), OAEP_SHA_256, material(32, (byte) 6));
 
             String keyId = key.getKeyId();
             String token = parameters.importToken();
@@ -2499,7 +2814,7 @@ class KmsServiceTest {
             KmsKey key = externalSymmetricKey();
             KmsService.ImportParameters parameters =
                     kmsService.getParametersForImport(key.getKeyId(), OAEP_SHA_256, "RSA_2048", REGION);
-            byte[] wrapped = wrap(parameters.publicKeyEncoded(), OAEP_SHA_256, material(32, (byte) 6));
+            byte[] wrapped = wrapOAEP(parameters.publicKeyEncoded(), OAEP_SHA_256, material(32, (byte) 6));
 
             String keyId = key.getKeyId();
             String token = parameters.importToken();
@@ -2525,7 +2840,7 @@ class KmsServiceTest {
             KmsKey key = externalSymmetricKey();
             KmsService.ImportParameters parameters =
                     kmsService.getParametersForImport(key.getKeyId(), OAEP_SHA_256, "RSA_2048", REGION);
-            byte[] wrapped = wrap(parameters.publicKeyEncoded(), OAEP_SHA_256, material(32, (byte) 1));
+            byte[] wrapped = wrapOAEP(parameters.publicKeyEncoded(), OAEP_SHA_256, material(32, (byte) 1));
 
             String keyId = key.getKeyId();
             String token = parameters.importToken();
@@ -2539,7 +2854,7 @@ class KmsServiceTest {
             KmsKey key = externalSymmetricKey();
             KmsService.ImportParameters parameters =
                     kmsService.getParametersForImport(key.getKeyId(), OAEP_SHA_256, "RSA_2048", REGION);
-            byte[] wrapped = wrap(parameters.publicKeyEncoded(), OAEP_SHA_256, material(32, (byte) 1));
+            byte[] wrapped = wrapOAEP(parameters.publicKeyEncoded(), OAEP_SHA_256, material(32, (byte) 1));
 
             String keyId = key.getKeyId();
             String token = parameters.importToken();
@@ -2667,10 +2982,367 @@ class KmsServiceTest {
             assertNull(deleted.getKeyMaterialId());
         }
 
+        @ParameterizedTest
+        @CsvSource({
+                "RSA_2048, RSA_AES_KEY_WRAP_SHA_1, RSA_2048",
+                "RSA_3072, RSA_AES_KEY_WRAP_SHA_256, RSA_3072",
+                "RSA_4096, RSA_AES_KEY_WRAP_SHA_256, RSA_4096"
+        })
+        void supportedRsaKeyAndWrappingSpecsImportUsablePrivateKeyMaterial(
+                String keySpec, String wrappingAlgorithm, String wrappingKeySpec) throws Exception {
+            KmsKey key = externalKey(keySpec, "SIGN_VERIFY");
+            KeyPair importedKeyPair = rsaKeyPair(keySpec);
+
+            KmsKey imported = importInto(key, importedKeyPair.getPrivate().getEncoded(),
+                    wrappingAlgorithm, wrappingKeySpec);
+
+            assertEquals("Enabled", imported.getKeyState());
+            assertTrue(imported.isEnabled());
+            assertArrayEquals(importedKeyPair.getPublic().getEncoded(),
+                    Base64.getDecoder().decode(imported.getPublicKeyEncoded()));
+
+            byte[] message = "imported RSA key".getBytes(StandardCharsets.UTF_8);
+            byte[] signature = kmsService.sign(key.getKeyId(), message,
+                    "RSASSA_PKCS1_V1_5_SHA_256", REGION);
+            Signature verifier = Signature.getInstance("SHA256withRSA");
+            verifier.initVerify(importedKeyPair.getPublic());
+            verifier.update(message);
+            assertTrue(verifier.verify(signature));
+        }
+
         @Test
-        void asymmetricKeySpecsCannotUseExternalOrigin() {
+        void rsaImportRejectsAModulusThatDoesNotMatchTheKeySpec() throws Exception {
+            KmsKey key = externalKey("RSA_2048", "SIGN_VERIFY");
+            byte[] rsa3072Material = rsaKeyPair("RSA_3072").getPrivate().getEncoded();
+
             AwsException ex = assertThrows(AwsException.class, () ->
-                    externalKey("RSA_2048", "ENCRYPT_DECRYPT"));
+                    importInto(key, rsa3072Material, RSA_AES_SHA_256));
+
+            assertEquals("IncorrectKeyMaterialException", ex.getErrorCode());
+            assertEquals("PendingImport", kmsService.describeKey(key.getKeyId(), REGION).getKeyState());
+        }
+
+        @Test
+        void rsaImportRejectsInvalidPkcs8Material() {
+            KmsKey key = externalKey("RSA_2048", "SIGN_VERIFY");
+
+            AwsException ex = assertThrows(AwsException.class, () ->
+                    importInto(key, material(32, (byte) 7), RSA_AES_SHA_256));
+
+            assertEquals("IncorrectKeyMaterialException", ex.getErrorCode());
+            assertEquals("PendingImport", kmsService.describeKey(key.getKeyId(), REGION).getKeyState());
+        }
+
+        @ParameterizedTest
+        @CsvSource({
+                "ECC_NIST_P256, RSA_AES_KEY_WRAP_SHA_256, RSA_2048",
+                "ECC_NIST_P384, RSA_AES_KEY_WRAP_SHA_1, RSA_3072",
+                "ECC_NIST_P521, RSA_AES_KEY_WRAP_SHA_256, RSA_4096",
+                "ECC_SECG_P256K1, RSA_AES_KEY_WRAP_SHA_256, RSA_2048",
+                "ECC_NIST_P256, RSAES_OAEP_SHA_256, RSA_2048",
+                "ECC_NIST_P521, RSAES_OAEP_SHA_1, RSA_4096",
+                "ECC_NIST_P521, RSAES_OAEP_SHA_256, RSA_3072",
+                "ECC_NIST_P521, RSA_AES_KEY_WRAP_SHA_256, RSA_2048",
+                "ECC_SECG_P256K1, RSAES_OAEP_SHA_256, RSA_3072"
+        })
+        void supportedEccKeyAndWrappingSpecsImportUsablePrivateKeyMaterial(
+                String keySpec, String wrappingAlgorithm, String wrappingKeySpec) throws Exception {
+            KmsKey key = externalKey(keySpec, "SIGN_VERIFY");
+            KeyPair importedKeyPair = ecKeyPair(keySpec);
+
+            KmsKey imported = importInto(key, importedKeyPair.getPrivate().getEncoded(),
+                    wrappingAlgorithm, wrappingKeySpec);
+
+            assertEquals("Enabled", imported.getKeyState());
+            assertTrue(imported.isEnabled());
+            assertArrayEquals(importedKeyPair.getPublic().getEncoded(),
+                    Base64.getDecoder().decode(imported.getPublicKeyEncoded()));
+
+            KmsKeySpec.Algorithm algorithm = KmsKeySpec.valueOf(keySpec).getAlgorithm().getFirst();
+            byte[] message = "imported ECC key".getBytes(StandardCharsets.UTF_8);
+            byte[] signature = kmsService.sign(key.getKeyId(), message, algorithm.name(), REGION);
+            Signature verifier = Signature.getInstance(algorithm.getJavaName(), BouncyCastleProvider.PROVIDER_NAME);
+            verifier.initVerify(importedKeyPair.getPublic());
+            verifier.update(message);
+            assertTrue(verifier.verify(signature));
+        }
+
+        @Test
+        void eccImportAcceptsACompressedEmbeddedPublicKey() throws Exception {
+            KmsKey key = externalKey("ECC_NIST_P256", "SIGN_VERIFY");
+            KeyPair keyPair = ecKeyPair("ECC_NIST_P256");
+            byte[] compressedPoint = ECNamedCurveTable.getByName("secp256r1").getCurve()
+                    .decodePoint(ecPublicPoint(keyPair)).getEncoded(true);
+
+            KmsKey imported = importInto(key, ecPkcs8(keyPair, "secp256r1", p256NamedCurve(), compressedPoint),
+                    RSA_AES_SHA_256);
+
+            assertEquals("Enabled", imported.getKeyState());
+            assertArrayEquals(keyPair.getPublic().getEncoded(),
+                    Base64.getDecoder().decode(imported.getPublicKeyEncoded()));
+        }
+
+        @Test
+        void eccImportRejectsKeyMaterialOnAnotherCurve() throws Exception {
+            KmsKey key = externalKey("ECC_NIST_P256", "SIGN_VERIFY");
+            byte[] p384Material = ecKeyPair("ECC_NIST_P384").getPrivate().getEncoded();
+
+            AwsException ex = assertThrows(AwsException.class, () ->
+                    importInto(key, p384Material, RSA_AES_SHA_256));
+
+            assertEquals("IncorrectKeyMaterialException", ex.getErrorCode());
+            assertEquals("PendingImport", kmsService.describeKey(key.getKeyId(), REGION).getKeyState());
+        }
+
+        @Test
+        void eccImportRejectsExplicitCurveParameters() throws Exception {
+            KmsKey key = externalKey("ECC_NIST_P256", "SIGN_VERIFY");
+            KeyPair keyPair = ecKeyPair("ECC_NIST_P256");
+            AlgorithmIdentifier explicitCurve = new AlgorithmIdentifier(X9ObjectIdentifiers.id_ecPublicKey,
+                    new X962Parameters(ECNamedCurveTable.getByName("secp256r1")));
+            byte[] material = ecPkcs8(keyPair, "secp256r1", explicitCurve, ecPublicPoint(keyPair));
+
+            AwsException ex = assertThrows(AwsException.class, () ->
+                    importInto(key, material, RSA_AES_SHA_256));
+
+            assertEquals("IncorrectKeyMaterialException", ex.getErrorCode());
+            assertEquals("PendingImport", kmsService.describeKey(key.getKeyId(), REGION).getKeyState());
+        }
+
+        @Test
+        void eccImportAcceptsInnerParametersNamingTheSameCurve() throws Exception {
+            KmsKey key = externalKey("ECC_NIST_P256", "SIGN_VERIFY");
+            KeyPair keyPair = ecKeyPair("ECC_NIST_P256");
+            byte[] material = ecPkcs8(keyPair, "secp256r1", p256NamedCurve(), ecPublicPoint(keyPair),
+                    X9ObjectIdentifiers.prime256v1);
+
+            KmsKey imported = importInto(key, material, RSA_AES_SHA_256);
+
+            assertEquals("Enabled", imported.getKeyState());
+        }
+
+        @Test
+        void eccImportRejectsInnerParametersNamingAnotherCurve() throws Exception {
+            KmsKey key = externalKey("ECC_NIST_P256", "SIGN_VERIFY");
+            KeyPair keyPair = ecKeyPair("ECC_NIST_P256");
+            byte[] material = ecPkcs8(keyPair, "secp256r1", p256NamedCurve(), ecPublicPoint(keyPair),
+                    SECObjectIdentifiers.secp384r1);
+
+            AwsException ex = assertThrows(AwsException.class, () ->
+                    importInto(key, material, RSA_AES_SHA_256));
+
+            assertEquals("IncorrectKeyMaterialException", ex.getErrorCode());
+            assertEquals("PendingImport", kmsService.describeKey(key.getKeyId(), REGION).getKeyState());
+        }
+
+        @Test
+        void eccImportRejectsExplicitInnerCurveParameters() throws Exception {
+            KmsKey key = externalKey("ECC_NIST_P256", "SIGN_VERIFY");
+            KeyPair keyPair = ecKeyPair("ECC_NIST_P256");
+            byte[] material = ecPkcs8(keyPair, "secp256r1", p256NamedCurve(), ecPublicPoint(keyPair),
+                    new X962Parameters(ECNamedCurveTable.getByName("secp256r1")));
+
+            AwsException ex = assertThrows(AwsException.class, () ->
+                    importInto(key, material, RSA_AES_SHA_256));
+
+            assertEquals("IncorrectKeyMaterialException", ex.getErrorCode());
+            assertEquals("PendingImport", kmsService.describeKey(key.getKeyId(), REGION).getKeyState());
+        }
+
+        @Test
+        void eccImportRejectsAMalformedPrivateKeyField() throws Exception {
+            KmsKey key = externalKey("ECC_NIST_P256", "SIGN_VERIFY");
+            byte[] material = ecPkcs8WithRawFields(new ASN1Integer(7));
+
+            AwsException ex = assertThrows(AwsException.class, () ->
+                    importInto(key, material, RSA_AES_SHA_256));
+
+            assertEquals("IncorrectKeyMaterialException", ex.getErrorCode());
+            assertEquals("PendingImport", kmsService.describeKey(key.getKeyId(), REGION).getKeyState());
+        }
+
+        @Test
+        void eccImportRejectsMalformedInnerParameters() throws Exception {
+            KmsKey key = externalKey("ECC_NIST_P256", "SIGN_VERIFY");
+            byte[] material = ecPkcs8WithRawFields(new DEROctetString(new byte[] {1}),
+                    new DERTaggedObject(false, 0, new DERSequence(new ASN1Integer(3))));
+
+            AwsException ex = assertThrows(AwsException.class, () ->
+                    importInto(key, material, RSA_AES_SHA_256));
+
+            assertEquals("IncorrectKeyMaterialException", ex.getErrorCode());
+            assertEquals("PendingImport", kmsService.describeKey(key.getKeyId(), REGION).getKeyState());
+        }
+
+        @Test
+        void eccImportRejectsAMalformedEmbeddedPublicKeyField() throws Exception {
+            KmsKey key = externalKey("ECC_NIST_P256", "SIGN_VERIFY");
+            byte[] material = ecPkcs8WithRawFields(new DEROctetString(new byte[] {1}),
+                    new DERTaggedObject(true, 1, new ASN1Integer(5)));
+
+            AwsException ex = assertThrows(AwsException.class, () ->
+                    importInto(key, material, RSA_AES_SHA_256));
+
+            assertEquals("IncorrectKeyMaterialException", ex.getErrorCode());
+            assertEquals("PendingImport", kmsService.describeKey(key.getKeyId(), REGION).getKeyState());
+        }
+
+        @Test
+        void eccImportRejectsAnEmbeddedPublicKeyThatDoesNotMatch() throws Exception {
+            KmsKey key = externalKey("ECC_NIST_P256", "SIGN_VERIFY");
+            KeyPair keyPair = ecKeyPair("ECC_NIST_P256");
+            byte[] otherPublicPoint = ecPublicPoint(ecKeyPair("ECC_NIST_P256"));
+            byte[] material = ecPkcs8(keyPair, "secp256r1", p256NamedCurve(), otherPublicPoint);
+
+            AwsException ex = assertThrows(AwsException.class, () ->
+                    importInto(key, material, RSA_AES_SHA_256));
+
+            assertEquals("IncorrectKeyMaterialException", ex.getErrorCode());
+            assertEquals("PendingImport", kmsService.describeKey(key.getKeyId(), REGION).getKeyState());
+        }
+
+        @Test
+        void eccImportRejectsAnRsaPrivateKey() throws Exception {
+            KmsKey key = externalKey("ECC_NIST_P256", "SIGN_VERIFY");
+            byte[] rsaMaterial = rsaKeyPair("RSA_2048").getPrivate().getEncoded();
+
+            AwsException ex = assertThrows(AwsException.class, () ->
+                    importInto(key, rsaMaterial, RSA_AES_SHA_256));
+
+            assertEquals("IncorrectKeyMaterialException", ex.getErrorCode());
+            assertEquals("PendingImport", kmsService.describeKey(key.getKeyId(), REGION).getKeyState());
+        }
+
+        @Test
+        void eccImportRejectsInvalidPkcs8Material() {
+            KmsKey key = externalKey("ECC_SECG_P256K1", "SIGN_VERIFY");
+
+            AwsException ex = assertThrows(AwsException.class, () ->
+                    importInto(key, material(32, (byte) 7), RSA_AES_SHA_256));
+
+            assertEquals("IncorrectKeyMaterialException", ex.getErrorCode());
+            assertEquals("PendingImport", kmsService.describeKey(key.getKeyId(), REGION).getKeyState());
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"ECC_NIST_P256", "ECC_NIST_P384", "ECC_NIST_P521", "ECC_SECG_P256K1"})
+        void importedEccKeyVerifiesSignaturesAndSignsDigests(String keySpec) throws Exception {
+            KmsKey key = externalKey(keySpec, "SIGN_VERIFY");
+            KeyPair importedKeyPair = ecKeyPair(keySpec);
+            importInto(key, importedKeyPair.getPrivate().getEncoded(), RSA_AES_SHA_256, "RSA_4096");
+            KmsKeySpec.Algorithm algorithm = KmsKeySpec.valueOf(keySpec).getAlgorithm().getFirst();
+            byte[] message = "imported ECC key".getBytes(StandardCharsets.UTF_8);
+
+            Signature signer = Signature.getInstance(algorithm.getJavaName(), BouncyCastleProvider.PROVIDER_NAME);
+            signer.initSign(importedKeyPair.getPrivate());
+            signer.update(message);
+            byte[] externalSignature = signer.sign();
+            assertDoesNotThrow(() -> kmsService.verify(key.getKeyId(), message, externalSignature,
+                    algorithm.name(), REGION));
+            byte[] tampered = "tampered message".getBytes(StandardCharsets.UTF_8);
+            AwsException ex = assertThrows(AwsException.class, () -> kmsService.verify(key.getKeyId(), tampered,
+                    externalSignature, algorithm.name(), REGION));
+            assertEquals("KMSInvalidSignatureException", ex.getErrorCode());
+
+            byte[] digest = MessageDigest.getInstance(algorithm.getJavaName().substring(0, 6)).digest(message);
+            byte[] digestSignature = kmsService.sign(key.getKeyId(), digest, algorithm.name(),
+                    KmsMessageType.DIGEST, REGION);
+            Signature verifier = Signature.getInstance(algorithm.getJavaName(), BouncyCastleProvider.PROVIDER_NAME);
+            verifier.initVerify(importedKeyPair.getPublic());
+            verifier.update(message);
+            assertTrue(verifier.verify(digestSignature));
+        }
+
+        @Test
+        void reimportingTheSameEccKeyAfterDeletionRestoresIt() throws Exception {
+            KmsKey key = externalKey("ECC_SECG_P256K1", "SIGN_VERIFY");
+            KeyPair keyPair = ecKeyPair("ECC_SECG_P256K1");
+            byte[] material = keyPair.getPrivate().getEncoded();
+            importInto(key, material, RSA_AES_SHA_256);
+
+            KmsKey deleted = kmsService.deleteImportedKeyMaterial(key.getKeyId(), REGION);
+            assertEquals("PendingImport", deleted.getKeyState());
+            assertNull(deleted.getPrivateKeyEncoded());
+
+            KmsKey reimported = importInto(key, material, RSA_AES_SHA_256);
+            assertEquals("Enabled", reimported.getKeyState());
+            assertArrayEquals(keyPair.getPublic().getEncoded(),
+                    Base64.getDecoder().decode(reimported.getPublicKeyEncoded()));
+        }
+
+        @Test
+        void reimportingADifferentEccKeyIsRejected() throws Exception {
+            KmsKey key = externalKey("ECC_NIST_P384", "SIGN_VERIFY");
+            importInto(key, ecKeyPair("ECC_NIST_P384").getPrivate().getEncoded(), RSA_AES_SHA_256);
+            kmsService.deleteImportedKeyMaterial(key.getKeyId(), REGION);
+            byte[] otherKey = ecKeyPair("ECC_NIST_P384").getPrivate().getEncoded();
+
+            AwsException ex = assertThrows(AwsException.class, () ->
+                    importInto(key, otherKey, RSA_AES_SHA_256));
+
+            assertEquals("IncorrectKeyMaterialException", ex.getErrorCode());
+            assertEquals("PendingImport", kmsService.describeKey(key.getKeyId(), REGION).getKeyState());
+        }
+
+        @Test
+        void expiringEccMaterialReturnsTheKeyToPendingImport() throws Exception {
+            KmsKey key = externalKey("ECC_NIST_P256", "SIGN_VERIFY");
+            KmsService.ImportParameters parameters =
+                    kmsService.getParametersForImport(key.getKeyId(), RSA_AES_SHA_256, "RSA_2048", REGION);
+            byte[] wrapped = wrapRsaAes(parameters.publicKeyEncoded(), RSA_AES_SHA_256,
+                    ecKeyPair("ECC_NIST_P256").getPrivate().getEncoded(), material(32, (byte) 91));
+            kmsService.importKeyMaterial(key.getKeyId(), parameters.importToken(), wrapped,
+                    "KEY_MATERIAL_EXPIRES", Instant.now().getEpochSecond() + 3600, null, REGION);
+
+            KmsKey stored = keyStore.get(REGION + "::" + key.getKeyId()).orElseThrow();
+            stored.setValidTo(Instant.now().getEpochSecond() - 60);
+            keyStore.put(REGION + "::" + key.getKeyId(), stored);
+
+            KmsKey expired = kmsService.describeKey(key.getKeyId(), REGION);
+            assertEquals("PendingImport", expired.getKeyState());
+            assertFalse(expired.isEnabled());
+            assertNull(expired.getPrivateKeyEncoded());
+        }
+
+        @Test
+        void aReplicaOfAnImportedEccKeyAcceptsTheSameKey() throws Exception {
+            String replicaRegion = "us-west-2";
+            KmsKey primary = kmsService.createKey("external primary", "SIGN_VERIFY", "ECC_NIST_P256",
+                    null, Map.of(), "EXTERNAL", true, REGION);
+            KeyPair keyPair = ecKeyPair("ECC_NIST_P256");
+            importInto(primary, keyPair.getPrivate().getEncoded(), RSA_AES_SHA_256);
+            KmsKey replica = kmsService.replicateKey(primary.getKeyId(), null, null, Map.of(), replicaRegion, REGION);
+            assertEquals("PendingImport", replica.getKeyState());
+
+            KmsService.ImportParameters parameters = kmsService.getParametersForImport(
+                    replica.getKeyId(), RSA_AES_SHA_256, "RSA_2048", replicaRegion);
+            byte[] wrapped = wrapRsaAes(parameters.publicKeyEncoded(), RSA_AES_SHA_256,
+                    keyPair.getPrivate().getEncoded(), material(32, (byte) 91));
+            KmsKey imported = kmsService.importKeyMaterial(replica.getKeyId(), parameters.importToken(), wrapped,
+                    "KEY_MATERIAL_DOES_NOT_EXPIRE", null, null, replicaRegion);
+
+            assertEquals("Enabled", imported.getKeyState());
+            assertArrayEquals(keyPair.getPublic().getEncoded(),
+                    Base64.getDecoder().decode(imported.getPublicKeyEncoded()));
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"RSAES_OAEP_SHA_1", "RSAES_OAEP_SHA_256"})
+        void p521MaterialRejectsRsaesOaepUnderAnRsa2048WrappingKey(String wrappingAlgorithm) {
+            String keyId = externalKey("ECC_NIST_P521", "SIGN_VERIFY").getKeyId();
+
+            AwsException ex = assertThrows(AwsException.class, () ->
+                    kmsService.getParametersForImport(keyId, wrappingAlgorithm, "RSA_2048", REGION));
+
+            assertEquals("UnsupportedOperationException", ex.getErrorCode());
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"ECC_NIST_EDWARDS25519", "ML_DSA_44"})
+        void asymmetricKeySpecsWithoutImportSupportCannotUseExternalOrigin(String keySpec) {
+            AwsException ex = assertThrows(AwsException.class, () ->
+                    externalKey(keySpec, "SIGN_VERIFY"));
+
             assertEquals("UnsupportedOperationException", ex.getErrorCode());
         }
 
@@ -2695,12 +3367,49 @@ class KmsServiceTest {
         }
 
         @Test
-        void anUnsupportedWrappingAlgorithmIsRejectedBeforeParametersAreIssued() {
+        void asymmetricKeyRejectsRsaAesWrappingBeforeParametersAreIssued() {
             String keyId = externalSymmetricKey().getKeyId();
 
             AwsException ex = assertThrows(AwsException.class, () ->
-                    kmsService.getParametersForImport(keyId, "RSA_AES_KEY_WRAP_SHA_256", "RSA_2048", REGION));
+                    kmsService.getParametersForImport(keyId, RSA_AES_SHA_256, "RSA_2048", REGION));
             assertEquals("UnsupportedOperationException", ex.getErrorCode());
+        }
+
+        @Test
+        void rsaKeyRejectsDirectRsaOaepWrappingBeforeParametersAreIssued() {
+            String keyId = externalKey("RSA_2048", "ENCRYPT_DECRYPT").getKeyId();
+
+            AwsException ex = assertThrows(AwsException.class, () ->
+                    kmsService.getParametersForImport(keyId, OAEP_SHA_256, "RSA_2048", REGION));
+
+            assertEquals("UnsupportedOperationException", ex.getErrorCode());
+        }
+
+        @Test
+        void unmodelledWrappingAlgorithmIsAValidationError() {
+            String keyId = externalSymmetricKey().getKeyId();
+
+            AwsException ex = assertThrows(AwsException.class, () ->
+                    kmsService.getParametersForImport(keyId, "NOT_AN_ALGORITHM", "RSA_2048", REGION));
+
+            assertEquals("ValidationException", ex.getErrorCode());
+        }
+
+        @Test
+        void rsaAesWrappingRejectsANon256BitAesKey() throws Exception {
+            KmsKey key = externalKey("RSA_2048", "SIGN_VERIFY");
+            KmsService.ImportParameters parameters = kmsService.getParametersForImport(
+                    key.getKeyId(), RSA_AES_SHA_256, "RSA_2048", REGION);
+            byte[] rsaMaterial = rsaKeyPair("RSA_2048").getPrivate().getEncoded();
+            byte[] wrapped = wrapRsaAes(parameters.publicKeyEncoded(), RSA_AES_SHA_256, rsaMaterial,
+                    material(16, (byte) 17));
+
+            AwsException ex = assertThrows(AwsException.class, () -> kmsService.importKeyMaterial(
+                    key.getKeyId(), parameters.importToken(), wrapped,
+                    "KEY_MATERIAL_DOES_NOT_EXPIRE", null, null, REGION));
+
+            assertEquals("InvalidCiphertextException", ex.getErrorCode());
+            assertEquals("PendingImport", kmsService.describeKey(key.getKeyId(), REGION).getKeyState());
         }
 
         @Test
@@ -3157,5 +3866,352 @@ class KmsServiceTest {
         AwsException ex = assertThrows(AwsException.class, () ->
                 kmsService.deriveSharedSecret(key.getKeyId(), new byte[]{1, 2, 3}, "ECDH", REGION));
         assertEquals("InvalidKeyUsageException", ex.getErrorCode());
+    /**
+     * The per-service keys AWS ships under alias/aws/*. No template declares them, so nothing
+     * reports them missing; a module that leaves a service's encryption at its default simply
+     * cannot resolve the key a real account would hand it.
+     */
+    @Nested
+    class AwsManagedKeyTests {
+
+        @Test
+        void listAliasesMintsEveryReservedAliasWithAResolvableKey() {
+            List<KmsAlias> aliases = kmsService.listAliases(REGION);
+
+            List<String> names = aliases.stream().map(KmsAlias::getAliasName).toList();
+            assertTrue(names.contains("alias/aws/s3"), "alias/aws/s3 missing from " + names);
+            assertTrue(names.contains("alias/aws/ebs"), "alias/aws/ebs missing from " + names);
+            assertTrue(names.contains("alias/aws/rds"), "alias/aws/rds missing from " + names);
+
+            for (KmsAlias alias : aliases) {
+                assertNotNull(alias.getTargetKeyId(), alias.getAliasName() + " has no target key");
+                // The alias is only worth anything if it resolves; a name with a dangling target
+                // fails a data source exactly as a missing name does.
+                KmsKey target = kmsService.describeKey(alias.getAliasName(), REGION);
+                assertEquals(alias.getTargetKeyId(), target.getKeyId());
+                assertEquals("AWS", target.getKeyManager(), alias.getAliasName() + " is not AWS managed");
+                assertTrue(alias.getAliasArn().endsWith(":" + alias.getAliasName()),
+                        "alias ARN " + alias.getAliasArn() + " does not name " + alias.getAliasName());
+            }
+        }
+
+        @Test
+        void describeKeyResolvesAReservedAliasWithoutAPriorListAliases() {
+            KmsKey key = kmsService.describeKey("alias/aws/s3", REGION);
+
+            assertEquals("AWS", key.getKeyManager());
+            assertEquals("Enabled", key.getKeyState());
+            assertTrue(key.isEnabled());
+            // AWS rotates its own keys and the customer cannot turn that off.
+            assertTrue(kmsService.getKeyRotationStatus("alias/aws/s3", REGION));
+            assertTrue(key.getArn().contains(REGION), "key ARN " + key.getArn() + " is not in " + REGION);
+        }
+
+        @Test
+        void describeKeyResolvesAReservedAliasByItsArn() {
+            KmsAlias alias = kmsService.listAliases(REGION).stream()
+                    .filter(a -> "alias/aws/ebs".equals(a.getAliasName()))
+                    .findFirst()
+                    .orElseThrow();
+
+            assertEquals(alias.getTargetKeyId(),
+                    kmsService.describeKey(alias.getAliasArn(), REGION).getKeyId());
+        }
+
+        /**
+         * A seeded key is only real if it encrypts. Asserting that the alias resolves proves the
+         * lookup; asserting that ciphertext produced under it comes back as the original bytes
+         * proves the key behind it has material, which a stub entry in the alias store would not.
+         */
+        @Test
+        void theAwsManagedKeyEncryptsAndDecrypts() {
+            byte[] plaintext = "default-encrypted object".getBytes(StandardCharsets.UTF_8);
+
+            byte[] ciphertext = kmsService.encrypt("alias/aws/s3", plaintext, REGION);
+
+            assertFalse(Arrays.equals(plaintext, ciphertext), "ciphertext is the plaintext");
+            assertArrayEquals(plaintext, kmsService.decrypt(ciphertext, REGION));
+        }
+
+        @Test
+        void seedingIsIdempotentAcrossRepeatedLookups() {
+            String first = kmsService.describeKey("alias/aws/s3", REGION).getKeyId();
+            int keysAfterFirst = kmsService.listKeys(REGION).size();
+            int aliasesAfterFirst = kmsService.listAliases(REGION).size();
+
+            kmsService.listAliases(REGION);
+            String second = kmsService.describeKey("alias/aws/s3", REGION).getKeyId();
+
+            assertEquals(first, second, "the AWS managed key was minted twice");
+            assertEquals(keysAfterFirst, kmsService.listKeys(REGION).size());
+            assertEquals(aliasesAfterFirst, kmsService.listAliases(REGION).size());
+        }
+
+        @Test
+        void eachRegionGetsItsOwnAwsManagedKeys() {
+            KmsKey east = kmsService.describeKey("alias/aws/s3", "us-east-1");
+            KmsKey west = kmsService.describeKey("alias/aws/s3", "eu-west-1");
+
+            assertNotEquals(east.getKeyId(), west.getKeyId(),
+                    "one key is shared between regions; AWS managed keys are per region");
+            assertTrue(east.getArn().contains("us-east-1"), east.getArn());
+            assertTrue(west.getArn().contains("eu-west-1"), west.getArn());
+        }
+
+        @Test
+        void customerKeysStayCustomerManagedAndAdministrable() {
+            KmsKey key = kmsService.createKey("mine", REGION);
+
+            assertEquals("CUSTOMER", key.getKeyManager());
+            kmsService.tagResource(key.getKeyId(), Map.of("env", "test"), REGION);
+            kmsService.scheduleKeyDeletion(key.getKeyId(), 7, REGION);
+            assertEquals("PendingDeletion", kmsService.describeKey(key.getKeyId(), REGION).getKeyState());
+        }
+
+        @Test
+        void refusesEveryCustomerAdministrationOfAnAwsManagedKey() {
+            String alias = "alias/aws/rds";
+            Map<String, Executable> denied = new LinkedHashMap<>();
+            denied.put("ScheduleKeyDeletion", () -> kmsService.scheduleKeyDeletion(alias, 30, REGION));
+            denied.put("CancelKeyDeletion", () -> kmsService.cancelKeyDeletion(alias, REGION));
+            denied.put("PutKeyPolicy", () -> kmsService.putKeyPolicy(alias, "{}", REGION));
+            denied.put("UpdateKeyDescription", () -> kmsService.updateKeyDescription(alias, "mine now", REGION));
+            denied.put("EnableKeyRotation", () -> kmsService.enableKeyRotation(alias, REGION));
+            denied.put("DisableKeyRotation", () -> kmsService.disableKeyRotation(alias, REGION));
+            denied.put("EnableKey", () -> kmsService.enableKey(alias, REGION));
+            denied.put("DisableKey", () -> kmsService.disableKey(alias, REGION));
+            denied.put("RotateKeyOnDemand", () -> kmsService.rotateKeyOnDemand(alias, REGION));
+            denied.put("TagResource", () -> kmsService.tagResource(alias, Map.of("a", "b"), REGION));
+            denied.put("UntagResource", () -> kmsService.untagResource(alias, List.of("a"), REGION));
+            // The key policy allows kms:CreateGrant only via the owning service, never directly.
+            denied.put("CreateGrant", () -> kmsService.createGrant(alias, "arn:aws:iam::000000000000:role/r",
+                    List.of("Decrypt"), REGION));
+
+            denied.forEach((operation, call) -> {
+                AwsException exception = assertThrows(AwsException.class, call,
+                        operation + " was allowed on an AWS managed key");
+                assertEquals("AccessDeniedException", exception.getErrorCode(), operation);
+            });
+
+            // The refusals must not have left the key half-changed.
+            KmsKey key = kmsService.describeKey(alias, REGION);
+            assertEquals("Enabled", key.getKeyState());
+            assertTrue(key.getTags().isEmpty());
+            assertTrue(key.isKeyRotationEnabled());
+            assertEquals(List.of(), kmsService.listGrants(alias, REGION, null, null, null, null).get("Grants"),
+                    "CreateGrant was refused but left a grant behind");
+        }
+
+        /**
+         * Minting is check-then-write across two stores, so two cold reads racing each other must
+         * not both mint: the loser's keys would sit in ListKeys unaliased forever.
+         */
+        @Test
+        void concurrentColdReadsMintEachAwsManagedKeyOnce() throws Exception {
+            int threads = 16;
+            ExecutorService pool = Executors.newFixedThreadPool(threads);
+            try {
+                CountDownLatch start = new CountDownLatch(1);
+                List<Future<List<KmsAlias>>> reads = new ArrayList<>();
+                for (int i = 0; i < threads; i++) {
+                    reads.add(pool.submit(() -> {
+                        start.await();
+                        return kmsService.listAliases(REGION);
+                    }));
+                }
+                start.countDown();
+                for (Future<List<KmsAlias>> read : reads) {
+                    read.get(30, TimeUnit.SECONDS);
+                }
+            } finally {
+                pool.shutdownNow();
+            }
+
+            // Read the key store directly, not through listKeys, which would mint again.
+            assertEquals(AwsManagedKeys.KEYS.size(), keyStore.scan(k -> k.startsWith(REGION + "::")).size(),
+                    "concurrent cold reads minted more AWS managed keys than the catalog holds");
+            List<String> reserved = kmsService.listAliases(REGION).stream()
+                    .map(KmsAlias::getAliasName)
+                    .filter(name -> name.startsWith("alias/aws/"))
+                    .toList();
+            assertEquals(AwsManagedKeys.KEYS.size(), reserved.size());
+            for (AwsManagedKeys.AwsManagedKeyDef def : AwsManagedKeys.KEYS) {
+                assertEquals(1, reserved.stream().filter(def.aliasName()::equals).count(), def.aliasName());
+            }
+        }
+
+        @Test
+        void refusesToClaimAnAliasInTheReservedNamespace() {
+            KmsKey mine = kmsService.createKey("mine", REGION);
+
+            AwsException created = assertThrows(AwsException.class,
+                    () -> kmsService.createAlias("alias/aws/s3", mine.getKeyId(), REGION));
+            assertEquals("InvalidAliasNameException", created.getErrorCode());
+
+            AwsException fresh = assertThrows(AwsException.class,
+                    () -> kmsService.createAlias("alias/aws/not-a-real-service", mine.getKeyId(), REGION));
+            assertEquals("InvalidAliasNameException", fresh.getErrorCode());
+
+            AwsException updated = assertThrows(AwsException.class,
+                    () -> kmsService.updateAlias("alias/aws/s3", mine.getKeyId(), REGION));
+            assertEquals("AccessDeniedException", updated.getErrorCode());
+
+            AwsException deleted = assertThrows(AwsException.class,
+                    () -> kmsService.deleteAlias("alias/aws/s3", REGION));
+            assertEquals("AccessDeniedException", deleted.getErrorCode());
+
+            // The alias still points where it did.
+            assertEquals("AWS", kmsService.describeKey("alias/aws/s3", REGION).getKeyManager());
+        }
+
+        @Test
+        void anUnknownAliasUnderTheReservedPrefixIsStillNotFound() {
+            AwsException exception = assertThrows(AwsException.class,
+                    () -> kmsService.describeKey("alias/aws/not-a-real-service", REGION));
+
+            assertEquals("NotFoundException", exception.getErrorCode());
+        }
+
+        /**
+         * The aliases and the keys live in different files, and PersistentStorage quarantines an
+         * unreadable one and starts that store empty on its own. Gating minting on the alias alone
+         * left every alias dangling for the life of the instance: ListAliases advertised
+         * alias/aws/s3 while DescribeKey on it reported NotFoundException. The catalog is in the
+         * repository, so this is the one part of a damaged store that can rebuild itself.
+         */
+        @Test
+        void remintsTheKeyWhenTheKeyStoreLostItAndTheAliasSurvived() {
+            String original = kmsService.describeKey("alias/aws/s3", REGION).getKeyId();
+            keyStore.delete(REGION + "::" + original);
+
+            // Not a shape check: the alias has to resolve to a key that can still do the work.
+            byte[] plaintext = "after the key store was lost".getBytes(StandardCharsets.UTF_8);
+            byte[] ciphertext = kmsService.encrypt("alias/aws/s3", plaintext, REGION);
+
+            assertArrayEquals(plaintext, kmsService.decrypt(ciphertext, REGION));
+            String reminted = kmsService.describeKey("alias/aws/s3", REGION).getKeyId();
+            assertNotEquals(original, reminted, "the alias still points at the key that was lost");
+            assertEquals("AWS", kmsService.describeKey("alias/aws/s3", REGION).getKeyManager());
+            // The repair must not duplicate the alias.
+            assertEquals(1, kmsService.listAliases(REGION).stream()
+                    .filter(alias -> "alias/aws/s3".equals(alias.getAliasName())).count());
+        }
+
+        /**
+         * Before alias/aws/ was reserved, a customer could create alias/aws/s3 on their own key and
+         * persist it. Gating on "the target exists" kept that alias pointing at a CUSTOMER key, so
+         * DescribeKey reported CUSTOMER and the AWS managed key guards let ScheduleKeyDeletion
+         * through the reserved alias.
+         */
+        @Test
+        void repointsAReservedAliasPersistedOnACustomerKey() {
+            KmsKey mine = kmsService.createKey("mine", REGION);
+            aliasStore.put(REGION + "::alias/aws/s3", new KmsAlias("alias/aws/s3",
+                    "arn:aws:kms:us-east-1:000000000000:alias/aws/s3", mine.getKeyId()));
+
+            KmsKey resolved = kmsService.describeKey("alias/aws/s3", REGION);
+
+            assertEquals("AWS", resolved.getKeyManager());
+            assertNotEquals(mine.getKeyId(), resolved.getKeyId());
+            AwsException refused = assertThrows(AwsException.class,
+                    () -> kmsService.scheduleKeyDeletion("alias/aws/s3", 7, REGION));
+            assertEquals("AccessDeniedException", refused.getErrorCode());
+            // The customer key itself is untouched.
+            assertEquals("CUSTOMER", kmsService.describeKey(mine.getKeyId(), REGION).getKeyManager());
+        }
+
+        /**
+         * kms-aliases.json lost while kms-keys.json survives: the AWS managed keys are re-aliased
+         * rather than minted again, so ListKeys holds no duplicates and ciphertext bound to the old
+         * key still decrypts and still belongs to the key alias/aws/s3 names.
+         */
+        @Test
+        void reusesSurvivingAwsManagedKeysWhenTheAliasStoreIsLost() {
+            byte[] plaintext = "before the alias store was lost".getBytes(StandardCharsets.UTF_8);
+            byte[] ciphertext = kmsService.encrypt("alias/aws/s3", plaintext, REGION);
+            String original = kmsService.describeKey("alias/aws/s3", REGION).getKeyId();
+            aliasStore.scan(k -> true).forEach(a -> aliasStore.delete(REGION + "::" + a.getAliasName()));
+            assertTrue(aliasStore.scan(k -> true).isEmpty());
+
+            assertEquals(AwsManagedKeys.KEYS.size(), kmsService.listKeys(REGION).size(),
+                    "losing the alias store minted a second set of AWS managed keys");
+            assertEquals(original, kmsService.describeKey("alias/aws/s3", REGION).getKeyId());
+            assertArrayEquals(plaintext, kmsService.decrypt(ciphertext, REGION));
+        }
+
+        @Test
+        void listAliasesRepairsEveryDanglingReservedAlias() {
+            kmsService.listAliases(REGION).stream()
+                    .filter(alias -> alias.getAliasName().startsWith("alias/aws/"))
+                    .forEach(alias -> keyStore.delete(REGION + "::" + alias.getTargetKeyId()));
+
+            for (KmsAlias alias : kmsService.listAliases(REGION)) {
+                assertEquals(alias.getTargetKeyId(),
+                        kmsService.describeKey(alias.getAliasName(), REGION).getKeyId(),
+                        alias.getAliasName() + " did not resolve after the key store was emptied");
+            }
+        }
+
+        /**
+         * Real AWS returns the AWS managed keys from ListKeys unconditionally. Reading ListKeys
+         * first on a cold service used to return nothing, so a caller that filters on KeyManager
+         * saw them or not depending on call order.
+         */
+        @Test
+        void listKeysMintsTheAwsManagedKeysWithoutAPriorAliasRead() {
+            List<KmsKey> keys = kmsService.listKeys(REGION);
+
+            assertEquals(AwsManagedKeys.KEYS.size(), keys.size());
+            assertTrue(keys.stream().allMatch(key -> "AWS".equals(key.getKeyManager())));
+            // And it did not mint a second set once the alias namespace is read as well.
+            kmsService.listAliases(REGION);
+            assertEquals(keys.size(), kmsService.listKeys(REGION).size());
+        }
+
+        @Test
+        void refusesToPointACustomerAliasAtAnAwsManagedKey() {
+            String awsKeyId = kmsService.describeKey("alias/aws/s3", REGION).getKeyId();
+            KmsKey mine = kmsService.createKey("mine", REGION);
+            kmsService.createAlias("alias/mine", mine.getKeyId(), REGION);
+
+            for (String target : List.of("alias/aws/s3", awsKeyId)) {
+                AwsException created = assertThrows(AwsException.class,
+                        () -> kmsService.createAlias("alias/borrowed", target, REGION),
+                        "CreateAlias accepted an AWS managed key as the target: " + target);
+                assertEquals("AccessDeniedException", created.getErrorCode());
+
+                AwsException updated = assertThrows(AwsException.class,
+                        () -> kmsService.updateAlias("alias/mine", target, REGION),
+                        "UpdateAlias accepted an AWS managed key as the target: " + target);
+                assertEquals("AccessDeniedException", updated.getErrorCode());
+            }
+
+            assertTrue(customerAliases(REGION).stream()
+                    .noneMatch(alias -> "alias/borrowed".equals(alias.getAliasName())));
+            assertEquals(mine.getKeyId(),
+                    kmsService.describeKey("alias/mine", REGION).getKeyId());
+        }
+
+        @Test
+        void listAliasesFilteredByKeyIdReturnsOnlyThatKeysAlias() {
+            String s3KeyId = kmsService.describeKey("alias/aws/s3", REGION).getKeyId();
+
+            List<KmsAlias> aliases = kmsService.listAliases(s3KeyId, REGION);
+
+            assertEquals(List.of("alias/aws/s3"), aliases.stream().map(KmsAlias::getAliasName).toList());
+        }
+    }
+
+    @Test
+    void aliasArnResolvesAnAliasNameContainingAColon() {
+        KmsKey key = kmsService.createKey(null, REGION);
+        kmsService.createAlias("alias/team:payments", key.getKeyId(), REGION);
+
+        String aliasArn = "arn:aws:kms:" + REGION + ":000000000000:alias/team:payments";
+        assertEquals(key.getKeyId(), kmsService.describeKey(aliasArn, REGION).getKeyId());
+
+        // Another service's ARN naming the same alias is not a KMS alias ARN.
+        assertThrows(AwsException.class, () -> kmsService.describeKey(
+                "arn:aws:sns:" + REGION + ":000000000000:alias/team:payments", REGION));
     }
 }

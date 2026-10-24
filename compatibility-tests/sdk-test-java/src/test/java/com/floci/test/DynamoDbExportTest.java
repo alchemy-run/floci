@@ -8,10 +8,12 @@ import software.amazon.awssdk.services.dynamodb.waiters.DynamoDbWaiter;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
 
-import java.io.ByteArrayInputStream;
 import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.zip.GZIPInputStream;
@@ -53,6 +55,11 @@ class DynamoDbExportTest {
                 .billingMode(BillingMode.PAY_PER_REQUEST)
                 .build());
         tableArn = tableResp.tableDescription().tableArn();
+        ddb.updateContinuousBackups(UpdateContinuousBackupsRequest.builder()
+                .tableName(TABLE_NAME)
+                .pointInTimeRecoverySpecification(PointInTimeRecoverySpecification.builder()
+                        .pointInTimeRecoveryEnabled(true).build())
+                .build());
 
         // Real AWS ExportTableToPointInTime requires PITR. Without it AWS
         // returns PointInTimeRecoveryUnavailableException.
@@ -231,6 +238,46 @@ class DynamoDbExportTest {
                         .exportArn("arn:aws:dynamodb:us-east-1:000000000000:table/T/export/doesnotexist")
                         .build()))
                 .isInstanceOf(software.amazon.awssdk.services.dynamodb.model.DynamoDbException.class);
+    }
+
+    @Test
+    @Order(8)
+    void exportTableToPointInTime_exportTime_exportsTheItemsOfThatTime() throws InterruptedException {
+        Thread.sleep(50);
+        Instant beforeFourthItem = Instant.now();
+        Thread.sleep(50);
+        ddb.putItem(PutItemRequest.builder().tableName(TABLE_NAME)
+                .item(Map.of(
+                        "pk", AttributeValue.fromS("user-4"),
+                        "sk", AttributeValue.fromS("order-004"),
+                        "total", AttributeValue.fromN("10")))
+                .build());
+
+        ExportDescription desc = ddb.exportTableToPointInTime(ExportTableToPointInTimeRequest.builder()
+                .tableArn(tableArn)
+                .s3Bucket(BUCKET_NAME)
+                .s3Prefix("exports-time")
+                .exportTime(beforeFourthItem)
+                .build()).exportDescription();
+        assertThat(desc.exportTime()).isEqualTo(beforeFourthItem.truncatedTo(ChronoUnit.MILLIS));
+
+        try (DynamoDbWaiter waiter = DynamoDbWaiter.builder().client(ddb).build()) {
+            waiter.waitUntilExportCompleted(r -> r.exportArn(desc.exportArn()));
+        }
+        assertThat(ddb.describeExport(DescribeExportRequest.builder().exportArn(desc.exportArn()).build())
+                .exportDescription().itemCount()).isEqualTo(3L);
+    }
+
+    @Test
+    @Order(9)
+    void exportTableToPointInTime_futureExportTime_throwsInvalidExportTimeException() {
+        assertThatThrownBy(() -> ddb.exportTableToPointInTime(ExportTableToPointInTimeRequest.builder()
+                .tableArn(tableArn)
+                .s3Bucket(BUCKET_NAME)
+                .exportTime(Instant.now().plusSeconds(3600))
+                .build()))
+                .isInstanceOf(InvalidExportTimeException.class)
+                .hasMessageContaining("Export Time is invalid");
     }
 
     private String decompressGzip(byte[] data) throws Exception {

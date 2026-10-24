@@ -6,11 +6,13 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.dataformat.cbor.CBORFactory;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.Response;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 
 import static io.restassured.RestAssured.given;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -80,6 +82,29 @@ class AwsJsonCborCloudWatchTimestampIntegrationTest {
         assertTrue(driftSeconds <= 60,
                 "the round-tripped Timestamp must stay in plain epoch seconds, unscaled (drifted "
                         + driftSeconds + "s): " + datapoint);
+    }
+
+    // CloudWatch is awsQueryCompatible: the header keeps the Query code while the body names
+    // the model shape, which is what the AWS SDK v2 uses to pick the typed exception.
+    @Test
+    void putMetricDataWithoutMetricNameReturnsTheModelledExceptionShape() throws Exception {
+        ObjectNode putRequest = JSON.createObjectNode();
+        putRequest.put("Namespace", "CborRpcV2MissingName-" + System.nanoTime());
+        putRequest.putArray("MetricData").addObject().put("Value", 1.0);
+
+        Response response = given()
+                .contentType("application/cbor")
+                .accept("application/cbor")
+                .header("smithy-protocol", "rpc-v2-cbor")
+                .body(AwsJsonCborController.nodeToSmithyCbor(putRequest))
+                .when().post("/service/GraniteServiceVersion20100801/operation/PutMetricData");
+
+        assertEquals(400, response.statusCode());
+        assertEquals("MissingParameter;Sender", response.header("x-amzn-query-error"));
+        JsonNode body = CBOR.readTree(response.asByteArray());
+        assertEquals("MissingRequiredParameterException", body.path("__type").asText(), body.toString());
+        assertEquals("The parameter MetricData.member.1.MetricName is required.",
+                body.path("message").asText(), body.toString());
     }
 
     private static JsonNode rpcV2Call(String action, ObjectNode body) throws Exception {

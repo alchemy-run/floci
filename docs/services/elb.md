@@ -2,7 +2,7 @@
 
 **Protocol:** Query (XML) — `POST http://localhost:4566/` with `Action=` parameter
 
-Floci supports Application Load Balancers (ALB) and Network Load Balancers (NLB) through the ELBv2 management API. The control plane is AWS SDK / CLI / Terraform compatible, and HTTP listeners can forward to registered instance targets using the target's reachable local address.
+Floci supports Application Load Balancers (ALB) and Network Load Balancers (NLB) through the ELBv2 management API. The control plane is AWS SDK / CLI / Terraform compatible, and HTTP and HTTPS listeners can forward to registered instance targets using the target's reachable local address.
 
 > Classic (v1) Elastic Load Balancing is a **different API** served from the same endpoint host —
 > see [ELB Classic (v1)](elb-classic.md). Requests are routed by their `Version` parameter:
@@ -45,6 +45,8 @@ Floci supports Application Load Balancers (ALB) and Network Load Balancers (NLB)
 | DescribeTargetHealth | Returns target health records maintained by Floci. |
 
 ### Listeners
+
+HTTPS listeners require a default certificate. Supply one when creating a listener or changing an HTTP listener to HTTPS; an omitted certificate list on an existing HTTPS listener keeps its default.
 
 | Action | Description |
 |--------|-------------|
@@ -96,17 +98,42 @@ Floci supports Application Load Balancers (ALB) and Network Load Balancers (NLB)
 
 ## Behavior Notes
 
+- HTTPS listeners terminate TLS using the configured ACM or IAM server certificates, with SNI certificate selection. When several load balancers share one local HTTPS port, clients must send SNI to identify the certificate they need; a connection without SNI cannot identify a particular load balancer before the TLS handshake.
+- ACM certificates must be issued before attaching them. Reimporting an attached ACM certificate refreshes subsequent TLS connections; existing connections keep their negotiated certificate. ACM deletion and revocation are refused while a listener still references the certificate.
+- Unusable saved listeners are retained for correction and logged individually so other saved listeners can start.
+- Listeners sharing a local port must use the same protocol. Requests select a load balancer by its DNS name, a hostname declared by its rules, or a certificate hostname; ambiguous hostnames return 502.
 - Load balancer, target group, listener, rule, and tag state is persisted through Floci storage and rebuilt on service startup.
 - Load balancers are created in `active` state.
+- `CreateLoadBalancer` takes `Subnets` or `SubnetMappings` for every load balancer type, and both together are refused with `ValidationError`. An Application Load Balancer takes at least two: with one or none it returns `ValidationError` `At least two subnets in two different Availability Zones must be specified` and creates nothing. The count comes before any subnet is looked up, as on AWS, so one subnet that does not exist gets that error too. A Network or Gateway Load Balancer with neither returns `ValidationError` `At least one subnet must be specified`. CloudFormation refuses such an `AWS::ElasticLoadBalancingV2::LoadBalancer` the same way when it creates or replaces the balancer; an update that keeps the balancer and names no subnets leaves it on its subnets.
+- `SetSubnets`, like `CreateLoadBalancer`, takes `Subnets` or `SubnetMappings`, and both together are refused with `ValidationError`. With neither it returns the same `ValidationError` as `CreateLoadBalancer` for the balancer's type, `At least two subnets in two different Availability Zones must be specified` for an Application Load Balancer and `At least one subnet must be specified` for a Network or Gateway Load Balancer, and leaves the balancer on its subnets. A `SetSubnets` that names subnets is counted as `CreateLoadBalancer` counts them, following the two-zone rule its API reference states: one subnet for an Application Load Balancer, in `Subnets` or `SubnetMappings`, returns `ValidationError` `At least two subnets in two different Availability Zones must be specified` before any subnet is looked up, and leaves the balancer on its subnets. AWS does not document the error for this case, so Floci gives `CreateLoadBalancer`'s error, in the same order. A CloudFormation update that keeps an Application Load Balancer and names one subnet fails with that error and rolls back. A Network Load Balancer can be set onto one subnet. The `SetSubnets` API reference requires a Gateway Load Balancer's `Subnets` to include every subnet it is already on; Floci does not enforce that.
+- EC2 refuses deletion of subnets and VPCs still referenced by load balancers with `DependencyViolation`. These account- and region-scoped dependencies follow persisted load balancer state; changing subnets or deleting the load balancer releases its old references. A CloudFormation update that names other subnets in `Subnets` or `SubnetMappings` moves the load balancer the way `SetSubnets` does, and a rolled-back update moves it back. An independent target group does not prevent subnet or VPC deletion.
 - HTTP listener sockets are preserved when listener actions change and are restarted only when socket-level settings such as port change.
 - Instance targets are resolved through EC2 instance private addresses so local load balancer traffic can reach containers.
 - Target health starts in `initial` state with reason `Elb.RegistrationInProgress` and is updated by Floci's health checker when monitoring is active.
+- Health checks probe the target group's `HealthCheckPort` when it is a port number, and each target's own port when it is `traffic-port` (the default).
 - Each `CreateListener` automatically creates an immutable default rule (`priority=default`, `isDefault=true`). This rule cannot be deleted; use `ModifyListener` to change its action.
-- Rule priorities are validated for uniqueness. `SetRulePriorities` is atomic: all priority assignments are validated before any change is committed.
+- Rule priorities are unique per listener: `CreateRule` and `SetRulePriorities` only reject a priority held by another rule on the same listener. `SetRulePriorities` is atomic: all priority assignments are validated before any change is committed.
 - `DeleteTargetGroup` is rejected with `ResourceInUse` while the target group is referenced by any listener or rule.
+- HTTPS and TLS certificate ARNs must refer to existing IAM server certificates or ACM certificates. `CreateListener`, `ModifyListener` and `AddListenerCertificates` reject a blank or unknown ARN with `CertificateNotFound`. When `ModifyListener` changes the protocol to HTTPS or TLS, it checks any inherited certificate ARNs too. An HTTPS listener also needs a default certificate: `CreateListener` and `ModifyListener` reject an absent or empty effective certificate list with `InvalidConfigurationRequest`. A referenced IAM server certificate cannot be deleted: `DeleteServerCertificate` returns `DeleteConflict` until the certificate is removed from the listener. Writes recording a new IAM certificate reference hold IAM's certificate lock, so the certificate cannot be deleted between the check and the write. A refused change preserves the listener's previous port, protocol, policy and certificates.
+- `RemoveListenerCertificates` refuses removal of an HTTPS or TLS listener's default certificate with `OperationNotPermitted` (400) and preserves the certificate list. Use `ModifyListener` to replace the default certificate. Additional certificates can still be removed.
 - `DeleteRule` is rejected with `OperationNotPermitted` for the default rule.
 - `DescribeSSLPolicies` returns a pre-seeded list of standard AWS SSL policies (`ELBSecurityPolicy-*`).
 - `DescribeAccountLimits` returns standard default limits (e.g., 50 load balancers per region, 100 target groups, etc.).
+- Responses from HTTP targets preserve repeated header values, including multiple `Set-Cookie` headers. This also applies when a target rejects a WebSocket upgrade.
+- Duration-based ALB target stickiness is applied for instance and IP targets when
+  `stickiness.enabled=true` and `stickiness.type=lb_cookie` (the default type). Requests
+  without a usable cookie select a target normally; subsequent requests carrying the
+  cookie return to that target while it remains eligible. Deregistered or unhealthy
+  targets are replaced using the existing health-aware selection, including fail-open
+  behavior when every target is unhealthy.
+- Sticky responses include opaque, authenticated `AWSALB` and `AWSALBCORS` cookies, without
+  replacing application cookies. `AWSALBCORS` takes precedence and has
+  `SameSite=None; Secure`. Both cookies use `Expires` seven days in the future; the
+  configured `stickiness.lb_cookie.duration_seconds` (default 86400, range 1 to 604800)
+  separately limits the age of a target binding. Each response renews the binding.
+  Restarting Floci invalidates existing bindings. Application-cookie stickiness,
+  weighted target-group affinity, and NLB stickiness are not implemented. Cookie
+  stickiness is not applied with target-group cross-zone balancing disabled or `weighted_random` routing.
 - `routing.http.preserve_host_header.enabled` (default `false`) controls whether the original client Host header is forwarded to targets unchanged, or replaced with the target's `host:port`.
 - Trust stores become `ACTIVE` as soon as the S3 CA bundle is readable and contains at least one `BEGIN CERTIFICATE` block. Floci does not asynchronously validate X.509 v3 constraints.
 - `GetTrustStoreCaCertificatesBundle` returns a synthetic `https://s3.{region}.amazonaws.com/{bucket}/{key}` location (Alchemy only asserts the `https://` prefix).
@@ -132,11 +159,12 @@ arn:aws:elasticloadbalancing:{region}:{account-id}:truststore/{name}/{hex16}
 ```bash
 export AWS_ENDPOINT_URL=http://localhost:4566
 
-# Create a load balancer
+# Create a load balancer on two of the default VPC's subnets
 aws elbv2 create-load-balancer \
   --name my-alb \
   --type application \
-  --scheme internet-facing
+  --scheme internet-facing \
+  --subnets subnet-default-us-east-1-a subnet-default-us-east-1-b
 
 # Create a target group
 aws elbv2 create-target-group \
@@ -194,3 +222,32 @@ aws elbv2 delete-target-group \
 ## Listener Ports
 
 Listener sockets bind on the Floci host. Expose any listener ports you need in Docker Compose when Floci itself runs in a container, similar to RDS and ElastiCache proxy ports.
+
+### Two load balancers on the same port
+
+In AWS each load balancer has its own DNS name and addresses, so two of them can both listen on
+port 80 and never interact: the network picks the load balancer, and a `host-header` rule only picks
+a rule inside one listener. Floci serves every load balancer from a single socket per port, so the
+Host header has to carry both decisions. A template that puts a public and an internal load balancer
+on port 80 is correct for AWS and stays accepted here, but the request has to name the one it wants.
+
+A listener is chosen in this order:
+
+1. The Host header equals a load balancer's own DNS name (`{name}-{id}.elb.localhost.floci.io`).
+2. Exactly one listener on the port has a rule whose `host-header` condition matches the Host
+   header. This uses the same matching as the rule evaluation that follows, so it is
+   case-insensitive, ignores the port, and applies AWS's wildcards: `*` matches 0 or more
+   characters and `?` matches exactly 1, which means `*.example.com` claims `test.example.com`
+   but not `example.com`. `HostHeaderConfig.RegexValues` is not supported, by rule evaluation or
+   by selection, so a load balancer that names itself only through a regex cannot be selected
+   this way.
+3. Only one listener is on the port, in which case it answers any Host header.
+
+If none of those resolve, and in particular when two load balancers declare the same hostname or
+neither declares any, the request answers `502 No listener for host`. Floci logs a warning naming
+both load balancers the first time a second one takes a port, because the targets behind them stay
+healthy and nothing else reports the collision.
+
+Giving each load balancer a `host-header` rule for the hostname it serves is usually enough, and it
+is the same configuration AWS needs. Moving one load balancer to a different listener port also
+works, at the cost of a Floci-only difference from the deployed template.

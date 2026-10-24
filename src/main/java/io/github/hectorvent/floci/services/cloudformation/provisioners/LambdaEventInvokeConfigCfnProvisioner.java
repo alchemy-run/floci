@@ -124,9 +124,11 @@ public class LambdaEventInvokeConfigCfnProvisioner implements CfnResourceProvisi
         if (eventAge != null) {
             settings.put("MaximumEventAgeInSeconds", eventAge);
         }
+        // AWS::NoValue drops a Destination rather than resolving to an empty one, so a destination
+        // left without one fails below as the registry schema requires.
         JsonNode destinations = props == null || !props.hasNonNull("DestinationConfig")
                 ? null
-                : ctx.engine().resolveNode(props.get("DestinationConfig"));
+                : ctx.engine().resolveNodeOmittingNoValue(props.get("DestinationConfig"));
         if (destinations != null && destinations.isObject()) {
             settings.put("DestinationConfig", destinationConfig(destinations));
         }

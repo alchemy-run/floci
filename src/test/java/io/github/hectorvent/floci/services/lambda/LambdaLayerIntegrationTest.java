@@ -81,8 +81,8 @@ class LambdaLayerIntegrationTest {
             .body("Content.CodeSize", greaterThan(0))
             .body("Content.CodeSha256", not(emptyString()))
             .body("Content.Location", containsString("awslambda-us-east-1-tasks/layers/"))
-            .body("Content.Location", endsWith("/" + LAYER_NAME
-                    + "/1?X-Amz-Credential=000000000000%2F00010101%2Fus-east-1%2Fs3%2Faws4_request"))
+            .body("Content.Location", containsString("/" + LAYER_NAME + "/1?X-Amz-Algorithm=AWS4-HMAC-SHA256"))
+            .body("Content.Location", containsString("X-Amz-Signature="))
             .body("CreatedDate", not(emptyString()));
     }
 
@@ -341,9 +341,8 @@ class LambdaLayerIntegrationTest {
     @Test
     @Order(19)
     void contentLocation_ofNonDefaultAccountLayer_isFetchable() throws Exception {
-        // The Location URL is fetched unsigned, so it must carry the owning account in
-        // X-Amz-Credential. Without it the download resolves the default account's
-        // bucket namespace and 404s for a layer published under another account.
+        // The Location URL is fetched without an Authorization header, so its presigned
+        // credential must target the layer's owning account.
         String location = given()
             .header("Authorization", "AWS4-HMAC-SHA256 Credential=000000000001/20260215/us-east-1/lambda/aws4_request, SignedHeaders=host, Signature=abc")
             .contentType("application/json")
@@ -355,7 +354,8 @@ class LambdaLayerIntegrationTest {
         .then()
             .statusCode(201)
             .body("Content.Location", containsString("/layers/000000000001/"))
-            .body("Content.Location", containsString("X-Amz-Credential=000000000001%2F"))
+            .body("Content.Location", containsString("X-Amz-Algorithm=AWS4-HMAC-SHA256"))
+            .body("Content.Location", containsString("X-Amz-Signature="))
             .extract().path("Content.Location");
 
         given()
@@ -514,5 +514,61 @@ class LambdaLayerIntegrationTest {
         .then()
             .statusCode(200);
         // Layer should no longer appear (all versions deleted)
+    }
+
+    // ── Request-shape validation ────────────────────────────────────────────────
+
+    @Test
+    @Order(23)
+    void publishLayerVersion_rejectsUnknownCompatibleRuntime() throws Exception {
+        given()
+            .contentType("application/json")
+            .body("""
+                {
+                    "Content": { "ZipFile": "%s" },
+                    "CompatibleRuntimes": ["cobol99"]
+                }
+                """.formatted(layerZipBase64()))
+        .when()
+            .post("/2018-10-31/layers/validation-test-layer/versions")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ValidationException"));
+    }
+
+    @Test
+    @Order(24)
+    void publishLayerVersion_rejectsUnknownCompatibleArchitecture() throws Exception {
+        given()
+            .contentType("application/json")
+            .body("""
+                {
+                    "Content": { "ZipFile": "%s" },
+                    "CompatibleArchitectures": ["mips"]
+                }
+                """.formatted(layerZipBase64()))
+        .when()
+            .post("/2018-10-31/layers/validation-test-layer/versions")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ValidationException"));
+    }
+
+    @Test
+    @Order(25)
+    void publishLayerVersion_rejectsTooManyCompatibleArchitectures() throws Exception {
+        given()
+            .contentType("application/json")
+            .body("""
+                {
+                    "Content": { "ZipFile": "%s" },
+                    "CompatibleArchitectures": ["x86_64", "arm64", "x86_64"]
+                }
+                """.formatted(layerZipBase64()))
+        .when()
+            .post("/2018-10-31/layers/validation-test-layer/versions")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ValidationException"));
     }
 }

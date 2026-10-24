@@ -13,11 +13,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import software.amazon.awssdk.core.SdkBytes;
 import software.amazon.awssdk.services.apigatewaymanagementapi.ApiGatewayManagementApiClient;
+import software.amazon.awssdk.services.apigatewaymanagementapi.model.DeleteConnectionRequest;
 import software.amazon.awssdk.services.apigatewaymanagementapi.model.GetConnectionRequest;
 import software.amazon.awssdk.services.apigatewaymanagementapi.model.GetConnectionResponse;
 import software.amazon.awssdk.services.apigatewaymanagementapi.model.GoneException;
 import software.amazon.awssdk.services.apigatewaymanagementapi.model.PostToConnectionRequest;
-import software.amazon.awssdk.services.apigatewaymanagementapi.model.DeleteConnectionRequest;
 import software.amazon.awssdk.services.apigatewayv2.ApiGatewayV2Client;
 import software.amazon.awssdk.services.apigatewayv2.model.*;
 import software.amazon.awssdk.services.lambda.LambdaClient;
@@ -276,7 +276,7 @@ class ApiGatewayV2WebSocketDataPlaneTest {
 
     private static String createLambda(String prefix, String code, Map<String, String> environment) {
         String fnName = TestFixtures.uniqueName(prefix);
-        var builder = CreateFunctionRequest.builder()
+        CreateFunctionRequest.Builder builder = CreateFunctionRequest.builder()
                 .functionName(fnName)
                 .runtime(Runtime.NODEJS20_X)
                 .role(ROLE)
@@ -294,7 +294,7 @@ class ApiGatewayV2WebSocketDataPlaneTest {
     }
 
     private static String createWsApi(String prefix) {
-        var res = gw.createApi(CreateApiRequest.builder()
+        CreateApiResponse res = gw.createApi(CreateApiRequest.builder()
                 .name(TestFixtures.uniqueName(prefix))
                 .protocolType(ProtocolType.WEBSOCKET)
                 .routeSelectionExpression("$request.body.action")
@@ -304,7 +304,7 @@ class ApiGatewayV2WebSocketDataPlaneTest {
     }
 
     private static String createLambdaIntegration(String apiId, String fnName) {
-        var res = gw.createIntegration(CreateIntegrationRequest.builder()
+        CreateIntegrationResponse res = gw.createIntegration(CreateIntegrationRequest.builder()
                 .apiId(apiId)
                 .integrationType(IntegrationType.AWS_PROXY)
                 .integrationUri("arn:aws:lambda:us-east-1:000000000000:function:" + fnName)
@@ -313,8 +313,8 @@ class ApiGatewayV2WebSocketDataPlaneTest {
     }
 
     private static void setupStage(String apiId, Map<String, String> stageVariables) {
-        var deploy = gw.createDeployment(CreateDeploymentRequest.builder().apiId(apiId).build());
-        var req = CreateStageRequest.builder()
+        CreateDeploymentResponse deploy = gw.createDeployment(CreateDeploymentRequest.builder().apiId(apiId).build());
+        CreateStageRequest.Builder req = CreateStageRequest.builder()
                 .apiId(apiId)
                 .stageName(STAGE)
                 .deploymentId(deploy.deploymentId());
@@ -471,7 +471,7 @@ class ApiGatewayV2WebSocketDataPlaneTest {
 
         String echoIntegId = createLambdaIntegration(apiId, echoFn);
 
-        var authRes = gw.createAuthorizer(CreateAuthorizerRequest.builder()
+        CreateAuthorizerResponse authRes = gw.createAuthorizer(CreateAuthorizerRequest.builder()
                 .apiId(apiId)
                 .authorizerType(AuthorizerType.REQUEST)
                 .name("ws-auth")
@@ -629,7 +629,7 @@ class ApiGatewayV2WebSocketDataPlaneTest {
         String apiId = createWsApi("stage-vars");
 
         // Integration with stage variable reference in URI
-        var integRes = gw.createIntegration(CreateIntegrationRequest.builder()
+        CreateIntegrationResponse integRes = gw.createIntegration(CreateIntegrationRequest.builder()
                 .apiId(apiId)
                 .integrationType(IntegrationType.AWS_PROXY)
                 .integrationUri("arn:aws:lambda:us-east-1:000000000000:function:${stageVariables.functionName}")
@@ -667,7 +667,7 @@ class ApiGatewayV2WebSocketDataPlaneTest {
         String apiId = createWsApi("mock-integ");
 
         // MOCK integration for $connect — no Lambda needed
-        var mockIntegRes = gw.createIntegration(CreateIntegrationRequest.builder()
+        CreateIntegrationResponse mockIntegRes = gw.createIntegration(CreateIntegrationRequest.builder()
                 .apiId(apiId)
                 .integrationType(IntegrationType.MOCK)
                 .build());

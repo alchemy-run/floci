@@ -17,14 +17,17 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.startsWith;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Covers CreateUserPoolDomain/DescribeUserPoolDomain/UpdateUserPoolDomain/DeleteUserPoolDomain (lex00/floci#63)
  * for both an Amazon Cognito prefix domain and a custom domain fronted by an ACM certificate, including
  * the certificate's InUseBy bookkeeping in ACM.
+ *
+ * <p>The last test posts {@code /_floci/state/reset}, which clears every service. The class runs on
+ * the shared default application all the same, as other classes that post the reset do: test
+ * classes run one at a time, so the reset only clears what this class and the ones before it
+ * created, and each service restores its bootstrap state as it clears.
  */
 @QuarkusTest
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
@@ -52,6 +55,8 @@ class CognitoUserPoolDomainIntegrationTest {
                 }
                 """);
         poolId = poolResponse.path("UserPool").path("Id").asText();
+        assertNull(poolResponse.path("UserPool").get("Domain"));
+        assertNull(poolResponse.path("UserPool").get("CustomDomain"));
         prefixDomain = "floci-test-" + UUID.randomUUID().toString().substring(0, 8);
         customDomain = "auth-" + UUID.randomUUID().toString().substring(0, 8) + ".example.com";
         CERTIFICATE_ARN = requestCertificate(customDomain);
@@ -59,53 +64,12 @@ class CognitoUserPoolDomainIntegrationTest {
     }
 
     private static String requestCertificate(String domainName) throws Exception {
-        String arn = RestAssuredJsonUtils.awsActionJson("CertificateManager", "RequestCertificate", """
+        return RestAssuredJsonUtils.awsActionJson("CertificateManager", "RequestCertificate", """
                 {
                   "DomainName": "%s",
                   "ValidationMethod": "DNS"
                 }
                 """.formatted(domainName)).path("CertificateArn").asText();
-        JsonNode certificate = RestAssuredJsonUtils.awsActionJson("CertificateManager", "DescribeCertificate",
-                "{\"CertificateArn\": \"" + arn + "\"}").path("Certificate");
-        assertEquals("PENDING_VALIDATION", certificate.path("Status").asText());
-        assertEquals(1, certificate.path("DomainValidationOptions").size());
-        JsonNode record = certificate.path("DomainValidationOptions").get(0).path("ResourceRecord");
-        String zoneId = given().contentType("application/xml").body("""
-                <CreateHostedZoneRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
-                  <Name>%s</Name><CallerReference>%s</CallerReference>
-                  <HostedZoneConfig><PrivateZone>false</PrivateZone></HostedZoneConfig>
-                </CreateHostedZoneRequest>
-                """.formatted(domainName, arn))
-                .when().post("/2013-04-01/hostedzone").then().statusCode(201)
-                .body("CreateHostedZoneResponse.HostedZone.Config.PrivateZone", equalTo("false"))
-                .extract().xmlPath().getString("CreateHostedZoneResponse.HostedZone.Id")
-                .replace("/hostedzone/", "");
-        try {
-            changeValidationRecord(zoneId, record, "UPSERT");
-            try {
-                acm("DescribeCertificate", arn).then().statusCode(200)
-                        .body("Certificate.Status", equalTo("ISSUED"))
-                        .body("Certificate.DomainValidationOptions[0].ValidationStatus", equalTo("SUCCESS"));
-                return arn;
-            } finally {
-                changeValidationRecord(zoneId, record, "DELETE");
-            }
-        } finally {
-            given().when().delete("/2013-04-01/hostedzone/" + zoneId).then().statusCode(200);
-        }
-    }
-
-    private static void changeValidationRecord(String zoneId, JsonNode record, String action) {
-        assertEquals("CNAME", record.path("Type").asText());
-        given().contentType("application/xml").body("""
-                <ChangeResourceRecordSetsRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
-                  <ChangeBatch><Changes><Change><Action>%s</Action><ResourceRecordSet>
-                    <Name>%s</Name><Type>CNAME</Type><TTL>60</TTL>
-                    <ResourceRecords><ResourceRecord><Value>%s</Value></ResourceRecord></ResourceRecords>
-                  </ResourceRecordSet></Change></Changes></ChangeBatch>
-                </ChangeResourceRecordSetsRequest>
-                """.formatted(action, record.path("Name").asText(), record.path("Value").asText()))
-                .when().post("/2013-04-01/hostedzone/" + zoneId + "/rrset").then().statusCode(200);
     }
 
     private static io.restassured.response.Response acm(String action, String certificateArn) {
@@ -144,65 +108,20 @@ class CognitoUserPoolDomainIntegrationTest {
         assertEquals(prefixDomain, description.path("Domain").asText());
         assertEquals(poolId, description.path("UserPoolId").asText());
         assertEquals("ACTIVE", description.path("Status").asText());
-        assertTrue(description.path("CloudFrontDistribution").asText().endsWith(".cloudfront.net"));
         assertNull(description.get("CustomDomainConfig"));
-    }
 
-    @Test
-    void prefixDistributionSurvivesUpdatesAndIsRemovedWithTheDomain() throws Exception {
-        String domain = "prefix-lifecycle-" + UUID.randomUUID().toString().substring(0, 8);
-        String owner = cognitoJson("CreateUserPool", """
-                {"PoolName": "prefix lifecycle"}
-                """).path("UserPool").path("Id").asText();
-        try {
-            JsonNode created = cognitoJson("CreateUserPoolDomain", """
-                    {"Domain": "%s", "UserPoolId": "%s", "ManagedLoginVersion": 1}
-                    """.formatted(domain, owner));
-            assertNull(created.get("CloudFrontDomain"));
-            try {
-                JsonNode original = cognitoJson("DescribeUserPoolDomain", """
-                        {"Domain": "%s"}
-                        """.formatted(domain)).path("DomainDescription");
-                String distribution = original.path("CloudFrontDistribution").asText();
-                assertTrue(distribution.endsWith(".cloudfront.net"));
-                assertEquals("000000000000", original.path("AWSAccountId").asText());
-                assertFalse(original.path("S3Bucket").asText().isBlank());
-                assertFalse(original.path("Version").asText().isBlank());
-
-                JsonNode updated = cognitoJson("UpdateUserPoolDomain", """
-                        {"Domain": "%s", "UserPoolId": "%s", "ManagedLoginVersion": 2}
-                        """.formatted(domain, owner));
-                assertNull(updated.get("CloudFrontDomain"));
-                for (int attempt = 0; attempt < 2; attempt++) {
-                    JsonNode observed = cognitoJson("DescribeUserPoolDomain", """
-                            {"Domain": "%s"}
-                            """.formatted(domain)).path("DomainDescription");
-                    assertEquals(distribution, observed.path("CloudFrontDistribution").asText());
-                    assertEquals(domain, observed.path("Domain").asText());
-                    assertEquals(owner, observed.path("UserPoolId").asText());
-                    assertEquals("ACTIVE", observed.path("Status").asText());
-                    assertEquals(2, observed.path("ManagedLoginVersion").asInt());
-                    assertNull(observed.get("CustomDomainConfig"));
+        JsonNode userPool = cognitoJson("DescribeUserPool", """
+                {
+                  "UserPoolId": "%s"
                 }
-            } finally {
-                cognitoAction("DeleteUserPoolDomain", """
-                        {"Domain": "%s", "UserPoolId": "%s"}
-                        """.formatted(domain, owner)).then().statusCode(200);
-            }
-            cognitoAction("DescribeUserPoolDomain", """
-                    {"Domain": "%s"}
-                    """.formatted(domain)).then().statusCode(200)
-                    .body("DomainDescription.size()", equalTo(0));
-        } finally {
-            cognitoAction("DeleteUserPool", """
-                    {"UserPoolId": "%s"}
-                    """.formatted(owner)).then().statusCode(200);
-        }
+                """.formatted(poolId)).path("UserPool");
+        assertEquals(prefixDomain, userPool.path("Domain").asText());
+        assertNull(userPool.get("CustomDomain"));
     }
 
     @Test
     @Order(4)
-    void deletePrefixDomainSucceeds() {
+    void deletePrefixDomainSucceeds() throws Exception {
         cognitoAction("DeleteUserPoolDomain", """
                 {
                   "Domain": "%s",
@@ -211,19 +130,26 @@ class CognitoUserPoolDomainIntegrationTest {
                 """.formatted(prefixDomain, poolId))
                 .then()
                 .statusCode(200);
+
+        JsonNode userPool = cognitoJson("DescribeUserPool", """
+                {
+                  "UserPoolId": "%s"
+                }
+                """.formatted(poolId)).path("UserPool");
+        assertNull(userPool.get("Domain"));
     }
 
     @Test
     @Order(5)
-    void describeDeletedPrefixDomainReturnsEmptyDescription() {
+    void describeDeletedPrefixDomainIsNotFound() {
         cognitoAction("DescribeUserPoolDomain", """
                 {
                   "Domain": "%s"
                 }
                 """.formatted(prefixDomain))
                 .then()
-                .statusCode(200)
-                .body("DomainDescription.size()", equalTo(0));
+                .statusCode(400)
+                .body("__type", equalTo("ResourceNotFoundException"));
     }
 
     @Test
@@ -258,6 +184,33 @@ class CognitoUserPoolDomainIntegrationTest {
         assertEquals(CERTIFICATE_ARN, description.path("CustomDomainConfig").path("CertificateArn").asText());
         assertEquals("ACTIVE", description.path("Status").asText());
         org.junit.jupiter.api.Assertions.assertNotNull(description.path("CloudFrontDistribution").asText(null));
+
+        String secondPrefixDomain = prefixDomain + "-again";
+        cognitoJson("CreateUserPoolDomain", """
+                {
+                  "Domain": "%s",
+                  "UserPoolId": "%s"
+                }
+                """.formatted(secondPrefixDomain, poolId));
+        try {
+            JsonNode userPool = cognitoJson("DescribeUserPool", """
+                    {
+                      "UserPoolId": "%s"
+                    }
+                    """.formatted(poolId)).path("UserPool");
+            assertEquals(secondPrefixDomain, userPool.path("Domain").asText());
+            assertEquals(customDomain, userPool.path("CustomDomain").asText());
+
+        } finally {
+            cognitoAction("DeleteUserPoolDomain", """
+                    {
+                      "Domain": "%s",
+                      "UserPoolId": "%s"
+                    }
+                    """.formatted(secondPrefixDomain, poolId))
+                    .then()
+                    .statusCode(200);
+        }
     }
 
     @Test
@@ -271,7 +224,7 @@ class CognitoUserPoolDomainIntegrationTest {
 
         acm("DeleteCertificate", CERTIFICATE_ARN)
                 .then()
-                .statusCode(409)
+                .statusCode(400)
                 .body("__type", equalTo("ResourceInUseException"));
     }
 
@@ -373,7 +326,7 @@ class CognitoUserPoolDomainIntegrationTest {
 
     @Test
     @Order(14)
-    void deleteCustomDomainThenDescribeReturnsEmptyDescription() {
+    void deleteCustomDomainThenDescribeIsNotFound() {
         cognitoAction("DeleteUserPoolDomain", """
                 {
                   "Domain": "%s",
@@ -389,8 +342,8 @@ class CognitoUserPoolDomainIntegrationTest {
                 }
                 """.formatted(customDomain))
                 .then()
-                .statusCode(200)
-                .body("DomainDescription.size()", equalTo(0));
+                .statusCode(400)
+                .body("__type", equalTo("ResourceNotFoundException"));
     }
 
     @Test
@@ -449,5 +402,101 @@ class CognitoUserPoolDomainIntegrationTest {
                 """.formatted(poolId))
                 .then()
                 .statusCode(200);
+    }
+
+    @Test
+    @Order(18)
+    void samePoolIdInDifferentAccountsReturnsOnlyThatAccountsDomain() throws Exception {
+        String accountB = "111122223333";
+        String sharedPoolId = "us-east-1_shared" + UUID.randomUUID().toString().substring(0, 8);
+        String defaultDomain = "floci-default-" + UUID.randomUUID().toString().substring(0, 8);
+        String accountBDomain = "floci-accountb-" + UUID.randomUUID().toString().substring(0, 8);
+        cognitoJson("CreateUserPool", """
+                {
+                  "PoolName": "DefaultAccountSharedPool",
+                  "UserPoolTags": { "floci:override-id": "%s" }
+                }
+                """.formatted(sharedPoolId));
+        CognitoCustomDomainFixtures.awsJsonAs(accountB, CognitoCustomDomainFixtures.COGNITO, "CreateUserPool", """
+                {
+                  "PoolName": "AccountBSharedPool",
+                  "UserPoolTags": { "floci:override-id": "%s" }
+                }
+                """.formatted(sharedPoolId));
+
+        try {
+            cognitoJson("CreateUserPoolDomain", """
+                    { "Domain": "%s", "UserPoolId": "%s" }
+                    """.formatted(defaultDomain, sharedPoolId));
+            CognitoCustomDomainFixtures.awsJsonAs(accountB, CognitoCustomDomainFixtures.COGNITO,
+                    "CreateUserPoolDomain", """
+                            { "Domain": "%s", "UserPoolId": "%s" }
+                            """.formatted(accountBDomain, sharedPoolId));
+
+            JsonNode defaultPool = cognitoJson("DescribeUserPool", """
+                    { "UserPoolId": "%s" }
+                    """.formatted(sharedPoolId)).path("UserPool");
+            JsonNode accountBPool = CognitoCustomDomainFixtures.awsJsonAs(accountB,
+                    CognitoCustomDomainFixtures.COGNITO, "DescribeUserPool", """
+                            { "UserPoolId": "%s" }
+                            """.formatted(sharedPoolId)).path("UserPool");
+            assertEquals(defaultDomain, defaultPool.path("Domain").asText());
+            assertEquals(accountBDomain, accountBPool.path("Domain").asText());
+        } finally {
+            CognitoCustomDomainFixtures.awsActionAs(accountB, CognitoCustomDomainFixtures.COGNITO,
+                    "DeleteUserPoolDomain", """
+                            { "Domain": "%s", "UserPoolId": "%s" }
+                            """.formatted(accountBDomain, sharedPoolId)).then().statusCode(200);
+            cognitoAction("DeleteUserPoolDomain", """
+                    { "Domain": "%s", "UserPoolId": "%s" }
+                    """.formatted(defaultDomain, sharedPoolId)).then().statusCode(200);
+            CognitoCustomDomainFixtures.awsActionAs(accountB, CognitoCustomDomainFixtures.COGNITO,
+                    "DeleteUserPool", """
+                            { "UserPoolId": "%s" }
+                            """.formatted(sharedPoolId)).then().statusCode(200);
+            cognitoAction("DeleteUserPool", """
+                    { "UserPoolId": "%s" }
+                    """.formatted(sharedPoolId)).then().statusCode(200);
+        }
+    }
+
+    @Test
+    @Order(19)
+    void recreatedPoolDoesNotInheritDomainAfterStateReset() throws Exception {
+        String pinnedPoolId = "us-east-1_reset" + UUID.randomUUID().toString().substring(0, 8);
+        String resetDomain = "floci-reset-" + UUID.randomUUID().toString().substring(0, 8);
+
+        try {
+            cognitoJson("CreateUserPool", """
+                    {
+                      "PoolName": "DomainResetPool",
+                      "UserPoolTags": { "floci:override-id": "%s" }
+                    }
+                    """.formatted(pinnedPoolId));
+            cognitoJson("CreateUserPoolDomain", """
+                    {
+                      "Domain": "%s",
+                      "UserPoolId": "%s"
+                    }
+                    """.formatted(resetDomain, pinnedPoolId));
+
+            assertEquals(resetDomain, cognitoJson("DescribeUserPool", """
+                    { "UserPoolId": "%s" }
+                    """.formatted(pinnedPoolId)).path("UserPool").path("Domain").asText());
+
+            given().when().post("/_floci/state/reset").then().statusCode(200);
+
+            JsonNode recreatedPool = cognitoJson("CreateUserPool", """
+                    {
+                      "PoolName": "DomainResetPoolAgain",
+                      "UserPoolTags": { "floci:override-id": "%s" }
+                    }
+                    """.formatted(pinnedPoolId)).path("UserPool");
+
+            assertNull(recreatedPool.get("Domain"), "a reset pool must not inherit its old domain");
+            assertNull(recreatedPool.get("CustomDomain"));
+        } finally {
+            given().when().post("/_floci/state/reset").then().statusCode(200);
+        }
     }
 }

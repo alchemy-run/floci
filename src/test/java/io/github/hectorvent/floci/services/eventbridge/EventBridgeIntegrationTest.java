@@ -208,7 +208,8 @@ class EventBridgeIntegrationTest {
         given()
                 .contentType(EVENT_BRIDGE_CONTENT_TYPE)
                 .header("X-Amz-Target", "AWSEvents.PutRule")
-                .body("{\"Name\":\"" + ruleName + "\",\"EventBusName\":\"" + busName + "\"}")
+                .body("{\"Name\":\"" + ruleName + "\",\"EventBusName\":\"" + busName
+                        + "\",\"EventPattern\":\"{\\\"source\\\":[\\\"my.app\\\"]}\"}")
                 .when().post("/")
                 .then().statusCode(200);
 
@@ -253,5 +254,43 @@ class EventBridgeIntegrationTest {
                 .when().post("/")
                 .then().statusCode(400)
                 .body("__type", equalTo("ResourceNotFoundException"));
+    }
+
+    @Test
+    @Order(8)
+    void putRuleWithoutPatternOrScheduleIsRejected() {
+        given()
+                .contentType(EVENT_BRIDGE_CONTENT_TYPE)
+                .header("X-Amz-Target", "AWSEvents.PutRule")
+                .body("{\"Name\":\"eb-no-pattern-or-schedule\"}")
+                .when().post("/")
+                .then().statusCode(400)
+                .body("__type", equalTo("ValidationException"))
+                .body("message", equalTo("Parameter(s) EventPattern or ScheduleExpression must be specified."));
+
+        given()
+                .contentType(EVENT_BRIDGE_CONTENT_TYPE)
+                .header("X-Amz-Target", "AWSEvents.DescribeRule")
+                .body("{\"Name\":\"eb-no-pattern-or-schedule\"}")
+                .when().post("/")
+                .then().statusCode(400)
+                .body("__type", equalTo("ResourceNotFoundException"));
+    }
+
+    @Test
+    @Order(9)
+    void listTagsForMissingResourceReturnsNotFound() {
+        for (String resource : new String[] {
+                "event-bus/missing-tags-bus", "rule/missing-tags-rule",
+                "archive/missing-tags-archive", "replay/unsupported-tags-resource"
+        }) {
+            given()
+                    .contentType(EVENT_BRIDGE_CONTENT_TYPE)
+                    .header("X-Amz-Target", "AWSEvents.ListTagsForResource")
+                    .body("{\"ResourceARN\":\"arn:aws:events:us-east-1:000000000000:" + resource + "\"}")
+                    .when().post("/")
+                    .then().statusCode(400)
+                    .body("__type", equalTo("ResourceNotFoundException"));
+        }
     }
 }

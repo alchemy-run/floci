@@ -2,9 +2,11 @@ package io.github.hectorvent.floci.services.apigateway;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.AwsPartitions;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.RequestContext;
 import io.github.hectorvent.floci.core.common.RequestHost;
+import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.services.apigatewayv2.ApiGatewayV2Service;
 import jakarta.annotation.Priority;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -32,8 +34,6 @@ public class ApiGatewayExecuteApiHostFilter implements ContainerRequestFilter {
 
     private static final Logger LOG = Logger.getLogger(ApiGatewayExecuteApiHostFilter.class);
     private static final Pattern EXECUTE_API_PREFIX = Pattern.compile("^([a-z0-9-]+)\\.execute-api\\.(.+)$",
-            Pattern.CASE_INSENSITIVE);
-    private static final Pattern AWS_REGION = Pattern.compile("^[a-z]{2}-[a-z-]+-\\d+$",
             Pattern.CASE_INSENSITIVE);
 
     private final ApiGatewayLookup apiGatewayLookup;
@@ -161,6 +161,12 @@ public class ApiGatewayExecuteApiHostFilter implements ContainerRequestFilter {
                 return;
             }
         } catch (AwsException e) {
+            // The v2 owner lookup is account-independent. When it found no owner, let the
+            // REST execute controller resolve the API after account context is established.
+            if (owner.isEmpty()) {
+                routeToRestApi(requestContext, originalUri, originalPath, apiId);
+                return;
+            }
             LOG.debugv(e, "Execute API host did not resolve to a routable API: apiId={0}, region={1}",
                     apiId, region);
             return;
@@ -194,6 +200,18 @@ public class ApiGatewayExecuteApiHostFilter implements ContainerRequestFilter {
         requestContext.setRequestUri(newUri);
     }
 
+    private void routeToRestApi(ContainerRequestContext requestContext, URI originalUri,
+                                String originalPath, String apiId) {
+        String path = originalPath == null || originalPath.isEmpty() ? "/" : originalPath;
+        URI newUri = UriBuilder.fromUri(originalUri)
+                .replacePath("/execute-api/" + apiId + path)
+                .buildFromEncoded();
+        LOG.debugv("REST execute-api host routing: {0} -> {1}", originalPath, newUri.getRawPath());
+        routeContext.routeToRestApi();
+        routeContext.recordSignedRequestPath(originalPath);
+        requestContext.setRequestUri(newUri);
+    }
+
     private boolean stageExists(String region, String apiId, String stageName) {
         try {
             apiGatewayLookup.requireStage(region, apiId, stageName);
@@ -222,8 +240,9 @@ public class ApiGatewayExecuteApiHostFilter implements ContainerRequestFilter {
     /**
      * Extracts the {@code apiId} from an execute-api virtual host, or {@code null} when the host
      * is not an execute-api host. Region-bearing hosts accept the configured Floci hostname, the
-     * local {@code localhost} form, and AWS's {@code amazonaws.com} form. The public built-in
-     * suffixes remain regionless convenience forms.
+     * local {@code localhost} form, the public built-in suffixes, and AWS's
+     * {@code amazonaws.com} form. The built-in suffixes are also accepted regionless, as a
+     * convenience form.
      */
     public static String extractApiId(String host, String baseHostname) {
         if (host == null) {
@@ -236,23 +255,32 @@ public class ApiGatewayExecuteApiHostFilter implements ContainerRequestFilter {
         }
 
         String tail = matcher.group(2);
-        if ("localhost.floci.io".equalsIgnoreCase(tail)
-                || "localhost.localstack.cloud".equalsIgnoreCase(tail)) {
+        if (isBuiltInSuffix(tail)) {
             return matcher.group(1).toLowerCase(Locale.ROOT);
         }
 
         int firstDot = tail.indexOf('.');
-        if (firstDot <= 0 || !AWS_REGION.matcher(tail.substring(0, firstDot)).matches()) {
+        if (firstDot <= 0 || !RegionResolver.isKnownRegion(tail.substring(0, firstDot))) {
             return null;
         }
 
         String endpointHost = tail.substring(firstDot + 1);
         if ("localhost".equalsIgnoreCase(endpointHost)
-                || "amazonaws.com".equalsIgnoreCase(endpointHost)
+                || isBuiltInSuffix(endpointHost)
+                || AwsPartitions.isDnsSuffix(endpointHost)
                 || (baseHostname != null && baseHostname.equalsIgnoreCase(endpointHost))) {
             return matcher.group(1).toLowerCase(Locale.ROOT);
         }
         return null;
+    }
+
+    private static boolean isBuiltInSuffix(String host) {
+        for (String suffix : EmbeddedDnsServer.BUILTIN_SUFFIXES) {
+            if (suffix.equalsIgnoreCase(host)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

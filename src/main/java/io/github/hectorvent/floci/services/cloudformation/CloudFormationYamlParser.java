@@ -30,7 +30,7 @@ public class CloudFormationYamlParser {
         this.objectMapper = objectMapper;
     }
 
-    public JsonNode parse(String yamlContent) throws Exception {
+    public JsonNode parse(String yamlContent) {
         LoaderOptions opts = new LoaderOptions();
         opts.setMaxAliasesForCollections(200);
         Yaml yaml = new Yaml(new CfnConstructor(opts));
@@ -59,6 +59,7 @@ public class CloudFormationYamlParser {
             register("!Cidr",       n -> fnMap("Fn::Cidr", n));
             register("!GetAZs",     n -> fnMap("Fn::GetAZs", n));
             register("!ImportValue",n -> fnMap("Fn::ImportValue", n));
+            register("!GetStackOutput", n -> fnMap("Fn::GetStackOutput", n));
             register("!Condition",  n -> scalarMap("Condition", scalar(n)));
             register("!And",        n -> fnMap("Fn::And", n));
             register("!Or",         n -> fnMap("Fn::Or", n));

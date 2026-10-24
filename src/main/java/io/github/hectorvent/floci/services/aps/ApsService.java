@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
+import io.github.hectorvent.floci.core.common.AwsEndpoints;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
@@ -89,7 +90,8 @@ public class ApsService implements TagHandler {
         workspace.setArn(arn);
         // The data-plane backend starts lazily on its first authenticated request.
         workspace.setStatus("ACTIVE");
-        workspace.setPrometheusEndpoint(prometheusEndpoint(workspaceId));
+        workspace.setPrometheusEndpoint(
+                "https://" + AwsEndpoints.host("aps-workspaces", region) + "/workspaces/" + workspaceId + "/");
         workspace.setCreatedAt(Instant.now());
         workspace.setKmsKeyArn(kmsKeyArn);
         if (tags != null) {

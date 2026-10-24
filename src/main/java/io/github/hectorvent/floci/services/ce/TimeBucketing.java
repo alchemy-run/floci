@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.ce;
 
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -25,22 +26,22 @@ final class TimeBucketing {
 
     static Granularity parseGranularity(String value) {
         if (value == null || value.isEmpty()) {
-            throw new AwsException("ValidationException",
-                    "1 validation error detected: Value at 'Granularity' failed to satisfy constraint: Member must not be null.", 400);
+            throw SmithyValidationErrors.validationException(
+                    "Value at 'Granularity' failed to satisfy constraint: Member must not be null.");
         }
         return switch (value) {
             case "HOURLY" -> Granularity.HOURLY;
             case "DAILY" -> Granularity.DAILY;
             case "MONTHLY" -> Granularity.MONTHLY;
-            default -> throw new AwsException("ValidationException",
-                    "1 validation error detected: Value '" + value + "' at 'Granularity' failed to satisfy constraint: Member must satisfy enum value set: [DAILY, MONTHLY, HOURLY]", 400);
+            default -> throw SmithyValidationErrors.validationException(
+                    "Value '" + value + "' at 'Granularity' failed to satisfy constraint: Member must satisfy enum value set: [DAILY, MONTHLY, HOURLY]");
         };
     }
 
     static Instant parseDate(String value, String field) {
         if (value == null || value.isEmpty()) {
-            throw new AwsException("ValidationException",
-                    "1 validation error detected: Value at '" + field + "' failed to satisfy constraint: Member must not be null.", 400);
+            throw SmithyValidationErrors.validationException(
+                    "Value at '" + field + "' failed to satisfy constraint: Member must not be null.");
         }
         // AWS accepts "YYYY-MM-DD" (most common) and ISO-8601 timestamps.
         try {

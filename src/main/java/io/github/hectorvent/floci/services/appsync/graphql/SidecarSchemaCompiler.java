@@ -15,8 +15,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Prepares a customer's SDL for the AWS-agnostic GraphQL sidecar and validates it there.
- * The in-process request path uses {@link AppSyncSchemaParser} instead. AppSync provides its
+ * Prepares a customer's SDL for the (AWS-agnostic) GraphQL sidecar and validates it against it
+ * (issue #2917): what {@code AppSyncSchemaParser} used to do in-process. AppSync provides its
  * directive declarations ({@code @aws_auth} etc.) and the 17 custom scalar type declarations
  * implicitly: customers never write {@code scalar AWSDateTime} themselves. That injection is
  * pure AWS-specific knowledge (which directives exist, their exact argument shapes) with no

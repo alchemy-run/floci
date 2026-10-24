@@ -6,6 +6,7 @@ import io.github.hectorvent.floci.core.common.ContainerTeardown;
 import io.github.hectorvent.floci.core.common.Resettable;
 import io.github.hectorvent.floci.core.common.ServiceRegistry;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.dynamodb.backend.DynamoDbBackendSelector;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -13,17 +14,23 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
 import org.mockito.Mock;
+import org.mockito.MockMakers;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -34,8 +41,9 @@ class EmulatorInfoControllerTest {
     @Mock private StorageFactory storageFactory;
     @Mock private Instance<Resettable> resettables;
     @Mock private Instance<ContainerTeardown> containerTeardowns;
-    @Mock private FlociCertificateAuthority certificateAuthority;
+    @Mock(mockMaker = MockMakers.INLINE) private FlociCertificateAuthority certificateAuthority;
     @Mock private EmulatorConfig config;
+    @Mock private DynamoDbBackendSelector dynamoDbBackendSelector;
     @Mock private ContainerTeardown sageMakerTeardown;
     @Mock private ContainerTeardown batchTeardown;
     @Mock private Resettable resettable;
@@ -45,7 +53,17 @@ class EmulatorInfoControllerTest {
     @BeforeEach
     void setUp() {
         controller = new EmulatorInfoController(serviceRegistry, initLifecycleState, storageFactory,
-                resettables, containerTeardowns, certificateAuthority, config);
+                resettables, containerTeardowns, certificateAuthority, config, dynamoDbBackendSelector);
+    }
+
+    @Test
+    @DisplayName("Should report the selected DynamoDB backend in info")
+    void info_reportsTheSelectedDynamoDbBackend() {
+        when(dynamoDbBackendSelector.selected()).thenReturn("local");
+
+        Map<?, ?> info = (Map<?, ?>) controller.info().getEntity();
+
+        assertEquals("local", info.get("dynamodb_backend"));
     }
 
     @Test
@@ -147,5 +165,22 @@ class EmulatorInfoControllerTest {
         verify(storageFactory, never()).clearAll();
         verify(resettable, never()).clear();
         verify(later, never()).clear();
+    }
+
+    @Test
+    void resetRefusedByPreflightChangesNothing() {
+        Resettable refusing = mock(Resettable.class);
+        IllegalStateException refusal = new IllegalStateException("backend refuses reset");
+        doThrow(refusal).when(refusing).checkReset();
+        lenient().when(containerTeardowns.iterator()).thenReturn(List.of(sageMakerTeardown).iterator());
+        when(resettables.iterator()).thenReturn(List.of(resettable, refusing).iterator());
+
+        assertSame(refusal, assertThrows(IllegalStateException.class, controller::reset));
+
+        verify(resettable).checkReset();
+        verify(refusing).checkReset();
+        verifyNoMoreInteractions(resettable, refusing);
+        verify(sageMakerTeardown, never()).stopManagedContainers();
+        verifyNoInteractions(storageFactory);
     }
 }

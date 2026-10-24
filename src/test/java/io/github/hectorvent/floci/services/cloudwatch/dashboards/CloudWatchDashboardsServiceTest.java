@@ -8,6 +8,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -33,8 +34,32 @@ class CloudWatchDashboardsServiceTest {
         Dashboard dashboard = service.getDashboard("ops", REGION);
         assertEquals(BODY, dashboard.getDashboardBody());
         assertEquals("ops", dashboard.getDashboardName());
-        assertEquals("arn:aws:cloudwatch:us-east-1:000000000000:dashboard/ops",
-                dashboard.getDashboardArn());
+        assertEquals("arn:aws:cloudwatch::000000000000:dashboard/ops", dashboard.getDashboardArn());
+    }
+
+    // Catches: a dashboard ARN minted with the request's Region; AWS's has none, in every partition.
+    @Test
+    void theDashboardArnIsRegionlessInTheRegionsPartition() {
+        service.putDashboard("ops", BODY, "cn-north-1");
+
+        assertEquals("arn:aws-cn:cloudwatch::000000000000:dashboard/ops",
+                service.getDashboard("ops", "cn-north-1").getDashboardArn());
+    }
+
+    // Catches: a dashboard persisted before the change reading back with its old region-ful ARN.
+    @Test
+    void aDashboardStoredWithTheOldRegionfulArnReadsBackRegionless() {
+        InMemoryStorage<String, Dashboard> store = new InMemoryStorage<>();
+        store.put(REGION + "::legacy", new Dashboard("legacy",
+                "arn:aws:cloudwatch:us-east-1:000000000000:dashboard/legacy", BODY));
+        CloudWatchDashboardsService legacy = new CloudWatchDashboardsService(store,
+                new RegionResolver(REGION, "000000000000"));
+
+        String regionless = "arn:aws:cloudwatch::000000000000:dashboard/legacy";
+        assertEquals(regionless, legacy.getDashboard("legacy", REGION).getDashboardArn());
+        assertEquals(regionless, legacy.listDashboards(null, REGION).get(0).getDashboardArn());
+        legacy.tagResource(regionless, Map.of("env", "dev"), REGION);
+        assertEquals(Map.of("env", "dev"), legacy.listTagsForResource(regionless, REGION));
     }
 
     @Test
@@ -116,10 +141,10 @@ class CloudWatchDashboardsServiceTest {
 
     @Test
     void tagsGivenOnCreateAreReadableByArn() {
-        service.putDashboard("ops", BODY, java.util.Map.of("team", "platform"), REGION);
+        service.putDashboard("ops", BODY, Map.of("team", "platform"), REGION);
         String arn = service.getDashboard("ops", REGION).getDashboardArn();
 
-        assertEquals(java.util.Map.of("team", "platform"), service.listTagsForResource(arn, REGION));
+        assertEquals(Map.of("team", "platform"), service.listTagsForResource(arn, REGION));
         assertTrue(CloudWatchDashboardsService.isDashboardArn(arn));
     }
 
@@ -129,12 +154,12 @@ class CloudWatchDashboardsServiceTest {
      */
     @Test
     void tagsOnAReplacingPutDoNotOverwriteTheExistingOnes() {
-        service.putDashboard("ops", BODY, java.util.Map.of("team", "platform"), REGION);
+        service.putDashboard("ops", BODY, Map.of("team", "platform"), REGION);
         String arn = service.getDashboard("ops", REGION).getDashboardArn();
 
-        service.putDashboard("ops", BODY, java.util.Map.of("team", "someone-else"), REGION);
+        service.putDashboard("ops", BODY, Map.of("team", "someone-else"), REGION);
 
-        assertEquals(java.util.Map.of("team", "platform"), service.listTagsForResource(arn, REGION));
+        assertEquals(Map.of("team", "platform"), service.listTagsForResource(arn, REGION));
     }
 
     @Test
@@ -142,11 +167,74 @@ class CloudWatchDashboardsServiceTest {
         service.putDashboard("ops", BODY, REGION);
         String arn = service.getDashboard("ops", REGION).getDashboardArn();
 
-        service.tagResource(arn, java.util.Map.of("env", "dev"), REGION);
-        assertEquals(java.util.Map.of("env", "dev"), service.listTagsForResource(arn, REGION));
+        service.tagResource(arn, Map.of("env", "dev"), REGION);
+        assertEquals(Map.of("env", "dev"), service.listTagsForResource(arn, REGION));
 
         service.untagResource(arn, List.of("env"), REGION);
-        assertEquals(java.util.Map.of(), service.listTagsForResource(arn, REGION));
+        assertEquals(Map.of(), service.listTagsForResource(arn, REGION));
+    }
+
+    /**
+     * Floci mints the regionless ARN AWS uses, and used to mint one with the request's Region.
+     * Callers may still hold the old form, so both resolve to the same dashboard.
+     */
+    @Test
+    void bothTheRegionlessAndTheOldRegionfulDashboardArnResolve() {
+        service.putDashboard("ops", BODY, REGION);
+        String regionless = service.getDashboard("ops", REGION).getDashboardArn();
+        String regionful = "arn:aws:cloudwatch:us-east-1:000000000000:dashboard/ops";
+
+        assertEquals("arn:aws:cloudwatch::000000000000:dashboard/ops", regionless);
+        assertTrue(CloudWatchDashboardsService.isDashboardArn(regionless));
+
+        service.tagResource(regionful, Map.of("env", "dev"), REGION);
+        // Read back through the other form: one dashboard, reachable either way.
+        assertEquals(Map.of("env", "dev"), service.listTagsForResource(regionless, REGION));
+        assertEquals(Map.of("env", "dev"), service.listTagsForResource(regionful, REGION));
+
+        service.untagResource(regionful, List.of("env"), REGION);
+        assertEquals(Map.of(), service.listTagsForResource(regionless, REGION));
+    }
+
+    /**
+     * The old region-ful form resolves only for the Region the dashboard was put through. An
+     * ARN naming a different Region must not resolve to the same-named dashboard in this one.
+     */
+    @Test
+    void anArnNamingAnotherRegionDoesNotResolve() {
+        service.putDashboard("ops", BODY, REGION);
+        String elsewhere = "arn:aws:cloudwatch:eu-west-1:000000000000:dashboard/ops";
+
+        AwsException e = assertThrows(AwsException.class,
+                () -> service.listTagsForResource(elsewhere, REGION));
+        assertEquals("ResourceNotFoundException", e.getErrorCode());
+    }
+
+    /**
+     * An ARN naming no dashboard is an error on all three operations, not a silent no-op. The
+     * ARN used here differs from a working one only in the dashboard name, so the outcome
+     * cannot be explained by the ARN failing to parse as a dashboard ARN.
+     */
+    @Test
+    void tagOperationsRejectAnArnThatNamesNoDashboard() {
+        service.putDashboard("ops", BODY, REGION);
+        String arn = service.getDashboard("ops", REGION).getDashboardArn();
+        String ghost = arn.replace("dashboard/ops", "dashboard/nosuch");
+        assertTrue(CloudWatchDashboardsService.isDashboardArn(ghost));
+
+        for (Runnable call : List.<Runnable>of(
+                () -> service.tagResource(ghost, Map.of("env", "prod"), REGION),
+                () -> service.untagResource(ghost, List.of("env"), REGION),
+                () -> service.listTagsForResource(ghost, REGION))) {
+            AwsException e = assertThrows(AwsException.class, call::run);
+            assertEquals("ResourceNotFoundException", e.getErrorCode());
+            assertEquals(404, e.getHttpStatus());
+        }
+
+        // The failures wrote nothing: the real dashboard still carries only what it was given.
+        assertEquals(Map.of(), service.listTagsForResource(arn, REGION));
+        service.tagResource(arn, Map.of("env", "dev"), REGION);
+        assertEquals(Map.of("env", "dev"), service.listTagsForResource(arn, REGION));
     }
 
     @Test

@@ -1,20 +1,22 @@
 package io.github.hectorvent.floci.services.mwaa;
 
+import com.github.dockerjava.api.DockerClient;
+import com.github.dockerjava.api.command.CopyArchiveToContainerCmd;
+import com.github.dockerjava.api.exception.NotFoundException;
+import com.github.dockerjava.api.model.Mount;
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
 import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
+import io.github.hectorvent.floci.core.common.docker.ContainerExec;
+import io.github.hectorvent.floci.core.common.docker.ContainerExecStubs;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager.ContainerInfo;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager.EndpointInfo;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
 import io.github.hectorvent.floci.core.common.docker.LaunchedContainerAwsEnv;
-import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.services.mwaa.model.Environment;
-import com.github.dockerjava.api.DockerClient;
-import com.github.dockerjava.api.command.CopyArchiveToContainerCmd;
-import com.github.dockerjava.api.exception.NotFoundException;
-import com.github.dockerjava.api.model.Mount;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -43,6 +45,7 @@ class MwaaEnvironmentManagerTest {
     private ContainerLifecycleManager lifecycleManager;
     private ContainerDetector containerDetector;
     private MwaaEnvironmentManager manager;
+    private EmulatorConfig.MwaaServiceConfig mwaaConfig;
 
     @BeforeEach
     void setUp() {
@@ -51,7 +54,7 @@ class MwaaEnvironmentManagerTest {
         when(dockerConfig.logMaxSize()).thenReturn("10m");
         when(dockerConfig.logMaxFile()).thenReturn("3");
 
-        EmulatorConfig.MwaaServiceConfig mwaaConfig = Mockito.mock(EmulatorConfig.MwaaServiceConfig.class);
+        mwaaConfig = Mockito.mock(EmulatorConfig.MwaaServiceConfig.class);
         when(mwaaConfig.dockerNetwork()).thenReturn(Optional.empty());
         when(mwaaConfig.defaultPostgresImage()).thenReturn("postgres:16-alpine");
 
@@ -340,10 +343,29 @@ class MwaaEnvironmentManagerTest {
         environment.setAccountId("000000000000");
         environment.setArn("arn:aws:airflow:us-east-1:000000000000:environment/my-env");
 
-        assertEquals("floci-ns1-mwaa-000000000000.us-east-1.my-env-db",
+        assertEquals("floci-aws-ns1-mwaa-000000000000.us-east-1.my-env-db",
                 MwaaEnvironmentManager.dbContainerName(namespacedConfig, environment));
-        assertEquals("floci-ns1-mwaa-000000000000.us-east-1.my-env-airflow",
+        assertEquals("floci-aws-ns1-mwaa-000000000000.us-east-1.my-env-airflow",
                 MwaaEnvironmentManager.airflowContainerName(namespacedConfig, environment));
+    }
+
+    @Test
+    void anEnvironmentWithoutAnArnIsNamedInTheConfiguredDefaultRegion() {
+        EmulatorConfig.DockerConfig dockerConfig = Mockito.mock(EmulatorConfig.DockerConfig.class);
+        when(dockerConfig.resourceNamespace()).thenReturn(Optional.empty());
+        EmulatorConfig chinaConfig = Mockito.mock(EmulatorConfig.class);
+        when(chinaConfig.docker()).thenReturn(dockerConfig);
+        when(chinaConfig.defaultRegion()).thenReturn("cn-north-1");
+
+        Environment environment = new Environment();
+        environment.setName("my-env");
+        environment.setAccountId("000000000000");
+
+        assertEquals("floci-aws-mwaa-000000000000.cn-north-1.my-env-db",
+                MwaaEnvironmentManager.dbContainerName(chinaConfig, environment));
+        assertEquals("cn-north-1", MwaaEnvironmentManager.environmentRegion(environment, "cn-north-1"));
+        environment.setArn("arn:aws:airflow:eu-west-1:000000000000:environment/my-env");
+        assertEquals("eu-west-1", MwaaEnvironmentManager.environmentRegion(environment, "cn-north-1"));
     }
 
     @Test
@@ -526,6 +548,135 @@ class MwaaEnvironmentManagerTest {
                     .thenThrow(new RuntimeException("docker daemon connection reset"));
 
             assertFalse(manager.hasAnyContainerExited(environmentWithContainers("db-container-id", "airflow-container-id")));
+        }
+    }
+
+    /**
+     * Explicit DeleteEnvironment tears down through {@code stopEnvironment}. The shutdown
+     * retention option is decided by {@link MwaaService#shutdown()} and must not turn a Delete
+     * into metadata removal that leaves the containers running.
+     */
+    @Test
+    void stopEnvironmentRemovesContainersEvenWhenShutdownRetentionIsEnabled() {
+        when(mwaaConfig.keepRunningOnShutdown()).thenReturn(true);
+        Environment environment = new Environment();
+        environment.setName("deleted-env");
+        environment.setAirflowContainerId("airflow-container-id");
+        environment.setDbContainerId("db-container-id");
+
+        manager.stopEnvironment(environment);
+
+        Mockito.verify(lifecycleManager).stopAndRemove("airflow-container-id", null);
+        Mockito.verify(lifecycleManager).stopAndRemove("db-container-id", null);
+    }
+
+    @Test
+    void runAirflowCliRunsTheAirflowCommandInTheAirflowContainer() throws Exception {
+        DockerClient dockerClient = Mockito.mock(DockerClient.class);
+        when(lifecycleManager.getDockerClient()).thenReturn(dockerClient);
+        List<List<String>> commands = ContainerExecStubs.completeEveryExec(dockerClient, "airflow-container-id", 2,
+                "dag1\n", "warning\n");
+
+        ContainerExec.Result result = manager.runAirflowCli("airflow-container-id", "dags list");
+
+        assertEquals(List.of(List.of("airflow", "dags", "list")), commands);
+        assertEquals(2, result.exitCode());
+        assertEquals("dag1\n", result.stdout());
+        assertEquals("warning\n", result.stderr());
+    }
+
+    @Nested
+    class AirflowCli {
+
+        private static final String AIRFLOW_ID = "airflow-container-id";
+        private DockerClient dockerClient;
+
+        @BeforeEach
+        void stubDocker() {
+            dockerClient = Mockito.mock(DockerClient.class);
+            when(lifecycleManager.getDockerClient()).thenReturn(dockerClient);
+        }
+
+        @Test
+        void shellSyntaxInACliCommandReachesAirflowAsPlainArguments() throws Exception {
+            List<List<String>> commands = ContainerExecStubs.completeEveryExec(dockerClient, AIRFLOW_ID, 0, "", "");
+
+            manager.runAirflowCli(AIRFLOW_ID, "dags list ; touch /tmp/pwned $(id) `id` | cat > /tmp/out");
+
+            assertEquals(List.of(List.of("airflow", "dags", "list", ";", "touch", "/tmp/pwned", "$(id)", "`id`",
+                    "|", "cat", ">", "/tmp/out")), commands);
+        }
+
+        @Test
+        void unsupportedCommandsNeverReachTheAirflowContainer() throws Exception {
+            List<List<String>> commands = ContainerExecStubs.completeEveryExec(dockerClient, AIRFLOW_ID, 0, "", "");
+
+            for (String command : List.of("users list", "users create", "db shell", "config get-value",
+                    "webserver", "scheduler", "celery worker", "dags unknown", "dags", "")) {
+                ContainerExec.Result result = manager.runAirflowCli(AIRFLOW_ID, command);
+                assertEquals(1, result.exitCode(), command);
+                assertTrue(result.stderr().contains("not supported"), command);
+            }
+            assertEquals(List.of(), commands);
+        }
+
+        @Test
+        void allowsEverySupportedMwaaCliCommand() {
+            for (String command : List.of(
+                    "cheat-sheet", "version", "connections add", "connections delete",
+                    "dags backfill", "dags delete", "dags list", "dags list-import-errors",
+                    "dags list-jobs", "dags list-runs", "dags next-execution", "dags pause",
+                    "dags report", "dags reserialize", "dags show", "dags state", "dags test",
+                    "dags trigger", "dags unpause", "db clean", "providers behaviours",
+                    "providers get", "providers hooks", "providers links", "providers list",
+                    "providers notifications", "providers secrets", "providers triggerer",
+                    "providers widgets", "roles add-perms", "roles create", "roles del-perms",
+                    "roles list", "tasks clear", "tasks failed-deps", "tasks list", "tasks render",
+                    "tasks run", "tasks state", "tasks states-for-dag-run", "tasks test",
+                    "variables delete", "variables get", "variables list", "variables set")) {
+                assertTrue(MwaaEnvironmentManager.isSupportedCliCommand(List.of(command.split(" "))), command);
+            }
+        }
+
+        @Test
+        void quotedCliArgumentsReachAirflowWhole() throws Exception {
+            List<List<String>> commands = ContainerExecStubs.completeEveryExec(dockerClient, AIRFLOW_ID, 0, "", "");
+
+            manager.runAirflowCli(AIRFLOW_ID, "dags trigger -c '{\"key\": \"a b\"}' my_dag");
+            manager.runAirflowCli(AIRFLOW_ID, "variables set greeting \"say \\\"hi\\\" to $USER\" ''");
+            manager.runAirflowCli(AIRFLOW_ID, "variables get two\\ words");
+
+            assertEquals(List.of(
+                    List.of("airflow", "dags", "trigger", "-c", "{\"key\": \"a b\"}", "my_dag"),
+                    List.of("airflow", "variables", "set", "greeting", "say \"hi\" to $USER", ""),
+                    List.of("airflow", "variables", "get", "two words")), commands);
+        }
+
+        @Test
+        void backslashNewlineJoinsTheTextOnEitherSide() throws Exception {
+            List<List<String>> commands = ContainerExecStubs.completeEveryExec(dockerClient, AIRFLOW_ID, 0, "", "");
+
+            manager.runAirflowCli(AIRFLOW_ID, "variables set greeting hel\\\nlo \"wor\\\nld\"");
+
+            assertEquals(List.of(List.of("airflow", "variables", "set", "greeting", "hello", "world")), commands);
+        }
+
+        @Test
+        void onlySpacesTabsAndNewlinesSeparateArguments() throws Exception {
+            List<List<String>> commands = ContainerExecStubs.completeEveryExec(dockerClient, AIRFLOW_ID, 0, "", "");
+
+            manager.runAirflowCli(AIRFLOW_ID, "variables\tset\ngreeting hello\u2003world");
+
+            assertEquals(List.of(List.of("airflow", "variables", "set", "greeting", "hello\u2003world")), commands);
+        }
+
+        @Test
+        void unterminatedQuoteIsRejectedWithoutRunningAnything() {
+            List<List<String>> commands = ContainerExecStubs.completeEveryExec(dockerClient, AIRFLOW_ID, 0, "", "");
+
+            assertThrows(IllegalArgumentException.class,
+                    () -> manager.runAirflowCli(AIRFLOW_ID, "dags trigger -c '{\"key\": 1}"));
+            assertEquals(List.of(), commands);
         }
     }
 }

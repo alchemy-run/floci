@@ -2,6 +2,8 @@ package io.github.hectorvent.floci.services.ses;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
+import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.route53.Route53Service;
@@ -18,10 +20,12 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -40,7 +44,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * cascade around {@link #delete}.
  */
 @ApplicationScoped
-public class SesIdentityService {
+public class SesIdentityService implements SesTaggable {
+
+    public static final String DKIM_SIGNING_HOSTED_ZONE = "dkim.amazonses.com";
 
     private static final Logger LOG = Logger.getLogger(SesIdentityService.class);
 
@@ -52,7 +58,8 @@ public class SesIdentityService {
     private final Clock clock;
     private final ConcurrentHashMap<String, DkimLookupCacheEntry> dkimLookupCache = new ConcurrentHashMap<>();
     // Serializes every identity check-then-put (v2 CreateEmailIdentity, the v1 verify family, the
-    // CVET pending registration) so concurrent creators can't lose each other's writes
+    // CVET pending registration, and the notification settings, which SES also changes on its own
+    // when it cannot publish to a topic) so concurrent writers can't lose each other's writes
     // (InMemoryStorage only makes each individual operation thread-safe).
     private final Object identityCreationLock = new Object();
 
@@ -186,7 +193,12 @@ public class SesIdentityService {
         return refreshIdentityState(identity, region);
     }
 
-    /** True when the address itself or its parent domain is a verified identity. */
+    /**
+     * True when the address itself, its domain or one of that domain's parents is a verified
+     * identity: "if you create and verify an identity for example.com, you don't need to create
+     * separate identities for a.example.com, a.b.example.com, user@example.com, user@a.example.com".
+     * The walk stops before a bare top-level domain.
+     */
     public boolean isVerifiedSender(String fromEmail, String region) {
         if (fromEmail == null) {
             return false;
@@ -200,23 +212,129 @@ public class SesIdentityService {
             return true;
         }
         int at = fromEmail.indexOf('@');
-        return at >= 0 && at < fromEmail.length() - 1
-                && isIdentityVerified(fromEmail.substring(at + 1), region);
+        if (at < 0 || at == fromEmail.length() - 1) {
+            return false;
+        }
+        String domain = fromEmail.substring(at + 1);
+        while (true) {
+            if (isIdentityVerified(domain, region)) {
+                return true;
+            }
+            int dot = domain.indexOf('.');
+            if (dot < 0 || domain.indexOf('.', dot + 1) < 0) {
+                return false;
+            }
+            domain = domain.substring(dot + 1);
+        }
     }
 
-    private boolean isIdentityVerified(String identity, String region) {
+    boolean isIdentityVerified(String identity, String region) {
         Identity id = getIdentityVerificationAttributes(identity, region);
         return id != null && "Success".equals(id.getVerificationStatus());
     }
 
+    /**
+     * The cursor is the identity name and carries no type filter: a token taken with
+     * {@code IdentityType=Domain} continues the unfiltered list when reused without the filter, as
+     * on SES.
+     */
+    public PaginatedResult<Identity> listIdentities(String identityType, String region, SesListPaging paging,
+                                                    Integer pageSize, String nextToken) {
+        return paging.page(region, listIdentities(identityType, region), Identity::getIdentity, pageSize,
+                nextToken);
+    }
+
+    /** By name, the order Floci settles on where SES's own varies between calls. */
     public List<Identity> listIdentities(String identityType, String region) {
-        List<Identity> all = identityStore.scan(k -> k.startsWith(keyPrefix(region)));
-        if (identityType == null || identityType.isBlank()) {
-            return all;
-        }
-        return all.stream()
-                .filter(i -> identityType.equals(i.getIdentityType()))
+        return identityStore.scan(k -> k.startsWith(keyPrefix(region))).stream()
+                .filter(i -> identityType == null || identityType.isBlank()
+                        || identityType.equals(i.getIdentityType()))
+                .sorted(Comparator.comparing(Identity::getIdentity))
                 .toList();
+    }
+
+    /**
+     * ListEmailIdentities, probed 2026-10-03. The controller has already checked the filter's keys
+     * and values; SES then checks the page size, the name, the type and the status, and last the
+     * token. The name is trimmed and found anywhere in the identity without regard to case, the keys
+     * combine, and a token is bound to the filter it came from, though not to the name's case.
+     */
+    public PaginatedResult<Identity> listV2Identities(String region, Map<String, String> filter,
+                                                      Integer pageSize, String nextToken) {
+        SesListPaging paging = filter.isEmpty()
+                ? SesListPaging.V2_LIST_EMAIL_IDENTITIES
+                : SesListPaging.V2_LIST_EMAIL_IDENTITIES_FILTERED;
+        // Validated here as well as in page() so the size error wins over the filter's values.
+        paging.checkRequest(pageSize, nextToken);
+        String name = v2FilterName(filter.get("IDENTITY_NAME_CONTAINS"));
+        String type = v2FilterType(filter.get("IDENTITY_TYPE"));
+        String status = v2FilterStatus(filter.get("VERIFICATION_STATUS"));
+        List<Identity> matching = listIdentities(type, region).stream()
+                .filter(i -> name == null || i.getIdentity().toLowerCase(Locale.ROOT).contains(name))
+                .map(i -> status == null ? i : withCurrentStatus(i, region))
+                .filter(i -> status == null || status.equals(i.getVerificationStatus()))
+                .toList();
+        // The name goes last: the type and status values never hold the separator, so no name can
+        // pass for another filter.
+        String scope = filter.isEmpty() ? ""
+                : Objects.toString(type, "") + "/" + Objects.toString(status, "") + "/" + Objects.toString(name, "");
+        return paging.page(region, scope, matching, Identity::getIdentity, pageSize, nextToken);
+    }
+
+    /** Only a domain that is not yet verified can still change status, through its DKIM records. */
+    private Identity withCurrentStatus(Identity identity, String region) {
+        if ("Domain".equals(identity.getIdentityType()) && !"Success".equals(identity.getVerificationStatus())) {
+            Identity refreshed = refreshIdentityState(identity, region);
+            return refreshed == null ? identity : refreshed;
+        }
+        return identity;
+    }
+
+    private static String v2FilterName(String value) {
+        if (value == null) {
+            return null;
+        }
+        String name = value.trim();
+        int length = name.codePointCount(0, name.length());
+        if (length < 3) {
+            throw new AwsException("BadRequestException",
+                    "Filter IDENTITY_NAME_CONTAINS must be at least 3 characters.", 400);
+        }
+        if (length > 320) {
+            throw new AwsException("BadRequestException",
+                    "Filter IDENTITY_NAME_CONTAINS must be at most 320 characters.", 400);
+        }
+        return name.toLowerCase(Locale.ROOT);
+    }
+
+    /** MANAGED_DOMAIN is in the model's enum, but SES refuses it as a filter. */
+    private static String v2FilterType(String value) {
+        if (value == null) {
+            return null;
+        }
+        return switch (value) {
+            case "EMAIL_ADDRESS" -> "EmailAddress";
+            case "DOMAIN" -> "Domain";
+            default -> throw new AwsException("BadRequestException",
+                    "Invalid identity type <" + value + "> in filter.", 400);
+        };
+    }
+
+    /** SES maps NOT_STARTED to its own name before refusing it, and words that refusal differently. */
+    private static String v2FilterStatus(String value) {
+        if (value == null) {
+            return null;
+        }
+        return switch (value) {
+            case "PENDING" -> "Pending";
+            case "SUCCESS" -> "Success";
+            case "FAILED" -> "Failed";
+            case "TEMPORARY_FAILURE" -> "TemporaryFailure";
+            case "NOT_STARTED" -> throw new AwsException("BadRequestException",
+                    "Invalid verification status <NotStarted>.", 400);
+            default -> throw new AwsException("BadRequestException",
+                    "Invalid verification status <" + value + "> in filter.", 400);
+        };
     }
 
     public List<String> getVerifiedEmailAddresses(String region) {
@@ -257,9 +375,9 @@ public class SesIdentityService {
         if (behaviorOnMxFailure != null) {
             if (!"UseDefaultValue".equals(behaviorOnMxFailure)
                     && !"RejectMessage".equals(behaviorOnMxFailure)) {
-                throw new AwsException("ValidationError",
-                        "1 validation error detected: Value at 'behaviorOnMXFailure' failed to satisfy "
-                                + "constraint: Member must satisfy enum value set: [RejectMessage, UseDefaultValue]", 400);
+                throw SmithyValidationErrors.validationError(
+                        "Value at 'behaviorOnMXFailure' failed to satisfy "
+                                + "constraint: Member must satisfy enum value set: [RejectMessage, UseDefaultValue]");
             }
             normalizedBehavior = behaviorOnMxFailure;
         }
@@ -307,15 +425,49 @@ public class SesIdentityService {
 
     public void setIdentityNotificationTopic(String identityValue, String notificationType,
                                              String snsTopic, String region) {
-        Identity identity = identityStore.get(identityKey(region, identityValue))
-                .orElseThrow(() -> new AwsException("InvalidParameterValue",
-                        "Identity does not exist: " + identityValue, 400));
-        if (snsTopic != null && !snsTopic.isBlank()) {
-            identity.getNotificationAttributes().put(notificationType + "Topic", snsTopic);
-        } else {
-            identity.getNotificationAttributes().remove(notificationType + "Topic");
+        synchronized (identityCreationLock) {
+            Identity identity = identityStore.get(identityKey(region, identityValue))
+                    .orElseThrow(() -> new AwsException("InvalidParameterValue",
+                            "Identity does not exist: " + identityValue, 400));
+            if (snsTopic != null && !snsTopic.isBlank()) {
+                identity.getNotificationAttributes().put(notificationType + "Topic", snsTopic);
+            } else {
+                identity.getNotificationAttributes().remove(notificationType + "Topic");
+            }
+            identityStore.put(identityKey(region, identityValue), identity);
         }
-        identityStore.put(identityKey(region, identityValue), identity);
+    }
+
+    /**
+     * What SES does when it cannot publish an identity's notification because the topic is gone or no
+     * longer lets SES publish to it: it "removes the configuration for that topic if it's been
+     * configured for bounces or complaints", leaves a delivery setting in place, and turns email
+     * feedback forwarding back on (SES Developer Guide, "Configuring Amazon SNS notifications for
+     * Amazon SES"). So every bounce or complaint setting of the identity that names {@code topicArn}
+     * goes, whichever notification failed, while one changed to another topic since is kept. SES also
+     * emails the owner about the change, which Floci does not send.
+     */
+    public void dropRefusedNotificationTopic(String identityValue, String topicArn, String region) {
+        String key = identityKey(region, identityValue);
+        synchronized (identityCreationLock) {
+            Identity identity = identityStore.get(key).orElse(null);
+            if (identity == null) {
+                return;
+            }
+            boolean removed = false;
+            for (String type : List.of("Bounce", "Complaint")) {
+                if (identity.getNotificationAttributes().remove(type + "Topic", topicArn)) {
+                    removed = true;
+                }
+            }
+            if (!removed) {
+                return;
+            }
+            identity.setFeedbackForwardingEnabled(true);
+            identityStore.put(key, identity);
+        }
+        LOG.infov("Removed topic {0}, which SES may not publish to, from the bounce and complaint settings of {1}"
+                + " and enabled feedback forwarding", topicArn, identityValue);
     }
 
     public Identity getIdentityNotificationAttributes(String identityValue, String region) {
@@ -323,12 +475,14 @@ public class SesIdentityService {
     }
 
     public void setFeedbackForwardingEnabled(String identityValue, boolean enabled, String region) {
-        Identity identity = identityStore.get(identityKey(region, identityValue))
-                .orElseThrow(() -> new AwsException("InvalidParameterValue",
-                        "Identity " + identityValue
-                                + " is invalid. Must be a verified email address or domain.", 400));
-        identity.setFeedbackForwardingEnabled(enabled);
-        identityStore.put(identityKey(region, identityValue), identity);
+        synchronized (identityCreationLock) {
+            Identity identity = identityStore.get(identityKey(region, identityValue))
+                    .orElseThrow(() -> new AwsException("InvalidParameterValue",
+                            "Identity " + identityValue
+                                    + " is invalid. Must be a verified email address or domain.", 400));
+            identity.setFeedbackForwardingEnabled(enabled);
+            identityStore.put(identityKey(region, identityValue), identity);
+        }
         LOG.infov("Updated feedback forwarding for {0}: enabled={1}", identityValue, enabled);
     }
 
@@ -339,25 +493,29 @@ public class SesIdentityService {
                     "NotificationType is required.", 400);
         }
         if (!NOTIFICATION_TYPES.contains(notificationType)) {
-            throw new AwsException("ValidationError",
-                    "1 validation error detected: Value at 'notificationType' failed to satisfy "
+            throw SmithyValidationErrors.validationError(
+                    "Value at 'notificationType' failed to satisfy "
                             + "constraint: Member must satisfy enum value set: "
-                            + NOTIFICATION_TYPES, 400);
+                            + NOTIFICATION_TYPES);
         }
-        Identity identity = identityStore.get(identityKey(region, identityValue))
-                .orElseThrow(() -> new AwsException("InvalidParameterValue",
-                        "Identity " + identityValue
-                                + " is invalid. It must be a verified email address or domain.", 400));
-        identity.getHeadersInNotificationsEnabled().put(notificationType, enabled);
-        identityStore.put(identityKey(region, identityValue), identity);
+        synchronized (identityCreationLock) {
+            Identity identity = identityStore.get(identityKey(region, identityValue))
+                    .orElseThrow(() -> new AwsException("InvalidParameterValue",
+                            "Identity " + identityValue
+                                    + " is invalid. It must be a verified email address or domain.", 400));
+            identity.getHeadersInNotificationsEnabled().put(notificationType, enabled);
+            identityStore.put(identityKey(region, identityValue), identity);
+        }
         LOG.infov("Updated headers-in-notifications for {0}: {1}={2}",
                 identityValue, notificationType, enabled);
     }
 
+    @Override
     public List<Tag> listTags(String identityValue, String region) {
         return new ArrayList<>(requireForTags(identityValue, region).getTags());
     }
 
+    @Override
     public void tag(String identityValue, String region, List<Tag> newTags) {
         Identity identity = requireForTags(identityValue, region);
         identity.setTags(SesTags.merge(identity.getTags(), newTags));
@@ -365,6 +523,7 @@ public class SesIdentityService {
         LOG.infov("Tagged SES identity: {0} (region {1}, +{2} tags)", identityValue, region, newTags.size());
     }
 
+    @Override
     public void untag(String identityValue, String region, List<String> tagKeys) {
         Identity identity = requireForTags(identityValue, region);
         Set<String> toRemove = new HashSet<>(tagKeys);
@@ -638,7 +797,7 @@ public class SesIdentityService {
 
     private boolean hasExpectedDkimRecord(String domain, String token) {
         String expectedName = normalizeDnsName(token + "._domainkey." + domain);
-        String expectedValue = normalizeDnsName(token + ".dkim.amazonses.com");
+        String expectedValue = normalizeDnsName(token + "." + DKIM_SIGNING_HOSTED_ZONE);
         for (HostedZone zone : route53Service.listHostedZones(null, Integer.MAX_VALUE)) {
             for (ResourceRecordSet recordSet : route53Service.listResourceRecordSets(zone.getId(), null, null,
                     Integer.MAX_VALUE)) {

@@ -7,7 +7,6 @@ import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
-
 import software.amazon.awssdk.awscore.exception.AwsServiceException;
 import software.amazon.awssdk.services.ses.SesClient;
 import software.amazon.awssdk.services.ses.model.DeleteIdentityRequest;
@@ -25,16 +24,15 @@ import software.amazon.awssdk.services.ses.model.SetIdentityHeadersInNotificatio
 import software.amazon.awssdk.services.ses.model.SetIdentityMailFromDomainRequest;
 import software.amazon.awssdk.services.ses.model.VerifyDomainDkimRequest;
 import software.amazon.awssdk.services.ses.model.VerifyDomainIdentityRequest;
-
 import software.amazon.awssdk.services.sesv2.SesV2Client;
 import software.amazon.awssdk.services.sesv2.model.BadRequestException;
 import software.amazon.awssdk.services.sesv2.model.CreateEmailIdentityRequest;
 import software.amazon.awssdk.services.sesv2.model.DeleteEmailIdentityRequest;
 import software.amazon.awssdk.services.sesv2.model.DkimAttributes;
 import software.amazon.awssdk.services.sesv2.model.DkimSigningAttributes;
-import software.amazon.awssdk.services.sesv2.model.DkimStatus;
 import software.amazon.awssdk.services.sesv2.model.DkimSigningAttributesOrigin;
 import software.amazon.awssdk.services.sesv2.model.DkimSigningKeyLength;
+import software.amazon.awssdk.services.sesv2.model.DkimStatus;
 import software.amazon.awssdk.services.sesv2.model.GetEmailIdentityRequest;
 import software.amazon.awssdk.services.sesv2.model.GetEmailIdentityResponse;
 import software.amazon.awssdk.services.sesv2.model.IdentityInfo;
@@ -222,8 +220,9 @@ class SesIdentityAttributesTest {
         sesV2.createEmailIdentity(CreateEmailIdentityRequest.builder().emailIdentity(email).build());
         sesV2.createEmailIdentity(CreateEmailIdentityRequest.builder().emailIdentity(domain).build());
         try {
+            // Other classes share this Floci, so ask for a page large enough to hold every identity.
             List<IdentityInfo> identities = sesV2.listEmailIdentities(
-                    ListEmailIdentitiesRequest.builder().build()).emailIdentities();
+                    ListEmailIdentitiesRequest.builder().pageSize(1000).build()).emailIdentities();
             IdentityInfo emailIdentity = identities.stream()
                     .filter(i -> email.equals(i.identityName())).findFirst().orElseThrow();
             IdentityInfo domainIdentity = identities.stream()

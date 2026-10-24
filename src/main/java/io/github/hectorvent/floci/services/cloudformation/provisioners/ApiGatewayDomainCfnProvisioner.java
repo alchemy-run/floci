@@ -102,7 +102,7 @@ public class ApiGatewayDomainCfnProvisioner implements CfnResourceProvisioner {
         }
         r.setPhysicalId(domainName);
         r.getAttributes().put("DomainNameArn",
-                "arn:aws:apigateway:" + ctx.region() + "::/domainnames/" + domainName);
+                ApiGatewayService.domainNameArn(ctx.region(), domainName));
         r.getAttributes().put("RegionalDomainName", orEmpty(provisioned.getRegionalDomainName()));
         r.getAttributes().put("RegionalHostedZoneId", orEmpty(provisioned.getRegionalHostedZoneId()));
         r.getAttributes().put("DistributionDomainName", orEmpty(provisioned.getDistributionDomainName()));

@@ -10,9 +10,9 @@ import io.github.hectorvent.floci.services.cognito.CognitoService;
 import io.github.hectorvent.floci.services.cognito.model.UserPool;
 import io.github.hectorvent.floci.services.cognito.model.UserPoolClient;
 import io.github.hectorvent.floci.services.cognito.model.UserPoolDomain;
+import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
-import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
 import java.util.List;
@@ -25,7 +25,6 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -40,7 +39,6 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -157,23 +155,8 @@ class CognitoCfnProvisionerTest {
         UserPoolDomain d = new UserPoolDomain();
         d.setDomain(domain);
         d.setUserPoolId(userPoolId);
-        d.setAwsAccountId("000000000000");
         d.setCloudFrontDistribution(cloudFront);
-        if (domain.contains(".")) {
-            d.setCertificateArn(CERTIFICATE_ARN);
-        }
         return d;
-    }
-
-    private void stubDomainRename(UserPoolDomain target, RuntimeException failure) {
-        when(cognito.createUserPoolDomain(any(), any(), any(), any(), any())).thenAnswer(inv -> {
-            Consumer<UserPoolDomain> beforeCreate = inv.getArgument(4);
-            beforeCreate.accept(target);
-            if (failure != null) {
-                throw failure;
-            }
-            return target;
-        });
     }
 
     private ObjectNode customDomainProps(String certificateArn) {
@@ -272,204 +255,20 @@ class CognitoCfnProvisionerTest {
     }
 
     @Test
-    void updateWithChangedDomainDeletesBeforeCreatingAndKeepsSnapshotUntilCommit() {
+    void updateWithChangedDomainReplacesTheDomain() {
         when(cognito.describeUserPoolDomain("old.example.com"))
                 .thenReturn(domain("old.example.com", POOL_ID, "dold.cloudfront.net"));
-        stubDomainRename(domain(DOMAIN, POOL_ID, CLOUDFRONT), null);
+        when(cognito.createUserPoolDomain(DOMAIN, POOL_ID, Map.of("CertificateArn", CERTIFICATE_ARN), 2))
+                .thenReturn(domain(DOMAIN, POOL_ID, CLOUDFRONT));
         StackResource r = resource("old.example.com",
                 Map.of("UserPoolId", POOL_ID, "CloudFrontDistribution", "dold.cloudfront.net"));
 
         provisioner.provision(r, customDomainProps(CERTIFICATE_ARN), ctx("old.example.com"));
 
-        InOrder order = inOrder(cognito);
-        ArgumentCaptor<UserPoolDomain> predecessor = ArgumentCaptor.forClass(UserPoolDomain.class);
-        order.verify(cognito).deleteUserPoolDomain(predecessor.capture());
-        assertEquals("old.example.com", predecessor.getValue().getDomain());
-        assertEquals(POOL_ID, predecessor.getValue().getUserPoolId());
-        assertEquals("dold.cloudfront.net", predecessor.getValue().getCloudFrontDistribution());
-        verify(cognito, never()).deleteUserPoolDomain(any(), any());
-        order.verify(cognito).createUserPoolDomain(eq(DOMAIN), eq(POOL_ID),
-                eq(Map.of("CertificateArn", CERTIFICATE_ARN)), eq(2), any());
         verify(cognito, never()).updateUserPoolDomain(any(), any(), any(), any());
+        verify(cognito).deleteUserPoolDomain("old.example.com", POOL_ID);
         assertEquals(DOMAIN, r.getPhysicalId());
-        assertTrue(provisioner.retainsFailedUpdateState(r));
-        r.setStatus("UPDATE_COMPLETE");
-        provisioner.completeUpdate(r);
-        assertFalse(provisioner.retainsFailedUpdateState(r));
         assertEquals(Map.of("UserPoolId", POOL_ID, "CloudFrontDistribution", CLOUDFRONT), r.getAttributes());
-    }
-
-    @Test
-    void prefixRenameAlsoDeletesBeforeCreatingAndRestoresItsDistributionOnRollback() {
-        UserPoolDomain prior = domain("old-prefix", POOL_ID, "dold.cloudfront.net");
-        when(cognito.describeUserPoolDomain(prior.getDomain())).thenReturn(prior);
-        stubDomainRename(domain("new-prefix", POOL_ID, CLOUDFRONT), null);
-        StackResource r = resource(prior.getDomain(),
-                Map.of("UserPoolId", POOL_ID, "CloudFrontDistribution", prior.getCloudFrontDistribution()));
-
-        provisioner.provision(r, mapper.createObjectNode().put("Domain", "new-prefix").put("UserPoolId", POOL_ID),
-                ctx(prior.getDomain()));
-
-        InOrder order = inOrder(cognito);
-        ArgumentCaptor<UserPoolDomain> predecessor = ArgumentCaptor.forClass(UserPoolDomain.class);
-        order.verify(cognito).deleteUserPoolDomain(predecessor.capture());
-        assertEquals(mapper.valueToTree(prior), mapper.valueToTree(predecessor.getValue()));
-        verify(cognito, never()).deleteUserPoolDomain(any(), any());
-        order.verify(cognito).createUserPoolDomain(eq("new-prefix"), eq(POOL_ID), isNull(), isNull(), any());
-        assertEquals("new-prefix", r.getPhysicalId());
-        assertTrue(provisioner.rollbackUpdate(r));
-        ArgumentCaptor<UserPoolDomain> restored = ArgumentCaptor.forClass(UserPoolDomain.class);
-        verify(cognito).restoreUserPoolDomain(restored.capture());
-        assertEquals(mapper.valueToTree(prior), mapper.valueToTree(restored.getValue()));
-        assertEquals("dold.cloudfront.net", r.getAttributes().get("CloudFrontDistribution"));
-    }
-
-    @Test
-    void failedRenameRestoresThePriorIdentityAndCleansAPartiallyCreatedReplacement() {
-        UserPoolDomain prior = domain("old.example.com", POOL_ID, "dold.cloudfront.net");
-        prior.setManagedLoginVersion(1);
-        prior.setSecurityPolicy("TLS_V1_2_2021");
-        when(cognito.describeUserPoolDomain(prior.getDomain())).thenReturn(prior);
-        stubDomainRename(domain(DOMAIN, POOL_ID, CLOUDFRONT), new IllegalStateException("TLS setup failed"));
-        Map<String, String> attributes = Map.of("UserPoolId", POOL_ID, "CloudFrontDistribution", "dold.cloudfront.net");
-        StackResource r = resource(prior.getDomain(), attributes);
-
-        assertThrows(IllegalStateException.class,
-                () -> provisioner.provision(r, customDomainProps(CERTIFICATE_ARN), ctx(prior.getDomain())));
-        assertTrue(provisioner.retainsFailedUpdateState(r));
-        assertThrows(IllegalStateException.class, () -> provisioner.clearUpdate(r));
-        assertTrue(provisioner.rollbackUpdate(r));
-
-        ArgumentCaptor<UserPoolDomain> target = ArgumentCaptor.forClass(UserPoolDomain.class);
-        ArgumentCaptor<UserPoolDomain> restored = ArgumentCaptor.forClass(UserPoolDomain.class);
-        InOrder order = inOrder(cognito);
-        order.verify(cognito).deleteUserPoolDomain(any(UserPoolDomain.class));
-        order.verify(cognito).createUserPoolDomain(any(), any(), any(), any(), any());
-        order.verify(cognito).deleteUserPoolDomain(target.capture());
-        order.verify(cognito).restoreUserPoolDomain(restored.capture());
-        assertEquals(CLOUDFRONT, target.getValue().getCloudFrontDistribution());
-        assertEquals(DOMAIN, target.getValue().getDomain());
-        assertEquals(mapper.valueToTree(prior), mapper.valueToTree(restored.getValue()));
-        assertEquals(prior.getDomain(), r.getPhysicalId());
-        assertEquals(attributes, r.getAttributes());
-        assertFalse(provisioner.hasPendingRollbackCleanup(r));
-    }
-
-    @Test
-    void failedRenameBeforeCreateDoesNotDeleteAnUnownedTarget() {
-        UserPoolDomain prior = domain("old.example.com", POOL_ID, "dold.cloudfront.net");
-        when(cognito.describeUserPoolDomain(prior.getDomain())).thenReturn(prior);
-        when(cognito.createUserPoolDomain(any(), any(), any(), any(), any()))
-                .thenThrow(new AwsException("InvalidParameterException", "Domain already associated", 400));
-        StackResource r = resource(prior.getDomain(), Map.of("UserPoolId", POOL_ID));
-
-        assertThrows(AwsException.class,
-                () -> provisioner.provision(r, customDomainProps(CERTIFICATE_ARN), ctx(prior.getDomain())));
-        assertTrue(provisioner.rollbackUpdate(r));
-
-        ArgumentCaptor<UserPoolDomain> deleted = ArgumentCaptor.forClass(UserPoolDomain.class);
-        verify(cognito).deleteUserPoolDomain(deleted.capture());
-        assertEquals(mapper.valueToTree(prior), mapper.valueToTree(deleted.getValue()));
-        verify(cognito, never()).deleteUserPoolDomain(any(), any());
-        verify(cognito).restoreUserPoolDomain(any(UserPoolDomain.class));
-        assertEquals(prior.getDomain(), r.getPhysicalId());
-    }
-
-    @Test
-    void laterRollbackRestoresASuccessfulRenameAndRetriesAFailedRestoration() {
-        UserPoolDomain prior = domain("old.example.com", POOL_ID, "dold.cloudfront.net");
-        when(cognito.describeUserPoolDomain(prior.getDomain())).thenReturn(prior);
-        stubDomainRename(domain(DOMAIN, POOL_ID, CLOUDFRONT), null);
-        StackResource r = resource(prior.getDomain(), Map.of("UserPoolId", POOL_ID));
-        provisioner.provision(r, customDomainProps(CERTIFICATE_ARN), ctx(prior.getDomain()));
-        doThrow(new IllegalStateException("ACM unavailable")).doNothing()
-                .when(cognito).restoreUserPoolDomain(any());
-
-        assertThrows(IllegalStateException.class, () -> provisioner.rollbackUpdate(r));
-        r.setStatus("UPDATE_FAILED");
-        provisioner.completeUpdate(r);
-        assertTrue(provisioner.hasPendingRollbackCleanup(r));
-        assertEquals(DOMAIN, r.getPhysicalId());
-        assertTrue(provisioner.rollbackUpdate(r));
-        assertEquals(prior.getDomain(), r.getPhysicalId());
-        assertFalse(provisioner.hasPendingRollbackCleanup(r));
-    }
-
-    @Test
-    void predecessorDeleteFailureNeverCreatesAReplacement() {
-        UserPoolDomain prior = domain("old.example.com", POOL_ID, "dold.cloudfront.net");
-        when(cognito.describeUserPoolDomain(prior.getDomain())).thenReturn(prior);
-        doThrow(new IllegalStateException("delete failed")).when(cognito)
-                .deleteUserPoolDomain(any(UserPoolDomain.class));
-        StackResource r = resource(prior.getDomain(), Map.of("UserPoolId", POOL_ID));
-
-        assertThrows(IllegalStateException.class,
-                () -> provisioner.provision(r, customDomainProps(CERTIFICATE_ARN), ctx(prior.getDomain())));
-
-        verify(cognito, never()).createUserPoolDomain(any(), any(), any(), any(), any());
-        assertTrue(provisioner.retainsFailedUpdateState(r));
-        assertTrue(provisioner.rollbackUpdate(r));
-        assertEquals(prior.getDomain(), r.getPhysicalId());
-    }
-
-    @Test
-    void stackDeletionAfterFailedRollbackCleansBothTrackedIdentities() {
-        UserPoolDomain prior = domain("old.example.com", POOL_ID, "dold.cloudfront.net");
-        when(cognito.describeUserPoolDomain(prior.getDomain())).thenReturn(prior);
-        stubDomainRename(domain(DOMAIN, POOL_ID, CLOUDFRONT), null);
-        StackResource r = resource(prior.getDomain(), Map.of("UserPoolId", POOL_ID));
-        provisioner.provision(r, customDomainProps(CERTIFICATE_ARN), ctx(prior.getDomain()));
-        doThrow(new IllegalStateException("restore failed")).when(cognito).restoreUserPoolDomain(any());
-        assertThrows(IllegalStateException.class, () -> provisioner.rollbackUpdate(r));
-        r.setStatus("UPDATE_FAILED");
-        provisioner.completeUpdate(r);
-        assertTrue(provisioner.hasPendingRollbackCleanup(r));
-
-        provisioner.delete(r, REGION);
-
-        ArgumentCaptor<UserPoolDomain> deleted = ArgumentCaptor.forClass(UserPoolDomain.class);
-        verify(cognito, times(4)).deleteUserPoolDomain(deleted.capture());
-        assertEquals(List.of(prior.getDomain(), DOMAIN, DOMAIN, prior.getDomain()),
-                deleted.getAllValues().stream().map(UserPoolDomain::getDomain).toList());
-        assertFalse(provisioner.hasPendingRollbackCleanup(r));
-    }
-
-    @Test
-    void samePoolRenameWithRetainIsRejectedBeforeMutation() {
-        when(cognito.describeUserPoolDomain("old.example.com"))
-                .thenReturn(domain("old.example.com", POOL_ID, "dold.cloudfront.net"));
-        StackResource r = resource("old.example.com", Map.of("UserPoolId", POOL_ID));
-        r.setUpdateReplacePolicy("Retain");
-
-        AwsException failure = assertThrows(AwsException.class,
-                () -> provisioner.provision(r, customDomainProps(CERTIFICATE_ARN), ctx("old.example.com")));
-
-        assertEquals("ValidationError", failure.getErrorCode());
-        verify(cognito, never()).deleteUserPoolDomain(any(UserPoolDomain.class));
-        verify(cognito, never()).deleteUserPoolDomain(any(), any());
-        verify(cognito, never()).createUserPoolDomain(any(), any(), any(), any(), any());
-        assertFalse(provisioner.retainsFailedUpdateState(r));
-        assertEquals("old.example.com", r.getPhysicalId());
-    }
-
-    @Test
-    void changingDomainTypeOrPoolKeepsCreateFirstOrdering() {
-        for (UserPoolDomain prior : List.of(domain("prefix", POOL_ID, "dold.cloudfront.net"),
-                domain("old.example.com", "us-east-1_OtherPool", "dold.cloudfront.net"))) {
-            CognitoService service = mock(CognitoService.class);
-            CognitoCfnProvisioner handler = new CognitoCfnProvisioner(service);
-            when(service.describeUserPoolDomain(prior.getDomain())).thenReturn(prior);
-            when(service.createUserPoolDomain(any(), any(), any(), any()))
-                    .thenReturn(domain(DOMAIN, POOL_ID, CLOUDFRONT));
-            StackResource r = resource(prior.getDomain(), Map.of("UserPoolId", prior.getUserPoolId()));
-
-            handler.provision(r, customDomainProps(CERTIFICATE_ARN), ctx(prior.getDomain()));
-
-            InOrder order = inOrder(service);
-            order.verify(service).createUserPoolDomain(any(), any(), any(), any());
-            order.verify(service).deleteUserPoolDomain(prior.getDomain(), prior.getUserPoolId());
-            assertFalse(handler.retainsFailedUpdateState(r));
-        }
     }
 
     @Test
@@ -495,7 +294,7 @@ class CognitoCfnProvisionerTest {
     @Test
     void updateWhosePriorDomainIsGoneCreatesItAgain() {
         when(cognito.describeUserPoolDomain(DOMAIN))
-                .thenThrow(new AwsException("ResourceNotFoundException", "Domain does not exist", 404));
+                .thenThrow(new AwsException("ResourceNotFoundException", "Domain does not exist", 400));
         when(cognito.createUserPoolDomain(DOMAIN, POOL_ID, Map.of("CertificateArn", CERTIFICATE_ARN), 2))
                 .thenReturn(domain(DOMAIN, POOL_ID, CLOUDFRONT));
         StackResource r = resource(DOMAIN, Map.of("UserPoolId", POOL_ID, "CloudFrontDistribution", CLOUDFRONT));
@@ -511,12 +310,12 @@ class CognitoCfnProvisionerTest {
     void replacementToleratesAPriorDomainThatIsAlreadyGone() {
         when(cognito.describeUserPoolDomain("old.example.com"))
                 .thenReturn(domain("old.example.com", POOL_ID, "dold.cloudfront.net"));
-        stubDomainRename(domain(DOMAIN, POOL_ID, CLOUDFRONT), null);
+        when(cognito.createUserPoolDomain(any(), any(), any(), any())).thenReturn(domain(DOMAIN, POOL_ID, CLOUDFRONT));
+        doThrow(new AwsException("ResourceNotFoundException", "Domain does not exist", 400))
+                .when(cognito).deleteUserPoolDomain("old.example.com", POOL_ID);
         StackResource r = resource("old.example.com", Map.of("UserPoolId", POOL_ID));
 
         assertDoesNotThrow(() -> provisioner.provision(r, customDomainProps(CERTIFICATE_ARN), ctx("old.example.com")));
-        verify(cognito).deleteUserPoolDomain(any(UserPoolDomain.class));
-        verify(cognito, never()).deleteUserPoolDomain(any(), any());
         assertEquals(DOMAIN, r.getPhysicalId());
     }
 
@@ -530,7 +329,7 @@ class CognitoCfnProvisionerTest {
 
     @Test
     void deleteToleratesAnAlreadyDeletedDomain() {
-        doThrow(new AwsException("ResourceNotFoundException", "Domain does not exist", 404))
+        doThrow(new AwsException("ResourceNotFoundException", "Domain does not exist", 400))
                 .when(cognito).deleteUserPoolDomain(DOMAIN, POOL_ID);
 
         assertDoesNotThrow(() -> provisioner.delete(resource(DOMAIN, Map.of("UserPoolId", POOL_ID)), REGION));
@@ -557,7 +356,7 @@ class CognitoCfnProvisionerTest {
     @Test
     void deleteWithoutARecordedUserPoolIdOfAMissingDomainIsANoOp() {
         when(cognito.describeUserPoolDomain(DOMAIN))
-                .thenThrow(new AwsException("ResourceNotFoundException", "Domain does not exist", 404));
+                .thenThrow(new AwsException("ResourceNotFoundException", "Domain does not exist", 400));
 
         assertDoesNotThrow(() -> provisioner.delete(resource(DOMAIN, Map.of()), REGION));
         verify(cognito, never()).deleteUserPoolDomain(any(), any());
@@ -1010,14 +809,101 @@ class CognitoCfnProvisionerTest {
     }
 
     @Test
-    void anInPlaceUserPoolClientUpdateCannotBeRolledBack() {
+    void anInPlaceUserPoolClientUpdateIsRolledBackFromTheSnapshotTakenBeforeIt() {
         when(cognito.describeUserPoolClient(CLIENT_ID)).thenReturn(client("web", null));
-        stubClientUpdate(client("web", null));
+        UserPoolClient before = client("web", null);
+        before.setCallbackURLs(List.of("https://before.example.com/callback"));
+        when(cognito.userPoolClientSettings(POOL_ID, CLIENT_ID)).thenReturn(before);
+        stubClientUpdate(client("web-renamed", null));
         StackResource r = resource(USER_POOL_CLIENT, "Client");
         r.setPhysicalId(CLIENT_ID);
-        provisioner.provision(r, mapper.createObjectNode().put("UserPoolId", POOL_ID), ctx(CLIENT_ID));
+        provisioner.provision(r, mapper.createObjectNode().put("UserPoolId", POOL_ID).put("ClientName", "web-renamed"),
+                ctx(CLIENT_ID));
 
-        assertFalse(provisioner.rollbackUpdate(r));
+        InOrder order = inOrder(cognito);
+        order.verify(cognito).userPoolClientSettings(POOL_ID, CLIENT_ID);
+        order.verify(cognito).updateUserPoolClient(any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+
+        assertTrue(provisioner.rollbackUpdate(r));
+
+        ArgumentCaptor<UserPoolClient> restored = ArgumentCaptor.forClass(UserPoolClient.class);
+        verify(cognito).restoreUserPoolClientSettings(restored.capture());
+        assertEquals(CLIENT_ID, restored.getValue().getClientId());
+        assertEquals("web", restored.getValue().getClientName());
+        assertEquals(List.of("https://before.example.com/callback"), restored.getValue().getCallbackURLs());
+        assertFalse(r.getAttributes().containsKey(CfnRollback.COGNITO_UPDATE_SNAPSHOT_ATTR), "the snapshot is spent");
+    }
+
+    @Test
+    void anInPlaceUserPoolUpdateIsRolledBackFromTheSnapshotTakenBeforeIt() {
+        UserPool before = pool(POOL_ID, "my-pool");
+        before.setMfaConfiguration("OFF");
+        when(cognito.userPoolSettings(POOL_ID)).thenReturn(before);
+        when(cognito.updateUserPool(any(), eq(REGION))).thenReturn(pool(POOL_ID, "renamed-pool"));
+        StackResource r = resource(USER_POOL, "Pool");
+        r.setPhysicalId(POOL_ID);
+        provisioner.provision(r, mapper.createObjectNode().put("UserPoolName", "renamed-pool")
+                .put("MfaConfiguration", "OPTIONAL"), ctx(POOL_ID));
+
+        InOrder order = inOrder(cognito);
+        order.verify(cognito).userPoolSettings(POOL_ID);
+        order.verify(cognito).updateUserPool(any(), eq(REGION));
+
+        assertTrue(provisioner.rollbackUpdate(r));
+
+        ArgumentCaptor<UserPool> restored = ArgumentCaptor.forClass(UserPool.class);
+        verify(cognito).restoreUserPoolSettings(restored.capture());
+        assertEquals(POOL_ID, restored.getValue().getId());
+        assertEquals("my-pool", restored.getValue().getName());
+        assertEquals("OFF", restored.getValue().getMfaConfiguration());
+        assertFalse(r.getAttributes().containsKey(CfnRollback.COGNITO_UPDATE_SNAPSHOT_ATTR), "the snapshot is spent");
+    }
+
+    @Test
+    void aFailedRestoreKeepsTheSnapshotForTheNextAttempt() {
+        when(cognito.userPoolSettings(POOL_ID)).thenReturn(pool(POOL_ID, "my-pool"));
+        when(cognito.updateUserPool(any(), eq(REGION))).thenReturn(pool(POOL_ID, "renamed-pool"));
+        when(cognito.restoreUserPoolSettings(any()))
+                .thenThrow(new AwsException("InternalErrorException", "storage unavailable", 500));
+        StackResource r = resource(USER_POOL, "Pool");
+        r.setPhysicalId(POOL_ID);
+        provisioner.provision(r, mapper.createObjectNode().put("UserPoolName", "renamed-pool"), ctx(POOL_ID));
+
+        assertThrows(AwsException.class, () -> provisioner.rollbackUpdate(r));
+
+        assertTrue(r.getAttributes().containsKey(CfnRollback.COGNITO_UPDATE_SNAPSHOT_ATTR));
+    }
+
+    @Test
+    void anInPlaceUpdateDropsItsSnapshotWhenTheUpdateCommits() {
+        // The engine's post-commit cleanup calls completeUpdate for every resource, but clearUpdate
+        // only after a replacement, so an in-place update relies on completeUpdate.
+        when(cognito.userPoolSettings(POOL_ID)).thenReturn(pool(POOL_ID, "my-pool"));
+        when(cognito.updateUserPool(any(), eq(REGION))).thenReturn(pool(POOL_ID, "renamed-pool"));
+        StackResource r = resource(USER_POOL, "Pool");
+        r.setPhysicalId(POOL_ID);
+        provisioner.provision(r, mapper.createObjectNode().put("UserPoolName", "renamed-pool"), ctx(POOL_ID));
+        assertTrue(r.getAttributes().containsKey(CfnRollback.COGNITO_UPDATE_SNAPSHOT_ATTR));
+
+        assertFalse(provisioner.completeUpdate(r).applicable(), "an in-place update owes no replacement cleanup");
+
+        assertFalse(r.getAttributes().containsKey(CfnRollback.COGNITO_UPDATE_SNAPSHOT_ATTR));
+    }
+
+    @Test
+    void aCommittedUpdateDropsTheSnapshotAndTheNextProvisionStartsWithoutOne() {
+        when(cognito.userPoolSettings(POOL_ID)).thenReturn(pool(POOL_ID, "my-pool"));
+        when(cognito.updateUserPool(any(), eq(REGION))).thenReturn(pool(POOL_ID, "renamed-pool"));
+        StackResource r = resource(USER_POOL, "Pool");
+        r.setPhysicalId(POOL_ID);
+        provisioner.provision(r, mapper.createObjectNode().put("UserPoolName", "renamed-pool"), ctx(POOL_ID));
+
+        provisioner.clearUpdate(r);
+
+        assertFalse(r.getAttributes().containsKey(CfnRollback.COGNITO_UPDATE_SNAPSHOT_ATTR));
+        assertTrue(provisioner.rollbackUpdate(r), "nothing to undo once the update committed");
+        verify(cognito, never()).restoreUserPoolSettings(any());
     }
 
     @Test

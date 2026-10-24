@@ -5,6 +5,7 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.docker.ContainerStorageHelper;
 import io.github.hectorvent.floci.core.resource.ExplorerResource;
 import io.github.hectorvent.floci.core.resource.ResourceProvider;
 import io.github.hectorvent.floci.core.resource.SupportedResourceType;
@@ -145,13 +146,17 @@ public class AmazonMqService implements ResourceProvider {
 
         String brokerId = "b-" + UUID.randomUUID();
         String accountId = regionResolver.getAccountId();
-        String brokerArn = AwsArnUtils.Arn.of("mq", config.defaultRegion(), accountId,
+        String brokerArn = AwsArnUtils.Arn.of("mq", regionResolver.getRegion(), accountId,
                 "broker:" + name + ":" + brokerId).toString();
 
         Broker broker = new Broker(brokerId, brokerArn, name, engine,
                 engineVersion, deploymentMode, params.hostInstanceType());
         broker.setAccountId(accountId);
         broker.setVolumeId(String.format("%06x", new SecureRandom().nextInt(0xFFFFFF)));
+        // Stamp the volume name now, with the current prefix, so it is persisted rather than
+        // recomputed later. Only records predating this field fall back to the legacy name.
+        broker.setDockerVolumeName(ContainerStorageHelper.resourceName(
+                config, "amazonmq", broker.getVolumeId(), broker.getBrokerId()));
         broker.setPubliclyAccessible(params.publiclyAccessible());
         broker.setAutoMinorVersionUpgrade(params.autoMinorVersionUpgrade());
         List<MqUser> users = new ArrayList<>();
@@ -180,6 +185,14 @@ public class AmazonMqService implements ResourceProvider {
         if (params.securityGroups() != null) {
             broker.setSecurityGroups(new ArrayList<>(params.securityGroups()));
         }
+        broker.setSecurityGroups(params.securityGroups());
+        broker.setSubnetIds(params.subnetIds());
+        broker.setLogs(params.logs());
+        broker.setMaintenanceWindowStartTime(params.maintenanceWindowStartTime());
+        broker.setStorageType(params.storageType());
+        broker.setAuthenticationStrategy(params.authenticationStrategy());
+        broker.setEncryptionOptions(params.encryptionOptions());
+        broker.setConfiguration(params.configuration());
 
         if (config.services().amazonmq().mock()) {
             // No backing container: come up immediately with synthetic endpoints.

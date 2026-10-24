@@ -1,15 +1,21 @@
 package io.github.hectorvent.floci.services.iam;
 
+import io.github.hectorvent.floci.testing.EnforcementFixtures;
 import io.github.hectorvent.floci.testing.IamEnforcementProfile;
+import io.github.hectorvent.floci.testing.PartitionCleanup;
+import io.quarkus.test.common.http.TestHTTPResource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.response.ValidatableResponse;
 import io.restassured.specification.RequestSpecification;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
+import java.net.URI;
 import java.util.Map;
 import java.util.UUID;
 
+import static io.github.hectorvent.floci.testing.EnforcementFixtures.auth;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
@@ -23,8 +29,13 @@ import static org.hamcrest.Matchers.not;
 @TestProfile(IamEnforcementProfile.class)
 class IamManagementActionsEnforcementIntegrationTest {
 
+    @TestHTTPResource("/")
+    static URI baseUri;
+
+    @RegisterExtension
+    final PartitionCleanup cleanup = new PartitionCleanup();
+
     private static final String ACCOUNT_ID = "000000000000";
-    private static final String REGION = "us-east-1";
 
     private static final String S3_ONLY_POLICY = """
         {"Version":"2012-10-17","Statement":[
@@ -38,15 +49,14 @@ class IamManagementActionsEnforcementIntegrationTest {
         String developer = "test-developer-" + suffix;
         String group = "Developers-" + suffix;
 
-        adminIam("CreateUser", Map.of("UserName", developer)).statusCode(200);
+        String akid = EnforcementFixtures.createUser(cleanup, baseUri.getPort(),
+                auth(ACCOUNT_ID, "iam"), developer).accessKeyId();
+        cleanup.register(() -> EnforcementFixtures.removeGroup(baseUri.getPort(),
+                auth(ACCOUNT_ID, "iam"), group));
         adminIam("CreateGroup", Map.of("GroupName", group)).statusCode(200);
         adminIam("PutGroupPolicy", Map.of("GroupName", group, "PolicyName", "DeveloperS3Policy",
                 "PolicyDocument", S3_ONLY_POLICY)).statusCode(200);
         adminIam("AddUserToGroup", Map.of("GroupName", group, "UserName", developer)).statusCode(200);
-        String akid = adminIam("CreateAccessKey", Map.of("UserName", developer))
-                .statusCode(200)
-                .extract().path("CreateAccessKeyResponse.CreateAccessKeyResult.AccessKey.AccessKeyId");
-
         // Granted S3 action still works.
         given().header("Authorization", auth(akid, "s3"))
         .when().get("/")
@@ -78,17 +88,14 @@ class IamManagementActionsEnforcementIntegrationTest {
     void explicitDenyOnIamActionsIsHonoured() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         String user = "deny-user-" + suffix;
-        adminIam("CreateUser", Map.of("UserName", user)).statusCode(200);
+        String akid = EnforcementFixtures.createUser(cleanup, baseUri.getPort(),
+                auth(ACCOUNT_ID, "iam"), user).accessKeyId();
         adminIam("PutUserPolicy", Map.of("UserName", user, "PolicyName", "S3AllowIamDeny",
                 "PolicyDocument", """
                     {"Version":"2012-10-17","Statement":[
                       {"Effect":"Allow","Action":["s3:*"],"Resource":"*"},
                       {"Effect":"Deny","Action":["iam:*"],"Resource":"*"}
                     ]}""")).statusCode(200);
-        String akid = adminIam("CreateAccessKey", Map.of("UserName", user))
-                .statusCode(200)
-                .extract().path("CreateAccessKeyResponse.CreateAccessKeyResult.AccessKey.AccessKeyId");
-
         userIam(akid, "CreateUser", Map.of("UserName", "deny-direct-" + suffix))
                 .statusCode(403)
                 .body(containsString("AccessDenied"));
@@ -112,8 +119,4 @@ class IamManagementActionsEnforcementIntegrationTest {
         return spec.when().post("/").then();
     }
 
-    private static String auth(String accessKeyId, String service) {
-        return "AWS4-HMAC-SHA256 Credential=" + accessKeyId + "/20260919/" + REGION + "/" + service
-                + "/aws4_request, SignedHeaders=host, Signature=abc";
-    }
 }
