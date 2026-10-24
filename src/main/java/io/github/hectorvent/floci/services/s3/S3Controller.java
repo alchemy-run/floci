@@ -608,8 +608,7 @@ public class S3Controller {
                                 @Context HttpHeaders httpHeaders) {
         try {
             validateRawUri();
-            S3Service.RequestAuthorization authorization = S3RequestAuthorizationParser.parseIfRequired(
-                    s3Service.isAuthEnforced(), httpHeaders, uriInfo);
+            S3Service.RequestAuthorization authorization = bucketAuthorization(bucket, httpHeaders, uriInfo);
             if (hasQueryParam(uriInfo, "uploads")) {
                 s3Service.authorizeBucketRead(bucket, "s3:ListBucketMultipartUploads", authorization);
                 return handleListMultipartUploads(bucket, prefix, delimiter, keyMarker,
