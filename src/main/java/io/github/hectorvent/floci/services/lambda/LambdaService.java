@@ -2200,15 +2200,6 @@ public class LambdaService implements ResourceProvider {
                     structureMember(request, "AmazonManagedKafkaEventSourceConfig"));
         }
 
-        if (request.get("AmazonManagedKafkaEventSourceConfig") != null) {
-            if (!isMskClusterArn(esm.getEventSourceArn())) {
-                throw new AwsException("InvalidParameterValueException",
-                        "AmazonManagedKafkaEventSourceConfig is only supported for Amazon MSK event sources", 400);
-            }
-            esm.setAmazonManagedKafkaEventSourceConfig(
-                    structureMember(request, "AmazonManagedKafkaEventSourceConfig"));
-        }
-
         if (request.containsKey("SourceAccessConfigurations")) {
             Object rawAccess = request.get("SourceAccessConfigurations");
             if (rawAccess != null) {
