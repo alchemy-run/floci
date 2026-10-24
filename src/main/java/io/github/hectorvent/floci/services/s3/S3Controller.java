@@ -3224,7 +3224,11 @@ public class S3Controller {
                                       ObjectLockHeaders lock) {
         CopySourceRef sourceObject = parseCopySource(copySource);
         String sourceBucket = sourceObject.bucket();
-        authorizeCopySourceRead(httpHeaders, uriInfo, sourceObject, authorization);
+        try {
+            authorizeCopySourceRead(httpHeaders, uriInfo, sourceObject, authorization);
+        } catch (AwsException e) {
+            throw copySourceRefusal(e, sourceObject.versionId());
+        }
         authorizeCopiedTags(httpHeaders, uriInfo, sourceObject, destBucket, destKey, authorization);
         String copiedSourceVersionId = copySourceVersionId(sourceBucket, sourceObject.objectKey(),
                 sourceObject.versionId());
@@ -3317,14 +3321,18 @@ public class S3Controller {
     private String copySourceVersionId(String sourceBucket, String sourceKey, String sourceVersionId) {
         try {
             return s3Service.getObjectMetadata(sourceBucket, sourceKey, sourceVersionId).getVersionId();
-        } catch (S3DeleteMarkerException marker) {
-            if (sourceVersionId != null) {
-                throw new AwsException("InvalidRequest",
-                        "The source of a copy request may not specifically refer to a delete marker by version id.",
-                        400);
-            }
-            throw marker;
+        } catch (AwsException e) {
+            throw copySourceRefusal(e, sourceVersionId);
         }
+    }
+
+    /** A copy source naming a delete marker by its version id is an InvalidRequest, not a 405. */
+    private static AwsException copySourceRefusal(AwsException e, String sourceVersionId) {
+        if (sourceVersionId != null && "MethodNotAllowed".equals(e.getErrorCode())) {
+            return new AwsException("InvalidRequest",
+                    "The source of a copy request may not specifically refer to a delete marker by version id.", 400);
+        }
+        return e;
     }
 
     // GetObjectAttributes is the one S3 response whose ETag comes without the surrounding quotes.
@@ -3337,7 +3345,11 @@ public class S3Controller {
                                           UriInfo uriInfo, S3Service.RequestAuthorization authorization) {
         CopySourceRef sourceObject = parseCopySource(copySource);
         String sourceBucket = sourceObject.bucket();
-        authorizeCopySourceRead(httpHeaders, uriInfo, sourceObject, authorization);
+        try {
+            authorizeCopySourceRead(httpHeaders, uriInfo, sourceObject, authorization);
+        } catch (AwsException e) {
+            throw copySourceRefusal(e, sourceObject.versionId());
+        }
         String copySourceRange = httpHeaders.getHeaderString("x-amz-copy-source-range");
         String copiedSourceVersionId = copySourceVersionId(sourceBucket, sourceObject.objectKey(),
                 sourceObject.versionId());
