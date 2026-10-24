@@ -398,6 +398,8 @@ public class GlueJsonHandler {
                 response.put("CrawlersNotFound", result.crawlersNotFound());
                 yield Response.ok(response).build();
             }
+            case "GetJobBookmark" -> handleGetJobBookmark(request);
+            case "ResetJobBookmark" -> handleResetJobBookmark(request);
             case "StartCrawler" -> {
                 crawlerRunService.startCrawler(request.path("Name").asText(null));
                 yield Response.ok(Map.of()).build();

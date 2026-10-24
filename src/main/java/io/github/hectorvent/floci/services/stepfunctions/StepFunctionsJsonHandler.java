@@ -65,6 +65,7 @@ public class StepFunctionsJsonHandler {
             case "StopExecution" -> handleStopExecution(request);
             case "GetExecutionHistory" -> handleGetExecutionHistory(request);
             case "DescribeMapRun" -> handleDescribeMapRun(request);
+            case "UpdateMapRun" -> handleUpdateMapRun(request);
             case "SendTaskSuccess" -> handleSendTaskSuccess(request);
             case "SendTaskFailure" -> handleSendTaskFailure(request);
             case "SendTaskHeartbeat" -> handleSendTaskHeartbeat(request);
@@ -814,5 +815,15 @@ public class StepFunctionsJsonHandler {
                             + "' failed to satisfy constraint: Member must be a number.", 400);
         }
         return node.doubleValue();
+    }
+
+    private Response handleUpdateMapRun(JsonNode request) {
+        service.updateMapRun(
+                request.path("mapRunArn").asText(),
+                parseOptionalInt(request, "maxConcurrency"),
+                parseOptionalLong(request, "toleratedFailureCount"),
+                parseOptionalDouble(request, "toleratedFailurePercentage")
+        );
+        return Response.ok(objectMapper.createObjectNode()).build();
     }
 }
