@@ -130,14 +130,6 @@ public class AcmJsonHandler {
         String certificateArn = request.path("CertificateArn").asText();
         Certificate cert = service.getCertificate(certificateArn, region);
 
-        // AWS returns RequestInProgressException for certificates still pending validation
-        if (cert.getStatus() == CertificateStatus.PENDING_VALIDATION) {
-            throw new AwsException(
-                "RequestInProgressException",
-                "The certificate request is in progress. The certificate body is not yet available.",
-                400);
-        }
-
         ObjectNode response = objectMapper.createObjectNode();
         response.put("Certificate", cert.getCertificateBody());
         if (cert.getCertificateChain() != null) {

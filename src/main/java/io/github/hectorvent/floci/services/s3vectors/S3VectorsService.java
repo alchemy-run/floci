@@ -93,8 +93,7 @@ public class S3VectorsService {
     }
 
     public VectorBucket getVectorBucket(String bucketName, String region) {
-        return findVectorBucket(bucketName, region).orElseThrow(() ->
-                new AwsException("NotFoundException", "The vector bucket " + bucketName + " does not exist.", 404));
+        return getVectorBucket(bucketName, null, region);
     }
 
     public List<VectorBucket> listVectorBuckets(String region) {
@@ -142,17 +141,7 @@ public class S3VectorsService {
     }
 
     public void deleteVectorBucket(String bucketName, String region) {
-        synchronized (lockFor(bucketName, region)) {
-            String key = buildStorageKey(region, bucketName);
-            VectorBucket bucket = store.get(key).orElseThrow(() ->
-                    new AwsException("NotFoundException", "The vector bucket " + bucketName + " does not exist.", 404));
-
-            if (!bucket.getIndexes().isEmpty()) {
-                throw new AwsException("ConflictException", "The vector bucket " + bucketName + " is not empty.", 409);
-            }
-            store.delete(key);
-            LOG.infov("Deleted Vector Bucket: {0}", bucketName);
-        }
+        deleteVectorBucket(bucketName, null, region);
     }
 
     public VectorIndex createIndex(String bucketName, String indexName, int dimension, String dataType,
@@ -201,7 +190,7 @@ public class S3VectorsService {
     }
 
     public VectorIndex getIndex(String bucketName, String indexName, String region) {
-        return getIndex(getVectorBucket(bucketName, region), indexName);
+        return getIndex(bucketName, indexName, null, region);
     }
 
     private VectorIndex getIndex(VectorBucket bucket, String indexName) {
@@ -218,15 +207,7 @@ public class S3VectorsService {
     }
 
     public void deleteIndex(String bucketName, String indexName, String region) {
-        synchronized (lockFor(bucketName, region)) {
-            VectorBucket bucket = getVectorBucket(bucketName, region);
-            if (!bucket.getIndexes().containsKey(indexName)) {
-                throw new AwsException("NotFoundException", "The index " + indexName + " does not exist.", 404);
-            }
-            bucket.getIndexes().remove(indexName);
-            store.put(buildStorageKey(region, bucketName), bucket);
-            LOG.infov("Deleted Index: {0}", indexName);
-        }
+        deleteIndex(bucketName, indexName, null, region);
     }
 
     public void replaceBucketTags(String bucketName, Map<String, String> tags, String region) {

@@ -889,88 +889,59 @@ public class IamActionRegistry {
     }
 
     /**
-     * The operation an object sub-resource selects, checked in the order S3Controller dispatches
-     * them: a request naming several runs the first, so it is checked as that one. A
-     * {@code versionId} selects the version action AWS checks in place of an action that has one
-     * (see {@link S3ObjectActions#forVersion}). Null where the controller falls through to the plain
-     * object operation on the current version, which the rules check.
+     * Object-level S3 actions. A request naming a {@code versionId} is authorized as the
+     * {@code *Version*} variant of its action, as on AWS (s3:GetObjectVersion,
+     * s3:GetObjectVersionTagging, ...); retention and legal hold have no such variant.
      */
     private static String objectSubResourceAction(String method, MultivaluedMap<String, String> params) {
-        String versionId = params.getFirst("versionId");
-        return switch (method) {
-            case "GET" -> {
-                if (params.containsKey("uploadId")) {
-                    yield "s3:ListMultipartUploadParts";
-                }
-                if (params.containsKey("tagging")) {
-                    yield S3ObjectActions.forVersion("s3:GetObjectTagging", versionId);
-                }
-                if (params.containsKey("annotation")) {
-                    yield S3ObjectActions.forVersion(annotationReadAction(params), versionId);
-                }
-                if (params.containsKey("retention")) {
-                    yield "s3:GetObjectRetention";
-                }
-                if (params.containsKey("legal-hold")) {
-                    yield "s3:GetObjectLegalHold";
-                }
-                if (params.containsKey("acl")) {
-                    yield S3ObjectActions.forVersion("s3:GetObjectAcl", versionId);
-                }
-                yield versionId != null ? "s3:GetObjectVersion" : null;
-            }
-            case "HEAD" -> {
-                if (params.containsKey("annotation")) {
-                    yield S3ObjectActions.forVersion(annotationReadAction(params), versionId);
-                }
-                yield versionId != null ? "s3:GetObjectVersion" : null;
-            }
-            case "PUT" -> {
-                if (params.containsKey("tagging")) {
-                    yield S3ObjectActions.forVersion("s3:PutObjectTagging", versionId);
-                }
-                if (params.containsKey("retention")) {
-                    yield "s3:PutObjectRetention";
-                }
-                if (params.containsKey("legal-hold")) {
-                    yield "s3:PutObjectLegalHold";
-                }
-                if (params.containsKey("acl")) {
-                    yield S3ObjectActions.forVersion("s3:PutObjectAcl", versionId);
-                }
-                // A PUT naming an uploadId and a partNumber is UploadPart, which the rules check as
-                // s3:PutObject, as they do PutObject and CopyObject.
-                yield params.containsKey("annotation")
-                        ? S3ObjectActions.forVersion("s3:PutObjectAnnotation", versionId)
-                        : null;
-            }
-            case "DELETE" -> {
-                if (params.containsKey("tagging")) {
-                    yield S3ObjectActions.forVersion("s3:DeleteObjectTagging", versionId);
-                }
-                if (params.containsKey("annotation")) {
-                    yield S3ObjectActions.forVersion("s3:DeleteObjectAnnotation", versionId);
-                }
-                if (params.containsKey("uploadId")) {
-                    yield "s3:AbortMultipartUpload";
-                }
-                yield versionId != null ? "s3:DeleteObjectVersion" : null;
-            }
-            case "POST" -> {
-                if (params.containsKey("uploads")) {
-                    yield "s3:PutObject";
-                }
-                if (params.containsKey("restore")) {
-                    yield "s3:RestoreObject";
-                }
-                if (params.containsKey("select")) {
-                    // S3Controller selects from the version a versionId names.
-                    yield S3ObjectActions.forVersion("s3:GetObject", versionId);
-                }
-                yield params.containsKey("uploadId") ? "s3:PutObject" : null;
-            }
-            default -> null;
-        };
+        boolean versioned = params.containsKey("versionId");
+        if (params.containsKey("acl")) {
+            return switch (method) {
+                case "GET" -> versioned ? "s3:GetObjectVersionAcl" : "s3:GetObjectAcl";
+                case "PUT" -> versioned ? "s3:PutObjectVersionAcl" : "s3:PutObjectAcl";
+                default -> null;
+            };
+        }
+        if (params.containsKey("tagging")) {
+            return switch (method) {
+                case "GET" -> versioned ? "s3:GetObjectVersionTagging" : "s3:GetObjectTagging";
+                case "PUT" -> versioned ? "s3:PutObjectVersionTagging" : "s3:PutObjectTagging";
+                case "DELETE" -> versioned ? "s3:DeleteObjectVersionTagging" : "s3:DeleteObjectTagging";
+                default -> null;
+            };
+        }
+        if (params.containsKey("retention")) {
+            return switch (method) {
+                case "GET" -> "s3:GetObjectRetention";
+                case "PUT" -> "s3:PutObjectRetention";
+                default -> null;
+            };
+        }
+        if (params.containsKey("legal-hold")) {
+            return switch (method) {
+                case "GET" -> "s3:GetObjectLegalHold";
+                case "PUT" -> "s3:PutObjectLegalHold";
+                default -> null;
+            };
+        }
+        if (params.containsKey("attributes") && "GET".equals(method)) {
+            return versioned ? "s3:GetObjectVersionAttributes" : "s3:GetObjectAttributes";
+        }
+        if (params.containsKey("uploadId")) {
+            return switch (method) {
+                case "GET" -> "s3:ListMultipartUploadParts";
+                case "DELETE" -> "s3:AbortMultipartUpload";
+                default -> null;
+            };
+        }
+        if (versioned) {
+            return switch (method) {
+                case "GET", "HEAD" -> "s3:GetObjectVersion";
+                case "DELETE" -> "s3:DeleteObjectVersion";
+                default -> null;
+            };
+        }
+        return null;
     }
 
     /** A named annotation is GetObjectAnnotation; an empty or absent name lists them, as S3Controller does. */

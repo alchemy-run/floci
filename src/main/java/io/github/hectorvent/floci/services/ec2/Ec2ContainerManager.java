@@ -202,12 +202,38 @@ public class Ec2ContainerManager {
                 || !ALIASES.matches(labels, ContainerStorageHelper.SECURITY_GROUP_HELPER_LABEL, "true")
                 || !"ec2".equals(labels.get(LABEL_SERVICE))
                 || !instance.getInstanceId().equals(labels.get(LABEL_RESOURCE_ID))
-                || !ALIASES.matches(labels, LABEL_OWNER, ownerIdentity())) {
+                || !ownerIdentity().equals(labels.get("floci_owner_port"))
+                || !Objects.equals(instance.getRegion(), labels.get(LABEL_REGION))
+                || !Objects.equals(Ec2MetadataServer.instanceAccountId(instance, regionResolver.getAccountId()),
+                        labels.get("io.floci.account"))) {
             throw new IllegalStateException("EC2 workload network namespace is not Floci protected");
         }
-        String address = helper.getNetworkSettings().getNetworks().values().stream()
-                .map(network -> network.getIpAddress()).filter(ip -> ip != null && !ip.isBlank())
-                .findFirst().orElseThrow(() -> new IllegalStateException("EC2 firewall helper has no Docker IP"));
+        Map<String, ContainerNetwork> networks = helper.getNetworkSettings().getNetworks();
+        String retained = instance.getContainerBridgeIp();
+        String address = networks.values().stream().map(ContainerNetwork::getIpAddress)
+                .filter(ip -> ip != null && !ip.isBlank() && ip.equals(retained)).findFirst().orElse(null);
+        if (retained != null && !retained.isBlank() && address == null) {
+            throw new IllegalStateException("EC2 namespace lost its retained Docker transport address");
+        }
+        if (address == null && vpcNetworkManager != null) {
+            String network = vpcNetworkManager.networkNameFor(instance.getRegion(), instance.getVpcId()).orElse(null);
+            ContainerNetwork attachment = network == null ? null : networks.get(network);
+            address = attachment == null ? null : attachment.getIpAddress();
+        }
+        if (address == null || address.isBlank()) {
+            address = networks.values().stream().map(ContainerNetwork::getIpAddress)
+                    .filter(ip -> ip != null && !ip.isBlank()).findFirst()
+                    .orElseThrow(() -> new IllegalStateException("EC2 namespace has no Docker transport"));
+        }
+        if (vpcNetworkManager != null && vpcNetworkManager.enabled()) {
+            String network = vpcNetworkManager.networkNameFor(instance.getRegion(), instance.getVpcId()).orElse(null);
+            if (network != null && networks.containsKey(network)
+                    && !vpcNetworkManager.reserveTransportPrivateIp(instance.getRegion(), instance.getSubnetId(),
+                            instance.getLogicalPrivateIpAddress() != null ? instance.getLogicalPrivateIpAddress()
+                                    : instance.getPrivateIpAddress(), address, instance.getInstanceId())) {
+                throw new IllegalStateException("EC2 namespace transport lease is owned by another instance");
+            }
+        }
         return new ProtectedNamespace(helperId, address);
     }
 
@@ -894,10 +920,9 @@ public class Ec2ContainerManager {
      * reboot already handle a null container id, so the rest of the lifecycle keeps working.
      */
     private void markContainerlessRunning(Instance instance) {
-        if (markRunning(instance)) {
-            LOG.infov("EC2 instance {0} is running without a backing container (no Docker daemon reachable)",
-                    instance.getInstanceId());
-        }
+        LOG.infov("EC2 instance {0} is running without a backing container (no Docker daemon reachable)",
+                instance.getInstanceId());
+        markRunning(instance);
     }
 
     /**
@@ -955,14 +980,19 @@ public class Ec2ContainerManager {
      * Updates instance state through stopping → stopped.
      */
     public void stop(Instance instance) {
-        String containerId = instance.getDockerContainerId();
+        String containerId;
+        synchronized (instance) {
+            if (needsPrivateNamespace(instance) && isLaunchCancelledState(instance)) {
+                return;
+            }
+            containerId = instance.getDockerContainerId();
+            instance.setState(containerId == null ? InstanceState.stopped() : InstanceState.stopping());
+            metadataServer.unregisterInstance(instance);
+        }
         if (containerId == null) {
-            instance.setState(InstanceState.stopped());
             return;
         }
-        InstanceState stopping = InstanceState.stopping();
-        instance.setState(stopping);
-        submitLifecycleOperation(containerId, () -> {
+        executor.submit(() -> {
             // Sidecars forward to the container's current IP, which Docker reassigns on the
             // next start; tear them down so no forward is left pointing at a stale address.
             portForwardManager.unpublishAll(instance);
@@ -973,7 +1003,13 @@ public class Ec2ContainerManager {
             } catch (Exception e) {
                 LOG.warnv("Error stopping EC2 container {0}: {1}", containerId, e.getMessage());
             }
-            instance.compareAndSetState(stopping, InstanceState.stopped());
+            synchronized (instance) {
+                if (!isLaunchCancelledState(instance)
+                        && Objects.equals(containerId, instance.getDockerContainerId())
+                        && "stopping".equals(instance.getState().getName())) {
+                    instance.setState(InstanceState.stopped());
+                }
+            }
         });
     }
 
@@ -1613,53 +1649,11 @@ public class Ec2ContainerManager {
         return new String[]{USER_DATA_SCRIPT_PATH};
     }
 
-    /**
-     * The install-and-verify probe {@link #startSshd} execs in the guest. Extracted so tests can
-     * assert against the string production actually issues rather than against a copy of it.
-     *
-     * <p>Installs openssh-server if absent. The trailing "command -v" checks make the script's own
-     * exit code the source of truth for whether sshd is actually available afterward - without
-     * them, a shell if/elif chain with no matching branch (no dnf/yum/apt-get/apk found) or whose
-     * install command itself failed (e.g. no network yet, apt lock held) still exits 0 by bash
-     * convention, so every later step in startSshd would silently no-op against a daemon that was
-     * never installed while still logging success.
-     *
-     * <p>The client package is installed alongside the server because provisioning tools need scp
-     * <em>on the instance</em>: Packer's default file transfer for a shell provisioner uploads the
-     * script with scp, and real AMIs carry it. Installing only openssh-server leaves sftp-server
-     * present but /usr/bin/scp absent, so the upload fails with "SCP failed to start. This usually
-     * means that SCP is not properly installed on the remote system." The guard tests for scp too:
-     * keying it on sshd alone would skip the install entirely on an image that already has the
-     * server but no client. Package names differ - openssh-clients on rpm distributions,
-     * openssh-client on Debian; apk's openssh already contains both.
-     *
-     * <p>The two failures are not equally fatal, so the script separates them: exit 1 means no sshd
-     * and there is nothing to start, while exit 2 means sshd is there but the client package did
-     * not land. A guest that can serve SSH but cannot scp is still worth starting - it just cannot
-     * run a Packer shell provisioner - so that case warns and continues rather than leaving the
-     * instance unreachable. Checking only sshd at the end would report that state as outright
-     * success, which is the silent failure this probe exists to prevent.
-     */
+    /** Missing scp does not prevent a supplied sshd from serving the guest. */
     static String[] sshdInstallProbeCommand() {
         return new String[]{"sh", "-c",
-            // dnf and yum are Python programs: an image's PYTHONHOME or LD_LIBRARY_PATH made them
-            // fail to start, so sshd was never installed.
-            Ec2MetadataProxy.CLEAR_APPLICATION_PATHS + ";" +
-            "if ! command -v sshd >/dev/null 2>&1 || ! command -v scp >/dev/null 2>&1; then" +
-                    "  if command -v dnf >/dev/null 2>&1; then dnf install -y openssh-server openssh-clients >/dev/null 2>&1;" +
-                    // yum is probed after dnf, and the order is load-bearing: Amazon Linux
-                    // 2023 and modern Fedora/RHEL ship both, and there dnf is the supported
-                    // front end while yum is only a compatibility shim over it. Amazon Linux
-                    // 2 -- reached by explicitly requesting ami-amazonlinux2, not the default
-                    // image -- ships only yum, so without this branch the chain falls through
-                    // and sshd is never installed.
-                    "  elif command -v yum >/dev/null 2>&1; then yum install -y openssh-server openssh-clients >/dev/null 2>&1;" +
-                    "  elif command -v apt-get >/dev/null 2>&1; then DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server openssh-client >/dev/null 2>&1;" +
-                    "  elif command -v apk >/dev/null 2>&1; then apk add --no-cache openssh >/dev/null 2>&1;" +
-                    "  fi;" +
-                    "fi;" +
-                    "command -v sshd >/dev/null 2>&1 || exit 1;" +
-                    "command -v scp >/dev/null 2>&1 || exit 2"};
+                "command -v sshd >/dev/null 2>&1 || exit 1;"
+                        + "command -v scp >/dev/null 2>&1 || exit 2"};
     }
 
     static String[] metadataProxyInstallCommand() {
@@ -1896,5 +1890,112 @@ public class Ec2ContainerManager {
         } catch (NotFoundException removed) {
             // An already removed helper cannot own a Docker endpoint.
         }
+    }
+
+    record ContainerExecResult(long exitCode, String output) {
+        String summary() {
+            return output == null || output.isBlank() ? "(no output)" : output;
+        }
+    }
+
+
+
+
+    private void markStartFailed(Instance instance, String containerId) {
+        synchronized (instance) {
+            if (!isLaunchCancelledState(instance) && Objects.equals(containerId, instance.getDockerContainerId())
+                    && "pending".equals(instance.getState().getName())) {
+                metadataServer.unregisterInstance(instance);
+                instance.setState(InstanceState.stopped());
+            }
+        }
+    }
+
+
+
+
+
+
+
+    /**
+     * Catalog images (amazonlinux:2023 / ubuntu:24.04) have no systemd tree.
+     * Alchemy hosted user-data writes {@code /etc/systemd/system/*.service};
+     * without the directory {@code cat >} fails and {@code systemctl enable}
+     * is a no-op.
+     */
+    static String[] prepareGuestFilesystemCommand() {
+        return new String[]{"sh", "-c",
+                "mkdir -p /etc/systemd/system /lib/systemd/system /usr/local/bin /usr/local/sbin /var/log /var/run"};
+    }
+
+    /**
+     * Official amazonlinux/ubuntu images have no systemd. Alchemy hosted
+     * user-data writes a unit and calls {@code systemctl enable --now}; this
+     * shim runs ExecStartPre + ExecStart with Restart=always so the HTTP
+     * server comes up the same way it does on a real AMI.
+     */
+    static String[] systemctlShimInstallCommand() {
+        return new String[]{"sh", "-c", String.join("\n",
+                "set -eu",
+                "mkdir -p /etc/systemd/system /lib/systemd/system /usr/local/sbin /usr/local/bin /var/log /var/run",
+                "if command -v systemctl >/dev/null 2>&1; then",
+                "  if [ -d /run/systemd/system ] || ! systemctl --version 2>/dev/null | grep -q '^systemd '; then exit 0; fi",
+                "fi",
+                "cat > /usr/local/sbin/systemctl <<'SHIM'",
+                "#!/bin/sh",
+                "cmd=\"${1:-}\"",
+                "shift || true",
+                "case \"$cmd\" in",
+                "  daemon-reload|status|is-enabled|is-active) exit 0 ;;",
+                "  enable|start|restart)",
+                "    unit=\"\"",
+                "    for a in \"$@\"; do",
+                "      case \"$a\" in --now) ;; *) unit=\"$a\" ;; esac",
+                "    done",
+                "    [ -n \"$unit\" ] || exit 0",
+                "    unit=\"${unit%.service}\"",
+                "    unitfile=\"/etc/systemd/system/${unit}.service\"",
+                "    [ -f \"$unitfile\" ] || unitfile=\"/lib/systemd/system/${unit}.service\"",
+                "    [ -f \"$unitfile\" ] || exit 0",
+                "    wd=$(sed -n 's/^WorkingDirectory=//p' \"$unitfile\" | tail -n 1)",
+                "    pre=$(sed -n 's/^ExecStartPre=//p' \"$unitfile\" | tail -n 1)",
+                "    start=$(sed -n 's/^ExecStart=//p' \"$unitfile\" | tail -n 1)",
+                "    envfile=$(sed -n 's/^EnvironmentFile=-\\{0,1\\}//p' \"$unitfile\" | tail -n 1)",
+                "    pidfile=\"/var/run/${unit}.pid\"",
+                "    # PIDs restart from 1 after a container reboot, so a stale pidfile can",
+                "    # name an unrelated live process: only trust it if it is this unit's loop.",
+                "    if [ -f \"$pidfile\" ]; then",
+                "      pid=$(cat \"$pidfile\")",
+                "      if [ -n \"$pid\" ] && kill -0 \"$pid\" 2>/dev/null \\",
+                "          && tr '\\000' ' ' < \"/proc/$pid/cmdline\" 2>/dev/null | grep -qF \"$unitfile\"; then",
+                "        exit 0",
+                "      fi",
+                "    fi",
+                "    # ExecStartPre downloads EnvironmentFile (Alchemy hosted env).",
+                "    # Run it INSIDE the restart loop, like systemd Restart=always",
+                "    # does: every unit restart re-syncs the bundle and re-sources",
+                "    # the env before ExecStart.",
+                "    nohup sh -c '",
+                "      unitfile=\"$0\"",
+                "      wd=$(sed -n \"s/^WorkingDirectory=//p\" \"$unitfile\" | tail -n 1)",
+                "      pre=$(sed -n \"s/^ExecStartPre=//p\" \"$unitfile\" | tail -n 1)",
+                "      start=$(sed -n \"s/^ExecStart=//p\" \"$unitfile\" | tail -n 1)",
+                "      envfile=$(sed -n \"s/^EnvironmentFile=-\\{0,1\\}//p\" \"$unitfile\" | tail -n 1)",
+                "      if [ -n \"$wd\" ]; then cd \"$wd\" || exit 1; fi",
+                "      while true; do",
+                "        if [ -n \"$pre\" ]; then $pre || { sleep 5; continue; }; fi",
+                "        if [ -n \"$envfile\" ] && [ -f \"$envfile\" ]; then set -a; . \"$envfile\"; set +a; fi",
+                "        if [ -n \"$start\" ]; then $start; fi",
+                "        sleep 5",
+                "      done",
+                "    ' \"$unitfile\" >/var/log/${unit}.log 2>&1 &",
+                "    echo $! > \"$pidfile\"",
+                "    exit 0",
+                "    ;;",
+                "  *) exit 0 ;;",
+                "esac",
+                "SHIM",
+                "chmod 755 /usr/local/sbin/systemctl",
+                "if [ ! -e /usr/bin/systemctl ]; then ln -s /usr/local/sbin/systemctl /usr/bin/systemctl; fi")};
     }
 }

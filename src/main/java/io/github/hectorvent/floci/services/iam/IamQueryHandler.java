@@ -2077,12 +2077,9 @@ public class IamQueryHandler {
     private Response handleCreateInstanceProfile(MultivaluedMap<String, String> params) {
         Map<String, String> tags = extractTags(params, false);
         InstanceProfile profile = iamService.createInstanceProfile(
-                getParam(params, "InstanceProfileName"), getParam(params, "Path"));
-        if (!tags.isEmpty()) {
-            iamService.tagInstanceProfile(profile.getInstanceProfileName(), tags);
-            profile = iamService.getInstanceProfile(profile.getInstanceProfileName());
-        }
-        String result = new XmlBuilder().start("InstanceProfile").raw(instanceProfileXml(profile, true)).end("InstanceProfile").build();
+                getParam(params, "InstanceProfileName"), getParam(params, "Path"),
+                extractTags(params));
+        String result = new XmlBuilder().start("InstanceProfile").raw(instanceProfileXml(profile)).end("InstanceProfile").build();
         return Response.ok(AwsQueryResponse.envelope("CreateInstanceProfile", AwsNamespaces.IAM, result)).build();
     }
 

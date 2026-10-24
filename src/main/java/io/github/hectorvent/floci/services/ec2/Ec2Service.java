@@ -5999,12 +5999,11 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
             requireNoTransitGatewayAttachment(region,
                     attachment -> vpcId.equals(attachment.getVpcId()),
                     "The vpc '" + vpcId + "' has dependencies and cannot be deleted.");
-            requireNoProviderDependency(provider -> provider.hasVpcDependency(region, vpcId),
-                    "The vpc '" + vpcId + "' has dependencies and cannot be deleted.");
             requireNoVpcDependents(region, vpcId);
             deleteVpcDefaultResources(region, vpcId);
             vpcs.delete(key(region, vpcId));
-            removeTags(region, vpcId);
+            deletedVpcKeys.add(key(region, vpcId));
+            tags.delete(vpcId);
         }
         if (vpcNetworkManager != null) {
             vpcNetworkManager.deleteVpcNetwork(region, vpcId);
@@ -7058,7 +7057,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
             throw new AwsException("MissingParameter", "The request must contain the parameter VpcId", 400);
         }
         ensureDefaultResources(region);
-        Vpc vpc = getRequiredVpc(region, vpcId);
+        Vpc vpc = resolveVpcForCreate(region, vpcId);
         if (ipv6CidrBlock != null && !ipv6CidrBlock.isBlank() && !vpcHasAssociatedIpv6CidrBlock(vpc)) {
             throw new AwsException("InvalidParameterValue",
                     "Ipv6CidrBlock can only be specified for a subnet in a VPC with an associated "
@@ -7091,27 +7090,29 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         // The conflict scan and the store must be one step under the VPC's lock, or two
         // overlapping creates in flight together both pass the scan before either is stored.
         // The topology lock, outermost, keeps DeleteVpc from removing the VPC in between.
+        // Lock against the resolved VPC: a substituted foreign id has no store row.
         synchronized (attachmentTopologyLock(region)) {
-            Vpc currentVpc = getRequiredVpc(region, vpcId);
-            synchronized (lockFor(key(region, vpcId))) {
-                rejectSubnetCidrOutsideVpc(currentVpc, cidrBlock);
+            getRequiredVpc(region, vpc.getVpcId());
+            synchronized (lockFor(key(region, vpc.getVpcId()))) {
                 rejectConflictingSubnetCidr(region, vpcId, cidrBlock);
                 subnets.put(key(region, subnetId), subnet);
             }
         }
         declareSubnetNetwork(region, vpcId, subnetId, cidrBlock);
 
-        // Every subnet starts associated with its VPC's default NACL. ReplaceNetworkAclAssociation
-        // later moves it onto a custom NACL, so this association must exist for that lookup to work.
-        NetworkAcl defaultAcl = findDefaultNetworkAcl(region, vpcId);
-        if (defaultAcl != null) {
-            NetworkAclAssociation assoc = new NetworkAclAssociation();
-            assoc.setNetworkAclAssociationId("aclassoc-" + randomHex(17));
-            assoc.setNetworkAclId(defaultAcl.getNetworkAclId());
-            assoc.setSubnetId(subnetId);
-            defaultAcl.getAssociations().add(assoc);
-            networkAcls.put(key(region, defaultAcl.getNetworkAclId()), defaultAcl);
+        // Every AWS subnet starts associated with its VPC's default NACL.
+        // ReplaceNetworkAclAssociation later moves it onto a custom NACL.
+        NetworkAcl defaultAcl = findDefaultNetworkAcl(region, vpc.getVpcId());
+        if (defaultAcl == null) {
+            throw new AwsException("InvalidNetworkAclID.NotFound",
+                    "The VPC '" + vpc.getVpcId() + "' has no default network ACL", 400);
         }
+        NetworkAclAssociation assoc = new NetworkAclAssociation();
+        assoc.setNetworkAclAssociationId("aclassoc-" + randomHex(17));
+        assoc.setNetworkAclId(defaultAcl.getNetworkAclId());
+        assoc.setSubnetId(subnetId);
+        defaultAcl.getAssociations().add(assoc);
+        networkAcls.put(key(region, defaultAcl.getNetworkAclId()), defaultAcl);
         return subnet;
     }
 
@@ -7241,10 +7242,19 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
             requireNoTransitGatewayAttachment(region,
                     attachment -> attachment.getSubnetIds().contains(subnetId),
                     "The subnet '" + subnetId + "' has dependencies and cannot be deleted.");
-            requireNoSubnetResidents(region, Set.of(subnetId),
-                    "The subnet '" + subnetId + "' has dependencies and cannot be deleted.");
-            requireNoProviderDependency(provider -> provider.hasSubnetDependency(region, subnetId),
-                    "The subnet '" + subnetId + "' has dependencies and cannot be deleted.");
+            // AWS DeleteSubnet drops the subnet's NACL association so DescribeNetworkAcls
+            // never returns an association whose subnetId points at a gone subnet.
+            for (NetworkAcl acl : new ArrayList<>(networkAcls.scan(k -> true))) {
+                if (!region.equals(acl.getRegion())) {
+                    continue;
+                }
+                List<NetworkAclAssociation> remaining = new ArrayList<>(acl.getAssociations());
+                if (!remaining.removeIf(a -> subnetId.equals(a.getSubnetId()))) {
+                    continue;
+                }
+                acl.setAssociations(remaining);
+                networkAcls.put(key(region, acl.getNetworkAclId()), acl);
+            }
             subnets.delete(key(region, subnetId));
         }
         if (vpcNetworkManager != null) {
@@ -7605,13 +7615,15 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
             return false;
         }
         String groupId = rule.getGroupId();
-        if (groupId == null) {
-            securityGroupRules.delete(key(region, securityGroupRuleId));
-            return true;
-        }
         synchronized (lockFor(key(region, groupId))) {
-            if (securityGroupRules.get(key(region, securityGroupRuleId)).isEmpty()) {
+            rule = securityGroupRules.get(key(region, securityGroupRuleId)).orElse(null);
+            if (rule == null) {
                 return false;
+            }
+            deleteRecordedRule(region, rule);
+            SecurityGroup sg = securityGroups.get(key(region, groupId)).orElse(null);
+            if (sg == null) {
+                return true;
             }
             removeRuleFromGroup(region, rule);
         }
@@ -7653,8 +7665,6 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
      * and ports alone would take out an unrelated rule that happens to share them.
      */
     private boolean removeRecordedPermission(List<IpPermission> perms, SecurityGroupRule rule) {
-        String referencedGroupId = rule.getReferencedGroupInfo() == null
-                ? null : rule.getReferencedGroupInfo().getGroupId();
         for (IpPermission perm : perms) {
             if (!Objects.equals(perm.getIpProtocol(), rule.getIpProtocol())
                     || !Objects.equals(perm.getFromPort(), rule.getFromPort())
@@ -7672,10 +7682,20 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
                 dropIfEmpty(perms, perm);
                 return true;
             }
+            if (rule.getPrefixListId() != null) {
+                PrefixListId match = perm.getPrefixListIds().stream()
+                        .filter(source -> rule.getPrefixListId().equals(source.getPrefixListId()))
+                        .findFirst().orElse(null);
+                if (match == null) {
+                    continue;
+                }
+                perm.getPrefixListIds().remove(match);
+                dropIfEmpty(perms, perm);
+                return true;
+            }
             if (rule.getReferencedGroupInfo() != null) {
-                // A reference by a name that matched no group was recorded without an id.
                 UserIdGroupPair matchPair = perm.getUserIdGroupPairs().stream()
-                        .filter(pair -> Objects.equals(referencedGroupId, pair.getGroupId()))
+                        .filter(pair -> sameReferencedGroup(rule, pair))
                         .findFirst().orElse(null);
                 if (matchPair == null) {
                     continue;
@@ -7715,7 +7735,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         return false;
     }
 
-    private void dropIfEmpty(List<IpPermission> perms, IpPermission perm) {
+    private static void dropIfEmpty(List<IpPermission> perms, IpPermission perm) {
         if (!hasSources(perm)) {
             perms.remove(perm);
         }
@@ -9108,7 +9128,13 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
             return null;
         }
         LaunchTemplateData.IamInstanceProfile profile = data.getIamInstanceProfile();
-        return resolveLaunchIamInstanceProfileArn(profile.getName(), profile.getArn());
+        if (profile.getArn() != null && !profile.getArn().isBlank()) {
+            return profile.getArn();
+        }
+        if (profile.getName() == null || profile.getName().isBlank()) {
+            return null;
+        }
+        return resolveIamInstanceProfileName(profile.getName());
     }
 
     public String resolveIamInstanceProfileName(String name) {
@@ -10055,24 +10081,14 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         if (resourceId.startsWith("tgw-")) {
             return "transit-gateway";
         }
-        if (resourceId.startsWith("ami-")) {
-            return "image";
-        }
-        if (resourceId.startsWith("vol-")) {
-            return "volume";
-        }
-        if (resourceId.startsWith("snap-")) {
-            return "snapshot";
-        }
-        if (resourceId.startsWith("acl-")) {
-            return "network-acl";
-        }
-        if (resourceId.startsWith("pcx-")) {
-            return "vpc-peering-connection";
-        }
-        if (resourceId.startsWith("sir-")) {
-            return "spot-instances-request";
-        }
+        if (resourceId.startsWith("vol-")) return "volume";
+        if (resourceId.startsWith("snap-")) return "snapshot";
+        if (resourceId.startsWith("pcx-")) return "vpc-peering-connection";
+        if (resourceId.startsWith("eigw-")) return "egress-only-internet-gateway";
+        if (resourceId.startsWith("dopt-")) return "dhcp-options";
+        if (resourceId.startsWith("acl-")) return "network-acl";
+        if (resourceId.startsWith("fl-")) return "vpc-flow-log";
+        if (resourceId.startsWith("cvpn-endpoint-")) return "client-vpn-endpoint";
         return "unknown";
     }
 
@@ -11679,7 +11695,16 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     // ─── Elastic IPs ───────────────────────────────────────────────────────────
 
     public Address allocateAddress(String region) {
-        return allocateAddress(region, null, null);
+        ensureDefaultResources(region);
+        String allocId = "eipalloc-" + randomHex(17);
+        String ip = "54." + (new Random().nextInt(256)) + "." + (new Random().nextInt(256)) + "." + (new Random().nextInt(256));
+        Address addr = new Address();
+        addr.setAllocationId(allocId);
+        addr.setPublicIp(ip);
+        addr.setRegion(region);
+        addr.setNetworkBorderGroup(region);
+        addresses.put(key(region, allocId), addr);
+        return addr;
     }
 
     /**
@@ -12774,7 +12799,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         return true;
     }
 
-    private List<Tag> getResourceTags(Object resource) {
+    List<Tag> getResourceTags(Object resource) {
         if (resource instanceof Instance inst) return inst.getTags();
         if (resource instanceof Vpc vpc) return vpc.getTags();
         if (resource instanceof Subnet subnet) return subnet.getTags();
@@ -13594,7 +13619,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
      * while a service holds it: {@link #holdNetworkInterfaceForService} leaves no attachment
      * behind, so the status is what says the interface is spoken for.
      */
-    public void deleteNetworkInterface(String region, String networkInterfaceId) {
+    public synchronized void deleteNetworkInterface(String region, String networkInterfaceId) {
         NetworkInterface ni = requireStandaloneNetworkInterface(region, networkInterfaceId);
         if (ni.getAttachment() != null || "in-use".equals(ni.getStatus())) {
             throw new AwsException("InvalidParameterValue",
@@ -13602,6 +13627,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         }
         releaseInterfaceAddresses(region, networkInterfaceId, true);
         networkInterfaces.delete(key(region, networkInterfaceId));
+        tags.delete(networkInterfaceId);
     }
 
     /**
@@ -13821,8 +13847,31 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
      * instance as "available", it does not outlive it stuck "in-use" and unusable. Reconciling on
      * read covers every such path at once, rather than chasing each terminal transition.
      */
-    private NetworkInterface releaseIfHostIsGone(String region, NetworkInterface ni) {
-        return releaseIfHostIsGone(callerAccountId(), region, ni);
+    private synchronized NetworkInterface releaseIfHostIsGone(String region, NetworkInterface ni) {
+        NetworkInterface current = networkInterfaces.get(key(region, ni.getNetworkInterfaceId())).orElse(null);
+        if (current == null) {
+            return ni;
+        }
+        ni = current;
+        NetworkInterfaceAttachment attachment = ni.getAttachment();
+        if (attachment == null || attachment.getInstanceId() == null) {
+            return ni;
+        }
+        Instance host = instances.get(key(region, attachment.getInstanceId())).orElse(null);
+        boolean hostIsGone = host == null || host.getState() == null
+                || "terminated".equals(host.getState().getName());
+        if (!hostIsGone) {
+            return ni;
+        }
+        ni.setAttachment(null);
+        ni.setStatus("available");
+        networkInterfaces.put(key(region, ni.getNetworkInterfaceId()), ni);
+        // The dead instance has to let go of its copy as well. Releasing only the standalone
+        // record would leave the terminated instance still reporting the interface, so once it is
+        // reused two instance records would claim it, and a real one is not the winner by any
+        // rule DescribeInstances applies.
+        detachFromInstance(region, attachment.getInstanceId(), ni.getNetworkInterfaceId());
+        return ni;
     }
 
     private NetworkInterface releaseIfHostIsGone(String accountId, String region, NetworkInterface ni) {
@@ -14766,6 +14815,50 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
             return Integer.valueOf(value);
         } catch (NumberFormatException exception) {
             throw new AwsException("InvalidParameterValue", "Invalid security group port " + value, 400);
+        }
+    }
+
+    private static final String DEFAULT_VPC_ENDPOINT_POLICY =
+            "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":\"*\",\"Action\":\"*\",\"Resource\":\"*\"}]}";
+
+    private Set<String> occupiedPrivateIps(String region, String subnetId) {
+        Set<String> occupied = new HashSet<>();
+        for (NetworkInterface eni : networkInterfaces.scan(k -> k.startsWith(region + "::"))) {
+            if (Objects.equals(subnetId, eni.getSubnetId())) {
+                occupied.add(eni.getPrivateIpAddress());
+                eni.getPrivateIpAddresses().forEach(ip -> occupied.add(ip.getPrivateIpAddress()));
+            }
+        }
+        for (Instance instance : instances.scan(k -> k.startsWith(region + "::"))) {
+            if (instance.getState() != null && "terminated".equals(instance.getState().getName())) {
+                continue;
+            }
+            if (Objects.equals(subnetId, instance.getSubnetId())) {
+                occupied.add(instance.getLogicalPrivateIpAddress() != null
+                        ? instance.getLogicalPrivateIpAddress() : instance.getPrivateIpAddress());
+            }
+            instance.getNetworkInterfaces().stream()
+                    .filter(eni -> Objects.equals(subnetId, eni.getSubnetId()))
+                    .forEach(eni -> occupied.add(eni.getPrivateIpAddress()));
+        }
+        for (NatGateway gateway : natGateways.scan(k -> k.startsWith(region + "::"))) {
+            if (Objects.equals(subnetId, gateway.getSubnetId()) && !"deleted".equals(gateway.getState())) {
+                gateway.getNatGatewayAddresses().forEach(address -> occupied.add(address.getPrivateIp()));
+            }
+        }
+        return occupied;
+    }
+
+    private String securityGroupTagLockId(String region, String resourceId) {
+        return resourceId.startsWith("sgr-")
+                ? requireSecurityGroupRule(region, null, resourceId).getGroupId() : resourceId;
+    }
+
+    private void validateSecurityGroupTagTarget(String region, String resourceId) {
+        if (resourceId.startsWith("sgr-")) {
+            requireSecurityGroupRule(region, null, resourceId);
+        } else if (resourceId.startsWith("sg-")) {
+            getRequiredSecurityGroup(region, resourceId);
         }
     }
 }

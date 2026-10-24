@@ -390,4 +390,66 @@ public class ServiceQuotasService {
         return ServiceQuotasCatalog.service(serviceCode).orElseThrow(() -> new AwsException(
                 "NoSuchResourceException", "The request failed because the specified service does not exist.", 400));
     }
+
+
+    public ObjectNode listServices(String nextToken, Integer maxResults) {
+        Page<ServiceDefinition> page = paginate(ServiceQuotasCatalog.services(), nextToken, maxResults);
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode array = response.putArray("Services");
+        for (ServiceDefinition service : page.items()) {
+            ObjectNode node = array.addObject();
+            node.put("ServiceCode", service.serviceCode());
+            node.put("ServiceName", service.serviceName());
+        }
+        if (page.nextToken() != null) {
+            response.put("NextToken", page.nextToken());
+        }
+        return response;
+    }
+
+
+    private static final String NO_SUCH_QUOTA =
+            "The request failed because the specified service quota does not exist.";
+
+    private static final Set<String> OPEN_REQUEST_STATUSES = Set.of("PENDING", "CASE_OPENED");
+
+    private record RequestedChange(String id, String serviceCode, String serviceName, String quotaCode,
+                                   String quotaName, String quotaArn, double desiredValue, String status,
+                                   String requester, String unit, boolean globalQuota,
+                                   String requestedAtLevel, String contextId, long created,
+                                   long lastUpdated) {
+    }
+
+    private static String quotaArn(ServiceDefinition service, QuotaDefinition quota, String region,
+                                   String accountId) {
+        return "arn:aws:servicequotas:" + region + ":" + (accountId == null ? "" : accountId) + ":"
+                + service.serviceCode() + "/" + quota.quotaCode();
+    }
+
+    /** Increase requests keyed by {@code accountId/region}, then request id, in submission order. */
+    private final Map<String, Map<String, RequestedChange>> requests = new ConcurrentHashMap<>();
+
+
+
+    private static String scopeKey(String accountId, String region) {
+        return accountId + "/" + region;
+    }
+
+    /** Most recent request first. */
+    private List<RequestedChange> snapshot(String accountId, String region) {
+        Map<String, RequestedChange> scope = requests.get(scopeKey(accountId, region));
+        if (scope == null) {
+            return List.of();
+        }
+        List<RequestedChange> copy;
+        synchronized (scope) {
+            copy = new ArrayList<>(scope.values());
+        }
+        return copy.reversed();
+    }
+
+    private static final Set<String> APPLIED_LEVELS = Set.of("ACCOUNT", "RESOURCE", "ALL");
+
+    private static final Set<String> REQUEST_STATUSES = Set.of(
+            "PENDING", "CASE_OPENED", "APPROVED", "DENIED", "CASE_CLOSED", "NOT_APPROVED", "INVALID_REQUEST");
 }

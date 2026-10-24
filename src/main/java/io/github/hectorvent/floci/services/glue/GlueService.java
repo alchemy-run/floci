@@ -3016,12 +3016,6 @@ public class GlueService {
             } else if (resource.startsWith("crawler/")) {
                 getCrawler(resource.substring(8));
                 return;
-            } else if (resource.startsWith("trigger/")) {
-                getTrigger(resource.substring(8));
-                return;
-            } else if (resource.startsWith("workflow/")) {
-                getWorkflow(resource.substring(9));
-                return;
             } else if (resource.startsWith("connection/")) {
                 getConnection(resource.substring(11), false);
                 return;

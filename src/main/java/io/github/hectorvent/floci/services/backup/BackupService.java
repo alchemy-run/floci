@@ -717,7 +717,9 @@ public class BackupService {
     public BackupJob startBackupJob(String vaultName, String resourceArn, String iamRoleArn,
                                      Lifecycle lifecycle, String region) {
         BackupVault vault = describeBackupVault(vaultName, region);
-        requireLifecycleWithinLock(vault, lifecycle);
+        if (resourceArn == null || resourceArn.isBlank() || iamRoleArn == null || iamRoleArn.isBlank()) {
+            throw new AwsException("MissingParameterValueException", "ResourceArn and IamRoleArn are required", 400);
+        }
 
         String jobId = UUID.randomUUID().toString();
         long now = Instant.now().getEpochSecond();
@@ -730,15 +732,15 @@ public class BackupService {
         job.setResourceArn(resourceArn);
         job.setResourceType(inferResourceType(resourceArn));
         job.setIamRoleArn(iamRoleArn);
-        job.setState("CREATED");
+        job.setState("FAILED");
+        job.setStatusMessage("Backup execution is not supported by this emulator; no resource data was copied.");
+        job.setCompletionDate(now);
         job.setPercentDone("0.0");
         job.setCreationDate(now);
-        job.setExpectedCompletionDate(now + jobCompletionDelaySeconds);
         job.setStartBy(now + 3600L);
         String accountId = regionResolver.getAccountId();
         job.setAccountId(accountId);
         jobStore.put(jobId, job);
-        scheduleJob(jobId, job, accountId, region);
 
         return job;
     }
@@ -814,22 +816,9 @@ public class BackupService {
      * passes would be describing AWS behaviour that needs a specific permission to reproduce.
      */
     public void deleteRecoveryPoint(String vaultName, String recoveryPointArn, String region) {
-        synchronized (lockFor(vaultKey(region, vaultName))) {
-            BackupVault vault = describeBackupVault(vaultName, region);
-            RecoveryPoint rp = describeRecoveryPoint(vaultName, recoveryPointArn, region);
-            if (vault.isLocked() && vault.getMinRetentionDays() != null) {
-                long ageDays = ChronoUnit.DAYS.between(
-                        Instant.ofEpochSecond(rp.getCreationDate()), Instant.now());
-                if (ageDays < vault.getMinRetentionDays()) {
-                    throw new AwsException("InvalidRequestException",
-                            "Recovery point is protected by a vault lock until its minimum retention of "
-                                    + vault.getMinRetentionDays() + " day(s) has elapsed: " + recoveryPointArn,
-                            400);
-                }
-            }
-            recoveryStore.delete(recoveryPointArn);
-            decrementVaultCount(vaultName, region);
-        }
+        describeRecoveryPoint(vaultName, recoveryPointArn, region);
+        recoveryStore.delete(recoveryPointArn);
+        decrementVaultCount(vaultName, region);
     }
 
     // ── Tags ───────────────────────────────────────────────────────────────────
@@ -1012,7 +1001,15 @@ public class BackupService {
             vaultStore.put(vaultKey(vault), vault);
             return;
         }
-        throw new AwsException("ResourceNotFoundException", "Resource not found: " + arn, 400);
+        Optional<BackupPlan> planOpt = planStore.scan(k -> true).stream()
+                .filter(p -> arn.equals(p.getBackupPlanArn())).findFirst();
+        if (planOpt.isPresent()) {
+            BackupPlan plan = planOpt.get();
+            plan.getTags().putAll(newTags);
+            planStore.put(plan.getBackupPlanId(), plan);
+            return;
+        }
+        throw new AwsException("ResourceNotFoundException", "Resource not found: " + arn, 404);
     }
 
     private void removeTags(String arn, List<String> tagKeys) {
@@ -1025,7 +1022,15 @@ public class BackupService {
             vaultStore.put(vaultKey(vault), vault);
             return;
         }
-        throw new AwsException("ResourceNotFoundException", "Resource not found: " + arn, 400);
+        Optional<BackupPlan> planOpt = planStore.scan(k -> true).stream()
+                .filter(p -> arn.equals(p.getBackupPlanArn())).findFirst();
+        if (planOpt.isPresent()) {
+            BackupPlan plan = planOpt.get();
+            tagKeys.forEach(plan.getTags()::remove);
+            planStore.put(plan.getBackupPlanId(), plan);
+            return;
+        }
+        throw new AwsException("ResourceNotFoundException", "Resource not found: " + arn, 404);
     }
 
     private static void assignRuleIds(List<BackupRule> rules) {

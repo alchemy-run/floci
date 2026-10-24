@@ -104,7 +104,9 @@ public class BackupController {
     public Response describeBackupVault(@Context HttpHeaders headers,
                                          @PathParam("backupVaultName") String vaultName) {
         String region = regionResolver.resolveRegion(headers);
-        return Response.ok(vaultJson(service.describeBackupVault(vaultName, region))).build();
+        ObjectNode vault = objectMapper.valueToTree(service.describeBackupVault(vaultName, region));
+        vault.remove(List.of("AccessPolicy", "SNSTopicArn", "BackupVaultEvents"));
+        return Response.ok(vault).build();
     }
 
     @DELETE

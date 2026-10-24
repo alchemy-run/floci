@@ -89,7 +89,83 @@ public class EcsJsonHandler {
     }
 
     public Response handle(String action, JsonNode request, String region) {
-        return handle(action, request, region, null);
+        return switch (action) {
+            // Clusters
+            case "CreateCluster" -> handleCreateCluster(request, region);
+            case "DescribeClusters" -> handleDescribeClusters(request, region);
+            case "ListClusters" -> handleListClusters(request, region);
+            case "DeleteCluster" -> handleDeleteCluster(request, region);
+            case "UpdateCluster" -> handleUpdateCluster(request, region);
+            case "UpdateClusterSettings" -> handleUpdateClusterSettings(request, region);
+            case "PutClusterCapacityProviders" -> handlePutClusterCapacityProviders(request, region);
+
+            case "RegisterTaskDefinition" -> handleRegisterTaskDefinition(request, region);
+            case "DescribeTaskDefinition" -> handleDescribeTaskDefinition(request, region);
+            case "ListTaskDefinitions" -> handleListTaskDefinitions(request, region);
+            case "ListTaskDefinitionFamilies" -> handleListTaskDefinitionFamilies(request, region);
+            case "DeregisterTaskDefinition" -> handleDeregisterTaskDefinition(request, region);
+            case "DeleteTaskDefinitions" -> handleDeleteTaskDefinitions(request, region);
+
+            case "RunTask" -> handleRunTask(request, region);
+            case "StartTask" -> handleStartTask(request, region);
+            case "StopTask" -> handleStopTask(request, region);
+            case "DescribeTasks" -> handleDescribeTasks(request, region);
+            case "ListTasks" -> handleListTasks(request, region);
+            case "UpdateTaskProtection" -> handleUpdateTaskProtection(request, region);
+            case "GetTaskProtection" -> handleGetTaskProtection(request, region);
+
+            case "CreateService" -> handleCreateService(request, region);
+            case "UpdateService" -> handleUpdateService(request, region);
+            case "DeleteService" -> handleDeleteService(request, region);
+            case "DescribeServices" -> handleDescribeServices(request, region);
+            case "ListServices" -> handleListServices(request, region);
+            case "ListServicesByNamespace" -> handleListServicesByNamespace(request, region);
+
+            case "TagResource" -> handleTagResource(request, region);
+            case "UntagResource" -> handleUntagResource(request, region);
+            case "ListTagsForResource" -> handleListTagsForResource(request, region);
+
+            case "PutAccountSetting" -> handlePutAccountSetting(request, region);
+            case "PutAccountSettingDefault" -> handlePutAccountSettingDefault(request, region);
+            case "DeleteAccountSetting" -> handleDeleteAccountSetting(request, region);
+            case "ListAccountSettings" -> handleListAccountSettings(request, region);
+
+            case "PutAttributes" -> handlePutAttributes(request, region);
+            case "DeleteAttributes" -> handleDeleteAttributes(request, region);
+            case "ListAttributes" -> handleListAttributes(request, region);
+
+            case "RegisterContainerInstance" -> handleRegisterContainerInstance(request, region);
+            case "DeregisterContainerInstance" -> handleDeregisterContainerInstance(request, region);
+            case "DescribeContainerInstances" -> handleDescribeContainerInstances(request, region);
+            case "ListContainerInstances" -> handleListContainerInstances(request, region);
+            case "UpdateContainerAgent" -> handleUpdateContainerAgent(request, region);
+            case "UpdateContainerInstancesState" -> handleUpdateContainerInstancesState(request, region);
+
+            case "CreateCapacityProvider" -> handleCreateCapacityProvider(request, region);
+            case "UpdateCapacityProvider" -> handleUpdateCapacityProvider(request, region);
+            case "DeleteCapacityProvider" -> handleDeleteCapacityProvider(request, region);
+            case "DescribeCapacityProviders" -> handleDescribeCapacityProviders(request, region);
+
+            case "CreateTaskSet" -> handleCreateTaskSet(request, region);
+            case "UpdateTaskSet" -> handleUpdateTaskSet(request, region);
+            case "DeleteTaskSet" -> handleDeleteTaskSet(request, region);
+            case "DescribeTaskSets" -> handleDescribeTaskSets(request, region);
+            case "UpdateServicePrimaryTaskSet" -> handleUpdateServicePrimaryTaskSet(request, region);
+
+            case "DescribeServiceDeployments" -> handleDescribeServiceDeployments(request, region);
+            case "ListServiceDeployments" -> handleListServiceDeployments(request, region);
+            case "DescribeServiceRevisions" -> handleDescribeServiceRevisions(request, region);
+
+            case "SubmitTaskStateChange" -> handleSubmitTaskStateChange(request, region);
+            case "SubmitContainerStateChange" -> handleSubmitContainerStateChange(request, region);
+            case "SubmitAttachmentStateChanges" -> handleSubmitAttachmentStateChanges(request, region);
+            case "DiscoverPollEndpoint" -> handleDiscoverPollEndpoint(request, region);
+
+            default -> Response.status(400)
+                    .entity(new AwsErrorResponse("UnsupportedOperation",
+                            "Operation " + action + " is not supported."))
+                    .build();
+        };
     }
 
     public Response handle(String action, JsonNode request, String region, URI requestBaseUri) {
@@ -323,10 +399,9 @@ public class EcsJsonHandler {
         TaskDefinition td = service.describeTaskDefinition(tdRef, region);
         ObjectNode resp = objectMapper.createObjectNode();
         resp.set("taskDefinition", writer.taskDefinitionNode(td));
-        // DescribeTaskDefinition reports tags at the top level, and only when asked for them.
-        if (jsonArrayToList(req.path("include")).contains("TAGS")
-                && td.getTags() != null && !td.getTags().isEmpty()) {
-            resp.set("tags", writer.tagsNode(td.getTags()));
+        List<String> include = jsonArrayToList(req.path("include"));
+        if (include.stream().anyMatch("TAGS"::equalsIgnoreCase)) {
+            resp.set("tags", writer.tagsNode(td.getTags() != null ? td.getTags() : Map.of()));
         }
         return Response.ok(resp).build();
     }
@@ -338,7 +413,7 @@ public class EcsJsonHandler {
         Integer maxResults = req.hasNonNull("maxResults") ? req.path("maxResults").asInt() : null;
         String nextToken = req.hasNonNull("nextToken") ? req.path("nextToken").asText() : null;
 
-        EcsService.ListPage page = service.listTaskDefinitions(region, familyPrefix, status, sort,
+        EcsService.ListPage page = service.listTaskDefinitions(familyPrefix, status, sort,
                 maxResults, nextToken);
 
         ObjectNode resp = objectMapper.createObjectNode();
@@ -357,7 +432,7 @@ public class EcsJsonHandler {
         Integer maxResults = req.hasNonNull("maxResults") ? req.path("maxResults").asInt() : null;
         String nextToken = req.hasNonNull("nextToken") ? req.path("nextToken").asText() : null;
 
-        EcsService.ListPage page = service.listTaskDefinitionFamilies(region, familyPrefix, status,
+        EcsService.ListPage page = service.listTaskDefinitionFamilies(familyPrefix, status,
                 maxResults, nextToken);
 
         ObjectNode resp = objectMapper.createObjectNode();
@@ -496,14 +571,16 @@ public class EcsJsonHandler {
         boolean protectionEnabled = req.path("protectionEnabled").asBoolean(false);
         Integer expiresInMinutes = req.has("expiresInMinutes") ? req.path("expiresInMinutes").asInt() : null;
 
-        List<ProtectedTask> result = service.updateTaskProtection(cluster, taskRefs, protectionEnabled,
-                expiresInMinutes, region);
+        EcsService.TaskProtectionResult result = service.updateTaskProtectionDetailed(
+                cluster, taskRefs, protectionEnabled, expiresInMinutes, region);
 
         ObjectNode resp = objectMapper.createObjectNode();
         ArrayNode arr = objectMapper.createArrayNode();
-        result.forEach(pt -> arr.add(writer.protectedTaskNode(pt)));
+        result.protectedTasks().forEach(pt -> arr.add(writer.protectedTaskNode(pt)));
         resp.set("protectedTasks", arr);
-        resp.set("failures", objectMapper.createArrayNode());
+        ArrayNode failures = objectMapper.createArrayNode();
+        result.failures().forEach(f -> failures.add(writer.failureNode(f)));
+        resp.set("failures", failures);
         return Response.ok(resp).build();
     }
 
@@ -511,13 +588,15 @@ public class EcsJsonHandler {
         String cluster = req.has("cluster") ? req.path("cluster").asText() : null;
         List<String> taskRefs = jsonArrayToList(req.path("tasks"));
 
-        List<ProtectedTask> result = service.getTaskProtection(cluster, taskRefs, region);
+        EcsService.TaskProtectionResult result = service.getTaskProtectionDetailed(cluster, taskRefs, region);
 
         ObjectNode resp = objectMapper.createObjectNode();
         ArrayNode arr = objectMapper.createArrayNode();
-        result.forEach(pt -> arr.add(writer.protectedTaskNode(pt)));
+        result.protectedTasks().forEach(pt -> arr.add(writer.protectedTaskNode(pt)));
         resp.set("protectedTasks", arr);
-        resp.set("failures", objectMapper.createArrayNode());
+        ArrayNode failures = objectMapper.createArrayNode();
+        result.failures().forEach(f -> failures.add(writer.failureNode(f)));
+        resp.set("failures", failures);
         return Response.ok(resp).build();
     }
 

@@ -1047,11 +1047,8 @@ public class CognitoService implements ResourceProvider {
     }
 
     public void deleteUserPool(String id) {
-        // Deletion protection is the pool's own guard against this call: with it ACTIVE, AWS
-        // refuses until an UpdateUserPool switches it to INACTIVE (developer guide, "User pool
-        // deletion protection"), and a CloudFormation delete of the pool reports DELETE_FAILED.
-        String deletionProtection = poolStore.get(id).map(UserPool::getDeletionProtection).orElse(null);
-        if ("ACTIVE".equalsIgnoreCase(deletionProtection)) {
+        UserPool pool = describeUserPool(id);
+        if ("ACTIVE".equalsIgnoreCase(pool.getDeletionProtection())) {
             throw new AwsException("InvalidParameterException",
                     "The user pool cannot be deleted because deletion protection is activated. "
                             + "Deletion protection must be inactivated first.", 400);
@@ -1735,58 +1732,7 @@ public class CognitoService implements ResourceProvider {
      */
     public UserPoolDomain createUserPoolDomain(String domain, String userPoolId,
             Map<String, Object> customDomainConfig, Integer managedLoginVersion) {
-        describeUserPool(userPoolId);
-        if (domain == null || domain.isBlank()) {
-            throw new AwsException("InvalidParameterException", "Domain is required", 400);
-        }
-        if (!findDomains(domain).isEmpty()) {
-            throw new AwsException("InvalidParameterException",
-                    "Domain " + domain + " already associated with another user pool", 400);
-        }
-
-        UserPoolDomain userPoolDomain = new UserPoolDomain();
-        userPoolDomain.setDomain(domain);
-        userPoolDomain.setUserPoolId(userPoolId);
-        userPoolDomain.setAwsAccountId(regionResolver.getAccountId());
-        userPoolDomain.setManagedLoginVersion(managedLoginVersion);
-        userPoolDomain.setStatus("ACTIVE");
-        userPoolDomain.setVersion(generateDomainVersion());
-        userPoolDomain.setS3Bucket("aws-cognito-prod-" + regionResolver.getRegion() + "-assets");
-
-        if (customDomainConfig != null) {
-            requireCustomDomainsAvailable(regionResolver.getRegion());
-            String certificateArn = (String) customDomainConfig.get("CertificateArn");
-            if (certificateArn == null || certificateArn.isBlank()) {
-                throw new AwsException("InvalidParameterException",
-                        "CertificateArn is required in CustomDomainConfig", 400);
-            }
-            requireUsableCertificate(certificateArn);
-            userPoolDomain.setCertificateArn(certificateArn);
-            Object securityPolicy = customDomainConfig.get("SecurityPolicy");
-            userPoolDomain.setSecurityPolicy(securityPolicy != null ? securityPolicy.toString() : "TLS_V1_2_2021");
-            userPoolDomain.setCloudFrontDistribution(generateCloudFrontDomain());
-        }
-
-        // Check and write as one step: two accounts racing for one name write to different
-        // account-prefixed keys, so without the lock both would succeed and the name would be
-        // ambiguous for routing.
-        synchronized (domainLock) {
-            if (!findDomains(domain).isEmpty()) {
-                throw new AwsException("InvalidParameterException",
-                        "Domain " + domain + " already associated with another user pool", 400);
-            }
-            if (userPoolDomain.isCustomDomain()) {
-                registerCertificateUse(userPoolDomain.getCertificateArn(), userPoolDomain);
-            }
-            domainStore.put(domain, userPoolDomain);
-        }
-        // Outside the lock: the reissue blocks until the HTTPS listener has switched certificates.
-        // A prefix domain is served under amazoncognito.com on AWS, not by Floci; a custom domain is.
-        if (customDomainConfig != null && certificateManager != null) {
-            certificateManager.ensureHost(domain);
-        }
-        LOG.infov("Created User Pool Domain: {0} for pool {1}", domain, userPoolId);
-        return userPoolDomain;
+        return createUserPoolDomain(domain, userPoolId, customDomainConfig, managedLoginVersion, created -> {});
     }
 
     public UserPoolDomain describeUserPoolDomain(String domain) {
@@ -1919,14 +1865,16 @@ public class CognitoService implements ResourceProvider {
     }
 
     public void deleteUserPoolDomain(String domain, String userPoolId) {
-        UserPoolDomain userPoolDomain = describeUserPoolDomain(domain);
-        if (!userPoolDomain.getUserPoolId().equals(userPoolId)) {
-            throw new AwsException("ResourceNotFoundException", "Domain does not exist", 400);
-        }
-        domainStore.delete(domain);
-        if (userPoolDomain.isCustomDomain()) {
-            acmService.removeInUseBy(userPoolDomain.getCertificateArn(),
-                    cloudFrontDistributionArn(regionResolver.getPartition(), userPoolDomain), CERTIFICATE_REGION);
+        synchronized (domainLock) {
+            UserPoolDomain userPoolDomain = describeUserPoolDomain(domain);
+            if (!userPoolDomain.getUserPoolId().equals(userPoolId)) {
+                throw new AwsException("ResourceNotFoundException", "Domain does not exist", 404);
+            }
+            domainStore.delete(domain);
+            if (userPoolDomain.isCustomDomain()) {
+                acmService.removeInUseBy(userPoolDomain.getCertificateArn(),
+                        cloudFrontDistributionArn(userPoolDomain), CERTIFICATE_REGION);
+            }
         }
         LOG.infov("Deleted User Pool Domain: {0} for pool {1}", domain, userPoolId);
     }
@@ -5729,9 +5677,35 @@ public class CognitoService implements ResourceProvider {
      */
     VerifiedAccessToken verifyAccessToken(String token) {
         try {
-            VerifiedJwt verified = verifyJwtSignatureAndIssuer(token);
-            JsonNode claims = verified.claims();
-            String poolId = verified.poolId();
+            if (token == null || token.isBlank()) {
+                throw new IllegalArgumentException("missing token");
+            }
+            String[] parts = token.split("\\.", -1);
+            if (parts.length != 3 || parts[0].isEmpty() || parts[1].isEmpty() || parts[2].isEmpty()) {
+                throw new IllegalArgumentException("malformed JWT");
+            }
+
+            JsonNode header = MAPPER.readTree(Base64.getUrlDecoder().decode(parts[0]));
+            JsonNode claims = MAPPER.readTree(Base64.getUrlDecoder().decode(parts[1]));
+            if (!"RS256".equals(header.path("alg").asText())
+                    || !"JWT".equalsIgnoreCase(header.path("typ").asText())) {
+                throw new IllegalArgumentException("unsupported JWT algorithm");
+            }
+
+            String issuer = textClaim(claims, "iss");
+            String poolId = issuer == null ? null : issuer.substring(issuer.lastIndexOf('/') + 1);
+            UserPool pool = poolId == null ? null : poolStore.get(poolId).orElse(null);
+            if (pool == null || !getIssuer(poolId).equals(issuer)
+                    || !getSigningKeyId(pool).equals(textClaim(header, "kid"))) {
+                throw new IllegalArgumentException("invalid issuer or key");
+            }
+
+            Signature verifier = Signature.getInstance("SHA256withRSA");
+            verifier.initVerify(getSigningPublicKey(pool));
+            verifier.update((parts[0] + "." + parts[1]).getBytes(StandardCharsets.UTF_8));
+            if (!verifier.verify(Base64.getUrlDecoder().decode(parts[2]))) {
+                throw new IllegalArgumentException("invalid signature");
+            }
 
             String verifiedPoolId = poolId;
             String username = textClaim(claims, "username");
@@ -7213,5 +7187,73 @@ public class CognitoService implements ResourceProvider {
             throw new AwsException("InvalidParameterException",
                     "ProviderName must be 1-32 characters with no spaces", 400);
         }
+    }
+
+    /**
+     * AWS prefixes custom schema attributes with {@code custom:} (or {@code dev:}
+     * for developer-only) on create. Standard attribute names are left unprefixed.
+     */
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> normalizeSchemaAttributes(List<Map<String, Object>> schema) {
+        if (schema == null) {
+            return new ArrayList<>();
+        }
+        List<Map<String, Object>> normalized = new ArrayList<>();
+        for (Map<String, Object> attr : schema) {
+            Map<String, Object> copy = attr == null ? new HashMap<>() : new HashMap<>(attr);
+            String name = (String) copy.get("Name");
+            if (name != null && !name.isBlank() && !CognitoStandardAttributes.isStandard(name)) {
+                copy.put("Name", prefixedAttributeName(name, Boolean.TRUE.equals(copy.get("DeveloperOnlyAttribute"))));
+            }
+            normalized.add(copy);
+        }
+        return normalized;
+    }
+
+    private UserPoolDomain updateUserPoolDomainLocked(String domain, String userPoolId,
+            Map<String, Object> customDomainConfig, Integer managedLoginVersion) {
+        describeUserPool(userPoolId);
+        UserPoolDomain userPoolDomain = MAPPER.convertValue(describeUserPoolDomain(domain), UserPoolDomain.class);
+        if (!userPoolDomain.getUserPoolId().equals(userPoolId)) {
+            throw new AwsException("ResourceNotFoundException", "Domain does not exist", 404);
+        }
+        String previousCertificateArn = userPoolDomain.getCertificateArn();
+        String certificateArn = previousCertificateArn;
+        if (customDomainConfig != null) {
+            if (!userPoolDomain.isCustomDomain()) {
+                throw new AwsException("InvalidParameterException",
+                        "CustomDomainConfig cannot be set on an Amazon Cognito prefix domain", 400);
+            }
+            certificateArn = (String) customDomainConfig.get("CertificateArn");
+            if (certificateArn == null || certificateArn.isBlank()) {
+                throw new AwsException("InvalidParameterException",
+                        "CertificateArn is required in CustomDomainConfig", 400);
+            }
+        }
+        // A new certificate is checked and registered before anything changes, so a failure leaves
+        // the domain on its current certificate.
+        boolean certificateChanged = !Objects.equals(certificateArn, previousCertificateArn);
+        if (certificateChanged) {
+            requireUsableCertificate(certificateArn);
+            registerCertificateUse(certificateArn, userPoolDomain);
+        }
+        if (customDomainConfig != null) {
+            userPoolDomain.setCertificateArn(certificateArn);
+            Object securityPolicy = customDomainConfig.get("SecurityPolicy");
+            if (securityPolicy != null) {
+                userPoolDomain.setSecurityPolicy(securityPolicy.toString());
+            }
+        }
+        if (managedLoginVersion != null) {
+            userPoolDomain.setManagedLoginVersion(managedLoginVersion);
+        }
+        userPoolDomain.setLastModifiedDate(System.currentTimeMillis() / 1000L);
+        domainStore.put(domain, userPoolDomain);
+        if (certificateChanged) {
+            acmService.removeInUseBy(previousCertificateArn,
+                    cloudFrontDistributionArn(userPoolDomain), CERTIFICATE_REGION);
+        }
+        LOG.infov("Updated User Pool Domain: {0} for pool {1}", domain, userPoolId);
+        return userPoolDomain;
     }
 }

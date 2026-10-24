@@ -205,16 +205,7 @@ public class EcrRegistryManager {
      * the two must name the same host.
      */
     public String getProxyEndpoint() {
-        if (tlsUriEnabled()) {
-            String host = "path".equalsIgnoreCase(config.services().ecr().uriStyle())
-                    ? "localhost.floci.io"
-                    : regionResolver.getAccountId() + ".dkr.ecr."
-                            + regionResolver.getRegion() + ".localhost.floci.io";
-            return "https://" + host + ":" + advertisedPort();
-        }
-        String scheme = config.services().ecr().tlsEnabled() ? "https" : "http";
-        return scheme + "://" + regionResolver.getAccountId() + ".dkr.ecr."
-                + regionResolver.getRegion() + ".localhost:" + advertisedPort();
+        return getProxyEndpoint(regionResolver.getAccountId(), regionResolver.getDefaultRegion());
     }
 
     /**
@@ -239,14 +230,15 @@ public class EcrRegistryManager {
     }
 
     /**
-     * The registry endpoint reachable from other containers on the Docker network:
-     * the container name plus the container-internal port (not the published host port).
+     * The registry endpoint reachable from other containers on the Docker network.
+     * Prefers the inspected container IP — the default {@code bridge} network has
+     * no embedded DNS, so {@code floci-ecr-registry} does not resolve.
      */
     public String internalEndpoint() {
-        // In-network clients reach the registry by container name, so this must be the name the
-        // container actually has: a legacy-named survivor keeps resolving through its own name.
-        String name = activeContainerName != null ? activeContainerName : registryContainerName();
-        return "http://" + name + ":" + CONTAINER_INTERNAL_PORT;
+        String host = (registryInternalHost != null && !registryInternalHost.isBlank())
+                ? registryInternalHost
+                : registryContainerName();
+        return "http://" + host + ":" + CONTAINER_INTERNAL_PORT;
     }
 
     /** Returns a {@link RegistryHttpClient} bound to the current registry endpoint. */
@@ -752,4 +744,9 @@ public class EcrRegistryManager {
     }
 
     private volatile String registryInternalHost;
+
+    private static boolean hasBlobCacheDisabled(Container container) {
+        Map<String, String> labels = container.getLabels();
+        return labels != null && BLOB_CACHE_DISABLED.equals(labels.get(BLOB_CACHE_LABEL));
+    }
 }

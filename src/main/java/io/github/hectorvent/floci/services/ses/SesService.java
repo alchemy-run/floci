@@ -1324,8 +1324,18 @@ public class SesService {
         }
         ResourceRef ref = parseSesArn(arn);
         requireCallerAccount(ref);
-        requireValidResourceName(ref);
-        List<Tag> tags = taggableDomains.get(ref.type()).listTags(ref.name(), region);
+        List<Tag> tags = switch (ref.type()) {
+            case "configuration-set" -> configSetService.listTags(ref.name(), region);
+            case "template" -> templateService.listTags(ref.name(), region);
+            case "identity" -> identityService.listTags(ref.name(), region);
+            case "contact-list" -> contactService.listTags(ref.name(), region);
+            case "custom-verification-email-template" -> cvetService.listTags(ref.name(), region);
+            case "dedicated-ip-pool" -> dedicatedIpService.listTags(ref.name(), region);
+            case "tenant" -> tenantService.listTags(ref.name(), region);
+            case "multi-region-endpoint" -> new ArrayList<>(getMultiRegionEndpoint(ref.name(), region).getTags());
+            default -> throw new AwsException("NotFoundException",
+                    "Resource " + arn + " was not found.", 404);
+        };
         // AWS checks existence against the signing region but keys the tag store by the literal
         // ARN: a mismatched ARN region passes the existence check above yet addresses an ARN
         // nothing was ever tagged under, so the result is empty (probe-confirmed across all six
@@ -1351,7 +1361,22 @@ public class SesService {
         // checks and then applies the empty merge as a no-op (probe-confirmed).
         List<Tag> tags = newTags == null ? List.of() : newTags;
         SesTags.validate(tags);
-        domain.tag(ref.name(), region, tags);
+        switch (ref.type()) {
+            case "configuration-set" -> configSetService.tag(ref.name(), region, tags);
+            case "template" -> templateService.tag(ref.name(), region, tags);
+            case "identity" -> identityService.tag(ref.name(), region, tags);
+            case "contact-list" -> contactService.tag(ref.name(), region, tags);
+            case "custom-verification-email-template" -> cvetService.tag(ref.name(), region, tags);
+            case "dedicated-ip-pool" -> dedicatedIpService.tag(ref.name(), region, tags);
+            case "tenant" -> tenantService.tag(ref.name(), region, tags);
+            case "multi-region-endpoint" -> {
+                MultiRegionEndpoint endpoint = getMultiRegionEndpoint(ref.name(), region);
+                endpoint.setTags(SesTags.merge(endpoint.getTags(), tags));
+                multiRegionEndpointStore.put(multiRegionEndpointKey(region, ref.name()), endpoint);
+            }
+            default -> throw new AwsException("NotFoundException",
+                    "Resource " + arn + " was not found.", 404);
+        }
     }
 
     public void untagResource(String arn, String region, List<String> tagKeys) {
@@ -1371,7 +1396,24 @@ public class SesService {
         if (!ref.region().equals(region)) {
             throw new AwsException("BadRequestException", "Failed to untag resource", 400);
         }
-        domain.untag(ref.name(), region, tagKeys);
+        switch (ref.type()) {
+            case "configuration-set" -> configSetService.untag(ref.name(), region, tagKeys);
+            case "template" -> templateService.untag(ref.name(), region, tagKeys);
+            case "identity" -> identityService.untag(ref.name(), region, tagKeys);
+            case "contact-list" -> contactService.untag(ref.name(), region, tagKeys);
+            case "custom-verification-email-template" -> cvetService.untag(ref.name(), region, tagKeys);
+            case "dedicated-ip-pool" -> dedicatedIpService.untag(ref.name(), region, tagKeys);
+            case "tenant" -> tenantService.untag(ref.name(), region, tagKeys);
+            case "multi-region-endpoint" -> {
+                MultiRegionEndpoint endpoint = getMultiRegionEndpoint(ref.name(), region);
+                List<Tag> remaining = new ArrayList<>(endpoint.getTags());
+                remaining.removeIf(tag -> tagKeys.contains(tag.key()));
+                endpoint.setTags(remaining);
+                multiRegionEndpointStore.put(multiRegionEndpointKey(region, ref.name()), endpoint);
+            }
+            default -> throw new AwsException("NotFoundException",
+                    "Resource " + arn + " was not found.", 404);
+        }
     }
 
     // name is everything after the type's first slash and may itself contain one: a tenant ARN's

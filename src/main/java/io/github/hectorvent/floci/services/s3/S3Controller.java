@@ -310,10 +310,16 @@ public class S3Controller {
             validateRawUri();
             S3Service.RequestAuthorization authorization = S3RequestAuthorizationParser.parseIfRequired(
                     s3Service.isAuthEnforced(), httpHeaders, uriInfo);
+            if (Set.of("notification", "versioning", "tagging", "object-lock", "website", "logging", "policy",
+                    "cors", "lifecycle", "acl", "encryption", "publicAccessBlock", "ownershipControls",
+                    "requestPayment", "accelerate", "replication", "metrics", "intelligent-tiering", "analytics", "inventory")
+                    .stream().anyMatch(parameter -> hasQueryParam(uriInfo, parameter))) {
+                s3Service.validateExpectedBucketOwner(bucket, httpHeaders.getHeaderString("x-amz-expected-bucket-owner"));
+            }
             if (hasQueryParam(uriInfo, "notification")) {
                 s3Service.authorizeBucketWrite(bucket, "s3:PutBucketNotification", authorization);
                 return handlePutBucketNotification(bucket, body,
-                        Boolean.parseBoolean(httpHeaders.getHeaderString("x-amz-skip-destination-validation")));
+                        "true".equalsIgnoreCase(httpHeaders.getHeaderString("x-amz-skip-destination-validation")));
             }
             if (hasQueryParam(uriInfo, "versioning")) {
                 s3Service.authorizeBucketWrite(bucket, "s3:PutBucketVersioning", authorization);
@@ -3108,7 +3114,10 @@ public class S3Controller {
             appendChecksumHeaders(resp, obj.getChecksum());
         }
         appendLockHeaders(resp, obj);
-        appendExpirationHeader(resp, obj);
+        if (obj.getRestoreExpiryDate() != null && Instant.now().isBefore(obj.getRestoreExpiryDate())) {
+            resp.header("x-amz-restore", "ongoing-request=\"false\", expiry-date=\""
+                    + RFC_822.format(obj.getRestoreExpiryDate()) + "\"");
+        }
     }
 
     private void appendExpirationHeader(Response.ResponseBuilder resp, S3Object obj) {
@@ -3735,10 +3744,17 @@ public class S3Controller {
                 .end("Error")
                 .build();
         Response.ResponseBuilder response = Response.status(e.getHttpStatus())
-                .entity(xml).type(MediaType.APPLICATION_XML);
-        // A request refused because it reached a delete marker says so in x-amz-delete-marker.
-        if (e.getExtendedData() != null && "DeleteMarker".equals(e.getExtendedData().get("ResourceType"))) {
-            response.header("x-amz-delete-marker", "true");
+                .entity(xml)
+                .type(MediaType.APPLICATION_XML);
+        if (e instanceof S3DeleteMarkerException marker) {
+            response.header("x-amz-delete-marker", "true")
+                    .header("x-amz-version-id", marker.versionId());
+            if (marker.selectedByVersionId()) {
+                response.header("Allow", "DELETE");
+                if (marker.lastModified() != null) {
+                    response.header("Last-Modified", RFC_822.format(marker.lastModified()));
+                }
+            }
         }
         return response.build();
     }
@@ -4327,17 +4343,30 @@ public class S3Controller {
 
     private String extractObjectKey(UriInfo uriInfo, String bucket, String fallbackKey) {
         validateRawUri();
-        String rawPath = currentVertxRequest.getCurrent().request().path();
-        // A virtual-hosted raw path is the key alone (see S3ObjectKeys.isVirtualHostedRawPath):
-        // searching it for "/<bucket>/" finds that string only when the KEY happens to contain the
-        // bucket's name as a segment, and everything up to that segment was then dropped from the key.
-        String key = S3ObjectKeys.fromRawPath(rawPath, uriInfo.getRequestUri().getPath(), bucket);
-        if (key == null) {
-            // Should not happen on standard /{bucket}/{key:.+} routes, but can happen when
-            // requests are rerouted from a single-segment route (e.g. createBucket / handleBucketPost)
-            String pathKey = uriInfo.getPathParameters().getFirst("key");
-            key = pathKey != null ? pathKey : fallbackKey;
+        String rawUri = currentVertxRequest.getCurrent().request().uri();
+        int qIdx = rawUri.indexOf('?');
+        String rawPath = qIdx >= 0 ? rawUri.substring(0, qIdx) : rawUri;
+        String bucketPrefix = "/" + bucket + "/";
+        String rawKey;
+        if (isVirtualHostedRawPath(uriInfo, bucket, rawPath)) {
+            // Virtual-hosted style: S3VirtualHostFilter rewrote the JAX-RS URI to "/<bucket>" +
+            // path, but the RAW path is still the key alone. Searching it for "/<bucket>/" finds
+            // that string only when the KEY happens to contain the bucket's name as a segment,
+            // and everything up to that segment was then dropped from the key.
+            rawKey = rawPath.substring(1);
+        } else {
+            int prefixIndex = rawPath.indexOf(bucketPrefix);
+            if (prefixIndex < 0) {
+                // Should not happen on standard /{bucket}/{key:.+} routes, but can happen when
+                // requests are rerouted from a single-segment route (e.g. createBucket / handleBucketPost)
+                String pathKey = uriInfo.getPathParameters().getFirst("key");
+                String resolvedKey = pathKey != null ? pathKey : fallbackKey;
+                validateKeyNoTraversal(resolvedKey);
+                return resolvedKey;
+            }
+            rawKey = rawPath.substring(prefixIndex + bucketPrefix.length());
         }
+        String key = URLDecoder.decode(rawKey.replace("+", "%2B"), StandardCharsets.UTF_8);
         validateKeyNoTraversal(key);
         return key;
     }

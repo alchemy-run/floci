@@ -50,6 +50,12 @@ public class CloudFrontDistributionFilter implements ContainerRequestFilter {
 
     @Override
     public void filter(ContainerRequestContext requestContext) {
+        URI originalUri = requestContext.getUriInfo().getRequestUri();
+        String path = originalUri.getRawPath();
+        if (path != null && (path.startsWith("/_floci/") || path.startsWith("/_cloudfront/")
+                || path.startsWith("/2020-05-31/"))) {
+            return;
+        }
         String host = RequestHost.of(requestContext);
         if (host == null) {
             return;
@@ -64,7 +70,6 @@ public class CloudFrontDistributionFilter implements ContainerRequestFilter {
             return;
         }
 
-        URI originalUri = requestContext.getUriInfo().getRequestUri();
         String rawPath = originalUri.getRawPath();
         if (rawPath == null || rawPath.isEmpty()) {
             rawPath = "/";

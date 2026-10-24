@@ -217,23 +217,20 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
         validateOriginCustomHeaders(dist.getConfig());
         validateResponseHeadersPolicyReferences(dist.getConfig(), null);
         validateTrustedKeyGroups(dist.getConfig());
-        validateOriginAccessControls(dist.getConfig());
-        return whileCertificatesHeld(dist.getConfig(), () -> {
-            validateViewerCertificate(dist.getConfig());
-            String id = generateDistributionId();
-            dist.setId(id);
-            dist.setArn(arn("distribution/" + id));
-            dist.setDomainName(domainNameFor(id));
-            dist.setStatus("Deployed");
-            dist.setLastModifiedTime(Instant.now());
-            dist.setEtag(UUID.randomUUID().toString());
-            if (tags != null && !tags.isEmpty()) {
-                dist.setTags(tags);
-                tagStore.put("distribution/" + id, tags);
-            }
-            distStore.put(id, dist);
-            return dist;
-        });
+        String id = generateDistributionId();
+        dist.setId(id);
+        dist.setArn(AwsArnUtils.Arn.of("cloudfront", "", accountId, "distribution/" + id).toString());
+        dist.setDomainName(domainNameFor(id));
+        dist.setStatus("Deployed");
+        dist.setLastModifiedTime(Instant.now());
+        dist.setEtag(UUID.randomUUID().toString());
+        if (tags != null && !tags.isEmpty()) {
+            dist.setTags(tags);
+            tagStore.put("distribution/" + id, tags);
+        }
+        distStore.put(id, dist);
+        bindEdgePort(id);
+        return dist;
     }
 
     public Distribution getDistribution(String id) {
@@ -1518,20 +1515,16 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
     // ── CloudFront Functions ──────────────────────────────────────────────────
 
     public synchronized CloudFrontFunction createFunction(CloudFrontFunction fn) {
-        validateFunctionRuntime(fn.getRuntime());
-        // The bare name holds the DEVELOPMENT stage, and the LIVE stage of releases before
-        // stage-aware keys.
-        if (functionStore.get(fn.getName()).isPresent()
-                || functionStore.get(functionKey(fn.getName(), "LIVE")).isPresent()) {
+        if (fn.getName() != null && findFunction(fn.getName(), null).isPresent()) {
             throw new AwsException("FunctionAlreadyExists",
-                    "A function with the same name already exists in this AWS account.", 409);
+                    "A function with the specified name already exists.", 409);
         }
-        fn.setStage("DEVELOPMENT");
+        fn.setStage(FUNCTION_STAGE_DEVELOPMENT);
         fn.setStatus("UNPUBLISHED");
         fn.setEtag(UUID.randomUUID().toString());
         fn.setCreatedTime(Instant.now());
         fn.setLastModifiedTime(Instant.now());
-        functionStore.put(fn.getName(), fn);
+        functionStore.put(functionKey(fn.getName(), FUNCTION_STAGE_DEVELOPMENT), fn);
         return fn;
     }
 
@@ -1543,19 +1536,22 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
 
     public synchronized CloudFrontFunction updateFunction(String name, String ifMatch,
                                                           CloudFrontFunction updated) {
-        validateFunctionRuntime(updated.getRuntime());
-        CloudFrontFunction existing = describeFunction(name, null);
+        CloudFrontFunction existing = describeFunction(name, FUNCTION_STAGE_DEVELOPMENT);
         if (!existing.getEtag().equals(ifMatch)) {
             throw new AwsException("InvalidIfMatchVersion",
                     "The If-Match version is missing or not valid for the resource.", 400);
         }
         updated.setName(name);
-        updated.setStage(existing.getStage());
+        updated.setStage(FUNCTION_STAGE_DEVELOPMENT);
         updated.setStatus(existing.getStatus());
         updated.setEtag(UUID.randomUUID().toString());
         updated.setCreatedTime(existing.getCreatedTime());
         updated.setLastModifiedTime(Instant.now());
-        functionStore.put(name, updated);
+        if (updated.getKeyValueStoreArns() == null || updated.getKeyValueStoreArns().isEmpty()) {
+            updated.setKeyValueStoreArns(existing.getKeyValueStoreArns());
+        }
+        functionStore.put(functionKey(name, FUNCTION_STAGE_DEVELOPMENT), updated);
+        functionStore.delete(name + ":" + FUNCTION_STAGE_DEVELOPMENT);
         return updated;
     }
 
@@ -2099,7 +2095,7 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
     public synchronized StreamingDistribution createStreamingDistribution(StreamingDistribution sd) {
         String id = generateDistributionId();
         sd.setId(id);
-        sd.setArn(arn("streaming-distribution/" + id));
+        sd.setArn(AwsArnUtils.Arn.of("cloudfront", "", accountId, "streaming-distribution/" + id).toString());
         sd.setDomainName(domainNameFor(id));
         sd.setStatus("Deployed");
         sd.setLastModifiedTime(Instant.now());

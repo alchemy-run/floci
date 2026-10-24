@@ -1453,11 +1453,6 @@ public class EcsContainerManager {
         new ArrayList<>(handle.getLogStreamsByContainerId().keySet())
                 .forEach(dockerId -> finalizeLogStream(handle, dockerId));
         removeFirelensVolume(handle);
-        revokeTaskRoleCredentials(handle.getTaskArn());
-        if (allRemoved) {
-            removeTaskVolumes(handle);
-            releaseTaskLinkLocalAddresses(handle.getTaskArn());
-        }
     }
 
     /**
@@ -1494,9 +1489,6 @@ public class EcsContainerManager {
         // period its container definition asked for.
         Set<String> terminatedContainerIds = new HashSet<>();
         for (Map.Entry<String, String> entry : handle.getContainerIds().entrySet()) {
-            if (handle.isContainerRemoved(entry.getKey())) {
-                continue;
-            }
             String dockerId = entry.getValue();
             try {
                 lifecycleManager.getDockerClient().stopContainerCmd(dockerId)
@@ -1518,12 +1510,7 @@ public class EcsContainerManager {
                 continue;
             }
             String dockerId = entry.getValue();
-            Integer exitCode = handle.getRecordedExitCode(name);
-            if (exitCode == null) {
-                exitCode = getExitCodeIfStopped(dockerId);
-                handle.recordExitCode(name, exitCode);
-            }
-            exitCodes.put(name, exitCode);
+            exitCodes.put(name, getExitCodeIfStopped(dockerId));
             // Read before the removal below, which is the last moment the daemon still knows it.
             handle.recordFinishedAt(name, getFinishedAtIfStopped(dockerId));
             try {
@@ -1541,19 +1528,8 @@ public class EcsContainerManager {
         // A force removal terminates Docker's follow-log transport even when the preceding stop failed.
         // Preserve handles for any container that still may be running after both operations failed.
         terminatedContainerIds.forEach(dockerId -> finalizeLogStream(handle, dockerId));
-        if (handle.allContainersRemoved()) {
-            cleanupProtectedNetwork(handle);
-            removeFirelensVolume(handle);
-            removeTaskVolumes(handle);
-            // Only now: a container that survived a failed removal still holds its address.
-            releaseTaskLinkLocalAddresses(handle.getTaskArn());
-        }
-        // Revoked whether or not removal succeeded, unlike everything above. A task being
-        // stopped must not keep usable credentials just because Docker could not remove one of
-        // its containers: the retry that would eventually revoke them depends on the handle
-        // being retained, which only happens while a log stream is still open, so a container
-        // without one (a FireLens router, say) would strand them for the life of the process.
-        revokeTaskRoleCredentials(handle.getTaskArn());
+        cleanupProtectedNetwork(handle);
+        removeFirelensVolume(handle);
         return exitCodes;
     }
 

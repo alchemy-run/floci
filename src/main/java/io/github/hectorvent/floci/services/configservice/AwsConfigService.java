@@ -714,24 +714,28 @@ public class AwsConfigService {
         recorderLastStopTime.remove(runtimeKey(region));
     }
 
-    public void startConfigurationRecorder(String region, String name) {
+    public synchronized void startConfigurationRecorder(String region, String name) {
         ConfigurationRecorder recorder = configurationRecorders.get(region);
         if (recorder == null || !recorder.name().equals(name)) {
             throw new AwsException("NoSuchConfigurationRecorderException",
                     "Cannot find configuration recorder with the specified name.", 400);
         }
-        recorderRunning.put(runtimeKey(region), true);
-        recorderLastStartTime.put(runtimeKey(region), now());
+        if (!deliveryChannels.containsKey(region)) {
+            throw new AwsException("NoAvailableDeliveryChannelException",
+                    "A delivery channel is required before starting the configuration recorder.", 400);
+        }
+        recorderRunning.put(recorderStateKey(region), true);
+        recorderLastStartTime.put(recorderStateKey(region), now());
     }
 
-    public void stopConfigurationRecorder(String region, String name) {
+    public synchronized void stopConfigurationRecorder(String region, String name) {
         ConfigurationRecorder recorder = configurationRecorders.get(region);
         if (recorder == null || !recorder.name().equals(name)) {
             throw new AwsException("NoSuchConfigurationRecorderException",
                     "Cannot find configuration recorder with the specified name.", 400);
         }
-        recorderRunning.put(runtimeKey(region), false);
-        recorderLastStopTime.put(runtimeKey(region), now());
+        recorderRunning.put(recorderStateKey(region), false);
+        recorderLastStopTime.put(recorderStateKey(region), now());
     }
 
     public List<ConfigurationRecorderStatus> describeConfigurationRecorderStatus(String region, List<String> names) {
@@ -753,10 +757,10 @@ public class AwsConfigService {
         }
         ConfigurationRecorderStatus status = new ConfigurationRecorderStatus(
                 recorder.name(),
-                recorderRunning.getOrDefault(runtimeKey(region), false),
-                recorderLastStartTime.containsKey(runtimeKey(region)) ? "SUCCESS" : "Pending",
-                recorderLastStartTime.get(runtimeKey(region)),
-                recorderLastStopTime.get(runtimeKey(region)));
+                recorderRunning.getOrDefault(recorderStateKey(region), false),
+                recorderLastStartTime.containsKey(recorderStateKey(region)) ? "SUCCESS" : "Pending",
+                recorderLastStartTime.get(recorderStateKey(region)),
+                recorderLastStopTime.get(recorderStateKey(region)));
         return List.of(status);
     }
 
@@ -799,7 +803,7 @@ public class AwsConfigService {
             throw new AwsException("NoSuchDeliveryChannelException",
                     "Cannot find delivery channel with the specified name.", 400);
         }
-        if (recorderRunning.getOrDefault(runtimeKey(region), false)) {
+        if (recorderRunning.getOrDefault(recorderStateKey(region), false)) {
             throw new AwsException("LastDeliveryChannelDeleteFailedException",
                     "You cannot delete the delivery channel you specified because the customer managed "
                             + "configuration recorder is running.", 400);

@@ -337,21 +337,17 @@ public class SsmJsonHandler {
                 node.put("Description", p.getDescription());
             }
             node.put("DataType", p.getDataType());
-            if (SsmService.keyIdOf(p) != null) {
-                node.put("KeyId", SsmService.keyIdOf(p));
+            if (p.getArn() != null) {
+                node.put("ARN", p.getArn());
+            }
+            if (p.getTier() != null) {
+                node.put("Tier", p.getTier());
             }
             if (p.getAllowedPattern() != null) {
                 node.put("AllowedPattern", p.getAllowedPattern());
             }
-            node.put("Tier", SsmService.tierOf(p));
-            if (p.getPolicies() != null) {
-                ArrayNode policies = node.putArray("Policies");
-                for (JsonNode policy : p.getPolicies()) {
-                    policies.addObject()
-                            .put("PolicyText", policy.toString())
-                            .put("PolicyType", policy.path("Type").asText(null))
-                            .put("PolicyStatus", "Pending");
-                }
+            if (p.getKeyId() != null) {
+                node.put("KeyId", p.getKeyId());
             }
             parametersArray.add(node);
         }

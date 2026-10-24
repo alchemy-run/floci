@@ -122,12 +122,12 @@ public class KmsService implements ResourceProvider {
 
     public byte[] generateRandom(int numberOfBytes) {
         if (numberOfBytes < 1) {
-            throw SmithyValidationErrors.validationException("Value '" + numberOfBytes
-                    + "' at 'numberOfBytes' failed to satisfy constraint: Member must have value greater than or equal to 1");
+            throw new AwsException("ValidationException", "1 validation error detected: Value '" + numberOfBytes
+                    + "' at 'numberOfBytes' failed to satisfy constraint: Member must have value greater than or equal to 1", 400);
         }
         if (1024 < numberOfBytes) {
-            throw SmithyValidationErrors.validationException("Value '" + numberOfBytes
-                    + "' at 'numberOfBytes' failed to satisfy constraint: Member must have value less than or equal to 1024");
+            throw new AwsException("ValidationException", "1 validation error detected: Value '" + numberOfBytes
+                    + "' at 'numberOfBytes' failed to satisfy constraint: Member must have value less than or equal to 1024", 400);
         }
         byte[] bytes = new byte[numberOfBytes];
         secureRandom.nextBytes(bytes);
@@ -418,12 +418,9 @@ public class KmsService implements ResourceProvider {
     private static final Pattern GRANT_NAME_PATTERN =
             Pattern.compile("^[a-zA-Z0-9:/_-]+$");
 
-    /**
-     * GrantConstraintSourceArnType pattern from the KMS model (kms/2014-11-01/service-2.json),
-     * quoted verbatim in AWS's validation message; it already accepts every partition.
-     */
-    private static final java.util.regex.Pattern GRANT_CONSTRAINT_SOURCE_ARN_PATTERN =
-            java.util.regex.Pattern.compile("^arn:aws[a-z0-9-]*:[a-z0-9-]+:[a-z0-9-]*:[0-9]{12}:.+$"); // partition-literal: model pattern quoted in AWS's message
+    /** GrantConstraintSourceArnType pattern from the KMS model (kms/2014-11-01/service-2.json). */
+    private static final Pattern GRANT_CONSTRAINT_SOURCE_ARN_PATTERN =
+            Pattern.compile("^arn:aws[a-z0-9-]*:[a-z0-9-]+:[a-z0-9-]*:[0-9]{12}:.+$");
 
     private static final Set<String> GRANT_CONSTRAINT_MEMBERS =
             Set.of("EncryptionContextSubset", "EncryptionContextEquals", "SourceArn");
@@ -521,9 +518,6 @@ public class KmsService implements ResourceProvider {
         validateGrantConstraints(constraints);
 
         KmsKey key = resolveKey(keyId, region);
-        // An AWS managed key's policy allows kms:CreateGrant only through the service that owns
-        // it (a kms:ViaService condition), never to the account directly.
-        requireCustomerManaged(key, "kms:CreateGrant");
         requireNotPendingDeletion(key);
         String grantId = UUID.randomUUID().toString();
         byte[] tokenBytes = new byte[32];
@@ -777,9 +771,9 @@ public class KmsService implements ResourceProvider {
 
     public void scheduleKeyDeletion(String keyId, int pendingWindowInDays, String region) {
         KmsKey key = resolveKey(keyId, region);
-        requireCustomerManaged(key, "kms:ScheduleKeyDeletion");
         requireNotPendingDeletion(key);
         key.setKeyState("PendingDeletion");
+        key.setEnabled(false);
         key.setDeletionDate(Instant.now().plusSeconds((long) pendingWindowInDays * 86400).getEpochSecond());
         keyStore.put(region + "::" + key.getKeyId(), key);
     }
@@ -791,13 +785,8 @@ public class KmsService implements ResourceProvider {
      */
     public void cancelKeyDeletion(String keyId, String region) {
         KmsKey key = resolveKey(keyId, region);
-        requireCustomerManaged(key, "kms:CancelKeyDeletion");
-        if (lacksImportedKeyMaterial(key)) {
-            key.setKeyState(PENDING_IMPORT);
-            key.setEnabled(false);
-        } else {
-            key.setKeyState("Enabled");
-        }
+        key.setKeyState(lacksImportedKeyMaterial(key) ? PENDING_IMPORT : "Disabled");
+        key.setEnabled(false);
         key.setDeletionDate(0);
         keyStore.put(region + "::" + key.getKeyId(), key);
     }
@@ -845,7 +834,6 @@ public class KmsService implements ResourceProvider {
 
     public void updateKeyDescription(String keyId, String description, String region) {
         KmsKey key = resolveKey(keyId, region);
-        requireCustomerManaged(key, "kms:UpdateKeyDescription");
         requireNotPendingDeletion(key);
         key.setDescription(description);
         keyStore.put(region + "::" + key.getKeyId(), key);
@@ -868,19 +856,11 @@ public class KmsService implements ResourceProvider {
     }
 
     public void enableKeyRotation(String keyId, String region) {
-        KmsKey key = resolveKey(keyId, region);
-        requireCustomerManaged(key, "kms:EnableKeyRotation");
-        validateRotationOrigin(key);
-        validateKeyIsUsableForCryptoOperations(key);
-        validateRotationKeySpec(key);
-        key.setKeyRotationEnabled(true);
-        keyStore.put(region + "::" + key.getKeyId(), key);
-        LOG.infov("Enabled key rotation for KMS key: {0} in {1}", key.getKeyId(), region);
+        enableKeyRotation(keyId, null, region);
     }
 
     public void disableKeyRotation(String keyId, String region) {
         KmsKey key = resolveKey(keyId, region);
-        requireCustomerManaged(key, "kms:DisableKeyRotation");
         validateRotationOrigin(key);
         validateKeyIsUsableForCryptoOperations(key);
         key.setKeyRotationEnabled(false);
@@ -890,7 +870,6 @@ public class KmsService implements ResourceProvider {
 
     public void enableKey(String keyId, String region) {
         KmsKey key = resolveKey(keyId, region);
-        requireCustomerManaged(key, "kms:EnableKey");
         requireNotPendingDeletion(key);
         requireImportedKeyMaterial(key);
         key.setEnabled(true);
@@ -901,7 +880,6 @@ public class KmsService implements ResourceProvider {
 
     public void disableKey(String keyId, String region) {
         KmsKey key = resolveKey(keyId, region);
-        requireCustomerManaged(key, "kms:DisableKey");
         requireNotPendingDeletion(key);
         requireImportedKeyMaterial(key);
         key.setEnabled(false);
@@ -914,12 +892,7 @@ public class KmsService implements ResourceProvider {
     public String rotateKeyOnDemand(String keyId, String region) {
         synchronized (backingKeyMaterialLock) {
             KmsKey key = resolveKey(keyId, region);
-            requireCustomerManaged(key, "kms:RotateKeyOnDemand");
             validateKeyIsUsableForCryptoOperations(key);
-            if (MULTI_REGION_REPLICA.equals(key.getMultiRegionKeyType())) {
-                throw new AwsException("UnsupportedOperationException",
-                        "On-demand rotation is only supported for the multi-Region primary key.", 400);
-            }
             validateRotationKeySpec(key);
             if (EXTERNAL_ORIGIN.equals(key.getOrigin())) {
                 throw new AwsException("KMSInvalidStateException",
@@ -1427,30 +1400,24 @@ public class KmsService implements ResourceProvider {
         if (!aliasName.startsWith("alias/")) {
             throw new AwsException("InvalidAliasNameException", "Alias name must begin with 'alias/'", 400);
         }
-        if (AwsManagedKeys.isReservedAlias(aliasName)) {
-            // AWS reserves the whole alias/aws/ namespace for its own keys and rejects the name
-            // outright, so a module that tries to claim one fails here exactly as it would there.
-            throw new AwsException("InvalidAliasNameException",
-                    "Alias name cannot begin with '" + AwsManagedKeys.RESERVED_ALIAS_PREFIX + "'", 400);
+        String storageKey = region + "::" + aliasName;
+        if (aliasStore.get(storageKey).isPresent()) {
+            throw new AwsException("AlreadyExistsException",
+                    "An alias with the name " + aliasName + " already exists", 400);
         }
         KmsKey key = resolveKey(targetKeyId, region); // Validate key exists and normalize to plain key ID
-        // AWS managed keys already carry the only alias they may have, the reserved one, and
-        // CreateAlias cannot give them a second. Letting it through would be the same class of
-        // error as seeding a key AWS does not have: the call succeeds here and fails there.
-        // AccessDeniedException rather than a CreateAlias-specific code, because the refusal is an
-        // authorization outcome (the key's policy grants the account nothing) and CreateAlias
-        // publishes no error for this case.
-        requireCustomerManaged(key, "kms:CreateAlias");
         requireNotPendingDeletion(key);
 
         String aliasArn = regionResolver.buildArn("kms", region, aliasName);
         KmsAlias alias = new KmsAlias(aliasName, aliasArn, key.getKeyId());
-        aliasStore.put(region + "::" + aliasName, alias);
+        aliasStore.put(storageKey, alias);
         LOG.infov("Created KMS alias: {0} -> {1}", aliasName, key.getKeyId());
     }
 
     public void updateAlias(String aliasName, String targetKeyId, String region) {
-        requireUnreservedAlias(aliasName, "kms:UpdateAlias");
+        if (aliasName == null || !aliasName.startsWith("alias/")) {
+            throw new AwsException("InvalidAliasNameException", "Alias name must begin with 'alias/'", 400);
+        }
         String storageKey = region + "::" + aliasName;
         KmsAlias existing = aliasStore.get(storageKey)
                 .orElseThrow(() -> aliasNotFound(aliasName, region));
@@ -1458,9 +1425,6 @@ public class KmsService implements ResourceProvider {
         KmsKey currentKey = resolveKey(existing.getTargetKeyId(), region);
         KmsKey newKey = resolveKey(targetKeyId, region); // Validate key exists and normalize to plain key ID
 
-        // Same reason as CreateAlias: repointing a customer alias at an AWS managed key would
-        // succeed here and fail against AWS.
-        requireCustomerManaged(newKey, "kms:UpdateAlias");
         requireNotPendingDeletion(newKey);
         if (currentKey.getKeyUsage() != newKey.getKeyUsage() || !sameKeyFamily(currentKey.getKeySpec(), newKey.getKeySpec())) {
             throw new AwsException("ValidationException",
@@ -2157,7 +2121,6 @@ public class KmsService implements ResourceProvider {
 
     public void tagResource(String keyId, Map<String, String> tags, String region) {
         KmsKey key = resolveKey(keyId, region);
-        requireCustomerManaged(key, "kms:TagResource");
         requireNotPendingDeletion(key);
         ReservedTags.rejectReservedTagsOnUpdate(tags);
         key.getTags().putAll(tags);
@@ -2166,7 +2129,6 @@ public class KmsService implements ResourceProvider {
 
     public void untagResource(String keyId, List<String> tagKeys, String region) {
         KmsKey key = resolveKey(keyId, region);
-        requireCustomerManaged(key, "kms:UntagResource");
         requireNotPendingDeletion(key);
         tagKeys.forEach(key.getTags()::remove);
         keyStore.put(region + "::" + key.getKeyId(), key);
@@ -2175,9 +2137,6 @@ public class KmsService implements ResourceProvider {
     // ──────────────────────────── Helpers ────────────────────────────
 
     private KmsKey resolveKey(String keyIdOrArn, String region) {
-        if (referencesReservedAlias(keyIdOrArn)) {
-            ensureAwsManagedKeys(region);
-        }
         if (AwsArnUtils.isArnFor(keyIdOrArn, "kms")) {
             String arnRegion = AwsArnUtils.parse(keyIdOrArn).region();
             if (!region.equals(arnRegion)) {

@@ -1029,7 +1029,30 @@ public class EmrHandler {
         return steps;
     }
 
+    private Long idleTimeout(JsonNode policy) {
+        JsonNode value = policy.path("IdleTimeout");
+        return value.isNumber() ? Long.valueOf(value.asLong()) : null;
+    }
+
+    private List<EmrBootstrapAction> parseBootstrapActions(JsonNode actionsNode) {
+        List<EmrBootstrapAction> actions = new ArrayList<>();
+        if (!actionsNode.isArray()) {
+            return actions;
+        }
+        for (JsonNode a : actionsNode) {
+            EmrBootstrapAction action = new EmrBootstrapAction();
+            action.setName(a.path("Name").asText(null));
+            JsonNode script = a.path("ScriptBootstrapAction");
+            action.setScriptPath(script.path("Path").asText(null));
+            action.setArgs(stringList(script.path("Args")));
+            actions.add(action);
+        }
+        return actions;
+    }
 
 
-
+    private Integer optionalInt(JsonNode node, String field) {
+        JsonNode value = node.path(field);
+        return value.isNumber() ? Integer.valueOf(value.asInt()) : null;
+    }
 }

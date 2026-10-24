@@ -750,7 +750,6 @@ public class CodePipelineService {
     private ObjectNode getPipelineState(JsonNode request, String region, String account) {
         CodePipelinePipeline pipeline = requirePipeline(account, region, text(request, "name"));
         List<CodePipelineExecution> pipelineExecutions = executions(account, region, pipeline.getName());
-        CodePipelineExecution latest = pipelineExecutions.stream().findFirst().orElse(null);
         ObjectNode response = mapper.createObjectNode();
         response.put("pipelineName", pipeline.getName());
         response.put("pipelineVersion", pipeline.getVersion());
@@ -767,22 +766,25 @@ public class CodePipelineService {
             putIfNotNull(transitionNode, "lastChangedAt", transition.getLastChangedAt());
             putIfNotNull(transitionNode, "lastChangedBy", transition.getLastChangedBy());
             putIfNotNull(transitionNode, "disabledReason", transition.getReason());
+            CodePipelineExecution latestStageExecution = pipelineExecutions.stream()
+                    .filter(execution -> hasStageExecution(execution, stageName))
+                    .findFirst()
+                    .orElse(null);
             ArrayNode actionStates = state.putArray("actionStates");
             for (JsonNode action : stage.path("actions")) {
                 ObjectNode actionState = actionStates.addObject();
                 String actionName = action.path("name").asText();
                 actionState.put("actionName", actionName);
-                if (latest != null) {
-                    ActionExecution latestAction = latestActionExecution(latest, stageName, actionName);
-                    if (latestAction != null) {
-                        actionState.set("latestExecution", actionStateNode(latestAction));
-                    }
+                itemStore.getForAccount(account, itemKey(region, "action-revision",
+                                sourcePollCursorId(pipeline.getName(), stageName, actionName)))
+                        .ifPresent(revision -> actionState.set("currentRevision", revision.getData().path("revision")));
+                if (latestStageExecution != null) {
+                    actionExecutionsForStage(latestStageExecution, stageName).stream()
+                            .filter(a -> actionName.equals(a.getActionName()))
+                            .findFirst()
+                            .ifPresent(a -> actionState.set("latestExecution", actionStateNode(a)));
                 }
             }
-            CodePipelineExecution latestStageExecution = pipelineExecutions.stream()
-                    .filter(execution -> hasStageExecution(execution, stageName))
-                    .findFirst()
-                    .orElse(null);
             if (latestStageExecution != null) {
                 ObjectNode latestExecution = state.putObject("latestExecution");
                 latestExecution.put("pipelineExecutionId", latestStageExecution.getPipelineExecutionId());
@@ -2827,8 +2829,13 @@ public class CodePipelineService {
         return latest;
     }
 
-    private void requireStage(CodePipelinePipeline pipeline, String stageName) {
-        stageByName(pipeline, stageName);
+    private JsonNode requireStage(CodePipelinePipeline pipeline, String stageName) {
+        for (JsonNode stage : pipeline.getDeclaration().path("stages")) {
+            if (stageName.equals(stage.path("name").asText())) {
+                return stage;
+            }
+        }
+        throw new AwsException("StageNotFoundException", "Stage not found: " + stageName, 400);
     }
 
     private JsonNode requireAction(CodePipelinePipeline pipeline, String stageName, String actionName) {
@@ -2851,10 +2858,8 @@ public class CodePipelineService {
             node = mapper.valueToTree(execution);
         }
         node.remove(List.of("accountId", "region", "startTime", "lastUpdateTime",
-                "sourceRevisions", "sourceRevisionOverrides", "actionExecutions", "currentStage", "waitingStage",
-                "admissionOrdinal",
-                "stopRequested", "abandon", "rollbackTargetPipelineExecutionId", "rollbackStageName",
-                "stageExecutionStatuses", "artifactsReleased", "ruleExecutions", "conditionOverrides"));
+                "sourceRevisions", "actionExecutions", "currentStage", "stopRequested", "abandon",
+                "rollbackTargetPipelineExecutionId", "resumeStageName", "retryFailedActionsOnly"));
         if (execution.getRollbackTargetPipelineExecutionId() != null) {
             node.putObject("rollbackMetadata").put(
                     "rollbackTargetPipelineExecutionId", execution.getRollbackTargetPipelineExecutionId());

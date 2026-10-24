@@ -3713,7 +3713,7 @@ public class LambdaService implements ResourceProvider {
             statement.put("Principal", permissionPrincipal(principal, region));
             statement.put("Action", action);
             statement.put("Resource", resourceArn);
-            Map<String, Object> condition = permissionCondition(request);
+            Map<String, Object> condition = buildPermissionCondition(request);
             if (!condition.isEmpty()) {
                 statement.put("Condition", condition);
             }
@@ -4436,4 +4436,22 @@ public class LambdaService implements ResourceProvider {
         }
         fn.setVpcEniIds(new ArrayList<>());
     }
+
+    /** An Amazon MSK event source reads exactly one topic. */
+    private static List<String> parseMskTopics(Object rawTopics) {
+        if (rawTopics == null) {
+            throw new AwsException("InvalidParameterValueException",
+                    "Topics is required for Amazon MSK event sources", 400);
+        }
+        if (!(rawTopics instanceof List<?> topicList) || topicList.size() != 1
+                || !(topicList.getFirst() instanceof String topic) || topic.isBlank()) {
+            throw new AwsException("InvalidParameterValueException",
+                    "Topics must contain exactly one non-blank topic name for Amazon MSK event sources", 400);
+        }
+        return new ArrayList<>(List.of(topic));
+    }
+
+
+
+
 }

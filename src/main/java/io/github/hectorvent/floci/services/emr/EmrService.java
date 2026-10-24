@@ -160,11 +160,14 @@ public class EmrService {
         // ValidationException if any were termination protected.
         boolean anyProtected = false;
         for (String id : ids) {
-            EmrCluster cluster = findCluster(id).orElse(null);
-            if (cluster == null) {
-                continue;
+            if (clusterStore.get(id).isEmpty()) {
+                throw new AwsException("ValidationException", "Specified job flow ID not valid: " + id, 400);
             }
-            if ("TERMINATED".equals(cluster.getState())) {
+        }
+        for (String id : ids) {
+            EmrCluster cluster = clusterStore.get(id).orElseThrow();
+            if (cluster.isTerminationProtected()) {
+                anyProtected = true;
                 continue;
             }
             if (cluster.isTerminationProtected()) {

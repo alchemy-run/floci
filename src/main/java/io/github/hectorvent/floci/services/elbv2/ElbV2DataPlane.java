@@ -523,15 +523,15 @@ public class ElbV2DataPlane {
     }
 
     private void clearPortBindings(int port) {
-        listenersByHostAndPort.remove(port);
-        for (Map.Entry<String, ListenerBinding> entry : listenerBindings.entrySet()) {
-            if (entry.getValue().port() == port) {
-                // Retain the old binding claim until its metadata is gone. A publisher on
-                // another port cannot install the same listener's new metadata in between.
-                ruleChains.remove(entry.getKey());
-                listenerRegions.remove(entry.getKey());
-                listenerBindings.remove(entry.getKey(), entry.getValue());
-            }
+        sharedAddressAffinity.remove(port);
+        Map<String, String> listenersByHost = listenersByHostAndPort.remove(port);
+        if (listenersByHost == null) {
+            return;
+        }
+        for (String listenerArn : listenersByHost.values()) {
+            listenerBindings.remove(listenerArn);
+            ruleChains.remove(listenerArn);
+            listenerRegions.remove(listenerArn);
         }
     }
 
@@ -2079,5 +2079,37 @@ public class ElbV2DataPlane {
                     req.resume();
                     req.response().setStatusCode(503).end("Service unavailable");
                 });
+    }
+
+
+    /**
+     * On AWS every load balancer owns its addresses, so a request sent to a resolved IP reaches
+     * exactly one load balancer. Every Floci load balancer resolves to the same local address, so
+     * a request addressed by IP carries no load balancer identity once two listeners share a
+     * port. The listener whose explicit (non-default) rule matches the request is the only one
+     * that could have been configured for it; when that does not single one out, the listener
+     * last resolved this way on the port keeps serving the client that was talking to it.
+     */
+    private String resolveSharedAddressListener(int port, Collection<String> candidates, HttpServerRequest req) {
+        List<String> explicitMatches = new ArrayList<>();
+        for (String candidate : candidates) {
+            AtomicReference<List<CompiledRule>> ref = ruleChains.get(candidate);
+            if (ref == null) {
+                continue;
+            }
+            for (CompiledRule compiled : ref.get()) {
+                if (compiled.matches(req)) {
+                    if (!compiled.rule.isDefault()) {
+                        explicitMatches.add(candidate);
+                    }
+                    break;
+                }
+            }
+        }
+        String selected = selectSharedAddressListener(explicitMatches, candidates, sharedAddressAffinity.get(port));
+        if (selected != null && explicitMatches.size() == 1) {
+            sharedAddressAffinity.put(port, selected);
+        }
+        return selected;
     }
 }

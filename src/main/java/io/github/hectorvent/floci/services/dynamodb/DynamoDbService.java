@@ -2438,8 +2438,7 @@ public class DynamoDbService {
     public TableDefinition updateTable(String tableName, Long readCapacity, Long writeCapacity,
                                         List<GlobalSecondaryIndex> gsiCreates, List<String> gsiDeletes,
                                         List<AttributeDefinition> newAttrDefs, String region) {
-        return updateTable(tableName, readCapacity, writeCapacity, gsiCreates, gsiDeletes,
-                           newAttrDefs, List.of(), List.of(), null, region);
+        return updateTable(tableName, readCapacity, writeCapacity, gsiCreates, gsiDeletes, newAttrDefs, region, false);
     }
 
     public TableDefinition updateTable(String tableName, Long readCapacity, Long writeCapacity,
@@ -5869,6 +5868,20 @@ public class DynamoDbService {
         return table;
     }
 
-
-
+    /**
+     * SHA-256 hex digest of a string, used by ClientRequestToken idempotency to compare
+     * request bodies. SHA-256 is required (not MD5) for the dedup contract because a
+     * collision would allow a request with different parameters to be silently treated
+     * as a replay; SHA-256 is supported on every JVM via {@link MessageDigest}.
+     */
+    private static String sha256(String input) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException e) {
+            // SHA-256 is mandated by the JLS to be available on every JVM; this should never trigger.
+            throw new IllegalStateException("SHA-256 is required but not available on this JVM", e);
+        }
+    }
 }

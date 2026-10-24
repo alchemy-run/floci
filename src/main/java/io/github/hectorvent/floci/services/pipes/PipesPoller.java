@@ -691,16 +691,14 @@ public class PipesPoller implements Resettable {
         return DEFAULT_BATCH_SIZE;
     }
 
+    /**
+     * EventBridge Pipes delivers a Lambda target a bare JSON array of source
+     * records — not the {@code { "Records": [...] }} Lambda event-source-mapping
+     * envelope. Enrichment already uses {@link #asEventArray}; the Lambda path
+     * must match so handlers can treat {@code event[0].eventSource} as the batch.
+     */
     private String wrapRecords(List<JsonNode> records) {
-        try {
-            ArrayNode recordsArray = objectMapper.createArrayNode();
-            records.forEach(recordsArray::add);
-            ObjectNode root = objectMapper.createObjectNode();
-            root.set("Records", recordsArray);
-            return objectMapper.writeValueAsString(root);
-        } catch (Exception e) {
-            return "{\"Records\":[]}";
-        }
+        return wrapPipeBatch(objectMapper, records);
     }
 
     // ──────────────────────────── Record Builders ────────────────────────────

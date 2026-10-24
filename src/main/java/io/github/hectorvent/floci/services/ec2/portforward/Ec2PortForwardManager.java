@@ -238,15 +238,20 @@ public class Ec2PortForwardManager {
     }
 
     void unpublish(Instance instance, int appPort) {
-        String name = forwardContainerName(config, instance.getInstanceId(), appPort);
-        ContainerStorageHelper.removeStaleContainer(config, lifecycleManager, name);
         Integer hostPort = instance.getPublishedPorts().remove(appPort);
-        if (hostPort != null) {
-            portAllocator.release(hostPort);
-            persist(instance);
-            LOG.infov("Unpublished EC2 instance {0} app port {1} (released host port {2})",
-                    instance.getInstanceId(), appPort, hostPort);
+        boolean muxed = httpPortMux != null && hostPort != null && hostPort == appPort;
+        if (muxed) {
+            httpPortMux.unregister(appPort, publicHost(instance));
+        } else {
+            String name = forwardContainerName(instance.getInstanceId(), appPort);
+            lifecycleManager.removeIfExists(name);
+            if (hostPort != null) {
+                portAllocator.release(hostPort);
+            }
         }
+        persist(instance);
+        LOG.infov("Unpublished EC2 instance {0} app port {1} (released host port {2})",
+                instance.getInstanceId(), appPort, hostPort);
     }
 
     private void persist(Instance instance) {

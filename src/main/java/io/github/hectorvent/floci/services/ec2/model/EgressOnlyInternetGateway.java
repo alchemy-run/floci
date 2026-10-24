@@ -40,4 +40,10 @@ public class EgressOnlyInternetGateway {
 
     public List<Tag> getCreationTags() { return creationTags; }
     public void setCreationTags(List<Tag> creationTags) { this.creationTags = creationTags; }
+
+
+
+    private String attachmentState = "attached";
+
+    private String vpcId;
 }

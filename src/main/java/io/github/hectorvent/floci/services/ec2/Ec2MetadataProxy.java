@@ -53,7 +53,7 @@ public final class Ec2MetadataProxy {
 
     public static String[] startCommand(String flociHost, int imdsPort) {
         return startCommand("imds", "169.254.169.254", 80, flociHost, imdsPort,
-                imdsProbeCommand("http://169.254.169.254"));
+                "curl -fsS --max-time 1 http://169.254.169.254/latest/meta-data/instance-id >/dev/null && exit 0");
     }
 
     /**

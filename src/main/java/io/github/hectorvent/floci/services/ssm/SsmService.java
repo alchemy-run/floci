@@ -509,16 +509,26 @@ public class SsmService implements ResourceProvider {
         }
     }
 
+    /**
+     * AWS GetParameter treats {@code MyParam} and {@code /MyParam} as the same
+     * name. ECS secret {@code valueFrom} ARNs always extract a leading slash
+     * ({@code arn:...:parameter/MyParam} → {@code /MyParam}), so a PutParameter
+     * of the unrooted name must still resolve.
+     */
     private Optional<Parameter> findParameter(String name, String region) {
-        Optional<Parameter> stored = parameterStore.get(regionKey(region, name));
-        if (stored.isPresent()) {
-            return stored;
+        if (name == null || name.isBlank()) {
+            return Optional.empty();
         }
-        Optional<Parameter> selected = findSelectedVersion(name, region);
-        if (selected.isPresent()) {
-            return selected;
+        Optional<Parameter> found = parameterStore.get(regionKey(region, name));
+        if (found.isPresent()) {
+            return found;
         }
-        return publicParameter(name, region);
+        String aliased = name.startsWith("/") ? name.substring(1) : "/" + name;
+        if (aliased.isBlank() || aliased.equals(name)) {
+            return Optional.empty();
+        }
+        return parameterStore.get(regionKey(region, aliased))
+                .or(() -> publicParameter(name.startsWith("/") ? name : aliased, region));
     }
 
     /**
@@ -741,8 +751,9 @@ public class SsmService implements ResourceProvider {
             case "Name" -> parameter.getName();
             case "Type" -> parameter.getType();
             case "DataType" -> parameter.getDataType();
-            case "Tier" -> tierOf(parameter);
-            case "KeyId" -> keyIdOf(parameter);
+            case "Tier" -> parameter.getTier() != null ? parameter.getTier() : "Standard";
+            case "KeyId" -> "SecureString".equals(parameter.getType())
+                    ? (parameter.getKeyId() != null ? parameter.getKeyId() : DEFAULT_SSM_KEY_ID) : null;
             default -> null;
         };
         return actual != null && matchesAny(actual, filter);

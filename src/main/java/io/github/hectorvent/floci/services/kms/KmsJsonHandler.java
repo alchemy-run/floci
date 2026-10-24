@@ -631,8 +631,10 @@ public class KmsJsonHandler {
         if (rotationPeriod.isNumber()) {
             validateRange("rotationPeriodInDays", rotationPeriod.asInt(), 90, 2560);
         }
-        service.enableKeyRotation(request.path("KeyId").asText(), region);
-        return Response.ok().build();
+        Integer period = rotationPeriod.isMissingNode() || rotationPeriod.isNull()
+                ? null : rotationPeriod.asInt();
+        service.enableKeyRotation(request.path("KeyId").asText(), period, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
     }
 
     private Response handleDisableKeyRotation(JsonNode request, String region) {
@@ -822,7 +824,8 @@ public class KmsJsonHandler {
         if (k.getValidTo() > 0) {
             keyMetadata.put("ValidTo", k.getValidTo());
         }
-        keyMetadata.put("KeyManager", k.getKeyManager());
+        keyMetadata.put("KeyManager", "CUSTOMER");
+        keyMetadata.put("MultiRegion", k.isMultiRegion());
         keyMetadata.put("CustomerMasterKeySpec", k.getKeySpec().name());
         keyMetadata.put("KeySpec", k.getKeySpec().name());
         keyMetadata.put("MultiRegion", k.isMultiRegion());

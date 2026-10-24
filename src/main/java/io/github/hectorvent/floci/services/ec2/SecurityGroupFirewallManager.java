@@ -151,10 +151,44 @@ public class SecurityGroupFirewallManager {
         }
     }
 
-    private void ensureHelperImage() {
-        LocallyBuiltHelperImage.ensureBuilt(dockerClient, containerBuilder,
-                config.network().securityGroupEnforcement().helperImage(), "floci/network-helper:local",
-                "/docker/network-helper.Dockerfile");
+    private synchronized void ensureHelperImage() {
+        String configured = config.network().securityGroupEnforcement().helperImage();
+        if (!"floci/network-helper:local".equals(configured)) {
+            return;
+        }
+        String image = containerBuilder.resolveImage(configured);
+        try {
+            var current = dockerClient.inspectImageCmd(image).exec().getConfig();
+            if (current != null && current.getLabels() != null
+                    && "2".equals(current.getLabels().get("io.floci.network-helper.version"))) {
+                return;
+            }
+        } catch (NotFoundException missing) {
+            // Build the versioned Floci recipe in the daemon used for workloads.
+        }
+        try (InputStream dockerfile = getClass().getResourceAsStream("/docker/network-helper.Dockerfile")) {
+            if (dockerfile == null) {
+                throw new IllegalStateException("Floci network helper Dockerfile is missing");
+            }
+            byte[] content = dockerfile.readAllBytes();
+            ByteArrayOutputStream archive = new ByteArrayOutputStream(content.length + 1024);
+            try (TarArchiveOutputStream tar = new TarArchiveOutputStream(archive)) {
+                TarArchiveEntry entry = new TarArchiveEntry("Dockerfile");
+                entry.setSize(content.length);
+                tar.putArchiveEntry(entry);
+                tar.write(content);
+                tar.closeArchiveEntry();
+            }
+            try (BuildImageResultCallback callback = new BuildImageResultCallback()) {
+                String built = dockerClient.buildImageCmd(new ByteArrayInputStream(archive.toByteArray()))
+                        .withTags(Set.of(image)).exec(callback).awaitImageId();
+                if (built == null || built.isBlank()) {
+                    throw new IllegalStateException("Docker did not build the Floci network helper image");
+                }
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Cannot build the Floci network helper image", e);
+        }
     }
 
     /** Registers only after the default-deny table exists, before workload startup. */
@@ -355,5 +389,51 @@ public class SecurityGroupFirewallManager {
     public record Namespace(String helperId, String transportAddress) {}
     private record ProtectedEndpoint(SecurityGroupNftCompiler.Endpoint endpoint, String helperId,
                                      Map<String, List<String>> prefixLists) {}
+
+    /** A private namespace is also required for overlapping VPC address translation without SG enforcement. */
+    public Namespace createNetworkNamespace(String service, String resourceId, String accountId, String region,
+                                            Optional<String> dockerNetwork, Map<Integer, Integer> portBindings) {
+        Info daemon = dockerClient.infoCmd().exec();
+        if (!"linux".equalsIgnoreCase(daemon.getOsType())) {
+            throw new IllegalStateException("Security-group enforcement requires a Linux Docker daemon");
+        }
+        if (daemon.getSecurityOptions() != null && daemon.getSecurityOptions().stream()
+                .anyMatch(option -> option.toLowerCase(Locale.ROOT).contains("rootless"))) {
+            throw new IllegalStateException("Security-group enforcement requires rootful Docker");
+        }
+        ensureHelperImage();
+        String name = ContainerStorageHelper.resourceName(config, "sg", null,
+                resourceId.replaceAll("[^a-zA-Z0-9_.-]", "-"));
+        String namespace = config.docker().resourceNamespace().orElse("");
+        String owner = namespace.isBlank() ? String.valueOf(config.port()) : namespace + "/" + config.port();
+        ContainerBuilder.Builder builder = containerBuilder.newContainer(config.network().securityGroupEnforcement().helperImage())
+                .withName(name)
+                .withDockerNetwork(dockerNetwork)
+                .withEmbeddedDns()
+                .withHostDockerInternalOnLinux()
+                .withEntrypoint(List.of("sh", "-c"))
+                .withCmd(List.of("exec sleep 2147483647"))
+                .withLabels(ContainerStorageHelper.resourceIdentityLabels(service, resourceId, accountId, region))
+                .withLabels(Map.of("floci.security-group-helper", "true", "floci_owner_port", owner));
+        if (portBindings != null) {
+            portBindings.forEach(builder::withPortBinding);
+        }
+        ContainerSpec spec = builder.build();
+        String helperId = null;
+        try {
+            helperId = lifecycleManager.createAndStart(spec).containerId();
+            String ip = dockerClient.inspectContainerCmd(helperId).exec().getNetworkSettings()
+                    .getNetworks().values().stream().map(n -> n.getIpAddress())
+                    .filter(address -> address != null && !address.isBlank())
+                    .findFirst().orElseThrow(() -> new IllegalStateException("Firewall helper has no Docker IP"));
+            apply(helperId, SecurityGroupNftCompiler.initialRuleset());
+            return new Namespace(helperId, ip);
+        } catch (Exception e) {
+            if (helperId != null) {
+                lifecycleManager.removeIfExists(helperId);
+            }
+            throw new IllegalStateException("Cannot prepare protected network namespace for " + resourceId, e);
+        }
+    }
 
 }

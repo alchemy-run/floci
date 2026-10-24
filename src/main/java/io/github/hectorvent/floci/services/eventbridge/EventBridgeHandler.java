@@ -500,9 +500,8 @@ public class EventBridgeHandler {
     private Response handleUpdateArchive(JsonNode request, String region) {
         String archiveName = request.path("ArchiveName").asText(null);
         String description = request.path("Description").asText(null);
-        String eventPattern = request.path("EventPattern").asText(null);
-        Integer retentionDays = request.hasNonNull("RetentionDays")
-                ? request.get("RetentionDays").asInt() : null;
+        String eventPattern = textOrJson(request.path("EventPattern"));
+        int retentionDays = request.path("RetentionDays").asInt(0);
         Archive archive = eventBridgeService.updateArchive(
                 archiveName, description, eventPattern, retentionDays, region);
         ObjectNode response = objectMapper.createObjectNode();

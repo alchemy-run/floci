@@ -1729,7 +1729,7 @@ public class ApiGatewayController {
                                   @PathParam("apiMappingId") String apiMappingId) {
         String region = regionResolver.resolveRegion(headers);
         StoredMapping found = service.getApiMapping(region, domainName, apiMappingId);
-        return Response.ok(toApiMappingNode(found).toString())
+        return Response.ok(toApiMappingNode(found.storedPath(), found.mapping()).toString())
                 .type(MediaType.APPLICATION_JSON).build();
     }
 
@@ -2389,13 +2389,13 @@ public class ApiGatewayController {
                 logs.put("format", s.getAccessLogSettings().format());
             }
         }
-        if (!s.getTags().isEmpty()) {
-            ObjectNode tags = node.putObject("tags");
-            s.getTags().forEach(tags::put);
-        }
         if (!s.getVariables().isEmpty()) {
             ObjectNode vars = node.putObject("variables");
             s.getVariables().forEach(vars::put);
+        }
+        if (s.getTags() != null && !s.getTags().isEmpty()) {
+            ObjectNode tags = node.putObject("tags");
+            s.getTags().forEach(tags::put);
         }
         if (!s.getMethodSettings().isEmpty()) {
             ObjectNode methodSettings = node.putObject("methodSettings");

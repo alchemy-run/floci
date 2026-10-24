@@ -368,14 +368,23 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
         if (regionLbs == null) {
             return; // AWS silently ignores non-existent LBs on delete
         }
-        LoadBalancer lb = regionLbs.get(arn);
+        regionLbs = mutableRegion(loadBalancers, region);
+        LoadBalancer lb = regionLbs.remove(arn);
         if (lb == null) {
             return;
         }
-        List<String> listenerArns;
-        synchronized (lb) {
-            if (!regionLbs.remove(arn, lb)) {
-                return;
+        // cascade: listeners → rules
+        List<String> listenerArns = lbToListeners.remove(arn);
+        if (listenerArns != null) {
+            Map<String, Listener> regionListeners = mutableRegion(listeners, region);
+            Map<String, Rule> regionRules = mutableRegion(rules, region);
+            for (String listenerArn : listenerArns) {
+                dataPlane.stopListener(listenerArn);
+                regionListeners.remove(listenerArn);
+                List<String> ruleArns = listenerToRules.remove(listenerArn);
+                if (ruleArns != null) {
+                    ruleArns.forEach(regionRules::remove);
+                }
             }
             listenerArns = listeners.getOrDefault(region, Map.of()).values().stream()
                     .filter(listener -> arn.equals(listener.getLoadBalancerArn()))
@@ -484,8 +493,7 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
                                           String matcher, String ipAddressType,
                                           Map<String, String> initialTags) {
         validateName(name, "target group");
-        validateHealthCheckPort(healthCheckPort);
-        Map<String, TargetGroup> regionTgs = targetGroups.computeIfAbsent(region, k -> new ConcurrentHashMap<>());
+        Map<String, TargetGroup> regionTgs = mutableRegion(targetGroups, region);
         boolean duplicate = regionTgs.values().stream()
                 .anyMatch(tg -> tg.getTargetGroupName().equals(name));
         if (duplicate) {
@@ -705,43 +713,27 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
     }
 
     public void deleteListener(String region, String listenerArn) {
-        while (true) {
-            Map<String, Listener> regionListeners = listeners.get(region);
-            Listener listener = regionListeners == null ? null : regionListeners.get(listenerArn);
-            if (listener == null) {
-                return;
-            }
-            ListenerState expected = listenerState(listener);
-            LoadBalancer lb = loadBalancers.getOrDefault(region, Map.of()).get(listener.getLoadBalancerArn());
-            BooleanSupplier removal = () -> {
-                if (!isCurrentListener(region, expected)) {
-                    return false;
-                }
-                regionListeners.remove(listenerArn, listener);
-                removeFromIndex(lbToListeners, listener.getLoadBalancerArn(), listenerArn);
-                Map<String, Rule> regionRules = rules.computeIfAbsent(region, ignored -> new ConcurrentHashMap<>());
-                List<String> ruleArns = listenerToRules.remove(listenerArn);
-                if (ruleArns != null) {
-                    ruleArns.forEach(regionRules::remove);
-                }
-                listeners.put(region, regionListeners);
-                rules.put(region, regionRules);
-                tags.remove(listenerArn);
-                unlinkUnreferencedTargetGroups(region, listener.getLoadBalancerArn());
-                return true;
-            };
-            boolean removed = dataPlane.removeListener(listenerArn, expected.port(), () -> {
-                if (lb == null) {
-                    return removal.getAsBoolean();
-                }
-                synchronized (lb) {
-                    return removal.getAsBoolean();
-                }
-            });
-            if (removed) {
-                return;
-            }
+        Map<String, Listener> regionListeners = listeners.get(region);
+        if (regionListeners == null) {
+            return;
         }
+        regionListeners = mutableRegion(listeners, region);
+        Listener listener = regionListeners.remove(listenerArn);
+        if (listener == null) {
+            return;
+        }
+        dataPlane.stopListener(listenerArn);
+        removeFromIndex(lbToListeners, listener.getLoadBalancerArn(), listenerArn);
+
+        Map<String, Rule> regionRules = mutableRegion(rules, region);
+        List<String> ruleArns = listenerToRules.remove(listenerArn);
+        if (ruleArns != null) {
+            ruleArns.forEach(regionRules::remove);
+        }
+        listeners.put(region, regionListeners);
+        rules.put(region, regionRules);
+        tags.remove(listenerArn);
+        unlinkUnreferencedTargetGroups(region, listener.getLoadBalancerArn());
     }
 
     public Listener modifyListener(String region, String listenerArn, String protocol, Integer port,
@@ -1121,13 +1113,28 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
     }
 
     public void addListenerCertificates(String region, String listenerArn, List<String> certArns) {
-        Listener initial = requireListener(region, listenerArn);
-        requireCertificates(region, initial.getProtocol(), certArns);
-        changeListenerCertificates(region, listenerArn, certArns, false);
+        Listener listener = requireListener(region, listenerArn);
+        List<String> certificates = listener.getCertificates();
+        for (String certArn : certArns) {
+            if (certArn != null && !certificates.contains(certArn)) {
+                certificates.add(certArn);
+            }
+        }
+        persistRegion(listeners, region);
     }
 
     public void removeListenerCertificates(String region, String listenerArn, List<String> certArns) {
-        changeListenerCertificates(region, listenerArn, certArns, true);
+        Listener listener = requireListener(region, listenerArn);
+        List<String> certificates = listener.getCertificates();
+        String defaultCert = certificates.isEmpty() ? null : certificates.getFirst();
+        if (defaultCert != null && certArns != null && certArns.contains(defaultCert)) {
+            throw new AwsException("OperationNotPermitted",
+                    "The default certificate cannot be removed. Use ModifyListener to change it.", 400);
+        }
+        if (certArns != null) {
+            certificates.removeAll(certArns);
+        }
+        persistRegion(listeners, region);
     }
 
     private void changeListenerCertificates(String region, String listenerArn, List<String> requested, boolean remove) {
@@ -2074,5 +2081,33 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
         subnet.setState("available");
         subnet.setAvailabilityZone(region + (char) ('a' + Math.floorMod(index, 3)));
         return subnet;
+    }
+
+    private static final String CANONICAL_HOSTED_ZONE_ID = "Z35SXDOTRQ7X7K";
+
+    private void restartDataPlane(Listener listener, String region) {
+        if (dataPlane == null || listener == null) {
+            return;
+        }
+        try {
+            dataPlane.restartListener(listener, region, getListenerRules(region, listener.getListenerArn()));
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    /**
+     * Data-plane bind is best-effort. A local HTTP proxy failure (null port,
+     * NLB/TCP/TLS, port conflict, NPE) must not fail CreateListener — that
+     * leaked as {@code InternalFailure: Unexpected error: null}.
+     */
+    private void startDataPlane(Listener listener, String region) {
+        if (dataPlane == null || listener == null) {
+            return;
+        }
+        try {
+            dataPlane.startListener(listener, region, getListenerRules(region, listener.getListenerArn()));
+        } catch (RuntimeException ignored) {
+            // already logged inside ElbV2DataPlane when the real impl is used
+        }
     }
 }

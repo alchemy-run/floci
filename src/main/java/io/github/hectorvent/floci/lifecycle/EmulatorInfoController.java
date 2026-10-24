@@ -167,15 +167,6 @@ public class EmulatorInfoController {
         for (Resettable service : resettables) {
             services.add(service);
         }
-        // Every service may refuse before the first destructive step, so a refusal changes nothing.
-        for (Resettable service : services) {
-            service.checkReset();
-        }
-        // Containers next: they are tracked independently of StorageBackend, so this can run
-        // in any order relative to the storage wipe below, but stopping them here means a
-        // client's reset actually reflects a clean slate instead of leaving Batch, CodeBuild,
-        // or SageMaker containers running with no record of them left in the store.
-        ContainerTeardowns.stopAll(containerTeardowns, LOG);
         RuntimeException failure = null;
         try {
             for (Resettable service : services) {

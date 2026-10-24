@@ -90,13 +90,7 @@ public class Route53ResolverService {
     private final StorageBackend<String, ObjectNode> endpointStore;
     private final StorageBackend<String, ObjectNode> ruleStore;
     private final StorageBackend<String, ObjectNode> ruleAssociationStore;
-    /**
-     * The {@code IpAddressRequests} each endpoint was created with, keyed by endpoint id.
-     * Kept beside the endpoint rather than on it: the modeled {@code ResolverEndpoint} shape
-     * carries {@code IpAddressCount} and no IP list, and the handlers return the stored node
-     * verbatim, so holding the addresses on the resource would put an unmodeled member on the
-     * wire. Read by the CreatorRequestId conflict check and ListResolverEndpointIpAddresses.
-     */
+    /** Original IP requests, assigned addresses, and EC2 interface IDs, keyed by endpoint ID. */
     private final StorageBackend<String, ObjectNode> endpointIpRequestStore;
     /**
      * Tags keyed by resource ARN, each an object of key to value. Kept apart from the resources
@@ -162,7 +156,6 @@ public class Route53ResolverService {
 
     public synchronized ObjectNode createFirewallDomainList(JsonNode request, String region, String accountId) {
         String name = requireText(request, "Name", VALIDATION);
-        JsonNode tags = validatedTags(request.get("Tags"), VALIDATION);
         Optional<ObjectNode> replay = replayOf(domainListStore, request, region);
         if (replay.isPresent()) {
             return replay.get();
@@ -178,16 +171,15 @@ public class Route53ResolverService {
         list.put("ManagedOwnerName", (String) null);
         list.put("CreationTime", Instant.now().toString());
         list.put("ModificationTime", Instant.now().toString());
+        list.set("_Tags", parseTags(request.path("Tags")));
         domainListStore.put(id, list);
-        putTags(list, tags);
-        return list.deepCopy();
+        return resourceView(list);
     }
 
     public ObjectNode deleteFirewallDomainList(String id) {
         ObjectNode list = require(domainListStore, id, "firewall domain list");
         domainListStore.delete(id);
-        tagStore.delete(text(list, "Arn"));
-        ObjectNode result = list.deepCopy();
+        ObjectNode result = resourceView(list);
         result.put("Status", "DELETING");
         return result;
     }
@@ -197,7 +189,7 @@ public class Route53ResolverService {
     }
 
     public Optional<ObjectNode> getCustomFirewallDomainList(String id) {
-        return domainListStore.get(id).map(ObjectNode::deepCopy);
+        return domainListStore.get(id).map(this::resourceView);
     }
 
     // ---------- Resolver endpoints ----------
@@ -330,8 +322,11 @@ public class Route53ResolverService {
             throw new AwsException(INVALID_PARAMETER,
                     "TargetIps must contain at least one target address.", 400);
         }
-        String domainName = text(request, "DomainName");
-        JsonNode tags = validatedTags(request.get("Tags"), INVALID_PARAMETER);
+        String domainName = normalizeDomain(requireText(request, "DomainName", INVALID_PARAMETER));
+        ObjectNode tags = parseTags(request.path("Tags"));
+        if (request.hasNonNull("ResolverEndpointId")) {
+            validateRuleEndpoint(text(request, "ResolverEndpointId"), region);
+        }
         Optional<ObjectNode> replay = replayOf(ruleStore, request, region);
         if (replay.isPresent()) {
             requireReplayMatches(replay.get(), request,
@@ -345,24 +340,25 @@ public class Route53ResolverService {
         rule.put("DomainName", domainName);
         rule.put("Status", "COMPLETE");
         rule.put("RuleType", text(request, "RuleType"));
-        rule.put("Name", text(request, "Name"));
-        rule.set("TargetIps", request.path("TargetIps").deepCopy());
-        rule.put("ResolverEndpointId", text(request, "ResolverEndpointId"));
+        copyIfPresent(request, rule, "Name", "TargetIps", "ResolverEndpointId");
         rule.put("OwnerId", accountId);
         rule.put("ShareStatus", "NOT_SHARED");
         rule.put("CreatorRequestId", text(request, "CreatorRequestId"));
         rule.put("CreationTime", Instant.now().toString());
         rule.put("ModificationTime", Instant.now().toString());
+        rule.set("_Tags", tags);
         ruleStore.put(id, rule);
-        putTags(rule, tags);
-        return rule.deepCopy();
+        return resourceView(rule);
     }
 
-    public ObjectNode deleteResolverRule(String id) {
+    public synchronized ObjectNode deleteResolverRule(String id) {
         ObjectNode rule = require(ruleStore, id, "resolver rule");
+        if (ruleAssociationStore.scan(key -> true).stream()
+                .anyMatch(association -> id.equals(text(association, "ResolverRuleId")))) {
+            throw new AwsException("ResourceInUseException", "Resolver rule is associated with a VPC", 400);
+        }
         ruleStore.delete(id);
-        tagStore.delete(text(rule, "Arn"));
-        ObjectNode result = rule.deepCopy();
+        ObjectNode result = resourceView(rule);
         result.put("Status", "DELETING");
         return result;
     }

@@ -128,7 +128,17 @@ public class ContainerLifecycleManager {
      * @return information about the created container including resolved endpoints and published ports
      */
     public ContainerInfo createAndStart(ContainerSpec spec) {
-        return createAndStart(spec, false);
+        String containerId = create(spec);
+        try {
+            ContainerInfo info = startCreated(containerId, spec);
+            return withPublishedHostPorts(info, spec);
+        } catch (Exception e) {
+            // A failed start (e.g. host-port conflict) must not leak the created
+            // container: retrying callers would accumulate Created containers and
+            // fixed-name callers would hit name conflicts on the next attempt.
+            removeIfExists(containerId);
+            throw e;
+        }
     }
 
     /** Starts a disposable container, reclaiming its anonymous volumes if startup fails. */
@@ -414,7 +424,7 @@ public class ContainerLifecycleManager {
         LOG.infov("Started container {0}", containerId);
 
         if (spec.networkMode() != null && !spec.networkMode().isBlank()
-                && spec.publishesPorts() && !spec.hasNetworkConfiguration()) {
+                && spec.hasPortBindings() && !spec.hasNetworkConfiguration()) {
             try {
                 dockerClient.connectToNetworkCmd()
                         .withContainerId(containerId)

@@ -641,7 +641,11 @@ public class SqsService implements Resettable, ResourceProvider {
             return;
         }
         ConcurrentHashMap<String, Instant> dedupMap = deduplicationCache.get(storageKey);
-        if (dedupMap == null) {
+        if (dedupMap != null && !dedupMap.isEmpty()) {
+            Map<String, Long> serializable = new HashMap<>();
+            dedupMap.forEach((id, expiry) -> serializable.put(id, expiry.toEpochMilli()));
+            dedupStore.put(storageKey, serializable);
+        } else {
             dedupStore.delete(storageKey);
             return;
         }
@@ -822,8 +826,7 @@ public class SqsService implements Resettable, ResourceProvider {
             removed.close();
         }
         deduplicationCache.remove(storageKey);
-        deduplicationIdentityCache.remove(storageKey);
-        deduplicationLocks.remove(storageKey);
+        redrivePolicyCache.remove(storageKey);
         if (messageStore != null) {
             messageStore.delete(storageKey);
         }
@@ -909,10 +912,7 @@ public class SqsService implements Resettable, ResourceProvider {
         attrs.put("CreatedTimestamp", String.valueOf(queue.getCreatedTimestamp().getEpochSecond()));
         attrs.put("LastModifiedTimestamp", String.valueOf(queue.getLastModifiedTimestamp().getEpochSecond()));
 
-        GuardedMessageQueue messages = unexpiredMessages(storageKey, queue);
-        // AWS: a GetQueueAttributes call activates the queue, so CloudWatch reports it again.
-        messages.activity().accessed();
-        GuardedMessageQueue.MessageCounts counts = messages.messageCounts();
+        GuardedMessageQueue.MessageCounts counts = getOrCreateQueue(storageKey).messageCounts();
         attrs.put("ApproximateNumberOfMessages", String.valueOf(counts.visible()));
         attrs.put("ApproximateNumberOfMessagesNotVisible", String.valueOf(counts.inFlight()));
         attrs.put("ApproximateNumberOfMessagesDelayed", String.valueOf(counts.delayed()));
@@ -1009,8 +1009,129 @@ public class SqsService implements Resettable, ResourceProvider {
                                Map<String, MessageAttributeValue> messageAttributes,
                                String awsTraceHeader,
                                String region) {
-        return sendMessage(queueUrl, body, delaySeconds, messageGroupId, messageDeduplicationId,
-                messageAttributes, awsTraceHeader, null, region);
+        String storageKey = regionKey(region, queueUrl);
+        Queue queue = getQueueByUrl(storageKey, queueUrl)
+                .orElseThrow(() -> new AwsException("AWS.SimpleQueueService.NonExistentQueue",
+                        "The specified queue does not exist.", 400));
+
+        int queueMaxMessageSize = parseMaxMessageSize(queue.getAttributes().get("MaximumMessageSize"));
+        int totalSize = computeMessageSize(body, messageAttributes);
+        if (totalSize > queueMaxMessageSize) {
+            throw new AwsException("InvalidParameterValue",
+                    "One or more parameters are invalid. " +
+                            "Reason: Message must be shorter than " + queueMaxMessageSize + " bytes.", 400);
+        }
+
+        int queueDelaySeconds = parseNonNegativeSecondsAttribute(queue.getAttributes().get("DelaySeconds"));
+
+        // Resolve the effective delay:
+        //   - FIFO queues only support queue-level DelaySeconds per AWS SQS,
+        //     so any per-message value is ignored and we always use the
+        //     queue attribute.
+        //   - Standard queues honor per-message DelaySeconds when explicitly
+        //     provided (non-null). When omitted (null), the queue-level
+        //     default applies.
+        int effectiveDelaySeconds;
+        if (queue.isFifo()) {
+            effectiveDelaySeconds = queueDelaySeconds;
+        } else {
+            effectiveDelaySeconds = (delaySeconds != null) ? delaySeconds : queueDelaySeconds;
+        }
+
+        // FIFO queue validation
+        if (queue.isFifo()) {
+            if (messageGroupId == null || messageGroupId.isEmpty()) {
+                throw new AwsException("MissingParameter",
+                        "The request must contain the parameter MessageGroupId.", 400);
+            }
+            // Resolve deduplication ID
+            String dedupId = messageDeduplicationId;
+            if (dedupId == null || dedupId.isEmpty()) {
+                if ("true".equalsIgnoreCase(queue.getAttributes().get("ContentBasedDeduplication"))) {
+                    dedupId = computeMd5(body);
+                } else {
+                    throw new AwsException("InvalidParameterValue",
+                            "The queue should either have ContentBasedDeduplication enabled or " +
+                                    "MessageDeduplicationId provided.", 400);
+                }
+            }
+
+            // Check deduplication window — atomic putIfAbsent to avoid race condition.
+            // When DeduplicationScope=messageGroup, dedup is scoped per MessageGroupId,
+            // so two messages with the same MessageDeduplicationId in different groups
+            // are not duplicates and must both be accepted.
+            boolean groupScoped = "messageGroup".equalsIgnoreCase(
+                    queue.getAttributes().get("DeduplicationScope"));
+            // Use NUL as the delimiter — it is outside the SQS-allowed character set for
+            // MessageGroupId/MessageDeduplicationId, so the composite key is unambiguous.
+            String dedupCacheKey = groupScoped ? messageGroupId + "\0" + dedupId : dedupId;
+            cleanupDeduplicationCache(storageKey);
+            ConcurrentHashMap<String, Instant> dedupMap = deduplicationCache.computeIfAbsent(storageKey, k -> new ConcurrentHashMap<>());
+            Instant expiry = Instant.now().plusSeconds(DEDUP_WINDOW_SECONDS);
+            Instant previous = dedupMap.putIfAbsent(dedupCacheKey, expiry);
+            persistDedup(storageKey);
+            if (previous != null && Instant.now().isBefore(previous)) {
+                // Duplicate within window — keep the original messageId and
+                // sequenceNumber but compute response MD5s from this request's
+                // body and attributes, otherwise SDK clients (which validate
+                // MD5 against what they sent) reject the response.
+                Message existing = getOrCreateQueue(storageKey).findByDeduplicationId(
+                        dedupId, groupScoped ? messageGroupId : null);
+                if (existing != null) {
+                    Message response = new Message(body);
+                    response.setMessageId(existing.getMessageId());
+                    response.setMessageGroupId(messageGroupId);
+                    response.setMessageDeduplicationId(dedupId);
+                    response.setSequenceNumber(existing.getSequenceNumber());
+                    if (messageAttributes != null && !messageAttributes.isEmpty()) {
+                        response.getMessageAttributes().putAll(messageAttributes);
+                        response.updateMd5OfMessageAttributes();
+                    }
+                    return response;
+                }
+            }
+
+            Message message = new Message(body);
+            message.setMessageGroupId(messageGroupId);
+            message.setMessageDeduplicationId(dedupId);
+            message.setSequenceNumber(sequenceCounter.incrementAndGet());
+            message.setAwsTraceHeader(awsTraceHeader);
+            if (effectiveDelaySeconds > 0) {
+                message.setVisibleAt(Instant.now().plusSeconds(effectiveDelaySeconds));
+            }
+            if (messageAttributes != null && !messageAttributes.isEmpty()) {
+                message.getMessageAttributes().putAll(messageAttributes);
+                message.updateMd5OfMessageAttributes();
+            }
+
+            getOrCreateQueue(storageKey).addMessage(message);
+            notifyReceivers(storageKey);
+            LOG.debugv("Sent FIFO message {0} to queue {1}, group={2}, seq={3}",
+                    message.getMessageId(), queueUrl, messageGroupId, message.getSequenceNumber());
+            LOG.tracev("Sent message {0} to queue {1} body={2} attributes={3}",
+                    message.getMessageId(), queueUrl, body, message.getMessageAttributes());
+            return message;
+        }
+
+        // Standard queue. MessageGroupId is retained for ReceiveMessage to
+        // return (fair queues); it has no effect on standard-queue delivery.
+        Message message = new Message(body);
+        message.setMessageGroupId(messageGroupId);
+        message.setAwsTraceHeader(awsTraceHeader);
+        if (effectiveDelaySeconds > 0) {
+            message.setVisibleAt(Instant.now().plusSeconds(effectiveDelaySeconds));
+        }
+        if (messageAttributes != null && !messageAttributes.isEmpty()) {
+            message.getMessageAttributes().putAll(messageAttributes);
+            message.updateMd5OfMessageAttributes();
+        }
+
+        getOrCreateQueue(storageKey).addMessage(message);
+        notifyReceivers(storageKey);
+        LOG.debugv("Sent message {0} to queue {1}", message.getMessageId(), queueUrl);
+        LOG.tracev("Sent message {0} to queue {1} body={2} attributes={3}",
+                message.getMessageId(), queueUrl, body, message.getMessageAttributes());
+        return message;
     }
 
     public Message sendMessage(String queueUrl, String body, Integer delaySeconds,
@@ -1489,7 +1610,7 @@ public class SqsService implements Resettable, ResourceProvider {
         int maxReceiveCount = rp != null ? rp.maxReceiveCount() : -1;
         String deadLetterTargetArn = rp != null ? rp.deadLetterTargetArn() : null;
 
-        GuardedMessageQueue guardedQueue = unexpiredMessages(storageKey, queue);
+        GuardedMessageQueue guardedQueue = getOrCreateQueue(storageKey);
         GuardedMessageQueue.ClaimResult claimResult = guardedQueue.claimVisibleMessages(
                 maxMessages, effectiveTimeout, queue.isFifo(), maxReceiveCount, deadLetterTargetArn);
 
@@ -1682,7 +1803,13 @@ public class SqsService implements Resettable, ResourceProvider {
         String prefix = region + "::";
         for (Queue q : queueStore.scan(k -> k.startsWith(prefix))) {
             if (targetArn.equals(redriveDlqArn(q))) {
-                sourceQueues.add(withCurrentQueueUrl(q, region).getQueueUrl());
+                // Echo the caller's scheme/host/port. Storage always records
+                // CreateQueue's baseUrl (https://localhost:4566/...), but a
+                // Lambda container holds the same queue as
+                // https://host.docker.internal:4566/... — sibling URLs must
+                // match that form or ListDeadLetterSourceQueues disagrees
+                // with the CreateQueue/GetQueueUrl value the caller already has.
+                sourceQueues.add(presentQueueUrl(q.getQueueUrl(), queueUrl));
             }
         }
         return sourceQueues;
@@ -1745,7 +1872,7 @@ public class SqsService implements Resettable, ResourceProvider {
             }
         }
 
-        GuardedMessageQueue srcQueueInitial = unexpiredMessages(srcKey, srcQueue.get());
+        GuardedMessageQueue srcQueueInitial = getOrCreateQueue(srcKey);
         GuardedMessageQueue.MessageCounts srcCounts = srcQueueInitial.messageCounts();
         long toMove = srcCounts.visible() + srcCounts.inFlight() + srcCounts.delayed();
 
@@ -2391,5 +2518,35 @@ public class SqsService implements Resettable, ResourceProvider {
         }
         int pathStart = url.indexOf('/', schemeEnd + 3);
         return pathStart < 0 ? url : url.substring(0, pathStart);
+    }
+
+
+    /** Copy of {@code attributes} whose Policy is stored the way SQS stores it. */
+    private static Map<String, String> withNormalizedPolicy(Map<String, String> attributes) {
+        if (attributes == null) {
+            return null;
+        }
+        String policy = attributes.get("Policy");
+        if (policy == null || policy.isEmpty()) {
+            return attributes;
+        }
+        Map<String, String> normalized = new HashMap<>(attributes);
+        normalized.put("Policy", normalizePolicyDocument(policy));
+        return normalized;
+    }
+
+    private boolean deadLetterTargetExists(String targetArn, String sourceAccountId, String region) {
+        if (!AwsArnUtils.isArnFor(targetArn, "sqs")) {
+            return false;
+        }
+        AwsArnUtils.Arn arn = AwsArnUtils.parse(targetArn);
+        if (!arn.region().isEmpty() && !arn.region().equals(region)) {
+            return false;
+        }
+        if (!arn.accountId().equals(sourceAccountId)) {
+            return false;
+        }
+        String dlqUrl = queueUrlFromArn(targetArn, region);
+        return dlqUrl != null && getQueueByUrl(regionKey(region, dlqUrl), dlqUrl).isPresent();
     }
 }

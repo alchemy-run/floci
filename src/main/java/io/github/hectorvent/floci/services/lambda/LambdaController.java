@@ -390,8 +390,10 @@ public class LambdaController {
     Map<String, Object> buildEsmResponse(EventSourceMapping esm) {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("UUID", esm.getUuid());
-        node.put("EventSourceMappingArn",
-                LambdaArnUtils.eventSourceMappingArn(esm.getRegion(), esm.getAccountId(), esm.getUuid()));
+        if (esm.getRegion() != null && esm.getAccountId() != null) {
+            node.put("EventSourceMappingArn", "arn:aws:lambda:" + esm.getRegion() + ":"
+                    + esm.getAccountId() + ":event-source-mapping:" + esm.getUuid());
+        }
         node.put("FunctionArn", esm.getFunctionArn());
         if (esm.getEventSourceArn() != null) {
             node.put("EventSourceArn", esm.getEventSourceArn());
@@ -432,6 +434,11 @@ public class LambdaController {
 
         if (esm.getSelfManagedEventSource() != null) {
             node.set("SelfManagedEventSource", objectMapper.valueToTree(esm.getSelfManagedEventSource()));
+        }
+
+        if (esm.getAmazonManagedKafkaEventSourceConfig() != null) {
+            node.set("AmazonManagedKafkaEventSourceConfig",
+                    objectMapper.valueToTree(esm.getAmazonManagedKafkaEventSourceConfig()));
         }
 
         if (esm.getTopics() != null && !esm.getTopics().isEmpty()) {

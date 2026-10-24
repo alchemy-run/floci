@@ -93,8 +93,7 @@ public class OrganizationsService implements ScpProvider, RootAccessOrganization
             "UPGRADE_ROLLOUT_POLICY",
             "BEDROCK_POLICY",
             "S3_POLICY",
-            "NETWORK_SECURITY_DIRECTOR_POLICY",
-            "GUARDDUTY_POLICY");
+            "NETWORK_SECURITY_DIRECTOR_POLICY");
 
     private static final Set<String> POLICY_TYPE_SET = Set.copyOf(POLICY_TYPES);
 

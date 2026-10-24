@@ -475,30 +475,16 @@ final class CognitoAuthFlowHandler {
             return handleSelectChallenge(pool, client, session, responses, clientMetadata);
         }
         if ("PASSWORD".equals(challengeName)) {
-            rejectSimulatedUser(consumeUserAuthSession(pool, client, session, "PASSWORD"));
+            consumeUserAuthSession(pool, client, session, "PASSWORD");
             return authenticateWithPassword(pool, client, responses, clientMetadata);
         }
         if ("PASSWORD_SRP".equals(challengeName)) {
-            rejectSimulatedUser(consumeUserAuthSession(pool, client, session, "PASSWORD_SRP"));
+            consumeUserAuthSession(pool, client, session, "PASSWORD_SRP");
             return handleUserSrpAuth(pool, client, responses, clientMetadata);
         }
-        if ("SMS_MFA".equals(challengeName)) {
-            return handleMessageMfaChallenge(pool, client, "SMS_MFA", session, responses, clientMetadata);
-        }
-        // EMAIL_OTP names both the email MFA challenge and USER_AUTH's email first factor; the session tells them apart.
-        if (("EMAIL_OTP".equals(challengeName) || "EMAIL_MFA".equals(challengeName))
-                && session != null && mfaSessions.containsKey(session)) {
-            return handleMessageMfaChallenge(pool, client, "EMAIL_OTP", session, responses, clientMetadata);
-        }
-        if ("SELECT_MFA_TYPE".equals(challengeName)) {
-            return handleSelectMfaType(pool, client, session, responses, clientMetadata);
-        }
         if ("EMAIL_OTP".equals(challengeName) || "SMS_OTP".equals(challengeName)) {
-            rejectSimulatedUser(consumeUserAuthSession(pool, client, session, challengeName));
+            consumeUserAuthSession(pool, client, session, challengeName);
             return handleOtpChallengeResponse(pool, client, challengeName, responses, clientMetadata);
-        }
-        if ("WEB_AUTHN".equals(challengeName)) {
-            return handleWebAuthnChallengeResponse(pool, client, session, responses, clientMetadata);
         }
         if ("NEW_PASSWORD_REQUIRED".equals(challengeName)) {
             String username = responses.get("USERNAME");
@@ -1660,8 +1646,29 @@ final class CognitoAuthFlowHandler {
         if (functionRef == null) return TriggerResult.notConfigured();
 
         String region = regionForPool(pool);
-        String clientId = client == null ? CLIENT_ID_NOT_APPLICABLE : client.getClientId();
-        Map<String, Object> event = triggerEvent(pool, clientId, user, triggerKey, triggerSource, request);
+
+        Map<String, Object> event = new HashMap<>();
+        event.put("version", "1");
+        event.put("region", region);
+        event.put("userPoolId", pool.getId());
+        event.put("userName", user == null ? null : user.getUsername());
+        event.put("callerContext", Map.of(
+                "awsSdkVersion", "floci",
+                "clientId", client.getClientId()));
+        event.put("triggerSource", triggerSource);
+        Map<String, Object> req = new HashMap<>(request);
+        if (user != null) {
+            Map<String, String> userAttributes = new LinkedHashMap<>();
+            if (user.getAttributes() != null) {
+                userAttributes.putAll(user.getAttributes());
+            }
+            if ("PreAuthentication".equals(triggerKey)) {
+                userAttributes.put("cognito:user_status", user.getUserStatus());
+            }
+            req.put("userAttributes", userAttributes);
+        }
+        event.put("request", req);
+        event.put("response", new HashMap<>());
 
         try {
             byte[] payload = MAPPER.writeValueAsBytes(event);
@@ -1790,7 +1797,8 @@ final class CognitoAuthFlowHandler {
         TriggerResult result = invokeTrigger(pool, client, user,
                 "PreAuthentication", "PreAuthentication_Authentication", req);
         if (result.errored()) {
-            throw blockingTriggerFailure(result, "PreAuthentication");
+            throw new AwsException("NotAuthorizedException",
+                    "PreAuthentication failed with error " + result.errorMessage() + ".", 400);
         }
     }
 

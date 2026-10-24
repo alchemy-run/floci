@@ -157,7 +157,50 @@ public class Message {
     }
 
     public void updateMd5OfMessageAttributes() {
-        this.md5OfMessageAttributes = computeMessageAttributesMd5(messageAttributes);
+        if (messageAttributes == null || messageAttributes.isEmpty()) {
+            this.md5OfMessageAttributes = null;
+            return;
+        }
+        try {
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            DataOutputStream dos = new DataOutputStream(bos);
+
+            List<String> keys = new ArrayList<>(messageAttributes.keySet());
+            Collections.sort(keys);
+
+            for (String key : keys) {
+                MessageAttributeValue val = messageAttributes.get(key);
+                byte[] nameBytes = key.getBytes(StandardCharsets.UTF_8);
+                dos.writeInt(nameBytes.length);
+                dos.write(nameBytes);
+
+                byte[] typeBytes = val.getDataType().getBytes(StandardCharsets.UTF_8);
+                dos.writeInt(typeBytes.length);
+                dos.write(typeBytes);
+
+                if (val.getBinaryValue() != null) {
+                    dos.write(2); // Binary type
+                    dos.writeInt(val.getBinaryValue().length);
+                    dos.write(val.getBinaryValue());
+                } else {
+                    dos.write(1); // String or Number
+                    byte[] valBytes = val.getStringValue().getBytes(StandardCharsets.UTF_8);
+                    dos.writeInt(valBytes.length);
+                    dos.write(valBytes);
+                }
+            }
+
+            byte[] digest = md.digest(bos.toByteArray());
+            StringBuilder sb = new StringBuilder();
+            for (byte b : digest) {
+                sb.append(String.format("%02x", b));
+            }
+            this.md5OfMessageAttributes = sb.toString();
+        } catch (Exception ignored) {
+            // Attribute serialization failure falls back to null MD5
+            this.md5OfMessageAttributes = null;
+        }
     }
 
     public static String computeMessageAttributesMd5(Map<String, MessageAttributeValue> messageAttributes) {

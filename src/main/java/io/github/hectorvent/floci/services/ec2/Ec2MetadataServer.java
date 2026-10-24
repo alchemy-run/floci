@@ -661,4 +661,15 @@ public class Ec2MetadataServer {
         }
         return defaultAccountId;
     }
+
+    private record MetadataToken(GuestIdentity identity, Instant expiresAt) {}
+
+    private final Map<String, GuestIdentity> capabilities = new ConcurrentHashMap<>();
+
+
+
+
+    static final String PROXY_HEADER = "X-Floci-IMDS-Capability";
+
+    private final SecureRandom random = new SecureRandom();
 }

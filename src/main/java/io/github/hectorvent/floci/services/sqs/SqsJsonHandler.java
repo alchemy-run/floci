@@ -152,16 +152,11 @@ public class SqsJsonHandler {
 
     private Response handleListQueues(JsonNode request, String region) {
         String prefix = request.path("QueueNamePrefix").asText(null);
-        Integer maxResults = getOptionalIntField(request, "MaxResults");
-        String nextToken = request.path("NextToken").asText(null);
-        PaginatedResult<Queue> page = sqsService.listQueues(prefix, maxResults, nextToken, region);
+        List<Queue> queues = sqsService.listQueues(prefix, region);
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode queueUrls = response.putArray("QueueUrls");
-        for (Queue q : page.items()) {
+        for (Queue q : queues) {
             queueUrls.add(q.getQueueUrl());
-        }
-        if (page.nextToken() != null) {
-            response.put("NextToken", page.nextToken());
         }
         return Response.ok(response).build();
     }
@@ -296,9 +291,9 @@ public class SqsJsonHandler {
             String senderId = msg.getSenderId() != null ? msg.getSenderId() : defaultSenderId;
             writeSystemAttributesJson(msgNode, msg, requestedAttrs, senderId);
 
-            if (!selectedMessageAttrs.isEmpty()) {
-                ObjectNode msgAttrs = objectMapper.createObjectNode();
-                for (Map.Entry<String, MessageAttributeValue> entry : selectedMessageAttrs.entrySet()) {
+            if (msg.getMessageAttributes() != null && !msg.getMessageAttributes().isEmpty()) {
+                ObjectNode msgAttrs = msgNode.putObject("MessageAttributes");
+                for (Map.Entry<String, MessageAttributeValue> entry : msg.getMessageAttributes().entrySet()) {
                     ObjectNode valNode = msgAttrs.putObject(entry.getKey());
                     valNode.put("DataType", entry.getValue().getDataType());
                     if (entry.getValue().getBinaryValue() != null) {

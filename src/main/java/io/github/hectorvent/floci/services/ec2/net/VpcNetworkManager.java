@@ -857,11 +857,7 @@ public class VpcNetworkManager {
         if (!vpc.created) {
             return;
         }
-        String flociContainerId = vpc.flociContainerId;
-        if (flociContainerId == null && currentContainerNetworkResolver != null) {
-            flociContainerId = currentContainerNetworkResolver.resolveContainerId().orElse(null);
-        }
-        removeNetworkWithRetry(vpc.networkName, flociContainerId, 1);
+        removeNetworkWithRetry(vpc.networkName, vpc.flociContainerId, 1);
     }
 
     private void removeNetworkWithRetry(String networkName, String flociContainerId, int attempt) {
@@ -1125,6 +1121,34 @@ public class VpcNetworkManager {
                     subnet.leased.remove(removed.transportAddress());
                 }
             }
+        }
+    }
+
+    /** Marks a Docker network as a Floci VPC network, for discovery and orphan reconciliation. */
+    public static final String LABEL_COMPONENT = "floci_component";
+
+    public static final String LABEL_DECLARED_CIDR = "floci_vpc_declared_cidr";
+
+    /**
+     * The API port of the Floci process that created the network. Several Floci instances
+     * routinely share one Docker daemon, and reconciliation deletes things; scoping it by
+     * owner is what stops one instance's startup from tearing down another's live networks.
+     */
+    public static final String LABEL_OWNER_PORT = "floci_vpc_owner_port";
+
+    public static final String LABEL_VPC_ID = "floci_vpc_id";
+
+    public static final String LABEL_VPC_REGION = "floci_vpc_region";
+
+    private Network inspectQuietly(VpcBinding vpc) {
+        if (currentContainerNetworkResolver == null) {
+            return null;
+        }
+        try {
+            return dockerClient.inspectNetworkCmd().withNetworkId(vpc.networkName).exec();
+        } catch (Exception e) {
+            LOG.debugv("Could not inspect VPC network {0}: {1}", vpc.networkName, e.getMessage());
+            return null;
         }
     }
 }

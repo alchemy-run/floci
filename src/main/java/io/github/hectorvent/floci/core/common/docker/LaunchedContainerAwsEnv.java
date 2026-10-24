@@ -143,7 +143,7 @@ public class LaunchedContainerAwsEnv {
     public List<String> sdkBaselineEnv(String region, Optional<String> awsConfigMountDir,
                                        String flociEndpoint, Optional<SessionCreds> injectedCredentials,
                                        String ownerAccountId) {
-        ArrayList<String> env = new ArrayList<>();
+        List<String> env = new ArrayList<>();
         env.add("AWS_DEFAULT_REGION=" + region);
         env.add("AWS_REGION=" + region);
         if (awsConfigMountDir.isPresent() && !awsConfigMountDir.get().isBlank()) {

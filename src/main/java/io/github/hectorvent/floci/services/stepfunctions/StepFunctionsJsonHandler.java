@@ -471,14 +471,22 @@ public class StepFunctionsJsonHandler {
     }
 
     private Response handleGetExecutionHistory(JsonNode request) {
-        String arn = request.path("executionArn").asText();
-        boolean includeExecutionData = request.path("includeExecutionData").asBoolean(true);
+        var arn = request.path("executionArn").asText();
+        var includeExecutionData = request.path("includeExecutionData").asBoolean(true);
+        var reverseOrder = request.path("reverseOrder").asBoolean(false);
+        Integer maxResults = parseOptionalInt(request, "maxResults");
 
         List<HistoryEvent> live = service.getExecutionHistory(arn);
         List<HistoryEvent> events;
         // Branch and iteration threads append under the history's own monitor while a client reads.
         synchronized (live) {
             events = new ArrayList<>(live);
+        }
+        if (reverseOrder) {
+            Collections.reverse(events);
+        }
+        if (maxResults != null && maxResults > 0 && events.size() > maxResults) {
+            events = events.subList(0, maxResults);
         }
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode array = response.putArray("events");

@@ -2333,7 +2333,11 @@ public class CloudFrontController {
                 .start("CachePolicyConfig")
                 .elem("Name", policy.getName())
                 .elem("Comment", policy.getComment() != null ? policy.getComment() : "");
-        CloudFrontPolicyConfigCodec.serializeCachePolicy(xml, policy.getConfig());
+        Map<String, Object> config = policy.getConfig();
+        if (config == null && policy.getConfigXml() != null && !policy.getConfigXml().isBlank()) {
+            config = CloudFrontPolicyConfigCodec.parseCachePolicy(policy.getConfigXml());
+        }
+        CloudFrontPolicyConfigCodec.serializeCachePolicy(xml, config);
         return xml.end("CachePolicyConfig")
                 .end("CachePolicy")
                 .build();
@@ -2348,7 +2352,11 @@ public class CloudFrontController {
                 .start("OriginRequestPolicyConfig")
                 .elem("Name", policy.getName())
                 .elem("Comment", policy.getComment() != null ? policy.getComment() : "");
-        CloudFrontPolicyConfigCodec.serializeOriginRequestPolicy(xml, policy.getConfig());
+        Map<String, Object> config = policy.getConfig();
+        if (config == null && policy.getConfigXml() != null && !policy.getConfigXml().isBlank()) {
+            config = CloudFrontPolicyConfigCodec.parseOriginRequestPolicy(policy.getConfigXml());
+        }
+        CloudFrontPolicyConfigCodec.serializeOriginRequestPolicy(xml, config);
         return xml.end("OriginRequestPolicyConfig")
                 .end("OriginRequestPolicy")
                 .build();

@@ -1360,7 +1360,46 @@ public class ApiGatewayV2Service {
         store.keys().stream().filter(k -> k.startsWith(prefix)).forEach(store::delete);
     }
 
+    /**
+     * Parses an API Gateway v2 resource ARN.
+     *
+     * <p>Supported shapes:
+     * {@code arn:aws:apigateway:{region}::/apis/{apiId}},
+     * {@code arn:aws:apigateway:{region}::/apis/{apiId}/stages/{stageName}},
+     * {@code arn:aws:apigateway:{region}::/domainnames/{name}},
+     * {@code arn:aws:apigateway:{region}::/vpclinks/{id}}.
+     */
+    private record ResourceRef(String region, String kind, String apiId, String childId) {}
 
-
-
+    private ResourceRef parseResourceArn(String resourceArn) {
+        if (resourceArn == null || resourceArn.isBlank()) {
+            throw new AwsException("BadRequestException", "ResourceArn must not be blank", 400);
+        }
+        AwsArnUtils.Arn arn;
+        try {
+            arn = AwsArnUtils.parse(resourceArn);
+        } catch (IllegalArgumentException e) {
+            throw new AwsException("BadRequestException",
+                    "Invalid ResourceArn format: " + resourceArn, 400);
+        }
+        String region = arn.region();
+        String resource = arn.resource();
+        String path = resource.startsWith("/") ? resource.substring(1) : resource;
+        String[] parts = path.split("/");
+        if (parts.length >= 2 && "apis".equals(parts[0]) && !parts[1].isEmpty()) {
+            String apiId = parts[1];
+            if (parts.length >= 4 && "stages".equals(parts[2]) && !parts[3].isEmpty()) {
+                return new ResourceRef(region, "stage", apiId, parts[3]);
+            }
+            return new ResourceRef(region, "api", apiId, null);
+        }
+        if (parts.length >= 2 && "domainnames".equals(parts[0])) {
+            return new ResourceRef(region, "domain", null, parts[1]);
+        }
+        if (parts.length >= 2 && "vpclinks".equals(parts[0])) {
+            return new ResourceRef(region, "vpclink", null, parts[1]);
+        }
+        throw new AwsException("BadRequestException",
+                "Cannot extract resource from ResourceArn: " + resourceArn, 400);
+    }
 }

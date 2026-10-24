@@ -644,7 +644,7 @@ public class SnsService implements Resettable, ResourceProvider {
         attrs.putIfAbsent("Owner", regionResolver.getAccountId());
         attrs.putIfAbsent("EffectiveDeliveryPolicy", "{\"http\":{\"defaultHealthyRetryPolicy\":{\"minDelayTarget\":20,\"maxDelayTarget\":20,\"numRetries\":3,\"numMaxDelayRetries\":0,\"numNoDelayRetries\":0,\"numMinDelayRetries\":0,\"backoffFunction\":\"linear\"},\"disableSubscriptionOverrides\":false}}");
         if (!attrs.containsKey("Policy") || attrs.get("Policy") == null || attrs.get("Policy").isBlank()) {
-            attrs.put("Policy", defaultTopicPolicy(topicArn, regionResolver.getAccountId()).toString());
+            attrs.put("Policy", defaultTopicPolicy(topicArn));
         }
         return attrs;
     }
@@ -929,12 +929,6 @@ public class SnsService implements Resettable, ResourceProvider {
             throw new AwsException("InvalidParameter",
                     "Invalid parameter: Endpoint scheme does not match protocol '" + protocol + "'.", 400);
         }
-        if ("http".equals(protocol) || "https".equals(protocol)) {
-            requireDeliverableEndpoint(endpoint);
-        }
-        if ("firehose".equals(protocol)) {
-            requireFirehoseRoleArn(attributes == null ? null : attributes.get(SUBSCRIPTION_ROLE_ARN));
-        }
         if (topicMaxMessageSize(topicArn, region) > DEFAULT_MAX_MESSAGE_SIZE) {
             requireLargePayloadProtocol(protocol);
         }
@@ -1049,12 +1043,17 @@ public class SnsService implements Resettable, ResourceProvider {
         // The limit is a per-topic attribute, so it cannot be applied until the topic is in
         // hand. SMS and mobile-push publishes never reach a topic and keep the AWS default.
         int payloadSize = computePublishSize(messageBytes, messageAttributes);
-        validateSubject(subject);
 
         // Send SMS
         if (phoneNumber != null) {
             requireWithinMaxMessageSize(payloadSize, DEFAULT_MAX_MESSAGE_SIZE);
-            return recordSms(phoneNumber, message, subject, region);
+            String messageId = UUID.randomUUID().toString();
+            String effectiveRegion = region != null ? region : "us-east-1";
+            SentSms sms = new SentSms(messageId, effectiveRegion, phoneNumber,
+                    message, subject, Instant.now());
+            smsStore.put("sms::" + effectiveRegion + "::" + messageId, sms);
+            LOG.infov("SNS SMS published: messageId={0} phone={1}", messageId, phoneNumber);
+            return messageId;
         }
 
         // Send a message to topic or directly to a target ARN

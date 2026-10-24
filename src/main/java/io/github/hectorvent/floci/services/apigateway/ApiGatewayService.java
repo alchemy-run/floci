@@ -1011,17 +1011,16 @@ public class ApiGatewayService implements ResourceProvider {
         Map<String, String> variables = (Map<String, String>) request.get("variables");
         if (variables != null) stage.setVariables(variables);
 
+        @SuppressWarnings("unchecked")
+        Map<String, String> tags = (Map<String, String>) request.get("tags");
+        stage.setTags(ReservedTags.stripApiGatewayReservedTags(tags));
+
         if (Boolean.TRUE.equals(request.get("cacheClusterEnabled"))) {
             stage.setCacheClusterEnabled(true);
             stage.setCacheClusterSize((String) request.getOrDefault("cacheClusterSize", "0.5"));
         }
 
         stage.setTracingEnabled(Boolean.TRUE.equals(request.get("tracingEnabled")));
-        if (request.get("tags") instanceof Map<?, ?> tags) {
-            tags.forEach((k, v) -> {
-                if (k instanceof String key && v instanceof String val) stage.getTags().put(key, val);
-            });
-        }
         if (request.get("accessLogSettings") instanceof Map<?, ?> logs) {
             stage.setAccessLogSettings(new Stage.AccessLogSettings(
                     logs.get("destinationArn") instanceof String arn ? arn : null,
@@ -2235,49 +2234,7 @@ public class ApiGatewayService implements ResourceProvider {
     }
 
     public CustomDomain createDomainName(String region, Map<String, Object> request) {
-        String domainName = (String) request.get("domainName");
-        if (domainName == null) throw new AwsException("BadRequestException", "domainName is required", 400);
-        String endpointType = endpointTypeOf(request);
-        if (!"REGIONAL".equals(endpointType) && !"EDGE".equals(endpointType)) {
-            // Private custom domains are not emulated; anything else would be a domain that is
-            // neither regional nor edge-optimized, which nothing here could route or describe.
-            throw new AwsException("BadRequestException", "Invalid value for endpoint type: " + endpointType, 400);
-        }
-        requireEndpointTypeAvailable(endpointType, region);
-
-        CustomDomain domain = new CustomDomain();
-        domain.setDomainName(domainName);
-        domain.setCertificateName((String) request.get("certificateName"));
-        domain.setCertificateArn((String) request.get("certificateArn"));
-        domain.setRegionalCertificateName((String) request.get("regionalCertificateName"));
-        domain.setRegionalCertificateArn((String) request.get("regionalCertificateArn"));
-        domain.setRegionalDomainName(domainName + ".regional.local");
-        domain.setRegionalHostedZoneId(AwsRegionFacts.apiGatewayRegionalHostedZoneId(region)
-                .orElse(UNSOURCED_REGIONAL_HOSTED_ZONE_ID));
-        applyEndpointType(domain, endpointType, region);
-        domain.setSecurityPolicy((String) request.getOrDefault("securityPolicy", "TLS_1_2"));
-        // Nothing is provisioned behind the domain, so it is usable as soon as it exists.
-        domain.setDomainNameStatus("AVAILABLE");
-        if (request.get("tags") instanceof Map<?, ?> tags && !tags.isEmpty()) {
-            Map<String, String> copied = new java.util.LinkedHashMap<>();
-            tags.forEach((key, value) -> copied.put(String.valueOf(key), String.valueOf(value)));
-            domain.setTags(copied);
-        }
-
-        // AWS enforces global uniqueness of custom domain names across all regions. The check and
-        // the store are one step, so two concurrent creates of one name cannot both succeed.
-        synchronized (domainNameLock) {
-            boolean exists = !domainStore.scan(k -> k.endsWith("::" + domainName)).isEmpty();
-            if (exists) {
-                throw new AwsException("BadRequestException",
-                        "The domain name you provided already exists.", 400);
-            }
-            domainStore.put(domainKey(region, domainName), domain);
-        }
-        // Outside the lock: the reissue blocks until the HTTPS listener has switched certificates.
-        certificateManager.ensureHost(domainName);
-        LOG.infov("Created custom domain {0} in {1}", domainName, region);
-        return domain;
+        return createDomainName(region, request, null);
     }
 
     /**
@@ -2436,7 +2393,8 @@ public class ApiGatewayService implements ResourceProvider {
         domain.setRegionalCertificateName(newRegionalCertificateName);
         domain.setRegionalCertificateArn(newRegionalCertificateArn);
         domain.setSecurityPolicy(newSecurityPolicy);
-        applyEndpointType(domain, newEndpointConfigurationType, region);
+        applyEndpointType(domain, newEndpointConfigurationType);
+        domain.synchronizePrimaryConfiguration();
         domainStore.put(domainKey, domain);
         return domain;
     }
@@ -2454,7 +2412,19 @@ public class ApiGatewayService implements ResourceProvider {
     }
 
     public BasePathMapping createBasePathMapping(String region, String domainName, Map<String, Object> request) {
-        return createBasePathMapping(region, domainName, request, REST_API_TYPE, Set.of());
+        String basePath = canonicalBasePath((String) request.get("basePath"));
+        String apiId = (String) request.get("restApiId");
+        String stage = (String) request.get("stage");
+
+        BasePathMapping mapping = new BasePathMapping(basePath, apiId, stage);
+        // New IDs use a separate namespace from the legacy path-encoded IDs.
+        mapping.setApiMappingId("a" + UUID.randomUUID().toString().replace("-", ""));
+        synchronized (domainNameLock) {
+            requireMappingPathAvailable(region, domainName, basePath, null);
+            basePathMappingStore.put(mappingKey(region, domainName, basePath), mapping);
+        }
+        LOG.infov("Created mapping for {0} path={1} -> API {2}", domainName, basePath, apiId);
+        return mapping;
     }
 
     private BasePathMapping createBasePathMapping(String region, String domainName, Map<String, Object> request,
@@ -5267,5 +5237,36 @@ public class ApiGatewayService implements ResourceProvider {
             throttle.setRateLimit(Double.parseDouble(String.valueOf(map.get("rateLimit"))));
         }
         return throttle;
+    }
+
+    private static String decodeJsonPointerSegment(String segment) {
+        return segment.replace("~1", "/").replace("~0", "~");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<String> readStringList(Object raw) {
+        if (!(raw instanceof List<?> list)) {
+            return new ArrayList<>();
+        }
+        List<String> values = new ArrayList<>();
+        for (Object item : list) {
+            if (item != null) {
+                values.add(String.valueOf(item));
+            }
+        }
+        return values;
+    }
+
+    private static String validateAuthorizerTtl(String value) {
+        int ttl;
+        try {
+            ttl = Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            throw new AwsException("BadRequestException", "authorizerResultTtlInSeconds must be an integer", 400);
+        }
+        if (ttl < 0 || ttl > 3600) {
+            throw new AwsException("BadRequestException", "authorizerResultTtlInSeconds must be between 0 and 3600", 400);
+        }
+        return Integer.toString(ttl);
     }
 }

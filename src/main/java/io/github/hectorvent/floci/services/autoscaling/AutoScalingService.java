@@ -563,10 +563,8 @@ public class AutoScalingService implements PassedRoleLookup {
                         });
             }
             groups.remove(key);
-            instanceRefreshes.entrySet().removeIf(e -> region.equals(e.getValue().getRegion())
-                    && name.equals(e.getValue().getAutoScalingGroupName()));
         }
-        // clean up associated hooks and policies
+        // clean up associated hooks, policies, refreshes, and scheduled actions
         hooks.entrySet().removeIf(e -> e.getValue().getAutoScalingGroupName().equals(name));
         policies.entrySet().removeIf(e -> e.getValue().getAutoScalingGroupName().equals(name));
         scheduledActions.entrySet().removeIf(e -> region.equals(e.getValue().getRegion())

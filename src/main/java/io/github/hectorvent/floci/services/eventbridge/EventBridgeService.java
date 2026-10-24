@@ -2166,4 +2166,20 @@ public class EventBridgeService implements ResourceProvider {
         return names;
     }
 
+    private void ensureArchiveSourceBusExists(String eventSourceArn, String region) {
+        String busName;
+        try {
+            busName = extractBusNameFromArn(eventSourceArn);
+        } catch (IllegalArgumentException e) {
+            throw new AwsException("ValidationException",
+                    "Invalid EventSourceArn: " + eventSourceArn, 400);
+        }
+        if ("default".equals(busName)) {
+            getOrCreateDefaultBus(region);
+            return;
+        }
+        busStore.get(busKey(region, busName))
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Event bus " + busName + " does not exist.", 404));
+    }
 }

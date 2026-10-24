@@ -2837,12 +2837,12 @@ public class AslExecutor {
             if (stateDef.has("Seconds")) {
                 waitNanos = secondsToNanos(stateDef.get("Seconds").asLong());
             } else if (stateDef.has("SecondsPath")) {
-                JsonNode val = resolvePath(stateDef.get("SecondsPath").asText(), effectiveInput, context);
+                JsonNode val = resolvePath(stateDef.get("SecondsPath").asText(), effectiveInput);
                 waitNanos = secondsToNanos(val.asLong());
             } else if (stateDef.has("Timestamp")) {
                 waitNanos = nanosUntil(stateDef.get("Timestamp").asText());
             } else if (stateDef.has("TimestampPath")) {
-                JsonNode val = resolvePath(stateDef.get("TimestampPath").asText(), effectiveInput, context);
+                JsonNode val = resolvePath(stateDef.get("TimestampPath").asText(), effectiveInput);
                 waitNanos = nanosUntil(val.asText());
             }
         }
@@ -2898,7 +2898,13 @@ public class AslExecutor {
      */
     private void sleepOrTimeOutExecution(long pauseNanos, long executionDeadlineNanos)
             throws InterruptedException {
-        sleepOrTimeOutTask(pauseNanos, executionDeadlineNanos, Long.MAX_VALUE);
+        long remainingNanos = executionDeadlineNanos - System.nanoTime();
+        if (pauseNanos < remainingNanos) {
+            sleeper.sleep(pauseNanos);
+            return;
+        }
+        sleeper.sleep(Math.max(remainingNanos, 0));
+        throw new ExecutionTimedOutException();
     }
 
     /**

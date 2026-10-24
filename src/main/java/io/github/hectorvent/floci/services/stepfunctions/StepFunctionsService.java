@@ -1370,9 +1370,13 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
         return true;
     }
 
-    /** A foreign, closed or unknown token cannot refresh a task's heartbeat. */
-    public synchronized void sendTaskHeartbeat(String taskToken) {
-        requirePendingTask(taskToken);
+    /**
+     * Resets the gap a Task's {@code HeartbeatSeconds} allows, rejecting unknown tokens.
+     */
+    public void sendTaskHeartbeat(String taskToken) {
+        if (taskToken == null || taskToken.isBlank() || !pendingTaskTokens.containsKey(taskToken)) {
+            throw new AwsException("InvalidToken", "Invalid token: '" + taskToken + "'", 400);
+        }
         taskHeartbeatNanos.put(taskToken, System.nanoTime());
     }
 

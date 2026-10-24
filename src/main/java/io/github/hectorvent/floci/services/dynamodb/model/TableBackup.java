@@ -7,6 +7,9 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * An on-demand backup: its details, the source table as it was when the backup was taken, and
@@ -56,4 +59,22 @@ public class TableBackup {
 
     public List<JsonNode> getItems() { return items; }
     public void setItems(List<JsonNode> items) { this.items = items != null ? items : new ArrayList<>(); }
+
+
+
+
+
+
+
+    private long backupCreationDateTime;
+
+    private long backupSizeBytes;
+
+    private String backupStatus;
+
+    private String tableArn;
+
+    private String tableId;
+
+    private String tableName;
 }

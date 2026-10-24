@@ -678,16 +678,28 @@ public class AcmService implements ResourceProvider {
         return cert;
     }
 
-    public synchronized void updateCertificateOptions(String certificateArn, CertificateOptions options, String region) {
+    /**
+     * Syncs mutable certificate options. Export is fixed at request time —
+     * AWS rejects changing it ("Export option for certificates cannot be updated").
+     */
+    public Certificate updateCertificateOptions(String certificateArn, CertificateOptions options, String region) {
         Certificate cert = getCertificateByArn(certificateArn, region);
         CertificateOptions current = cert.getCertOptions() != null
-            ? cert.getCertOptions() : CertificateOptions.defaultOptions();
-        cert.setCertOptions(new CertificateOptions(
-            options.certificateTransparencyLoggingPreference() != null
-                ? options.certificateTransparencyLoggingPreference()
-                : current.certificateTransparencyLoggingPreference(),
-            options.export() != null ? options.export() : current.export()));
+            ? cert.getCertOptions()
+            : CertificateOptions.defaultOptions();
+
+        if (options != null && options.export() != null
+            && !options.export().equals(current.export())) {
+            throw new AwsException("InvalidStateException",
+                "Export option for certificates cannot be updated", 400);
+        }
+
+        String ctPref = options != null && options.certificateTransparencyLoggingPreference() != null
+            ? options.certificateTransparencyLoggingPreference()
+            : current.certificateTransparencyLoggingPreference();
+        cert.setCertOptions(new CertificateOptions(ctPref, current.export()));
         store.put(regionKey(region, cert.extractCertificateId()), cert);
+        return cert;
     }
 
     // ============ Helper Methods ============
@@ -1044,5 +1056,14 @@ public class AcmService implements ResourceProvider {
         }
 
         return new ListResult(page, newNextToken);
+    }
+
+
+    @Inject
+    Route53Service route53Service;
+
+    private static String normalizeDnsName(String name) {
+        String normalized = name.toLowerCase(Locale.ROOT);
+        return normalized.endsWith(".") ? normalized : normalized + ".";
     }
 }
