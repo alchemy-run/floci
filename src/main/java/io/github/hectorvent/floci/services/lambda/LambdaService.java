@@ -1395,7 +1395,9 @@ public class LambdaService implements ResourceProvider {
         boolean hasKafkaSource = request.containsKey("SelfManagedEventSource") && request.get("SelfManagedEventSource") != null;
         boolean hasTopics = request.containsKey("Topics") && request.get("Topics") != null;
         boolean hasEventSourceArn = request.containsKey("EventSourceArn") && request.get("EventSourceArn") != null;
-        boolean isSelfManagedKafka = hasKafkaSource || hasTopics;
+        // An Amazon MSK source names its cluster in EventSourceArn and its topic in Topics.
+        boolean isMskKafka = hasEventSourceArn && isMskClusterArn(request.get("EventSourceArn"));
+        boolean isSelfManagedKafka = !isMskKafka && (hasKafkaSource || hasTopics);
 
         // The SourceAccessConfigurations cap applies to every source type, not only self-managed Kafka
         if (request.get("SourceAccessConfigurations") instanceof List<?> accessToCap) {
@@ -1407,8 +1409,23 @@ public class LambdaService implements ResourceProvider {
         Map<String, Object> selfManagedEventSource = null;
         List<String> topics = null;
         List<Map<String, Object>> sourceAccessConfigurations = null;
+        Map<String, Object> amazonManagedKafkaEventSourceConfig = null;
 
-        if (isSelfManagedKafka) {
+        if (isMskKafka) {
+            if (hasKafkaSource) {
+                throw new AwsException("InvalidParameterValueException",
+                        "Cannot specify both EventSourceArn and SelfManagedEventSource", 400);
+            }
+            eventSourceArn = (String) request.get("EventSourceArn");
+            topics = parseMskTopics(request.get("Topics"));
+            amazonManagedKafkaEventSourceConfig = structureMember(request, "AmazonManagedKafkaEventSourceConfig");
+            resolvedRegion = AwsArnUtils.regionOrDefault(eventSourceArn, region);
+            if (fnRef.region() != null && !fnRef.region().equals(resolvedRegion)) {
+                throw new AwsException("InvalidParameterValueException",
+                        "Function ARN region '" + fnRef.region() + "' does not match event source region '"
+                                + resolvedRegion + "'", 400);
+            }
+        } else if (isSelfManagedKafka) {
             if (hasEventSourceArn) {
                 throw new AwsException("InvalidParameterValueException",
                         "Cannot specify both EventSourceArn and SelfManagedEventSource/Topics", 400);
@@ -1540,7 +1557,8 @@ public class LambdaService implements ResourceProvider {
 
         EventSourceMapping.FilterCriteria filterCriteria = parseFilterCriteria(request, objectMapper);
 
-        StartingPositionSpec startingPosition = parseStartingPosition(request, eventSourceArn, isSelfManagedKafka);
+        StartingPositionSpec startingPosition = parseStartingPosition(request, eventSourceArn,
+                isSelfManagedKafka || isMskKafka);
 
         String queueUrl = (eventSourceArn != null && eventSourceArn.contains(":sqs:"))
                 ? AwsArnUtils.arnToQueueUrl(eventSourceArn, config != null ? config.effectiveBaseUrl() : null)
@@ -1570,6 +1588,7 @@ public class LambdaService implements ResourceProvider {
         esm.setSelfManagedEventSource(selfManagedEventSource);
         esm.setTopics(topics);
         esm.setSourceAccessConfigurations(sourceAccessConfigurations);
+        esm.setAmazonManagedKafkaEventSourceConfig(amazonManagedKafkaEventSourceConfig);
         esm.setTags(requestTags(request));
         esm.setLastModified(System.currentTimeMillis());
 
