@@ -3229,7 +3229,11 @@ public class S3Controller {
         } catch (AwsException e) {
             throw copySourceRefusal(e, sourceObject.versionId());
         }
-        authorizeCopiedTags(httpHeaders, uriInfo, sourceObject, destBucket, destKey, authorization);
+        try {
+            authorizeCopiedTags(httpHeaders, uriInfo, sourceObject, destBucket, destKey, authorization);
+        } catch (AwsException e) {
+            throw copySourceRefusal(e, sourceObject.versionId());
+        }
         String copiedSourceVersionId = copySourceVersionId(sourceBucket, sourceObject.objectKey(),
                 sourceObject.versionId());
         String copyContentEncoding = toPersistedContentEncoding(httpHeaders.getHeaderString("Content-Encoding"));
