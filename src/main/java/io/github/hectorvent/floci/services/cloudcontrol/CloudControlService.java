@@ -527,8 +527,16 @@ public class CloudControlService {
                     + "not hold for " + identifier + ".", null, accountId));
         }
 
-        RequestScopes.runAs(accountId,
-                () -> provisioner.deleteStandalone(typeName, identifier, region, attributes));
+        RequestScopes.runAs(accountId, () -> {
+            // SSM documents and parameters are deleted by the backends that created them.
+            if ("AWS::SSM::Parameter".equals(typeName)) {
+                ssmBackend.delete(identifier, region);
+            } else if (SsmDocumentResource.TYPE.equals(typeName)) {
+                ssmDocuments.delete(identifier, region);
+            } else {
+                provisioner.deleteStandalone(typeName, identifier, region, attributes);
+            }
+        });
         created.remove(key);
         removePersistedCreated(accountId, region, typeName, identifier);
         return record(new ProgressEvent(typeName, identifier,
