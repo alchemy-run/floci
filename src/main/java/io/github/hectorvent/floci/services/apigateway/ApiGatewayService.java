@@ -309,10 +309,6 @@ public class ApiGatewayService implements ResourceProvider {
         api.setCreatedDate(System.currentTimeMillis() / 1000L);
         api.setTags(ReservedTags.stripApiGatewayReservedTags(tags));
 
-        if (request.get("binaryMediaTypes") instanceof List<?> binaryTypes) {
-            api.setBinaryMediaTypes(binaryTypes.stream()
-                    .filter(String.class::isInstance).map(String.class::cast).toList());
-        }
         if (request.get("policy") instanceof String policy && !policy.isEmpty()) {
             api.setPolicy(policy);
         }
@@ -325,7 +321,15 @@ public class ApiGatewayService implements ResourceProvider {
                         List<EndpointType> types = list.stream()
                                 .filter(String.class::isInstance)
                                 .map(String.class::cast)
-                                .map(ApiGatewayService::endpointType)
+                                .map(String::toUpperCase)
+                                .map(typeStr -> {
+                                    try {
+                                        return EndpointType.valueOf(typeStr);
+                                    } catch (IllegalArgumentException e) {
+                                        throw new AwsException("BadRequestException",
+                                                "Endpoint configuration type must be REGIONAL, EDGE, or PRIVATE.", 400);
+                                    }
+                                })
                                 .toList();
                         endpointConfiguration.setTypes(types);
                     } else if (EPC_VPC_IDS_KEY.equals(ks)) {
@@ -349,19 +353,28 @@ public class ApiGatewayService implements ResourceProvider {
             throw new AwsException("BadRequestException",
                     "Endpoint configuration types must contain exactly one value.", 400);
         }
-        requireEndpointTypeAvailable(endpointConfiguration.getTypes().getFirst().name(), region);
 
-        api.setEndpointConfiguration(endpointConfigurationOf(endpointConfiguration.getTypes().getFirst(),
-                endpointConfiguration.getVpcEndpointIds()));
+        EndpointType type = endpointConfiguration.getTypes().getFirst();
+        if (EndpointType.PRIVATE.equals(type)) {
+            if (endpointConfiguration.getVpcEndpointIds().isEmpty()) {
+                throw new AwsException("BadRequestException",
+                        "At least one vpcEndpointId is required for PRIVATE APIs.", 400);
+            }
+        } else {
+            // Reject/ignore vpcEndpointIds for REGIONAL and EDGE
+            endpointConfiguration.setVpcEndpointIds(new ArrayList<>());
+        }
+
+        api.setEndpointConfiguration(endpointConfiguration);
+        api.setBinaryMediaTypes(readStringList(request.get("binaryMediaTypes")));
 
         // Create root resource "/"
         ApiGatewayResource root = new ApiGatewayResource();
         root.setId(shortId(8));
         root.setPath("/");
-        api.setRootResourceId(root.getId());
-
-        apiStore.put(apiKey(region, api.getId()), api);
         resourceStore.put(resourceKey(region, api.getId(), root.getId()), root);
+        api.setRootResourceId(root.getId());
+        apiStore.put(apiKey(region, api.getId()), api);
 
         LOG.infov("Created REST API: {0} ({1}) in {2}", name, api.getId(), region);
         return api;
@@ -3152,21 +3165,24 @@ public class ApiGatewayService implements ResourceProvider {
     public RestApi updateRestApi(String region, String apiId, List<Map<String, String>> patchOperations) {
         RestApi api = getRestApi(region, apiId);
         if (patchOperations != null) {
-            // Worked out before anything is set: the store hands back the live API, and a rejected
-            // endpoint change must leave it as it was.
-            EndpointConfiguration endpointConfiguration = patchEndpointConfiguration(api, patchOperations, region);
             for (Map<String, String> op : patchOperations) {
-                if (!"replace" .equals(op.get("op"))) continue;
+                String opType = op.get("op");
                 String path = op.getOrDefault("path", "");
                 String value = op.get("value");
-                if ("/name" .equals(path)) api.setName(value);
-                else if ("/description" .equals(path)) api.setDescription(value);
-                // aws_api_gateway_rest_api_policy writes the policy this way, and clears it by
-                // replacing it with an empty string.
-                else if ("/policy" .equals(path)) api.setPolicy(value == null || value.isEmpty() ? null : value);
-            }
-            if (endpointConfiguration != null) {
-                api.setEndpointConfiguration(endpointConfiguration);
+                if ("/name".equals(path) && !"remove".equals(opType)) {
+                    api.setName(value);
+                } else if ("/description".equals(path)) {
+                    api.setDescription("remove".equals(opType) ? null : value);
+                } else if ("/policy".equals(path)) {
+                    api.setPolicy("remove".equals(opType) || value == null || value.isEmpty() ? null : value);
+                } else if (path.startsWith("/binaryMediaTypes/")) {
+                    String mediaType = decodeJsonPointerSegment(path.substring("/binaryMediaTypes/".length()));
+                    if ("remove".equals(opType)) {
+                        api.getBinaryMediaTypes().remove(mediaType);
+                    } else if (!api.getBinaryMediaTypes().contains(mediaType)) {
+                        api.getBinaryMediaTypes().add(mediaType);
+                    }
+                }
             }
         }
         apiStore.put(apiKey(region, apiId), api);
