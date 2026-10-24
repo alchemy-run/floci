@@ -977,23 +977,16 @@ public class LambdaService implements ResourceProvider {
             fn.setFileSystemConfigs(requestedFileSystemConfigs);
         }
 
-        if (request.containsKey("ImageConfig")) {
-            if (imageConfig != null) {
-                if (imageConfig.containsKey("Command")) {
-                    List<String> cmd = imageConfig.get("Command") instanceof List<?>
-                            ? ((List<?>) imageConfig.get("Command")).stream().map(Object::toString).toList() : null;
-                    fn.setImageConfigCommand(cmd);
-                }
-                if (imageConfig.containsKey("EntryPoint")) {
-                    List<String> ep = imageConfig.get("EntryPoint") instanceof List<?>
-                            ? ((List<?>) imageConfig.get("EntryPoint")).stream().map(Object::toString).toList() : null;
-                    fn.setImageConfigEntryPoint(ep);
-                }
-                if (imageConfig.containsKey("WorkingDirectory")) {
-                    fn.setImageConfigWorkingDirectory(
-                            imageConfig.get("WorkingDirectory") instanceof String wd ? wd : null);
-                }
-            }
+        // ImageConfig is replaced as a whole, as on AWS: a member left out of a supplied ImageConfig
+        // clears that override, so `"ImageConfig": {}` drops every override. Omitting ImageConfig
+        // from the request leaves the current overrides in place.
+        if (imageConfig != null) {
+            fn.setImageConfigCommand(imageConfig.get("Command") instanceof List<?> cmd
+                    ? cmd.stream().map(Object::toString).toList() : null);
+            fn.setImageConfigEntryPoint(imageConfig.get("EntryPoint") instanceof List<?> ep
+                    ? ep.stream().map(Object::toString).toList() : null);
+            fn.setImageConfigWorkingDirectory(
+                    imageConfig.get("WorkingDirectory") instanceof String wd ? wd : null);
         }
 
         fn.setLastModified(System.currentTimeMillis());
