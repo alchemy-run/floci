@@ -12522,6 +12522,8 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
                 case "state" -> matchesValue(values, subnet.getState());
                 case "availabilityZone", "availability-zone" -> matchesValue(values, subnet.getAvailabilityZone());
                 case "cidr-block", "cidrBlock", "cidr" -> matchesValue(values, subnet.getCidrBlock());
+                case "default-for-az", "defaultForAz" ->
+                        matchesValue(values, String.valueOf(subnet.isDefaultForAz()));
                 default -> true;
             };
         }
@@ -12605,6 +12607,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
                 // default arm silently matched every group regardless of value, which is
                 // indistinguishable from "no filter" for the caller.
                 case "description" -> matchesValue(values, sg.getDescription());
+                case "owner-id" -> matchesValue(values, sg.getOwnerId());
                 default -> true;
             };
         }
