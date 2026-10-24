@@ -246,6 +246,12 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
         String lambdaRegion = extractRegionFromArn(fn.getFunctionArn(), config.defaultRegion());
         String lambdaAccountId = AwsArnUtils.accountOrDefault(fn.getFunctionArn(), config.defaultAccountId());
         LambdaDockerFlags dockerFlags = configuredDockerFlags();
+        // Internal extensions register as soon as the runtime boots (container start below). Create
+        // the stream and attach the platform-log sink first so the EXTENSION Name: … line, which is
+        // how a function confirms its extensions registered, reaches CloudWatch Logs.
+        logStreamer.ensureLogGroupAndStreamForAccount(lambdaAccountId, cwLogGroup, cwLogStream, lambdaRegion);
+        runtimeApiServer.setPlatformLogSink(line -> logStreamer.streamToCloudWatchLogsForAccount(
+                lambdaAccountId, cwLogGroup, cwLogStream, lambdaRegion, line));
 
         // Build env vars
         List<String> env = new ArrayList<>();
