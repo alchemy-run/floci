@@ -1540,6 +1540,19 @@ public class ApiGatewayService implements ResourceProvider {
         // only applied once the whole patch is known to be good.
         String newName = plan.getName();
         String newDescription = plan.getDescription();
+        ThrottleSettings newThrottle = null;
+        if (plan.getThrottle() != null) {
+            newThrottle = new ThrottleSettings();
+            newThrottle.setBurstLimit(plan.getThrottle().getBurstLimit());
+            newThrottle.setRateLimit(plan.getThrottle().getRateLimit());
+        }
+        QuotaSettings newQuota = null;
+        if (plan.getQuota() != null) {
+            newQuota = new QuotaSettings();
+            newQuota.setLimit(plan.getQuota().getLimit());
+            newQuota.setOffset(plan.getQuota().getOffset());
+            newQuota.setPeriod(plan.getQuota().getPeriod());
+        }
         List<UsagePlan.ApiStage> newApiStages = new ArrayList<>(plan.getApiStages());
         if (patchOperations != null) {
             for (Map<String, String> op : patchOperations) {
@@ -1549,13 +1562,16 @@ public class ApiGatewayService implements ResourceProvider {
                 String opType = op.get("op");
                 String path = op.get("path");
                 String value = op.get("value");
-                if (path == null || value == null) {
+                if (path == null || (value == null && !"remove".equals(opType))) {
                     throw new AwsException("BadRequestException", "Missing path or value", 400);
                 }
                 if ("/apiStages".equals(path)) {
                     // AWS models stage membership as add/remove of an "apiId:stage" pair.
                     if (!"add".equals(opType) && !"remove".equals(opType)) {
                         throw new AwsException("BadRequestException", "Invalid operation", 400);
+                    }
+                    if (value == null) {
+                        throw new AwsException("BadRequestException", "Missing value", 400);
                     }
                     String[] parts = value.split(":", 2);
                     if (parts.length != 2 || parts[0].isEmpty() || parts[1].isEmpty()) {
@@ -1572,6 +1588,46 @@ public class ApiGatewayService implements ResourceProvider {
                     }
                     continue;
                 }
+                if (path.startsWith("/throttle/") || path.startsWith("/quota/")) {
+                    if (!"add".equals(opType) && !"replace".equals(opType) && !"remove".equals(opType)) {
+                        throw new AwsException("BadRequestException", "Invalid operation", 400);
+                    }
+                    try {
+                        if (path.startsWith("/throttle/")) {
+                            if (!List.of("/throttle/burstLimit", "/throttle/rateLimit").contains(path)) {
+                                throw new AwsException("BadRequestException", "Unsupported path: " + path, 400);
+                            }
+                            if (newThrottle == null) {
+                                newThrottle = new ThrottleSettings();
+                                newThrottle.setBurstLimit(null);
+                                newThrottle.setRateLimit(null);
+                            }
+                            applyThrottlePatch(newThrottle, path, opType, value);
+                            if (newThrottle.getBurstLimit() == null && newThrottle.getRateLimit() == null) {
+                                newThrottle = null;
+                            }
+                        } else {
+                            if (!List.of("/quota/limit", "/quota/offset", "/quota/period").contains(path)) {
+                                throw new AwsException("BadRequestException", "Unsupported path: " + path, 400);
+                            }
+                            if (newQuota == null) {
+                                newQuota = new QuotaSettings();
+                            }
+                            applyQuotaPatch(newQuota, path, opType, value);
+                            if (newQuota.getLimit() == null && newQuota.getOffset() == null
+                                    && newQuota.getPeriod() == null) {
+                                newQuota = null;
+                            }
+                        }
+                    } catch (NumberFormatException e) {
+                        throw new AwsException("BadRequestException", "Invalid numeric value for " + path, 400);
+                    }
+                    continue;
+                }
+                if ("/description".equals(path) && "remove".equals(opType)) {
+                    newDescription = null;
+                    continue;
+                }
                 if (!"add".equals(opType) && !"replace".equals(opType)) {
                     throw new AwsException("BadRequestException", "Invalid operation", 400);
                 }
@@ -1584,6 +1640,8 @@ public class ApiGatewayService implements ResourceProvider {
                 }
             }
         }
+        plan.setThrottle(newThrottle);
+        plan.setQuota(newQuota);
         plan.setName(newName);
         plan.setDescription(newDescription);
         plan.getApiStages().clear();
@@ -5154,12 +5212,21 @@ public class ApiGatewayService implements ResourceProvider {
         getStage(region, apiId, stageName);
     }
 
+    private static void applyThrottlePatch(ThrottleSettings throttle, String path, String opType, String value) {
+        if ("/throttle/burstLimit".equals(path)) {
+            throttle.setBurstLimit("remove".equals(opType) || value == null ? null : Integer.parseInt(value));
+        } else if ("/throttle/rateLimit".equals(path)) {
+            throttle.setRateLimit("remove".equals(opType) || value == null ? null : Double.parseDouble(value));
+        }
+    }
 
-
-
-
-
-
-
-
+    private static void applyQuotaPatch(QuotaSettings quota, String path, String opType, String value) {
+        if ("/quota/limit".equals(path)) {
+            quota.setLimit("remove".equals(opType) || value == null ? null : Integer.parseInt(value));
+        } else if ("/quota/offset".equals(path)) {
+            quota.setOffset("remove".equals(opType) || value == null ? null : Integer.parseInt(value));
+        } else if ("/quota/period".equals(path)) {
+            quota.setPeriod("remove".equals(opType) ? null : value);
+        }
+    }
 }
