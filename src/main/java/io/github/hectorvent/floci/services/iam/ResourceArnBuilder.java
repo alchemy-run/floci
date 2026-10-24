@@ -1594,11 +1594,7 @@ public class ResourceArnBuilder {
         return v;
     }
 
-    private static final Logger LOG = Logger.getLogger(ResourceArnBuilder.class);
 
-    /** SES v2 / v1 From address in a JSON body. */
-    private static final Pattern FROM_EMAIL_JSON =
-            Pattern.compile("\"FromEmailAddress\"\\s*:\\s*\"([^\"]+)\"");
 
     private final Instance<ResourceArnResolver> arnResolvers;
 
@@ -1638,79 +1634,8 @@ public class ResourceArnBuilder {
         return AwsArnUtils.Arn.of("lambda", region, accountId, "function:" + name).toString();
     }
 
-    private String buildGuardDutyArn(ContainerRequestContext ctx, String path, String region, String accountId) {
-        path = path.startsWith("/") ? path : "/" + path;
-        if (path.startsWith("/tags/")) {
-            return path.substring("/tags/".length());
-        }
-        String detector = extractSegmentAfter(path, "detector");
-        if (detector == null) {
-            return "*";
-        }
-        String resource = "detector/" + detector;
-        for (String kind : List.of("filter", "ipset", "threatintelset")) {
-            String id = extractSegmentAfter(path, kind);
-            if (id != null) {
-                return AwsArnUtils.Arn.of("guardduty", region, accountId, resource + "/" + kind + "/" + id).toString();
-            }
-            if (path.endsWith("/" + kind)) {
-                if ("filter".equals(kind) && "POST".equals(ctx.getMethod())) {
-                    JsonNode body = readJsonBody(ctx);
-                    JsonNode name = body == null ? null : body.get("name");
-                    if (name != null && name.isTextual() && !name.asText().isBlank()) {
-                        return AwsArnUtils.Arn.of("guardduty", region, accountId,
-                                resource + "/filter/" + name.asText()).toString();
-                    }
-                }
-                // Set creation and collection listing do not support resource-level permissions.
-                return "*";
-            }
-        }
-        return AwsArnUtils.Arn.of("guardduty", region, accountId, resource).toString();
-    }
 
-    private String buildInspector2Arn(ContainerRequestContext ctx, String path, String region, String accountId) {
-        path = path.startsWith("/") ? path : "/" + path;
-        if (path.startsWith("/tags/")) {
-            return path.substring("/tags/".length());
-        }
-        if ("/filters/create".equals(path)) {
-            return AwsArnUtils.Arn.of("inspector2", region, accountId,
-                    "owner/" + accountId + "/filter/*").toString();
-        }
-        if ("/filters/update".equals(path) || "/filters/delete".equals(path)) {
-            JsonNode body = readJsonBody(ctx);
-            JsonNode arn = body == null ? null : body.get("filterArn");
-            if (arn != null && arn.isTextual() && !arn.asText().isBlank()) {
-                return arn.asText();
-            }
-        }
-        return "*";
-    }
 
-    private String buildEmrServerlessArn(ContainerRequestContext ctx, String path, String region, String accountId) {
-        path = path.startsWith("/") ? path : "/" + path;
-        int tags = path.indexOf("/tags/");
-        if (tags >= 0) {
-            return path.substring(tags + "/tags/".length());
-        }
-        String applicationId = extractSegmentAfter(path, "applications");
-        if (applicationId == null) {
-            return "*";
-        }
-        String resource = "/applications/" + applicationId;
-        String jobRunId = extractSegmentAfter(path, "jobruns");
-        String sessionId = extractSegmentAfter(path, "sessions");
-        if (jobRunId == null && sessionId == null && path.endsWith("/dashboard")) {
-            sessionId = ctx.getUriInfo().getQueryParameters().getFirst("resourceId");
-        }
-        if (jobRunId != null) {
-            resource += "/jobruns/" + jobRunId;
-        } else if (sessionId != null) {
-            resource += "/sessions/" + sessionId;
-        }
-        return AwsArnUtils.Arn.of("emr-serverless", region, accountId, resource).toString();
-    }
 
     private String buildSecretsManagerArn(ContainerRequestContext ctx, String region, String accountId) {
         JsonNode json = readJsonBody(ctx);
@@ -1742,46 +1667,7 @@ public class ResourceArnBuilder {
         return requestArn;
     }
 
-    /**
-     * SES authorizes send against the identity of the From address
-     * ({@code arn:aws:ses:region:account:identity/user@domain}), not the domain
-     * identity the binding was declared on. Domain-scoped policies therefore
-     * also grant {@code identity/*@domain}.
-     */
-    private String buildSesIdentityArn(ContainerRequestContext ctx, String region, String accountId) {
-        String from = firstFormParam(ctx, "FromEmailAddress");
-        if (from == null || from.isBlank()) {
-            from = firstFormParam(ctx, "Source");
-        }
-        if (from == null || from.isBlank()) {
-            from = extractFromEmailAddressFromBody(ctx);
-        }
-        from = extractEmail(from);
-        if (from == null || from.isBlank()) {
-            return AwsArnUtils.Arn.of("ses", region, accountId, "identity/*").toString();
-        }
-        return AwsArnUtils.Arn.of("ses", region, accountId, "identity/" + from).toString();
-    }
 
-    private String extractFromEmailAddressFromBody(ContainerRequestContext ctx) {
-        InputStream in = ctx.getEntityStream();
-        if (in == null) {
-            return null;
-        }
-        byte[] body;
-        try {
-            body = in.readAllBytes();
-        } catch (IOException e) {
-            LOG.debugv(e, "Failed to buffer SES body for IAM resource ARN");
-            return null;
-        }
-        ctx.setEntityStream(new ByteArrayInputStream(body));
-        if (body.length == 0) {
-            return null;
-        }
-        Matcher m = FROM_EMAIL_JSON.matcher(new String(body, StandardCharsets.UTF_8));
-        return m.find() ? m.group(1) : null;
-    }
 
     /** Strips a display-name wrapper: {@code "Ada" <ada@example.com>} → {@code ada@example.com}. */
     static String extractEmail(String from) {

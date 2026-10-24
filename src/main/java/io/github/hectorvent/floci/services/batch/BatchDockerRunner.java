@@ -315,7 +315,6 @@ public class BatchDockerRunner implements ContainerTeardown {
         }
     }
 
-    private static final Pattern OWNER_ACCOUNT_ID = Pattern.compile("\\d{12}");
 
     private final UnaryOperator<String> imageResolver;
 

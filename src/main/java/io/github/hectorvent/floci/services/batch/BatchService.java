@@ -2146,13 +2146,9 @@ public class BatchService {
     private record ListFilter(String name, List<String> values) {
     }
 
-    private enum Placement { READY, WAIT, STOP }
 
-    private static final int MAX_CONCURRENT_CONTAINERS = 16;
 
-    private static final long PLACEMENT_POLL_MILLIS = 1000;
 
-    private final Semaphore containerSlots = new Semaphore(MAX_CONCURRENT_CONTAINERS);
 
     public ObjectNode getJobQueueSnapshot(JsonNode request) {
         BatchJobQueue queue = resolveJobQueue(requiredText(request, "jobQueue"));
@@ -2222,12 +2218,6 @@ public class BatchService {
         throw client("Resource not found: " + arn);
     }
 
-    private Map<String, String> readTags(String arn) {
-        return resolveComputeEnvironmentOptional(arn).map(BatchComputeEnvironment::getTags)
-                .or(() -> resolveJobQueueOptional(arn).map(BatchJobQueue::getTags))
-                .or(() -> resolveJobDefinitionOptional(arn, true).map(BatchJobDefinition::getTags))
-                .orElseThrow(() -> client("Resource not found: " + arn));
-    }
 
     private void mergeTags(Map<String, String> tags, Map<String, String> upsert, List<String> removed) {
         if (upsert != null) {
@@ -2238,110 +2228,11 @@ public class BatchService {
         }
     }
 
-    private boolean immediateComplete() {
-        return config.services().batch().immediateComplete();
-    }
 
-    private void queueImmediateJob(BatchJob job) {
-        job.setStatus(BatchStatus.PENDING.name());
-        putJob(job);
-        job.setStatus(BatchStatus.RUNNABLE.name());
-        job.setStatusReason("Job is ready to run");
-        putJob(job);
-    }
 
-    private static boolean isTerminal(BatchJob job) {
-        return BatchStatus.SUCCEEDED.name().equals(job.getStatus())
-                || BatchStatus.FAILED.name().equals(job.getStatus());
-    }
 
-    private static boolean matchesComputeEnvironment(BatchComputeEnvironment env, String ref) {
-        return env.getComputeEnvironmentArn().equals(ref) || env.getComputeEnvironmentName().equals(ref);
-    }
 
-    /**
-     * Holds a RUNNABLE job until its queue can place it: the queue is ENABLED and one of its
-     * compute environments is a MANAGED, ENABLED, VALID environment, and a container slot is free.
-     * An UNMANAGED environment has no container instances in Floci, so its jobs stay RUNNABLE as
-     * they do on AWS until capacity is registered. Returns the container slots acquired, or -1
-     * when the job no longer needs to run.
-     */
-    private int awaitPlacement(String accountId, String jobId, int requestedSlots) {
-        if (!shouldRunDocker()) {
-            return 0;
-        }
-        int slots = Math.min(Math.max(1, requestedSlots), MAX_CONCURRENT_CONTAINERS);
-        while (!Thread.currentThread().isInterrupted()) {
-            Placement placement = placement(accountId, jobId);
-            if (placement == Placement.STOP) {
-                return -1;
-            }
-            if (placement == Placement.READY && containerSlots.tryAcquire(slots)) {
-                return slots;
-            }
-            try {
-                Thread.sleep(PLACEMENT_POLL_MILLIS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }
-        return -1;
-    }
 
-    private Placement placement(String accountId, String jobId) {
-        return RequestScopes.callAs(accountId, () -> {
-            synchronized (this) {
-                BatchJob job = getJobForAccount(accountId, jobId).orElse(null);
-                if (job == null || isTerminal(job)) {
-                    return Placement.STOP;
-                }
-                Optional<BatchJobQueue> queue = resolveJobQueueOptional(job.getJobQueue());
-                if (queue.isEmpty()) {
-                    failJob(accountId, jobId, "Job queue " + job.getJobQueueName() + " was deleted");
-                    return Placement.STOP;
-                }
-                if (!"ENABLED".equals(queue.get().getState())) {
-                    return Placement.WAIT;
-                }
-                for (BatchComputeEnvironmentOrder order : queue.get().getComputeEnvironmentOrder()) {
-                    Optional<BatchComputeEnvironment> env =
-                            resolveComputeEnvironmentOptional(order.getComputeEnvironment());
-                    if (env.isPresent() && "MANAGED".equals(env.get().getType())
-                            && "ENABLED".equals(env.get().getState())
-                            && "VALID".equals(env.get().getStatus())) {
-                        return Placement.READY;
-                    }
-                }
-                return Placement.WAIT;
-            }
-        });
-    }
 
-    private void validateRuntimePlatform(BatchRuntimePlatform platform) {
-        if (platform == null || platform.getCpuArchitecture() == null) {
-            return;
-        }
-        String architecture = platform.getCpuArchitecture();
-        if (!BatchRuntimePlatform.X86_64.equals(architecture) && !BatchRuntimePlatform.ARM64.equals(architecture)) {
-            throw client("runtimePlatform.cpuArchitecture must be one of [X86_64, ARM64]");
-        }
-    }
 
-    private String resourceName(String ref, String prefix) {
-        if (ref == null || ref.isBlank()) {
-            return "";
-        }
-        if (ref.startsWith("arn:")) {
-            try {
-                String resource = AwsArnUtils.parse(ref).resource();
-                if (resource.startsWith(prefix)) {
-                    return resource.substring(prefix.length());
-                }
-                return resource;
-            } catch (IllegalArgumentException e) {
-                return ref;
-            }
-        }
-        return ref;
-    }
 }

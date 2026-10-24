@@ -694,14 +694,6 @@ public class ApplicationAutoScalingService {
         }
     }
 
-    private List<ScheduledAction> findScheduledActions(String region, String serviceNamespace, String resourceId,
-                                                       String scalableDimension) {
-        String prefix = region + "::" + serviceNamespace + "::";
-        return scheduledActions.scan(k -> k.startsWith(prefix)).stream()
-                .filter(a -> resourceId.equals(a.getResourceId()))
-                .filter(a -> scalableDimension.equals(a.getScalableDimension()))
-                .toList();
-    }
 
     private String buildScheduledActionArn(String region, String serviceNamespace, String resourceId,
                                            String scheduledActionName) {

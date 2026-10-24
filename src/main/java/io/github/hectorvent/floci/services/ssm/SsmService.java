@@ -1639,27 +1639,6 @@ public class SsmService implements ResourceProvider {
     public record UnlabelResult(List<String> removedLabels, List<String> invalidLabels) {
     }
 
-    private static String normalizeResourceId(String resourceId) {
-        if (resourceId != null && resourceId.startsWith("arn:")) {
-            try {
-                AwsArnUtils.Arn arn = AwsArnUtils.parse(resourceId);
-                if ("ssm".equals(arn.service())) {
-                    String resource = arn.resource();
-                    if (resource.startsWith("parameter/")) {
-                        return resource.substring("parameter".length());
-                    }
-                    if (resource.startsWith("parameter")) {
-                        return resource.substring("parameter".length());
-                    }
-                }
-            } catch (IllegalArgumentException e) {
-                // Not a valid ARN; fall through and use resourceId directly so callers
-                // querying parameterStore produce the standard InvalidResourceId error.
-                LOG.debugv("Failed to parse resourceId as ARN: {0}", resourceId);
-            }
-        }
-        return resourceId;
-    }
 
     public synchronized SsmDocument createDocument(String name, String content, String documentType,
                                                    String documentFormat, String targetType,

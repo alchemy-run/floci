@@ -728,8 +728,6 @@ public class MwaaEnvironmentManager {
     /** Airflow web/API user created at bootstrap; InvokeRestApi authenticates as this user. */
     public static final String AIRFLOW_ADMIN_USER = "admin";
 
-    private static final String API_AUTH_BACKENDS =
-            "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session";
 
     private static String environmentIdentity(Environment environment) {
         return environmentAccount(environment) + "." + environmentRegion(environment) + "." + environment.getName();
@@ -739,22 +737,6 @@ public class MwaaEnvironmentManager {
         return AwsArnUtils.regionOrDefault(environment.getArn(), "us-east-1");
     }
 
-    private static byte[] tarSingleFile(String entryName, byte[] content) {
-        try {
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            try (TarArchiveOutputStream tar = new TarArchiveOutputStream(out)) {
-                TarArchiveEntry entry = new TarArchiveEntry(entryName);
-                entry.setSize(content.length);
-                entry.setMode(0644);
-                tar.putArchiveEntry(entry);
-                tar.write(content);
-                tar.closeArchiveEntry();
-            }
-            return out.toByteArray();
-        } catch (IOException e) {
-            throw new IllegalStateException("Could not build in-memory tar for " + entryName, e);
-        }
-    }
 
     public record ExecResult(long exitCode, String stdout, String stderr) {}
 }

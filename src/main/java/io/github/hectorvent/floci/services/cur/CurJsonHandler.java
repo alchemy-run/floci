@@ -208,18 +208,4 @@ public class CurJsonHandler {
         return Response.ok(response).build();
     }
 
-    private static Map<String, String> parseTags(JsonNode node) {
-        Map<String, String> tags = new LinkedHashMap<>();
-        if (node.isArray()) {
-            for (JsonNode tag : node) {
-                String key = stringOrNull(tag, "Key");
-                String value = stringOrNull(tag, "Value");
-                if (key == null || key.isEmpty() || value == null) {
-                    throw new AwsException("ValidationException", "Tags require a nonempty Key and a Value.", 400);
-                }
-                tags.put(key, value);
-            }
-        }
-        return tags;
-    }
 }

@@ -3285,18 +3285,7 @@ public class GlueService {
         return getTags(resourceArn, regionResolver.getRegion());
     }
 
-    private void putResourceTags(String arn, Map<String, String> tags, String region) {
-        if (tags == null || tags.isEmpty()) {
-            return;
-        }
-        resourceTagStore.put(arn, new LinkedHashMap<>(tags));
-        resourceGroupsTaggingService.tagResources(List.of(arn), tags, region);
-    }
 
-    private void deleteResourceTags(String arn, String region) {
-        resourceTagStore.delete(arn);
-        resourceGroupsTaggingService.deleteResources(List.of(arn), region);
-    }
 
     private Map<String, Object> defaultBookmark(String jobName, String runId) {
         Map<String, Object> bookmark = new LinkedHashMap<>();

@@ -4156,23 +4156,6 @@ public class CloudFrontController {
         }
     }
 
-    private String xmlKeyValueStoreAssociations(List<String> arns) {
-        List<String> items = arns != null ? arns : List.of();
-        XmlBuilder xml = new XmlBuilder()
-                .start("KeyValueStoreAssociations")
-                .elem("Quantity", items.size());
-        if (!items.isEmpty()) {
-            xml.start("Items");
-            for (String arn : items) {
-                xml.start("KeyValueStoreAssociation")
-                        .elem("KeyValueStoreARN", arn)
-                        .end("KeyValueStoreAssociation");
-            }
-            xml.end("Items");
-        }
-        xml.end("KeyValueStoreAssociations");
-        return xml.build();
-    }
 
     private String xmlVpcOrigin(VpcOrigin origin) {
         List<String> protocols = origin.getOriginSslProtocols() != null
@@ -4250,32 +4233,7 @@ public class CloudFrontController {
         return value;
     }
 
-    private static String extractXmlElement(String body, String localName) {
-        if (body == null || body.isEmpty()) {
-            return null;
-        }
-        String pattern = "(?is)<(?:[\\w.-]+:)?" + localName + "\\b[^>]*>.*?</(?:[\\w.-]+:)?" + localName + ">";
-        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile(pattern).matcher(body);
-        return matcher.find() ? matcher.group() : null;
-    }
 
-    /**
-     * {@code FunctionCode} is a blob, so the REST-XML wire format carries it
-     * base64-encoded. Store the source itself — that is what the runtime runs
-     * and what the size limit applies to. Hand-written XML that carries plain
-     * source is accepted as-is.
-     */
-    private String decodeFunctionCode(String value) {
-        if (value == null || value.isBlank()) {
-            return value;
-        }
-        try {
-            byte[] decoded = Base64.getDecoder().decode(value.replaceAll("\\s", ""));
-            return new String(decoded, java.nio.charset.StandardCharsets.UTF_8);
-        } catch (IllegalArgumentException notBase64) {
-            return value;
-        }
-    }
 
     private VpcOrigin parseVpcOrigin(String body) {
         VpcOrigin origin = new VpcOrigin();
@@ -4306,13 +4264,4 @@ public class CloudFrontController {
         return store;
     }
 
-    private String xmlPublicKeyItems(List<String> items) {
-        XmlBuilder xml = new XmlBuilder().start("Items");
-        if (items != null) {
-            for (String item : items) {
-                xml.elem("PublicKey", item);
-            }
-        }
-        return xml.end("Items").build();
-    }
 }

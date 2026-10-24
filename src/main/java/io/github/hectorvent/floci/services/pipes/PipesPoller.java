@@ -924,9 +924,7 @@ public class PipesPoller implements Resettable {
         return colonIdx >= 0 ? arn.substring(colonIdx + 1) : arn;
     }
 
-    private final DynamoDbStreamService dynamoDbStreamService;
 
-    private final ConcurrentHashMap<String, String> dynamoDbIterators = new ConcurrentHashMap<>();
 
 
     static String wrapPipeBatch(ObjectMapper mapper, List<JsonNode> records) {
@@ -939,15 +937,4 @@ public class PipesPoller implements Resettable {
         }
     }
 
-    private List<ObjectNode> buildDynamoDbRecordNodes(List<?> records, Pipe pipe, String region) {
-        List<ObjectNode> nodes = new ArrayList<>();
-        for (Object record : records) {
-            ObjectNode node = objectMapper.valueToTree(record);
-            node.put("eventSource", "aws:dynamodb");
-            node.put("eventSourceARN", pipe.getSource());
-            node.put("awsRegion", region);
-            nodes.add(node);
-        }
-        return nodes;
-    }
 }

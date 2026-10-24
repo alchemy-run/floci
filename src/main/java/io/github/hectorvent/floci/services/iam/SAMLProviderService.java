@@ -229,23 +229,6 @@ public class SAMLProviderService {
     }
 
 
-    private void updateLegacyMetadata(String accountId, IamSamlProvider provider) {
-        try {
-            SAMLMetadata.Parsed parsed = SAMLMetadata.parse(provider.getMetadataDocument());
-            provider.setEntityId(parsed.entityId());
-            provider.setCertificate(parsed.certificateBase64());
-            save(accountId, provider);
-        } catch (Exception e) {
-            throw new AwsException("InvalidInput", "The SAML metadata document is invalid.", 400);
-        }
-    }
 
 
-    private void save(String accountId, IamSamlProvider provider) {
-        if (providers instanceof AccountAwareStorageBackend<IamSamlProvider> aware) {
-            aware.putForAccount(accountId, provider.getArn(), provider);
-        } else {
-            providers.put(provider.getArn(), provider);
-        }
-    }
 }

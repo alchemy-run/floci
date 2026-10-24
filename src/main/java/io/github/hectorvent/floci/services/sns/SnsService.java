@@ -3390,15 +3390,6 @@ public class SnsService implements Resettable, ResourceProvider {
         }
     }
 
-    private static String sha256(String message) {
-        try {
-        	MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] hash = md.digest(message.getBytes(StandardCharsets.UTF_8));
-            return HEX.formatHex(hash);
-        } catch (NoSuchAlgorithmException e) {
-            return UUID.randomUUID().toString();
-        }
-    }
 
     public Map<String, String> getSmsAttributes(String region) {
         Map<String, String> attrs = new java.util.LinkedHashMap<>();
@@ -3462,42 +3453,8 @@ public class SnsService implements Resettable, ResourceProvider {
                 + topicArn + "\",\"Condition\":{\"StringEquals\":{\"AWS:SourceAccount\":\"" + account + "\"}}}]}";
     }
 
-    private ObjectNode parseTopicPolicy(String raw, String topicArn) {
-        String source = (raw == null || raw.isBlank()) ? defaultTopicPolicy(topicArn) : raw;
-        try {
-            JsonNode parsed = objectMapper.readTree(source);
-            if (parsed instanceof ObjectNode obj) {
-                return obj;
-            }
-        } catch (Exception e) {
-            LOG.debugv(e, "Failed to parse topic policy; resetting to default");
-        }
-        try {
-            return (ObjectNode) objectMapper.readTree(defaultTopicPolicy(topicArn));
-        } catch (Exception e) {
-            throw new AwsException("InvalidParameter", "Invalid parameter: Policy", 400);
-        }
-    }
 
-    private static ArrayNode ensureStatementArray(ObjectNode policy) {
-        JsonNode existing = policy.get("Statement");
-        if (existing instanceof ArrayNode arr) {
-            return arr;
-        }
-        if (existing instanceof ObjectNode stmt) {
-            ArrayNode arr = policy.putArray("Statement");
-            arr.add(stmt);
-            return arr;
-        }
-        return policy.putArray("Statement");
-    }
 
-    private static String snsAction(String action) {
-        if (action == null) {
-            return "SNS:Publish";
-        }
-        return action.startsWith("SNS:") ? action : "SNS:" + action;
-    }
 
     static boolean isPlausibleGcmCredential(String credential) {
         if (credential == null || credential.isBlank()) {

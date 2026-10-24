@@ -946,16 +946,5 @@ public class BudgetsService implements Resettable {
     private enum SubscriberMutation { CREATE, UPDATE, DELETE }
     private record ResourceRef(String accountId, String budgetName, String actionId) {}
 
-    private static double historyTimeBound(JsonNode period, String field, double defaultValue) {
-        if (period == null || !period.has(field)) {
-            return defaultValue;
-        }
-        JsonNode value = period.get(field);
-        if (!value.isNumber() || !Double.isFinite(value.asDouble())) {
-            throw invalid("TimePeriod " + field + " must be an epoch timestamp.");
-        }
-        return value.asDouble();
-    }
 
-    private record HistoryEntry(String cursor, JsonNode history) {}
 }

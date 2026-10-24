@@ -1769,12 +1769,9 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
     @Inject
     S3Service s3Service;
 
-    private static final String CANONICAL_HOSTED_ZONE_ID = "Z35SXDOTRQ7X7K";
 
     private static final Pattern PEM_CERT = Pattern.compile("-----BEGIN CERTIFICATE-----");
 
-    /** Classic (8 hex) or current (17 hex) subnet IDs. Anything else is SubnetNotFound. */
-    private static final Pattern AWS_SUBNET_ID = Pattern.compile("subnet-[0-9a-f]{8}(?:[0-9a-f]{9})?");
 
     private Map<String, Map<String, TrustStore>> trustStores = new ConcurrentHashMap<>();
 
@@ -1823,24 +1820,6 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
         return describeCapacityReservation(region, arn);
     }
 
-    /**
-     * Index 0 is the default certificate (CreateListener / ModifyListener).
-     * Subsequent entries are SNI extras (AddListenerCertificates).
-     */
-    private static void replaceDefaultCertificate(Listener listener, String defaultCertArn) {
-        List<String> current = listener.getCertificates();
-        List<String> extras = new ArrayList<>();
-        for (int i = 1; i < current.size(); i++) {
-            String extra = current.get(i);
-            if (extra != null && !extra.equals(defaultCertArn)) {
-                extras.add(extra);
-            }
-        }
-        List<String> updated = new ArrayList<>();
-        updated.add(defaultCertArn);
-        updated.addAll(extras);
-        listener.setCertificates(updated);
-    }
 
     public TrustStore createTrustStore(String region, String name,
                                        String caCertificatesBundleS3Bucket,
@@ -1967,29 +1946,7 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
                 + revocation.getS3Bucket() + "/" + revocation.getS3Key();
     }
 
-    private Subnet lookupEc2Subnet(String region, String subnetId) {
-        if (ec2Service == null) {
-            return null;
-        }
-        try {
-            return ec2Service.findSubnetById(region, subnetId).orElse(null);
-        } catch (AwsException e) {
-            if ("InvalidSubnetID.NotFound".equals(e.getErrorCode())) {
-                return null;
-            }
-            throw e;
-        }
-    }
 
-    private static Subnet synthesizeAcceptedSubnet(String region, String subnetId, int index) {
-        Subnet subnet = new Subnet();
-        subnet.setSubnetId(subnetId);
-        subnet.setVpcId("vpc-default");
-        subnet.setRegion(region);
-        subnet.setState("available");
-        subnet.setAvailabilityZone(region + (char) ('a' + Math.floorMod(index, 3)));
-        return subnet;
-    }
 
     private TrustStore requireTrustStore(String region, String arn) {
         TrustStore trustStore = trustStores.getOrDefault(region, Map.of()).get(arn);
@@ -2054,13 +2011,4 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
     }
 
 
-    private void restartDataPlane(Listener listener, String region) {
-        if (dataPlane == null || listener == null) {
-            return;
-        }
-        try {
-            dataPlane.restartListener(listener, region, getListenerRules(region, listener.getListenerArn()));
-        } catch (RuntimeException ignored) {
-        }
-    }
 }

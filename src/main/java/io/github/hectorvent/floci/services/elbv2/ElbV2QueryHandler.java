@@ -1633,17 +1633,6 @@ public class ElbV2QueryHandler {
         return xml.build();
     }
 
-    private List<String> subnetMappingIds(MultivaluedMap<String, String> p) {
-        List<String> result = new ArrayList<>();
-        int i = 1;
-        while (true) {
-            String val = p.getFirst("SubnetMappings.member." + i + ".SubnetId");
-            if (val == null) break;
-            result.add(val);
-            i++;
-        }
-        return result;
-    }
 
     private static Long parseLongOrNull(String s) {
         if (s == null || s.isEmpty()) return null;

@@ -6818,22 +6818,6 @@ public class Ec2QueryHandler {
         }
     }
 
-    /**
-     * AWS CreateVolume stores the CMK ARN even when the request passed an alias
-     * name ({@code alias/...}) or key id. Resolve through KMS so DescribeVolumes
-     * matches live EC2.
-     */
-    private String resolveVolumeKmsKeyId(String kmsKeyId, String region) {
-        if (kmsKeyId == null || kmsKeyId.isBlank()) {
-            return null;
-        }
-        try {
-            return kmsService.describeKey(kmsKeyId, region).getArn();
-        } catch (AwsException e) {
-            throw new AwsException("InvalidParameterValue",
-                    "The KMS key " + kmsKeyId + " does not exist, is disabled, or is not usable.", 400);
-        }
-    }
 
     private Map<String, List<String>> getFilters(MultivaluedMap<String, String> p) {
         Map<String, List<String>> filters = new LinkedHashMap<>();
@@ -6942,27 +6926,7 @@ public class Ec2QueryHandler {
         return clientVpnService;
     }
 
-    /** AWS refuses to delete a subnet, security group or VPC a Client VPN endpoint still uses. */
-    private void requireNoClientVpnDependents(String region, String resourceId, String kind) {
-        if (clientVpnService == null) {
-            return;
-        }
-        clientVpnService.dependentEndpoint(region, resourceId).ifPresent(endpointId -> {
-            throw new AwsException("DependencyViolation", "The " + kind + " '" + resourceId
-                    + "' has dependencies and cannot be deleted: it is used by Client VPN endpoint " + endpointId, 400);
-        });
-    }
 
-    private void requireKnownClientVpnEndpoints(String region, List<String> resourceIds) {
-        if (clientVpnService == null) {
-            return;
-        }
-        for (String resourceId : resourceIds) {
-            if (resourceId != null && resourceId.startsWith(Ec2ClientVpnService.ENDPOINT_PREFIX)) {
-                clientVpnService.requireEndpoint(region, resourceId);
-            }
-        }
-    }
 
     private static boolean hasParameterPrefix(MultivaluedMap<String, String> p, String prefix) {
         return p.keySet().stream().anyMatch(name -> name.startsWith(prefix));
@@ -7332,33 +7296,7 @@ public class Ec2QueryHandler {
         return xmlResponse(xml.build());
     }
 
-    private Route routeFromParams(MultivaluedMap<String, String> p, String origin) {
-        Route route = new Route();
-        route.setDestinationCidrBlock(p.getFirst("DestinationCidrBlock"));
-        route.setDestinationIpv6CidrBlock(p.getFirst("DestinationIpv6CidrBlock"));
-        route.setDestinationPrefixListId(p.getFirst("DestinationPrefixListId"));
-        route.setGatewayId(p.getFirst("GatewayId"));
-        route.setNatGatewayId(p.getFirst("NatGatewayId"));
-        route.setEgressOnlyInternetGatewayId(p.getFirst("EgressOnlyInternetGatewayId"));
-        route.setVpcPeeringConnectionId(p.getFirst("VpcPeeringConnectionId"));
-        route.setNetworkInterfaceId(p.getFirst("NetworkInterfaceId"));
-        route.setInstanceId(p.getFirst("InstanceId"));
-        route.setVpcEndpointId(p.getFirst("VpcEndpointId"));
-        route.setOrigin(origin);
-        return route;
-    }
 
-    private static int countRouteTargets(Route route) {
-        int n = 0;
-        if (route.getGatewayId() != null) n++;
-        if (route.getNatGatewayId() != null) n++;
-        if (route.getEgressOnlyInternetGatewayId() != null) n++;
-        if (route.getVpcPeeringConnectionId() != null) n++;
-        if (route.getNetworkInterfaceId() != null) n++;
-        if (route.getInstanceId() != null) n++;
-        if (route.getVpcEndpointId() != null) n++;
-        return n;
-    }
 
     private String instanceXml(Instance inst) {
         XmlBuilder xml = new XmlBuilder()

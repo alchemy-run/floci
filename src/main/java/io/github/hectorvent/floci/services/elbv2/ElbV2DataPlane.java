@@ -1619,6 +1619,18 @@ public class ElbV2DataPlane {
 
     private final Map<Integer, String> sharedAddressAffinity = new ConcurrentHashMap<>();
 
+    public void startListener(Listener listener, String region, List<Rule> rules) {
+        try {
+            startListenerUnsafe(listener, region, rules);
+        } catch (RuntimeException e) {
+            // Control-plane Create/ModifyListener must not fail because the local
+            // HTTP proxy cannot bind (null port, NLB/TCP/TLS, port-in-use). AWS
+            // CreateListener is a control-plane call; leaking an NPE as
+            // InternalFailure: Unexpected error: null is what blocked ECS NLB/ALB.
+            LOG.errorf(e, "ELBv2 data-plane failed to start listener %s",
+                    listener != null ? listener.getListenerArn() : null);
+        }
+    }
 
     private void startListenerUnsafe(Listener listener, String region, List<Rule> rules) {
         if (config == null || config.services() == null || config.services().elbv2() == null
@@ -1730,55 +1742,7 @@ public class ElbV2DataPlane {
         return server;
     }
 
-    private String resolveListenerArn(int port, HttpServerRequest req) {
-        Map<String, String> listenersByHost = listenersByHostAndPort.get(port);
-        if (listenersByHost == null || listenersByHost.isEmpty()) {
-            return null;
-        }
-        String host = normalizeHost(req.host());
-        String listenerArn = listenersByHost.get(host);
-        if (listenerArn != null) {
-            return listenerArn;
-        }
-        if (listenersByHost.size() == 1) {
-            return listenersByHost.values().iterator().next();
-        }
-        if (!ElbV2TargetResolver.isIpLiteral(host)) {
-            return null;
-        }
-        return resolveSharedAddressListener(port, listenersByHost.values(), req);
-    }
 
-    /**
-     * On AWS every load balancer owns its addresses, so a request sent to a resolved IP reaches
-     * exactly one load balancer. Every Floci load balancer resolves to the same local address, so
-     * a request addressed by IP carries no load balancer identity once two listeners share a
-     * port. The listener whose explicit (non-default) rule matches the request is the only one
-     * that could have been configured for it; when that does not single one out, the listener
-     * last resolved this way on the port keeps serving the client that was talking to it.
-     */
-    private String resolveSharedAddressListener(int port, Collection<String> candidates, HttpServerRequest req) {
-        List<String> explicitMatches = new ArrayList<>();
-        for (String candidate : candidates) {
-            AtomicReference<List<CompiledRule>> ref = ruleChains.get(candidate);
-            if (ref == null) {
-                continue;
-            }
-            for (CompiledRule compiled : ref.get()) {
-                if (compiled.matches(req)) {
-                    if (!compiled.rule.isDefault()) {
-                        explicitMatches.add(candidate);
-                    }
-                    break;
-                }
-            }
-        }
-        String selected = selectSharedAddressListener(explicitMatches, candidates, sharedAddressAffinity.get(port));
-        if (selected != null && explicitMatches.size() == 1) {
-            sharedAddressAffinity.put(port, selected);
-        }
-        return selected;
-    }
 
     static String selectSharedAddressListener(List<String> explicitMatches, Collection<String> candidates,
                                               String affinity) {

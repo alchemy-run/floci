@@ -387,24 +387,6 @@ public class MemoryLakeFormationStorage implements LakeFormationStorage {
         resourcesStorage.put(region + ":" + info.getResourceArn(), copyOf(info));
     }
 
-    private void pruneTagAssignments(String region, String catalogId, String tagKey, List<String> allowedValues) {
-        String prefix = region + ":" + catalogId + ":";
-        for (String key : resourceTagsStorage.keys()) {
-            if (key.startsWith(prefix)) {
-                List<LFTagPair> updated = new ArrayList<>();
-                for (LFTagPair source : resourceTagsStorage.get(key).orElse(List.of())) {
-                    LFTagPair tag = copyTag(source, catalogId);
-                    if (tagKey.equals(tag.getTagKey()) && catalogId.equals(tag.getCatalogId())) {
-                        tag.setTagValues(tag.getTagValues().stream().filter(allowedValues::contains).toList());
-                    }
-                    if (!tag.getTagValues().isEmpty()) {
-                        updated.add(tag);
-                    }
-                }
-                resourceTagsStorage.put(key, updated);
-            }
-        }
-    }
 
     @Override
     public List<LFTagPair> getResourceLFTags(String region, String catalogId, Resource resource) {

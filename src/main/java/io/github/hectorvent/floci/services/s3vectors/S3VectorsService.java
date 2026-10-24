@@ -711,12 +711,4 @@ public class S3VectorsService {
 
     private record TaggedResource(String bucketName, Map<String, String> tags) {}
 
-    private double calculateDotProduct(List<Float> v1, List<Float> v2) {
-        if (v1 == null || v2 == null || v1.size() != v2.size()) return 0.0;
-        double dotProduct = 0.0;
-        for (int i = 0; i < v1.size(); i++) {
-            dotProduct += v1.get(i) * v2.get(i);
-        }
-        return dotProduct;
-    }
 }

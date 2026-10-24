@@ -1927,7 +1927,6 @@ public class SecretsManagerService implements ResourceProvider {
         return Set.of(new SupportedResourceType("secretsmanager:secret", "secretsmanager", true));
     }
 
-    private final ConcurrentHashMap<String, Object> rotationLocks = new ConcurrentHashMap<>();
 
     /**
      * The secret {@code secretId} (name, partial ARN or full ARN) names in the request's account,

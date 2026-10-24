@@ -219,19 +219,6 @@ public class EmrServerlessController {
         service.getDashboardForJobRun(applicationId, jobRunId);
     }
 
-    private static Double timestamp(String value) {
-        if (value == null) {
-            return null;
-        }
-        try {
-            double result = Double.parseDouble(value);
-            if (Double.isFinite(result)) {
-                return result;
-            }
-        } catch (NumberFormatException ignored) {
-        }
-        throw new AwsException("ValidationException", "Invalid timestamp filter", 400);
-    }
 
     @GET
     @Path("/{applicationId}/sessions")

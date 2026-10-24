@@ -897,13 +897,6 @@ public class EmrService {
         return requireCluster(clusterId).getAutoTerminationIdleTimeout();
     }
 
-    private void validateIdleTimeout(long idleTimeout) {
-        if (idleTimeout < MIN_IDLE_TIMEOUT_SECONDS || idleTimeout > MAX_IDLE_TIMEOUT_SECONDS) {
-            throw new AwsException("ValidationException",
-                    "The idle timeout must be between " + MIN_IDLE_TIMEOUT_SECONDS + " and "
-                            + MAX_IDLE_TIMEOUT_SECONDS + " seconds.", 400);
-        }
-    }
 
     private void validateManagedScalingPolicy(EmrCluster cluster, EmrManagedScalingPolicy policy) {
         requireComputeLimit(policy.getUnitType(), "unitType");

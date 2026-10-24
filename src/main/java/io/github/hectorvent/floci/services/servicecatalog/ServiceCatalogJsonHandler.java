@@ -882,16 +882,4 @@ public class ServiceCatalogJsonHandler {
         return Response.ok(response).build();
     }
 
-    private Response createProductResponse(ObjectNode product) {
-        ObjectNode response = objectMapper.createObjectNode();
-        response.set("ProductViewDetail", productView(product));
-        response.set("Tags", product.has("Tags") ? product.get("Tags") : objectMapper.createArrayNode());
-        List<ObjectNode> artifacts = service.provisioningArtifacts(product);
-        if (!artifacts.isEmpty()) {
-            ObjectNode artifact = artifacts.getFirst();
-            artifact.remove("Info");
-            response.set("ProvisioningArtifactDetail", artifact);
-        }
-        return Response.ok(response).build();
-    }
 }

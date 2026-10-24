@@ -2348,20 +2348,8 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
         return findByHost(host);
     }
 
-    private static final String FUNCTION_STAGE_DEVELOPMENT = "DEVELOPMENT";
 
-    private static final String FUNCTION_STAGE_LIVE = "LIVE";
 
-    private Optional<CloudFrontFunction> findFunction(String name, String stage) {
-        if (stage == null || stage.isEmpty()) {
-            return findFunction(name, FUNCTION_STAGE_DEVELOPMENT)
-                    .or(() -> findFunction(name, FUNCTION_STAGE_LIVE));
-        }
-        return functionStore.get(functionKey(name, stage))
-                .filter(fn -> stage.equals(fn.getStage()))
-                .or(() -> functionStore.get(name + ":" + stage).filter(fn -> stage.equals(fn.getStage())))
-                .or(() -> functionStore.get(name).filter(fn -> stage.equals(fn.getStage())));
-    }
 
     public synchronized VpcOrigin createVpcOrigin(VpcOrigin origin, Map<String, String> tags) {
         validateVpcOriginArn(origin.getOriginEndpointArn());

@@ -896,13 +896,6 @@ public class OpenSearchController {
         }
     }
 
-    private Domain requireDomainFromBody(String body) {
-        String domainName = readBody(body).path("DomainName").asText(null);
-        if (domainName == null || domainName.isBlank()) {
-            throw new AwsException("ValidationException", "DomainName is required.", 400);
-        }
-        return service.describeDomain(domainName);
-    }
 
     private void writeMaintenance(ObjectNode node, DomainMaintenance maintenance) {
         node.put("Action", maintenance.getAction());

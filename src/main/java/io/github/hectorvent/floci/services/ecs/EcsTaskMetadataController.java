@@ -544,6 +544,4 @@ public class EcsTaskMetadataController {
         }
     }
 
-    /** The search domain an instance gets, which us-east-1 spells differently from every other region. */
-    private static final String LEGACY_SEARCH_DOMAIN_REGION = "us-east-1";
 }

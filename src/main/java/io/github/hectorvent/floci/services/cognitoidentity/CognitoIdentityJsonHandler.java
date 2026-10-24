@@ -280,21 +280,4 @@ public class CognitoIdentityJsonHandler {
         return node;
     }
 
-    private Map<String, String> roles(JsonNode node) {
-        if (node == null || node.isNull()) {
-            return null;
-        }
-        if (!node.isObject()) {
-            throw new AwsException("SerializationException", "Roles must be an object.", 400);
-        }
-        Map<String, String> values = new LinkedHashMap<>();
-        for (Map.Entry<String, JsonNode> entry : node.properties()) {
-            JsonNode value = entry.getValue();
-            if (!value.isTextual() && !value.isNull()) {
-                throw new AwsException("SerializationException", "Role ARN must be a string.", 400);
-            }
-            values.put(entry.getKey(), value.isNull() ? null : value.textValue());
-        }
-        return values;
-    }
 }

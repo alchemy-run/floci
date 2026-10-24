@@ -1424,35 +1424,8 @@ public class GlueJsonHandler {
         this.mapper = mapper;
     }
 
-    @SuppressWarnings("unchecked")
-    private Response handleStartJobRun(JsonNode request) {
-        String jobName = request.get("JobName").asText();
-        Map<String, String> arguments = request.has("Arguments")
-                ? mapper.convertValue(request.get("Arguments"), Map.class)
-                : null;
-        String id = glueService.startJobRun(jobName, arguments);
-        return Response.ok(Map.of("JobRunId", id)).build();
-    }
 
-    private Response handleGetJobRun(JsonNode request) {
-        return Response.ok(Map.of("JobRun", glueService.getJobRun(
-                request.get("JobName").asText(),
-                request.get("RunId").asText()))).build();
-    }
 
-    private Response handleGetJobRuns(JsonNode request) {
-        return Response.ok(Map.of("JobRuns", glueService.getJobRuns(request.get("JobName").asText()))).build();
-    }
 
-    private Response handleGetJobBookmark(JsonNode request) {
-        return Response.ok(Map.of("JobBookmarkEntry", glueService.getJobBookmark(
-                request.get("JobName").asText(),
-                request.path("RunId").asText(null)))).build();
-    }
 
-    private Response handleResetJobBookmark(JsonNode request) {
-        return Response.ok(Map.of("JobBookmarkEntry", glueService.resetJobBookmark(
-                request.get("JobName").asText(),
-                request.path("RunId").asText(null)))).build();
-    }
 }

@@ -524,7 +524,6 @@ public class BedrockAgentCoreControlService {
         return sb.toString();
     }
 
-    private static final Pattern RUNTIME_ID_PATTERN = Pattern.compile("[a-zA-Z][a-zA-Z0-9_]{0,99}-[a-zA-Z0-9]{10}");
 
     @Inject
     public BedrockAgentCoreControlService(StorageFactory storageFactory, RegionResolver regionResolver,
@@ -544,31 +543,6 @@ public class BedrockAgentCoreControlService {
                 "runtime/" + runtime.getAgentRuntimeId() + "/runtime-endpoint/" + endpoint.getName());
     }
 
-    /** The runtime id of a {@code runtime/<id>} or {@code runtime/<id>/runtime-endpoint/<name>} resource. */
-    private static String runtimeIdFromResource(String resource) {
-        String rest = resource.substring("runtime/".length());
-        int slash = rest.indexOf('/');
-        String id = slash < 0 ? rest : rest.substring(0, slash);
-        return id.isEmpty() ? null : id;
-    }
 
-    private AgentRuntime findByArn(String region, String arn) {
-        String id = runtimeIdFromArn(arn);
-        return storage.get(key(region, id))
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                        "AgentCore resource not found: " + arn, 404));
-    }
 
-    private static String runtimeIdFromArn(String arn) {
-        // arn:aws:bedrock-agentcore:<region>:<account>:runtime/<agentRuntimeId>
-        String[] parts = arn == null ? new String[0] : arn.split(":", 6);
-        if (parts.length < 6 || !parts[5].startsWith("runtime/") || parts[5].contains("/runtime-endpoint/")) {
-            throw new AwsException("ValidationException", "Unsupported resource ARN: " + arn, 400);
-        }
-        String id = runtimeIdFromResource(parts[5]);
-        if (id == null || !parts[5].equals("runtime/" + id) || !RUNTIME_ID_PATTERN.matcher(id).matches()) {
-            throw new AwsException("ValidationException", "Unsupported resource ARN: " + arn, 400);
-        }
-        return id;
-    }
 }

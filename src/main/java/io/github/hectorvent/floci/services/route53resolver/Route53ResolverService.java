@@ -925,84 +925,9 @@ public class Route53ResolverService {
         return page(addresses, request, "IpAddresses", region + ":" + id);
     }
 
-    private void validateEndpointOptions(JsonNode request) {
-        String endpointType = text(request, "ResolverEndpointType");
-        if (endpointType != null) {
-            requireEnum(endpointType, "ResolverEndpointType", ENDPOINT_TYPES, INVALID_PARAMETER);
-        }
-        if (request.has("Protocols")) {
-            JsonNode protocols = request.path("Protocols");
-            if (!protocols.isArray() || protocols.isEmpty()) {
-                throw new AwsException(INVALID_PARAMETER, "Protocols must not be empty", 400);
-            }
-            for (JsonNode protocol : protocols) {
-                requireEnum(protocol.asText(), "Protocols", List.of("Do53", "DoH", "DoH-FIPS"), INVALID_PARAMETER);
-            }
-        }
-    }
 
-    private ArrayNode allocateAddresses(ObjectNode endpoint, JsonNode requests, String region) {
-        List<String> subnetIds = new ArrayList<>();
-        for (JsonNode request : requests) {
-            subnetIds.add(requireText(request, "SubnetId", INVALID_PARAMETER));
-            if (request.hasNonNull("Ipv6") || !"IPV4".equals(endpoint.path("ResolverEndpointType").asText())) {
-                throw new AwsException(INVALID_PARAMETER,
-                        "IPv6 resolver network interfaces are not supported by this emulator", 400);
-            }
-        }
-        ArrayNode addresses = objectMapper.createArrayNode();
-        try {
-            List<Subnet> subnets = ec2.describeSubnets(region, subnetIds, Map.of());
-            String vpcId = subnets.getFirst().getVpcId();
-            if (subnets.stream().anyMatch(subnet -> !vpcId.equals(subnet.getVpcId()))) {
-                throw new AwsException(INVALID_PARAMETER, "All endpoint subnets must belong to the same VPC", 400);
-            }
-            endpoint.put("HostVPCId", vpcId);
-            List<String> groups = new ArrayList<>();
-            endpoint.path("SecurityGroupIds").forEach(group -> groups.add(group.asText()));
-            for (JsonNode request : requests) {
-                NetworkInterface networkInterface = ec2.createNetworkInterface(region, text(request, "SubnetId"),
-                        "Route 53 Resolver endpoint " + text(endpoint, "Id"), text(request, "Ip"),
-                        List.of(), groups, List.of());
-                ObjectNode address = addresses.addObject();
-                address.put("IpId", id("rni"));
-                address.put("SubnetId", networkInterface.getSubnetId());
-                address.put("Ip", networkInterface.getPrivateIpAddress());
-                address.put("Status", "ATTACHED");
-                address.put("CreationTime", Instant.now().toString());
-                address.put("ModificationTime", Instant.now().toString());
-                address.put("_NetworkInterfaceId", networkInterface.getNetworkInterfaceId());
-            }
-            return addresses;
-        } catch (AwsException error) {
-            releaseAddresses(addresses, region);
-            throw new AwsException(INVALID_PARAMETER, error.getMessage(), 400);
-        }
-    }
 
-    private void releaseAddresses(JsonNode addresses, String region) {
-        for (JsonNode address : addresses) {
-            String networkInterfaceId = text(address, "_NetworkInterfaceId");
-            if (networkInterfaceId != null) {
-                try {
-                    ec2.deleteNetworkInterface(region, networkInterfaceId);
-                } catch (AwsException expected) {
-                    if (!"InvalidNetworkInterfaceID.NotFound".equals(expected.getErrorCode())) {
-                        throw expected;
-                    }
-                    // An interface removed out of band is already released.
-                }
-            }
-        }
-    }
 
-    private void validateRuleEndpoint(String id, String region) {
-        ObjectNode endpoint = require(endpointStore, id, "resolver endpoint");
-        requireRegion(endpoint, region);
-        if (!"OUTBOUND".equals(text(endpoint, "Direction"))) {
-            throw new AwsException(INVALID_PARAMETER, "Resolver rules require an OUTBOUND endpoint", 400);
-        }
-    }
 
     public void validateRequestRegion(JsonNode request, String region) {
         if (request.hasNonNull("ResolverEndpointId")) {

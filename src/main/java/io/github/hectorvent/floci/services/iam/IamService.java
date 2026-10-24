@@ -6392,21 +6392,10 @@ public class IamService implements SessionAccountLookup, ResourceProvider {
         return instant == null ? "" : CREDENTIAL_REPORT_TIME.format(instant);
     }
 
-    private static final String SERVICE_LINKED_ROLE_PATH = "/aws-service-role/";
 
-    private static final String SERVICE_LINKED_ROLE_NAME_PREFIX = "AWSServiceRoleFor";
 
-    private static final Map<String, String> SERVICE_LINKED_ROLE_NAMES = Map.of(
-            "autoscaling.amazonaws.com", "AutoScaling",
-            "cloud9.amazonaws.com", "AWSCloud9",
-            "lakeformation.amazonaws.com", "LakeFormationDataAccess",
-            "ram.amazonaws.com", "ResourceAccessManager"
-    );
 
-    private static final String AMAZONAWS_DOMAIN = ".amazonaws.com";
 
-    /** {@code tagListType} / {@code tagKeyListType} are both {@code max: 50}. */
-    private static final int MAX_TAGS_PER_INSTANCE_PROFILE = 50;
 
 
     private static Map<String, IamPolicy> buildAwsManagedPolicies() {
@@ -6428,32 +6417,6 @@ public class IamService implements SessionAccountLookup, ResourceProvider {
         return catalog;
     }
 
-    /**
-     * Every dot- and hyphen-separated label contributes, because the leading one alone is not unique:
-     * {@code rds.amazonaws.com} and {@code rds.application-autoscaling.amazonaws.com} are separate
-     * roles on AWS, and a config declaring both must not collide on one name here.
-     */
-    private static String derivedServiceName(String awsServiceName) {
-        String canonicalName = SERVICE_LINKED_ROLE_NAMES.get(awsServiceName);
-        if (canonicalName != null) {
-            return canonicalName;
-        }
-        String core = awsServiceName == null ? "" : awsServiceName;
-        if (core.endsWith(AMAZONAWS_DOMAIN)) {
-            core = core.substring(0, core.length() - AMAZONAWS_DOMAIN.length());
-        }
-        StringBuilder derived = new StringBuilder();
-        for (String segment : core.split("[.-]")) {
-            if (!segment.isEmpty()) {
-                derived.append(Character.toUpperCase(segment.charAt(0))).append(segment.substring(1));
-            }
-        }
-        if (derived.isEmpty()) {
-            throw new AwsException("InvalidInput",
-                    "The request must include a valid AWSServiceName, for example es.amazonaws.com.", 400);
-        }
-        return derived.toString();
-    }
 
     public InstanceProfile createInstanceProfile(String instanceProfileName, String path,
                                                  Map<String, String> tags) {
@@ -6477,20 +6440,6 @@ public class IamService implements SessionAccountLookup, ResourceProvider {
         return loginProfiles.get(userName).isPresent();
     }
 
-    /**
-     * Base wire validation shared by Create/UpdateLoginProfile, then, only when the account has
-     * ever set one (matching {@link #getAccountPasswordPolicy}'s own NoSuchEntity-by-default
-     * semantics), the account's password policy.
-     */
-    private void validateLoginProfilePassword(String password) {
-        if (password == null || !LOGIN_PROFILE_PASSWORD_PATTERN.matcher(password).matches()) {
-            throw new AwsException("ValidationError",
-                    "1 validation error detected: Value at 'password' failed to satisfy constraint: "
-                            + "Member must have length less than or equal to 128 and greater than or "
-                            + "equal to 1", 400);
-        }
-        getAccountPasswordPolicy().ifPresent(policy -> checkPasswordAgainstPolicy(password, policy));
-    }
 
     /**
      * Temporary credentials minted for a Lambda (or other) execution role so the

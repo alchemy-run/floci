@@ -664,45 +664,8 @@ public class EfsService implements Resettable {
                 new TypeReference<Map<String, List<LifecyclePolicy>>>() {});
     }
 
-    private Subnet mountTargetSubnet(String region, String subnetId) {
-        if (subnetId == null || subnetId.isBlank()) {
-            throw EfsException.badRequest("SubnetId is required");
-        }
-        try {
-            return ec2Service.describeSubnets(region, List.of(subnetId), Map.of()).getFirst();
-        } catch (AwsException error) {
-            throw mountTargetNetworkError(error);
-        }
-    }
 
-    private void validateSecurityGroups(String region, String vpcId, List<String> groupIds) {
-        if (groupIds == null || groupIds.isEmpty()) {
-            return;
-        }
-        if (groupIds.size() > 5) {
-            throw EfsException.badRequest("At most five security groups can be assigned to a mount target");
-        }
-        List<SecurityGroup> groups;
-        try {
-            groups = ec2Service.describeSecurityGroups(region, groupIds, List.of(), Map.of());
-        } catch (AwsException error) {
-            throw mountTargetNetworkError(error);
-        }
-        if (groups.stream().anyMatch(group -> !vpcId.equals(group.getVpcId()))) {
-            throw EfsException.networkError("SecurityGroupNotFound", "Security group does not belong to the subnet VPC");
-        }
-    }
 
-    private AwsException mountTargetNetworkError(AwsException error) {
-        return switch (error.getErrorCode()) {
-            case "InvalidSubnetID.NotFound" -> EfsException.networkError("SubnetNotFound", error.getMessage());
-            case "InvalidGroup.NotFound" -> EfsException.networkError("SecurityGroupNotFound", error.getMessage());
-            case "InvalidIPAddress.InUse" -> EfsException.networkError("IpAddressInUse", error.getMessage());
-            case "InsufficientFreeAddressesInSubnet" -> EfsException.networkError("NoFreeAddressesInSubnet", error.getMessage());
-            case "InvalidParameterValue", "MissingParameter" -> EfsException.badRequest(error.getMessage());
-            default -> error;
-        };
-    }
 
     public Map<String, Object> describeReplicationConfigurations(String region, String fileSystemId) {
         if (fileSystemId != null) {

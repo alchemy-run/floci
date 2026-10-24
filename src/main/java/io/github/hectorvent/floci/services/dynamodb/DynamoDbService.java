@@ -5697,26 +5697,7 @@ public class DynamoDbService {
 
 
 
-    private Set<String> writtenAttributes(List<String> touchedPaths, String updateExpression,
-                                           JsonNode expressionAttrNames) {
-        Set<String> names = new LinkedHashSet<>();
-        for (String path : touchedPaths) {
-            List<Object> tokens = pathTokens(path, updateExpression, expressionAttrNames);
-            if (!tokens.isEmpty() && tokens.get(0) instanceof String name) {
-                names.add(name);
-            }
-        }
-        return names;
-    }
 
-    private TransactionCanceledException.CancellationReason transactUpdateValueTooDeep(JsonNode transactItem) {
-        var values = transactItem.path("Update").get("ExpressionAttributeValues");
-        if (DynamoDbAttributeValueValidator.nestingWithinLimit(values)) {
-            return null;
-        }
-        return new TransactionCanceledException.CancellationReason("ValidationError", null,
-                "Nesting Levels have exceeded supported limits");
-    }
 
 
     /**
@@ -5828,6 +5809,32 @@ public class DynamoDbService {
 
 
 
+    public TableDefinition restoreTableFromBackup(String backupArn, String targetTableName, String region) {
+        TableBackup backup = requireBackup(backupArn);
+        DynamoDbTableNames.requireShortName(targetTableName);
+        String storageKey = regionKey(region, targetTableName);
+        if (tableStore.get(storageKey).isPresent()) {
+            throw new AwsException("TableAlreadyExistsException",
+                    "Table already exists: " + targetTableName, 400);
+        }
+        TableDefinition restored = createTable(
+                targetTableName,
+                new ArrayList<>(backup.getKeySchema()),
+                new ArrayList<>(backup.getAttributeDefinitions()),
+                backup.getReadCapacityUnits(),
+                backup.getWriteCapacityUnits(),
+                List.of(),
+                List.of(),
+                region);
+        if (backup.getBillingMode() != null) {
+            restored.setBillingMode(backup.getBillingMode());
+        }
+        tableStore.put(storageKey, restored);
+        itemsByTable.put(scopedItemsKey(storageKey), new ConcurrentSkipListMap<>(backup.getItems()));
+        persistItems(storageKey);
+        LOG.infov("Restored table {0} from backup {1}", targetTableName, backupArn);
+        return restored;
+    }
 
     public TableDefinition restoreTableToPointInTime(String sourceTableName, String targetTableName, String region) {
         String canonicalSource = canonicalTableName(region, sourceTableName);
@@ -5875,6 +5882,17 @@ public class DynamoDbService {
         return backup;
     }
 
+    public String updateContributorInsights(String tableName, String indexName, String action, String region) {
+        TableDefinition table = describeTable(tableName, region);
+        if (!"ENABLE".equals(action) && !"DISABLE".equals(action)) {
+            throw new AwsException("ValidationException",
+                    "ContributorInsightsAction must be ENABLE or DISABLE", 400);
+        }
+        String status = "ENABLE".equals(action) ? "ENABLED" : "DISABLED";
+        table.setContributorInsightsStatusFor(indexName, status);
+        persistTable(table.getTableName(), table, region);
+        return status;
+    }
 
     public String describeContributorInsights(String tableName, String indexName, String region) {
         TableDefinition table = describeTable(tableName, region);
@@ -5899,22 +5917,6 @@ public class DynamoDbService {
     }
 
 
-    /**
-     * SHA-256 hex digest of a string, used by ClientRequestToken idempotency to compare
-     * request bodies. SHA-256 is required (not MD5) for the dedup contract because a
-     * collision would allow a request with different parameters to be silently treated
-     * as a replay; SHA-256 is supported on every JVM via {@link MessageDigest}.
-     */
-    private static String sha256(String input) {
-        try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest);
-        } catch (NoSuchAlgorithmException e) {
-            // SHA-256 is mandated by the JLS to be available on every JVM; this should never trigger.
-            throw new IllegalStateException("SHA-256 is required but not available on this JVM", e);
-        }
-    }
 
     @Override
     public Set<SupportedResourceType> getSupportedResourceTypes() {

@@ -707,15 +707,6 @@ public class SesTenantService implements SesTaggable {
 
     private final StorageBackend<String, TenantResource> legacyAssociationStore;
 
-    private Optional<Tenant> findTagTenant(TenantTagArn arn, String resourceRemainder, String region) {
-        return findByTenantId(arn.tenantId(), region).or(() -> {
-            if (arn.name() != null) {
-                return Optional.empty();
-            }
-            return find(resourceRemainder, region).filter(tenant -> tenant.tenantArn() != null
-                    && tenant.tenantArn().endsWith(":tenant/" + resourceRemainder));
-        });
-    }
 
     /**
      * The list operations return everything in one page, so any client-supplied NextToken is invalid -

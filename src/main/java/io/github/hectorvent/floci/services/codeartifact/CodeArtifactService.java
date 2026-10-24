@@ -3044,6 +3044,23 @@ public class CodeArtifactService implements Resettable {
 
     private final CodeArtifactEventPublisher eventPublisher;
 
+    /**
+     * {@code mavenRepositoryId} is assigned at {@link #createRepository}, but a repository
+     * persisted before that field existed has none; backfills it lazily on first Maven-format use
+     * rather than leaving every caller of {@link CodeArtifactRepository#getMavenRepositoryId()} to
+     * handle a null it can otherwise never see.
+     */
+    public synchronized String ensureMavenRepositoryId(String region, String domain, String domainOwner,
+                                                         String repository) {
+        String owner = effectiveOwner(domainOwner);
+        String key = repositoryKey(region, domain, repository);
+        CodeArtifactRepository r = requireRepository(owner, key, repository);
+        if (r.getMavenRepositoryId() == null) {
+            r.setMavenRepositoryId(newRevision());
+            repositories.putForAccount(owner, key, r);
+        }
+        return r.getMavenRepositoryId();
+    }
 
     public record PackageCoordinate(String region, String domain, String owner, String repository,
                                     String format, String namespace, String name) {}
@@ -3646,7 +3663,4 @@ public class CodeArtifactService implements Resettable {
         }
     }
 
-    private static String packageKeyComponent(String value) {
-        return value == null ? "" : value.replace("%", "%25").replace(":", "%3A");
-    }
 }

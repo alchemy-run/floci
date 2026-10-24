@@ -1952,50 +1952,7 @@ public class CodeDeployService {
         return registered;
     }
 
-    private synchronized void recordRevisionUse(String region, String appName, String groupName,
-                                                 Map<String, Object> revision) {
-        Application app = getApplication(region, appName);
-        ApplicationRevision registered = ensureRevision(region, app, revision);
-        double now = clock.millis() / 1000.0;
-        registered.getGenericRevisionInfo().putIfAbsent("firstUsedTime", now);
-        registered.getGenericRevisionInfo().put("lastUsedTime", now);
-        for (ApplicationRevision item : revisionsFor(region, app)) {
-            Object value = item.getGenericRevisionInfo().get("deploymentGroups");
-            List<String> groups = new ArrayList<>();
-            if (value instanceof List<?> existing) {
-                for (Object name : existing) {
-                    if (name instanceof String group && !group.equals(groupName)) {
-                        groups.add(group);
-                    }
-                }
-            }
-            if (item == registered) {
-                groups.add(groupName);
-            }
-            item.getGenericRevisionInfo().put("deploymentGroups", groups);
-        }
-        persistRegion(applicationRevisions, region);
-    }
 
-    private synchronized void updateRevisionGroupName(String region, String appName, String oldName, String newName) {
-        Application app = getApplication(region, appName);
-        for (ApplicationRevision revision : revisionsFor(region, app)) {
-            Object value = revision.getGenericRevisionInfo().get("deploymentGroups");
-            if (value instanceof List<?> existing) {
-                List<String> groups = new ArrayList<>();
-                for (Object item : existing) {
-                    if (item instanceof String name) {
-                        String replacement = name.equals(oldName) ? newName : name;
-                        if (replacement != null) {
-                            groups.add(replacement);
-                        }
-                    }
-                }
-                revision.getGenericRevisionInfo().put("deploymentGroups", groups);
-            }
-        }
-        persistRegion(applicationRevisions, region);
-    }
 
     public synchronized Map<String, Object> getApplicationRevision(String region, String appName,
                                                                   Map<String, Object> revision) {

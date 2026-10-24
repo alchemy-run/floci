@@ -403,11 +403,6 @@ public class CodeDeployJsonHandler {
         return mapper.convertValue(value, new TypeReference<Map<String, Object>>() {});
     }
 
-    private Response continueDeployment(JsonNode req, String region) {
-        service.continueDeployment(region, req.path("deploymentId").asText(null),
-                req.path("deploymentWaitType").asText(null));
-        return Response.ok(Map.of()).build();
-    }
 
     private Response putLifecycleEventHookExecutionStatus(JsonNode req, String region) {
         String deploymentId = req.path("deploymentId").asText(null);

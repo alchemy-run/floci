@@ -2314,14 +2314,6 @@ public class KmsService implements ResourceProvider {
 
     private static final int MAX_ROTATION_PERIOD_DAYS = 2560;
 
-    private static void validateMaterialLength(KmsKey key, byte[] material) {
-        int expected = key.getKeySpec().materialByteLength();
-        if (material.length != expected) {
-            throw new AwsException("IncorrectKeyMaterialException",
-                    "Key material for key spec " + key.getKeySpec() + " must be " + expected
-                            + " bytes but was " + material.length + " bytes.", 400);
-        }
-    }
 
     public Map<String, Object> generateDataKeyPair(String keyId, String keyPairSpec,
                                                    Map<String, String> encryptionContext, String region) {
@@ -2358,4 +2350,30 @@ public class KmsService implements ResourceProvider {
 
     public record DeriveSharedSecretResult(byte[] sharedSecret, String keyArn, String algorithm) {}
 
+    public DeriveSharedSecretResult deriveSharedSecret(String keyId, byte[] publicKeyDer, String algorithm, String region) {
+        if (algorithm == null || algorithm.isBlank()) {
+            throw new AwsException("ValidationException", "KeyAgreementAlgorithm is required", 400);
+        }
+        if (!"ECDH".equals(algorithm)) {
+            throw new AwsException("ValidationException", "KeyAgreementAlgorithm must be ECDH", 400);
+        }
+        if (publicKeyDer == null || publicKeyDer.length == 0) {
+            throw new AwsException("ValidationException", "PublicKey is required", 400);
+        }
+        KmsKey key = resolveKey(keyId, region);
+        validateKeyIsUsableForCryptoOperations(key);
+        if (KmsKeyUsage.KEY_AGREEMENT != key.getKeyUsage()) {
+            throw new AwsException("InvalidKeyUsageException",
+                    "DeriveSharedSecret requires a key with KeyUsage KEY_AGREEMENT.", 400);
+        }
+        try {
+            byte[] secret = keyTypes.of(key.getKeySpec()).deriveSharedSecret(key, publicKeyDer);
+            return new DeriveSharedSecretResult(secret, key.getArn(), algorithm);
+        } catch (AwsException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new AwsException("InvalidKeyUsageException",
+                    "Unable to derive shared secret: " + e.getMessage(), 400);
+        }
+    }
 }

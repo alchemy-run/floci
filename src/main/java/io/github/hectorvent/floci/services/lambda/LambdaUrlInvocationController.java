@@ -273,18 +273,6 @@ public class LambdaUrlInvocationController {
         return objectMapper.createObjectNode().put("message", message).toString();
     }
 
-    /**
-     * Function URL waits for the container off the JAX-RS worker pool so a
-     * nested emulator call (the Lambda talking back to Floci) can still be
-     * served. Holding the request thread across {@code invoke()} deadlocks
-     * under parallel Function URL traffic — Alchemy bindings suites burst
-     * ~8 routes at the default 3s timeout and get 502s.
-     */
-    private static final ExecutorService INVOKE_POOL = Executors.newCachedThreadPool(r -> {
-        Thread t = new Thread(r, "lambda-url-invoke");
-        t.setDaemon(true);
-        return t;
-    });
 
     private final CurrentVertxRequest currentVertxRequest;
 
@@ -324,42 +312,7 @@ public class LambdaUrlInvocationController {
     /** The request path and query exactly as the client sent them, relative to the function URL. */
     record RawTarget(String path, String query) {}
 
-    /**
-     * Reads the path and query from the request line. A pre-matching filter that rewrites the
-     * request URI (host-style routing) leaves JAX-RS holding a decoded copy that re-encodes
-     * differently, so a literal {@code +} sent as {@code %2B} would reach the function as a
-     * space. The Vert.x request is never rewritten, so it is the authoritative source.
-     */
-    private RawTarget rawTarget(String urlId, HttpHeaders headers, UriInfo uriInfo) {
-        io.vertx.core.http.HttpServerRequest vertxRequest = currentRequest();
-        String rawPath;
-        String rawQuery;
-        String host;
-        if (vertxRequest != null) {
-            rawPath = vertxRequest.path();
-            rawQuery = vertxRequest.query();
-            host = RequestHost.of(vertxRequest);
-        } else {
-            URI requestUri = uriInfo.getRequestUri();
-            rawPath = requestUri.getRawPath();
-            rawQuery = requestUri.getRawQuery();
-            host = RequestHost.of(headers != null ? headers.getHeaderString("Host") : null, requestUri);
-        }
-        return new RawTarget(functionPath(urlId, rawPath, LambdaUrlRoutingFilter.isFunctionUrlHost(host)),
-                rawQuery != null ? rawQuery : "");
-    }
 
-    private io.vertx.core.http.HttpServerRequest currentRequest() {
-        if (currentVertxRequest == null) {
-            return null;
-        }
-        try {
-            RoutingContext current = currentVertxRequest.getCurrent();
-            return current != null ? current.request() : null;
-        } catch (RuntimeException e) {
-            return null;
-        }
-    }
 
     /**
      * The path the function sees. Host-style URLs ({@code <url-id>.lambda-url.<region>.<host>})
@@ -410,85 +363,6 @@ public class LambdaUrlInvocationController {
         }
     }
 
-    /**
-     * Builds the HTTP response for a streaming invocation result
-     * (awslambda.streamifyResponse). With {@code InvokeMode=RESPONSE_STREAM} body
-     * chunks pass through unbuffered (flushed as they arrive); with the default
-     * BUFFERED mode the stream is drained and returned whole. Either way the
-     * {@code application/vnd.awslambda.http-integration-response} prelude
-     * (JSON metadata, an 8-NUL delimiter, then the raw body) is parsed off the
-     * front when present.
-     */
-    private Response buildStreamedResponse(InvokeResult result, boolean passThrough) {
-        StreamingPayload stream = result.getStream();
-        boolean framed = stream.getContentType() != null
-                && stream.getContentType().startsWith("application/vnd.awslambda.http-integration-response");
-
-        int status = 200;
-        ObjectNode prelude = null;
-        byte[] initialBody = new byte[0];
-        try {
-            if (framed) {
-                Prelude parsed = readPrelude(stream);
-                prelude = parsed.metadata();
-                initialBody = parsed.remainder();
-                if (prelude.has("statusCode")) {
-                    status = prelude.get("statusCode").asInt();
-                }
-            }
-        } catch (Exception e) {
-            LOG.warnv("Failed to parse streaming response prelude: {0}", e.getMessage());
-            return Response.status(500).entity(jsonMessage("Malformed streaming response"))
-                    .type(MediaType.APPLICATION_JSON).build();
-        }
-
-        Response.ResponseBuilder builder = Response.status(status);
-        if (prelude != null) {
-            if (prelude.has("headers")) {
-                prelude.get("headers").fields()
-                        .forEachRemaining(e -> builder.header(e.getKey(), e.getValue().asText()));
-            }
-            if (prelude.has("cookies") && prelude.get("cookies").isArray()) {
-                prelude.get("cookies").forEach(c -> builder.header("Set-Cookie", c.asText()));
-            }
-        } else if (stream.getContentType() != null) {
-            builder.header("Content-Type", stream.getContentType());
-        }
-
-        if (passThrough) {
-            byte[] head = initialBody;
-            StreamingOutput out = output -> {
-                try {
-                    if (head.length > 0) {
-                        output.write(head);
-                        output.flush();
-                    }
-                    byte[] chunk;
-                    while ((chunk = stream.next()) != null) {
-                        output.write(chunk);
-                        output.flush();
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                } catch (TimeoutException e) {
-                    LOG.warnv("Streaming response stalled: {0}", e.getMessage());
-                }
-            };
-            return builder.entity(out).build();
-        }
-
-        try {
-            byte[] rest = stream.drain();
-            byte[] full = new byte[initialBody.length + rest.length];
-            System.arraycopy(initialBody, 0, full, 0, initialBody.length);
-            System.arraycopy(rest, 0, full, initialBody.length, rest.length);
-            return builder.entity(full).build();
-        } catch (Exception e) {
-            LOG.warnv("Failed to drain streaming response: {0}", e.getMessage());
-            return Response.status(500).entity(jsonMessage("Truncated streaming response"))
-                    .type(MediaType.APPLICATION_JSON).build();
-        }
-    }
 
     record Prelude(ObjectNode metadata, byte[] remainder) {}
 

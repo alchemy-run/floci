@@ -487,12 +487,6 @@ public class OpenSearchService implements ResourceProvider {
         return config.effectiveBaseUrl();
     }
 
-    /** Makes the HTTPS listener's certificate cover every domain endpoint host in the region. */
-    private void ensureEndpointCertificate(String region) {
-        if (certificateManager != null) {
-            certificateManager.ensureHost(OpenSearchDataPlaneEndpoint.certificateWildcard(region, baseUrl()));
-        }
-    }
 
     /**
      * Lookup used by the operations (DescribeDomainHealth, DescribeDomainNodes,

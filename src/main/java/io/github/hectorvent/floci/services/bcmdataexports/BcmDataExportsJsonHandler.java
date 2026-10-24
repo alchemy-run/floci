@@ -446,36 +446,5 @@ public class BcmDataExportsJsonHandler {
         return Response.ok(response).build();
     }
 
-    private ObjectNode serializeExportStatus(Export e) {
-        ObjectNode status = objectMapper.createObjectNode();
-        if (e.getExportStatus() != null) {
-            status.put("StatusCode", e.getExportStatus());
-        }
-        if (e.getCreatedAt() > 0) {
-            status.put("CreatedAt", Instant.ofEpochMilli(e.getCreatedAt()).toString());
-        }
-        if (e.getLastUpdatedAt() > 0) {
-            status.put("LastUpdatedAt", Instant.ofEpochMilli(e.getLastUpdatedAt()).toString());
-        }
-        return status;
-    }
 
-    private ObjectNode serializeExecutionStatus(ExportExecution exec) {
-        ObjectNode status = objectMapper.createObjectNode();
-        status.put("StatusCode", exec.getExportStatus());
-        if (exec.getCreatedAt() > 0) {
-            status.put("CreatedAt", Instant.ofEpochMilli(exec.getCreatedAt()).toString());
-        }
-        if (exec.getCompletedAt() > 0) {
-            status.put("CompletedAt", Instant.ofEpochMilli(exec.getCompletedAt()).toString());
-        }
-        long updated = exec.getCompletedAt() > 0 ? exec.getCompletedAt() : exec.getCreatedAt();
-        if (updated > 0) {
-            status.put("LastUpdatedAt", Instant.ofEpochMilli(updated).toString());
-        }
-        if (exec.getStatusReason() != null) {
-            status.put("StatusReason", "INTERNAL_FAILURE");
-        }
-        return status;
-    }
 }

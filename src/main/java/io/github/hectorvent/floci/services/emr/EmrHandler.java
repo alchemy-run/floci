@@ -1038,42 +1038,7 @@ public class EmrHandler {
         return steps;
     }
 
-    private List<EmrBootstrapAction> parseBootstrapActions(JsonNode actionsNode) {
-        List<EmrBootstrapAction> actions = new ArrayList<>();
-        if (!actionsNode.isArray()) {
-            return actions;
-        }
-        for (JsonNode a : actionsNode) {
-            EmrBootstrapAction action = new EmrBootstrapAction();
-            action.setName(a.path("Name").asText(null));
-            JsonNode script = a.path("ScriptBootstrapAction");
-            action.setScriptPath(script.path("Path").asText(null));
-            action.setArgs(stringList(script.path("Args")));
-            actions.add(action);
-        }
-        return actions;
-    }
 
-    private Long idleTimeout(JsonNode policy) {
-        JsonNode value = policy.path("IdleTimeout");
-        return value.isNumber() ? Long.valueOf(value.asLong()) : null;
-    }
 
-    private EmrManagedScalingPolicy parseManagedScalingPolicy(JsonNode node) {
-        EmrManagedScalingPolicy policy = new EmrManagedScalingPolicy();
-        JsonNode limits = node.path("ComputeLimits");
-        policy.setUnitType(limits.path("UnitType").asText(null));
-        policy.setMinimumCapacityUnits(optionalInt(limits, "MinimumCapacityUnits"));
-        policy.setMaximumCapacityUnits(optionalInt(limits, "MaximumCapacityUnits"));
-        policy.setMaximumOnDemandCapacityUnits(optionalInt(limits, "MaximumOnDemandCapacityUnits"));
-        policy.setMaximumCoreCapacityUnits(optionalInt(limits, "MaximumCoreCapacityUnits"));
-        policy.setUtilizationPerformanceIndex(optionalInt(node, "UtilizationPerformanceIndex"));
-        policy.setScalingStrategy(node.path("ScalingStrategy").asText(null));
-        return policy;
-    }
 
-    private Integer optionalInt(JsonNode node, String field) {
-        JsonNode value = node.path(field);
-        return value.isNumber() ? Integer.valueOf(value.asInt()) : null;
-    }
 }

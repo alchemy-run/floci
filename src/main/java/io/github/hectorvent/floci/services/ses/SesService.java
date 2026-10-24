@@ -2082,6 +2082,15 @@ public class SesService {
         return all;
     }
 
+    public List<TenantResourceAssociation> listTenantResources(String tenantName,
+                                                               String resourceTypeFilter,
+                                                               Integer pageSize, String nextToken,
+                                                               String region) {
+        SesTenantService.validateListPaging(pageSize, nextToken);
+        SesTenantService.validateResourceTypeFilter(resourceTypeFilter);
+        Tenant tenant = tenantService.tenantForAssociation(tenantName, region);
+        return tenantService.listTenantResources(tenant, resourceTypeFilter, region);
+    }
 
     public List<TenantResourceAssociation> listResourceTenants(String resourceArn, Integer pageSize,
                                                                String nextToken, String accountId,

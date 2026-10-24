@@ -1494,39 +1494,7 @@ public class FirehoseService implements ResourceProvider {
         return Set.of(new SupportedResourceType("firehose:deliverystream", "firehose", true));
     }
 
-    private static void applyEncryptionInput(DeliveryStreamDescription stream,
-                                             DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration encryption) {
-        if (encryption.getKeyType() == null || encryption.getKeyType().isBlank()) {
-            throw new AwsException("InvalidArgumentException", "KeyType is required.", 400);
-        }
-        applyEncryption(stream, encryption.getKeyType(), encryption.getKeyArn());
-    }
 
-    private static void applyEncryption(DeliveryStreamDescription stream, String keyType, String keyArn) {
-        if ("KinesisStreamAsSource".equals(stream.getDeliveryStreamType())) {
-            throw new AwsException("InvalidArgumentException",
-                    "Server-side encryption is not supported for delivery streams with a Kinesis stream as source.", 400);
-        }
-        String effectiveKeyType = keyType == null ? "AWS_OWNED_CMK" : keyType;
-        if (!effectiveKeyType.equals("AWS_OWNED_CMK") && !effectiveKeyType.equals("CUSTOMER_MANAGED_CMK")) {
-            throw new AwsException("InvalidArgumentException",
-                    "KeyType must be AWS_OWNED_CMK or CUSTOMER_MANAGED_CMK.", 400);
-        }
-        if (effectiveKeyType.equals("CUSTOMER_MANAGED_CMK") && (keyArn == null || keyArn.isBlank())) {
-            throw new AwsException("InvalidArgumentException",
-                    "KeyARN is required for CUSTOMER_MANAGED_CMK.", 400);
-        }
-        if (keyArn != null && !keyArn.isBlank()
-                && (keyArn.length() > SSE_KEY_ARN_MAX_LENGTH || !SSE_KEY_ARN_PATTERN.matcher(keyArn).matches())) {
-            throw new AwsException("InvalidArgumentException",
-                    "KeyARN is not a valid KMS key ARN: " + keyArn, 400);
-        }
-        stream.setDeliveryStreamEncryptionConfiguration(
-                new DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration(
-                        effectiveKeyType,
-                        effectiveKeyType.equals("CUSTOMER_MANAGED_CMK") ? keyArn : null,
-                        "ENABLED"));
-    }
 
     public List<String> listDeliveryStreams() {
         return listDeliveryStreams(null, Integer.MAX_VALUE, null).names();

@@ -1041,32 +1041,8 @@ public class EventBridgeHandler {
         return Response.ok(response).build();
     }
 
-    private String textOrJson(JsonNode node) {
-        if (node == null || node.isMissingNode() || node.isNull()) {
-            return null;
-        }
-        if (node.isTextual()) {
-            String text = node.asText();
-            return text.isEmpty() ? null : text;
-        }
-        if (node.isObject() || node.isArray()) {
-            return node.toString();
-        }
-        return null;
-    }
 
-    private String objectOrNull(JsonNode node) {
-        if (node == null || node.isMissingNode() || node.isNull() || !node.isObject()) {
-            return null;
-        }
-        return node.toString();
-    }
 
-    private void putEpoch(ObjectNode node, String field, Instant instant) {
-        if (instant != null) {
-            node.put(field, instant.getEpochSecond());
-        }
-    }
 
 
 }

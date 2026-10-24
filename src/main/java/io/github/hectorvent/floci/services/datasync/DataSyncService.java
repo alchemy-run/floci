@@ -1298,10 +1298,4 @@ public class DataSyncService {
         executor.shutdownNow();
     }
 
-    private void saveExecutionTags(String arn, Map<String, String> tags) {
-        ObjectNode execution = execution(arn, regionResolver.getRegion());
-        execution.putArray("Tags");
-        tags.forEach((key, value) -> execution.withArray("Tags").addObject().put("Key", key).put("Value", value));
-        executions.put(arn, execution);
-    }
 }

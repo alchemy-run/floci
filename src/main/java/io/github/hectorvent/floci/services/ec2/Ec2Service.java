@@ -14356,4 +14356,53 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         }
         return Optional.empty();
     }
+
+    public DhcpOptions createDhcpOptions(String region, Map<String, List<String>> configurations, List<Tag> dhcpTags) {
+        DhcpOptions options = new DhcpOptions();
+        options.setDhcpOptionsId("dopt-" + randomHex(8));
+        options.setOwnerId(callerAccountId());
+        options.setRegion(region);
+        options.setConfigurations(new LinkedHashMap<>(configurations));
+        if (dhcpTags != null && !dhcpTags.isEmpty()) {
+            options.setTags(new ArrayList<>(dhcpTags));
+            tags.put(options.getDhcpOptionsId(), new ArrayList<>(dhcpTags));
+        }
+        dhcpOptionsSets.put(key(region, options.getDhcpOptionsId()), options);
+        return options;
+    }
+
+    public void associateDhcpOptions(String region, String dhcpOptionsId, String vpcId) {
+        Vpc vpc = getRequiredVpc(region, vpcId);
+        String effectiveId = "default".equals(dhcpOptionsId) ? "dopt-default" : dhcpOptionsId;
+        if (!"dopt-default".equals(effectiveId) && dhcpOptionsSets.get(key(region, effectiveId)) == null) {
+            throw new AwsException("InvalidDhcpOptionID.NotFound",
+                    "The dhcpOptions ID '" + dhcpOptionsId + "' does not exist", 400);
+        }
+        vpc.setDhcpOptionsId(effectiveId);
+        vpcs.put(key(region, vpcId), vpc);
+    }
+
+    public void deleteDhcpOptions(String region, String dhcpOptionsId) {
+        if (dhcpOptionsSets.remove(key(region, dhcpOptionsId)) == null) {
+            throw new AwsException("InvalidDhcpOptionID.NotFound",
+                    "The dhcpOptions ID '" + dhcpOptionsId + "' does not exist", 400);
+        }
+        tags.delete(dhcpOptionsId);
+    }
+
+    public List<DhcpOptions> describeDhcpOptions(String region, List<String> ids) {
+        ensureDefaultDhcpOptions(region);
+        if (ids != null && !ids.isEmpty()) {
+            for (String id : ids) {
+                if (dhcpOptionsSets.get(key(region, id)) == null) {
+                    throw new AwsException("InvalidDhcpOptionID.NotFound",
+                            "The dhcpOptions ID '" + id + "' does not exist", 400);
+                }
+            }
+        }
+        return dhcpOptionsSets.values().stream()
+                .filter(d -> region.equals(d.getRegion()))
+                .filter(d -> ids == null || ids.isEmpty() || ids.contains(d.getDhcpOptionsId()))
+                .collect(Collectors.toList());
+    }
 }

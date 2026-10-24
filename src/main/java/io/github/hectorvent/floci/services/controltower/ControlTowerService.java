@@ -950,21 +950,4 @@ public class ControlTowerService {
         return arn != null && arn.contains(":landingzone/");
     }
 
-    private static Map<String, String> readTags(JsonNode tags) {
-        if (tags == null || tags.isNull()) {
-            return null;
-        }
-        if (!tags.isObject() || tags.size() > 200) {
-            throw validation("tags must be an object with at most 200 entries.");
-        }
-        Map<String, String> result = new LinkedHashMap<>();
-        tags.fields().forEachRemaining(entry -> {
-            if (entry.getKey().isBlank() || entry.getKey().length() > 128
-                    || !entry.getValue().isTextual() || entry.getValue().textValue().length() > 256) {
-                throw validation("tags must contain string values with valid lengths.");
-            }
-            result.put(entry.getKey(), entry.getValue().textValue());
-        });
-        return result;
-    }
 }

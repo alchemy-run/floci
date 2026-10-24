@@ -891,17 +891,4 @@ public class IamActionRegistry {
                         .contains(rule.service()) && rule.action().equals(action)));
     }
 
-    /**
-     * Reads {@code Action} from a {@code application/x-www-form-urlencoded}
-     * request body and restores the entity stream so downstream consumers
-     * (e.g. {@code AwsQueryController}'s {@code MultivaluedMap} injection)
-     * can still parse the form themselves. Returns {@code null} if the
-     * request is not form-encoded or the body has no {@code Action} field.
-     */
-    private static String readFormAction(ContainerRequestContext ctx) {
-        // Delegates to RequestBodyReader so this and ResourceArnBuilder's per-service resource
-        // lookups share one buffered copy of the body per request instead of each independently
-        // reading (and needing to reset) the live entity stream.
-        return RequestBodyReader.formField(ctx, "Action");
-    }
 }

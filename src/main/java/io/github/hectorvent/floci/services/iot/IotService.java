@@ -2311,76 +2311,15 @@ public class IotService {
     private record TaggableResource(Map<String, String> tags, java.util.function.Consumer<Map<String, String>> updateTags) {
     }
 
-    /** An AWS policy variable such as {@code ${iot:ClientId}}. */
-    private static final Pattern POLICY_VARIABLE = Pattern.compile("\\$\\{[^}]*\\}");
 
     /** How long a thing type must stay deprecated before DeleteThingType accepts it. */
     static final Duration THING_TYPE_DELETION_DELAY = Duration.ofMinutes(5);
 
-    private final DynamoDbService dynamoDbService;
 
     private final Clock clock;
 
-    /**
-     * Substitutes the connection's variables into every string of the document on the parsed tree,
-     * so a client id is never read as JSON. A statement still holding a variable Floci cannot
-     * resolve matches nothing, as an unresolvable variable does on AWS, and is dropped. A document
-     * that does not parse is returned as is: the evaluator logs it and skips it.
-     */
-    private String resolvePolicyVariables(String document, Map<String, String> variables) {
-        JsonNode root;
-        try {
-            root = objectMapper.readTree(document);
-        } catch (JsonProcessingException e) {
-            return document;
-        }
-        if (!(root instanceof ObjectNode policy)) {
-            return document;
-        }
-        JsonNode statements = policy.get("Statement");
-        Iterable<JsonNode> each = statements == null ? List.of() : statements.isArray() ? statements : List.of(statements);
-        ArrayNode resolved = objectMapper.createArrayNode();
-        for (JsonNode statement : each) {
-            JsonNode substituted = substituteVariables(statement.deepCopy(), variables);
-            if (!hasUnresolvedVariable(substituted)) {
-                resolved.add(substituted);
-            }
-        }
-        policy.set("Statement", resolved);
-        return policy.toString();
-    }
 
-    private static JsonNode substituteVariables(JsonNode node, Map<String, String> variables) {
-        if (node.isTextual()) {
-            String text = node.asText();
-            for (Map.Entry<String, String> variable : variables.entrySet()) {
-                text = text.replace("${" + variable.getKey() + "}", variable.getValue());
-            }
-            return TextNode.valueOf(text);
-        }
-        if (node instanceof ObjectNode object) {
-            for (Map.Entry<String, JsonNode> property : object.properties()) {
-                property.setValue(substituteVariables(property.getValue(), variables));
-            }
-        } else if (node instanceof ArrayNode array) {
-            for (int i = 0; i < array.size(); i++) {
-                array.set(i, substituteVariables(array.get(i), variables));
-            }
-        }
-        return node;
-    }
 
-    private static boolean hasUnresolvedVariable(JsonNode node) {
-        if (node.isTextual()) {
-            return POLICY_VARIABLE.matcher(node.asText()).find();
-        }
-        for (JsonNode child : node) {
-            if (hasUnresolvedVariable(child)) {
-                return true;
-            }
-        }
-        return false;
-    }
 
     /**
      * Deprecates a thing type, or with {@code undoDeprecate} reverts it to active. Deprecating an
@@ -2413,91 +2352,9 @@ public class IotService {
         }
     }
 
-    private void publishShadowUpdate(ReservedShadowTopic topic, JsonNode request, String clientToken, String region,
-                                     BiConsumer<String, byte[]> publisher) {
-        JsonNode previous = shadowStore.get(shadowKey(region, topic.thingName(), topic.shadowName()))
-                .map(IotShadow::getDocument)
-                .map(this::readJson)
-                .orElse(null);
-        JsonNode current = updateThingShadow(topic.thingName(), topic.shadowName(), request, region);
-        ObjectNode accepted = withClientToken(current.deepCopy(), clientToken);
-        publishJson(topic.acceptedTopic(), accepted, publisher);
 
-        ObjectNode documents = objectMapper.createObjectNode();
-        if (previous != null) {
-            documents.set("previous", previous);
-        }
-        documents.set("current", current);
-        documents.put("timestamp", Instant.now().getEpochSecond());
-        publishJson(topic.documentsTopic(), documents, publisher);
 
-        ObjectNode deltaState = objectMapper.createObjectNode();
-        JsonNode desired = current.path("state").path("desired");
-        JsonNode reported = current.path("state").path("reported");
-        if (desired.isObject()) {
-            desired.fields().forEachRemaining(entry -> {
-                JsonNode reportedValue = reported.path(entry.getKey());
-                if (reportedValue.isMissingNode() || !reportedValue.equals(entry.getValue())) {
-                    deltaState.set(entry.getKey(), entry.getValue());
-                }
-            });
-        }
-        if (!deltaState.isEmpty()) {
-            ObjectNode delta = objectMapper.createObjectNode();
-            delta.set("state", deltaState);
-            delta.put("version", current.path("version").asLong());
-            delta.put("timestamp", Instant.now().getEpochSecond());
-            publishJson(topic.deltaTopic(), delta, publisher);
-        }
-    }
 
-    private void publishShadowGet(ReservedShadowTopic topic, String clientToken, String region, BiConsumer<String, byte[]> publisher) {
-        ObjectNode accepted = withClientToken(getThingShadow(topic.thingName(), topic.shadowName(), region).deepCopy(), clientToken);
-        publishJson(topic.acceptedTopic(), accepted, publisher);
-    }
 
-    private void publishShadowDelete(ReservedShadowTopic topic, String clientToken, String region, BiConsumer<String, byte[]> publisher) {
-        ObjectNode accepted = withClientToken(deleteThingShadow(topic.thingName(), topic.shadowName(), region).deepCopy(), clientToken);
-        publishJson(topic.acceptedTopic(), accepted, publisher);
-    }
 
-    private void publishRejected(String topic, String code, String message, String clientToken, BiConsumer<String, byte[]> publisher) {
-        ObjectNode rejected = objectMapper.createObjectNode();
-        rejected.put("code", code);
-        rejected.put("message", message == null ? code : message);
-        rejected.put("timestamp", Instant.now().getEpochSecond());
-        if (clientToken != null && !clientToken.isBlank()) {
-            rejected.put("clientToken", clientToken);
-        }
-        publishJson(topic, rejected, publisher);
-    }
-
-    private void publishJson(String topic, JsonNode payload, BiConsumer<String, byte[]> publisher) {
-        try {
-            publisher.accept(topic, objectMapper.writeValueAsBytes(payload));
-        } catch (Exception e) {
-            throw new AwsException("InvalidRequestException", e.getMessage(), 400);
-        }
-    }
-
-    private void mergeObject(ObjectNode parent, String field, JsonNode patch) {
-        if (patch == null || patch.isMissingNode()) {
-            return;
-        }
-        if (patch.isNull()) {
-            parent.remove(field);
-            return;
-        }
-        if (!patch.isObject()) {
-            return;
-        }
-        ObjectNode target = parent.withObject("/" + field);
-        patch.fields().forEachRemaining(entry -> {
-            if (entry.getValue().isNull()) {
-                target.remove(entry.getKey());
-            } else {
-                target.set(entry.getKey(), entry.getValue());
-            }
-        });
-    }
 }

@@ -1508,13 +1508,6 @@ public class KinesisService implements ResourceProvider {
     public record UpdateStreamWarmThroughputResult(
             String streamArn, String streamName, Integer targetMiBps, Integer currentMiBps) {}
 
-    private boolean areAdjacent(KinesisShard a, KinesisShard b) {
-        BigInteger aStart = new BigInteger(a.getHashKeyRange().startingHashKey());
-        BigInteger aEnd = new BigInteger(a.getHashKeyRange().endingHashKey());
-        BigInteger bStart = new BigInteger(b.getHashKeyRange().startingHashKey());
-        BigInteger bEnd = new BigInteger(b.getHashKeyRange().endingHashKey());
-        return aEnd.add(BigInteger.ONE).equals(bStart) || bEnd.add(BigInteger.ONE).equals(aStart);
-    }
 
     private String streamNameFromArn(String streamArn) {
         if (streamArn == null || streamArn.isBlank()) {
@@ -1535,17 +1528,5 @@ public class KinesisService implements ResourceProvider {
         return name;
     }
 
-    private String formatShardId(int index) {
-        return String.format("shardId-%012d", index);
-    }
 
-    private int iteratorStartIndex(KinesisStream stream, String shardId, String type) {
-        // AWS validates the shard at GetShardIterator time for every iterator type.
-        KinesisShard shard = stream.getShards().stream()
-                .filter(s -> s.getShardId().equals(shardId))
-                .findFirst()
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Shard not found", 400));
-        // LATEST resumes from the tip snapshot taken now; other types resolve in getRecords.
-        return "LATEST".equals(type) ? shard.recordCount() : 0;
-    }
 }

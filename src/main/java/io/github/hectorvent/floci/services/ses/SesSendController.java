@@ -666,21 +666,7 @@ public class SesSendController {
         return out;
     }
 
-    private List<String> jsonArrayToList(JsonNode arrayNode) {
-        if (arrayNode == null || arrayNode.isMissingNode() || !arrayNode.isArray()) {
-            return Collections.emptyList();
-        }
-        List<String> list = new ArrayList<>();
-        arrayNode.forEach(node -> list.add(node.asText()));
-        return list;
-    }
 
-    private List<String> mergeLists(List<String> to, List<String> cc, List<String> bcc) {
-        List<String> all = new ArrayList<>(to);
-        all.addAll(cc);
-        all.addAll(bcc);
-        return all;
-    }
 
     @POST
     @Path("/multi-region-endpoints")

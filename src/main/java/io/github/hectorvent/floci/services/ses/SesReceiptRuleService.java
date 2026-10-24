@@ -1031,13 +1031,6 @@ public class SesReceiptRuleService {
         }
     }
 
-    private static void requireValidRecipients(ReceiptRule rule) {
-        for (String recipient : rule.getRecipients()) {
-            if (!isValidRecipient(recipient)) {
-                throw new AwsException("InvalidParameterValue", "Invalid recipient: " + recipient, 400);
-            }
-        }
-    }
 
     static boolean isValidRecipient(String recipient) {
         if (recipient == null || recipient.isEmpty()) {

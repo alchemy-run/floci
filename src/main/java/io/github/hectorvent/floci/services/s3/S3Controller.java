@@ -4917,95 +4917,12 @@ public class S3Controller {
 
 
 
-    private static int resolveMaxUploads(String maxUploads) {
-        if (maxUploads == null) {
-            return 1000;
-        }
-        if (maxUploads.matches("\\d{1,10}") && Long.parseLong(maxUploads) <= Integer.MAX_VALUE) {
-            return Integer.parseInt(maxUploads);
-        }
-        Map<String, Object> detail = new LinkedHashMap<>();
-        detail.put("ArgumentName", "max-uploads");
-        detail.put("ArgumentValue", maxUploads);
-        throw new AwsException("InvalidArgument",
-                "Argument max-uploads must be an integer between 0 and 2147483647", 400, detail);
-    }
-
-    /** S3 assigns an Id to every notification configuration submitted without one. */
-    private static String notificationId(String id) {
-        if (id != null && !id.isBlank()) {
-            return id;
-        }
-        return Base64.getEncoder().withoutPadding().encodeToString(
-                UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8));
-    }
 
 
-    /** Reports the version an object subresource request acted on, as S3 does in {@code x-amz-version-id}. */
-    private static Response.ResponseBuilder withVersionHeader(Response.ResponseBuilder response, S3Object object) {
-        if (object.getVersionId() != null) {
-            response.header("x-amz-version-id", object.getVersionId());
-        }
-        return response;
-    }
 
-    /**
-     * S3 does not reveal whether an object or version exists to a caller that may not list the
-     * bucket: a missing key or version (and, for most object operations, a delete-marker version)
-     * is answered with 403 AccessDenied unless the caller holds {@code s3:ListBucket} on the
-     * bucket. Returns the error to send, which is either {@code e} or that AccessDenied.
-     */
-    private AwsException concealUnlistableMiss(AwsException e, String bucket, HttpHeaders httpHeaders,
-                                               S3Service.RequestAuthorization authorization,
-                                               boolean concealDeleteMarkerVersion) {
-        boolean missing = "NoSuchKey".equals(e.getErrorCode()) || "NoSuchVersion".equals(e.getErrorCode());
-        boolean deleteMarkerVersion = concealDeleteMarkerVersion && e instanceof S3DeleteMarkerException;
-        if (!missing && !deleteMarkerVersion) {
-            return e;
-        }
-        String authorizationHeader = httpHeaders != null ? httpHeaders.getHeaderString("Authorization") : null;
-        if (authorizationHeader == null) {
-            return e;
-        }
-        String bucketArn = S3PublicAccessEvaluator.bucketArn(bucket);
-        try {
-            S3Service.SignedPrincipalResourcePolicyEvaluation evaluation =
-                    s3Service.signedPrincipalResourcePolicyDecision(bucket, "s3:ListBucket", bucketArn,
-                            authorization != null ? authorization : S3Service.RequestAuthorization.unsigned());
-            iamEnforcementFilter.authorizeAdditionalResourceForSession(authorizationHeader, "s3:ListBucket",
-                    bucketArn, evaluation.decision(), evaluation.resourceOwnerAccountId());
-            return e;
-        } catch (AwsException denied) {
-            return denied;
-        }
-    }
 
-    /** Runs an object operation whose not-found answers are subject to {@link #concealUnlistableMiss}. */
-    private Response concealingMisses(String bucket, HttpHeaders httpHeaders,
-                                      S3Service.RequestAuthorization authorization,
-                                      boolean concealDeleteMarkerVersion, Supplier<Response> operation) {
-        try {
-            return operation.get();
-        } catch (AwsException e) {
-            return xmlErrorResponse(concealUnlistableMiss(e, bucket, httpHeaders, authorization,
-                    concealDeleteMarkerVersion));
-        }
-    }
 
-    private void validateContentMd5(HttpHeaders httpHeaders, byte[] body) {
-        String contentMd5 = httpHeaders.getHeaderString("Content-MD5");
-        if (contentMd5 == null) {
-            return;
-        }
-        try {
-            byte[] digest = java.security.MessageDigest.getInstance("MD5").digest(body);
-            if (!contentMd5.equals(java.util.Base64.getEncoder().encodeToString(digest))) {
-                throw new AwsException("BadDigest", "The Content-MD5 you specified did not match the payload.", 400);
-            }
-        } catch (java.security.NoSuchAlgorithmException e) {
-            throw new IllegalStateException("MD5 algorithm is not available", e);
-        }
-    }
+
 
 
 
@@ -5024,24 +4941,6 @@ public class S3Controller {
         return metadata;
     }
 
-    private S3Checksum extractChecksumFromHeaders(HttpHeaders httpHeaders) {
-        String crc32 = httpHeaders.getHeaderString("x-amz-checksum-crc32");
-        String crc32c = httpHeaders.getHeaderString("x-amz-checksum-crc32c");
-        String crc64nvme = httpHeaders.getHeaderString("x-amz-checksum-crc64nvme");
-        String sha1 = httpHeaders.getHeaderString("x-amz-checksum-sha1");
-        String sha256 = httpHeaders.getHeaderString("x-amz-checksum-sha256");
-        if (crc32 == null && crc32c == null && crc64nvme == null && sha1 == null && sha256 == null) {
-            return null;
-        }
-        S3Checksum checksum = new S3Checksum();
-        checksum.setChecksumCRC32(crc32);
-        checksum.setChecksumCRC32C(crc32c);
-        checksum.setChecksumCRC64NVME(crc64nvme);
-        checksum.setChecksumSHA1(sha1);
-        checksum.setChecksumSHA256(sha256);
-        checksum.setChecksumType(ChecksumType.FULL_OBJECT);
-        return checksum;
-    }
 
     private static String extractBoundary(String contentType) {
         if (contentType == null) {
@@ -5060,40 +4959,6 @@ public class S3Controller {
         return null;
     }
 
-    private static List<byte[]> splitMultipartParts(byte[] body, byte[] boundary) {
-        java.util.ArrayList<byte[]> parts = new java.util.ArrayList<>();
-        int pos = indexOf(body, boundary, 0);
-        if (pos < 0) {
-            return parts;
-        }
-        // Skip past the first boundary line
-        pos += boundary.length;
-        // Skip the CRLF or -- after boundary
-        if (pos < body.length - 1 && body[pos] == '-' && body[pos + 1] == '-') {
-            return parts; // closing boundary immediately
-        }
-        if (pos < body.length - 1 && body[pos] == '\r' && body[pos + 1] == '\n') {
-            pos += 2;
-        }
-
-        while (pos < body.length) {
-            int nextBoundary = indexOf(body, boundary, pos);
-            if (nextBoundary < 0) {
-                break;
-            }
-            parts.add(Arrays.copyOfRange(body, pos, nextBoundary));
-            pos = nextBoundary + boundary.length;
-            // Check for closing boundary --
-            if (pos < body.length - 1 && body[pos] == '-' && body[pos + 1] == '-') {
-                break;
-            }
-            // Skip CRLF after boundary
-            if (pos < body.length - 1 && body[pos] == '\r' && body[pos + 1] == '\n') {
-                pos += 2;
-            }
-        }
-        return parts;
-    }
 
     private static int indexOf(byte[] data, byte[] pattern, int fromIndex) {
         outer:
@@ -5108,58 +4973,8 @@ public class S3Controller {
         return -1;
     }
 
-    private static int indexOfDoubleNewline(byte[] data) {
-        for (int i = 0; i < data.length - 3; i++) {
-            if (data[i] == '\r' && data[i + 1] == '\n' && data[i + 2] == '\r' && data[i + 3] == '\n') {
-                return i;
-            }
-        }
-        return -1;
-    }
 
-    private static String extractHeaderValue(String headers, String headerName) {
-        String lowerHeaders = headers.toLowerCase(Locale.ROOT);
-        String lowerName = headerName.toLowerCase(Locale.ROOT) + ":";
-        int idx = lowerHeaders.indexOf(lowerName);
-        if (idx < 0) {
-            return null;
-        }
-        int valueStart = idx + lowerName.length();
-        int lineEnd = headers.indexOf('\r', valueStart);
-        if (lineEnd < 0) {
-            lineEnd = headers.indexOf('\n', valueStart);
-        }
-        if (lineEnd < 0) {
-            lineEnd = headers.length();
-        }
-        return headers.substring(valueStart, lineEnd).trim();
-    }
 
-    private static String extractDispositionParam(String disposition, String paramName) {
-        String search = paramName + "=";
-        int idx = disposition.indexOf(search);
-        if (idx < 0) {
-            return null;
-        }
-        int valueStart = idx + search.length();
-        if (valueStart >= disposition.length()) {
-            return null;
-        }
-        if (disposition.charAt(valueStart) == '"') {
-            valueStart++;
-            int valueEnd = disposition.indexOf('"', valueStart);
-            if (valueEnd < 0) {
-                return disposition.substring(valueStart);
-            }
-            return disposition.substring(valueStart, valueEnd);
-        } else {
-            int valueEnd = disposition.indexOf(';', valueStart);
-            if (valueEnd < 0) {
-                valueEnd = disposition.length();
-            }
-            return disposition.substring(valueStart, valueEnd).trim();
-        }
-    }
 
     /**
      * True when the raw request path carries no bucket prefix because the bucket came from the

@@ -1487,14 +1487,4 @@ public class SsmJsonHandler {
         return Response.ok(response).build();
     }
 
-    private Map<String, String> documentTags(String name, String region) {
-        try {
-            return ssmService.getDocument(name, region).getTags();
-        } catch (AwsException e) {
-            if ("InvalidDocument".equals(e.getErrorCode())) {
-                throw new AwsException("InvalidResourceId", "Resource " + name + " not found.", 400);
-            }
-            throw e;
-        }
-    }
 }

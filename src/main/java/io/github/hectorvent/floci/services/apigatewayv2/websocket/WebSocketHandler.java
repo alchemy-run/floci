@@ -837,48 +837,7 @@ public class WebSocketHandler {
         }
     }
 
-    /**
-     * Path-style upgrades at {@code /ws/{apiId}/{stageName}}.
-     */
-    private void handlePathStyleWebSocketUpgrade(RoutingContext ctx) {
-        String path = ctx.request().path();
-        String[] parsed = parsePathStyle(path);
-        if (parsed == null) {
-            ctx.response().setStatusCode(403).end();
-            return;
-        }
-        beginUpgrade(ctx, parsed[0], parsed[1]);
-    }
 
-    /**
-     * Virtual-host upgrades: {@code Host: {apiId}.execute-api.{region}.amazonaws.com}
-     * and path {@code /{stageName}}. Non-upgrade or non-execute-api traffic
-     * falls through to JAX-RS (HTTP APIs, @connections).
-     */
-    private void handleVirtualHostWebSocketUpgrade(RoutingContext ctx) {
-        if (!isWebSocketUpgrade(ctx)) {
-            ctx.next();
-            return;
-        }
-        String host = ApiGatewayExecuteApiRoutingFilter.resolveHost(
-                ctx.request().getHeader("Host"), URI.create(ctx.request().absoluteURI()));
-        String apiId = ApiGatewayExecuteApiHostFilter.extractApiId(host, baseHostname);
-        if (apiId == null) {
-            ctx.next();
-            return;
-        }
-        String path = ctx.request().path();
-        if (path != null && ApiGatewayExecuteApiRoutingFilter.alreadyPathStyle(path)) {
-            ctx.next();
-            return;
-        }
-        String stageName = ApiGatewayExecuteApiRoutingFilter.firstSegment(path);
-        if (stageName == null || stageName.isEmpty()) {
-            ctx.response().setStatusCode(403).end();
-            return;
-        }
-        beginUpgrade(ctx, apiId, stageName);
-    }
 
     static boolean isWebSocketUpgrade(RoutingContext ctx) {
         String upgrade = ctx.request().getHeader("Upgrade");
@@ -906,12 +865,4 @@ public class WebSocketHandler {
         return new String[] { apiId, stageName };
     }
 
-    /**
-     * Validate the API and stage, generate a connectionId, and run the $connect lifecycle.
-     */
-    private void beginUpgrade(RoutingContext ctx, String apiId, String stageName) {
-        // Resolve region from the request Authorization header
-        String region = apiGatewayV2Service.resolveApiRegion(resolveRegionFromVertxRequest(ctx), apiId);
-        processUpgrade(ctx, apiId, stageName, region);
-    }
 }

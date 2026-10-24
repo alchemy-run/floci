@@ -724,8 +724,4 @@ public class NeptuneService {
         usedPorts.remove(port);
     }
 
-    /** The DNS suffix endpoint hostnames are built under, as ELB and the other data planes do. */
-    private String dnsSuffix() {
-        return config.hostname().orElse(EmbeddedDnsServer.DEFAULT_SUFFIX);
-    }
 }

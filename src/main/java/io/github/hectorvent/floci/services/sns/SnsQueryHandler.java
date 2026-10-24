@@ -775,18 +775,4 @@ public class SnsQueryHandler {
         return a != null ? a : b;
     }
 
-    private List<String> collectIndexed(MultivaluedMap<String, String> params, String name) {
-        List<String> values = new ArrayList<>();
-        for (int i = 1; ; i++) {
-            String v = getParam(params, name + ".member." + i);
-            if (v == null) {
-                v = getParam(params, name + "." + i);
-            }
-            if (v == null) {
-                break;
-            }
-            values.add(v);
-        }
-        return values;
-    }
 }

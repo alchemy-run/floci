@@ -838,6 +838,39 @@ public class CloudControlService {
     private final Map<String, ReentrantLock> operationLocks = new ConcurrentHashMap<>();
 
 
+    public ProgressEvent updateResource(String region, String accountId, String typeName,
+                                        String identifier, String patchDocument) {
+        if (!"AWS::SSM::Parameter".equals(typeName) && !SsmDocumentResource.TYPE.equals(typeName)) {
+            throw new AwsException("UnsupportedActionException", "UpdateResource is not supported for " + typeName, 400);
+        }
+        JsonNode patch;
+        JsonNode observed;
+        try {
+            patch = mapper.readTree(patchDocument);
+            observed = mapper.readTree(getResource(region, accountId, typeName, identifier).properties());
+        } catch (JsonProcessingException | IllegalArgumentException e) {
+            throw new AwsException("InvalidRequestException", "PatchDocument is not valid JSON.", 400);
+        }
+        JsonNode desired = ResourcePatch.apply(observed, patch);
+        String token = UUID.randomUUID().toString();
+        ProgressEvent pending = new ProgressEvent(typeName, identifier, token, "UPDATE", "IN_PROGRESS", null, null, accountId);
+        persistRequest(new PersistedRequest(pending, region, desired.toString(), System.currentTimeMillis()));
+        record(pending);
+        try {
+            String actual;
+            if (SsmDocumentResource.TYPE.equals(typeName)) {
+                RequestScopes.runAs(accountId, () -> ssmDocuments.update(identifier, observed, desired, region));
+                actual = getResource(region, accountId, typeName, identifier).properties();
+            } else {
+                actual = RequestScopes.callAs(accountId, () -> ssmBackend.write(identifier, desired, true, region))
+                        .toString();
+            }
+            return record(new ProgressEvent(typeName, identifier, token, "UPDATE", "SUCCESS", null,
+                    actual, accountId));
+        } catch (AwsException e) {
+            return record(pending.failed(e));
+        }
+    }
 
     public ProgressEvent requestStatus(String region, String accountId, String token) {
         ProgressEvent event = requestStatus(accountId, token);

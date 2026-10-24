@@ -6297,13 +6297,10 @@ public class AslExecutor {
 
     private static final long ECS_SYNC_POLL_INTERVAL_MS = 100;
 
-    private static final String AWS_SDK_SFN_PREFIX = "arn:aws:states:::aws-sdk:sfn:";
 
-    private static final String AWS_SDK_SCHEDULER_PREFIX = "arn:aws:states:::aws-sdk:scheduler:";
 
     private final LambdaFunctionStore functionStore;
 
-    private final DynamoDbService dynamoDbService;
 
 
     private void doExecute(StateMachine sm, Execution exec, List<HistoryEvent> history,

@@ -4189,22 +4189,16 @@ public class LambdaService implements ResourceProvider {
         }
     }
 
+
     /**
-     * Per-function locks covering PutFunctionConcurrency,
-     * DeleteFunctionConcurrency, and deleteFunction itself. Serializing the
-     * limiter update + persistence pair against itself for a given function
-     * prevents the limiter and store from diverging on interleaved concurrent
-     * requests.
-     *
-     * <p>Entries are intentionally never removed — see {@code deleteFunction}
-     * for the race this avoids. The map therefore grows by one {@code Object}
-     * per distinct function ARN the emulator has ever seen (create/delete
-     * cycles with fresh names included). Acceptable footprint for a local
-     * emulator workload.
+     * Optional: durable-execution purge on function delete. Injected lazily so
+     * LambdaDurableService can depend on LambdaService without a CDI cycle.
+     * Unit tests assign it via {@link #setDurableService}.
      */
-    private final ConcurrentHashMap<String, Object> concurrencyOpLocks = new ConcurrentHashMap<>();
+    @Inject
+    Instance<LambdaDurableService> durableServiceInstance;
 
-
+    private LambdaDurableService durableService;
 
     /** Optional ECR digest resolution for image functions; unit tests assign it via {@link #setImageDigestResolver}. */
     @Inject
@@ -4255,29 +4249,16 @@ public class LambdaService implements ResourceProvider {
         this.objectMapper = objectMapper;
     }
 
+    /** Test hook: wire the durable service without CDI. */
+    void setDurableService(LambdaDurableService durableService) {
+        this.durableService = durableService;
+    }
 
     /** Test hook: wire the image digest resolver without CDI. */
     void setImageDigestResolver(LambdaImageDigestResolver imageDigestResolver) {
         this.imageDigestResolver = imageDigestResolver;
     }
 
-    /**
-     * Records the image a container-image function deploys. Lambda resolves the tag to its
-     * manifest digest at deploy time and reports that digest as {@code ResolvedImageUri} and
-     * {@code CodeSha256}; a reference that cannot be resolved is kept as given.
-     */
-    private void applyImageUri(LambdaFunction fn, String imageUri) {
-        fn.setImageUri(imageUri);
-        LambdaImageDigestResolver resolver = imageDigestResolver;
-        if (resolver == null && imageDigestResolverInstance != null && imageDigestResolverInstance.isResolvable()) {
-            resolver = imageDigestResolverInstance.get();
-        }
-        String resolved = resolver != null ? resolver.resolve(imageUri) : null;
-        fn.setResolvedImageUri(resolved);
-        if (resolved != null) {
-            fn.setCodeSha256(resolved.substring(resolved.lastIndexOf("@sha256:") + "@sha256:".length()));
-        }
-    }
 
 
     private LambdaFunction resolveInvokeTarget(String region, String name, String qualifier) {
@@ -4387,19 +4368,6 @@ public class LambdaService implements ResourceProvider {
         return eventSourceArn instanceof String arn && arn.contains(":kafka:") && arn.contains(":cluster/");
     }
 
-    /** An Amazon MSK event source reads exactly one topic. */
-    private static List<String> parseMskTopics(Object rawTopics) {
-        if (rawTopics == null) {
-            throw new AwsException("InvalidParameterValueException",
-                    "Topics is required for Amazon MSK event sources", 400);
-        }
-        if (!(rawTopics instanceof List<?> topicList) || topicList.size() != 1
-                || !(topicList.getFirst() instanceof String topic) || topic.isBlank()) {
-            throw new AwsException("InvalidParameterValueException",
-                    "Topics must contain exactly one non-blank topic name for Amazon MSK event sources", 400);
-        }
-        return new ArrayList<>(List.of(topic));
-    }
 
     private static void validateLoggingConfig(Object value) {
         if (!(value instanceof Map<?, ?> logging)) {
@@ -4467,36 +4435,44 @@ public class LambdaService implements ResourceProvider {
         removePermission(region, functionName, null, statementId);
     }
 
-    private static final String TAG_TYPE_FUNCTION = "function";
-
-    private static final String TAG_TYPE_EVENT_SOURCE_MAPPING = "event-source-mapping";
 
 
+    /**
+     * Builds the IAM Condition block for AddPermission. AWS stores
+     * {@code InvokedViaFunctionUrl} as {@code Bool.lambda:InvokedViaFunctionUrl}
+     * and {@code FunctionUrlAuthType} as {@code StringEquals.lambda:FunctionUrlAuthType}.
+     */
+    static Map<String, Object> buildPermissionCondition(Map<String, Object> request) {
+        Map<String, Object> condition = new java.util.LinkedHashMap<>();
+        String sourceArn = (String) request.get("SourceArn");
+        String sourceAccount = (String) request.get("SourceAccount");
+        String functionUrlAuthType = (String) request.get("FunctionUrlAuthType");
+        Object invokedVia = request.get("InvokedViaFunctionUrl");
 
-    private void releaseVpcEnis(String region, LambdaFunction fn) {
-        if (ec2Service == null || fn.getVpcEniIds() == null || fn.getVpcEniIds().isEmpty()) {
-            return;
+        if (sourceArn != null && !sourceArn.isBlank()) {
+            condition.put("ArnLike", new java.util.LinkedHashMap<>(Map.of("AWS:SourceArn", sourceArn)));
         }
-        for (String eniId : new ArrayList<>(fn.getVpcEniIds())) {
-            try {
-                ec2Service.deleteNetworkInterface(region, eniId);
-            } catch (Exception e) {
-                LOG.warnv("Could not delete Lambda VPC ENI {0}: {1}", eniId, e.getMessage());
+
+        Map<String, Object> stringEquals = new java.util.LinkedHashMap<>();
+        if (sourceAccount != null && !sourceAccount.isBlank()) {
+            stringEquals.put("AWS:SourceAccount", sourceAccount);
+        }
+        if (functionUrlAuthType != null && !functionUrlAuthType.isBlank()) {
+            stringEquals.put("lambda:FunctionUrlAuthType", functionUrlAuthType);
+        }
+        if (!stringEquals.isEmpty()) {
+            condition.put("StringEquals", stringEquals);
+        }
+
+        if (invokedVia != null) {
+            boolean invoked = invokedVia instanceof Boolean b ? b : Boolean.parseBoolean(invokedVia.toString());
+            if (invoked) {
+                condition.put("Bool", Map.of("lambda:InvokedViaFunctionUrl", "true"));
             }
         }
-        fn.setVpcEniIds(new ArrayList<>());
+        return condition;
     }
 
-    private static List<String> asStringList(Object raw) {
-        if (!(raw instanceof List<?> list)) {
-            return List.of();
-        }
-        List<String> out = new ArrayList<>();
-        for (Object item : list) {
-            if (item != null) {
-                out.add(item.toString());
-            }
-        }
-        return out;
-    }
+
+
 }

@@ -2997,15 +2997,6 @@ public class ApiGatewayController {
         return Response.noContent().build();
     }
 
-    private static boolean embedsMethods(List<String> embed) {
-        if (embed == null) {
-            return false;
-        }
-        return embed.stream().anyMatch(value ->
-                value != null && (value.equalsIgnoreCase("methods")
-                        || value.contains("resourceMethods")
-                        || value.equalsIgnoreCase("item")));
-    }
 
     private ObjectNode toUsageNode(ApiGatewayService.UsageSnapshot usage) {
         ObjectNode node = objectMapper.createObjectNode();
@@ -3104,19 +3095,6 @@ public class ApiGatewayController {
         return node;
     }
 
-    /** Rejects a mapping whose API or stage does not exist, with the errors AWS gives for each. */
-    private void requireApiAndStageExist(String region, String apiId, String stage) {
-        try {
-            v2Service.getApi(region, apiId);
-        } catch (AwsException e) {
-            throw new AwsException("BadRequestException", "Invalid API identifier specified: " + apiId, 400);
-        }
-        try {
-            v2Service.getStage(region, apiId, stage);
-        } catch (AwsException e) {
-            throw new AwsException("BadRequestException", "Invalid stage identifier specified", 400);
-        }
-    }
 
     /** Legacy records without a persisted ID retain their exact stored-path identity. */
     static String apiMappingId(String storedPath) {

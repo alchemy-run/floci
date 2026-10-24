@@ -692,6 +692,4 @@ public class ElbClassicService implements ServerCertificateReferenceProvider {
                 && java.util.Objects.equals(a.getSslCertificateId(), b.getSslCertificateId());
     }
 
-    /** The hosted zone ID AWS reports for Classic load balancers; fixed per region on AWS too. */
-    private static final String CANONICAL_HOSTED_ZONE_ID = "Z35SXDOTRQ7X7K";
 }

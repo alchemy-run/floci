@@ -702,9 +702,7 @@ public class WarmPool implements ContainerTeardown, Resettable {
         }
     }
 
-    private final Set<ContainerHandle> leased = ConcurrentHashMap.newKeySet();
 
-    private final ConcurrentHashMap<String, Semaphore> inFlight = new ConcurrentHashMap<>();
 
     @Inject
     public WarmPool(LambdaRuntimeLauncher lambdaRuntimeLauncher, EmulatorConfig config) {
@@ -713,87 +711,10 @@ public class WarmPool implements ContainerTeardown, Resettable {
         this.maxPoolSizePerFunction = DEFAULT_MAX_POOL_SIZE;
     }
 
-    private ContainerHandle acquireLeased(LambdaFunction fn) {
-        boolean ephemeral = config != null && config.services().lambda().ephemeral();
-        ContainerHandle handle = null;
-        PoolState poolState = null;
-        long leaseEpoch = 0;
-        String environmentKey = executionEnvironmentKey(fn);
 
-        if (!ephemeral) {
-            poolState = poolStates.computeIfAbsent(fn.getFunctionName(), ignored -> new PoolState());
-            synchronized (poolState) {
-                leaseEpoch = poolState.epochByEnvironment.computeIfAbsent(environmentKey, ignored -> 0L);
-            }
-            // Skip pooled handles whose container died out-of-band — otherwise the
-            // caller would wait the full Lambda function timeout.
-            while (true) {
-                ContainerHandle candidate;
-                synchronized (poolState) {
-                    ArrayDeque<ContainerHandle> idle = poolState.idleByEnvironment.get(environmentKey);
-                    candidate = idle == null ? null : idle.pollFirst();
-                }
-                if (candidate == null) {
-                    break;
-                }
-                // A container whose extension reported a fatal error is still *running*, so the
-                // liveness probe alone would hand it back out. Skip it for the same reason a dead
-                // one is skipped: it can no longer serve invocations correctly.
-                if (candidate.isFaulted()) {
-                    LOG.infov("Discarding pooled container {0} for function {1}: an extension reported a fatal error",
-                            candidate.getContainerId(), fn.getFunctionName());
-                    stopQuietly(candidate);
-                    continue;
-                }
-                if (lambdaRuntimeLauncher.isAlive(candidate)) {
-                    handle = candidate;
-                    break;
-                }
-                LOG.infov("Discarding dead pooled container {0} for function {1}",
-                        candidate.getContainerId(), fn.getFunctionName());
-                stopQuietly(candidate);
-            }
-        }
 
-        if (handle == null) {
-            LOG.debugv(ephemeral ? "Ephemeral start for function: {0}" : "Cold start for function: {0}",
-                    fn.getFunctionName());
-            handle = lambdaRuntimeLauncher.launch(fn);
-        } else {
-            LOG.debugv("Reusing warm container for function: {0}", fn.getFunctionName());
-        }
-        if (!ephemeral) {
-            activeLeases.put(handle, new Lease(poolState, leaseEpoch, environmentKey));
-        }
-        handle.setState(ContainerState.BUSY);
-        leased.add(handle);
-        return handle;
-    }
 
-    private int maxConcurrent() {
-        if (config == null) {
-            return DEFAULT_MAX_POOL_SIZE;
-        }
-        return Math.max(1, config.services().lambda().maxConcurrentContainers());
-    }
 
-    private Semaphore semaphoreFor(String functionName) {
-        return inFlight.computeIfAbsent(functionName, k -> new Semaphore(maxConcurrent()));
-    }
-
-    private void takeLease(String functionName) {
-        semaphoreFor(functionName).acquireUninterruptibly();
-    }
-
-    private void releaseLease(String functionName, ContainerHandle handle) {
-        if (handle != null && !leased.remove(handle)) {
-            return;
-        }
-        Semaphore sem = inFlight.get(functionName);
-        if (sem != null) {
-            sem.release();
-        }
-    }
 
 
     private void drainAll() {

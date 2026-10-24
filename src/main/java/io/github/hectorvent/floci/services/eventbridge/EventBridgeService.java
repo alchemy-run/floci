@@ -2132,9 +2132,7 @@ public class EventBridgeService implements ResourceProvider {
                 tags != null ? tags : Map.of()));
     }
 
-    private final StorageBackend<String, ApiDestination> destinationStore;
 
-    private final EventBridgeInvoker invoker;
 
     public List<String> listRuleNamesByTarget(String targetArn, String busName, String region) {
         if (targetArn == null || targetArn.isBlank()) {
@@ -2162,35 +2160,6 @@ public class EventBridgeService implements ResourceProvider {
         return names;
     }
 
-    private static String destinationKey(String region, String name) {
-        return "destination:" + region + ":" + name;
-    }
 
-    private void ensureArchiveSourceBusExists(String eventSourceArn, String region) {
-        String busName;
-        try {
-            busName = extractBusNameFromArn(eventSourceArn);
-        } catch (IllegalArgumentException e) {
-            throw new AwsException("ValidationException",
-                    "Invalid EventSourceArn: " + eventSourceArn, 400);
-        }
-        if ("default".equals(busName)) {
-            getOrCreateDefaultBus(region);
-            return;
-        }
-        busStore.get(busKey(region, busName))
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                        "Event bus " + busName + " does not exist.", 404));
-    }
 
-    private void requireConnectionArn(String connectionArn, String region) {
-        String prefix = "connection:" + region + ":";
-        boolean found = connectionStore.scan(k -> k.startsWith(prefix))
-                .stream()
-                .anyMatch(c -> connectionArn.equals(c.getConnectionArn()));
-        if (!found) {
-            throw new AwsException("ResourceNotFoundException",
-                    "Connection not found: " + connectionArn, 404);
-        }
-    }
 }

@@ -2130,19 +2130,6 @@ public class AutoScalingService implements PassedRoleLookup {
                 "Successful");
     }
 
-    /**
-     * Instance-scoped writes ({@code SetInstanceHealth}, {@code TerminateInstanceInAutoScalingGroup})
-     * carry no group name. AWS resolves the instance to its owning group for resource-level
-     * authorization; a well-formed id that belongs to no group is an {@code AccessDenied}
-     * (the caller's group-scoped grant does not match), not a {@code ValidationError}.
-     */
-    private static AwsException instanceNotAuthorized(String action, String instanceId) {
-        return new AwsException("AccessDenied",
-                "User is not authorized to perform: autoscaling:" + action
-                        + " because instance '" + instanceId
-                        + "' is not associated with an Auto Scaling group.",
-                403);
-    }
 
     private InstanceRefresh requireActiveRefresh(String region, String asgName) {
         requireGroup(region, asgName);

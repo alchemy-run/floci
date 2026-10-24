@@ -803,8 +803,4 @@ public class FlowLogService {
                 nz(eni.vpcId));                    // vpc-id
     }
 
-    private static String customHeader(String logFormat) {
-        // AWS custom format uses ${field-name} tokens; convert to a space-delimited header.
-        return logFormat.replace("${", "").replace("}", "").trim();
-    }
 }

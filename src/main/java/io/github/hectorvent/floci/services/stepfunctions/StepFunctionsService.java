@@ -3038,11 +3038,7 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
         }
     }
 
-    private static final Set<String> ITEM_READER_RESOURCES = Set.of(
-            "arn:aws:states:::s3:getObject",
-            "arn:aws:states:::s3:listObjectsV2");
 
-    private static final String RESULT_WRITER_RESOURCE = "arn:aws:states:::s3:putObject";
 
     @Inject
     public StepFunctionsService(StorageFactory storageFactory, RegionResolver regionResolver,
@@ -3165,4 +3161,22 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
                 .toList();
     }
 
+    public void updateMapRun(String mapRunArn, Integer maxConcurrency, Long toleratedFailureCount,
+                             Double toleratedFailurePercentage) {
+        MapRun run = describeMapRun(mapRunArn);
+        if (!"RUNNING".equals(run.getStatus())) {
+            throw new AwsException("ValidationException",
+                    "Map Run " + mapRunArn + " is not running and cannot be updated.", 400);
+        }
+        if (maxConcurrency != null) {
+            run.setMaxConcurrency(maxConcurrency);
+        }
+        if (toleratedFailureCount != null) {
+            run.setToleratedFailureCount(toleratedFailureCount);
+        }
+        if (toleratedFailurePercentage != null) {
+            run.setToleratedFailurePercentage(toleratedFailurePercentage);
+        }
+        mapRunStore.put(mapRunArn, run);
+    }
 }

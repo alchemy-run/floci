@@ -406,22 +406,6 @@ public class Ec2PortForwardManager {
         this.httpPortMux = httpPortMux;
     }
 
-    private boolean publishViaMux(Instance instance, int appPort) {
-        if (httpPortMux == null) {
-            return false;
-        }
-        NetworkTarget target = resolveInstanceTarget(instance);
-        if (target == null) {
-            return false;
-        }
-        String containerName = ContainerStorageHelper.resourceName(config, "ec2", null, instance.getInstanceId());
-        if (!httpPortMux.register(appPort, publicHost(instance), target.ip(), containerName)) {
-            return false;
-        }
-        instance.getPublishedPorts().put(appPort, appPort);
-        persist(instance);
-        return true;
-    }
 
     public static String publicHost(Instance instance) {
         if (instance == null) {

@@ -719,7 +719,6 @@ public class EcrRegistryManager {
 
     static final String BLOB_CACHE_DISABLED = "disabled";
 
-    private volatile String registryInternalHost;
 
     /**
      * AWS-shaped registry login URL. Hostname style is
@@ -741,18 +740,5 @@ public class EcrRegistryManager {
         return scheme + "://" + account + ".dkr.ecr." + resolvedRegion + ".localhost:" + port;
     }
 
-    private void rememberInternalHost(ContainerInfo info) {
-        if (info == null) {
-            return;
-        }
-        ContainerLifecycleManager.EndpointInfo endpoint = info.getEndpoint(CONTAINER_INTERNAL_PORT);
-        if (endpoint != null && endpoint.host() != null && !endpoint.host().isBlank()) {
-            this.registryInternalHost = endpoint.host();
-        }
-    }
 
-    private static boolean hasBlobCacheDisabled(Container container) {
-        Map<String, String> labels = container.getLabels();
-        return labels != null && BLOB_CACHE_DISABLED.equals(labels.get(BLOB_CACHE_LABEL));
-    }
 }

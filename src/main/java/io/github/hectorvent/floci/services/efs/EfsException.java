@@ -52,11 +52,6 @@ public class EfsException extends AwsException {
         return new EfsException(Status.BAD_REQUEST, "BadRequest", message);
     }
 
-    private static Map<String, Object> errorData(String errorCode, Map<String, Object> extendedData) {
-        Map<String, Object> data = new HashMap<>(extendedData);
-        data.put("ErrorCode", errorCode);
-        return data;
-    }
 
     public static EfsException replicationNotFound(String fileSystemId) {
         return new EfsException(Status.NOT_FOUND, "ReplicationNotFound",

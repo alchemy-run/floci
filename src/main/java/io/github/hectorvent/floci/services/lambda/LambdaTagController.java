@@ -117,12 +117,4 @@ public class LambdaTagController {
         this.objectMapper = objectMapper;
     }
 
-    /** {@code arn:aws:lambda:us-east-1:...} → {@code us-east-1}. */
-    private static String regionFromArn(String arn) {
-        String[] parts = arn.split(":");
-        if (parts.length < 4 || parts[3].isBlank()) {
-            throw new AwsException("InvalidParameterValueException", "Invalid ARN: " + arn, 400);
-        }
-        return parts[3];
-    }
 }

@@ -342,22 +342,4 @@ public class LakeFormationService {
         this.catalog = catalog;
     }
 
-    private IamRole serviceLinkedRole() {
-        String name = "AWSServiceRoleForLakeFormationDataAccess";
-        Optional<IamRole> existing = iam.findRole(regionResolver.getAccountId(), name);
-        if (existing.isPresent()) {
-            if (!existing.get().isServiceLinkedRole()) {
-                throw new AwsException("InvalidInputException", "The data access role is not a service-linked role", 400);
-            }
-            return existing.get();
-        }
-        try {
-            return iam.createServiceLinkedRole("lakeformation.amazonaws.com", null, null);
-        } catch (AwsException error) {
-            if (!"InvalidInput".equals(error.getErrorCode())) {
-                throw error;
-            }
-            return iam.findRole(regionResolver.getAccountId(), name).orElseThrow(() -> error);
-        }
-    }
 }

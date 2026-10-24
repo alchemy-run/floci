@@ -2309,69 +2309,12 @@ public class SqsService implements Resettable, ResourceProvider {
         return candidate.matches("\\d{12}") ? candidate : null;
     }
 
-    /**
-     * AWS rejects a RedrivePolicy whose {@code deadLetterTargetArn} does not name an existing
-     * queue in the source queue's own account and region. Only the policy being written is
-     * checked: deleting the dead-letter queue afterwards leaves the source queue usable.
-     */
-    private void validateRedrivePolicy(Map<String, String> attributes, String sourceAccountId, String region) {
-        if (attributes == null) {
-            return;
-        }
-        String raw = attributes.get("RedrivePolicy");
-        if (raw == null || raw.isEmpty()) {
-            return;
-        }
-        JsonNode policy;
-        try {
-            policy = POLICY_MAPPER.readTree(raw);
-        } catch (Exception e) {
-            LOG.debugv("RedrivePolicy is not JSON, skipping dead-letter target check: {0}", raw);
-            return;
-        }
-        JsonNode target = policy == null ? null : policy.get("deadLetterTargetArn");
-        if (target == null || !target.isTextual()) {
-            return;
-        }
-        if (!deadLetterTargetExists(target.asText(), sourceAccountId, region)) {
-            throw new AwsException("InvalidParameterValue",
-                    "Value " + raw + " for parameter RedrivePolicy is invalid. "
-                            + "Reason: Dead letter target does not exist.", 400);
-        }
-    }
 
-    private boolean deadLetterTargetExists(String targetArn, String sourceAccountId, String region) {
-        if (!AwsArnUtils.isArnFor(targetArn, "sqs")) {
-            return false;
-        }
-        AwsArnUtils.Arn arn = AwsArnUtils.parse(targetArn);
-        if (!arn.region().isEmpty() && !arn.region().equals(region)) {
-            return false;
-        }
-        if (!arn.accountId().equals(sourceAccountId)) {
-            return false;
-        }
-        String dlqUrl = queueUrlFromArn(targetArn, region);
-        return dlqUrl != null && getQueueByUrl(regionKey(region, dlqUrl), dlqUrl).isPresent();
-    }
 
     /** Policy statement elements SQS stores a one-element list of as the bare value. */
     private static final List<String> COLLAPSIBLE_STATEMENT_ELEMENTS =
             List.of("Action", "NotAction", "Resource", "NotResource");
 
-    /** Copy of {@code attributes} whose Policy is stored the way SQS stores it. */
-    private static Map<String, String> withNormalizedPolicy(Map<String, String> attributes) {
-        if (attributes == null) {
-            return null;
-        }
-        String policy = attributes.get("Policy");
-        if (policy == null || policy.isEmpty()) {
-            return attributes;
-        }
-        Map<String, String> normalized = new HashMap<>(attributes);
-        normalized.put("Policy", normalizePolicyDocument(policy));
-        return normalized;
-    }
 
     /**
      * SQS re-serializes a queue policy when it stores it: whitespace is dropped and a one-element

@@ -895,13 +895,7 @@ public class EcrJsonHandler {
     }
 
 
-    private Response handleGetRegistryPolicy(JsonNode request, String region) {
-        return registryPolicyResponse(service.getRegistryPolicy(region));
-    }
 
-    private Response handleDeleteRegistryPolicy(JsonNode request, String region) {
-        return registryPolicyResponse(service.deleteRegistryPolicy(region));
-    }
 
     private Response handleStartImageScan(JsonNode request, String region) {
         String repo = request.path("repositoryName").asText(null);
@@ -923,21 +917,4 @@ public class EcrJsonHandler {
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
-    private static byte[] decodeBlob(JsonNode node) {
-        if (node == null || node.isMissingNode() || node.isNull()) {
-            return new byte[0];
-        }
-        if (node.isBinary()) {
-            try {
-                return node.binaryValue();
-            } catch (Exception e) {
-                return new byte[0];
-            }
-        }
-        String text = node.asText("");
-        if (text.isEmpty()) {
-            return new byte[0];
-        }
-        return Base64.getDecoder().decode(text);
-    }
 }

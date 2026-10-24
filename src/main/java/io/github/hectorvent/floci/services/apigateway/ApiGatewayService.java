@@ -5018,26 +5018,6 @@ public class ApiGatewayService implements ResourceProvider {
         deleteDomainName(region, domainName);
     }
 
-    private static void validateV2DomainRequest(Map<String, Object> request, boolean create) {
-        if (request == null) {
-            throw new AwsException("BadRequestException", "Expected a domain request object", 400);
-        }
-        Object routingMode = request.get("routingMode");
-        if (routingMode != null && !List.of("API_MAPPING_ONLY", "ROUTING_RULE_ONLY", "ROUTING_RULE_THEN_API_MAPPING")
-                .contains(routingMode)) {
-            throw new AwsException("BadRequestException", "Invalid routingMode", 400);
-        }
-        validateDomainString(request, "apiMappingSelectionExpression");
-        Object authentication = request.get("mutualTlsAuthentication");
-        if (authentication != null) {
-            if (!(authentication instanceof Map<?, ?> settings)) {
-                throw new AwsException("BadRequestException", "mutualTlsAuthentication must be an object", 400);
-            }
-            validateDomainString(settings, "truststoreUri");
-            validateDomainString(settings, "truststoreVersion");
-        }
-        domainConfigurations(request, create);
-    }
 
     private static List<Map<String, Object>> domainConfigurations(Map<String, Object> request, boolean required) {
         Object value = request.get("domainNameConfigurations");
@@ -5174,113 +5154,12 @@ public class ApiGatewayService implements ResourceProvider {
         getStage(region, apiId, stageName);
     }
 
-    private static String decodeJsonPointerSegment(String segment) {
-        return segment.replace("~1", "/").replace("~0", "~");
-    }
 
-    @SuppressWarnings("unchecked")
-    private static List<String> readStringList(Object raw) {
-        if (!(raw instanceof List<?> list)) {
-            return new ArrayList<>();
-        }
-        List<String> values = new ArrayList<>();
-        for (Object item : list) {
-            if (item != null) {
-                values.add(String.valueOf(item));
-            }
-        }
-        return values;
-    }
 
-    @SuppressWarnings("unchecked")
-    private static Map<String, String> readStringMap(Object raw) {
-        Map<String, String> values = new HashMap<>();
-        if (raw instanceof Map<?, ?> map) {
-            map.forEach((key, value) -> {
-                if (key != null && value != null) {
-                    values.put(String.valueOf(key), String.valueOf(value));
-                }
-            });
-        }
-        return values;
-    }
 
-    private static ThrottleSettings readThrottle(Object raw) {
-        if (!(raw instanceof Map<?, ?> map)) {
-            return null;
-        }
-        ThrottleSettings throttle = new ThrottleSettings();
-        throttle.setBurstLimit(null);
-        throttle.setRateLimit(null);
-        if (map.get("burstLimit") instanceof Number n) {
-            throttle.setBurstLimit(n.intValue());
-        } else if (map.get("burstLimit") != null) {
-            throttle.setBurstLimit(Integer.parseInt(String.valueOf(map.get("burstLimit"))));
-        }
-        if (map.get("rateLimit") instanceof Number n) {
-            throttle.setRateLimit(n.doubleValue());
-        } else if (map.get("rateLimit") != null) {
-            throttle.setRateLimit(Double.parseDouble(String.valueOf(map.get("rateLimit"))));
-        }
-        return throttle;
-    }
 
-    private static QuotaSettings readQuota(Object raw) {
-        if (!(raw instanceof Map<?, ?> map)) {
-            return null;
-        }
-        QuotaSettings quota = new QuotaSettings();
-        if (map.get("limit") instanceof Number n) {
-            quota.setLimit(n.intValue());
-        } else if (map.get("limit") != null) {
-            quota.setLimit(Integer.parseInt(String.valueOf(map.get("limit"))));
-        }
-        if (map.get("offset") instanceof Number n) {
-            quota.setOffset(n.intValue());
-        } else if (map.get("offset") != null) {
-            quota.setOffset(Integer.parseInt(String.valueOf(map.get("offset"))));
-        }
-        if (map.get("period") != null) {
-            quota.setPeriod(String.valueOf(map.get("period")));
-        }
-        return quota;
-    }
 
-    private static void applyThrottlePatch(ThrottleSettings throttle, String path, String opType, String value) {
-        if ("/throttle/burstLimit".equals(path)) {
-            throttle.setBurstLimit("remove".equals(opType) || value == null ? null : Integer.parseInt(value));
-        } else if ("/throttle/rateLimit".equals(path)) {
-            throttle.setRateLimit("remove".equals(opType) || value == null ? null : Double.parseDouble(value));
-        }
-    }
 
-    private static void applyQuotaPatch(QuotaSettings quota, String path, String opType, String value) {
-        if ("/quota/limit".equals(path)) {
-            quota.setLimit("remove".equals(opType) || value == null ? null : Integer.parseInt(value));
-        } else if ("/quota/offset".equals(path)) {
-            quota.setOffset("remove".equals(opType) || value == null ? null : Integer.parseInt(value));
-        } else if ("/quota/period".equals(path)) {
-            quota.setPeriod("remove".equals(opType) ? null : value);
-        }
-    }
 
-    private static GatewayResponse defaultGatewayResponse(String responseType) {
-        GatewayResponse response = new GatewayResponse();
-        response.setResponseType(responseType);
-        response.setStatusCode(defaultStatusCode(responseType));
-        response.setDefaultResponse(true);
-        return response;
-    }
 
-    private static String defaultStatusCode(String responseType) {
-        return switch (responseType) {
-            case "DEFAULT_4XX", "BAD_REQUEST_BODY", "BAD_REQUEST_PARAMETERS" -> "400";
-            case "UNAUTHORIZED" -> "401";
-            case "ACCESS_DENIED", "WAF_FILTERED" -> "403";
-            case "RESOURCE_NOT_FOUND" -> "404";
-            case "DEFAULT_5XX", "API_CONFIGURATION_ERROR", "AUTHORIZER_FAILURE",
-                    "AUTHORIZER_CONFIGURATION_ERROR", "INTEGRATION_FAILURE", "INTEGRATION_TIMEOUT" -> "500";
-            default -> "500";
-        };
-    }
 }

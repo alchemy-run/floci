@@ -606,15 +606,6 @@ public class SnsJsonHandler {
         return Response.ok(response).build();
     }
 
-    private static List<String> jsonNodeToList(JsonNode node) {
-        List<String> values = new ArrayList<>();
-        if (node != null && node.isArray()) {
-            for (JsonNode item : node) {
-                values.add(item.asText());
-            }
-        }
-        return values;
-    }
 
     private static JsonNode firstPresent(JsonNode request, String... names) {
         for (String name : names) {

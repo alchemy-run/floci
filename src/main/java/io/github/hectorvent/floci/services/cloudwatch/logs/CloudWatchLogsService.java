@@ -1536,12 +1536,8 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
         return Set.of(new SupportedResourceType("logs:log-group", "logs", true));
     }
 
-    /** AWS PutLogEvents rejects events more than two hours in the future. */
-    private static final long TOO_NEW_HORIZON_MS = 2L * 60 * 60 * 1000;
 
-    private static final String DEFAULT_LOG_GROUP_CLASS = "STANDARD";
 
-    private static final String CANONICAL_ACCOUNT = "000000000000";
 
     private static final ObjectMapper PAYLOAD_MAPPER = new ObjectMapper();
 
@@ -1553,42 +1549,9 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
 
     private final Instance<IamService> iamServices;
 
-    private final Instance<KinesisService> kinesisServices;
 
 
-    private void migrateLegacyMetricFilters() {
-        synchronized (metricFilterStore) {
-            if (metricFilterStore instanceof AccountAwareStorageBackend<MetricFilter> aware) {
-                for (AccountAwareStorageBackend.AccountEntry<MetricFilter> entry : aware.scanAllAccountEntries(k -> true)) {
-                    String destination = migratedMetricFilterKey(entry.key(), entry.value());
-                    if (destination != null) {
-                        aware.migrateLegacyEntries(entry.accountId(), entry.key()::equals,
-                                ignored -> destination, ignored -> true);
-                    }
-                }
-            } else {
-                for (String source : List.copyOf(metricFilterStore.keys())) {
-                    MetricFilter filter = metricFilterStore.get(source).orElse(null);
-                    String destination = migratedMetricFilterKey(source, filter);
-                    if (destination != null) {
-                        if (metricFilterStore.get(destination).isEmpty()) {
-                            metricFilterStore.put(destination, filter);
-                        }
-                        metricFilterStore.delete(source);
-                    }
-                }
-            }
-        }
-    }
 
-    private static String migratedMetricFilterKey(String source, MetricFilter filter) {
-        int separator = source.indexOf("::");
-        if (separator < 0 || filter == null || filter.getLogGroupName() == null || filter.getFilterName() == null) {
-            return null;
-        }
-        String prefix = source.substring(0, separator) + "::" + filter.getLogGroupName() + "::";
-        return source.equals(prefix + "filter::" + filter.getFilterName()) ? prefix + filter.getFilterName() : null;
-    }
 
     public void deleteResourcePolicy(String policyName, String region) {
         String key = resourcePolicyKey(region, policyName);
@@ -1792,17 +1755,7 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
         return fields;
     }
 
-    private static String normalizeLogGroupClass(String logGroupClass) {
-        if (logGroupClass == null || logGroupClass.isBlank()) {
-            return DEFAULT_LOG_GROUP_CLASS;
-        }
-        return logGroupClass;
-    }
 
-    private void deleteByPrefix(StorageBackend<String, ?> store, String prefix) {
-        List<String> keys = store.keys().stream().filter(k -> k.startsWith(prefix)).toList();
-        keys.forEach(store::delete);
-    }
 
     /**
      * Same-account pass-role. The emulator aliases the request-scoped account
@@ -1928,104 +1881,11 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
         return record;
     }
 
-    private void deliverSubscriptionMatches(String accountId, String groupName, String streamName,
-                                            List<LogEvent> ingested, String region) {
-        String prefix = subscriptionFilterKeyPrefix(region, groupName);
-        List<SubscriptionFilter> filters = keysForAccount(subscriptionFilterStore, accountId).stream()
-                .filter(key -> key.startsWith(prefix))
-                .map(key -> getForAccount(subscriptionFilterStore, accountId, key))
-                .flatMap(Optional::stream)
-                .toList();
-        if (filters.isEmpty()) {
-            return;
-        }
-        for (SubscriptionFilter filter : filters) {
-            List<LogEvent> matched = ingested.stream()
-                    .filter(e -> matchesFilterPattern(e.getMessage(), filter.getFilterPattern()))
-                    .toList();
-            if (matched.isEmpty()) {
-                continue;
-            }
-            try {
-                deliverToDestination(accountId, filter, groupName, streamName, matched, region);
-            } catch (Exception e) {
-                LOG.warnv("Failed to deliver subscription filter {0}: {1}",
-                        filter.getFilterName(), e.getMessage());
-            }
-        }
-    }
 
-    private void deliverToDestination(String accountId, SubscriptionFilter filter, String groupName, String streamName,
-                                      List<LogEvent> matched, String region) throws Exception {
-        String destinationArn = filter.getDestinationArn();
-        if (destinationArn != null && destinationArn.contains(":destination:")) {
-            String name = resourceNameAfter(destinationArn, ":destination:");
-            LogDestination dest = getForAccount(destinationStore, accountId, destinationKey(region, name)).orElse(null);
-            if (dest == null) {
-                return;
-            }
-            destinationArn = dest.getTargetArn();
-        }
-        if (destinationArn != null && destinationArn.contains(":function:")) {
-            invokeLambdaSubscription(accountId, destinationArn, filter, groupName, streamName, matched, region);
-            return;
-        }
-        if (destinationArn != null && destinationArn.contains(":stream/") && kinesisServices != null
-                && !kinesisServices.isUnsatisfied()) {
-            String stream = resourceNameAfter(destinationArn, ":stream/");
-            byte[] payload = gzipJson(subscriptionPayload(accountId, filter, groupName, streamName, matched, region));
-            kinesisServices.get().putRecordForAccount(accountId, stream, payload, streamName, region);
-        }
-    }
 
-    private void invokeLambdaSubscription(String accountId, String functionArn, SubscriptionFilter filter,
-                                          String groupName, String streamName,
-                                          List<LogEvent> matched, String region) throws Exception {
-        if (lambdaServices == null || lambdaServices.isUnsatisfied()) {
-            return;
-        }
-        Map<String, Object> envelope = Map.of("awslogs", Map.of("data",
-                Base64.getEncoder().encodeToString(
-                        gzipJson(subscriptionPayload(accountId, filter, groupName, streamName, matched, region)))));
-        byte[] body = PAYLOAD_MAPPER.writeValueAsBytes(envelope);
-        lambdaServices.get().invoke(region, functionArn, body, InvocationType.Event);
-    }
 
-    private Map<String, Object> subscriptionPayload(String accountId, SubscriptionFilter filter, String groupName,
-                                                    String streamName, List<LogEvent> matched, String region) {
-        List<Map<String, Object>> events = new ArrayList<>();
-        for (LogEvent event : matched) {
-            events.add(Map.of(
-                    "id", event.getEventId(),
-                    "timestamp", event.getTimestamp(),
-                    "message", event.getMessage() != null ? event.getMessage() : ""));
-        }
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("messageType", "DATA_MESSAGE");
-        payload.put("owner", accountId != null ? accountId : regionResolver.getAccountId());
-        payload.put("logGroup", groupName);
-        payload.put("logStream", streamName);
-        payload.put("subscriptionFilters", List.of(filter.getFilterName()));
-        payload.put("logEvents", events);
-        return payload;
-    }
 
-    private static byte[] gzipJson(Map<String, Object> payload) throws Exception {
-        byte[] json = PAYLOAD_MAPPER.writeValueAsBytes(payload);
-        ByteArrayOutputStream bos = new ByteArrayOutputStream();
-        try (GZIPOutputStream gzip = new GZIPOutputStream(bos)) {
-            gzip.write(json);
-        }
-        return bos.toByteArray();
-    }
 
-    private void deleteEventsForStream(String region, String groupName, String streamName) {
-        String eventPrefix = eventKeyPrefix(region, groupName, streamName);
-        List<String> keys = eventStore.keys().stream()
-                .filter(k -> k.startsWith(eventPrefix))
-                .toList();
-        keys.forEach(eventStore::delete);
-    }
 
     private static String destinationKey(String region, String destinationName) {
         return region + "::destination::" + destinationName;
