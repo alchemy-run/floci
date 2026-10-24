@@ -13602,6 +13602,23 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
      * either attached later (the attach-eni pattern) or handed to an instance at launch time as
      * its primary interface (the override-default-eni pattern, see {@link #runInstances}).
      */
+    /**
+     * As below, for an interface another service manages: {@code interfaceType} names it
+     * ({@code lambda} for a Lambda VPC ENI), as DescribeNetworkInterfaces reports it.
+     */
+    public NetworkInterface createNetworkInterface(String region, String subnetId, String description,
+                                                    String privateIpAddress, List<String> privateIpAddresses,
+                                                    List<String> securityGroupIds, List<Tag> tagList,
+                                                    String interfaceType) {
+        NetworkInterface ni = createNetworkInterface(region, subnetId, description, privateIpAddress,
+                privateIpAddresses, securityGroupIds, tagList);
+        if (interfaceType != null && !interfaceType.isBlank()) {
+            ni.setInterfaceType(interfaceType);
+            networkInterfaces.put(key(region, ni.getNetworkInterfaceId()), ni);
+        }
+        return ni;
+    }
+
     public NetworkInterface createNetworkInterface(String region, String subnetId, String description,
                                                     String privateIpAddress, List<String> privateIpAddresses,
                                                     List<String> securityGroupIds, List<Tag> tagList) {

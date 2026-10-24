@@ -552,6 +552,7 @@ public class LambdaService implements ResourceProvider {
         if (vpcConfig != null) {
             fn.setVpcConfig(vpcConfig);
             fn.setVpcId(resolveVpcId(region, vpcConfig));
+            syncVpcEnis(region, fn);
         }
 
         applySnapStart(fn, snapStart);
@@ -956,6 +957,7 @@ public class LambdaService implements ResourceProvider {
             if (requestedVpcConfigUpdate != null) {
                 fn.setVpcConfig(requestedVpcConfig);
                 fn.setVpcId(resolveVpcId(region, requestedVpcConfig));
+                syncVpcEnis(region, fn);
             }
         }
 
@@ -1094,6 +1096,7 @@ public class LambdaService implements ResourceProvider {
         LambdaFunction fn = getFunction(region, functionName); // throws 404 if not found
         functionName = fn.getFunctionName();
         String arn = fn.getFunctionArn();
+        releaseVpcEnis(region, fn);
         // Before the drain and anything is deleted, so no queued or running event starts a container for,
         // or reports on, a function being removed.
         if (executorService != null) {
@@ -4470,7 +4473,29 @@ public class LambdaService implements ResourceProvider {
         return new ArrayList<>(List.of(topic));
     }
 
-
-
-
+    private void syncVpcEnis(String region, LambdaFunction fn) {
+        releaseVpcEnis(region, fn);
+        Map<String, Object> vpc = fn.getVpcConfig();
+        if (ec2Service == null || vpc == null) {
+            return;
+        }
+        List<String> subnetIds = asStringList(vpc.get("SubnetIds"));
+        List<String> groupIds = asStringList(vpc.get("SecurityGroupIds"));
+        if (subnetIds.isEmpty()) {
+            return;
+        }
+        List<String> eniIds = new ArrayList<>();
+        for (String subnetId : subnetIds) {
+            try {
+                String description = "AWS Lambda VPC ENI-" + fn.getFunctionName()
+                        + "-" + UUID.randomUUID().toString().substring(0, 8);
+                NetworkInterface ni = ec2Service.createNetworkInterface(
+                        region, subnetId, description, null, null, groupIds, null, "lambda");
+                eniIds.add(ni.getNetworkInterfaceId());
+            } catch (Exception e) {
+                LOG.warnv("Could not create Lambda VPC ENI in subnet {0}: {1}", subnetId, e.getMessage());
+            }
+        }
+        fn.setVpcEniIds(eniIds);
+    }
 }
