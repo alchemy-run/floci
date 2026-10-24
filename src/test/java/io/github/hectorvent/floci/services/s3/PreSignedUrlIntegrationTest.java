@@ -322,7 +322,6 @@ class PreSignedUrlIntegrationTest {
     void cleanUp() {
         given().when().delete("/" + BUCKET + "/secret-file.txt").then().statusCode(204);
         given().when().delete("/" + BUCKET + "/uploaded-via-presign.txt").then().statusCode(204);
-        given().when().delete("/" + BUCKET + "/presign-content-type.txt").then().statusCode(204);
         given().when().delete("/" + BUCKET + "/disposition-file.txt").then().statusCode(204);
         given().when().delete("/" + BUCKET).then().statusCode(204);
     }

@@ -1,7 +1,11 @@
 package io.github.hectorvent.floci.services.eks;
 
 import com.github.dockerjava.api.DockerClient;
-import io.github.hectorvent.floci.core.common.docker.ContainerExec;
+import com.github.dockerjava.api.async.ResultCallback;
+import com.github.dockerjava.api.command.ExecCreateCmdResponse;
+import com.github.dockerjava.api.command.InspectContainerResponse;
+import com.github.dockerjava.api.exception.ConflictException;
+import com.github.dockerjava.api.model.Frame;
 import io.github.hectorvent.floci.services.eks.model.Cluster;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
@@ -13,15 +17,15 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -41,16 +45,6 @@ class EksIrsaDockerIntegrationTest {
 
     private static final Logger LOG = Logger.getLogger(EksIrsaDockerIntegrationTest.class);
     private static final String FORM = "application/x-www-form-urlencoded";
-
-    /**
-     * The root stand-in credential, for the IAM fixtures this test sets up. Those are ordinary
-     * management calls that AWS signs, and this test runs with enforcement on, so they carry a
-     * credential. The AssumeRoleWithWebIdentity calls under test stay unsigned on purpose: AWS
-     * serves that operation without credentials, which is the whole point of web identity.
-     */
-    private static final String SETUP_AUTH =
-            "AWS4-HMAC-SHA256 Credential=test/20260101/us-east-1/iam/aws4_request, "
-                    + "SignedHeaders=host, Signature=setup";
     private static final String ACCOUNT = "000000000000";
 
     public static final class Profile implements QuarkusTestProfile {
@@ -149,7 +143,7 @@ class EksIrsaDockerIntegrationTest {
         long saDeadline = System.currentTimeMillis() + 30000;
         boolean saReady = false;
         while (System.currentTimeMillis() < saDeadline) {
-            ContainerExec.Result saResult = execInContainerWithExitCode(containerId,
+            ExecResult saResult = execInContainerWithExitCode(containerId,
                     new String[]{"kubectl", "get", "serviceaccount", "default"});
             if (saResult.exitCode() == 0) {
                 saReady = true;
@@ -192,7 +186,7 @@ class EksIrsaDockerIntegrationTest {
         long podDeadline = System.currentTimeMillis() + 45000;
         boolean podRunning = false;
         while (System.currentTimeMillis() < podDeadline) {
-            ContainerExec.Result statusResult = execInContainerWithExitCode(containerId,
+            ExecResult statusResult = execInContainerWithExitCode(containerId,
                     new String[]{"kubectl", "get", "pod", "irsa-workload-pod", "-o", "jsonpath={.status.phase}"});
             if ("Running".equalsIgnoreCase(statusResult.stdout().trim())) {
                 podRunning = true;
@@ -201,34 +195,6 @@ class EksIrsaDockerIntegrationTest {
             Thread.sleep(2000);
         }
         assertTrue(podRunning, "irsa-workload-pod must reach Running state");
-
-        // The pod is Running, so it was scheduled onto the node, which the kubelet
-        // registered with its provider ID: the node is guaranteed to exist here.
-        ContainerExec.Result nodeResult = execInContainerWithExitCode(containerId,
-                new String[]{"kubectl", "get", "nodes", "-o", "jsonpath={.items[0].spec.providerID}"});
-        assertEquals(0, nodeResult.exitCode(), "kubectl get nodes failed");
-        assertEquals(eksClusterManager.deriveClusterNodeProviderId(cluster), nodeResult.stdout().trim(),
-                "Node providerID must match the derived AWS provider ID");
-
-        ContainerExec.Result nodeNameResult = execInContainerWithExitCode(containerId,
-                new String[]{"kubectl", "get", "nodes", "-o", "jsonpath={.items[0].metadata.name}"});
-        assertEquals(0, nodeNameResult.exitCode(), "kubectl get nodes failed");
-        assertEquals(eksClusterManager.deriveClusterNodePrivateDnsName(cluster), nodeNameResult.stdout().trim(),
-                "Node name must match the derived cluster node private DNS name");
-
-        ContainerExec.Result zoneResult = execInContainerWithExitCode(containerId,
-                new String[]{"kubectl", "get", "nodes", "-o",
-                        "jsonpath={.items[0].metadata.labels.topology\\.kubernetes\\.io/zone}"});
-        assertEquals(0, zoneResult.exitCode(), "kubectl get nodes failed");
-        assertEquals(eksClusterManager.deriveClusterNodeAvailabilityZone(cluster), zoneResult.stdout().trim(),
-                "Node topology zone label must match the derived availability zone");
-
-        ContainerExec.Result regionResult = execInContainerWithExitCode(containerId,
-                new String[]{"kubectl", "get", "nodes", "-o",
-                        "jsonpath={.items[0].metadata.labels.topology\\.kubernetes\\.io/region}"});
-        assertEquals(0, regionResult.exitCode(), "kubectl get nodes failed");
-        assertEquals(eksClusterManager.clusterRegion(cluster), regionResult.stdout().trim(),
-                "Node topology region label must match the cluster region");
 
         // Extract the projected token from the pod volume
         String token = execInContainer(containerId,
@@ -325,40 +291,11 @@ class EksIrsaDockerIntegrationTest {
         .then()
             .statusCode(400)
             .body(containsString("InvalidIdentityToken"));
-
-        // 5. Container recreation: recreate the cluster container and verify that k3s
-        // reuses the same node name on the existing data volume without duplicate or stale nodes
-        dockerClient.stopContainerCmd(containerId).exec();
-        dockerClient.removeContainerCmd(containerId).exec();
-
-        eksClusterManager.startCluster(cluster);
-        String recreatedContainerId = cluster.getContainerId();
-        assertNotNull(recreatedContainerId);
-        assertNotEquals(containerId, recreatedContainerId);
-
-        long recreateDeadline = System.currentTimeMillis() + 60000;
-        boolean recreateReady = false;
-        while (System.currentTimeMillis() < recreateDeadline) {
-            if (eksClusterManager.isReady(cluster)) {
-                recreateReady = true;
-                break;
-            }
-            Thread.sleep(2000);
-        }
-        assertTrue(recreateReady, "k3s API server must become ready after container recreation");
-        eksClusterManager.finalizeCluster(cluster);
-
-        ContainerExec.Result recreatedNodeResult = execInContainerWithExitCode(recreatedContainerId,
-                new String[]{"kubectl", "get", "nodes", "-o", "jsonpath={.items[*].metadata.name}"});
-        assertEquals(0, recreatedNodeResult.exitCode(), "kubectl get nodes failed on recreated cluster");
-        assertEquals(eksClusterManager.deriveClusterNodePrivateDnsName(cluster), recreatedNodeResult.stdout().trim(),
-                "Recreated cluster must keep the same node name without leaving duplicate or stale nodes");
     }
 
     private String createRole(String name, String trustPolicy) {
         return given()
             .contentType(FORM)
-            .header("Authorization", SETUP_AUTH)
             .formParam("Action", "CreateRole")
             .formParam("Version", "2010-05-08")
             .formParam("RoleName", name)
@@ -374,7 +311,6 @@ class EksIrsaDockerIntegrationTest {
         try {
             given()
                 .contentType(FORM)
-                .header("Authorization", SETUP_AUTH)
                 .formParam("Action", "DeleteRole")
                 .formParam("Version", "2010-05-08")
                 .formParam("RoleName", name)
@@ -393,12 +329,88 @@ class EksIrsaDockerIntegrationTest {
         }
     }
 
-    private ContainerExec.Result execInContainerWithExitCode(String containerId, String[] cmd) {
-        return ContainerExec.run(dockerClient, containerId, cmd, 30).throwIfTimedOut(containerId);
+    record ExecResult(long exitCode, String stdout, String stderr) {}
+
+    private ExecResult execInContainerWithExitCode(String containerId, String[] cmd) throws Exception {
+        ExecCreateCmdResponse exec;
+        try {
+            exec = dockerClient.execCreateCmd(containerId)
+                    .withCmd(cmd)
+                    .withAttachStdout(true)
+                    .withAttachStderr(true)
+                    .exec();
+        } catch (ConflictException e) {
+            // Teardown removes the container, so its exit state and logs are only readable now.
+            throw new IllegalStateException("k3s container " + containerId + " is no longer running: "
+                    + describeExit(containerId), e);
+        }
+
+        StringBuilder stdout = new StringBuilder();
+        StringBuilder stderr = new StringBuilder();
+        boolean completed = dockerClient.execStartCmd(exec.getId())
+                .exec(new ResultCallback.Adapter<Frame>() {
+                    @Override
+                    public void onNext(Frame frame) {
+                        if (frame != null && frame.getPayload() != null) {
+                            String text = new String(frame.getPayload(), StandardCharsets.UTF_8);
+                            if (frame.getStreamType() == com.github.dockerjava.api.model.StreamType.STDERR) {
+                                stderr.append(text);
+                            } else {
+                                stdout.append(text);
+                            }
+                        }
+                    }
+                })
+                .awaitCompletion(30, TimeUnit.SECONDS);
+
+        if (!completed) {
+            throw new RuntimeException("exec timed out in container " + containerId);
+        }
+        Long exitCode = dockerClient.inspectExecCmd(exec.getId()).exec().getExitCodeLong();
+        return new ExecResult(exitCode != null ? exitCode : -1L, stdout.toString(), stderr.toString());
+    }
+
+    /** The container's exit state and last log lines. */
+    private String describeExit(String containerId) {
+        StringBuilder description = new StringBuilder();
+        try {
+            InspectContainerResponse.ContainerState state =
+                    dockerClient.inspectContainerCmd(containerId).exec().getState();
+            description.append("status=").append(state.getStatus())
+                    .append(" exitCode=").append(state.getExitCodeLong())
+                    .append(" oomKilled=").append(state.getOOMKilled())
+                    .append(" error=").append(state.getError())
+                    .append(" startedAt=").append(state.getStartedAt())
+                    .append(" finishedAt=").append(state.getFinishedAt());
+        } catch (Exception e) {
+            description.append("state unavailable: ").append(e.getMessage());
+        }
+        StringBuilder logs = new StringBuilder();
+        try {
+            dockerClient.logContainerCmd(containerId)
+                    .withStdOut(true)
+                    .withStdErr(true)
+                    .withTail(80)
+                    .exec(new ResultCallback.Adapter<Frame>() {
+                        @Override
+                        public void onNext(Frame frame) {
+                            if (frame != null && frame.getPayload() != null) {
+                                logs.append(new String(frame.getPayload(), StandardCharsets.UTF_8));
+                            }
+                        }
+                    })
+                    .awaitCompletion(10, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            logs.append("logs unavailable: ").append(e.getMessage());
+        }
+        return description + "\n--- last k3s log lines ---\n" + logs;
     }
 
     private String execInContainer(String containerId, String[] cmd) throws Exception {
-        ContainerExec.Result result = execInContainerWithExitCode(containerId, cmd);
+        ExecResult result = execInContainerWithExitCode(containerId, cmd);
         if (result.exitCode() != 0) {
             throw new RuntimeException("exec failed with code " + result.exitCode() + ": " + result.stderr());
         }

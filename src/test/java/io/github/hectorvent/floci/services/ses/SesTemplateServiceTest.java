@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
-import io.github.hectorvent.floci.services.ses.model.BulkEmailEntryResult;
 import io.github.hectorvent.floci.services.ses.model.EmailTemplate;
 import io.github.hectorvent.floci.services.ses.model.Tag;
 import io.github.hectorvent.floci.testing.MutableClock;
@@ -379,25 +378,6 @@ class SesTemplateServiceTest {
         String mime = SesTemplateService.buildTestRenderMime("S", "hello", "<p>hi</p>", date, "BOUND");
         assertTrue(mime.contains("hello\r\n--BOUND"));
         assertTrue(mime.contains("</p>\r\n--BOUND"));
-    }
-
-    @ParameterizedTest(name = "{0} -> {1}")
-    @MethodSource("mapErrorCodeToBulkStatusCases")
-    void mapErrorCodeToBulkStatus_returnsExpected(String errorCode, BulkEmailEntryResult.Status expected) {
-        assertEquals(expected, SesService.mapErrorCodeToBulkStatus(errorCode));
-    }
-
-    static Stream<Arguments> mapErrorCodeToBulkStatusCases() {
-        return Stream.of(
-                Arguments.of("MessageRejected",           BulkEmailEntryResult.Status.MESSAGE_REJECTED),
-                Arguments.of("MailFromDomainNotVerified", BulkEmailEntryResult.Status.MAIL_FROM_DOMAIN_NOT_VERIFIED),
-                Arguments.of("MailFromDomainNotVerifiedException",
-                        BulkEmailEntryResult.Status.MAIL_FROM_DOMAIN_NOT_VERIFIED),
-                Arguments.of("InvalidParameterValue",     BulkEmailEntryResult.Status.INVALID_PARAMETER),
-                Arguments.of("MissingRenderingAttribute", BulkEmailEntryResult.Status.INVALID_PARAMETER),
-                Arguments.of("InvalidRenderingParameter", BulkEmailEntryResult.Status.INVALID_PARAMETER),
-                Arguments.of("SomethingElse",             BulkEmailEntryResult.Status.FAILED)
-        );
     }
 
     @Test

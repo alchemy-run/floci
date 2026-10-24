@@ -154,14 +154,12 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
     private final Pattern lambdaOriginHost;
 
     public CloudFrontService(StorageFactory factory, EmulatorConfig config, RegionResolver regionResolver) {
-        this(factory, config, regionResolver, null, null, null);
+        this(factory, config, regionResolver, null);
     }
 
     @Inject
     public CloudFrontService(StorageFactory factory, EmulatorConfig config, RegionResolver regionResolver,
-                             IamService iamService,
-            ElbV2Service elbV2,
-            CloudFrontEdgePorts edgePorts) {
+                             IamService iamService) {
         this.iamService = iamService;
         this.distStore = factory.create("cloudfront", "cloudfront-distributions.json",
                 new TypeReference<Map<String, Distribution>>() {});
@@ -209,8 +207,6 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
         this.kvsKeysStore = factory.create("cloudfront", "cloudfront-kvs-keys.json",
                 new TypeReference<Map<String, Map<String, String>>>() {});
         this.domainSuffix = config.services().cloudfront().domainSuffix().orElse("cloudfront.net");
-        this.elbV2 = elbV2;
-        this.edgePorts = edgePorts;
     }
 
     // ── Distributions ─────────────────────────────────────────────────────────
@@ -2325,10 +2321,12 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
 
     private final String domainSuffix;
 
-    private final ElbV2Service elbV2;
+    @Inject
+    ElbV2Service elbV2;
 
     /** Null in unit tests: a distribution without a local port is still Host-addressable. */
-    private final CloudFrontEdgePorts edgePorts;
+    @Inject
+    CloudFrontEdgePorts edgePorts;
 
     /**
      * Serve this distribution's emulated edge on its own local port, so it is

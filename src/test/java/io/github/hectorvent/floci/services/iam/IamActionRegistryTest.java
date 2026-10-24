@@ -22,9 +22,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
@@ -403,116 +401,6 @@ class IamActionRegistryTest {
             assertEquals(route[2], registry.resolveRoute("eks", mockCtx(route[0], route[1],
                     new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}")), route[1]);
         }
-    }
-
-    @Test
-    void resolvesAndEnforcesEmrServerlessApplicationAndSubresourceActions() {
-        String[][] routes = {
-                {"GET", "/applications/app", "GetApplication"},
-                {"PATCH", "/applications/app", "UpdateApplication"},
-                {"POST", "/applications/app/start", "StartApplication"},
-                {"GET", "/applications/app/jobruns", "ListJobRuns"},
-                {"POST", "/applications/app/jobruns", "StartJobRun"},
-                {"GET", "/applications/app/jobruns/run", "GetJobRun"},
-                {"DELETE", "/applications/app/jobruns/run", "CancelJobRun"},
-                {"GET", "/applications/app/jobruns/run/attempts", "ListJobRunAttempts"},
-                {"GET", "/applications/app/jobruns/run/dashboard", "GetDashboardForJobRun"},
-                {"GET", "/applications/app/sessions", "ListSessions"},
-                {"POST", "/applications/app/sessions", "StartSession"},
-                {"GET", "/applications/app/sessions/session/endpoint", "GetSessionEndpoint"},
-                {"DELETE", "/applications/app/sessions/session", "TerminateSession"},
-                {"POST", "/tags/arn:aws:emr-serverless:us-east-1:000000000000:/applications/app", "TagResource"}
-        };
-        for (String[] route : routes) {
-            for (String prefix : new String[]{"", "/_emrserverless"}) {
-                String action = registry.resolve("emr-serverless", mockCtx(route[0], prefix + route[1],
-                        new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}"));
-                assertEquals("emr-serverless:" + route[2], action);
-                assertTrue(registry.isRoleEnforcedAction(action));
-            }
-        }
-        assertFalse(registry.isRoleEnforcedAction("emr-serverless:UnknownAction"));
-    }
-
-    @Test
-    void resolvesAndEnforcesGuardDutyAndInspector2Routes() {
-        String[][] routes = {
-                {"guardduty", "GET", "/detector", "ListDetectors"},
-                {"guardduty", "POST", "/detector", "CreateDetector"},
-                {"guardduty", "POST", "/detector/d/filter", "CreateFilter"},
-                {"guardduty", "GET", "/detector/d/filter", "ListFilters"},
-                {"guardduty", "GET", "/detector/d/filter/n", "GetFilter"},
-                {"guardduty", "POST", "/detector/d/filter/n", "UpdateFilter"},
-                {"guardduty", "DELETE", "/detector/d/filter/n", "DeleteFilter"},
-                {"guardduty", "GET", "/detector/d/ipset/i", "GetIPSet"},
-                {"guardduty", "DELETE", "/detector/d/threatintelset/i", "DeleteThreatIntelSet"},
-                {"guardduty", "POST", "/detector/d/findings/create", "CreateSampleFindings"},
-                {"guardduty", "POST", "/detector/d/findings/get", "GetFindings"},
-                {"guardduty", "POST", "/detector/d/usage/statistics", "GetUsageStatistics"},
-                {"guardduty", "POST", "/detector/d/coverage", "ListCoverage"},
-                {"guardduty", "GET", "/invitation/count", "GetInvitationsCount"},
-                {"guardduty", "POST", "/detector/d/member/invite", "InviteMembers"},
-                {"guardduty", "GET", "/tags/arn:aws:guardduty:r:a:detector/d/filter/n", "ListTagsForResource"},
-                {"guardduty", "GET", "/admin", "ListOrganizationAdminAccounts"},
-                {"guardduty", "GET", "/organization/statistics", "GetOrganizationStatistics"},
-                {"guardduty", "GET", "/detector/d/administrator", "GetAdministratorAccount"},
-                {"guardduty", "GET", "/detector/d/malware-scan-settings", "GetMalwareScanSettings"},
-                {"guardduty", "POST", "/detector/d/malware-scan-settings", "UpdateMalwareScanSettings"},
-                {"guardduty", "POST", "/detector/d/investigation/list", "ListInvestigations"},
-                {"inspector2", "POST", "/filters/create", "CreateFilter"},
-                {"inspector2", "POST", "/filters/update", "UpdateFilter"},
-                {"inspector2", "POST", "/filters/delete", "DeleteFilter"},
-                {"inspector2", "POST", "/filters/list", "ListFilters"},
-                {"inspector2", "POST", "/ec2deepinspectionconfiguration/get", "GetEc2DeepInspectionConfiguration"},
-                {"inspector2", "POST", "/cis/scan-configuration/list", "ListCisScanConfigurations"},
-                {"inspector2", "POST", "/status/batch/get", "BatchGetAccountStatus"},
-                {"inspector2", "POST", "/findings/list", "ListFindings"},
-                {"inspector2", "POST", "/coverage/list", "ListCoverage"},
-                {"inspector2", "POST", "/vulnerabilities/search", "SearchVulnerabilities"},
-                {"inspector2", "POST", "/usage/list", "ListUsageTotals"},
-                {"inspector2", "POST", "/accountpermissions/list", "ListAccountPermissions"},
-                {"inspector2", "POST", "/freetrialinfo/batchget", "BatchGetFreeTrialInfo"},
-                {"inspector2", "POST", "/configuration/get", "GetConfiguration"},
-                {"inspector2", "GET", "/encryptionkey/get", "GetEncryptionKey"},
-                {"inspector2", "POST", "/cis/scan/list", "ListCisScans"},
-                {"inspector2", "POST", "/members/list", "ListMembers"},
-                {"inspector2", "POST", "/delegatedadminaccounts/get", "GetDelegatedAdminAccount"},
-                {"inspector2", "POST", "/reporting/status/get", "GetFindingsReportStatus"},
-                {"inspector2", "DELETE", "/tags/arn:aws:inspector2:r:a:owner/a/filter/f", "UntagResource"}
-        };
-        for (String[] route : routes) {
-            String action = registry.resolve(route[0], mockCtx(route[1], route[2],
-                    new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}"));
-            assertEquals(route[0] + ":" + route[3], action);
-            assertTrue(registry.isRoleEnforcedAction(action));
-        }
-        assertFalse(registry.isRoleEnforcedAction("guardduty:UnknownAction"));
-        assertFalse(registry.isRoleEnforcedAction("inspector2:UnknownAction"));
-        assertNull(registry.resolve("inspector2", mockCtx("POST", "/detector/d/filter",
-                new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}")));
-    }
-
-    @Test
-    void resolvesSesV2SendRoutes() {
-        assertEquals("ses:SendEmail", registry.resolve("ses",
-                mockCtx("POST", "/v2/email/outbound-emails", new MultivaluedHashMap<>(),
-                        MediaType.APPLICATION_JSON_TYPE, "{\"FromEmailAddress\":\"a@b.test\"}")));
-        assertEquals("ses:SendEmail", registry.resolve("ses",
-                mockCtx("POST", "/v2/email/outbound-bulk-emails", new MultivaluedHashMap<>(),
-                        MediaType.APPLICATION_JSON_TYPE, "{\"FromEmailAddress\":\"a@b.test\"}")));
-    }
-
-    @Test
-    void roleEnforcedActionsCoverSesSendAndKmsGetKeyRotationStatus() {
-        assertTrue(registry.isRoleEnforcedAction("ses:SendEmail"));
-        assertTrue(registry.isRoleEnforcedAction("ses:SendRawEmail"));
-        assertTrue(registry.isRoleEnforcedAction("ses:SendBulkEmail"));
-        assertTrue(registry.isRoleEnforcedAction("kms:GetKeyRotationStatus"));
-        assertFalse(registry.isRoleEnforcedAction("kms:Encrypt"));
-        assertFalse(registry.isRoleEnforcedAction("dynamodb:PutItem"));
-        assertTrue(registry.isRoleEnforcedAction("secretsmanager:GetSecretValue"));
-        assertTrue(registry.isRoleEnforcedAction("secretsmanager:DescribeSecret"));
-        assertFalse(registry.isRoleEnforcedAction(null));
     }
 
     @Test

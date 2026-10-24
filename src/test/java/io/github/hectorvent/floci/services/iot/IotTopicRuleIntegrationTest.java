@@ -31,25 +31,6 @@ class IotTopicRuleIntegrationTest {
     }
 
     @Test
-    void missingTopicRuleUsesTheAwsUnauthorizedWireError() {
-        given()
-        .when()
-            .get("/rules/missingWireRule")
-        .then()
-            .statusCode(401)
-            .body("__type", equalTo("UnauthorizedException"))
-            .body("message", equalTo("Access to topic rule 'missingWireRule' was denied"));
-
-        given()
-        .when()
-            .delete("/rules/missingWireRule")
-        .then()
-            .statusCode(401)
-            .body("__type", equalTo("UnauthorizedException"))
-            .body("message", equalTo("Access to topic rule 'missingWireRule' was denied"));
-    }
-
-    @Test
     void topicRuleMetadataRoundTrips() {
         given()
             .contentType("application/json")
@@ -562,9 +543,8 @@ class IotTopicRuleIntegrationTest {
         .when()
             .delete("/rules/mvp1Rule")
         .then()
-            .statusCode(401)
-            .body("__type", equalTo("UnauthorizedException"))
-            .body("message", equalTo("Access to topic rule 'mvp1Rule' was denied"));
+            .statusCode(404)
+            .body("__type", equalTo("ResourceNotFoundException"));
     }
 
     private static String auth(String region, String service) {

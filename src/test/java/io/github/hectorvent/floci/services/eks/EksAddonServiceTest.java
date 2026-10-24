@@ -2,7 +2,6 @@ package io.github.hectorvent.floci.services.eks;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.eks.model.Addon;
 import io.github.hectorvent.floci.services.eks.model.AddonInfo;
@@ -308,16 +307,42 @@ class EksAddonServiceTest {
     }
 
     @Test
-    void inactiveClusterRejectsOperations() {
+    void inactiveClusterRejectsMutationsButServesReads() {
         Fixture fixture = fixture();
+        fixture.service.create(fixture.cluster, new CreateAddonRequest("coredns", null, null, null, null, null, null, null));
         fixture.cluster.setStatus(ClusterStatus.CREATING);
 
         CreateAddonRequest request = new CreateAddonRequest("vpc-cni", null, null, null, null, null, null, null);
-        assertThrows(AwsException.class, () -> fixture.service.create(fixture.cluster, request));
-        assertThrows(AwsException.class, () -> fixture.service.describe(fixture.cluster, "vpc-cni"));
-        assertThrows(AwsException.class, () -> fixture.service.list(fixture.cluster, null, null));
-        assertThrows(AwsException.class, () -> fixture.service.update(fixture.cluster, "vpc-cni", null));
-        assertThrows(AwsException.class, () -> fixture.service.delete(fixture.cluster, "vpc-cni", false));
+        assertEquals("InvalidRequestException", assertThrows(AwsException.class,
+                () -> fixture.service.create(fixture.cluster, request)).getErrorCode());
+        assertEquals("InvalidRequestException", assertThrows(AwsException.class,
+                () -> fixture.service.update(fixture.cluster, "coredns", null)).getErrorCode());
+        assertEquals("InvalidRequestException", assertThrows(AwsException.class,
+                () -> fixture.service.delete(fixture.cluster, "coredns", false)).getErrorCode());
+
+        assertEquals(List.of("coredns"), fixture.service.list(fixture.cluster, null, null).addons());
+        assertEquals("coredns", fixture.service.describe(fixture.cluster, "coredns").addonName());
+        assertEquals("ResourceNotFoundException", assertThrows(AwsException.class,
+                () -> fixture.service.describe(fixture.cluster, "vpc-cni")).getErrorCode());
+    }
+
+    @Test
+    void metricsServerCommunityAddonResolvesDefaultVersionAndIsActive() {
+        Fixture fixture = fixture();
+        fixture.cluster.setVersion("1.29");
+
+        Addon addon = fixture.service.create(fixture.cluster,
+                new CreateAddonRequest("metrics-server", null, null, null, null, null, null, null));
+        assertEquals("metrics-server", addon.addonName());
+        assertEquals("v0.7.2-eksbuild.3", addon.addonVersion());
+        assertEquals("ACTIVE", addon.status());
+        assertEquals("community", addon.owner());
+        assertEquals("eks", addon.publisher());
+        assertEquals(List.of("metrics-server"), fixture.service.list(fixture.cluster, null, null).addons());
+
+        AddonInfo info = fixture.catalog.findAddon("metrics-server").orElseThrow();
+        assertEquals("observability", info.type());
+        assertTrue(fixture.catalog.isVersionSupported("metrics-server", "v0.7.2-eksbuild.1", "1.32"));
     }
 
     @Test
@@ -568,70 +593,17 @@ class EksAddonServiceTest {
     }
 
     @Test
-    void ebsCsiDriverAddonSupportedAcrossClusterVersions() {
+    void addonUpdatesAreListedPerAddonAndNotAsClusterUpdates() {
         Fixture fixture = fixture();
+        fixture.service.create(fixture.cluster, new CreateAddonRequest(
+                "vpc-cni", "v1.18.1-eksbuild.1", null, null, null, null, null, null));
+        Update update = fixture.service.update(fixture.cluster, "vpc-cni",
+                new UpdateAddonRequest(null, null, null, null, "{\"env\":{}}", null));
 
-        // The default version resolves for each cluster version the catalog covers
-        Map<String, String> expectedDefaults = Map.of(
-                "1.28", "v1.26.1-eksbuild.1",
-                "1.29", "v1.28.0-eksbuild.1",
-                "1.30", "v1.31.0-eksbuild.1",
-                "1.31", "v1.35.0-eksbuild.1",
-                "1.32", "v1.38.1-eksbuild.1"
-        );
-        for (Map.Entry<String, String> entry : expectedDefaults.entrySet()) {
-            fixture.cluster.setVersion(entry.getKey());
-            assertEquals(Optional.of(entry.getValue()),
-                    fixture.catalog.resolveDefaultVersion("aws-ebs-csi-driver", entry.getKey()));
-        }
-
-        // CreateAddon for aws-ebs-csi-driver succeeds and DescribeAddon returns it
-        fixture.cluster.setVersion("1.30");
-        CreateAddonRequest req = new CreateAddonRequest(
-                "aws-ebs-csi-driver", null, ROLE, null, null, null, null, null);
-        Addon created = fixture.service.create(fixture.cluster, req);
-        assertEquals("aws-ebs-csi-driver", created.addonName());
-        assertEquals("v1.31.0-eksbuild.1", created.addonVersion());
-        assertEquals("ACTIVE", created.status());
-        assertEquals("aws", created.owner());
-        assertEquals("eks", created.publisher());
-
-        Addon described = fixture.service.describe(fixture.cluster, "aws-ebs-csi-driver");
-        assertEquals(created, described);
-
-        // DescribeAddonVersions returns the new addon with its versions and compatibilities
-        EksAddonService.AddonVersionsPage byName = fixture.service.describeAddonVersions(
-                "aws-ebs-csi-driver", null, null, null, null, null, null);
-        assertEquals(1, byName.addons().size());
-        AddonInfo addonInfo = byName.addons().getFirst();
-        assertEquals("aws-ebs-csi-driver", addonInfo.addonName());
-        assertEquals("storage", addonInfo.type());
-        assertEquals("aws", addonInfo.owner());
-        assertEquals("eks", addonInfo.publisher());
-        assertEquals(5, addonInfo.addonVersions().size());
-
-        // Filtering by addon name and cluster version works
-        EksAddonService.AddonVersionsPage byCluster = fixture.service.describeAddonVersions(
-                "aws-ebs-csi-driver", "1.32", null, null, null, null, null);
-        assertEquals(1, byCluster.addons().size());
-        assertEquals(1, byCluster.addons().getFirst().addonVersions().size());
-        assertEquals("v1.38.1-eksbuild.1", byCluster.addons().getFirst().addonVersions().getFirst().addonVersion());
-
-        // The four existing addons are unchanged
-        for (String existing : List.of("vpc-cni", "coredns", "kube-proxy", "eks-pod-identity-agent")) {
-            assertTrue(fixture.catalog.isKnownAddon(existing));
-            assertNotNull(fixture.catalog.findAddon(existing).orElse(null));
-        }
-
-        // An addon name that is still not in the catalog is rejected exactly as before
-        assertFalse(fixture.catalog.isKnownAddon("unsupported-addon"));
-        CreateAddonRequest unsupportedReq = new CreateAddonRequest(
-                "unsupported-addon", null, null, null, null, null, null, null);
-        AwsException ex = assertThrows(AwsException.class, () ->
-                fixture.service.create(fixture.cluster, unsupportedReq));
-        assertEquals("InvalidParameterException", ex.getErrorCode());
-        assertEquals(400, ex.getHttpStatus());
-        assertTrue(ex.getMessage().contains("unsupported-addon"));
+        assertEquals(List.of(update.id()), fixture.service.listUpdateIds(fixture.cluster, "VPC-CNI"));
+        assertTrue(fixture.service.listUpdateIds(fixture.cluster, null).isEmpty());
+        assertEquals(List.of("vpc-cni"), fixture.service.clusterAddons(fixture.cluster).stream()
+                .map(Addon::addonName).toList());
     }
 
     private static Fixture fixture() {
@@ -648,9 +620,9 @@ class EksAddonServiceTest {
         EksAddonCatalog catalog = new EksAddonCatalog();
         InMemoryStorage<String, EksAddonService.StoredAddon> storage = new InMemoryStorage<>();
         InMemoryStorage<String, EksAddonService.StoredUpdate> updatesStorage = new InMemoryStorage<>();
-        InMemoryStorage<String, EksPodIdentityAssociationService.StoredAssociation> assocStorage = new InMemoryStorage<>();
+        InMemoryStorage<String, EksPodIdentityService.StoredAssociation> assocStorage = new InMemoryStorage<>();
         EksPodIdentityAssociationService podIdentityAssociations = new EksPodIdentityAssociationService(
-                assocStorage, iam, new RegionResolver("us-east-1", "000000000000"));
+                new EksPodIdentityService(assocStorage, iam, new ObjectMapper()));
         EksAddonService service = new EksAddonService(storage, updatesStorage, catalog, iam, podIdentityAssociations);
 
         return new Fixture(cluster, iam, role, storage, updatesStorage, catalog, podIdentityAssociations, service);

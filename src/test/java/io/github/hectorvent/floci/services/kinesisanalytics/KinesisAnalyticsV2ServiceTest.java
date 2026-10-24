@@ -1,7 +1,6 @@
 package io.github.hectorvent.floci.services.kinesisanalytics;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
-import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
@@ -88,8 +87,8 @@ class KinesisAnalyticsV2ServiceTest {
                 .create(Mockito.anyString(), Mockito.anyString(), Mockito.any());
 
         EmulatorConfig config = Mockito.mock(EmulatorConfig.class);
-        EmulatorConfig.ServicesConfig servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
-        EmulatorConfig.KinesisAnalyticsServiceConfig kaConfig = Mockito.mock(EmulatorConfig.KinesisAnalyticsServiceConfig.class);
+        var servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
+        var kaConfig = Mockito.mock(EmulatorConfig.KinesisAnalyticsServiceConfig.class);
         when(config.services()).thenReturn(servicesConfig);
         when(servicesConfig.kinesisAnalytics()).thenReturn(kaConfig);
         when(kaConfig.mock()).thenReturn(true);
@@ -130,22 +129,6 @@ class KinesisAnalyticsV2ServiceTest {
     void createApplicationRejectsDuplicateName() {
         create("demo");
         assertThrows(AwsException.class, () -> create("demo"));
-    }
-
-    @Test
-    void sameApplicationNameCanExistInDifferentRegions() {
-        FlinkApplication east = create("regional");
-        FlinkApplication west = service.createApplication("regional", "FLINK-1_18", ROLE,
-                null, null, null, null, null, 1, null, null, null, "us-west-2");
-
-        assertEquals("us-east-1", AwsArnUtils.parse(east.getApplicationArn()).region());
-        assertEquals("us-west-2", AwsArnUtils.parse(west.getApplicationArn()).region());
-        assertEquals(1, service.listApplications("us-east-1").size());
-        assertEquals(1, service.listApplications("us-west-2").size());
-        assertEquals("us-east-1", AwsArnUtils
-                .parse(service.describeApplication("regional", "us-east-1").getApplicationArn()).region());
-        assertEquals("us-west-2", AwsArnUtils
-                .parse(service.describeApplication("regional", "us-west-2").getApplicationArn()).region());
     }
 
     @Test
@@ -214,12 +197,40 @@ class KinesisAnalyticsV2ServiceTest {
     }
 
     @Test
-    void deleteApplicationRejectedWhileRunning() {
+    void deleteApplicationHaltsARunningApplication() {
         FlinkApplication app = create("demo");
         service.startApplication("demo"); // mock mode → RUNNING
-        // AWS rejects delete of a running application; it must be stopped first.
-        assertThrows(AwsException.class,
-                () -> service.deleteApplication("demo", app.getCreateTimestamp()));
+        // AWS halts the running application's execution and deletes it.
+        service.deleteApplication("demo", app.getCreateTimestamp());
+        assertTrue(service.listApplications().isEmpty());
+    }
+
+    @Test
+    void deleteApplicationStopsTheFlinkClusterOfAStartingApplication() {
+        FlinkContainerManager manager = Mockito.mock(FlinkContainerManager.class);
+        KinesisAnalyticsV2Service realMode = buildService(false, manager);
+        FlinkApplication app = realMode.createApplication("demo", "FLINK-1_18", ROLE, null, null,
+                "bucket", "app.jar", null, 1);
+        realMode.startApplication("demo"); // real mode → STARTING until the poller sees the cluster
+        assertEquals(ApplicationStatus.STARTING, realMode.describeApplication("demo").getApplicationStatus());
+
+        realMode.deleteApplication("demo", app.getCreateTimestamp());
+
+        Mockito.verify(manager).stopCluster(Mockito.argThat(stopped -> "demo".equals(stopped.getApplicationName())));
+        Mockito.verify(manager).removeSavepointsVolume(Mockito.any());
+        assertTrue(realMode.listApplications().isEmpty());
+    }
+
+    @Test
+    void deleteApplicationRejectedWhileMidTransition() {
+        FlinkApplication app = create("demo");
+        for (ApplicationStatus status : List.of(ApplicationStatus.STOPPING, ApplicationStatus.UPDATING,
+                ApplicationStatus.DELETING)) {
+            service.describeApplication("demo").setApplicationStatus(status);
+            AwsException ex = assertThrows(AwsException.class,
+                    () -> service.deleteApplication("demo", app.getCreateTimestamp()));
+            assertEquals("ResourceInUseException", ex.getErrorCode());
+        }
     }
 
     @Test
@@ -316,68 +327,6 @@ class KinesisAnalyticsV2ServiceTest {
         Map<String, String> after = service.tagResource(app.getApplicationArn(), Map.of("team", "platform"));
         assertEquals("platform", after.get("team"));
         assertEquals("platform", service.listTagsForResource(app.getApplicationArn()).get("team"));
-    }
-
-    @Test
-    void tagResourceMigratesLegacyApplicationToRegionalKey() {
-        AccountAwareStorageBackend<FlinkApplication> store =
-                AccountAwareStorageBackend.inMemory("000000000000");
-        KinesisAnalyticsV2Service legacyState = mockModeService(store);
-        FlinkApplication legacyApp = legacyApplication("legacy");
-        store.putForAccount("000000000000", "legacy", legacyApp);
-
-        Map<String, String> tags = legacyState.tagResource(
-                legacyApp.getApplicationArn(), Map.of("team", "platform"));
-
-        assertEquals("platform", tags.get("team"));
-        assertTrue(store.getForAccount("000000000000", "legacy").isEmpty());
-        assertEquals("platform", store.getForAccount("000000000000", "us-east-1/legacy")
-                .orElseThrow().getTags().get("team"));
-        assertEquals("platform", legacyState.listTagsForResource(legacyApp.getApplicationArn()).get("team"));
-    }
-
-    @Test
-    void tagResourceRejectsArnOwnedByAnotherAccount() {
-        FlinkApplication local = create("shared-name");
-        String foreignArn = AwsArnUtils.Arn.of("kinesisanalytics", "us-east-1", "111122223333",
-                "application/shared-name").toString();
-
-        assertThrows(AwsException.class,
-                () -> service.tagResource(foreignArn, Map.of("team", "foreign")));
-
-        assertTrue(service.listTagsForResource(local.getApplicationArn()).isEmpty());
-    }
-
-    @Test
-    void tagResourceDoesNotMigrateLegacyApplicationIntoAnotherRegion() {
-        AccountAwareStorageBackend<FlinkApplication> store =
-                AccountAwareStorageBackend.inMemory("000000000000");
-        KinesisAnalyticsV2Service legacyState = mockModeService(store);
-        store.putForAccount("000000000000", "legacy", legacyApplication("legacy"));
-        String westArn = AwsArnUtils.Arn.of("kinesisanalytics", "us-west-2", "000000000000",
-                "application/legacy").toString();
-
-        assertThrows(AwsException.class,
-                () -> legacyState.tagResource(westArn, Map.of("team", "platform")));
-
-        assertTrue(store.getForAccount("000000000000", "legacy").isPresent());
-        assertTrue(store.getForAccount("000000000000", "us-west-2/legacy").isEmpty());
-    }
-
-    @Test
-    void listApplicationsMigratesLegacyApplicationToRegionalKey() {
-        AccountAwareStorageBackend<FlinkApplication> store =
-                AccountAwareStorageBackend.inMemory("000000000000");
-        KinesisAnalyticsV2Service legacyState = mockModeService(store);
-        store.putForAccount("000000000000", "legacy", legacyApplication("legacy"));
-
-        List<FlinkApplication> applications = legacyState.listApplications("us-east-1");
-
-        assertEquals(List.of("legacy"), applications.stream()
-                .map(FlinkApplication::getApplicationName)
-                .toList());
-        assertTrue(store.getForAccount("000000000000", "legacy").isEmpty());
-        assertTrue(store.getForAccount("000000000000", "us-east-1/legacy").isPresent());
     }
 
     @Test
@@ -569,7 +518,8 @@ class KinesisAnalyticsV2ServiceTest {
         FlinkApplication updated = realMode.updateApplication("demo", 1L, null,
                 "bucket", "v2.jar", null, null);
 
-        Mockito.verify(manager).redeployCode(app);
+        Mockito.verify(manager).redeployCode(updated);
+        assertEquals("app.jar", app.getCodeS3Key());
         assertEquals("v2.jar", updated.getCodeS3Key());
         assertEquals(ApplicationStatus.STARTING, updated.getApplicationStatus());
     }
@@ -687,8 +637,8 @@ class KinesisAnalyticsV2ServiceTest {
                 .create(Mockito.anyString(), Mockito.anyString(), Mockito.any());
 
         EmulatorConfig config = Mockito.mock(EmulatorConfig.class);
-        EmulatorConfig.ServicesConfig servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
-        EmulatorConfig.KinesisAnalyticsServiceConfig kaConfig = Mockito.mock(EmulatorConfig.KinesisAnalyticsServiceConfig.class);
+        var servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
+        var kaConfig = Mockito.mock(EmulatorConfig.KinesisAnalyticsServiceConfig.class);
         when(config.services()).thenReturn(servicesConfig);
         when(servicesConfig.kinesisAnalytics()).thenReturn(kaConfig);
         when(kaConfig.mock()).thenReturn(false);
@@ -718,7 +668,8 @@ class KinesisAnalyticsV2ServiceTest {
             Thread.sleep(1500);
 
             Mockito.verify(store, Mockito.atLeastOnce())
-                    .putForAccount(Mockito.eq("000000000000"), Mockito.eq("us-east-1/demo"), Mockito.any());
+                    .putForAccount(Mockito.eq("000000000000"),
+                            Mockito.eq("arn:aws:kinesisanalytics:us-east-1:000000000000:application/demo"), Mockito.any());
             assertEquals("job-1", realMode.describeApplication("demo").getFlinkJobId());
         } finally {
             realMode.shutdown();
@@ -729,18 +680,6 @@ class KinesisAnalyticsV2ServiceTest {
         return buildService(true, Mockito.mock(FlinkContainerManager.class));
     }
 
-    private KinesisAnalyticsV2Service mockModeService(AccountAwareStorageBackend<FlinkApplication> store) {
-        return buildService(true, Mockito.mock(FlinkContainerManager.class), store);
-    }
-
-    private FlinkApplication legacyApplication(String name) {
-        FlinkApplication application = new FlinkApplication(name,
-                "arn:aws:kinesisanalytics:us-east-1:000000000000:application/" + name,
-                "FLINK-1_18", ROLE, "STREAMING");
-        application.setAccountId("000000000000");
-        return application;
-    }
-
     private KinesisAnalyticsV2Service realModeServiceWithFailingManager() {
         FlinkContainerManager failing = Mockito.mock(FlinkContainerManager.class);
         Mockito.doThrow(new RuntimeException("docker unavailable"))
@@ -749,18 +688,13 @@ class KinesisAnalyticsV2ServiceTest {
     }
 
     private KinesisAnalyticsV2Service buildService(boolean mock, FlinkContainerManager manager) {
-        return buildService(mock, manager, AccountAwareStorageBackend.inMemory("000000000000"));
-    }
-
-    private KinesisAnalyticsV2Service buildService(boolean mock, FlinkContainerManager manager,
-                                                   AccountAwareStorageBackend<FlinkApplication> store) {
         StorageFactory storageFactory = Mockito.mock(StorageFactory.class);
-        Mockito.doReturn(store).when(storageFactory)
-                .create(Mockito.anyString(), Mockito.anyString(), Mockito.any());
+        when(storageFactory.create(Mockito.anyString(), Mockito.anyString(), Mockito.any()))
+                .thenReturn(AccountAwareStorageBackend.inMemory("000000000000"));
 
         EmulatorConfig config = Mockito.mock(EmulatorConfig.class);
-        EmulatorConfig.ServicesConfig servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
-        EmulatorConfig.KinesisAnalyticsServiceConfig kaConfig = Mockito.mock(EmulatorConfig.KinesisAnalyticsServiceConfig.class);
+        var servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
+        var kaConfig = Mockito.mock(EmulatorConfig.KinesisAnalyticsServiceConfig.class);
         when(config.services()).thenReturn(servicesConfig);
         when(servicesConfig.kinesisAnalytics()).thenReturn(kaConfig);
         when(kaConfig.mock()).thenReturn(mock);

@@ -42,15 +42,13 @@ class IotIntegrationTest {
 
     @Test
     @Order(2)
-    void defaultDescribeEndpointReturnsTheAwsShapedAtsHostname() {
+    void defaultDescribeEndpointReturnsBaseUrlAuthority() {
         given()
         .when()
             .get("/endpoint")
         .then()
             .statusCode(200)
-            .body("endpointAddress", matchesPattern("[a-z0-9]{14}-ats\\.iot\\.us-east-1\\.amazonaws\\.com"))
-            .body("endpointAddress", equalTo(
-                    IotEndpoints.awsAddress("iot:Data-ATS", "000000000000", "us-east-1")));
+            .body("endpointAddress", equalTo("localhost:4566"));
     }
 
     @Test
@@ -62,8 +60,7 @@ class IotIntegrationTest {
             .get("/endpoint")
         .then()
             .statusCode(200)
-            .body("endpointAddress", equalTo(
-                    IotEndpoints.awsAddress("iot:Data-ATS", "000000000000", "us-east-1")));
+            .body("endpointAddress", equalTo("localhost:4566"));
     }
 
     @Test

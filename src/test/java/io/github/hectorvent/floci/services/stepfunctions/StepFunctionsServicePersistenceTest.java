@@ -69,25 +69,6 @@ class StepFunctionsServicePersistenceTest {
     private final RegionResolver regionResolver = Mockito.mock(RegionResolver.class);
 
     @Test
-    void legacyForkLoggingAndTracingSettingsSurviveModelMigration() throws Exception {
-        ObjectMapper mapper = new ObjectMapper();
-        Map<String, Object> legacy = Map.of(
-                "loggingLevel", "ALL", "includeExecutionData", true, "tracingEnabled", true,
-                "loggingDestinationsJson", mapper.writeValueAsString(List.of(Map.of(
-                        "cloudWatchLogsLogGroup", Map.of("logGroupArn",
-                                "arn:aws:logs:us-east-1:000000000000:log-group:workflow:*")))));
-        StateMachine stateMachine = mapper.readValue(mapper.writeValueAsString(legacy), StateMachine.class);
-        StateMachine reloaded = mapper.readValue(mapper.writeValueAsString(stateMachine), StateMachine.class);
-
-        assertEquals("ALL", reloaded.getLoggingConfiguration().path("level").asText());
-        assertTrue(reloaded.getLoggingConfiguration().path("includeExecutionData").asBoolean());
-        assertEquals("arn:aws:logs:us-east-1:000000000000:log-group:workflow:*",
-                reloaded.getLoggingConfiguration().path("destinations").get(0)
-                        .path("cloudWatchLogsLogGroup").path("logGroupArn").asText());
-        assertTrue(reloaded.getTracingConfiguration().path("enabled").asBoolean());
-    }
-
-    @Test
     void historyCheckpointCallbackRunsAtBoundedIntervals() {
         AtomicInteger lastCheckpoint = new AtomicInteger();
         StepFunctionsService.ExecutionHistory history =

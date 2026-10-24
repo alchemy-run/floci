@@ -9,7 +9,6 @@ import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import org.junit.jupiter.api.Test;
 
-import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -17,7 +16,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -43,8 +41,7 @@ class IotDomainConfigurationTlsServiceTest {
             new InMemoryStorage<>(), new RegionResolver(REGION, "000000000000"), endpointConfig(), certificateManager);
 
     private static EmulatorConfig endpointConfig() {
-        EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
-        when(config.services().iot().endpointAddress()).thenReturn(Optional.of("localhost:4566"));
+        EmulatorConfig config = mock(EmulatorConfig.class);
         when(config.iotEndpointAddress()).thenReturn("localhost:4566");
         return config;
     }

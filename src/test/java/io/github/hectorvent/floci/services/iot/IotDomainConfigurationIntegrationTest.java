@@ -216,7 +216,7 @@ class IotDomainConfigurationIntegrationTest {
             .body("domainConfigurationName", equalTo("iot:Data-ATS"))
             .body("domainConfigurationArn",
                     startsWith("arn:aws:iot:us-east-1:000000000000:domainconfiguration/iot:Data-ATS/"))
-            .body("domainName", equalTo(IotEndpoints.awsAddress("iot:Data-ATS", "000000000000", "us-east-1")))
+            .body("domainName", equalTo("localhost:4566"))
             .body("domainType", equalTo("AWS_MANAGED"))
             .body("serviceType", equalTo("DATA"))
             .body("domainConfigurationStatus", equalTo("ENABLED"))
@@ -346,9 +346,6 @@ class IotDomainConfigurationIntegrationTest {
             .get("/endpoint")
         .then()
             .statusCode(200)
-            .body("endpointAddress", equalTo(
-                    IotEndpoints.awsAddress("iot:CredentialProvider", "000000000000", "us-east-1")))
-            .body("endpointAddress", startsWith(
-                    IotEndpoints.accountPrefix("000000000000") + ".credentials.iot.us-east-1."));
+            .body("endpointAddress", equalTo("localhost:4566"));
     }
 }

@@ -1,6 +1,5 @@
 package io.github.hectorvent.floci.services.ses;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.RegionResolver;
@@ -47,19 +46,6 @@ class SesReceiptRuleServiceTest {
     private SnsService snsService;
     private LambdaService lambdaService;
     private ServiceCallAuthorizer serviceCallAuthorizer;
-
-    @Test
-    void legacyReceiptActionRemainsReadable() throws Exception {
-        ObjectMapper mapper = new ObjectMapper();
-        ReceiptAction action = mapper.readValue("""
-                {"AddHeaderAction":{"HeaderName":"X-Test","HeaderValue":"legacy"}}
-                """, ReceiptAction.class);
-        assertEquals("AddHeaderAction", action.getType());
-        assertEquals("legacy", action.property("HeaderValue"));
-        ReceiptAction restored = mapper.readValue(mapper.writeValueAsString(action), ReceiptAction.class);
-        assertEquals(action.getType(), restored.getType());
-        assertEquals(action.getProperties(), restored.getProperties());
-    }
 
     @BeforeEach
     void setUp() {

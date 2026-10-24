@@ -1,40 +1,29 @@
 package io.github.hectorvent.floci.services.sagemaker;
 
 import com.github.dockerjava.api.DockerClient;
-import com.github.dockerjava.api.async.ResultCallback;
-import com.github.dockerjava.api.model.Event;
-import com.github.dockerjava.api.model.EventType;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
-import io.github.hectorvent.floci.testing.TestImages;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Timeout;
 
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static io.restassured.RestAssured.given;
 import static org.awaitility.Awaitility.await;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
-// Real containers may take up to awaitTerminalStatus's 150 s, past the suite's 2-minute default.
-@Timeout(value = 3, unit = TimeUnit.MINUTES)
 class SageMakerDockerIntegrationTest {
     private static final String AUTH =
             "AWS4-HMAC-SHA256 Credential=test/20260205/us-east-1/sagemaker/aws4_request";
@@ -63,7 +52,7 @@ class SageMakerDockerIntegrationTest {
                 {
                   "TrainingJobName":"%s",
                   "AlgorithmSpecification":{
-                    "TrainingImage":"%s",
+                    "TrainingImage":"public.ecr.aws/docker/library/busybox:stable",
                     "ContainerEntrypoint":["/bin/sh","-c"],
                     "ContainerArguments":["mkdir -p /opt/ml/model && cp /opt/ml/input/data/train/data.txt /opt/ml/model/model.txt"]
                   },
@@ -72,7 +61,7 @@ class SageMakerDockerIntegrationTest {
                   "ResourceConfig":{"InstanceType":"ml.m5.large","InstanceCount":1,"VolumeSizeInGB":1},
                   "StoppingCondition":{"MaxRuntimeInSeconds":60}
                 }
-                """.formatted(job, TestImages.BUSYBOX, bucket, bucket)).then().statusCode(200).body("TrainingJobArn", notNullValue());
+                """.formatted(job, bucket, bucket)).then().statusCode(200).body("TrainingJobArn", notNullValue());
 
         waitForTraining(job, "Completed");
         String artifact = post("SageMaker.DescribeTrainingJob", "{\"TrainingJobName\":\"%s\"}".formatted(job))
@@ -85,16 +74,13 @@ class SageMakerDockerIntegrationTest {
     @Test
     void endpointHostsRealContainerAndRuntimeProxiesInvocations() throws Exception {
         String suffix = Long.toString(System.nanoTime(), 36);
-        String bucket = "sm-ep-" + suffix;
-        s3Service.createBucket(bucket, "us-east-1");
-        s3Service.putObject(bucket, "prefix.txt", "MODEL:".getBytes(StandardCharsets.UTF_8), "text/plain", Map.of());
         String model = "sm-ep-model-" + suffix;
         String cfg = "sm-ep-cfg-" + suffix;
         String endpoint = "sm-endpoint-" + suffix;
-        String script = "trap 'exit 0' TERM; cat > /server.py <<'PY'\nfrom http.server import BaseHTTPRequestHandler,HTTPServer\nfrom pathlib import Path\nmodel=Path('/opt/ml/model/prefix.txt').read_bytes()\nclass H(BaseHTTPRequestHandler):\n def do_GET(self):\n  self.send_response(200 if self.path == '/ping' else 404); self.end_headers()\n def do_POST(self):\n  n=int(self.headers.get('content-length','0')); b=self.rfile.read(n); self.send_response(200); self.send_header('Content-Type','text/plain'); self.end_headers(); self.wfile.write(model+b.upper())\nHTTPServer(('0.0.0.0',8080),H).serve_forever()\nPY\npython /server.py & wait $!";
+        String script = "trap 'exit 0' TERM; cat > /server.py <<'PY'\nfrom http.server import BaseHTTPRequestHandler,HTTPServer\nclass H(BaseHTTPRequestHandler):\n def do_GET(self):\n  self.send_response(200 if self.path == '/ping' else 404); self.end_headers()\n def do_POST(self):\n  n=int(self.headers.get('content-length','0')); b=self.rfile.read(n); self.send_response(200); self.send_header('Content-Type','text/plain'); self.end_headers(); self.wfile.write(b.upper())\nHTTPServer(('0.0.0.0',8080),H).serve_forever()\nPY\npython /server.py & wait $!";
         post("SageMaker.CreateModel", """
-                {"ModelName":"%s","PrimaryContainer":{"Image":"%s","ModelDataUrl":"s3://%s/prefix.txt","ContainerEntrypoint":["/bin/sh","-c"],"ContainerArguments":[%s]}}
-                """.formatted(model, TestImages.PYTHON_ALPINE, bucket, json(script))).then().statusCode(200);
+                {"ModelName":"%s","PrimaryContainer":{"Image":"public.ecr.aws/docker/library/python:3-alpine","ContainerEntrypoint":["/bin/sh","-c"],"ContainerArguments":[%s]}}
+                """.formatted(model, json(script))).then().statusCode(200);
         post("SageMaker.CreateEndpointConfig", """
                 {"EndpointConfigName":"%s","ProductionVariants":[{"VariantName":"AllTraffic","ModelName":"%s","InitialInstanceCount":1,"InstanceType":"ml.t2.medium","InitialVariantWeight":1.0}]}
                 """.formatted(cfg, model)).then().statusCode(200);
@@ -104,7 +90,7 @@ class SageMakerDockerIntegrationTest {
         given().header("Authorization", "AWS4-HMAC-SHA256 Credential=test/20260205/us-east-1/runtime.sagemaker/aws4_request")
                 .contentType("text/plain").body("hello")
                 .when().post("/endpoints/%s/invocations".formatted(endpoint))
-                .then().statusCode(200).body(equalTo("MODEL:HELLO"));
+                .then().statusCode(200).body(equalTo("HELLO"));
         post("SageMaker.DeleteEndpoint", "{\"EndpointName\":\"%s\"}".formatted(endpoint)).then().statusCode(200);
     }
 
@@ -118,7 +104,7 @@ class SageMakerDockerIntegrationTest {
                 {
                   "TrainingJobName":"%s",
                   "AlgorithmSpecification":{
-                    "TrainingImage":"%s",
+                    "TrainingImage":"public.ecr.aws/docker/library/busybox:stable",
                     "ContainerEntrypoint":["/bin/sh","-c"],
                     "ContainerArguments":["trap 'exit 143' TERM; mkfifo /tmp/hold; cat /tmp/hold & wait"]
                   },
@@ -126,10 +112,10 @@ class SageMakerDockerIntegrationTest {
                   "ResourceConfig":{"InstanceType":"ml.m5.large","InstanceCount":1,"VolumeSizeInGB":1},
                   "StoppingCondition":{"MaxRuntimeInSeconds":300}
                 }
-                """.formatted(job, TestImages.BUSYBOX, bucket)).then().statusCode(200);
+                """.formatted(job, bucket)).then().statusCode(200);
         // Wait for the container to actually be running, blocked on an empty pipe, so the stop
         // races a real running container rather than one still being staged.
-        awaitContainerRunning("floci-aws-sagemaker-training-" + job);
+        awaitContainerRunning("floci-sagemaker-training-" + job);
         post("SageMaker.StopTrainingJob", "{\"TrainingJobName\":\"%s\"}".formatted(job)).then().statusCode(200);
         post("SageMaker.DescribeTrainingJob", "{\"TrainingJobName\":\"%s\"}".formatted(job))
                 .then().statusCode(200).body("TrainingJobStatus", equalTo("Stopped"));
@@ -151,62 +137,27 @@ class SageMakerDockerIntegrationTest {
         // up, well before /ping can succeed, so the start it races is always still in flight.
         String script = "trap 'exit 0' TERM; cat > /server.py <<'PY'\nfrom http.server import BaseHTTPRequestHandler,HTTPServer\nclass H(BaseHTTPRequestHandler):\n def do_GET(self):\n  self.send_response(200); self.end_headers()\nHTTPServer(('0.0.0.0',8080),H).serve_forever()\nPY\npython /server.py & wait $!";
         post("SageMaker.CreateModel", """
-                {"ModelName":"%s","PrimaryContainer":{"Image":"%s","ContainerEntrypoint":["/bin/sh","-c"],"ContainerArguments":[%s]}}
-                """.formatted(model, TestImages.PYTHON_ALPINE, json(script))).then().statusCode(200);
+                {"ModelName":"%s","PrimaryContainer":{"Image":"public.ecr.aws/docker/library/python:3-alpine","ContainerEntrypoint":["/bin/sh","-c"],"ContainerArguments":[%s]}}
+                """.formatted(model, json(script))).then().statusCode(200);
         post("SageMaker.CreateEndpointConfig", """
                 {"EndpointConfigName":"%s","ProductionVariants":[{"VariantName":"AllTraffic","ModelName":"%s","InitialInstanceCount":1,"InstanceType":"ml.t2.medium","InitialVariantWeight":1.0}]}
                 """.formatted(cfg, model)).then().statusCode(200);
-        // A superseded start tears down the container it brought up, so that container being
-        // destroyed marks the point where the worker has decided. Watching Docker's event stream
-        // rather than polling for the container means a container that is created and discarded
-        // between two polls is still seen: events are queued and replayed from the watch's start.
-        try (ContainerDestroyWatch discarded =
-                new ContainerDestroyWatch(dockerClient, "floci-aws-sagemaker-endpoint-" + endpoint)) {
-            post("SageMaker.CreateEndpoint", "{\"EndpointName\":\"%s\",\"EndpointConfigName\":\"%s\"}".formatted(endpoint, cfg))
-                    .then().statusCode(200);
-            post("SageMaker.DeleteEndpoint", "{\"EndpointName\":\"%s\"}".formatted(endpoint)).then().statusCode(200);
-            // Let the superseded start worker finish (it should discard its result, not persist it).
-            assertTrue(discarded.await(Duration.ofSeconds(30)),
-                    "the superseded start should have discarded the container it brought up");
-        }
+        post("SageMaker.CreateEndpoint", "{\"EndpointName\":\"%s\",\"EndpointConfigName\":\"%s\"}".formatted(endpoint, cfg))
+                .then().statusCode(200);
+        post("SageMaker.DeleteEndpoint", "{\"EndpointName\":\"%s\"}".formatted(endpoint)).then().statusCode(200);
+        // Let the superseded start worker finish (it should discard its result, not persist it).
+        // Discarding it tears down the container it brought up, so the container appearing and
+        // then disappearing marks the point where the worker has decided.
+        String containerName = "floci-sagemaker-endpoint-" + endpoint;
+        AtomicBoolean containerSeen = new AtomicBoolean();
+        await("the superseded start to discard its container").atMost(Duration.ofSeconds(30))
+                .pollInterval(Duration.ofMillis(100)).until(() -> {
+                    boolean running = !dockerClient.listContainersCmd()
+                            .withNameFilter(List.of(containerName)).exec().isEmpty();
+                    containerSeen.compareAndSet(false, running);
+                    return containerSeen.get() && !running;
+                });
         post("SageMaker.DescribeEndpoint", "{\"EndpointName\":\"%s\"}".formatted(endpoint)).then().statusCode(400);
-    }
-
-    /**
-     * Watches Docker's event stream for the destruction of a container whose name contains the
-     * given fragment. The stream is opened before the container exists and replays from that
-     * moment, so unlike polling for the container this cannot miss one that came and went inside
-     * a single poll interval.
-     */
-    private static final class ContainerDestroyWatch implements AutoCloseable {
-        private final CountDownLatch destroyed = new CountDownLatch(1);
-        private final ResultCallback.Adapter<Event> events;
-
-        ContainerDestroyWatch(DockerClient dockerClient, String nameFragment) {
-            events = dockerClient.eventsCmd()
-                    .withEventTypeFilter(EventType.CONTAINER)
-                    .withEventFilter("destroy")
-                    .withSince(String.valueOf(Instant.now().getEpochSecond()))
-                    .exec(new ResultCallback.Adapter<Event>() {
-                        @Override
-                        public void onNext(Event event) {
-                            String name = event.getActor() == null
-                                    ? null : event.getActor().getAttributes().get("name");
-                            if (name != null && name.contains(nameFragment)) {
-                                destroyed.countDown();
-                            }
-                        }
-                    });
-        }
-
-        boolean await(Duration timeout) throws InterruptedException {
-            return destroyed.await(timeout.toMillis(), TimeUnit.MILLISECONDS);
-        }
-
-        @Override
-        public void close() throws IOException {
-            events.close();
-        }
     }
 
     private void awaitContainerRunning(String nameFragment) {

@@ -139,20 +139,6 @@ class PipesPollerTest {
     }
 
     @Test
-    void wrapPipeBatchEmitsBareArrayNotEsmEnvelope() throws Exception {
-        ObjectNode record = MAPPER.createObjectNode();
-        record.put("eventSource", "aws:sqs");
-        record.put("body", "hello");
-        String json = PipesPoller.wrapPipeBatch(MAPPER, List.of(record));
-        JsonNode node = MAPPER.readTree(json);
-        assertTrue(node.isArray());
-        assertEquals(1, node.size());
-        assertEquals("aws:sqs", node.get(0).path("eventSource").asText());
-        assertEquals("hello", node.get(0).path("body").asText());
-        assertFalse(node.has("Records"));
-    }
-
-    @Test
     void asEventArrayWrapsSingleObjectInBatchArray() throws Exception {
         // Pipes delivers events to a target as a batch array; a single-object enrichment response
         // must become a one-element array so a target like "InputPath": "$.[0]" can unwrap it.

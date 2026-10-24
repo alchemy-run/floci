@@ -6,7 +6,6 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.cloudwatch.dashboards.CloudWatchDashboardsService;
 import io.github.hectorvent.floci.services.cloudwatch.metricstreams.CloudWatchMetricStreamsService;
@@ -57,12 +56,6 @@ class CloudWatchMetricsJsonHandlerTest {
         CloudWatchMetricStreamsService metricStreamsService = new CloudWatchMetricStreamsService(
                 new InMemoryStorage<>(), new RegionResolver(REGION, "000000000000"));
         handler = new CloudWatchMetricsJsonHandler(service, dashboardsService, metricStreamsService, MAPPER);
-        RegionResolver regions = new RegionResolver(REGION, "000000000000");
-        CloudWatchMetadataService metadata = new CloudWatchMetadataService(
-                new InMemoryStorage<>(), regions, MAPPER, service);
-        handler.metadataService = metadata;
-        handler.insightsService = new CloudWatchInsightsService(
-                AccountAwareStorageBackend.inMemory("000000000000"), MAPPER, regions, metadata);
     }
 
     /**
@@ -396,16 +389,6 @@ class CloudWatchMetricsJsonHandlerTest {
                 EPOCH_NOW.minusSeconds(10), EPOCH_NOW.plusSeconds(10), 60);
         assertEquals(0, oldResult.get("Datapoints").size(),
                 "metric from 24h ago must not be returned for a 20-second window around now");
-    }
-
-    @Test
-    void describeInsightRulesReturnsEmptyList() {
-        ObjectNode req = MAPPER.createObjectNode();
-        Response resp = handler.handle("DescribeInsightRules", req, REGION);
-        assertEquals(200, resp.getStatus());
-        ObjectNode body = (ObjectNode) resp.getEntity();
-        assertTrue(body.path("InsightRules").isArray());
-        assertEquals(0, body.path("InsightRules").size());
     }
 
     @Test

@@ -20,7 +20,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -71,7 +70,7 @@ class RabbitMqManagerTest {
     private static ContainerBuilder.Builder selfReturningBuilder(ContainerBuilder containerBuilder) {
         ContainerBuilder.Builder builder = Mockito.mock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-        when(builder.build()).thenReturn(new ContainerSpec("test-image"));
+        when(builder.build()).thenReturn(Mockito.mock(ContainerSpec.class));
         return builder;
     }
 
@@ -162,37 +161,6 @@ class RabbitMqManagerTest {
         assertEquals("http://172.17.0.5:15672", broker.getBrokerInstances().get(0).getConsoleURL());
     }
 
-    /** Container logs stream to the log group DescribeBroker names as generalLogGroup. */
-    @Test
-    void startContainerStreamsLogsToGeneralLogGroup() {
-        EmulatorConfig config = configWithDefaultPortRanges();
-
-        ContainerLifecycleManager lifecycleManager = Mockito.mock(ContainerLifecycleManager.class);
-        when(lifecycleManager.createAndStart(any())).thenReturn(
-                new ContainerLifecycleManager.ContainerInfo("container-id", Map.of(
-                        5672, new ContainerLifecycleManager.EndpointInfo("localhost", 5672),
-                        15672, new ContainerLifecycleManager.EndpointInfo("localhost", 15672))));
-
-        ContainerBuilder containerBuilder = Mockito.mock(ContainerBuilder.class);
-        selfReturningBuilder(containerBuilder);
-
-        PortAllocator portAllocator = Mockito.mock(PortAllocator.class);
-        when(portAllocator.allocate(5672, 5699)).thenReturn(5672);
-        when(portAllocator.allocate(15672, 15699)).thenReturn(15672);
-
-        ContainerLogStreamer logStreamer = Mockito.mock(ContainerLogStreamer.class);
-        RabbitMqManager manager = new RabbitMqManager(containerBuilder, lifecycleManager,
-                logStreamer, Mockito.mock(ContainerDetector.class),
-                portAllocator, config, regionResolver());
-
-        Broker broker = broker("b-1");
-        manager.startContainer(broker);
-
-        assertEquals("/aws/amazonmq/broker/b-1/general", broker.generalLogGroup());
-        verify(logStreamer).attach(eq("container-id"), eq(broker.generalLogGroup()),
-                any(), any(), eq("amazonmq:b-1"));
-    }
-
     /**
      * The reservation must die with the container: without the release, repeated
      * create/delete cycles exhaust the configured ranges and later brokers can
@@ -249,10 +217,8 @@ class RabbitMqManagerTest {
 
         assertThrows(RuntimeException.class, () -> manager.startContainer(broker("b-1")));
 
-        // Once for the stale-container sweep before create, once for the rollback; the sweep also
-        // clears the pre-migration name so a survivor cannot keep the broker's ports.
-        verify(lifecycleManager, Mockito.times(2)).removeIfExists("floci-aws-amazonmq-b-1");
-        verify(lifecycleManager).removeIfExists("floci-amazonmq-b-1");
+        // Once for the stale-container sweep before create, once for the rollback.
+        verify(lifecycleManager, Mockito.times(2)).removeIfExists("floci-amazonmq-b-1");
         verify(portAllocator).release(5672);
         verify(portAllocator).release(15672);
     }
@@ -276,7 +242,6 @@ class RabbitMqManagerTest {
 
         manager.stopContainer(broker);
 
-        verify(lifecycleManager).removeIfExists("floci-aws-amazonmq-b-2");
         verify(lifecycleManager).removeIfExists("floci-amazonmq-b-2");
         verifyNoMoreInteractions(lifecycleManager);
     }

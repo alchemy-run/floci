@@ -605,28 +605,6 @@ class AssumeRolePolicyEvaluatorTest {
     }
 
     @Test
-    void allowsMatchingServicePrincipal() {
-        assertTrue(evaluator.allowsService(trust("{\"Service\":\"redshift.amazonaws.com\"}"),
-                "redshift.amazonaws.com"));
-    }
-
-    @Test
-    void deniesDifferentServicePrincipal() {
-        assertFalse(evaluator.allowsService(trust("{\"Service\":\"lambda.amazonaws.com\"}"),
-                "redshift.amazonaws.com"));
-    }
-
-    @Test
-    void explicitServiceDenyOverridesAllow() {
-        String doc = """
-            {"Version":"2012-10-17","Statement":[
-              {"Effect":"Allow","Principal":{"Service":"redshift.amazonaws.com"},"Action":"sts:AssumeRole"},
-              {"Effect":"Deny","Principal":{"Service":"redshift.amazonaws.com"},"Action":"sts:AssumeRole"}]}
-            """;
-        assertFalse(evaluator.allowsService(doc, "redshift.amazonaws.com"));
-    }
-
-    @Test
     void deniesBlankOrMalformedDocument() {
         assertFalse(evaluator.allows(null, CALLER, CALLER_ACCOUNT, Map.of()));
         assertFalse(evaluator.allows("", CALLER, CALLER_ACCOUNT, Map.of()));

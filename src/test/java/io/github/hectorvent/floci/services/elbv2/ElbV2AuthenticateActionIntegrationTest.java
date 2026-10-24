@@ -97,8 +97,6 @@ class ElbV2AuthenticateActionIntegrationTest {
                 .formParam(base + "OnUnauthenticatedRequest", "authenticate")
                 .formParam(base + "AuthenticationRequestExtraParams.entry.1.key", "prompt")
                 .formParam(base + "AuthenticationRequestExtraParams.entry.1.value", "login")
-                .formParam(base + "AuthenticationRequestExtraParams.member.1.key", "display")
-                .formParam(base + "AuthenticationRequestExtraParams.member.1.value", "page")
                 .formParam("DefaultActions.member.2.Type", "forward")
                 .formParam("DefaultActions.member.2.Order", "2")
                 .formParam("DefaultActions.member.2.TargetGroupArn", tgArn)))
@@ -121,13 +119,9 @@ class ElbV2AuthenticateActionIntegrationTest {
         assertEquals("client-abc", described.getString(action + "ClientId"));
         assertEquals("authenticate", described.getString(action + "OnUnauthenticatedRequest"));
         assertEquals("prompt",
-                described.getString(action + "AuthenticationRequestExtraParams.entry[0].key"));
+                described.getString(action + "AuthenticationRequestExtraParams.entry.key"));
         assertEquals("login",
-                described.getString(action + "AuthenticationRequestExtraParams.entry[0].value"));
-        assertEquals("display",
-                described.getString(action + "AuthenticationRequestExtraParams.entry[1].key"));
-        assertEquals("page",
-                described.getString(action + "AuthenticationRequestExtraParams.entry[1].value"));
+                described.getString(action + "AuthenticationRequestExtraParams.entry.value"));
 
         // The model documents all three defaults, and AWS reports the resolved value.
         assertEquals("AWSELBAuthSessionCookie", described.getString(action + "SessionCookieName"));

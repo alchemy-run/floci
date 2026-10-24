@@ -2,147 +2,17 @@ package io.github.hectorvent.floci.services.rds.proxy;
 
 import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.testutil.IamServiceTestHelper;
-import io.github.hectorvent.floci.testutil.LogCapture;
 import io.github.hectorvent.floci.testutil.SigV4TokenTestHelper;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 
 import java.lang.reflect.Method;
-import java.text.MessageFormat;
 import java.time.Instant;
-import java.util.List;
-import java.util.logging.LogRecord;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RdsSigV4ValidatorTest {
-
-    private static final String S3_ONLY_POLICY = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\","
-            + "\"Action\":[\"s3:GetObject\"],\"Resource\":[\"*\"]}]}";
-
-    private static RdsProxyBinding exampleBinding() {
-        return new RdsProxyBinding("db.example.local", 3307, "us-east-1", "123456789012", "db-ABCDEFGHIJKL01234", true);
-    }
-
-    /**
-     * What a PostgreSQL proxy publishes when {@code services.rds.iam-token-endpoint-binding} is
-     * turned off: the token's signature and DBUser are checked, the endpoint it was generated for
-     * is not.
-     */
-    private static RdsProxyBinding unboundBinding() {
-        return new RdsProxyBinding("db.example.local", 5432, "us-east-1", "123456789012", "db-ABCDEFGHIJKL01234", false);
-    }
-
-    /**
-     * Every proxy publishes a binding; a token that shows up without one has nothing to be
-     * checked against and is refused rather than waved through on its signature alone.
-     */
-    @Test
-    void validateRefusesTokenWithoutBinding() throws Exception {
-        IamService iamService = IamServiceTestHelper.iamServiceWithAccessKey("AKIDRDS", "secret-rds");
-        RdsSigV4Validator validator = new RdsSigV4Validator(iamService);
-        String token = SigV4TokenTestHelper.createRdsToken(
-                "db.example.local", 3307, "admin", "AKIDRDS", "secret-rds",
-                Instant.now().minusSeconds(60), 900);
-
-        assertFalse(validator.validate(token, "admin", null));
-    }
-
-    @Test
-    void validateRejectsCallerWithoutRdsDbConnectWhenEnforcementIsOn() throws Exception {
-        IamService iamService = IamServiceTestHelper.iamServiceWithUserPolicy(
-                "AKIDRDS", "secret-rds", "jane", S3_ONLY_POLICY);
-        RdsSigV4Validator validator = new RdsSigV4Validator(iamService, () -> true);
-        String token = SigV4TokenTestHelper.createRdsToken(
-                "db.example.local", 3307, "jane_doe", "AKIDRDS", "secret-rds",
-                Instant.now().minusSeconds(60), 900);
-
-        assertFalse(validator.validate(token, "jane_doe", exampleBinding()),
-                "a valid token from a principal that is not allowed rds-db:connect must be rejected");
-    }
-
-    /**
-     * The key IAM authorizes must be the key the signature was verified with. A token that spells
-     * its signer's credential with a percent-encoded name and adds a second credential, of a key
-     * IAM does not know, must not be authorized on that second key.
-     */
-    @Test
-    void validateAuthorizesTheKeyTheSignatureWasVerifiedWith() throws Exception {
-        IamService iamService = IamServiceTestHelper.iamServiceWithUserPolicy(
-                "AKIDRDS", "secret-rds", "jane", S3_ONLY_POLICY);
-        RdsSigV4Validator validator = new RdsSigV4Validator(iamService, () -> true);
-        String token = SigV4TokenTestHelper.createRdsTokenWithASecondCredential(
-                "db.example.local", 3307, "jane_doe", "AKIDRDS", "secret-rds", "AKIDUNKNOWN",
-                Instant.now().minusSeconds(60), 900);
-
-        assertFalse(validator.validate(token, "jane_doe", exampleBinding()),
-                "the signer is not allowed rds-db:connect, whatever other credential the token names");
-    }
-
-    @Test
-    void validateAcceptsCallerAllowedRdsDbConnectOnTheBoundDbUser() throws Exception {
-        // The example policy from the AWS "IAM database authentication" guide.
-        IamService iamService = IamServiceTestHelper.iamServiceWithUserPolicy(
-                "AKIDRDS", "secret-rds", "jane", connectPolicyFor(
-                        "arn:aws:rds-db:us-east-1:123456789012:dbuser:db-ABCDEFGHIJKL01234/jane_doe"));
-        RdsSigV4Validator validator = new RdsSigV4Validator(iamService, () -> true);
-        String token = SigV4TokenTestHelper.createRdsToken(
-                "db.example.local", 3307, "jane_doe", "AKIDRDS", "secret-rds",
-                Instant.now().minusSeconds(60), 900);
-
-        assertTrue(validator.validate(token, "jane_doe", exampleBinding()));
-    }
-
-    /** A China database's rds-db:connect resource is an arn:aws-cn: ARN, as a China IAM policy names it. */
-    @Test
-    void validateAcceptsAChinaConnectGrantForADatabaseInChina() throws Exception {
-        IamService iamService = IamServiceTestHelper.iamServiceWithUserPolicy(
-                "AKIDRDS", "secret-rds", "jane", connectPolicyFor(
-                        "arn:aws-cn:rds-db:cn-north-1:123456789012:dbuser:db-ABCDEFGHIJKL01234/jane_doe"));
-        RdsSigV4Validator validator = new RdsSigV4Validator(iamService, () -> true);
-        String token = SigV4TokenTestHelper.createRdsTokenWithScope(
-                "db.example.local", 3307, "jane_doe", "AKIDRDS", "secret-rds", "cn-north-1", "rds-db",
-                Instant.now().minusSeconds(60), 900);
-        RdsProxyBinding chinaBinding = new RdsProxyBinding(
-                "db.example.local", 3307, "cn-north-1", "123456789012", "db-ABCDEFGHIJKL01234", true);
-
-        assertTrue(validator.validate(token, "jane_doe", chinaBinding));
-    }
-
-    @Test
-    void validateRejectsCallerWhoseConnectGrantIsForAnotherDbUser() throws Exception {
-        IamService iamService = IamServiceTestHelper.iamServiceWithUserPolicy(
-                "AKIDRDS", "secret-rds", "jane", connectPolicyFor(
-                        "arn:aws:rds-db:us-east-1:123456789012:dbuser:db-ABCDEFGHIJKL01234/someone_else"));
-        RdsSigV4Validator validator = new RdsSigV4Validator(iamService, () -> true);
-        String token = SigV4TokenTestHelper.createRdsToken(
-                "db.example.local", 3307, "jane_doe", "AKIDRDS", "secret-rds",
-                Instant.now().minusSeconds(60), 900);
-
-        assertFalse(validator.validate(token, "jane_doe", exampleBinding()),
-                "rds-db:connect is granted per database user, not per database");
-    }
-
-    @Test
-    void validateSkipsTheConnectCheckWhenEnforcementIsOff() throws Exception {
-        IamService iamService = IamServiceTestHelper.iamServiceWithUserPolicy(
-                "AKIDRDS", "secret-rds", "jane", S3_ONLY_POLICY);
-        RdsSigV4Validator validator = new RdsSigV4Validator(iamService);
-        String token = SigV4TokenTestHelper.createRdsToken(
-                "db.example.local", 3307, "jane_doe", "AKIDRDS", "secret-rds",
-                Instant.now().minusSeconds(60), 900);
-
-        assertTrue(validator.validate(token, "jane_doe", exampleBinding()),
-                "without IAM enforcement a well-formed token is enough, as before");
-    }
-
-    private static String connectPolicyFor(String resourceArn) {
-        return "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\","
-                + "\"Action\":[\"rds-db:connect\"],\"Resource\":[\"" + resourceArn + "\"]}]}";
-    }
 
     @Test
     void validateAcceptsTokenSignedByStandardSigV4() throws Exception {
@@ -162,7 +32,7 @@ class RdsSigV4ValidatorTest {
                 900
         );
 
-        assertTrue(validator.validate(token, "testuser", unboundBinding()),
+        assertTrue(validator.validate(token, "testuser"),
                 "Validator must accept a well-formed SigV4 RDS authentication token");
     }
 
@@ -181,7 +51,7 @@ class RdsSigV4ValidatorTest {
                 900
         );
 
-        assertTrue(validator.validate(token, "admin", unboundBinding()));
+        assertTrue(validator.validate(token, "admin"));
     }
 
     @Test
@@ -200,7 +70,7 @@ class RdsSigV4ValidatorTest {
         );
         String brokenToken = validToken.replace("db.example.local:5432/?", "db.example.local/?");
 
-        assertFalse(validator.validate(brokenToken, "admin", unboundBinding()));
+        assertFalse(validator.validate(brokenToken, "admin"));
     }
 
     @Test
@@ -218,7 +88,7 @@ class RdsSigV4ValidatorTest {
                 900
         );
 
-        assertFalse(validator.validate(token, "admin", unboundBinding()));
+        assertFalse(validator.validate(token, "admin"));
     }
 
     @Test
@@ -237,7 +107,7 @@ class RdsSigV4ValidatorTest {
         );
         String tamperedToken = validToken.replace("DBUser=admin", "DBUser=attacker");
 
-        assertFalse(validator.validate(tamperedToken, "admin", unboundBinding()));
+        assertFalse(validator.validate(tamperedToken, "admin"));
     }
 
     @Test
@@ -255,7 +125,7 @@ class RdsSigV4ValidatorTest {
                 900
         );
 
-        assertFalse(validator.validate(token, "admin", unboundBinding()));
+        assertFalse(validator.validate(token, "admin"));
     }
 
     /**
@@ -280,7 +150,7 @@ class RdsSigV4ValidatorTest {
                 900
         );
 
-        assertFalse(validator.validate(token, "admin", unboundBinding()));
+        assertFalse(validator.validate(token, "admin"));
     }
 
     @Test
@@ -299,7 +169,7 @@ class RdsSigV4ValidatorTest {
         );
         String withoutDbUser = validToken.replaceFirst("DBUser=admin&", "");
 
-        assertFalse(validator.validate(withoutDbUser, "admin", unboundBinding()));
+        assertFalse(validator.validate(withoutDbUser, "admin"));
     }
 
     @Test
@@ -317,7 +187,7 @@ class RdsSigV4ValidatorTest {
                 900
         );
 
-        assertFalse(validator.validate(token, "attacker", unboundBinding()),
+        assertFalse(validator.validate(token, "attacker"),
                 "Token signed for 'admin' must be rejected when client connects as 'attacker'");
     }
 
@@ -330,9 +200,9 @@ class RdsSigV4ValidatorTest {
                 Instant.now().minusSeconds(60), 900);
 
         assertTrue(validator.validate(token, "admin",
-                new RdsProxyBinding("db.example.local", 3307, "us-east-1", "123456789012", "db-ABCDEFGHIJKL01234", true)));
+                new RdsMysqlBinding("db.example.local", 3307, "us-east-1")));
         assertFalse(validator.validate(token, "admin",
-                new RdsProxyBinding("db.example.local", 3306, "us-east-1", "123456789012", "db-ABCDEFGHIJKL01234", true)));
+                new RdsMysqlBinding("db.example.local", 3306, "us-east-1")));
     }
 
     @Test
@@ -344,38 +214,7 @@ class RdsSigV4ValidatorTest {
                 Instant.now().minusSeconds(60), 900);
 
         assertFalse(validator.validate(token, "admin",
-                new RdsProxyBinding("other.example.local", 3307, "us-east-1", "123456789012", "db-ABCDEFGHIJKL01234", true)));
-    }
-
-    /**
-     * Natively Floci advertises {@code host.docker.internal} (the name Lambda containers reach it
-     * by) while host clients connect to the loopback interface; in Docker with published ports the
-     * same split applies. A loopback name therefore names this same endpoint.
-     */
-    @ParameterizedTest
-    @ValueSource(strings = {"localhost", "127.0.0.1"})
-    void validateAcceptsTokenSignedForLoopbackWhenTheEndpointAdvertisesAnotherName(String loopbackHost)
-            throws Exception {
-        IamService iamService = IamServiceTestHelper.iamServiceWithAccessKey("AKIDRDS", "secret-rds");
-        RdsSigV4Validator validator = new RdsSigV4Validator(iamService);
-        String token = SigV4TokenTestHelper.createRdsToken(
-                loopbackHost, 3307, "admin", "AKIDRDS", "secret-rds",
-                Instant.now().minusSeconds(60), 900);
-
-        assertTrue(validator.validate(token, "admin",
-                new RdsProxyBinding("host.docker.internal", 3307, "us-east-1", "123456789012", "db-ABCDEFGHIJKL01234", true)));
-    }
-
-    @Test
-    void validateRejectsLoopbackTokenSignedForAnotherPort() throws Exception {
-        IamService iamService = IamServiceTestHelper.iamServiceWithAccessKey("AKIDRDS", "secret-rds");
-        RdsSigV4Validator validator = new RdsSigV4Validator(iamService);
-        String token = SigV4TokenTestHelper.createRdsToken(
-                "localhost", 3308, "admin", "AKIDRDS", "secret-rds",
-                Instant.now().minusSeconds(60), 900);
-
-        assertFalse(validator.validate(token, "admin",
-                new RdsProxyBinding("host.docker.internal", 3307, "us-east-1", "123456789012", "db-ABCDEFGHIJKL01234", true)));
+                new RdsMysqlBinding("other.example.local", 3307, "us-east-1")));
     }
 
     @Test
@@ -387,7 +226,7 @@ class RdsSigV4ValidatorTest {
                 Instant.now().minusSeconds(60), 900);
 
         assertFalse(validator.validate(token, "admin",
-                new RdsProxyBinding("db.example.local", 3307, "eu-west-1", "123456789012", "db-ABCDEFGHIJKL01234", true)));
+                new RdsMysqlBinding("db.example.local", 3307, "eu-west-1")));
     }
 
     @Test
@@ -399,38 +238,7 @@ class RdsSigV4ValidatorTest {
                 "us-east-1", "s3", Instant.now().minusSeconds(60), 900);
 
         assertFalse(validator.validate(token, "admin",
-                new RdsProxyBinding("db.example.local", 3307, "us-east-1", "123456789012", "db-ABCDEFGHIJKL01234", true)));
-    }
-
-    /**
-     * PostgreSQL endpoints publish their binding with the endpoint check off when
-     * {@code services.rds.iam-token-endpoint-binding} is turned off: a well-signed token for any
-     * host, port and region is accepted, as it was before the check existed.
-     */
-    @Test
-    void validateSkipsTheEndpointCheckWhenTokensAreNotBoundToTheEndpoint() throws Exception {
-        IamService iamService = IamServiceTestHelper.iamServiceWithAccessKey("AKIDRDS", "secret-rds");
-        RdsSigV4Validator validator = new RdsSigV4Validator(iamService);
-        String token = SigV4TokenTestHelper.createRdsTokenWithScope(
-                "other.example.local", 3308, "admin", "AKIDRDS", "secret-rds",
-                "eu-west-1", "rds-db", Instant.now().minusSeconds(60), 900);
-
-        assertTrue(validator.validate(token, "admin", new RdsProxyBinding(
-                "db.example.local", 3307, "us-east-1", "123456789012", "db-ABCDEFGHIJKL01234", false)));
-    }
-
-    @Test
-    void validateStillRequiresRdsDbConnectWhenTokensAreNotBoundToTheEndpoint() throws Exception {
-        IamService iamService = IamServiceTestHelper.iamServiceWithUserPolicy(
-                "AKIDRDS", "secret-rds", "jane", S3_ONLY_POLICY);
-        RdsSigV4Validator validator = new RdsSigV4Validator(iamService, () -> true);
-        String token = SigV4TokenTestHelper.createRdsToken(
-                "db.example.local", 3307, "jane_doe", "AKIDRDS", "secret-rds",
-                Instant.now().minusSeconds(60), 900);
-
-        assertFalse(validator.validate(token, "jane_doe", new RdsProxyBinding(
-                        "db.example.local", 3307, "us-east-1", "123456789012", "db-ABCDEFGHIJKL01234", false)),
-                "the endpoint check being off does not turn off the rds-db:connect check");
+                new RdsMysqlBinding("db.example.local", 3307, "us-east-1")));
     }
 
     @Test
@@ -448,7 +256,7 @@ class RdsSigV4ValidatorTest {
                 900
         );
 
-        assertTrue(validator.validate(token, null, unboundBinding()),
+        assertTrue(validator.validate(token, null),
                 "Null clientUsername should skip the identity check (backwards compat)");
     }
 
@@ -469,7 +277,7 @@ class RdsSigV4ValidatorTest {
                 900
         );
 
-        assertTrue(validator.validate(token, "db+admin@example.com", unboundBinding()));
+        assertTrue(validator.validate(token, "db+admin@example.com"));
     }
 
     @Test
@@ -489,7 +297,7 @@ class RdsSigV4ValidatorTest {
         // Tampering with the region in the credential scope invalidates the signature
         String tamperedToken = token.replace("us-east-1", "eu-west-1");
 
-        assertFalse(validator.validate(tamperedToken, "admin", unboundBinding()));
+        assertFalse(validator.validate(tamperedToken, "admin"));
     }
 
     @Test
@@ -508,7 +316,7 @@ class RdsSigV4ValidatorTest {
         );
         String withoutSignature = validToken.replaceFirst("&X-Amz-Signature=[0-9a-f]+", "");
 
-        assertFalse(validator.validate(withoutSignature, "admin", unboundBinding()));
+        assertFalse(validator.validate(withoutSignature, "admin"));
     }
 
     @Test
@@ -529,31 +337,8 @@ class RdsSigV4ValidatorTest {
                 "session-token"
         );
 
-        assertTrue(validator.validate(token, "admin", unboundBinding()),
+        assertTrue(validator.validate(token, "admin"),
                 "Validator must accept RDS IAM tokens signed with STS session credentials (ASIA… keys)");
-    }
-
-    /**
-     * What every Lambda that connects with IAM authentication sends: a token presigned with the
-     * function's execution-role credentials, whose session token carries {@code +}, {@code /} and
-     * {@code =}.
-     */
-    @Test
-    void validateAcceptsTokenSignedWithLambdaSessionCredentials() throws Exception {
-        String accessKeyId = "ASIAIOSFODNN7EXAMPLE";
-        String secretAccessKey = "lambda+session/secret";
-        String sessionToken = "IQoJb3JpZ2luX2VjEJr+abc/def+ghi/jkl==";
-        IamService iamService = IamServiceTestHelper.iamServiceWithSessionCredential(
-                accessKeyId, secretAccessKey, sessionToken, Instant.now().plusSeconds(3600));
-        RdsSigV4Validator validator = new RdsSigV4Validator(iamService);
-
-        String token = SigV4TokenTestHelper.createRdsToken(
-                "db.example.local", 3307, "admin", accessKeyId, secretAccessKey,
-                Instant.now().minusSeconds(60), 900, sessionToken);
-
-        assertTrue(validator.validate(token, "admin", exampleBinding()));
-        assertFalse(validator.validate(token.replace("%2B", "%20"), "admin", exampleBinding()),
-                "a token whose session token reads a space where the issued one has a + is another token");
     }
 
     @Test
@@ -567,7 +352,7 @@ class RdsSigV4ValidatorTest {
                 "db.example.local", 5432, "admin", accessKeyId, secretAccessKey,
                 Instant.now().minusSeconds(60), 900);
 
-        assertFalse(validator.validate(token, "admin", unboundBinding()));
+        assertFalse(validator.validate(token, "admin"));
     }
 
     @Test
@@ -581,7 +366,7 @@ class RdsSigV4ValidatorTest {
                 "db.example.local", 5432, "admin", accessKeyId, secretAccessKey,
                 Instant.now().minusSeconds(60), 900, "wrong-session-token");
 
-        assertFalse(validator.validate(token, "admin", unboundBinding()));
+        assertFalse(validator.validate(token, "admin"));
     }
 
     @Test
@@ -596,7 +381,7 @@ class RdsSigV4ValidatorTest {
                 "db.example.local", 5432, "admin", accessKeyId, secretAccessKey,
                 Instant.now().minusSeconds(60), 900, "session-token");
 
-        assertFalse(validator.validate(token, "admin", unboundBinding()));
+        assertFalse(validator.validate(token, "admin"));
     }
 
     @Test
@@ -615,7 +400,7 @@ class RdsSigV4ValidatorTest {
                 900
         );
 
-        assertFalse(validator.validate(token, "admin", unboundBinding()),
+        assertFalse(validator.validate(token, "admin"),
                 "Validator must reject STS token signed with wrong secret");
     }
 
@@ -639,7 +424,7 @@ class RdsSigV4ValidatorTest {
                 900
         );
 
-        assertFalse(validator.validate(token, "admin", unboundBinding()),
+        assertFalse(validator.validate(token, "admin"),
                 "A token self-signed with secret == accessKeyId for an unregistered access key "
                         + "must never validate; unregistered keys must fail closed");
     }
@@ -665,42 +450,8 @@ class RdsSigV4ValidatorTest {
                 900
         );
 
-        assertTrue(validator.validate(token, "admin", unboundBinding()),
+        assertTrue(validator.validate(token, "admin"),
                 "The well-known \"test\"/\"test\" local-dev credential pair must still validate");
-    }
-
-    /**
-     * The database user comes straight from the client's startup message and ends up in the
-     * {@code rds-db} resource the refusal names, so one carrying line breaks must not be able
-     * to forge extra log lines through that warning.
-     */
-    @Test
-    void refusedConnectWarningStripsControlCharactersFromTheDbUser() throws Exception {
-        IamService iamService = IamServiceTestHelper.iamServiceWithUserPolicy(
-                "AKIDRDS", "secret-rds", "jane", S3_ONLY_POLICY);
-        RdsSigV4Validator validator = new RdsSigV4Validator(iamService, () -> true);
-        String dbUser = "jane\r\nINJECTED";
-        String token = SigV4TokenTestHelper.createRdsToken(
-                "db.example.local", 3307, dbUser, "AKIDRDS", "secret-rds",
-                Instant.now().minusSeconds(60), 900);
-
-        List<LogRecord> records = LogCapture.capture(RdsSigV4Validator.class,
-                () -> assertFalse(validator.validate(token, dbUser, exampleBinding())));
-
-        List<String> refusals = records.stream()
-                .map(RdsSigV4ValidatorTest::render)
-                .filter(message -> message.contains("rds-db:connect"))
-                .toList();
-        assertEquals(1, refusals.size(), "expected one refusal warning, got: " + records);
-        assertTrue(refusals.get(0).contains("INJECTED"));
-        assertFalse(refusals.get(0).contains("\r") || refusals.get(0).contains("\n"),
-                "control characters must be stripped from the warning: " + refusals.get(0));
-    }
-
-    private static String render(LogRecord record) {
-        return record.getParameters() == null
-                ? record.getMessage()
-                : MessageFormat.format(record.getMessage(), record.getParameters());
     }
 
     @Test

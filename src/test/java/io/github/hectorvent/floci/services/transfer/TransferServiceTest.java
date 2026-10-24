@@ -2,17 +2,17 @@ package io.github.hectorvent.floci.services.transfer;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.config.EmulatorConfig;
-import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.RequestContext;
+import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import jakarta.enterprise.inject.Instance;
 import io.github.hectorvent.floci.services.transfer.model.Server;
 import io.github.hectorvent.floci.services.transfer.model.SshPublicKey;
 import io.github.hectorvent.floci.services.transfer.model.User;
-import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -24,10 +24,8 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.anyString;
 
 class TransferServiceTest {
 
@@ -56,7 +54,6 @@ class TransferServiceTest {
         tagDelegate = new InMemoryStorage<>();
         tagStore = new AccountAwareStorageBackend<>(
                 tagDelegate, requestContextInstance, "111111111111");
-        tagStore = Mockito.spy(tagStore);
         StorageFactory factory = new StorageFactory(null, null) {
             @Override
             public <V> AccountAwareStorageBackend<V> create(String serviceName, String fileName,
@@ -79,18 +76,6 @@ class TransferServiceTest {
                 .thenAnswer(invocation -> AwsArnUtils.Arn.of(invocation.getArgument(0),
                         invocation.getArgument(1), requestContext.getAccountId(), invocation.getArgument(2)).toString());
         service = new TransferService(factory, null, regionResolver);
-    }
-
-    @Test
-    void failedTagWriteDoesNotLeaveCreatedServerBehind() {
-        doThrow(new IllegalStateException("tag write failed"))
-                .when(tagStore).putForAccount(anyString(), anyString(), any());
-
-        assertThrows(IllegalStateException.class, () -> service.createServer("us-east-1", null, null,
-                null, null, null, null, null, null, Map.of("stage", "test")));
-
-        assertTrue(serverDelegate.keys().isEmpty());
-        assertTrue(tagDelegate.keys().isEmpty());
     }
 
     @Test

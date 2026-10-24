@@ -229,8 +229,7 @@ class PostgresWireDecoderTest {
         byte[] hostile = new byte[]{'Q', 0x7F, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF};
         PostgresWireDecoder decoder = new PostgresWireDecoder(new ByteArrayInputStream(hostile));
         IOException ex = assertThrows(IOException.class, decoder::nextMessage);
-        assertTrue(ex.getMessage().contains("exceeds the " + PostgresWireDecoder.MAX_MESSAGE_BYTES + " byte limit"),
-                ex.getMessage());
+        assertTrue(ex.getMessage().contains("Refusing"), ex.getMessage());
     }
 
     @Test

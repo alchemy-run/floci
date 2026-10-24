@@ -1,11 +1,12 @@
 package io.github.hectorvent.floci.services.msk;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.dockerjava.api.DockerClient;
-import com.github.dockerjava.api.exception.NotFoundException;
+import com.github.dockerjava.api.command.InspectContainerCmd;
+import com.github.dockerjava.api.command.InspectContainerResponse;
+import com.github.dockerjava.api.model.ExposedPort;
+import com.github.dockerjava.api.model.Ports;
 import com.sun.net.httpserver.HttpServer;
 import io.github.hectorvent.floci.config.EmulatorConfig;
-import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
@@ -28,26 +29,19 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicReference;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -101,12 +95,10 @@ class RedpandaManagerTest {
         lenient().when(storage.hostPersistentPath()).thenReturn(tempDir.toAbsolutePath().toString());
 
         lenient().when(embeddedDnsServer.getServerIp()).thenReturn(Optional.empty());
-        // The real retry loop, driven by the stubbed allocate() and verified release().
-        lenient().when(portAllocator.allocateAndStart(eq(9300), eq(9399), any())).thenCallRealMethod();
 
         ContainerBuilder containerBuilder = new ContainerBuilder(config, dockerHostResolver, embeddedDnsServer);
         manager = new RedpandaManager(containerBuilder, lifecycleManager, logStreamer, containerDetector,
-                config, regionResolver, portAllocator, new ObjectMapper());
+                config, regionResolver, portAllocator);
 
         lenient().when(logStreamer.generateLogStreamName(any())).thenReturn("log-stream");
         lenient().when(regionResolver.getDefaultRegion()).thenReturn("us-east-1");
@@ -119,51 +111,6 @@ class RedpandaManagerTest {
         if (adminServer != null) {
             adminServer.stop(0);
         }
-    }
-
-    @Test
-    void aPersistedVolumeNameIsMountedVerbatim() {
-        when(lifecycleManager.createAndStart(any())).thenReturn(
-                new ContainerInfo("container-1", Map.of(KAFKA_PORT, new EndpointInfo("h", KAFKA_PORT))));
-        when(config.storage().hostPersistentPath()).thenReturn("");
-        MskCluster cluster = newCluster();
-        cluster.setDockerVolumeName("floci-aws-msk-abc123");
-
-        manager.startContainer(cluster);
-
-        verify(lifecycleManager).ensureVolume("floci-aws-msk-abc123");
-        assertEquals("floci-aws-msk-abc123", cluster.getDockerVolumeName(),
-                "a persisted volume name must never be rewritten");
-    }
-
-    @Test
-    void aPreUpgradeClusterMountsItsLegacyVolumeAndKeepsThatName() {
-        // No persisted name means a record written before the field existed, so the cluster's
-        // data lives in the legacy-prefixed volume. Mounting the current name would silently
-        // start an empty broker and strand every topic.
-        when(lifecycleManager.createAndStart(any())).thenReturn(
-                new ContainerInfo("container-2", Map.of(KAFKA_PORT, new EndpointInfo("h", KAFKA_PORT))));
-        when(config.storage().hostPersistentPath()).thenReturn("");
-        MskCluster cluster = newCluster();
-        cluster.setDockerVolumeName(null);
-
-        manager.startContainer(cluster);
-
-        verify(lifecycleManager).ensureVolume("floci-msk-abc123");
-        verify(lifecycleManager, never()).ensureVolume("floci-aws-msk-abc123");
-        assertEquals("floci-msk-abc123", cluster.getDockerVolumeName(),
-                "the legacy name must be backfilled onto the record, not recomputed each start");
-    }
-
-    @Test
-    void deletingAPreUpgradeClusterRemovesItsLegacyVolume() {
-        when(config.storage().mode()).thenReturn("memory");
-        MskCluster cluster = newCluster();
-        cluster.setDockerVolumeName(null);
-
-        manager.removeClusterStorage(cluster);
-
-        verify(lifecycleManager).removeVolume("floci-msk-abc123");
     }
 
     private MskCluster newCluster() {
@@ -186,189 +133,22 @@ class RedpandaManagerTest {
         return adminServer.getAddress().getPort();
     }
 
-    private MskCluster clusterWithAdminPort(int adminHostPort) {
-        when(lifecycleManager.resolveEndpoint("container-id", RedpandaManager.ADMIN_PORT, null))
-                .thenReturn(new EndpointInfo("localhost", adminHostPort));
-        MskCluster cluster = newCluster();
-        cluster.setContainerId("container-id");
-        cluster.setBootstrapBrokers("localhost:19092");
-        return cluster;
-    }
-
-    @Test
-    void createScramUser() throws Exception {
-        int port = startFakeAdminServer();
-        AtomicReference<String> body = new AtomicReference<>();
-        AtomicReference<String> method = new AtomicReference<>();
-        adminServer.createContext("/v1/security/users", exchange -> {
-            if ("GET".equals(exchange.getRequestMethod())) {
-                byte[] users = "[]".getBytes(StandardCharsets.UTF_8);
-                exchange.sendResponseHeaders(200, users.length);
-                exchange.getResponseBody().write(users);
-                exchange.close();
-                return;
-            }
-            method.set(exchange.getRequestMethod());
-            body.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
-            exchange.sendResponseHeaders(200, -1);
-            exchange.close();
-        });
-
-        manager.createUser(clusterWithAdminPort(port), "alice", "password");
-
-        assertEquals("POST", method.get());
-        assertEquals(Map.of("username", "alice", "password", "password", "algorithm", "SCRAM-SHA-512"),
-                new ObjectMapper().readValue(body.get(), Map.class));
-    }
-
-    @Test
-    void createScramUserUpdatesExistingUser() throws Exception {
-        int port = startFakeAdminServer();
-        AtomicReference<String> updatePath = new AtomicReference<>();
-        AtomicReference<String> updateBody = new AtomicReference<>();
-        AtomicReference<String> updateMethod = new AtomicReference<>();
-        adminServer.createContext("/v1/security/users", exchange -> {
-            if ("GET".equals(exchange.getRequestMethod())) {
-                byte[] users = "[\"alice /+\"]".getBytes(StandardCharsets.UTF_8);
-                exchange.sendResponseHeaders(200, users.length);
-                exchange.getResponseBody().write(users);
-            } else {
-                updateMethod.set(exchange.getRequestMethod());
-                updatePath.set(exchange.getRequestURI().getRawPath());
-                updateBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
-                exchange.sendResponseHeaders(200, -1);
-            }
-            exchange.close();
-        });
-
-        manager.createUser(clusterWithAdminPort(port), "alice /+", "new-password");
-
-        assertEquals("/v1/security/users/alice%20%2F%2B", updatePath.get());
-        assertEquals("PUT", updateMethod.get());
-        assertEquals("new-password", new ObjectMapper().readTree(updateBody.get()).get("password").textValue());
-    }
-
-    @Test
-    void createScramUserSurfacesBrokerErrorsWithoutLeakingResponse() throws Exception {
-        int port = startFakeAdminServer();
-        adminServer.createContext("/v1/security/users", exchange -> {
-            if ("GET".equals(exchange.getRequestMethod())) {
-                byte[] users = "[]".getBytes(StandardCharsets.UTF_8);
-                exchange.sendResponseHeaders(200, users.length);
-                exchange.getResponseBody().write(users);
-                exchange.close();
-                return;
-            }
-            byte[] body = "sensitive-password".getBytes(StandardCharsets.UTF_8);
-            exchange.sendResponseHeaders(500, body.length);
-            exchange.getResponseBody().write(body);
-            exchange.close();
-        });
-
-        AwsException error = assertThrows(AwsException.class,
-                () -> manager.createUser(clusterWithAdminPort(port), "alice", "sensitive-password"));
-
-        assertEquals("InternalServerErrorException", error.getErrorCode());
-        assertFalse(error.getMessage().contains("sensitive-password"));
-    }
-
-    @Test
-    void deleteScramUser() throws Exception {
-        int port = startFakeAdminServer();
-        AtomicReference<String> path = new AtomicReference<>();
-        AtomicReference<String> method = new AtomicReference<>();
-        adminServer.createContext("/v1/security/users", exchange -> {
-            path.set(exchange.getRequestURI().getRawPath());
-            method.set(exchange.getRequestMethod());
-            exchange.sendResponseHeaders(200, -1);
-            exchange.close();
-        });
-
-        manager.deleteUser(clusterWithAdminPort(port), "alice /+");
-
-        assertEquals("DELETE", method.get());
-        assertEquals("/v1/security/users/alice%20%2F%2B", path.get());
-    }
-
-    @Test
-    void deleteScramUserToleratesAlreadyDeletedUser() throws Exception {
-        int port = startFakeAdminServer();
-        adminServer.createContext("/v1/security/users", exchange -> {
-            exchange.sendResponseHeaders(404, -1);
-            exchange.close();
-        });
-
-        assertDoesNotThrow(() -> manager.deleteUser(clusterWithAdminPort(port), "alice"));
-    }
-
-    @Test
-    void checkScramUserExistsReturnsTrueWhenPresent() throws Exception {
-        int port = startFakeAdminServer();
-        adminServer.createContext("/v1/security/users", exchange -> {
-            byte[] users = "[\"alice\", \"bob\"]".getBytes(StandardCharsets.UTF_8);
-            exchange.sendResponseHeaders(200, users.length);
-            exchange.getResponseBody().write(users);
-            exchange.close();
-        });
-
-        MskCluster cluster = clusterWithAdminPort(port);
-        assertTrue(manager.listUsers(cluster).contains("alice"));
-    }
-
-    @Test
-    void checkScramUserExistsReturnsFalseWhenUserNotFound() throws Exception {
-        int port = startFakeAdminServer();
-        adminServer.createContext("/v1/security/users", exchange -> {
-            byte[] users = "[\"bob\"]".getBytes(StandardCharsets.UTF_8);
-            exchange.sendResponseHeaders(200, users.length);
-            exchange.getResponseBody().write(users);
-            exchange.close();
-        });
-
-        MskCluster cluster = clusterWithAdminPort(port);
-        assertFalse(manager.listUsers(cluster).contains("alice"));
-    }
-
-    @Test
-    void deleteScramUserReportsBrokerFailure() throws Exception {
-        int port = startFakeAdminServer();
-        adminServer.createContext("/v1/security/users", exchange -> {
-            exchange.sendResponseHeaders(503, -1);
-            exchange.close();
-        });
-        MskCluster cluster = clusterWithAdminPort(port);
-        AwsException error = assertThrows(AwsException.class, () -> manager.deleteUser(cluster, "alice"));
-        assertEquals("InternalServerErrorException", error.getErrorCode());
-    }
-
-    @Test
-    void sendAdminRequestRejectsClusterWithoutBroker() {
-        AwsException error = assertThrows(AwsException.class, 
-            () -> manager.sendAdminRequest(newCluster(), "/v1/security/users", "GET", null));
-        assertEquals("ServiceUnavailableException", error.getErrorCode());
-    }
-    
-    @Test
-    void adminRequestsReportMissingBrokerWhenEndpointResolutionFails() {
-        when(lifecycleManager.resolveEndpoint("container-fail", RedpandaManager.ADMIN_PORT, null))
-                .thenThrow(new NotFoundException("container not found"));
-
-        MskCluster cluster = newCluster();
-        cluster.setContainerId("container-fail");
-        cluster.setBootstrapBrokers("localhost:19092");
-
-        assertFalse(manager.isReady(cluster));
-        AwsException error = assertThrows(AwsException.class, () -> manager.deleteUser(cluster, "alice"));
-        assertEquals("ServiceUnavailableException", error.getErrorCode());
-        assertEquals("Cluster has no backing Kafka broker.", error.getMessage());
-    }
-
     @Test
     void isReadyPollsTheCorrectAdminReadinessPathInNativeMode() throws Exception {
         int adminHostPort = startFakeAdminServer();
 
-        when(lifecycleManager.resolveEndpoint("container-id", RedpandaManager.ADMIN_PORT, null))
-                .thenReturn(new EndpointInfo("localhost", adminHostPort));
+        when(containerDetector.isRunningInContainer()).thenReturn(false);
+
+        DockerClient dockerClient = mock(DockerClient.class);
+        InspectContainerCmd inspectCmd = mock(InspectContainerCmd.class);
+        InspectContainerResponse inspect = mock(InspectContainerResponse.class, RETURNS_DEEP_STUBS);
+
+        when(lifecycleManager.getDockerClient()).thenReturn(dockerClient);
+        when(dockerClient.inspectContainerCmd("container-id")).thenReturn(inspectCmd);
+        when(inspectCmd.exec()).thenReturn(inspect);
+        when(inspect.getNetworkSettings().getPorts().getBindings()).thenReturn(Map.of(
+                ExposedPort.tcp(RedpandaManager.ADMIN_PORT),
+                new Ports.Binding[] { new Ports.Binding("0.0.0.0", String.valueOf(adminHostPort)) }));
 
         MskCluster cluster = newCluster();
         cluster.setContainerId("container-id");
@@ -377,36 +157,6 @@ class RedpandaManagerTest {
         assertTrue(manager.isReady(cluster),
                 "isReady() should report ready once /v1/status/ready answers 200; "
                         + "if it regresses to polling /ready (which always 404s), this assertion fails");
-    }
-
-    @Test
-    void adminBaseUrlResolvesFromThePersistedContainerIdOnTheBrokersNetworkAfterRestart() {
-        when(config.services().dockerNetwork()).thenReturn(Optional.of("floci-net"));
-        when(lifecycleManager.resolveEndpoint("container-460", RedpandaManager.ADMIN_PORT, "floci-net"))
-                .thenReturn(new EndpointInfo("172.18.0.9", RedpandaManager.ADMIN_PORT));
-
-        // A cluster record as a killed Floci left it: still CREATING, with a host-form bootstrap
-        // string, and nothing in this freshly constructed manager's memory about its container.
-        MskCluster cluster = newCluster();
-        cluster.setContainerId("container-460");
-        cluster.setBootstrapBrokers("localhost:9300");
-
-        assertEquals("http://172.18.0.9:9644", manager.adminBaseUrl(cluster),
-                "readiness must not depend on in-memory state or on the bootstrap string's format");
-    }
-
-    @Test
-    void isReadyReportsNotReadyWhenTheContainerIsGone() {
-        when(lifecycleManager.resolveEndpoint("container-461", RedpandaManager.ADMIN_PORT, null))
-                .thenThrow(new NotFoundException("No such container: container-461"));
-
-        MskCluster cluster = newCluster();
-        cluster.setContainerId("container-461");
-        cluster.setBootstrapBrokers("172.18.0.10:9092");
-
-        assertFalse(manager.isReady(cluster),
-                "a failed endpoint lookup must not escape into the readiness poller, "
-                        + "which would abandon its pass over the remaining clusters");
     }
 
     @Test
@@ -433,9 +183,39 @@ class RedpandaManagerTest {
     }
 
     @Test
-    void containerModeAdvertisesContainerNameOnInternalListenerAndHostPortOnHostListener() {
+    void iamClusterGetsANamedSaslIamListenerAdvertisingItsBrokerHost() {
+        when(containerDetector.isRunningInContainer()).thenReturn(false);
+        when(portAllocator.allocate(9300, 9399)).thenReturn(54321);
+
+        ContainerInfo info = new ContainerInfo("container-iam", Map.of(
+                KAFKA_PORT, new EndpointInfo("localhost", 54321),
+                RedpandaManager.SASL_IAM_PORT, new EndpointInfo("localhost", 60001)));
+        when(lifecycleManager.createAndStart(any())).thenReturn(info);
+
+        MskCluster cluster = newCluster();
+        cluster.setIamBrokerHost("boot-abc12345.kafka-serverless.us-east-1.localhost.floci.io");
+        ArgumentCaptor<ContainerSpec> specCaptor = ArgumentCaptor.forClass(ContainerSpec.class);
+
+        manager.startContainer(cluster);
+
+        verify(lifecycleManager).createAndStart(specCaptor.capture());
+        ContainerSpec spec = specCaptor.getValue();
+        int listeners = spec.cmd().indexOf("--kafka-addr");
+        assertTrue(listeners >= 0, "cmd should declare named listeners");
+        assertEquals("internal://0.0.0.0:9092,sasl_iam://0.0.0.0:9098", spec.cmd().get(listeners + 1));
+        int advertised = spec.cmd().indexOf("--advertise-kafka-addr");
+        assertEquals("internal://localhost:54321,"
+                        + "sasl_iam://boot-abc12345.kafka-serverless.us-east-1.localhost.floci.io:9098",
+                spec.cmd().get(advertised + 1));
+        assertEquals(Integer.valueOf(0), spec.portBindings().get(RedpandaManager.SASL_IAM_PORT));
+
+        assertEquals("localhost:54321", cluster.getBootstrapBrokers());
+        assertEquals("localhost:60001", cluster.getIamBackendAddress());
+    }
+
+    @Test
+    void containerModeAdvertisesContainerNameAddress() {
         when(containerDetector.isRunningInContainer()).thenReturn(true);
-        when(portAllocator.allocate(9300, 9399)).thenReturn(9301);
 
         ContainerInfo info = new ContainerInfo("container-456",
                 Map.of(KAFKA_PORT, new EndpointInfo("172.18.0.5", KAFKA_PORT)));
@@ -443,165 +223,22 @@ class RedpandaManagerTest {
 
         ArgumentCaptor<ContainerSpec> specCaptor = ArgumentCaptor.forClass(ContainerSpec.class);
 
-        MskCluster cluster = newCluster();
-        manager.startContainer(cluster);
+        manager.startContainer(newCluster());
 
         verify(lifecycleManager).createAndStart(specCaptor.capture());
         ContainerSpec spec = specCaptor.getValue();
 
-        int listenIndex = spec.cmd().indexOf("--kafka-addr");
-        assertTrue(listenIndex >= 0, "cmd should contain --kafka-addr");
-        assertEquals("internal://0.0.0.0:9092,host://0.0.0.0:9093", spec.cmd().get(listenIndex + 1));
         int flagIndex = spec.cmd().indexOf("--advertise-kafka-addr");
         assertTrue(flagIndex >= 0, "cmd should contain --advertise-kafka-addr");
-        assertEquals("internal://floci-aws-msk-abc123:9092,host://localhost:9301",
-                spec.cmd().get(flagIndex + 1));
+        assertEquals("floci-msk-abc123:9092", spec.cmd().get(flagIndex + 1));
 
-        assertFalse(spec.portBindings().containsKey(KAFKA_PORT),
-                "the internal listener stays on the Docker network");
-        assertEquals(Integer.valueOf(9301), spec.portBindings().get(RedpandaManager.KAFKA_HOST_LISTENER_PORT),
-                "the host listener is published so clients on the Docker host can reach the broker");
+        assertFalse(spec.portBindings().containsKey(KAFKA_PORT), "container mode should not publish ports to host");
         assertTrue(spec.exposedPorts().contains(KAFKA_PORT));
         assertTrue(spec.exposedPorts().contains(RedpandaManager.ADMIN_PORT));
         assertFalse(Files.exists(tempDir.resolve("msk").resolve("test-cluster")),
                 "container mode must not create host directories from inside the emulator container");
 
-        assertEquals("172.18.0.5:9092", cluster.getBootstrapBrokers(),
-                "without a bootstrap hostname, GetBootstrapBrokers keeps the Docker-network address");
-    }
-
-    @Test
-    void containerModeListsBothListenersWhenBootstrapHostnameIsSet() {
-        when(containerDetector.isRunningInContainer()).thenReturn(true);
-        when(config.services().msk().bootstrapHostname()).thenReturn(Optional.of("kafka.local"));
-        when(portAllocator.allocate(9300, 9399)).thenReturn(9302);
-
-        ContainerInfo info = new ContainerInfo("container-457",
-                Map.of(KAFKA_PORT, new EndpointInfo("172.18.0.6", KAFKA_PORT)));
-        when(lifecycleManager.createAndStart(any())).thenReturn(info);
-
-        ArgumentCaptor<ContainerSpec> specCaptor = ArgumentCaptor.forClass(ContainerSpec.class);
-
-        MskCluster cluster = newCluster();
-        manager.startContainer(cluster);
-
-        verify(lifecycleManager).createAndStart(specCaptor.capture());
-        ContainerSpec spec = specCaptor.getValue();
-        int flagIndex = spec.cmd().indexOf("--advertise-kafka-addr");
-        assertEquals("internal://floci-aws-msk-abc123:9092,host://kafka.local:9302",
-                spec.cmd().get(flagIndex + 1));
-        assertEquals("floci-aws-msk-abc123:9092,kafka.local:9302", cluster.getBootstrapBrokers(),
-                "both listeners are listed, the internal one first, so host and sibling-container "
-                        + "clients can each discover the broker");
-    }
-
-    @Test
-    void containerModeTreatsBlankBootstrapHostnameAsUnset() {
-        when(containerDetector.isRunningInContainer()).thenReturn(true);
-        when(config.services().msk().bootstrapHostname()).thenReturn(Optional.of("  "));
-        when(portAllocator.allocate(9300, 9399)).thenReturn(9305);
-        when(lifecycleManager.createAndStart(any())).thenReturn(new ContainerInfo("container-459",
-                Map.of(KAFKA_PORT, new EndpointInfo("172.18.0.8", KAFKA_PORT))));
-
-        ArgumentCaptor<ContainerSpec> specCaptor = ArgumentCaptor.forClass(ContainerSpec.class);
-
-        MskCluster cluster = newCluster();
-        manager.startContainer(cluster);
-
-        verify(lifecycleManager).createAndStart(specCaptor.capture());
-        ContainerSpec spec = specCaptor.getValue();
-        int flagIndex = spec.cmd().indexOf("--advertise-kafka-addr");
-        assertEquals("internal://floci-aws-msk-abc123:9092,host://localhost:9305",
-                spec.cmd().get(flagIndex + 1));
-        assertEquals("172.18.0.8:9092", cluster.getBootstrapBrokers());
-    }
-
-    @Test
-    void containerModeReleasesHostListenerPortWhenStartFails() {
-        when(containerDetector.isRunningInContainer()).thenReturn(true);
-        when(portAllocator.allocate(9300, 9399)).thenReturn(9303);
-        when(lifecycleManager.createAndStart(any())).thenThrow(new RuntimeException("boom"));
-
-        assertThrows(RuntimeException.class, () -> manager.startContainer(newCluster()));
-
-        verify(portAllocator).release(9303);
-    }
-
-    @Test
-    void releasesHostPortWhenVolumeSetupFailsBeforeStart() {
-        when(config.storage().hostPersistentPath()).thenReturn("");
-        when(containerDetector.isRunningInContainer()).thenReturn(true);
-        when(portAllocator.allocate(9300, 9399)).thenReturn(9306);
-        doThrow(new RuntimeException("Docker unreachable"))
-                .when(lifecycleManager).ensureVolume("floci-aws-msk-abc123");
-
-        assertThrows(RuntimeException.class, () -> manager.startContainer(newCluster()));
-
-        verify(portAllocator).release(9306);
-        verify(lifecycleManager, never()).createAndStart(any());
-    }
-
-    @Test
-    void tryStartContainerReportsUnavailableWhenNoDaemonAnswers() {
-        when(lifecycleManager.createAndStart(any()))
-                .thenThrow(new RuntimeException("java.net.SocketException: No such file or directory"));
-        when(lifecycleManager.getDockerClient())
-                .thenThrow(new RuntimeException("java.net.SocketException: No such file or directory"));
-
-        assertFalse(manager.tryStartContainer(newCluster()));
-    }
-
-    @Test
-    void tryStartContainerPropagatesFailuresWhileTheDaemonIsReachable() {
-        when(lifecycleManager.createAndStart(any()))
-                .thenThrow(new RuntimeException("no such image: redpandadata/redpanda:latest"));
-        when(lifecycleManager.getDockerClient()).thenReturn(mock(DockerClient.class, RETURNS_DEEP_STUBS));
-
-        RuntimeException failure = assertThrows(RuntimeException.class,
-                () -> manager.tryStartContainer(newCluster()));
-        assertEquals("no such image: redpandadata/redpanda:latest", failure.getMessage());
-    }
-
-    @Test
-    void movesToTheNextHostPortWhenDockerReportsTheChosenOneInUse() {
-        // From inside a container, allocate() cannot see a host process holding a port, so the
-        // collision only shows up when Docker tries to bind it.
-        when(containerDetector.isRunningInContainer()).thenReturn(true);
-        when(portAllocator.allocate(9300, 9399)).thenReturn(9307, 9308);
-        when(lifecycleManager.createAndStart(any()))
-                .thenThrow(new RuntimeException("listen tcp4 0.0.0.0:9307: bind: address already in use"))
-                .thenReturn(new ContainerInfo("container-461",
-                        Map.of(KAFKA_PORT, new EndpointInfo("172.18.0.9", KAFKA_PORT))));
-
-        ArgumentCaptor<ContainerSpec> specCaptor = ArgumentCaptor.forClass(ContainerSpec.class);
-
-        MskCluster cluster = newCluster();
-        manager.startContainer(cluster);
-
-        verify(lifecycleManager, times(2)).createAndStart(specCaptor.capture());
-        ContainerSpec retried = specCaptor.getAllValues().get(1);
-        assertEquals("internal://floci-aws-msk-abc123:9092,host://localhost:9308",
-                retried.cmd().get(retried.cmd().indexOf("--advertise-kafka-addr") + 1),
-                "the listener args are rebuilt for the new port");
-        assertEquals(Integer.valueOf(9308), retried.portBindings().get(RedpandaManager.KAFKA_HOST_LISTENER_PORT));
-        assertEquals("container-461", cluster.getContainerId());
-        verify(portAllocator).release(9307);
-        verify(portAllocator, never()).release(9308);
-    }
-
-    @Test
-    void stopContainerInContainerModeReleasesHostListenerPort() {
-        when(containerDetector.isRunningInContainer()).thenReturn(true);
-        when(portAllocator.allocate(9300, 9399)).thenReturn(9304);
-        when(lifecycleManager.createAndStart(any())).thenReturn(new ContainerInfo("container-458",
-                Map.of(KAFKA_PORT, new EndpointInfo("172.18.0.7", KAFKA_PORT))));
-
-        MskCluster cluster = newCluster();
-        manager.startContainer(cluster);
-        manager.stopContainer(cluster);
-
-        verify(lifecycleManager).stopAndRemove("container-458", null);
-        verify(portAllocator).release(9304);
+        verifyNoInteractions(portAllocator);
     }
 
     @Test

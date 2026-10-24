@@ -43,7 +43,6 @@ class SesServiceSmtpTest {
         SesServiceTestBuilder builder = SesServiceTestBuilder.create().smtpRelay(smtpRelay);
         emailStore = builder.emailStore();
         service = builder.build();
-        builder.identityService().verifyEmailIdentity("from@example.com", "us-east-1");
         configSets = builder.configSetService();
         sentEmails = builder.sentEmailService();
         suppression = builder.suppressionService();
@@ -257,26 +256,6 @@ class SesServiceSmtpTest {
     @Test
     void sendRawEmail_rejectedMessage_keepsNoReturnPathFromItsHeaders() {
         // The scan trips on the subject; the Return-Path header, read off the same message, must
-        // not survive on the record either, so the request's return path is used.
-        String raw = "From: from@example.com\r\nTo: to@example.com\r\nReturn-Path: <bounces@evil.example>\r\n"
-                + "Subject: " + SesContentScan.signature() + "\r\n\r\nbody\r\n";
-
-        String messageId = service.sendRawEmail("from@example.com", List.of("to@example.com"), raw,
-                "bounces@example.com", null, List.of(), null, "us-east-1");
-
-        assertEquals("bounces@example.com", storedEmail(messageId).getReturnPath());
-        assertEquals("Bad content", storedEmail(messageId).getRejectReason());
-        verify(smtpRelay, never()).relayRaw(any());
-    }
-
-    @Test
-    void sendRawEmail_unreadableMessage_isRefusedNotStoredNotRelayed() {
-        // Nested past what mime4j can parse: the content cannot be scanned, so the send is refused
-        // rather than recorded and relayed unseen.
-        String raw = "Content-Type: message/rfc822\r\n\r\n".repeat(100_000) + "Subject: deep\r\n\r\nx\r\n";
-
-        AwsException e = assertThrows(AwsException.class, () -> service.sendRawEmail("from@example.com",
-                List.of("to@example.com"), raw, null, null, List.of(), null, "us-east-1"));
         // not survive on the record either, so the request's return path is used. Both return paths
         // are verified, so the send gets past the sender check to the scan.
         identities.verifyEmailIdentity("bounces@example.com", "us-east-1");

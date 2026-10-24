@@ -16,7 +16,6 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -31,7 +30,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -51,9 +49,7 @@ class IotDomainConfigurationServiceTest {
             mock(TlsCertificateManager.class));
 
     private static EmulatorConfig endpointConfig(AtomicReference<String> endpointAddress) {
-        EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
-        when(config.services().iot().endpointAddress())
-                .thenAnswer(invocation -> Optional.ofNullable(endpointAddress.get()));
+        EmulatorConfig config = mock(EmulatorConfig.class);
         when(config.iotEndpointAddress()).thenAnswer(invocation -> endpointAddress.get());
         return config;
     }
@@ -210,23 +206,6 @@ class IotDomainConfigurationServiceTest {
         assertEquals("JOBS", service.describeDomainConfiguration("iot:Jobs", REGION).getServiceType());
         assertTrue(service.describeDomainConfiguration("iot:Jobs", "eu-west-1").getDomainConfigurationArn()
                 .startsWith("arn:aws:iot:eu-west-1:"));
-    }
-
-    @Test
-    void awsManagedConfigurationsCarryTheAwsShapedEndpointPerTypeWhenNoAddressIsConfigured() {
-        endpointAddress.set(null);
-        String prefix = IotEndpoints.accountPrefix("000000000000");
-
-        assertEquals(prefix + "-ats.iot." + REGION + ".amazonaws.com",
-                service.describeDomainConfiguration("iot:Data-ATS", REGION).getDomainName());
-        assertEquals(prefix + ".iot." + REGION + ".amazonaws.com",
-                service.describeDomainConfiguration("iot:Data", REGION).getDomainName());
-        assertEquals(prefix + ".credentials.iot." + REGION + ".amazonaws.com",
-                service.describeDomainConfiguration("iot:CredentialProvider", REGION).getDomainName());
-        assertEquals(prefix + ".jobs.iot." + REGION + ".amazonaws.com",
-                service.describeDomainConfiguration("iot:Jobs", REGION).getDomainName());
-        assertEquals(prefix + "-ats.iot.eu-west-1.amazonaws.com",
-                service.describeDomainConfiguration("iot:Data-ATS", "eu-west-1").getDomainName());
     }
 
     @Test

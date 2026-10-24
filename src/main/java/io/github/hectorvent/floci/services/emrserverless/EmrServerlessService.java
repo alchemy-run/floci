@@ -67,14 +67,12 @@ public class EmrServerlessService {
 
     @Inject
     public EmrServerlessService(EmulatorConfig config, StorageFactory storageFactory,
-                                RegionResolver regionResolver, Clock clock,
-            EmrServerlessJobService jobs) {
+                                RegionResolver regionResolver, Clock clock) {
         this.config = config;
         this.regionResolver = regionResolver;
         this.clock = clock;
         this.storage = storageFactory.create("emrserverless", "emr-serverless-applications.json",
                 new TypeReference<Map<String, Application>>() {});
-        this.jobs = jobs;
     }
 
     public synchronized Application createApplication(CreateApplicationRequest request) {
@@ -490,7 +488,8 @@ public class EmrServerlessService {
         return summary;
     }
 
-    private final EmrServerlessJobService jobs;
+    @Inject
+    EmrServerlessJobService jobs;
 
     public PaginatedResult<ObjectNode> listJobRuns(String applicationId, Integer maxResults, String nextToken,
                                                    List<String> states, Double after, Double before, String mode) {

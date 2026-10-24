@@ -206,8 +206,7 @@ public class GlueService {
                        GlueSchemaRegistryService schemaRegistryService,
                        RegionResolver regionResolver,
                        ResourceGroupsTaggingService resourceGroupsTaggingService,
-                       KmsService kmsService,
-            GlueCrawlerRunner crawlerRunner) {
+                       KmsService kmsService) {
         this.databaseStore = storageFactory.create("glue", "databases.json", new TypeReference<>() {});
         this.tableStore = storageFactory.create("glue", "tables.json", new TypeReference<>() {});
         this.tableVersionStore = storageFactory.create("glue", "table_versions.json", new TypeReference<>() {});
@@ -235,7 +234,6 @@ public class GlueService {
         this.kmsService = kmsService;
         this.jobRunStore = storageFactory.create("glue", "job_runs.json", new TypeReference<>() {});
         this.jobBookmarkStore = storageFactory.create("glue", "job_bookmarks.json", new TypeReference<>() {});
-        this.crawlerRunner = crawlerRunner;
     }
 
     GlueService(StorageBackend<String, Database> databaseStore,
@@ -282,7 +280,6 @@ public class GlueService {
         this.kmsService = kmsService;
         this.jobRunStore = new io.github.hectorvent.floci.core.storage.InMemoryStorage<>();
         this.jobBookmarkStore = new io.github.hectorvent.floci.core.storage.InMemoryStorage<>();
-        this.crawlerRunner = null;
     }
 
     public SecurityConfiguration createSecurityConfiguration(String name, JsonNode encryptionConfiguration,
@@ -3048,7 +3045,8 @@ public class GlueService {
     private final StorageBackend<String, Map<String, Object>> jobBookmarkStore;
 
 
-    private final GlueCrawlerRunner crawlerRunner;
+    @Inject
+    GlueCrawlerRunner crawlerRunner;
 
     public String startJobRun(String jobName, Map<String, String> arguments) {
         getJob(jobName);

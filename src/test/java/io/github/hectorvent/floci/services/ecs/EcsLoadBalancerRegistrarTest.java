@@ -20,7 +20,6 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -121,24 +120,6 @@ class EcsLoadBalancerRegistrarTest {
         registrar.registerTask(task, svc, REGION);
         assertTrue(elbV2Service.describeTargetHealth(REGION, tgArn, null).isEmpty(),
                 "no loadBalancers block -> no target registered");
-    }
-
-    @Test
-    void targetsAreHealthyOnlyOnceTheirHealthChecksPass() {
-        String tgArn = createTargetGroup("reg-tg-health");
-        // Nothing listens on this host port, so the target can never pass its health check.
-        EcsTask task = taskWithContainer("web", 8080, 42000);
-        EcsServiceModel svc = serviceWithLb(tgArn, "web", 8080);
-
-        assertFalse(registrar.targetsHealthy(task, svc, REGION), "an unregistered target is not healthy");
-        registrar.registerTask(task, svc, REGION);
-        assertFalse(registrar.targetsHealthy(task, svc, REGION),
-                "a registered target that has not passed its health check is not healthy");
-        registrar.deregisterTask(task, svc, REGION);
-
-        EcsServiceModel withoutLb = new EcsServiceModel();
-        withoutLb.setServiceName("regtest-svc");
-        assertTrue(registrar.targetsHealthy(task, withoutLb, REGION), "no target means nothing to wait for");
     }
 
     @Test

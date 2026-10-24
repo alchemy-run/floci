@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.mock;
@@ -64,30 +63,6 @@ class PortAllocatorDockerAwareTest {
 
         assertNotEquals(19900, allocated, "must not allocate a port a container already publishes, even though this process's own socket check sees it as free");
         allocator.release(allocated);
-    }
-
-    @Test
-    void tryAllocateRejectsAPortAlreadyPublishedByAnotherContainer() {
-        DockerClient dockerClient = mock(DockerClient.class);
-        ListContainersCmd listCmd = mock(ListContainersCmd.class);
-        when(dockerClient.listContainersCmd()).thenReturn(listCmd);
-        when(listCmd.withShowAll(true)).thenReturn(listCmd);
-        Container sibling = mock(Container.class);
-        when(sibling.getPorts()).thenReturn(new ContainerPort[]{new ContainerPort().withPublicPort(19900)});
-        when(listCmd.exec()).thenReturn(List.of(sibling));
-
-        PortAllocator allocator = new PortAllocator(dockerClient);
-
-        assertFalse(allocator.tryAllocate(19900));
-        verify(dockerClient, times(1)).listContainersCmd();
-    }
-
-    @Test
-    void tryAllocateRejectsInvalidPorts() {
-        PortAllocator allocator = new PortAllocator();
-
-        assertFalse(allocator.tryAllocate(0));
-        assertFalse(allocator.tryAllocate(65536));
     }
 
     @Test

@@ -152,7 +152,7 @@ class CognitoCustomDomainOAuthContractIntegrationTest {
                 .header("Pragma", equalTo("no-cache"));
 
         JsonNode claims = jwtPayload(response.path("access_token"));
-        assertEquals("https://cognito-idp.us-east-1.amazonaws.com/" + poolA, claims.path("iss").asText());
+        assertEquals(FLOCI_URL + "/" + poolA, claims.path("iss").asText());
         assertEquals(clientA, claims.path("client_id").asText());
         assertEquals("access", claims.path("token_use").asText());
         assertEquals("aws.cognito.signin.user.admin", claims.path("scope").asText());

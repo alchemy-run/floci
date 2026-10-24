@@ -3,14 +3,10 @@ package io.github.hectorvent.floci.services.kinesisanalytics.container;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.dockerjava.api.DockerClient;
-import com.github.dockerjava.api.exception.NotFoundException;
-import com.github.dockerjava.api.model.MountType;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
 import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
-import io.github.hectorvent.floci.core.common.docker.ContainerExecStubs;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager.ContainerInfo;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager.EndpointInfo;
@@ -18,46 +14,31 @@ import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
 import io.github.hectorvent.floci.core.common.docker.LaunchedContainerAwsEnv;
+import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.services.kinesisanalytics.model.FlinkApplication;
-import io.github.hectorvent.floci.services.kinesisanalytics.model.Snapshot;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
-import io.github.hectorvent.floci.testing.DockerArchiveUploadFixture;
-import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
-import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalInt;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.atLeastOnce;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -85,6 +66,7 @@ class FlinkContainerManagerTest {
     private ContainerLifecycleManager lifecycleManager;
     private LaunchedContainerAwsEnv awsEnv;
     private S3Service s3Service;
+    private FlinkRestClient flinkRest;
     private FlinkContainerManager manager;
 
     @BeforeEach
@@ -106,13 +88,10 @@ class FlinkContainerManagerTest {
         EmulatorConfig.DnsConfig dnsConfig = mock(EmulatorConfig.DnsConfig.class);
         when(dnsConfig.containerFallbackEnabled()).thenReturn(false);
 
-        EmulatorConfig.StorageConfig storageConfig = storageWithInitImage("busybox:stable");
-
         EmulatorConfig config = mock(EmulatorConfig.class);
         when(config.docker()).thenReturn(dockerConfig);
         when(config.services()).thenReturn(servicesConfig);
         when(config.dns()).thenReturn(dnsConfig);
-        when(config.storage()).thenReturn(storageConfig);
         when(config.defaultRegion()).thenReturn("us-west-2");
 
         DockerHostResolver dockerHostResolver = mock(DockerHostResolver.class);
@@ -133,6 +112,7 @@ class FlinkContainerManagerTest {
         s3Service = mock(S3Service.class);
         awsEnv = mock(LaunchedContainerAwsEnv.class);
         when(awsEnv.sdkBaselineEnv(eq("us-west-2"), eq(Optional.empty()))).thenReturn(AWS_ENV);
+        flinkRest = mock(FlinkRestClient.class);
 
         manager = new FlinkContainerManager(
                 containerBuilder,
@@ -143,31 +123,8 @@ class FlinkContainerManagerTest {
                 regionResolver,
                 awsEnv,
                 s3Service,
-                mock(FlinkRestClient.class),
+                flinkRest,
                 MAPPER);
-    }
-
-    private static EmulatorConfig.StorageConfig storageWithInitImage(String initImage) {
-        EmulatorConfig.EfsSharingConfig efs = mock(EmulatorConfig.EfsSharingConfig.class);
-        when(efs.initImage()).thenReturn(initImage);
-        EmulatorConfig.StorageConfig storage = mock(EmulatorConfig.StorageConfig.class);
-        when(storage.efs()).thenReturn(efs);
-        return storage;
-    }
-
-    @Test
-    void deleteSnapshotFilesRemovesTheSavepointInsideTheJobManager() {
-        DockerClient dockerClient = mock(DockerClient.class);
-        when(lifecycleManager.getDockerClient()).thenReturn(dockerClient);
-        List<List<String>> commands = ContainerExecStubs.completeEveryExec(dockerClient, "jm-container-id", 0, "", "");
-        FlinkApplication app = application("my-app");
-        app.setContainerId("jm-container-id");
-        Snapshot snapshot = new Snapshot();
-        snapshot.setFlinkLocation("/savepoints/savepoint-1");
-
-        manager.deleteSnapshotFiles(app, snapshot);
-
-        assertEquals(List.of(List.of("rm", "-rf", "/savepoints/savepoint-1")), commands);
     }
 
     private FlinkApplication application(String name) {
@@ -190,7 +147,7 @@ class FlinkContainerManagerTest {
         when(config.docker()).thenReturn(docker);
         when(docker.logMaxSize()).thenReturn("10m");
         when(docker.logMaxFile()).thenReturn("3");
-        EmulatorConfig.StorageConfig storage = storageWithInitImage("busybox:stable");
+        EmulatorConfig.StorageConfig storage = Mockito.mock(EmulatorConfig.StorageConfig.class);
         when(config.storage()).thenReturn(storage);
         when(storage.hostPersistentPath()).thenReturn("floci-data");
 
@@ -204,7 +161,7 @@ class FlinkContainerManagerTest {
         ContainerBuilder containerBuilder = Mockito.mock(ContainerBuilder.class);
         ContainerBuilder.Builder builder = Mockito.mock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-        when(builder.build()).thenReturn(new ContainerSpec("test-image"));
+        when(builder.build()).thenReturn(Mockito.mock(ContainerSpec.class));
 
         RegionResolver regionResolver = Mockito.mock(RegionResolver.class);
         when(regionResolver.getAccountId()).thenReturn("000000000000");
@@ -217,6 +174,7 @@ class FlinkContainerManagerTest {
 
         FlinkApplication app = new FlinkApplication();
         app.setApplicationName("my-app");
+        app.setApplicationArn("arn:aws:kinesisanalytics:us-east-1:000000000000:application/my-app");
 
         manager.startCluster(app);
 
@@ -326,24 +284,6 @@ class FlinkContainerManagerTest {
     }
 
     @Test
-    void startCluster_savepointsVolume_isChownedToFlinkUser() {
-        FlinkApplication app = application("snap");
-        when(lifecycleManager.create(any())).thenReturn("jm-id");
-        when(lifecycleManager.startCreated(any(), any())).thenReturn(new ContainerInfo(
-                "jm-id", Map.of(8081, new EndpointInfo("localhost", 49152))));
-
-        manager.startCluster(app);
-
-        String volumeName = app.getDockerVolumeName();
-        verify(lifecycleManager).ensureSharedVolume(volumeName, OptionalInt.of(9999), OptionalInt.of(9999),
-                Optional.empty(), "busybox:stable");
-        ContainerSpec jmSpec = captureCreatedSpecs().getFirst();
-        assertTrue(jmSpec.mounts().stream().anyMatch(mount -> mount.getType() == MountType.VOLUME
-                && volumeName.equals(mount.getSource())
-                && "/opt/flink/savepoints".equals(mount.getTarget())));
-    }
-
-    @Test
     void codeClusterInjectsTheSameAwsSdkEnvironmentIntoBothFlinkProcesses() {
         FlinkApplication app = application("with-code");
         app.setCodeS3Bucket("code-bucket");
@@ -379,8 +319,8 @@ class FlinkContainerManagerTest {
 
         assertThrows(RuntimeException.class, () -> manager.startCluster(app));
 
-        verify(lifecycleManager, times(2)).removeIfExists("floci-aws-kinesisanalytics-arn-aws-kinesisanalytics-us-west-2-000000000000-application-jm-failure");
-        verify(lifecycleManager, atLeastOnce()).removeIfExists("floci-aws-kinesisanalytics-arn-aws-kinesisanalytics-us-west-2-000000000000-application-jm-failure-tm");
+        verify(lifecycleManager, times(2)).removeIfExists("floci-kinesisanalytics-000000000000-us-west-2-jm-failure");
+        verify(lifecycleManager, atLeastOnce()).removeIfExists("floci-kinesisanalytics-000000000000-us-west-2-jm-failure-tm");
         assertNull(app.getContainerId());
         assertNull(app.getTaskManagerContainerId());
     }
@@ -400,7 +340,7 @@ class FlinkContainerManagerTest {
         assertThrows(RuntimeException.class, () -> manager.startCluster(app));
 
         verify(lifecycleManager).stopAndRemove("jm-id", null);
-        verify(lifecycleManager, atLeastOnce()).removeIfExists("floci-aws-kinesisanalytics-arn-aws-kinesisanalytics-us-west-2-000000000000-application-tm-failure-tm");
+        verify(lifecycleManager, atLeastOnce()).removeIfExists("floci-kinesisanalytics-000000000000-us-west-2-tm-failure-tm");
         assertNull(app.getContainerId());
         assertNull(app.getRestEndpoint());
         assertNull(app.getTaskManagerContainerId());
@@ -419,126 +359,147 @@ class FlinkContainerManagerTest {
 
         assertThrows(RuntimeException.class, () -> manager.startCluster(app));
 
-        verify(lifecycleManager, times(2)).removeIfExists("floci-aws-kinesisanalytics-arn-aws-kinesisanalytics-us-west-2-000000000000-application-log4j-copy-failure");
-        verify(lifecycleManager, atLeastOnce()).removeIfExists("floci-aws-kinesisanalytics-arn-aws-kinesisanalytics-us-west-2-000000000000-application-log4j-copy-failure-tm");
+        verify(lifecycleManager, times(2)).removeIfExists("floci-kinesisanalytics-000000000000-us-west-2-log4j-copy-failure");
+        verify(lifecycleManager, atLeastOnce()).removeIfExists("floci-kinesisanalytics-000000000000-us-west-2-log4j-copy-failure-tm");
         verify(lifecycleManager, Mockito.never()).startCreated(any(), any());
         assertNull(app.getContainerId());
     }
 
-    @ParameterizedTest
-    @ValueSource(ints = {0, 73, 8192})
-    void startupRetriesConsumedLogConfigurationUploadsBeforeStarting(int consumedBytes) throws Exception {
-        FlinkApplication app = application("copy-retry");
-        when(lifecycleManager.create(any())).thenReturn("jm-id");
-        DockerClient docker = mock(DockerClient.class);
+    @Test
+    void sameNameInAnotherScopeCannotRemoveRunningCluster() {
+        FlinkApplication running = application("shared");
+        when(lifecycleManager.create(any())).thenReturn("owned-jm");
+        when(lifecycleManager.startCreated(any(), any())).thenReturn(new ContainerInfo(
+                "owned-jm", Map.of(8081, new EndpointInfo("localhost", 49152))));
+        manager.startCluster(running);
+
+        FlinkApplication otherRegion = new FlinkApplication("shared",
+                "arn:aws:kinesisanalytics:us-east-1:000000000000:application/shared",
+                "FLINK-1_18", "role", "STREAMING");
+        FlinkApplication otherAccount = new FlinkApplication("shared",
+                "arn:aws:kinesisanalytics:us-west-2:111111111111:application/shared",
+                "FLINK-1_18", "role", "STREAMING");
+        manager.stopCluster(otherRegion);
+        manager.stopCluster(otherAccount);
+        verify(lifecycleManager, Mockito.never()).stopAndRemove(eq("owned-jm"), any());
+        verify(lifecycleManager).removeIfExists("floci-kinesisanalytics-000000000000-us-east-1-shared");
+        verify(lifecycleManager).removeIfExists("floci-kinesisanalytics-111111111111-us-west-2-shared");
+        manager.stopAll();
+        verify(lifecycleManager).stopAndRemove("owned-jm", null);
+    }
+
+    @Test
+    void savepointsVolumeIsFlinkOwnedAndSharedWithTheTaskManager() {
+        FlinkApplication app = application("snap");
+        app.setCodeS3Bucket("code-bucket");
+        app.setCodeS3Key("jobs/demo.jar");
+        when(s3Service.getObject("code-bucket", "jobs/demo.jar", null))
+                .thenReturn(new S3Object("code-bucket", "jobs/demo.jar", new byte[]{1}, "application/java-archive"));
+        DockerClient docker = mock(DockerClient.class, RETURNS_DEEP_STUBS);
         when(lifecycleManager.getDockerClient()).thenReturn(docker);
-        DockerArchiveUploadFixture uploads = new DockerArchiveUploadFixture(docker, "jm-id");
-        uploads.failures = 1;
-        uploads.consumedBytes = consumedBytes;
-        uploads.failure = new RuntimeException(new IOException("Connection reset"));
-        when(lifecycleManager.startCreated(any(), any())).thenAnswer(invocation -> {
-            assertEquals(1, uploads.completed.size(), "configuration must be uploaded before starting");
-            return new ContainerInfo("jm-id", Map.of(8081, new EndpointInfo("localhost", 49152)));
-        });
-        FlinkContainerManager startup = spy(manager);
-        doAnswer(invocation -> {
-            manager.copyFileIntoContainer(invocation.getArgument(0), invocation.getArgument(1),
-                    invocation.getArgument(2), invocation.getArgument(3), invocation.getArgument(4), 0);
-            return null;
-        }).when(startup).copyFileIntoContainer(anyString(), anyString(), anyString(), any(), anyBoolean(), anyLong());
+        when(lifecycleManager.create(any())).thenReturn("jm-id").thenReturn("tm-id");
+        when(lifecycleManager.startCreated(any(), any()))
+                .thenReturn(new ContainerInfo("jm-id", Map.of(8081, new EndpointInfo("localhost", 49152))))
+                .thenReturn(new ContainerInfo("tm-id", Map.of()));
 
-        startup.startCluster(app);
+        manager.startCluster(app);
 
-        assertEquals(2, uploads.commands.size());
-        assertEquals(1, uploads.completed.size());
-        assertNotSame(uploads.streams.get(0), uploads.streams.get(1));
-        uploads.commands.forEach(command -> verify(command).withRemotePath("/opt/flink/conf"));
-        try (TarArchiveInputStream tar = new TarArchiveInputStream(
-                new ByteArrayInputStream(uploads.completed.getFirst()))) {
-            TarArchiveEntry entry = tar.getNextEntry();
-            assertEquals("log4j-console.properties", entry.getName());
-            assertEquals(0644, entry.getMode());
-            assertArrayEquals(manager.msfStyleLog4j2Config(app), tar.readAllBytes());
-            assertNull(tar.getNextEntry());
+        String volume = "floci-kinesisanalytics-000000000000-us-west-2-snap-savepoints";
+        for (ContainerSpec spec : captureCreatedSpecs()) {
+            assertTrue(spec.mounts().stream().anyMatch(m -> volume.equals(m.getSource())
+                    && "/opt/flink/savepoints".equals(m.getTarget())), spec.cmd() + " must mount " + volume);
         }
-        verify(lifecycleManager).startCreated(eq("jm-id"), any());
-        assertEquals("jm-id", app.getContainerId());
+        // log4j config + the flink-owned mount point are extracted into the JobManager before it starts.
+        org.mockito.InOrder order = Mockito.inOrder(docker, lifecycleManager);
+        order.verify(docker, Mockito.calls(2)).copyArchiveToContainerCmd("jm-id");
+        order.verify(lifecycleManager).startCreated(eq("jm-id"), any());
     }
 
     @Test
-    void applicationPropertiesRetryKeepsTheNestedPathAndPayload() throws Exception {
-        DockerArchiveUploadFixture uploads = failingUpload(new RuntimeException(new IOException("Broken pipe")), 2);
-        byte[] content = manager.applicationPropertiesJson(application("properties-retry"));
-
-        manager.copyFileIntoContainer("jm-id", "/etc", "flink/application_properties.json", content, false, 0);
-
-        assertEquals(3, uploads.commands.size());
-        assertEquals(1, uploads.completed.size());
-        assertNotSame(uploads.streams.get(0), uploads.streams.get(1));
-        assertNotSame(uploads.streams.get(1), uploads.streams.get(2));
-        uploads.commands.forEach(command -> verify(command).withRemotePath("/etc"));
-        try (TarArchiveInputStream tar = new TarArchiveInputStream(
-                new ByteArrayInputStream(uploads.completed.getFirst()))) {
-            TarArchiveEntry entry = tar.getNextEntry();
-            assertEquals("flink/application_properties.json", entry.getName());
-            assertEquals(0644, entry.getMode());
-            assertArrayEquals(content, tar.readAllBytes());
-            assertNull(tar.getNextEntry());
+    void savepointMountPointTarIsAFlinkOwnedDirectory() throws Exception {
+        byte[] tar = FlinkContainerManager.flinkOwnedDirectoryTar("savepoints");
+        try (var in = new org.apache.commons.compress.archivers.tar.TarArchiveInputStream(
+                new java.io.ByteArrayInputStream(tar))) {
+            var entry = in.getNextEntry();
+            assertEquals("savepoints/", entry.getName());
+            assertTrue(entry.isDirectory());
+            assertEquals(9999L, entry.getLongUserId());
+            assertEquals(9999L, entry.getLongGroupId());
+            assertNull(in.getNextEntry());
         }
     }
 
     @Test
-    void requiredCopyExhaustsSixAttemptsBeforePropagatingTheFailure() {
-        DockerArchiveUploadFixture uploads = failingUpload(new RuntimeException(new IOException("Broken pipe")), 6);
+    void savepointAbortedBecauseTasksWereNotRunningIsRetriggered() throws Exception {
+        FlinkApplication app = application("retry");
+        app.setRestEndpoint("http://jm:8081");
+        app.setFlinkJobId("job-1");
+        var snapshot = new io.github.hectorvent.floci.services.kinesisanalytics.model.Snapshot("snap", 1L, "FLINK-1_20");
+        snapshot.setFlinkRequestId("req-1");
+        when(flinkRest.savepointStatus("http://jm:8081", "job-1", "req-1")).thenReturn(
+                new FlinkRestClient.SavepointStatus("COMPLETED", null, true,
+                        "CheckpointException: Checkpoint triggering task Source (1/1) is not being executed at "
+                                + "the moment. Aborting checkpoint. Failure reason: Not all required tasks are "
+                                + "currently running."));
+        when(flinkRest.triggerSavepoint("http://jm:8081", "job-1", "/opt/flink/savepoints")).thenReturn("req-2");
 
-        IllegalStateException failure = assertThrows(IllegalStateException.class,
-                () -> manager.copyFileIntoContainer("jm-id", "/opt/flink/conf", "log4j-console.properties",
-                        new byte[]{1, 2, 3}, true, 0));
+        assertTrue(manager.advanceSnapshot(app, snapshot));
+        assertEquals(io.github.hectorvent.floci.services.kinesisanalytics.model.SnapshotStatus.CREATING,
+                snapshot.getSnapshotStatus());
+        assertEquals("req-2", snapshot.getFlinkRequestId());
 
-        assertEquals(6, uploads.commands.size());
-        assertTrue(uploads.completed.isEmpty());
-        assertTrue(failure.getMessage().contains("log4j-console.properties"));
-        assertSame(uploads.failure, failure.getCause().getCause());
+        when(flinkRest.savepointStatus("http://jm:8081", "job-1", "req-2")).thenReturn(
+                new FlinkRestClient.SavepointStatus("COMPLETED", "file:/opt/flink/savepoints/savepoint-1", false, null));
+        assertTrue(manager.advanceSnapshot(app, snapshot));
+        assertEquals(io.github.hectorvent.floci.services.kinesisanalytics.model.SnapshotStatus.READY,
+                snapshot.getSnapshotStatus());
     }
 
     @Test
-    void optionalCopyStillSuppressesFailureAfterExhaustingRetries() {
-        DockerArchiveUploadFixture uploads = failingUpload(new RuntimeException(new IOException("Broken pipe")), 6);
+    void savepointTaskRetriesAreBoundedAndOtherFailuresAreTerminal() {
+        FlinkApplication app = application("bounded");
+        app.setRestEndpoint("http://jm:8081");
+        app.setFlinkJobId("job-1");
+        var snapshot = new io.github.hectorvent.floci.services.kinesisanalytics.model.Snapshot("snap", 1L, "FLINK-1_20");
+        snapshot.setFlinkRequestId("req-1");
+        snapshot.setFlinkTriggerAttempts(FlinkContainerManager.MAX_SAVEPOINT_TRIGGER_ATTEMPTS);
+        when(flinkRest.savepointStatus(any(), any(), any())).thenReturn(new FlinkRestClient.SavepointStatus(
+                "COMPLETED", null, true, "Not all required tasks are currently running."));
+        assertTrue(manager.advanceSnapshot(app, snapshot));
+        assertEquals(io.github.hectorvent.floci.services.kinesisanalytics.model.SnapshotStatus.FAILED,
+                snapshot.getSnapshotStatus());
 
-        manager.copyFileIntoContainer("jm-id", "/etc", "flink/application_properties.json",
-                new byte[]{1}, false, 0);
-
-        assertEquals(6, uploads.commands.size());
-        assertTrue(uploads.completed.isEmpty());
+        var ioFailure = new io.github.hectorvent.floci.services.kinesisanalytics.model.Snapshot("io", 1L, "FLINK-1_20");
+        ioFailure.setFlinkRequestId("req-io");
+        when(flinkRest.savepointStatus(any(), any(), eq("req-io"))).thenReturn(new FlinkRestClient.SavepointStatus(
+                "COMPLETED", null, true, "java.io.IOException: Failed to create savepoint directory"));
+        assertTrue(manager.advanceSnapshot(app, ioFailure));
+        assertEquals(io.github.hectorvent.floci.services.kinesisanalytics.model.SnapshotStatus.FAILED,
+                ioFailure.getSnapshotStatus());
     }
 
     @Test
-    void daemonRejectionIsNotRetried() {
-        DockerArchiveUploadFixture uploads = failingUpload(new NotFoundException("container missing"), 6);
-
-        IllegalStateException failure = assertThrows(IllegalStateException.class,
-                () -> manager.copyFileIntoContainer("jm-id", "/etc", "flink/application_properties.json",
-                        new byte[]{1}, true, 0));
-
-        assertEquals(1, uploads.commands.size());
-        assertSame(uploads.failure, failure.getCause().getCause());
+    void jobIsOnlyRunningOnceEveryVertexIsDeployed() throws Exception {
+        assertFalse(FlinkRestClient.jobFullyRunning(MAPPER.readTree(
+                "{\"state\":\"RUNNING\",\"vertices\":[{\"status\":\"RUNNING\"},{\"status\":\"DEPLOYING\"}]}")));
+        assertFalse(FlinkRestClient.jobFullyRunning(MAPPER.readTree(
+                "{\"state\":\"CREATED\",\"vertices\":[{\"status\":\"CREATED\"}]}")));
+        assertTrue(FlinkRestClient.jobFullyRunning(MAPPER.readTree(
+                "{\"state\":\"RUNNING\",\"vertices\":[{\"status\":\"RUNNING\"},{\"status\":\"FINISHED\"}]}")));
     }
 
     @Test
-    void missingContainerDoesNotAttemptAnUpload() {
-        manager.copyFileIntoContainer(null, "/etc", "flink/application_properties.json", new byte[]{1}, true, 0);
-
-        verify(lifecycleManager, Mockito.never()).getDockerClient();
-    }
-
-    private DockerArchiveUploadFixture failingUpload(RuntimeException failure, int failures) {
-        DockerClient docker = mock(DockerClient.class);
-        when(lifecycleManager.getDockerClient()).thenReturn(docker);
-        DockerArchiveUploadFixture uploads = new DockerArchiveUploadFixture(docker, "jm-id");
-        uploads.failure = failure;
-        uploads.failures = failures;
-        uploads.consumedBytes = 73;
-        return uploads;
+    void savepointStatusParsesTheFlinkFailureCause() throws Exception {
+        FlinkRestClient.SavepointStatus status = FlinkRestClient.parseSavepointStatus(MAPPER.readTree(
+                "{\"status\":{\"id\":\"COMPLETED\"},\"operation\":{\"failure-cause\":{\"class\":\"x\","
+                        + "\"stack-trace\":\"Failure reason: Not all required tasks are currently running.\"}}}"));
+        assertTrue(status.failed());
+        assertTrue(status.tasksNotRunning());
+        FlinkRestClient.SavepointStatus ok = FlinkRestClient.parseSavepointStatus(MAPPER.readTree(
+                "{\"status\":{\"id\":\"COMPLETED\"},\"operation\":{\"location\":\"file:/opt/flink/savepoints/s\"}}"));
+        assertFalse(ok.failed());
+        assertFalse(ok.tasksNotRunning());
+        assertEquals("file:/opt/flink/savepoints/s", ok.location());
     }
 
     private List<ContainerSpec> captureCreatedSpecs() {

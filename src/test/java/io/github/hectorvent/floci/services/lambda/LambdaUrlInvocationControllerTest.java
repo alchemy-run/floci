@@ -92,7 +92,7 @@ class LambdaUrlInvocationControllerTest {
         when(uriInfo.getRequestUri()).thenReturn(URI.create("http://localhost/lambda-url/url-id/"));
         when(uriInfo.getQueryParameters()).thenReturn(new MultivaluedHashMap<>());
 
-        Response response = controller.handleGet("url-id", "", headers, uriInfo).toCompletableFuture().join();
+        Response response = controller.handleGet("url-id", "", headers, uriInfo);
 
         assertEquals(200, response.getStatus());
         assertEquals(accountId, requestContext.getAccountId());
@@ -122,7 +122,7 @@ class LambdaUrlInvocationControllerTest {
         byte[] binaryBody = new byte[] {0x00, (byte) 0xff, (byte) 0x80, 0x0a};
 
         controller.handlePost("url-id", "", headersWith("application/octet-stream"),
-                uriInfoFor("http://localhost/lambda-url/url-id/"), binaryBody).toCompletableFuture().join();
+                uriInfoFor("http://localhost/lambda-url/url-id/"), binaryBody);
 
         ArgumentCaptor<byte[]> event = ArgumentCaptor.forClass(byte[].class);
         verify(lambdaService).invokeArn(eq(FUNCTION_ARN), event.capture(), eq(InvocationType.RequestResponse));
@@ -182,7 +182,7 @@ class LambdaUrlInvocationControllerTest {
         byte[] textLookingBody = "hello world".getBytes(StandardCharsets.UTF_8);
 
         controller.handlePost("url-id", "", headersWith("application/octet-stream"),
-                uriInfoFor("http://localhost/lambda-url/url-id/"), textLookingBody).toCompletableFuture().join();
+                uriInfoFor("http://localhost/lambda-url/url-id/"), textLookingBody);
 
         ArgumentCaptor<byte[]> event = ArgumentCaptor.forClass(byte[].class);
         verify(lambdaService).invokeArn(eq(FUNCTION_ARN), event.capture(), eq(InvocationType.RequestResponse));
@@ -212,7 +212,7 @@ class LambdaUrlInvocationControllerTest {
         byte[] body = "{\"a\":1}".getBytes(StandardCharsets.UTF_8);
 
         controller.handlePost("url-id", "", headersWith("Application/JSON"),
-                uriInfoFor("http://localhost/lambda-url/url-id/"), body).toCompletableFuture().join();
+                uriInfoFor("http://localhost/lambda-url/url-id/"), body);
 
         ArgumentCaptor<byte[]> event = ArgumentCaptor.forClass(byte[].class);
         verify(lambdaService).invokeArn(eq(FUNCTION_ARN), event.capture(), eq(InvocationType.RequestResponse));
@@ -240,7 +240,7 @@ class LambdaUrlInvocationControllerTest {
         LambdaUrlInvocationController controller = newController(lambdaService);
 
         controller.handlePost("url-id", "", headersWith("application/json"),
-                uriInfoFor("http://localhost/lambda-url/url-id/"), "{\"hello\":\"world\"}".getBytes(StandardCharsets.UTF_8)).toCompletableFuture().join();
+                uriInfoFor("http://localhost/lambda-url/url-id/"), "{\"hello\":\"world\"}".getBytes(StandardCharsets.UTF_8));
 
         ArgumentCaptor<byte[]> event = ArgumentCaptor.forClass(byte[].class);
         verify(lambdaService).invokeArn(eq(FUNCTION_ARN), event.capture(), eq(InvocationType.RequestResponse));
@@ -269,7 +269,7 @@ class LambdaUrlInvocationControllerTest {
         LambdaUrlInvocationController controller = newController(lambdaService);
 
         Response response = controller.handleGet("url-id", "", headersWith(null),
-                uriInfoFor("http://localhost/lambda-url/url-id/")).toCompletableFuture().join();
+                uriInfoFor("http://localhost/lambda-url/url-id/"));
 
         List<Object> setCookieHeaders = response.getHeaders().get("Set-Cookie");
         assertEquals(2, setCookieHeaders.size());
@@ -295,7 +295,7 @@ class LambdaUrlInvocationControllerTest {
         LambdaUrlInvocationController controller = newController(lambdaService);
 
         Response response = controller.handleGet("url-id", "", headersWith(null),
-                uriInfoFor("http://localhost/lambda-url/url-id/")).toCompletableFuture().join();
+                uriInfoFor("http://localhost/lambda-url/url-id/"));
 
         assertEquals(502, response.getStatus());
         assertNull(response.getEntity());
@@ -353,20 +353,5 @@ class LambdaUrlInvocationControllerTest {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-    }
-
-
-    @Test
-    void hasSigV4_detectsAuthorizationHeader() {
-        assertTrue(LambdaUrlInvocationController.hasSigV4(
-                "AWS4-HMAC-SHA256 Credential=AKIA.../us-east-1/lambda/aws4_request", null));
-        assertFalse(LambdaUrlInvocationController.hasSigV4("Bearer token", null));
-        assertFalse(LambdaUrlInvocationController.hasSigV4((String) null, (String) null));
-    }
-
-    @Test
-    void hasSigV4_detectsQueryStringSigning() {
-        assertTrue(LambdaUrlInvocationController.hasSigV4(null, "AWS4-HMAC-SHA256"));
-        assertFalse(LambdaUrlInvocationController.hasSigV4(null, "none"));
     }
 }

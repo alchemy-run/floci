@@ -51,7 +51,6 @@ class SesServiceListManagementTest {
         SesServiceTestBuilder builder = SesServiceTestBuilder.create().smtpRelay(smtpRelay);
         contactStore = builder.contactStore();
         service = builder.build();
-        service.verifyEmailIdentity("from@example.com", "us-east-1");
         contacts = builder.contactService();
         builder.identityService().verifyEmailIdentity(FROM, REGION);
 

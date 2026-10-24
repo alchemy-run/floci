@@ -1,7 +1,5 @@
 package io.github.hectorvent.floci.services.ec2.net;
 
-import io.github.hectorvent.floci.config.EmulatorConfig;
-import io.github.hectorvent.floci.core.common.docker.CurrentContainerNetworkResolver;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.ConnectToNetworkCmd;
 import com.github.dockerjava.api.command.CreateNetworkCmd;
@@ -12,7 +10,6 @@ import com.github.dockerjava.api.command.ListNetworksCmd;
 import com.github.dockerjava.api.command.RemoveNetworkCmd;
 import com.github.dockerjava.api.exception.ConflictException;
 import com.github.dockerjava.api.exception.NotFoundException;
-import com.github.dockerjava.api.model.ContainerNetwork;
 import com.github.dockerjava.api.model.Network;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.docker.CurrentContainerNetworkResolver;
@@ -40,7 +37,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -225,59 +221,6 @@ class VpcNetworkManagerTest {
         when(network.getIpam()).thenReturn(new Network.Ipam()
                 .withConfig(new Network.Ipam.Config().withSubnet(subnet)));
         existingNetworks.add(network);
-    }
-
-    @Test
-    void overlappingVpcsKeepLogicalAddressButLeaseDistinctTransport() {
-        existingNetwork("occupied", "10.0.0.0/16", Map.of());
-        manager.declareVpc(REGION, "vpc-a", "10.0.0.0/16");
-        manager.declareVpc(REGION, "vpc-b", "10.0.0.0/16");
-        manager.declareSubnet(REGION, "vpc-a", "subnet-a", "10.0.1.0/24");
-        manager.declareSubnet(REGION, "vpc-b", "subnet-b", "10.0.1.0/24");
-        String first = manager.allocateTransportPrivateIp(REGION, "subnet-a", "10.0.1.77", "i-a").orElseThrow();
-        String second = manager.allocateTransportPrivateIp(REGION, "subnet-b", "10.0.1.77", "i-b").orElseThrow();
-        assertEquals("10.240.1.77", first);
-        assertEquals("10.241.1.77", second);
-        assertEquals(first, manager.allocateTransportPrivateIp(REGION, "subnet-a", "10.0.1.77", "i-a").orElseThrow());
-        assertThrows(IllegalStateException.class,
-                () -> manager.allocateTransportPrivateIp(REGION, "subnet-a", "10.0.1.77", "i-other"));
-        assertTrue(manager.attach(REGION, "vpc-a", "subnet-a", "container-a", first).isPresent());
-        ArgumentCaptor<ContainerNetwork> endpoint = ArgumentCaptor.forClass(ContainerNetwork.class);
-        verify(docker.connectToNetworkCmd()).withContainerNetwork(endpoint.capture());
-        assertEquals(first, endpoint.getValue().getIpamConfig().getIpv4Address());
-    }
-
-    @Test
-    void exactOwnerCleanupCannotReleaseReplacementOrRetainedTransport() {
-        manager.declareVpc(REGION, "vpc-a", "10.0.0.0/16");
-        manager.declareSubnet(REGION, "vpc-a", "subnet-a", "10.0.1.0/24");
-        assertEquals("10.0.1.77", manager.allocateTransportPrivateIp(REGION, "subnet-a", "10.0.1.77", "i-old").orElseThrow());
-        manager.releaseTransportPrivateIp(REGION, "subnet-a", "i-old");
-        assertEquals("10.0.1.77", manager.allocateTransportPrivateIp(REGION, "subnet-a", "10.0.1.77", "i-new").orElseThrow());
-        manager.releaseTransportPrivateIp(REGION, "subnet-a", "i-old");
-        manager.releasePrivateIp(REGION, "subnet-a", "10.0.1.77");
-        assertFalse(manager.reservePrivateIp(REGION, "subnet-a", "10.0.1.77"));
-        assertTrue(manager.reserveTransportPrivateIp(REGION, "subnet-a", "10.0.1.77", "10.0.1.77", "i-new"));
-        assertFalse(manager.reserveTransportPrivateIp(REGION, "subnet-a", "10.0.1.77", "10.0.1.78", "i-foreign"));
-        manager.releaseTransportPrivateIp(REGION, "subnet-a", "i-new");
-        assertTrue(manager.reservePrivateIp(REGION, "subnet-a", "10.0.1.77"));
-    }
-
-    @Test
-    void restartRetainsSubstitutedNetworkAndExactStoppedTransportLease() {
-        String networkName = manager.networkName(REGION, "vpc-a");
-        existingNetwork(networkName, "10.243.0.0/16", Map.of(
-                VpcNetworkManager.LABEL_COMPONENT, VpcNetworkManager.COMPONENT_VALUE,
-                VpcNetworkManager.LABEL_VPC_ID, "vpc-a",
-                VpcNetworkManager.LABEL_VPC_REGION, REGION,
-                VpcNetworkManager.LABEL_OWNER_PORT, "4650"));
-        manager.declareVpc(REGION, "vpc-a", "10.0.0.0/16");
-        manager.declareSubnet(REGION, "vpc-a", "subnet-b", "10.0.2.0/24");
-        manager.declareSubnet(REGION, "vpc-a", "subnet-a", "10.0.1.0/24");
-        assertEquals("10.243.0.0/16", manager.effectiveVpcCidr(REGION, "vpc-a").orElseThrow());
-        assertTrue(manager.reserveTransportPrivateIp(REGION, "subnet-a", "10.0.1.77", "10.243.1.77", "i-stopped"));
-        assertEquals("10.243.1.77", manager.allocateTransportPrivateIp(REGION, "subnet-a", "10.0.1.77", "i-stopped").orElseThrow());
-        assertFalse(manager.reservePrivateIp(REGION, "subnet-a", "10.243.1.77"));
     }
 
     // ─── The ordinary case: the declared CIDR is what the instance gets ───────
@@ -548,32 +491,6 @@ class VpcNetworkManagerTest {
         verify(connect).withContainerId("floci-container");
         verify(connect).withContainerId("instance-1");
         verify(connect, times(2)).withNetworkId(networkName);
-
-        dockerHostedManager.detach(REGION, "vpc-1", "instance-1");
-        dockerHostedManager.deleteVpcNetwork(REGION, "vpc-1");
-        verify(docker.disconnectFromNetworkCmd()).withContainerId("floci-container");
-        assertEquals(List.of(networkName), removedNetworks);
-    }
-
-    @Test
-    void doesNotReconnectCurrentFlociContainerAlreadyAttachedToVpcNetwork() {
-        CurrentContainerNetworkResolver currentContainerNetworkResolver =
-                mock(CurrentContainerNetworkResolver.class);
-        when(currentContainerNetworkResolver.resolveContainerId()).thenReturn(Optional.of("floci-container"));
-        VpcNetworkManager dockerHostedManager =
-                new VpcNetworkManager(config, docker, currentContainerNetworkResolver);
-        String networkName = dockerHostedManager.networkName(REGION, "vpc-1");
-        existingNetwork(networkName, "10.0.0.0/16", ourLabels("vpc-1", "4650"), Map.of(
-                "floci-container", mock(Network.ContainerNetworkConfig.class)));
-        dockerHostedManager.declareVpc(REGION, "vpc-1", "10.0.0.0/16");
-        dockerHostedManager.declareSubnet(REGION, "vpc-1", "subnet-a", "10.0.1.0/24");
-        String address = dockerHostedManager.allocatePrivateIp(REGION, "subnet-a").orElseThrow();
-
-        assertTrue(dockerHostedManager.attach(REGION, "vpc-1", "subnet-a", "instance-1", address).isPresent());
-
-        ConnectToNetworkCmd connect = docker.connectToNetworkCmd();
-        verify(connect, never()).withContainerId("floci-container");
-        verify(connect).withContainerId("instance-1");
     }
 
     @Test

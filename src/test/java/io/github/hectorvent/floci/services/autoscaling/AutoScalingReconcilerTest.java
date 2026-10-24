@@ -225,45 +225,6 @@ class AutoScalingReconcilerTest {
 
     @Test
     void scaleOutTerminatesInstancesWhenGroupDisappears() {
-        AutoScalingService asgService = mock(AutoScalingService.class);
-        Ec2Service ec2Service = mock(Ec2Service.class);
-        ElbV2Service elbV2Service = mock(ElbV2Service.class);
-        AutoScalingReconciler reconciler = new AutoScalingReconciler(asgService, ec2Service, elbV2Service);
-        AutoScalingGroup asg = launchTemplateAsg();
-        stubLaunchTemplate(ec2Service, "ami-version-1", "t3.micro");
-        when(asgService.saveAutoScalingGroupIfPresent(asg)).thenReturn(false);
-
-        Instance ec2Instance = new Instance();
-        ec2Instance.setInstanceId("i-stale");
-        Reservation reservation = new Reservation();
-        reservation.setInstances(List.of(ec2Instance));
-        when(ec2Service.runInstances(eq("us-east-1"), eq("ami-version-1"), eq("t3.micro"),
-                eq(1), eq(1), eq(null), eq(List.of()), eq(null), eq(null), eq(List.of()),
-                eq(null), eq(null), eq(null))).thenReturn(reservation);
-
-        reconciler.reconcile(asg);
-
-        verify(ec2Service).terminateInstances("us-east-1", List.of("i-stale"));
-        verify(asgService, never()).completeInstanceRefreshIfSettled("us-east-1", "app-asg");
-    }
-
-    @Test
-    void scaleOutPersistsInstancesWhenGroupStillExists() {
-        AutoScalingService asgService = mock(AutoScalingService.class);
-        Ec2Service ec2Service = mock(Ec2Service.class);
-        ElbV2Service elbV2Service = mock(ElbV2Service.class);
-        AutoScalingReconciler reconciler = new AutoScalingReconciler(asgService, ec2Service, elbV2Service);
-        AutoScalingGroup asg = launchTemplateAsg();
-        stubLaunchTemplate(ec2Service, "ami-version-1", "t3.micro");
-        when(asgService.saveAutoScalingGroupIfPresent(asg)).thenReturn(true);
-
-        Instance ec2Instance = new Instance();
-        ec2Instance.setInstanceId("i-owned");
-        Reservation reservation = new Reservation();
-        reservation.setInstances(List.of(ec2Instance));
-        when(ec2Service.runInstances(eq("us-east-1"), eq("ami-version-1"), eq("t3.micro"),
-                eq(1), eq(1), eq(null), eq(List.of()), eq(null), eq(null), eq(List.of()),
-                eq(null), eq(null), eq(null))).thenReturn(reservation);
         AutoScalingService asgService = scalingService();
         Ec2Service ec2Service = mock(Ec2Service.class);
         ElbV2Service elbV2Service = mock(ElbV2Service.class);

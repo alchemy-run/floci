@@ -75,7 +75,7 @@ class RedshiftCatalogSeedIntegrationTest {
     }
 
     @Test
-    void catalogViewsIntrospection() throws Exception {
+    void testCatalogViewsIntrospection() throws Exception {
         clusterId = "cat-seed-" + UUID.randomUUID().toString().substring(0, 8);
         Cluster cluster = service.createCluster(clusterId, "dc2.large", "admin", "Secret123");
 
@@ -251,7 +251,7 @@ class RedshiftCatalogSeedIntegrationTest {
     }
 
     @Test
-    void allDocumentedRedshiftColumnsContract() throws Exception {
+    void testAllDocumentedRedshiftColumnsContract() throws Exception {
         clusterId = "cat-contract-" + UUID.randomUUID().toString().substring(0, 8);
         Cluster cluster = service.createCluster(clusterId, "dc2.large", "admin", "Secret123");
 

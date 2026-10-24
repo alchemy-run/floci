@@ -7281,8 +7281,6 @@ class CloudFormationIntegrationTest {
      * resource's {@code Outputs.*} attributes right after the child's (synchronous, same-thread)
      * {@code executeTemplate} call returns. When the child's own resource loop fails, {@code
      * executeTemplate} never reaches its Outputs block at all: {@code rollbackFailedExecution}
-     * rewrites the child's status straight from {@code CREATE_FAILED} into {@code
-     * ROLLBACK_COMPLETE} before returning. {@code executeNestedStack} used to detect a failed
      * settles the child in {@code ROLLBACK_COMPLETE} before returning, and the child's status is
      * never {@code CREATE_FAILED}. {@code executeNestedStack} used to detect a failed
      * child only by checking for the literal strings {@code CREATE_FAILED}/{@code UPDATE_FAILED},
@@ -7887,17 +7885,6 @@ class CloudFormationIntegrationTest {
             .statusCode(200)
             .body("clusters[0].clusterName", equalTo("cfn-ecs-delete-cluster"));
 
-        String taskDefinitionArn = given()
-            .header("X-Amz-Target", ECS_TARGET_PREFIX + "DescribeTaskDefinition")
-            .contentType(ECS_CONTENT_TYPE)
-            .body("{\"taskDefinition\": \"cfn-ecs-delete-taskdef\"}")
-        .when()
-            .post("/")
-        .then()
-            .statusCode(200)
-            .body("taskDefinition.status", equalTo("ACTIVE"))
-            .extract().path("taskDefinition.taskDefinitionArn");
-
         given()
             .contentType("application/x-www-form-urlencoded")
             .formParam("Action", "DeleteStack")
@@ -7920,18 +7907,7 @@ class CloudFormationIntegrationTest {
             .statusCode(200)
             .body("clusters", org.hamcrest.Matchers.empty());
 
-        // Task definition is deregistered (INACTIVE): the revision still describes by ARN,
-        // while the bare family no longer resolves because it has no ACTIVE revision left.
-        given()
-            .header("X-Amz-Target", ECS_TARGET_PREFIX + "DescribeTaskDefinition")
-            .contentType(ECS_CONTENT_TYPE)
-            .body("{\"taskDefinition\": \"" + taskDefinitionArn + "\"}")
-        .when()
-            .post("/")
-        .then()
-            .statusCode(200)
-            .body("taskDefinition.status", equalTo("INACTIVE"));
-
+        // Task definition is deregistered (INACTIVE)
         given()
             .header("X-Amz-Target", ECS_TARGET_PREFIX + "DescribeTaskDefinition")
             .contentType(ECS_CONTENT_TYPE)
@@ -7939,8 +7915,8 @@ class CloudFormationIntegrationTest {
         .when()
             .post("/")
         .then()
-            .statusCode(400)
-            .body("__type", equalTo("ClientException"));
+            .statusCode(200)
+            .body("taskDefinition.status", equalTo("INACTIVE"));
     }
 
     // ── Issue #924: ELBv2 provisioning via CloudFormation ────────────────────

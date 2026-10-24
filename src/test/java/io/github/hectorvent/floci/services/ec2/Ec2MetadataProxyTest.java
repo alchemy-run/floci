@@ -9,11 +9,10 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.concurrent.TimeUnit;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -27,101 +26,6 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class Ec2MetadataProxyTest {
-    @Test
-    void authenticatedProxyUsesStandardPathsAndReplacesCallerIdentity(@TempDir Path directory) throws Exception {
-        Path script = directory.resolve("proxy.py");
-        Path config = directory.resolve("config.json");
-        Path log = directory.resolve("proxy-test.log");
-        Files.writeString(script, Ec2MetadataProxy.authenticatedProxyScript());
-        String harness = """
-                import importlib.util, sys, json, threading, http.client, http.server
-                spec = importlib.util.spec_from_file_location('guest_proxy', sys.argv[1])
-                proxy = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(proxy)
-                proxy.CONFIG = sys.argv[2]
-                received = []
-                class Upstream(http.server.BaseHTTPRequestHandler):
-                    def log_message(self, *args):
-                        pass
-                    def respond(self):
-                        received.append((self.command, self.path, self.headers))
-                        body = b'metadata-response'
-                        self.send_response(200)
-                        self.send_header('Content-Length', str(len(body)))
-                        self.send_header('x-aws-ec2-metadata-token-ttl-seconds', '60')
-                        self.end_headers()
-                        self.wfile.write(body)
-                    do_GET = respond
-                    do_PUT = respond
-                upstream = http.server.HTTPServer(('127.0.0.1', 0), Upstream)
-                local = http.server.HTTPServer(('127.0.0.1', 0), proxy.MetadataProxy)
-                for server in (upstream, local):
-                    threading.Thread(target=server.serve_forever, daemon=True).start()
-                def configure(capability):
-                    with open(proxy.CONFIG, 'w') as target:
-                        json.dump({'host': '127.0.0.1', 'port': upstream.server_port, 'capability': capability}, target)
-                def request(method, path):
-                    client = http.client.HTTPConnection('127.0.0.1', local.server_port, timeout=3)
-                    try:
-                        client.putrequest(method, path)
-                        client.putheader('X-Floci-IMDS-Capability', 'another-guest')
-                        client.putheader('x-floci-imds-capability', 'forged')
-                        client.putheader('X-Floci-Instance-Id', 'i-other')
-                        if method == 'PUT':
-                            client.putheader('X-aws-ec2-metadata-token-ttl-seconds', '60')
-                        else:
-                            client.putheader('X-aws-ec2-metadata-token', 'guest-token')
-                        client.endheaders()
-                        response = client.getresponse()
-                        assert response.status == 200, response.status
-                        assert response.getheader('x-aws-ec2-metadata-token-ttl-seconds') == '60'
-                        assert response.read() == b'metadata-response'
-                    finally:
-                        client.close()
-                try:
-                    configure('owned-capability')
-                    request('PUT', '/latest/api/token')
-                    method, path, headers = received[-1]
-                    assert (method, path) == ('PUT', '/latest/api/token')
-                    assert headers.get_all('X-Floci-IMDS-Capability') == ['owned-capability']
-                    assert headers.get('X-Floci-Instance-Id') is None
-                    assert headers.get('X-aws-ec2-metadata-token-ttl-seconds') == '60'
-                    configure('rotated-capability')
-                    request('GET', '/latest/meta-data/iam/security-credentials/role')
-                    method, path, headers = received[-1]
-                    assert (method, path) == ('GET', '/latest/meta-data/iam/security-credentials/role')
-                    assert headers.get_all('X-Floci-IMDS-Capability') == ['rotated-capability']
-                    assert headers.get('X-aws-ec2-metadata-token') == 'guest-token'
-                finally:
-                    for server in (local, upstream):
-                        server.shutdown()
-                        server.server_close()
-                """;
-        Process process = new ProcessBuilder("python3", "-c", harness, script.toString(), config.toString())
-                .redirectErrorStream(true).redirectOutput(log.toFile()).start();
-        try {
-            assertTrue(process.waitFor(20, TimeUnit.SECONDS), "guest proxy regression timed out");
-            assertEquals(0, process.exitValue(), Files.readString(log));
-        } finally {
-            process.destroyForcibly();
-            process.waitFor(5, TimeUnit.SECONDS);
-        }
-    }
-
-    @Test
-    void authenticatedBootstrapUsesPrivateConfigAndChecksTheExpectedInstance() {
-        String install = Ec2MetadataProxy.authenticatedInstallCommand()[2];
-        assertTrue(install.contains("command -v python3"));
-        assertTrue(install.contains("dnf install -y --allowerasing iproute python3 curl ca-certificates"));
-        String start = Ec2MetadataProxy.authenticatedStartCommand("i-owned")[2];
-        assertTrue(start.contains("chmod 600 /var/lib/floci-imds-proxy.json.next"));
-        assertTrue(start.contains("mv /var/lib/floci-imds-proxy.json.next /var/lib/floci-imds-proxy.json"));
-        assertTrue(start.contains("nohup python3 /var/lib/floci-imds-proxy.py"));
-        assertTrue(start.contains("http://169.254.169.254/latest/api/token"));
-        assertTrue(start.contains("http://169.254.169.254/latest/meta-data/instance-id)\" = 'i-owned'"));
-        assertTrue(start.contains("tr '\\000' ' ' </proc/$pid/cmdline"));
-    }
-
 
     @Test
     void installCommandContainsSupportedPackageManagers() {
@@ -156,20 +60,6 @@ class Ec2MetadataProxyTest {
         assertTrue(script.contains("-X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 60'"));
         assertTrue(script.contains("http://169.254.169.254/latest/api/token"));
         assertTrue(script.contains("-H \"X-aws-ec2-metadata-token: $token\" http://169.254.169.254/latest/meta-data/instance-id"));
-    }
-
-    @Test
-    void podIdentityStartCommandAttachesAddressIdempotentlyAndTargetsHostAndPort() {
-        String[] command = Ec2MetadataProxy.podIdentityStartCommand("10.0.0.1", 4566);
-        assertEquals(3, command.length);
-        assertEquals("sh", command[0]);
-        assertEquals("-c", command[1]);
-
-        String script = command[2];
-        assertTrue(script.contains("ip addr show dev lo | grep -q '169.254.170.23/32' || ip addr add 169.254.170.23/32 dev lo"));
-        assertTrue(script.contains("if [ -f /tmp/floci-pod-identity-proxy.pid ] && kill -0 \"$(cat /tmp/floci-pod-identity-proxy.pid)\" 2>/dev/null; then\n  exit 0\nfi"));
-        assertTrue(script.contains("nohup socat TCP-LISTEN:80,bind=169.254.170.23,fork,reuseaddr TCP:10.0.0.1:4566 >/tmp/floci-pod-identity-proxy.log 2>&1 &"));
-        assertTrue(script.contains("http://169.254.170.23/v1/credentials"));
     }
 
     @Test

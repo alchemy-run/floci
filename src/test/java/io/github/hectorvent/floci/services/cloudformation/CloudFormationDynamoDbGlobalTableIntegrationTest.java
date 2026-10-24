@@ -88,14 +88,6 @@ class CloudFormationDynamoDbGlobalTableIntegrationTest {
         assertTrue(tableArn != null && tableArn.startsWith("arn:aws:dynamodb:"), "TableArn: " + tableArn);
         assertFalse(tableId == null || tableId.isBlank(), "DescribeTable reported no TableId");
 
-        // The Replicas property is applied: the non-local region is tracked and surfaced by
-        // DescribeTable. Whether the deployment region itself appears in Replicas is deliberately not
-        // asserted here: on AWS a global table lists its stack region as a replica too, and reporting
-        // that is a DescribeTable follow-up (the reconcile must keep filtering the local region, since
-        // the UpdateTable ReplicaUpdates API rejects adding it).
-        List<String> replicaRegions = described.getList("Table.Replicas.RegionName");
-        assertTrue(replicaRegions != null && replicaRegions.contains("us-west-2"),
-                "DescribeTable Replicas did not report us-west-2: " + replicaRegions);
         // The Replicas property is applied: the declared non-local region is tracked, and the
         // deployment region is reported as a replica too, so DescribeTable lists both, as AWS does for
         // a global table.

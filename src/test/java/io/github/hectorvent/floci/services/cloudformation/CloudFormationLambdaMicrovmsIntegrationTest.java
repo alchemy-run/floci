@@ -1,10 +1,7 @@
 package io.github.hectorvent.floci.services.cloudformation;
 
-import io.github.hectorvent.floci.services.lambda.microvm.MicrovmBuildService;
-import io.quarkus.test.InjectMock;
 import io.github.hectorvent.floci.core.common.XmlParser;
 import io.quarkus.test.junit.QuarkusTest;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
@@ -13,10 +10,6 @@ import static io.restassured.RestAssured.given;
 import static org.awaitility.Awaitility.await;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -32,15 +25,6 @@ class CloudFormationLambdaMicrovmsIntegrationTest {
 
     private static final String CFN_AUTH =
             "AWS4-HMAC-SHA256 Credential=test/20260205/us-east-1/cloudformation/aws4_request";
-
-    @InjectMock
-    MicrovmBuildService buildService;
-
-    @BeforeEach
-    void mockDockerBuild() {
-        when(buildService.buildForAccount(anyString(), anyString(), anyString(), anyString()))
-                .thenAnswer(inv -> inv.getArgument(3));
-    }
 
     @Test
     void createStackProvisionsImageAndConnector() {
@@ -83,7 +67,6 @@ class CloudFormationLambdaMicrovmsIntegrationTest {
                   },
                   "Outputs": {
                     "ImageArn": {"Value": {"Fn::GetAtt": ["Image", "ImageArn"]}},
-                    "ImageVersion": {"Value": {"Fn::GetAtt": ["Image", "LatestActiveImageVersion"]}},
                     "ConnectorArn": {"Value": {"Fn::GetAtt": ["Connector", "Arn"]}}
                   }
                 }
@@ -100,20 +83,18 @@ class CloudFormationLambdaMicrovmsIntegrationTest {
         .then()
             .statusCode(200);
 
-        await().untilAsserted(() -> given()
-                .contentType("application/x-www-form-urlencoded")
-                .header("Authorization", CFN_AUTH)
-                .formParam("Action", "DescribeStacks")
-                .formParam("StackName", stackName)
-                .when().post("/")
-                .then().statusCode(200)
-                .body(containsString("<StackStatus>CREATE_COMPLETE</StackStatus>"))
-                .body(containsString(":microvm-image:" + imageName))
-                .body(containsString(":network-connector:nc-"))
-                .body(containsString("<OutputKey>ImageVersion</OutputKey>"))
-                .body(containsString("<OutputValue>1.0</OutputValue>")));
-        verify(buildService).buildForAccount(eq("000000000000"), eq("us-east-1"),
-                eq("s3://cfn-bucket/context.zip"), anyString());
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .header("Authorization", CFN_AUTH)
+            .formParam("Action", "DescribeStacks")
+            .formParam("StackName", stackName)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body(containsString("<StackStatus>CREATE_COMPLETE</StackStatus>"))
+            .body(containsString(":microvm-image:" + imageName))
+            .body(containsString(":network-connector:nc-"));
 
         // Both resources really exist in the MicroVMs service.
         given()

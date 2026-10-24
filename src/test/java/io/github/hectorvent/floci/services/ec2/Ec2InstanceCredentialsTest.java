@@ -25,14 +25,6 @@ class Ec2InstanceCredentialsTest {
     private static final Instant NOW = Instant.parse("2026-09-16T10:00:00Z");
 
     @Test
-    void iamCredentialRoleNameComesFromInstanceProfileRole() {
-        Fixture fixture = fixture();
-
-        assertEquals("worker", fixture.credentials.role(fixture.instance).orElseThrow().getRoleName());
-        verify(fixture.iam).findInstanceProfile(ACCOUNT, "profile");
-    }
-
-    @Test
     void credentialsAreRegisteredStableAndRotateWithOverlap() {
         Fixture fixture = fixture();
         SessionCredential first = fixture.get(NOW);

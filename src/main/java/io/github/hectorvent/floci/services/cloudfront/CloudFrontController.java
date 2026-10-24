@@ -59,12 +59,8 @@ public class CloudFrontController {
     private final CloudFrontService service;
 
     @Inject
-    public CloudFrontController(CloudFrontService service,
-            CloudFrontFunctionRuntime functionRuntime,
-            ObjectMapper mapper) {
+    public CloudFrontController(CloudFrontService service) {
         this.service = service;
-        this.functionRuntime = functionRuntime;
-        this.mapper = mapper;
     }
 
     // ── Distributions ─────────────────────────────────────────────────────────
@@ -3898,9 +3894,11 @@ public class CloudFrontController {
 
     private static final int MAX_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS = 300;
 
-    private final CloudFrontFunctionRuntime functionRuntime;
+    @Inject
+    CloudFrontFunctionRuntime functionRuntime;
 
-    private final ObjectMapper mapper;
+    @Inject
+    ObjectMapper mapper;
 
     /**
      * Runs a function against a caller-supplied event object and returns the

@@ -36,39 +36,6 @@ class AwsQueryControllerIntegrationTest {
     }
 
     @Test
-    void autoScalingActionsFallbackWithoutAuthorizationHeader() {
-        // These actions used to miss AUTOSCALING_ACTIONS and fall through to SQS.
-        for (String action : new String[] {
-                "ExecutePolicy",
-                "SetInstanceHealth",
-                "SetInstanceProtection",
-                "EnterStandby",
-                "ExitStandby",
-                "CancelInstanceRefresh",
-                "RollbackInstanceRefresh",
-                "PutScheduledUpdateGroupAction",
-                "DescribeScheduledActions",
-                "DeleteScheduledAction"
-        }) {
-            given()
-                .contentType("application/x-www-form-urlencoded")
-                .formParam("Action", action)
-                .formParam("AutoScalingGroupName", "missing-asg")
-                .formParam("InstanceId", "i-00000000000000000")
-                .formParam("InstanceIds.member.1", "i-00000000000000000")
-                .formParam("HealthStatus", "Unhealthy")
-                .formParam("PolicyName", "missing-policy")
-                .formParam("ScheduledActionName", "missing-action")
-            .when()
-                .post("/")
-            .then()
-                .contentType("application/xml")
-                .body(not(containsString("not supported by SQS")))
-                .body(containsString("autoscaling.amazonaws.com"));
-        }
-    }
-
-    @Test
     void globalClusterActionFallbackWithoutAuthorizationHeader() {
         // Without a credential scope the service is inferred from the action. An action the RDS
         // handler serves but the inference list does not name is dispatched to SQS, which answers

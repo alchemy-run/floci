@@ -19,7 +19,6 @@ import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.sns.SnsService;
 import io.github.hectorvent.floci.services.sqs.SqsService;
 
-import java.time.Clock;
 import java.util.Set;
 
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
@@ -48,11 +47,6 @@ final class IotServiceTestSupport {
     }
 
     IotServiceTestSupport(String region, FlociCertificateAuthority certificateAuthority, boolean accountAware) {
-        this(region, certificateAuthority, accountAware, Clock.systemUTC());
-    }
-
-    IotServiceTestSupport(String region, FlociCertificateAuthority certificateAuthority, boolean accountAware,
-                          Clock clock) {
         EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
         when(config.defaultRegion()).thenReturn(region);
         when(config.services().iot().ruleSqlStrict()).thenReturn(false);
@@ -85,7 +79,6 @@ final class IotServiceTestSupport {
                 mock(FirehoseService.class),
                 mock(CloudWatchLogsService.class),
                 certificateAuthority,
-                new IamPolicyEvaluator(objectMapper),
-                clock);
+                new IamPolicyEvaluator(objectMapper));
     }
 }

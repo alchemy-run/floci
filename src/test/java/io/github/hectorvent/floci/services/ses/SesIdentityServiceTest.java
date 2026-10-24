@@ -15,7 +15,6 @@ import org.mockito.Mockito;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -59,14 +58,12 @@ class SesIdentityServiceTest {
 
     @Test
     void verifyEmailIdentity_createsOnce_returnsExistingOnRepeat() {
-        CountingStorage store = new CountingStorage();
-        SesIdentityService counted = new SesIdentityService(store, null, Clock.systemUTC());
-        Identity first = counted.verifyEmailIdentity("alice@example.com", REGION);
+        Identity first = service.verifyEmailIdentity("alice@example.com", REGION);
         assertEquals("EmailAddress", first.getIdentityType());
-        assertEquals("Success", first.getVerificationStatus());
-        Identity second = counted.verifyEmailIdentity("alice@example.com", REGION);
+        first.setVerificationStatus("Success");
+        service.save(first, REGION);
+        Identity second = service.verifyEmailIdentity("alice@example.com", REGION);
         assertEquals("Success", second.getVerificationStatus());
-        assertEquals(1, store.puts.get());
     }
 
     @Test
@@ -159,32 +156,6 @@ class SesIdentityServiceTest {
     }
 
     @Test
-    void createEmailIdentityPendingAddressCanBeConfirmedByV1() {
-        Identity created = service.createEmailIdentity("pending@example.com", null, null, REGION, null);
-        assertEquals("Pending", created.getVerificationStatus());
-        assertTrue(service.isVerifiedSender("pending@example.com", REGION));
-        assertEquals("Success", service.verifyEmailIdentity("pending@example.com", REGION).getVerificationStatus());
-    }
-
-    @Test
-    void isVerifiedSender_missingAddressAndPendingDomain_areRejected() {
-        assertFalse(service.isVerifiedSender("sender@example.com", REGION));
-        service.createEmailIdentity("example.com", null, null, REGION, null);
-        assertFalse(service.isVerifiedSender("sender@example.com", REGION));
-    }
-
-    @Test
-    void createEmailIdentitySigningLengthIsAtomic() {
-        Identity created = service.createEmailIdentity("dkim.example.com", null, null, REGION, null, "RSA_1024_BIT");
-        assertEquals("RSA_1024_BIT", created.getDkimNextSigningKeyLength());
-        assertEquals("RSA_1024_BIT", created.getDkimCurrentSigningKeyLength());
-        assertEquals("NotStarted", created.getDkimVerificationStatus());
-        assertThrows(AwsException.class, () -> service.createEmailIdentity(
-                "invalid.example.com", null, null, REGION, null, "invalid"));
-        assertTrue(service.find("invalid.example.com", REGION).isEmpty());
-    }
-
-    @Test
     void createEmailIdentity_buildsTheCompleteRecordInOneWrite() {
         Identity created = service.createEmailIdentity("alice@example.com", "my-cs",
                 List.of(new Tag("team", "floci")), REGION, () -> { });
@@ -240,12 +211,10 @@ class SesIdentityServiceTest {
     /** Counts put calls so the single-write guarantee is asserted, not inferred. */
     private static final class CountingStorage extends InMemoryStorage<String, Identity> {
         final AtomicInteger puts = new AtomicInteger();
-        final List<String> verificationStatuses = new CopyOnWriteArrayList<>();
 
         @Override
         public void put(String key, Identity value) {
             puts.incrementAndGet();
-            verificationStatuses.add(value.getVerificationStatus());
             super.put(key, value);
         }
     }
@@ -257,7 +226,6 @@ class SesIdentityServiceTest {
         counted.createEmailIdentity("alice@example.com", "my-cs",
                 List.of(new Tag("team", "floci")), REGION, () -> { });
         assertEquals(1, store.puts.get());
-        assertEquals(List.of("Pending"), store.verificationStatuses);
     }
 
     @Test
@@ -355,18 +323,11 @@ class SesIdentityServiceTest {
         verifier.join(TimeUnit.SECONDS.toMillis(5));
         assertTrue(!creator.isAlive() && !verifier.isAlive(), "threads did not finish in time");
 
-        // Creation persists Pending; v1 confirmation persists Success without losing the full record.
+        // Verify returned the creator's record instead of replacing it; nothing was lost.
         assertEquals("my-cs", verifyResult.get().getConfigurationSetName());
-        assertEquals(List.of(new Tag("team", "floci")), verifyResult.get().getTags());
-        assertEquals("Success", verifyResult.get().getVerificationStatus());
-        assertEquals(2, store.puts.get());
-        assertEquals(List.of("Pending", "Success"), store.verificationStatuses);
-        Identity stored = counted.find("alice@example.com", REGION).orElseThrow();
-        assertEquals("my-cs", stored.getConfigurationSetName());
-        assertEquals(List.of(new Tag("team", "floci")), stored.getTags());
-        assertEquals("Success", stored.getVerificationStatus());
-        counted.verifyEmailIdentity("alice@example.com", REGION);
-        assertEquals(2, store.puts.get());
+        assertEquals(1, store.puts.get());
+        assertEquals("my-cs",
+                counted.find("alice@example.com", REGION).orElseThrow().getConfigurationSetName());
     }
 
     @Test

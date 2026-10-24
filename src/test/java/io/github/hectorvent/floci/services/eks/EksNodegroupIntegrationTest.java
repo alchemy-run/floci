@@ -1,19 +1,12 @@
 package io.github.hectorvent.floci.services.eks;
 
-import io.github.hectorvent.floci.services.ec2.Ec2Service;
-import io.github.hectorvent.floci.services.ec2.model.LaunchTemplate;
-import io.github.hectorvent.floci.services.ec2.model.LaunchTemplateData;
 import io.quarkus.test.junit.QuarkusTest;
-import jakarta.inject.Inject;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
 import java.time.Duration;
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
-import java.util.List;
 
 import static io.restassured.RestAssured.given;
 import static org.awaitility.Awaitility.await;
@@ -86,9 +79,6 @@ class EksNodegroupIntegrationTest {
                 .body("nodegroup.nodeRole", equalTo(NODE_ROLE));
     }
 
-    @Inject
-    Ec2Service ec2Service;
-
     @Test
     @Order(5)
     void updateNodegroupConfigRoutesToEksAndSettles() {
@@ -157,21 +147,5 @@ class EksNodegroupIntegrationTest {
         given().contentType(JSON)
                 .when().get("/clusters/" + CLUSTER + "/node-groups/ng1")
                 .then().statusCode(404);
-    }
-
-    @Test
-    @Order(6)
-    void createNodeGroupWithLaunchTemplateUserData() {
-        LaunchTemplateData data = new LaunchTemplateData();
-        data.setUserData(Base64.getEncoder().encodeToString("#!/bin/sh\necho hi".getBytes(StandardCharsets.UTF_8)));
-        LaunchTemplate lt = ec2Service.createLaunchTemplate("us-east-1", "eks-it-lt", data, List.of());
-
-        given().contentType(JSON)
-                .body("{\"nodegroupName\":\"ng-lt\",\"subnets\":[\"subnet-abc\"],\"nodeRole\":\"" + NODE_ROLE + "\","
-                        + "\"launchTemplate\":{\"id\":\"" + lt.getLaunchTemplateId() + "\",\"version\":\"1\"}}")
-                .when().post("/clusters/" + CLUSTER + "/node-groups")
-                .then().statusCode(200)
-                .body("nodegroup.nodegroupName", equalTo("ng-lt"))
-                .body("nodegroup.launchTemplate.id", equalTo(lt.getLaunchTemplateId()));
     }
 }

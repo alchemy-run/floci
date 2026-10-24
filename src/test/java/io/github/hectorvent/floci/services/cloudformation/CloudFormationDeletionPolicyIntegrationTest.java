@@ -21,7 +21,6 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.fail;
-import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 /**
  * Verifies the resource-level {@code DeletionPolicy} attribute (issue #1555): {@code Retain} keeps a
@@ -39,50 +38,6 @@ class CloudFormationDeletionPolicyIntegrationTest {
     /** CUSTOM_AUTH signs for eu-west-1, whose S3 endpoint requires a matching LocationConstraint, as on AWS. */
     private static final String EU_WEST_1_BUCKET =
             "<CreateBucketConfiguration><LocationConstraint>eu-west-1</LocationConstraint></CreateBucketConfiguration>";
-
-    @Test
-    void deletingNestedStacksDoesNotExhaustOperationWorkers() throws InterruptedException {
-        String suffix = Long.toString(System.nanoTime(), 36);
-        String childTemplateKey = "child-delete-workers-" + suffix + ".json";
-        given().when().put("/nested-stack-templates").then().statusCode(200);
-        given()
-                .contentType("application/json")
-                .body("{\"Resources\":{}}")
-        .when()
-                .put("/nested-stack-templates/" + childTemplateKey)
-        .then()
-                .statusCode(200);
-
-        List<String> stackIds = new ArrayList<>();
-        List<String> stackNames = new ArrayList<>();
-        String childUrl = "http://localhost/nested-stack-templates/" + childTemplateKey;
-        for (int i = 0; i < 16; i++) {
-            String stackName = "nested-delete-worker-" + suffix + "-" + i;
-            String template = "{\"Resources\":{\"Child\":{\"Type\":\"AWS::CloudFormation::Stack\","
-                    + "\"Properties\":{\"TemplateURL\":\"" + childUrl + "\"}}}}";
-            String stackId = createStack(stackName, template);
-            awaitStackStatus(stackId, "CREATE_COMPLETE");
-            stackNames.add(stackName);
-            stackIds.add(stackId);
-        }
-
-        assertTimeoutPreemptively(Duration.ofSeconds(20), () -> {
-            try (ExecutorService clients = Executors.newFixedThreadPool(16)) {
-                List<CompletableFuture<Void>> deletes = stackNames.stream()
-                        .map(name -> CompletableFuture.runAsync(() -> deleteStack(name), clients))
-                        .toList();
-                CompletableFuture.allOf(deletes.toArray(CompletableFuture[]::new)).join();
-                for (String stackId : stackIds) {
-                    try {
-                        awaitStackStatus(stackId, "DELETE_COMPLETE");
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        throw new AssertionError("Interrupted while waiting for nested stack deletion", e);
-                    }
-                }
-            }
-        });
-    }
 
     @Test
     void deletingNestedStacksDoesNotExhaustOperationWorkers() throws InterruptedException {

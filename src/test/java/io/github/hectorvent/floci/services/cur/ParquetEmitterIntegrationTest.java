@@ -3,13 +3,14 @@ package io.github.hectorvent.floci.services.cur;
 import io.github.hectorvent.floci.core.common.UsageLine;
 import io.github.hectorvent.floci.services.floci.duck.FlociDuckClient;
 import io.github.hectorvent.floci.services.s3.S3Service;
-import io.github.hectorvent.floci.services.s3.model.S3Object;
-import io.github.hectorvent.floci.testing.SidecarContainersProfile;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+
+import java.util.HashMap;
 
 import java.time.Instant;
 import java.util.List;
@@ -45,9 +46,26 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * runner that adds the host alias).
  */
 @QuarkusTest
-@TestProfile(SidecarContainersProfile.class)
+@TestProfile(ParquetEmitterIntegrationTest.FixedPortProfile.class)
 @EnabledIfEnvironmentVariable(named = "FLOCI_DUCK_CROSS_CONTAINER_TEST", matches = "1|true|yes")
 class ParquetEmitterIntegrationTest {
+
+    /**
+     * Force Floci's HTTP server onto a known port so the floci-duck sidecar can
+     * reach it via {@code host.docker.internal:<port>}. The default test port
+     * of {@code 0} (random) is fine for tests that only hit the JVM-local API,
+     * but DuckDB writes Parquet by talking back to Floci's S3 service over the
+     * network and so needs a stable port.
+     */
+    public static final class FixedPortProfile implements QuarkusTestProfile {
+        @Override
+        public java.util.Map<String, String> getConfigOverrides() {
+            java.util.Map<String, String> overrides = new HashMap<>();
+            overrides.put("quarkus.http.test-port", "4566");
+            overrides.put("floci.base-url", "http://localhost:4566");
+            return overrides;
+        }
+    }
 
     private static final Instant JAN_15 = Instant.parse("2026-01-15T00:00:00Z");
     private static final Instant JAN_16 = Instant.parse("2026-01-16T00:00:00Z");
@@ -88,7 +106,7 @@ class ParquetEmitterIntegrationTest {
         assertThat(result.rowCount(), equalTo(2));
 
         // Confirm the Parquet object actually landed in S3.
-        S3Object parquetObject = s3Service.getObject(destBucket, result.key());
+        var parquetObject = s3Service.getObject(destBucket, result.key());
         assertNotNull(parquetObject);
         assertThat(parquetObject.getSize(), greaterThanOrEqualTo(1L));
 
@@ -127,7 +145,7 @@ class ParquetEmitterIntegrationTest {
         ParquetEmitter.Result result = emitter.emit("cleanup-report", destBucket, null, lines);
 
         // Staging bucket exists, but no staging objects should remain for this run.
-        List<S3Object> staging = s3Service.listObjects("floci-cur-staging",
+        var staging = s3Service.listObjects("floci-cur-staging",
                 "cur-staging/cleanup-report/" + result.runId(), null, Integer.MAX_VALUE);
         assertTrue(staging.isEmpty(),
                 "Expected no leftover staging objects, found: " + staging);

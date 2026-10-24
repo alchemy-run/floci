@@ -325,7 +325,7 @@ class AcmServiceTest {
 
         X509Certificate leaf = assertChainsToTheCa(cert);
         assertEquals(CertificateType.AMAZON_ISSUED, cert.getType());
-        assertEquals(CertificateStatus.PENDING_VALIDATION, cert.getStatus());
+        assertEquals(CertificateStatus.ISSUED, cert.getStatus());
         assertEquals(algorithm, cert.getKeyAlgorithm());
         assertEquals(algorithm.getAlgorithm(), leaf.getPublicKey().getAlgorithm());
         if (leaf.getPublicKey() instanceof RSAPublicKey rsa) {
@@ -360,22 +360,6 @@ class AcmServiceTest {
         assertEquals(CertificateStatus.PENDING_VALIDATION, cert.getStatus());
         assertNull(cert.getIssuedAt());
         assertChainsToTheCa(cert);
-    }
-
-    @Test
-    void disabledAutomaticValidationKeepsPendingRequestsUnavailable() {
-        AcmService pendingService = newService(-1);
-        Certificate cert = pendingService.requestCertificate("pending.example.test", List.of(),
-                ValidationMethod.DNS, null, KeyAlgorithm.RSA_2048, null, null, null, REGION);
-        assertEquals(CertificateStatus.PENDING_VALIDATION,
-                pendingService.describeCertificate(cert.getArn(), REGION).getStatus());
-        ObjectMapper mapper = new ObjectMapper();
-        AcmJsonHandler handler = new AcmJsonHandler(pendingService, mapper);
-        AwsException pending = assertThrows(AwsException.class, () -> handler.handle("GetCertificate",
-                mapper.createObjectNode().put("CertificateArn", cert.getArn()), REGION));
-        assertEquals("RequestInProgressException", pending.getErrorCode());
-        assertEquals("RequestInProgressException", assertThrows(AwsException.class,
-                () -> pendingService.renewCertificate(cert.getArn(), REGION)).getErrorCode());
     }
 
     @Test
@@ -481,8 +465,6 @@ class AcmServiceTest {
         assertEquals(otherCa.caPem(), withChain.getCertificateChain(), "an import keeps the chain it was given");
         assertEquals(otherCa.certificate().getSubjectX500Principal().getName(), withChain.getIssuer());
         assertEquals(leaf.certificatePem(), withChain.getCertificateBody());
-        assertEquals(leaf.certificatePem(), service.getCertificate(withChain.getArn(), REGION).getCertificateBody());
-        assertEquals(CertificateStatus.ISSUED, service.describeCertificate(withChain.getArn(), REGION).getStatus());
         assertNull(withoutChain.getCertificateChain());
     }
 

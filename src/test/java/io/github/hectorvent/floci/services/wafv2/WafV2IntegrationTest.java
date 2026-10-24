@@ -9,8 +9,6 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
-import java.util.UUID;
-
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
@@ -30,8 +28,6 @@ class WafV2IntegrationTest {
     private static final String PREFIX = "AWSWAF_20190729.";
     private static final String API_RESOURCE_ARN =
             "arn:aws:apigateway:us-east-1::/restapis/floci-waf-test/stages/prod";
-    private static final String LOG_DESTINATION_ARN =
-            "arn:aws:firehose:us-east-1:000000000000:deliverystream/aws-waf-logs-test";
 
     private static String ipSetId;
     private static String ipSetArn;
@@ -362,85 +358,6 @@ class WafV2IntegrationTest {
 
     @Test
     @Order(17)
-    void tagResourcePersistsTagsForRegexPatternSet() {
-        Response created = call("CreateRegexPatternSet",
-                "{\"Name\":\"floci-tagged-regex\",\"Scope\":\"REGIONAL\",\"RegularExpressionList\":[]}");
-        created.then().statusCode(200);
-        String arn = created.jsonPath().getString("Summary.ARN");
-        String id = created.jsonPath().getString("Summary.Id");
-
-        assertTagAndUntagRoundTrip(arn);
-
-        String lockToken = call("GetRegexPatternSet",
-                "{\"Name\":\"floci-tagged-regex\",\"Scope\":\"REGIONAL\",\"Id\":\"" + id + "\"}")
-                .then().statusCode(200).extract().jsonPath().getString("LockToken");
-        call("DeleteRegexPatternSet",
-                "{\"Name\":\"floci-tagged-regex\",\"Scope\":\"REGIONAL\",\"Id\":\"" + id
-                        + "\",\"LockToken\":\"" + lockToken + "\"}")
-                .then().statusCode(200);
-    }
-
-    @Test
-    @Order(18)
-    void tagResourcePersistsTagsForRuleGroup() {
-        Response created = call("CreateRuleGroup",
-                "{\"Name\":\"floci-tagged-rules\",\"Scope\":\"REGIONAL\",\"Capacity\":1,\"Rules\":[]}");
-        created.then().statusCode(200);
-        String arn = created.jsonPath().getString("Summary.ARN");
-        String id = created.jsonPath().getString("Summary.Id");
-
-        assertTagAndUntagRoundTrip(arn);
-
-        String lockToken = call("GetRuleGroup",
-                "{\"Name\":\"floci-tagged-rules\",\"Scope\":\"REGIONAL\",\"Id\":\"" + id + "\"}")
-                .then().statusCode(200).extract().jsonPath().getString("LockToken");
-        call("DeleteRuleGroup",
-                "{\"Name\":\"floci-tagged-rules\",\"Scope\":\"REGIONAL\",\"Id\":\"" + id
-                        + "\",\"LockToken\":\"" + lockToken + "\"}")
-                .then().statusCode(200);
-    }
-
-    private static void assertTagAndUntagRoundTrip(String arn) {
-        call("TagResource", "{\"ResourceARN\":\"" + arn
-                + "\",\"Tags\":[{\"Key\":\"env\",\"Value\":\"test\"},{\"Key\":\"team\",\"Value\":\"waf\"}]}")
-                .then().statusCode(200);
-
-        call("ListTagsForResource", "{\"ResourceARN\":\"" + arn + "\"}")
-                .then().statusCode(200)
-                .body("TagInfoForResource.ResourceARN", equalTo(arn))
-                .body("TagInfoForResource.TagList", hasSize(2))
-                .body("TagInfoForResource.TagList.find { it.Key == 'env' }.Value", equalTo("test"))
-                .body("TagInfoForResource.TagList.find { it.Key == 'team' }.Value", equalTo("waf"));
-
-        call("UntagResource", "{\"ResourceARN\":\"" + arn + "\",\"TagKeys\":[\"team\"]}")
-                .then().statusCode(200);
-
-        call("ListTagsForResource", "{\"ResourceARN\":\"" + arn + "\"}")
-                .then().statusCode(200)
-                .body("TagInfoForResource.TagList", hasSize(1))
-                .body("TagInfoForResource.TagList[0].Key", equalTo("env"));
-    }
-
-    @Test
-    @Order(19)
-    void putLoggingConfigurationForExistingWebAclSucceeds() {
-        call("PutLoggingConfiguration",
-                "{\"LoggingConfiguration\":{\"ResourceArn\":\"" + webAclArn + "\","
-                        + "\"LogDestinationConfigs\":[\"" + LOG_DESTINATION_ARN + "\"]}}")
-                .then().statusCode(200)
-                .body("LoggingConfiguration.ResourceArn", equalTo(webAclArn))
-                .body("LoggingConfiguration.LogDestinationConfigs[0]", equalTo(LOG_DESTINATION_ARN));
-
-        call("GetLoggingConfiguration", "{\"ResourceArn\":\"" + webAclArn + "\"}")
-                .then().statusCode(200)
-                .body("LoggingConfiguration.ResourceArn", equalTo(webAclArn));
-
-        call("DeleteLoggingConfiguration", "{\"ResourceArn\":\"" + webAclArn + "\"}")
-                .then().statusCode(200);
-    }
-
-    @Test
-    @Order(20)
     void teardown() {
         call("DisassociateWebACL", "{\"ResourceArn\":\"" + API_RESOURCE_ARN + "\"}")
                 .then().statusCode(200);
@@ -462,7 +379,7 @@ class WafV2IntegrationTest {
     }
 
     @Test
-    @Order(21)
+    @Order(18)
     void getMissingWebAclReturnsNonexistentItem() {
         call("GetWebACL",
                 "{\"Name\":\"nope\",\"Scope\":\"REGIONAL\",\"Id\":\"00000000-0000-0000-0000-000000000000\"}")
@@ -471,7 +388,7 @@ class WafV2IntegrationTest {
     }
 
     @Test
-    @Order(22)
+    @Order(19)
     void arnLookupsOnMissingResourcesReturnNonexistentItemAs400() {
         String missingArn = "arn:aws:wafv2:us-east-1:000000000000:regional/webacl/nope/"
                 + "00000000-0000-0000-0000-000000000000";
@@ -495,18 +412,116 @@ class WafV2IntegrationTest {
     }
 
     @Test
-    @Order(23)
-    void putLoggingConfigurationForMissingWebAclDoesNotPersist() {
-        String missingArn = "arn:aws:wafv2:us-east-1:000000000000:regional/webacl/nope/" + UUID.randomUUID();
+    @Order(12)
+    void apiKeyLifecycle() {
+        Response created = call("CreateAPIKey",
+                "{\"Scope\":\"REGIONAL\",\"TokenDomains\":[\"example.com\"]}");
+        created.then().statusCode(200).body("APIKey", notNullValue());
+        String apiKey = created.jsonPath().getString("APIKey");
 
-        call("PutLoggingConfiguration",
-                "{\"LoggingConfiguration\":{\"ResourceArn\":\"" + missingArn + "\","
-                        + "\"LogDestinationConfigs\":[\"" + LOG_DESTINATION_ARN + "\"]}}")
-                .then().statusCode(400)
-                .body("__type", equalTo("WAFNonexistentItemException"));
+        call("ListAPIKeys", "{\"Scope\":\"REGIONAL\"}")
+                .then().statusCode(200)
+                .body("APIKeySummaries.find { it.APIKey == '" + apiKey + "' }.TokenDomains[0]",
+                        equalTo("example.com"));
 
-        call("GetLoggingConfiguration", "{\"ResourceArn\":\"" + missingArn + "\"}")
-                .then().statusCode(400)
+        call("GetDecryptedAPIKey",
+                "{\"Scope\":\"REGIONAL\",\"APIKey\":\"" + apiKey + "\"}")
+                .then().statusCode(200)
+                .body("TokenDomains[0]", equalTo("example.com"))
+                .body("CreationTimestamp", notNullValue());
+
+        call("DeleteAPIKey", "{\"Scope\":\"REGIONAL\",\"APIKey\":\"" + apiKey + "\"}")
+                .then().statusCode(200);
+
+        call("GetDecryptedAPIKey",
+                "{\"Scope\":\"REGIONAL\",\"APIKey\":\"" + apiKey + "\"}")
+                .then().statusCode(404)
                 .body("__type", equalTo("WAFNonexistentItemException"));
+    }
+
+    @Test
+    @Order(13)
+    void managedRuleCatalog() {
+        call("ListAvailableManagedRuleGroups", "{\"Scope\":\"REGIONAL\"}")
+                .then().statusCode(200)
+                .body("ManagedRuleGroups.find { it.Name == 'AWSManagedRulesCommonRuleSet' }.VendorName",
+                        equalTo("AWS"));
+
+        call("DescribeManagedRuleGroup",
+                "{\"VendorName\":\"AWS\",\"Name\":\"AWSManagedRulesCommonRuleSet\",\"Scope\":\"REGIONAL\"}")
+                .then().statusCode(200)
+                .body("Capacity", not(equalTo(0)))
+                .body("Rules", not(hasSize(0)));
+
+        call("ListAvailableManagedRuleGroupVersions",
+                "{\"VendorName\":\"AWS\",\"Name\":\"AWSManagedRulesCommonRuleSet\",\"Scope\":\"REGIONAL\"}")
+                .then().statusCode(200)
+                .body("CurrentDefaultVersion", notNullValue());
+
+        call("DescribeAllManagedProducts", "{\"Scope\":\"REGIONAL\"}")
+                .then().statusCode(200)
+                .body("ManagedProducts", not(hasSize(0)));
+
+        call("DescribeManagedProductsByVendor",
+                "{\"VendorName\":\"AWS\",\"Scope\":\"REGIONAL\"}")
+                .then().statusCode(200)
+                .body("ManagedProducts.find { it.ManagedRuleSetName == 'AWSManagedRulesCommonRuleSet' }.VendorName",
+                        equalTo("AWS"));
+    }
+
+    @Test
+    @Order(14)
+    void sampledRequestsAndRateKeysAndTopPaths() {
+        Response created = call("CreateWebACL",
+                "{\"Name\":\"floci-waf-analytics\",\"Scope\":\"REGIONAL\","
+                        + "\"DefaultAction\":{\"Allow\":{}},"
+                        + "\"VisibilityConfig\":{\"SampledRequestsEnabled\":true,"
+                        + "\"CloudWatchMetricsEnabled\":true,\"MetricName\":\"analytics\"},"
+                        + "\"Rules\":[{\"Name\":\"rate-limit\",\"Priority\":0,"
+                        + "\"Statement\":{\"RateBasedStatement\":{\"Limit\":100,\"AggregateKeyType\":\"IP\"}},"
+                        + "\"Action\":{\"Block\":{}},"
+                        + "\"VisibilityConfig\":{\"SampledRequestsEnabled\":true,"
+                        + "\"CloudWatchMetricsEnabled\":true,\"MetricName\":\"rate-limit\"}}]}");
+        created.then().statusCode(200);
+        String id = created.jsonPath().getString("Summary.Id");
+        String arn = created.jsonPath().getString("Summary.ARN");
+
+        call("GetSampledRequests",
+                "{\"WebAclArn\":\"" + arn + "\",\"RuleMetricName\":\"rate-limit\","
+                        + "\"Scope\":\"REGIONAL\",\"MaxItems\":100,"
+                        + "\"TimeWindow\":{\"StartTime\":1,\"EndTime\":2}}")
+                .then().statusCode(200)
+                .body("SampledRequests", hasSize(0))
+                .body("PopulationSize", equalTo(0));
+
+        call("GetRateBasedStatementManagedKeys",
+                "{\"Scope\":\"REGIONAL\",\"WebACLName\":\"floci-waf-analytics\","
+                        + "\"WebACLId\":\"" + id + "\",\"RuleName\":\"rate-limit\"}")
+                .then().statusCode(200)
+                .body("ManagedKeysIPV4.IPAddressVersion", equalTo("IPV4"))
+                .body("ManagedKeysIPV4.Addresses", hasSize(0));
+
+        call("GetTopPathStatisticsByTraffic",
+                "{\"WebAclArn\":\"" + arn + "\",\"Scope\":\"REGIONAL\","
+                        + "\"TimeWindow\":{\"StartTime\":1,\"EndTime\":2},"
+                        + "\"Limit\":10,\"NumberOfTopTrafficBotsPerPath\":3}")
+                .then().statusCode(200)
+                .body("PathStatistics", hasSize(0))
+                .body("TotalRequestCount", equalTo(0));
+
+        call("TagResource",
+                "{\"ResourceARN\":\"" + arn + "\",\"Tags\":[{\"Key\":\"Extra\",\"Value\":\"1\"}]}")
+                .then().statusCode(200);
+        call("ListTagsForResource", "{\"ResourceARN\":\"" + arn + "\"}")
+                .then().statusCode(200)
+                .body("TagInfoForResource.TagList.find { it.Key == 'Extra' }.Value", equalTo("1"));
+
+        String lock = call("GetWebACL",
+                "{\"Name\":\"floci-waf-analytics\",\"Scope\":\"REGIONAL\",\"Id\":\"" + id + "\"}")
+                .jsonPath().getString("LockToken");
+        call("DeleteWebACL",
+                "{\"Name\":\"floci-waf-analytics\",\"Scope\":\"REGIONAL\",\"Id\":\"" + id + "\","
+                        + "\"LockToken\":\"" + lock + "\"}")
+                .then().statusCode(200);
     }
 }

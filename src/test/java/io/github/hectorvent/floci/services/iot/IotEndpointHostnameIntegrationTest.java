@@ -12,15 +12,13 @@ import static org.hamcrest.Matchers.equalTo;
 @TestProfile(ConfiguredHostnameProfile.class)
 class IotEndpointHostnameIntegrationTest {
 
-    /** The emulator's own hostname does not leak into the AWS-shaped account endpoint. */
     @Test
-    void configuredHostnameDoesNotReplaceTheAwsShapedEndpoint() {
+    void configuredHostnameIsUsedInDescribeEndpoint() {
         given()
         .when()
             .get("/endpoint")
         .then()
             .statusCode(200)
-            .body("endpointAddress", equalTo(
-                    IotEndpoints.awsAddress("iot:Data-ATS", "000000000000", "us-east-1")));
+            .body("endpointAddress", equalTo("floci:4566"));
     }
 }

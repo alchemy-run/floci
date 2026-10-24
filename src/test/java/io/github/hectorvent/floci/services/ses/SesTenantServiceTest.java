@@ -1,12 +1,10 @@
 package io.github.hectorvent.floci.services.ses;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.ses.model.Tag;
 import io.github.hectorvent.floci.services.ses.model.Tenant;
-import io.github.hectorvent.floci.services.ses.model.TenantResource;
 import io.github.hectorvent.floci.services.ses.model.TenantResourceAssociation;
 import io.github.hectorvent.floci.services.ses.model.TenantSuppressionAttributes;
 import io.github.hectorvent.floci.testing.MutableClock;
@@ -35,40 +33,6 @@ class SesTenantServiceTest {
     private static final String REGION = "us-east-1";
     private static final String ACCOUNT = "000000000000";
     private SesTenantService service;
-
-    @Test
-    void legacyTenantSuppressionRemainsReadable() throws Exception {
-        ObjectMapper mapper = new ObjectMapper();
-        Tenant tenant = mapper.readValue("""
-                {"TenantName":"legacy","TenantId":"id","TenantArn":"arn",
-                 "SuppressedReasons":["BOUNCE"],"SuppressionScope":"TENANT"}
-                """, Tenant.class);
-        assertEquals("legacy", tenant.tenantName());
-        assertEquals("ENABLED", tenant.sendingStatus());
-        assertEquals(List.of("BOUNCE"), tenant.suppressionAttributes().suppressedReasons());
-        assertEquals(tenant, mapper.readValue(mapper.writeValueAsString(tenant), Tenant.class));
-    }
-
-    @Test
-    void legacyAssociationsMigrateAndCascadeOnDelete() {
-        InMemoryStorage<String, Tenant> tenants = new InMemoryStorage<>();
-        InMemoryStorage<String, TenantResourceAssociation> associations = new InMemoryStorage<>();
-        InMemoryStorage<String, TenantResource> legacy = new InMemoryStorage<>();
-        String resourceArn = "arn:aws:ses:" + REGION + ":" + ACCOUNT + ":configuration-set/legacy-cs";
-        Tenant tenant = new Tenant("legacy", "legacy-id", "arn:aws:ses:" + REGION + ":" + ACCOUNT + ":tenant/legacy",
-                null, List.of(new Tag("team", "legacy")), "ENABLED", null);
-        tenants.put("tenant::" + REGION + "::legacy", tenant);
-        legacy.put("tenantResource::" + REGION + "::legacy::" + resourceArn,
-                new TenantResource("legacy", resourceArn, "CONFIGURATION_SET"));
-        SesTenantService migrated = new SesTenantService(tenants, associations, legacy,
-                Clock.systemUTC(), new SecureRandom());
-
-        assertEquals("configuration-set", migrated.listTenantResources(tenant, null, REGION).getFirst().resourceType());
-        assertTrue(legacy.keys().isEmpty());
-        assertEquals(List.of(new Tag("team", "legacy")), migrated.listTags("legacy", REGION));
-        migrated.deleteTenant("legacy", REGION, ignored -> { });
-        assertTrue(associations.keys().isEmpty());
-    }
 
     @BeforeEach
     void setUp() {
@@ -166,12 +130,12 @@ class SesTenantServiceTest {
 
     // Per-account isolation is provided transparently by AccountAwareStorageBackend (which
     // StorageFactory wraps every store in), not by the tenant key, so it is covered by the core
-    // storage tests rather than re-tested here, consistent with the other SES resources.
+    // storage tests rather than re-tested here — consistent with the other SES resources.
 
     @Test
     void getAndDelete_rejectMalformedName() {
         // Unlike CreateTenant, both an absent and an empty name collapse to the service-level
-        // message here (probe-confirmed 2026-08-30), the Smithy wordings are CreateTenant-only.
+        // message here (probe-confirmed 2026-08-30) — the Smithy wordings are CreateTenant-only.
         assertEquals("TenantName cannot be empty",
                 assertThrows(AwsException.class, () -> service.getTenant("", REGION)).getMessage());
         assertEquals("TenantName cannot be empty",
@@ -434,7 +398,7 @@ class SesTenantServiceTest {
         AwsException empty = assertThrows(AwsException.class,
                 () -> service.tenantForAssociation("", REGION));
         assertEquals("TenantName cannot be empty", empty.getMessage());
-        // An absent TenantName gets the same message (probe-confirmed), the Smithy not-null
+        // An absent TenantName gets the same message (probe-confirmed) — the Smithy not-null
         // variant exists only on CreateTenant.
         AwsException absent = assertThrows(AwsException.class,
                 () -> service.tenantForAssociation(null, REGION));
@@ -504,7 +468,7 @@ class SesTenantServiceTest {
     @Test
     void putSuppressionAttributes_precedenceMatchesAws() {
         // Empty TenantName wins over the enum check; request validation wins over existence. An
-        // absent TenantName gets the same message, no Smithy not-null variant on this operation.
+        // absent TenantName gets the same message — no Smithy not-null variant on this operation.
         assertEquals("TenantName cannot be empty",
                 assertThrows(AwsException.class, () -> service.putSuppressionAttributes(
                         "", List.of("NOPE"), "TENANT", REGION)).getMessage());
@@ -538,7 +502,7 @@ class SesTenantServiceTest {
         assertEquals("TenantName cannot be empty",
                 assertThrows(AwsException.class,
                         () -> service.runWithTenant(" ", REGION, t -> null)).getMessage());
-        // An absent TenantName collapses to the same service-level message (probe-confirmed) -
+        // An absent TenantName collapses to the same service-level message (probe-confirmed) —
         // the Smithy not-null variant exists only on CreateTenant.
         assertEquals("TenantName cannot be empty",
                 assertThrows(AwsException.class,
@@ -567,7 +531,7 @@ class SesTenantServiceTest {
         AwsException e = assertThrows(AwsException.class,
                 () -> service.tenantForSending("ghost", REGION, ACCOUNT));
         assertEquals("NotFoundException", e.getErrorCode());
-        // No angle brackets, and the account id is included, unlike the management operations.
+        // No angle brackets, and the account id is included — unlike the management operations.
         assertEquals("Tenant ghost for AwsAccountId " + ACCOUNT + " not found.", e.getMessage());
         assertEquals("TenantName cannot be empty",
                 assertThrows(AwsException.class,

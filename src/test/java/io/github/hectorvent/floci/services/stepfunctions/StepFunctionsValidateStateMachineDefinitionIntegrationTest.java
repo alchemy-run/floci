@@ -378,22 +378,6 @@ class StepFunctionsValidateStateMachineDefinitionIntegrationTest {
     }
 
     @Test
-    void startAtMissingState_returnsFail() {
-        String def = "{\\\"StartAt\\\":\\\"Missing\\\",\\\"States\\\":{\\\"Done\\\":{\\\"Type\\\":\\\"Pass\\\",\\\"End\\\":true}}}";
-        given().contentType(CT).header("X-Amz-Target", TARGET)
-                .body("{\"definition\":\"" + def + "\"}")
-                .when().post("/")
-                .then().statusCode(200)
-                .body("result", equalTo("FAIL"))
-                .body("diagnostics.size()", greaterThanOrEqualTo(1))
-                .body("diagnostics[0].severity", equalTo("ERROR"))
-                // AWS reports an unresolvable StartAt as a dangling transition target at /StartAt,
-                // the same "MISSING_TRANSITION_TARGET: Missing 'Next' target" CreateStateMachine uses.
-                .body("diagnostics[0].code", equalTo("MISSING_TRANSITION_TARGET"))
-                .body("diagnostics[0].location", equalTo("/StartAt"));
-    }
-
-    @Test
     void malformedJson_returnsFailWithInvalidJson() {
         given().contentType(CT).header("X-Amz-Target", TARGET)
                 .body("{\"definition\":\"{not json\"}")

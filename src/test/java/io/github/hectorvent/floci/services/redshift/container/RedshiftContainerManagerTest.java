@@ -2,7 +2,6 @@ package io.github.hectorvent.floci.services.redshift.container;
 
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
-import com.github.dockerjava.api.command.CopyArchiveFromContainerCmd;
 import com.github.dockerjava.api.command.CopyArchiveToContainerCmd;
 import com.github.dockerjava.api.command.ExecCreateCmd;
 import com.github.dockerjava.api.command.ExecCreateCmdResponse;
@@ -23,19 +22,17 @@ import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
 import io.github.hectorvent.floci.services.redshift.model.Cluster;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
-import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import com.github.dockerjava.api.command.CopyArchiveFromContainerCmd;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -47,61 +44,15 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.RETURNS_SELF;
-import static org.mockito.Mockito.clearInvocations;
-import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.RETURNS_SELF;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class RedshiftContainerManagerTest {
-
-    @ParameterizedTest
-    @ValueSource(strings = {"adopt", "readiness", "proxy"})
-    void startupRollbackPreservesAdoptedDataAndExplicitStopStillRemovesIt(String failureStage) throws IOException {
-        String name = "floci-aws-redshift-" + ACCOUNT_ID + "-survivor";
-        Container existing = mock(Container.class);
-        when(existing.getId()).thenReturn("cont-survivor");
-        when(lifecycleManager.findByName(name)).thenReturn(Optional.of(existing));
-        Closeable stream = mock(Closeable.class);
-        if ("adopt".equals(failureStage)) {
-            when(lifecycleManager.adopt(eq("cont-survivor"), any(), any()))
-                    .thenThrow(new IllegalStateException("adoption failed"));
-            assertThrows(IllegalStateException.class,
-                    () -> manager.adoptOrStart(ACCOUNT_ID, "survivor", "admin", "pass"));
-        } else {
-            when(lifecycleManager.adopt(eq("cont-survivor"), any(), any())).thenReturn(
-                    new ContainerInfo("cont-survivor", Map.of(5432, new EndpointInfo("localhost", 5432))));
-            when(logStreamer.attach(anyString(), anyString(), anyString(), anyString(), anyString())).thenReturn(stream);
-            if ("readiness".equals(failureStage)) {
-                when(dockerClient.execCreateCmd(anyString())).thenThrow(new IllegalStateException("not ready"));
-                Thread.currentThread().interrupt();
-                try {
-                    assertThrows(IllegalStateException.class,
-                            () -> manager.adoptOrStart(ACCOUNT_ID, "survivor", "admin", "pass"));
-                } finally {
-                    Thread.interrupted();
-                }
-            } else {
-                manager.adoptOrStart(ACCOUNT_ID, "survivor", "admin", "pass");
-            }
-        }
-
-        manager.rollbackStartup(ACCOUNT_ID, "survivor");
-        manager.rollbackStartup(ACCOUNT_ID, "survivor");
-
-        verify(lifecycleManager, never()).removeIfExistsStrict(anyString(), eq(true));
-        assertTrue(manager.getContainer(ACCOUNT_ID, "survivor").isEmpty());
-        if (!"adopt".equals(failureStage)) {
-            verify(stream).close();
-        }
-        manager.stop(ACCOUNT_ID, "survivor");
-        verify(lifecycleManager).removeIfExistsStrict("cont-survivor", true);
-    }
-
 
     private ContainerBuilder containerBuilder;
     private ContainerLifecycleManager lifecycleManager;
@@ -114,8 +65,6 @@ class RedshiftContainerManagerTest {
     @BeforeEach
     void setUp() {
         containerBuilder = mock(ContainerBuilder.class);
-        // Echoes its input, so a test sees which network the manager asked to resolve.
-        when(containerBuilder.resolveDockerNetwork(any())).thenAnswer(inv -> inv.<Optional<String>>getArgument(0).map(n -> "resolved:" + n));
         lifecycleManager = mock(ContainerLifecycleManager.class);
         logStreamer = mock(ContainerLogStreamer.class);
         containerDetector = mock(ContainerDetector.class);
@@ -125,7 +74,6 @@ class RedshiftContainerManagerTest {
         when(lifecycleManager.getDockerClient()).thenReturn(dockerClient);
         when(config.services().redshift().imageVersion()).thenReturn("postgres:16-alpine");
         when(config.services().redshift().dockerNetwork()).thenReturn(Optional.empty());
-        when(config.defaultRegion()).thenReturn("us-east-1");
 
         // Default mock for execCreateCmd/execStartCmd/inspectExecCmd to make waitForReady succeed instantly
         ExecCreateCmd defaultCreateCmd = mock(ExecCreateCmd.class, org.mockito.Mockito.RETURNS_SELF);
@@ -164,7 +112,7 @@ class RedshiftContainerManagerTest {
     private static final String ACCOUNT_ID = "111111111111";
 
     @Test
-    void takeSnapshotContainerNotFound() {
+    void testTakeSnapshotContainerNotFound() {
         AwsException ex = assertThrows(AwsException.class, () ->
                 manager.takeSnapshot(ACCOUNT_ID, "non-existent-cluster", "admin", "dev", Path.of("dummy.sql")));
         assertEquals("ClusterNotFound", ex.getErrorCode());
@@ -172,7 +120,7 @@ class RedshiftContainerManagerTest {
     }
 
     @Test
-    void restoreSnapshotContainerNotFound() {
+    void testRestoreSnapshotContainerNotFound() {
         AwsException ex = assertThrows(AwsException.class, () ->
                 manager.restoreSnapshot(ACCOUNT_ID, "non-existent-cluster", "admin", "dev", Path.of("dummy.sql")));
         assertEquals("ClusterNotFound", ex.getErrorCode());
@@ -180,7 +128,7 @@ class RedshiftContainerManagerTest {
     }
 
     @Test
-    void createSnapshotNullCluster() {
+    void testCreateSnapshotNullCluster() {
         AwsException ex = assertThrows(AwsException.class, () ->
                 manager.createSnapshot(ACCOUNT_ID, null, Path.of("dummy.sql")));
         assertEquals("InvalidParameterValue", ex.getErrorCode());
@@ -188,7 +136,7 @@ class RedshiftContainerManagerTest {
     }
 
     @Test
-    void restoreSnapshotNullCluster() {
+    void testRestoreSnapshotNullCluster() {
         AwsException ex = assertThrows(AwsException.class, () ->
                 manager.restoreSnapshot(ACCOUNT_ID, (Cluster) null, Path.of("dummy.sql")));
         assertEquals("InvalidParameterValue", ex.getErrorCode());
@@ -196,11 +144,11 @@ class RedshiftContainerManagerTest {
     }
 
     @Test
-    void takeSnapshotSuccess() throws Exception {
+    void testTakeSnapshotSuccess() throws Exception {
         ContainerBuilder.Builder specBuilder = mock(ContainerBuilder.Builder.class, org.mockito.Mockito.RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(specBuilder);
         ContainerInfo info = new ContainerInfo("cont-123", Map.of(5432, new EndpointInfo("localhost", 5432)));
-        when(lifecycleManager.createAndStartEphemeral(any())).thenReturn(info);
+        when(lifecycleManager.createAndStart(any())).thenReturn(info);
 
         RedshiftContainerHandle handle = manager.start(ACCOUNT_ID, "test-cluster", "admin", "pass");
         assertNotNull(handle);
@@ -255,11 +203,11 @@ class RedshiftContainerManagerTest {
     }
 
     @Test
-    void takeSnapshotFailureExitCode() throws Exception {
+    void testTakeSnapshotFailureExitCode() throws Exception {
         ContainerBuilder.Builder specBuilder = mock(ContainerBuilder.Builder.class, org.mockito.Mockito.RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(specBuilder);
         ContainerInfo info = new ContainerInfo("cont-123", Map.of(5432, new EndpointInfo("localhost", 5432)));
-        when(lifecycleManager.createAndStartEphemeral(any())).thenReturn(info);
+        when(lifecycleManager.createAndStart(any())).thenReturn(info);
 
         manager.start(ACCOUNT_ID, "test-cluster", "admin", "pass");
 
@@ -293,11 +241,11 @@ class RedshiftContainerManagerTest {
     }
 
     @Test
-    void restoreSnapshotEmptyDump() {
+    void testRestoreSnapshotEmptyDump() {
         ContainerBuilder.Builder specBuilder = mock(ContainerBuilder.Builder.class, org.mockito.Mockito.RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(specBuilder);
         ContainerInfo info = new ContainerInfo("cont-123", Map.of(5432, new EndpointInfo("localhost", 5432)));
-        when(lifecycleManager.createAndStartEphemeral(any())).thenReturn(info);
+        when(lifecycleManager.createAndStart(any())).thenReturn(info);
 
         manager.start(ACCOUNT_ID, "test-cluster", "admin", "pass");
 
@@ -307,11 +255,11 @@ class RedshiftContainerManagerTest {
     }
 
     @Test
-    void restoreSnapshotSuccess() throws Exception {
+    void testRestoreSnapshotSuccess() throws Exception {
         ContainerBuilder.Builder specBuilder = mock(ContainerBuilder.Builder.class, org.mockito.Mockito.RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(specBuilder);
         ContainerInfo info = new ContainerInfo("cont-123", Map.of(5432, new EndpointInfo("localhost", 5432)));
-        when(lifecycleManager.createAndStartEphemeral(any())).thenReturn(info);
+        when(lifecycleManager.createAndStart(any())).thenReturn(info);
 
         manager.start(ACCOUNT_ID, "test-cluster", "admin", "pass");
 
@@ -352,45 +300,41 @@ class RedshiftContainerManagerTest {
     }
 
     @Test
-    void stopRemovesContainer() {
+    void testStopRemovesContainer() {
         ContainerBuilder.Builder specBuilder = mock(ContainerBuilder.Builder.class, org.mockito.Mockito.RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(specBuilder);
         ContainerInfo info = new ContainerInfo("cont-123", Map.of(5432, new EndpointInfo("localhost", 5432)));
-        when(lifecycleManager.createAndStartEphemeral(any())).thenReturn(info);
+        when(lifecycleManager.createAndStart(any())).thenReturn(info);
 
         manager.start(ACCOUNT_ID, "test-cluster", "admin", "pass");
         assertTrue(manager.getContainer(ACCOUNT_ID, "test-cluster").isPresent());
 
-        clearInvocations(lifecycleManager);
         manager.stop(ACCOUNT_ID, "test-cluster");
         assertTrue(manager.getContainer(ACCOUNT_ID, "test-cluster").isEmpty());
-        verify(lifecycleManager).removeIfExistsStrict("cont-123", true);
+        verify(lifecycleManager).removeIfExists("floci-redshift-" + ACCOUNT_ID + "-test-cluster");
     }
 
     @Test
-    void startRemovesStaleContainerBeforeCreating() {
-        ContainerBuilder.Builder specBuilder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
+    void testStartRemovesAStaleContainerHoldingTheClusterNameBeforeCreating() {
+        ContainerBuilder.Builder specBuilder = mock(ContainerBuilder.Builder.class, org.mockito.Mockito.RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(specBuilder);
         ContainerInfo info = new ContainerInfo("cont-123", Map.of(5432, new EndpointInfo("localhost", 5432)));
-        when(lifecycleManager.createAndStartEphemeral(any())).thenReturn(info);
+        when(lifecycleManager.createAndStart(any())).thenReturn(info);
 
         manager.start(ACCOUNT_ID, "test-cluster", "admin", "pass");
 
-        // A container left under the fixed name by an earlier run would make createAndStart fail with a name conflict
         InOrder order = inOrder(lifecycleManager);
-        order.verify(lifecycleManager).removeIfExistsStrict("floci-aws-redshift-" + ACCOUNT_ID + "-test-cluster", true);
-        order.verify(lifecycleManager).createAndStartEphemeral(any());
-        // A legacy-named container may still hold a cluster's data.
-        verify(lifecycleManager, never()).removeIfExistsStrict("floci-redshift-" + ACCOUNT_ID + "-test-cluster", true);
+        order.verify(lifecycleManager).removeIfExistsStrict("floci-redshift-" + ACCOUNT_ID + "-test-cluster");
+        order.verify(lifecycleManager).createAndStart(any());
     }
 
     @Test
-    void sameClusterIdentifierAcrossAccountsDoesNotCollide() {
+    void testSameClusterIdentifierAcrossAccountsDoesNotCollide() {
         ContainerBuilder.Builder specBuilder = mock(ContainerBuilder.Builder.class, org.mockito.Mockito.RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(specBuilder);
         ContainerInfo infoA = new ContainerInfo("cont-account-a", Map.of(5432, new EndpointInfo("localhost", 5432)));
         ContainerInfo infoB = new ContainerInfo("cont-account-b", Map.of(5432, new EndpointInfo("localhost", 5433)));
-        when(lifecycleManager.createAndStartEphemeral(any())).thenReturn(infoA, infoB);
+        when(lifecycleManager.createAndStart(any())).thenReturn(infoA, infoB);
 
         String otherAccountId = "222222222222";
         manager.start(ACCOUNT_ID, "shared-id", "admin", "pass");
@@ -404,47 +348,45 @@ class RedshiftContainerManagerTest {
     }
 
     @Test
-    void adoptOrStartAdoptsExistingContainerInsteadOfRecreatingIt() {
-        String containerName = "floci-aws-redshift-" + ACCOUNT_ID + "-test-cluster";
+    void testAdoptOrStartAdoptsExistingContainerInsteadOfRecreatingIt() {
+        String containerName = "floci-redshift-" + ACCOUNT_ID + "-test-cluster";
         Container existing = mock(Container.class);
         when(existing.getId()).thenReturn("cont-existing");
         when(lifecycleManager.findByName(containerName)).thenReturn(Optional.of(existing));
         ContainerInfo adopted = new ContainerInfo("cont-existing", Map.of(5432, new EndpointInfo("localhost", 6000)));
-        when(config.services().redshift().dockerNetwork()).thenReturn(Optional.of("redshift-net"));
-        when(lifecycleManager.adopt(eq("cont-existing"), any(), eq(Optional.of("resolved:redshift-net")))).thenReturn(adopted);
+        when(lifecycleManager.adopt(eq("cont-existing"), any())).thenReturn(adopted);
 
         RedshiftContainerHandle handle = manager.adoptOrStart(ACCOUNT_ID, "test-cluster", "admin", "pass");
 
         assertEquals("cont-existing", handle.getContainerId());
         assertEquals(6000, handle.getPort());
         assertTrue(manager.getContainer(ACCOUNT_ID, "test-cluster").isPresent());
-        // The surviving container retains its anonymous PostgreSQL volume. A replacement
-        // would start with an empty volume, so adoption must preserve the container.
-        verify(lifecycleManager, never()).createAndStartEphemeral(any());
-        verify(lifecycleManager, never()).removeIfExistsStrict(anyString(), eq(true));
+        // Data lives only in the container's writable layer (no volume) — recreating it
+        // would silently discard it, so a container found by name must never be recreated.
+        verify(lifecycleManager, never()).createAndStart(any());
     }
 
     @Test
-    void adoptOrStartFallsBackToStartWhenNoExistingContainer() {
-        String containerName = "floci-aws-redshift-" + ACCOUNT_ID + "-test-cluster";
+    void testAdoptOrStartFallsBackToStartWhenNoExistingContainer() {
+        String containerName = "floci-redshift-" + ACCOUNT_ID + "-test-cluster";
         when(lifecycleManager.findByName(containerName)).thenReturn(Optional.empty());
         ContainerBuilder.Builder specBuilder = mock(ContainerBuilder.Builder.class, org.mockito.Mockito.RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(specBuilder);
         ContainerInfo info = new ContainerInfo("cont-fresh", Map.of(5432, new EndpointInfo("localhost", 5432)));
-        when(lifecycleManager.createAndStartEphemeral(any())).thenReturn(info);
+        when(lifecycleManager.createAndStart(any())).thenReturn(info);
 
         RedshiftContainerHandle handle = manager.adoptOrStart(ACCOUNT_ID, "test-cluster", "admin", "pass");
 
         assertEquals("cont-fresh", handle.getContainerId());
-        verify(lifecycleManager, never()).adopt(any(), any(), any());
+        verify(lifecycleManager, never()).adopt(any(), any());
     }
 
     @Test
-    void alterUserPasswordSuccess() throws Exception {
+    void testAlterUserPasswordSuccess() throws Exception {
         ContainerBuilder.Builder specBuilder = mock(ContainerBuilder.Builder.class, org.mockito.Mockito.RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(specBuilder);
         ContainerInfo info = new ContainerInfo("cont-123", Map.of(5432, new EndpointInfo("localhost", 5432)));
-        when(lifecycleManager.createAndStartEphemeral(any())).thenReturn(info);
+        when(lifecycleManager.createAndStart(any())).thenReturn(info);
         manager.start(ACCOUNT_ID, "test-cluster", "admin", "pass");
 
         ExecCreateCmd createCmd = mock(ExecCreateCmd.class, org.mockito.Mockito.RETURNS_SELF);
@@ -473,8 +415,75 @@ class RedshiftContainerManagerTest {
         verify(dockerClient, org.mockito.Mockito.times(4)).execCreateCmd("cont-123");
     }
 
+    private ExecCreateCmd startClusterAndRecordExecs(java.util.List<String> commands, String stdout) {
+        ContainerBuilder.Builder specBuilder = mock(ContainerBuilder.Builder.class, org.mockito.Mockito.RETURNS_SELF);
+        when(containerBuilder.newContainer(anyString())).thenReturn(specBuilder);
+        ContainerInfo info = new ContainerInfo("cont-db", Map.of(5432, new EndpointInfo("localhost", 5432)));
+        when(lifecycleManager.createAndStart(any())).thenReturn(info);
+        manager.start(ACCOUNT_ID, "db-cluster", "admin", "pass");
+
+        ExecCreateCmd createCmd = mock(ExecCreateCmd.class, org.mockito.Mockito.RETURNS_SELF);
+        when(createCmd.withCmd(any(String[].class))).thenAnswer(invocation -> {
+            commands.add(String.join(" ", (String[]) invocation.getRawArguments()[0]));
+            return createCmd;
+        });
+        ExecCreateCmdResponse createResponse = mock(ExecCreateCmdResponse.class);
+        when(createResponse.getId()).thenReturn("exec-db");
+        when(createCmd.exec()).thenReturn(createResponse);
+        when(dockerClient.execCreateCmd("cont-db")).thenReturn(createCmd);
+
+        ExecStartCmd startCmd = mock(ExecStartCmd.class);
+        when(startCmd.exec(any())).thenAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            ResultCallback.Adapter<Frame> adapter = invocation.getArgument(0);
+            if (stdout != null) {
+                adapter.onNext(new Frame(StreamType.STDOUT, stdout.getBytes(StandardCharsets.UTF_8)));
+            }
+            adapter.onComplete();
+            return adapter;
+        });
+        when(dockerClient.execStartCmd("exec-db")).thenReturn(startCmd);
+        return createCmd;
+    }
+
     @Test
-    void alterUserPasswordContainerNotFound() {
+    void ensureDatabaseCreatesTheRequestedDatabase() {
+        java.util.List<String> commands = new java.util.ArrayList<>();
+        startClusterAndRecordExecs(commands, null);
+
+        manager.ensureDatabase(ACCOUNT_ID, "db-cluster", "admin", "analytics");
+
+        assertEquals(2, commands.size());
+        assertTrue(commands.get(0).contains("SELECT 1 FROM pg_database WHERE datname = 'analytics'"));
+        assertTrue(commands.get(1).endsWith("-c CREATE DATABASE \"analytics\""), commands.get(1));
+    }
+
+    @Test
+    void ensureDatabaseLeavesAnExistingDatabaseAlone() {
+        java.util.List<String> commands = new java.util.ArrayList<>();
+        startClusterAndRecordExecs(commands, "1\n");
+
+        manager.ensureDatabase(ACCOUNT_ID, "db-cluster", "admin", "analytics");
+
+        assertEquals(1, commands.size());
+    }
+
+    @Test
+    void ensureDatabaseSkipsTheBootstrapDatabaseAndRejectsUnsafeNames() {
+        java.util.List<String> commands = new java.util.ArrayList<>();
+        startClusterAndRecordExecs(commands, null);
+
+        manager.ensureDatabase(ACCOUNT_ID, "db-cluster", "admin", "dev");
+        manager.ensureDatabase(ACCOUNT_ID, "db-cluster", "admin", null);
+        AwsException ex = assertThrows(AwsException.class, () ->
+                manager.ensureDatabase(ACCOUNT_ID, "db-cluster", "admin", "x\"; DROP DATABASE dev; --"));
+
+        assertEquals("InvalidParameterValue", ex.getErrorCode());
+        assertTrue(commands.isEmpty());
+    }
+
+    @Test
+    void testAlterUserPasswordContainerNotFound() {
         AwsException ex = assertThrows(AwsException.class, () ->
                 manager.alterUserPassword(ACCOUNT_ID, "non-existent-cluster", "admin", "new-secret"));
         assertEquals("ClusterNotFound", ex.getErrorCode());
@@ -482,11 +491,11 @@ class RedshiftContainerManagerTest {
     }
 
     @Test
-    void alterUserPasswordInvalidUsername() throws Exception {
+    void testAlterUserPasswordInvalidUsername() throws Exception {
         ContainerBuilder.Builder specBuilder = mock(ContainerBuilder.Builder.class, org.mockito.Mockito.RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(specBuilder);
         ContainerInfo info = new ContainerInfo("cont-123", Map.of(5432, new EndpointInfo("localhost", 5432)));
-        when(lifecycleManager.createAndStartEphemeral(any())).thenReturn(info);
+        when(lifecycleManager.createAndStart(any())).thenReturn(info);
         manager.start(ACCOUNT_ID, "test-cluster", "admin", "pass");
 
         // Test SQL injection attempt with semicolon
@@ -503,11 +512,11 @@ class RedshiftContainerManagerTest {
     }
 
     @Test
-    void alterUserPasswordInvalidPassword() throws Exception {
+    void testAlterUserPasswordInvalidPassword() throws Exception {
         ContainerBuilder.Builder specBuilder = mock(ContainerBuilder.Builder.class, org.mockito.Mockito.RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(specBuilder);
         ContainerInfo info = new ContainerInfo("cont-123", Map.of(5432, new EndpointInfo("localhost", 5432)));
-        when(lifecycleManager.createAndStartEphemeral(any())).thenReturn(info);
+        when(lifecycleManager.createAndStart(any())).thenReturn(info);
         manager.start(ACCOUNT_ID, "test-cluster", "admin", "pass");
 
         // Forbidden characters: ', ", \, / and @ (AWS ModifyCluster rejects the same set)
@@ -536,11 +545,11 @@ class RedshiftContainerManagerTest {
     }
 
     @Test
-    void alterUserPasswordExecFailure() throws Exception {
+    void testAlterUserPasswordExecFailure() throws Exception {
         ContainerBuilder.Builder specBuilder = mock(ContainerBuilder.Builder.class, org.mockito.Mockito.RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(specBuilder);
         ContainerInfo info = new ContainerInfo("cont-123", Map.of(5432, new EndpointInfo("localhost", 5432)));
-        when(lifecycleManager.createAndStartEphemeral(any())).thenReturn(info);
+        when(lifecycleManager.createAndStart(any())).thenReturn(info);
         manager.start(ACCOUNT_ID, "test-cluster", "admin", "pass");
 
         ExecCreateCmd createCmd = mock(ExecCreateCmd.class, org.mockito.Mockito.RETURNS_SELF);
@@ -573,11 +582,11 @@ class RedshiftContainerManagerTest {
     }
 
     @Test
-    void startAttachesLogStreamerAndToleratesFailure() throws Exception {
+    void testStartAttachesLogStreamerAndToleratesFailure() throws Exception {
         ContainerBuilder.Builder specBuilder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(specBuilder);
         ContainerInfo info = new ContainerInfo("cont-stream", Map.of(5432, new EndpointInfo("localhost", 5432)));
-        when(lifecycleManager.createAndStartEphemeral(any())).thenReturn(info);
+        when(lifecycleManager.createAndStart(any())).thenReturn(info);
         Closeable stream = mock(Closeable.class);
         when(logStreamer.attach("cont-stream", "/floci/redshift", "test-cluster", "us-east-1", "redshift:test-cluster"))
                 .thenReturn(stream);
@@ -596,13 +605,13 @@ class RedshiftContainerManagerTest {
     }
 
     @Test
-    void adoptOrStartAttachesLogStreamerAndToleratesFailure() throws Exception {
-        String containerName = "floci-aws-redshift-" + ACCOUNT_ID + "-test-cluster";
+    void testAdoptOrStartAttachesLogStreamerAndToleratesFailure() throws Exception {
+        String containerName = "floci-redshift-" + ACCOUNT_ID + "-test-cluster";
         Container existing = mock(Container.class);
         when(existing.getId()).thenReturn("cont-adopt-stream");
         when(lifecycleManager.findByName(containerName)).thenReturn(Optional.of(existing));
         ContainerInfo adopted = new ContainerInfo("cont-adopt-stream", Map.of(5432, new EndpointInfo("localhost", 6000)));
-        when(lifecycleManager.adopt(eq("cont-adopt-stream"), any(), eq(Optional.empty()))).thenReturn(adopted);
+        when(lifecycleManager.adopt(eq("cont-adopt-stream"), any())).thenReturn(adopted);
         Closeable stream = mock(Closeable.class);
         when(logStreamer.attach("cont-adopt-stream", "/floci/redshift", "test-cluster", "us-east-1", "redshift:test-cluster"))
                 .thenReturn(stream);
@@ -621,7 +630,7 @@ class RedshiftContainerManagerTest {
     }
 
     @Test
-    void bootstrapCatalogSuccess() {
+    void testBootstrapCatalogSuccess() {
         CopyArchiveToContainerCmd copyCmd = mock(CopyArchiveToContainerCmd.class, org.mockito.Mockito.RETURNS_SELF);
         when(dockerClient.copyArchiveToContainerCmd("cont-bootstrap")).thenReturn(copyCmd);
 
@@ -644,7 +653,7 @@ class RedshiftContainerManagerTest {
     }
 
     @Test
-    void bootstrapCatalogFailureDoesNotThrow() {
+    void testBootstrapCatalogFailureDoesNotThrow() {
         CopyArchiveToContainerCmd copyCmd = mock(CopyArchiveToContainerCmd.class, org.mockito.Mockito.RETURNS_SELF);
         when(copyCmd.exec()).thenThrow(new RuntimeException("Docker copy error"));
         when(dockerClient.copyArchiveToContainerCmd("cont-bootstrap-fail")).thenReturn(copyCmd);
@@ -652,80 +661,5 @@ class RedshiftContainerManagerTest {
         // Must not bubble an exception that fails cluster startup
         org.junit.jupiter.api.Assertions.assertDoesNotThrow(() ->
                 manager.bootstrapCatalog("cont-bootstrap-fail", "admin", "dev"));
-    }
-
-    @Test
-    void stopFailureRetainsHandleForRetry() {
-        ContainerBuilder.Builder specBuilder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
-        when(containerBuilder.newContainer(anyString())).thenReturn(specBuilder);
-        when(lifecycleManager.createAndStartEphemeral(any())).thenReturn(
-                new ContainerInfo("cont-owned", Map.of(5432, new EndpointInfo("localhost", 5432))));
-        RedshiftContainerHandle handle = manager.start(ACCOUNT_ID, "owned", "admin", "pass");
-        doThrow(new IllegalStateException("Docker removal failed"))
-                .when(lifecycleManager).removeIfExistsStrict("cont-owned", true);
-        assertThrows(IllegalStateException.class, () -> manager.stop(ACCOUNT_ID, "owned"));
-        assertEquals(Optional.of(handle), manager.getContainer(ACCOUNT_ID, "owned"));
-        doNothing().when(lifecycleManager).removeIfExistsStrict("cont-owned", true);
-        manager.stop(ACCOUNT_ID, "owned");
-        assertTrue(manager.getContainer(ACCOUNT_ID, "owned").isEmpty());
-    }
-
-    @Test
-    void successfulStopClosesOwnedLogStream() throws IOException {
-        ContainerBuilder.Builder specBuilder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
-        when(containerBuilder.newContainer(anyString())).thenReturn(specBuilder);
-        when(lifecycleManager.createAndStartEphemeral(any())).thenReturn(
-                new ContainerInfo("cont-owned", Map.of(5432, new EndpointInfo("localhost", 5432))));
-        RedshiftContainerHandle handle = manager.start(ACCOUNT_ID, "owned", "admin", "pass");
-        Closeable stream = mock(Closeable.class);
-        handle.setLogStream(stream);
-        manager.stop(ACCOUNT_ID, "owned");
-        verify(stream).close();
-    }
-
-    @Test
-    void staleRemovalFailurePreventsReplacementCreation() {
-        doThrow(new IllegalStateException("Docker unavailable")).when(lifecycleManager)
-                .removeIfExistsStrict("floci-aws-redshift-" + ACCOUNT_ID + "-owned", true);
-        assertThrows(IllegalStateException.class, () -> manager.start(ACCOUNT_ID, "owned", "admin", "pass"));
-        verify(lifecycleManager, never()).createAndStartEphemeral(any());
-    }
-
-    @Test
-    void readinessFailureKeepsLogAndContainerOwnershipUntilRollback() throws IOException {
-        ContainerBuilder.Builder specBuilder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
-        when(containerBuilder.newContainer(anyString())).thenReturn(specBuilder);
-        when(lifecycleManager.createAndStartEphemeral(any())).thenReturn(
-                new ContainerInfo("cont-unready", Map.of(5432, new EndpointInfo("localhost", 5432))));
-        Closeable stream = mock(Closeable.class);
-        when(logStreamer.attach(anyString(), anyString(), anyString(), anyString(), anyString())).thenReturn(stream);
-        when(dockerClient.execCreateCmd(anyString())).thenThrow(new IllegalStateException("not ready"));
-        Thread.currentThread().interrupt();
-        try {
-            assertThrows(IllegalStateException.class, () -> manager.start(ACCOUNT_ID, "unready", "admin", "pass"));
-        } finally {
-            Thread.interrupted();
-        }
-        assertTrue(manager.getContainer(ACCOUNT_ID, "unready").isPresent());
-        verify(stream, never()).close();
-        manager.rollbackStartup(ACCOUNT_ID, "unready");
-        verify(lifecycleManager).removeIfExistsStrict("cont-unready", true);
-        verify(stream).close();
-    }
-
-    @Test
-    void logCloseFailureRetainsHandleForRetryAfterContainerRemoval() throws IOException {
-        ContainerBuilder.Builder specBuilder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
-        when(containerBuilder.newContainer(anyString())).thenReturn(specBuilder);
-        when(lifecycleManager.createAndStartEphemeral(any())).thenReturn(
-                new ContainerInfo("cont-owned", Map.of(5432, new EndpointInfo("localhost", 5432))));
-        RedshiftContainerHandle handle = manager.start(ACCOUNT_ID, "owned", "admin", "pass");
-        Closeable stream = mock(Closeable.class);
-        handle.setLogStream(stream);
-        doThrow(new IllegalStateException("close failed")).doNothing().when(stream).close();
-        assertThrows(IllegalStateException.class, () -> manager.stop(ACCOUNT_ID, "owned"));
-        assertEquals(Optional.of(handle), manager.getContainer(ACCOUNT_ID, "owned"));
-        manager.stop(ACCOUNT_ID, "owned");
-        assertTrue(manager.getContainer(ACCOUNT_ID, "owned").isEmpty());
     }
 }

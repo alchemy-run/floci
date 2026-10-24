@@ -183,9 +183,6 @@ class SesTemplateV2IntegrationTest {
     @Test
     @Order(9)
     void sendEmail_withTemplate_substitutesVariables() {
-        // Idempotent setup: sibling suites in the shared JVM may already have
-        // verified this identity; AWS answers a duplicate CreateEmailIdentity
-        // with 400 AlreadyExistsException, which is just as good here.
         given()
             .contentType("application/json")
             .header("Authorization", AUTH_HEADER)
@@ -195,8 +192,7 @@ class SesTemplateV2IntegrationTest {
         .when()
             .post("/v2/email/identities")
         .then()
-            .statusCode(org.hamcrest.Matchers.anyOf(
-                org.hamcrest.Matchers.is(200), org.hamcrest.Matchers.is(400)));
+            .statusCode(200);
 
         String messageId = given()
             .contentType("application/json")
@@ -340,8 +336,7 @@ class SesTemplateV2IntegrationTest {
         .when()
             .post("/v2/email/identities")
         .then()
-            .statusCode(org.hamcrest.Matchers.anyOf(
-                org.hamcrest.Matchers.is(200), org.hamcrest.Matchers.is(400)));
+            .statusCode(200);
 
         String messageId = given()
             .contentType("application/json")

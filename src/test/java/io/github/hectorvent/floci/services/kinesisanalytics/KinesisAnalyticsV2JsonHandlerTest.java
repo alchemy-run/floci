@@ -1,13 +1,12 @@
 package io.github.hectorvent.floci.services.kinesisanalytics;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.kinesisanalytics.container.FlinkContainerManager;
 import jakarta.ws.rs.core.Response;
@@ -97,7 +96,7 @@ class KinesisAnalyticsV2JsonHandlerTest {
 
         Response resp = handler.handle("ListApplications", MAPPER.createObjectNode(), REGION);
         assertThat(resp.getStatus(), is(200));
-        JsonNode summaries = entity(resp).get("ApplicationSummaries");
+        var summaries = entity(resp).get("ApplicationSummaries");
         assertEquals(2, summaries.size());
     }
 
@@ -116,7 +115,7 @@ class KinesisAnalyticsV2JsonHandlerTest {
         del.put("CreateTimestamp", createTs);
         assertThat(handler.handle("DeleteApplication", del, REGION).getStatus(), is(200));
 
-        JsonNode summaries = entity(handler.handle("ListApplications", MAPPER.createObjectNode(), REGION))
+        var summaries = entity(handler.handle("ListApplications", MAPPER.createObjectNode(), REGION))
                 .get("ApplicationSummaries");
         assertEquals(0, summaries.size());
     }
@@ -146,7 +145,7 @@ class KinesisAnalyticsV2JsonHandlerTest {
         describe.put("ApplicationName", "coded");
         ObjectNode detail = (ObjectNode) entity(handler.handle("DescribeApplication", describe, REGION))
                 .get("ApplicationDetail");
-        JsonNode loc = detail.get("ApplicationConfigurationDescription")
+        var loc = detail.get("ApplicationConfigurationDescription")
                 .get("ApplicationCodeConfigurationDescription")
                 .get("CodeContentDescription").get("S3ApplicationCodeLocationDescription");
         assertEquals("arn:aws:s3:::flink-code", loc.get("BucketARN").asText());
@@ -183,7 +182,7 @@ class KinesisAnalyticsV2JsonHandlerTest {
         describe.put("ApplicationName", "envprops");
         ObjectNode detail = (ObjectNode) entity(handler.handle("DescribeApplication", describe, REGION))
                 .get("ApplicationDetail");
-        JsonNode groups = detail.get("ApplicationConfigurationDescription")
+        var groups = detail.get("ApplicationConfigurationDescription")
                 .get("EnvironmentPropertyDescriptions").get("PropertyGroupDescriptions");
         assertEquals(1, groups.size());
         assertEquals("ProducerConfigProperties", groups.get(0).get("PropertyGroupId").asText());
@@ -277,7 +276,7 @@ class KinesisAnalyticsV2JsonHandlerTest {
         ObjectNode detail = (ObjectNode) entity(updated).get("ApplicationDetail");
         assertEquals(2L, detail.get("ApplicationVersionId").asLong());
 
-        JsonNode loc = detail.get("ApplicationConfigurationDescription")
+        var loc = detail.get("ApplicationConfigurationDescription")
                 .get("ApplicationCodeConfigurationDescription")
                 .get("CodeContentDescription").get("S3ApplicationCodeLocationDescription");
         assertEquals("arn:aws:s3:::flink-code-v2", loc.get("BucketARN").asText());
@@ -308,7 +307,7 @@ class KinesisAnalyticsV2JsonHandlerTest {
         listReq.put("ResourceARN", arn);
         Response listed = handler.handle("ListTagsForResource", listReq, REGION);
         assertThat(listed.getStatus(), is(200));
-        JsonNode tags = entity(listed).get("Tags");
+        var tags = entity(listed).get("Tags");
         assertEquals(1, tags.size());
         assertEquals("env", tags.get(0).get("Key").asText());
         assertEquals("dev", tags.get(0).get("Value").asText());
@@ -359,7 +358,7 @@ class KinesisAnalyticsV2JsonHandlerTest {
         Response listed = handler.handle("ListApplicationSnapshots",
                 MAPPER.createObjectNode().put("ApplicationName", "streaming"), REGION);
         assertThat(listed.getStatus(), is(200));
-        JsonNode summaries = entity(listed).get("SnapshotSummaries");
+        var summaries = entity(listed).get("SnapshotSummaries");
         assertEquals(1, summaries.size());
         assertEquals("before-upgrade", summaries.get(0).get("SnapshotName").asText());
 
@@ -369,7 +368,7 @@ class KinesisAnalyticsV2JsonHandlerTest {
         deleteSnap.put("SnapshotCreationTimestamp", creationTimestamp);
         assertThat(handler.handle("DeleteApplicationSnapshot", deleteSnap, REGION).getStatus(), is(200));
 
-        JsonNode afterDelete = entity(handler.handle("ListApplicationSnapshots",
+        var afterDelete = entity(handler.handle("ListApplicationSnapshots",
                 MAPPER.createObjectNode().put("ApplicationName", "streaming"), REGION)).get("SnapshotSummaries");
         assertEquals(0, afterDelete.size());
     }
@@ -419,8 +418,8 @@ class KinesisAnalyticsV2JsonHandlerTest {
                 .thenReturn(AccountAwareStorageBackend.inMemory("000000000000"));
 
         EmulatorConfig config = Mockito.mock(EmulatorConfig.class);
-        EmulatorConfig.ServicesConfig servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
-        EmulatorConfig.KinesisAnalyticsServiceConfig kaConfig = Mockito.mock(EmulatorConfig.KinesisAnalyticsServiceConfig.class);
+        var servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
+        var kaConfig = Mockito.mock(EmulatorConfig.KinesisAnalyticsServiceConfig.class);
         when(config.services()).thenReturn(servicesConfig);
         when(servicesConfig.kinesisAnalytics()).thenReturn(kaConfig);
         when(kaConfig.mock()).thenReturn(true);

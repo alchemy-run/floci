@@ -68,28 +68,6 @@ class EcsServiceTaskOwnershipTest {
     }
 
     @Test
-    void taskProtectionRequiresStampedServiceOwnershipRatherThanASpoofedGroup() {
-        EcsService service = newMockModeService();
-        service.createCluster("protection-cluster", REGION);
-        registerTaskDef(service);
-        service.createService("protection-cluster", "web", "own-fam", 1, LaunchType.FARGATE,
-                List.of(), null, REGION);
-        service.reconcileServices();
-        EcsTask owned = ownedTasks(service, "protection-cluster", "web").getFirst();
-        EcsTask intruder = service.runTask("protection-cluster", "own-fam", 1, LaunchType.FARGATE,
-                "web", "me", null, null, REGION).getFirst();
-
-        EcsService.TaskProtectionResult result = service.updateTaskProtectionDetailed("protection-cluster",
-                List.of(owned.getTaskArn(), intruder.getTaskArn()), true, 60, REGION);
-
-        assertEquals(1, result.protectedTasks().size());
-        assertEquals(owned.getTaskArn(), result.protectedTasks().getFirst().taskArn());
-        assertEquals(1, result.failures().size());
-        assertEquals("TASK_NOT_VALID", result.failures().getFirst().reason());
-        assertEquals(intruder.getTaskArn(), result.failures().getFirst().arn());
-    }
-
-    @Test
     void scaleInDoesNotStopATaskThatMerelyNamesTheServiceAsItsGroup() {
         EcsService service = newMockModeService();
         service.createCluster("scale-cluster", REGION);

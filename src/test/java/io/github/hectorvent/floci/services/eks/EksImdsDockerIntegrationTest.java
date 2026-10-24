@@ -1,16 +1,18 @@
 package io.github.hectorvent.floci.services.eks;
 
 import com.github.dockerjava.api.DockerClient;
+import com.github.dockerjava.api.async.ResultCallback;
+import com.github.dockerjava.api.command.ExecCreateCmdResponse;
+import com.github.dockerjava.api.model.Frame;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
-import io.github.hectorvent.floci.core.common.docker.ContainerExec;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
 import io.github.hectorvent.floci.services.ec2.Ec2MetadataServer;
 import io.github.hectorvent.floci.services.eks.model.Cluster;
-import io.github.hectorvent.floci.testing.ContainerDataPlaneProfile;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -19,23 +21,29 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/**
- * Configures the link-local IMDS endpoint on a stand-in cluster container and queries it from the
- * node and from a pod network namespace. The settings come from
- * {@link ContainerDataPlaneProfile}, which this class shares with
- * {@code TimestreamInfluxDbDockerIntegrationTest}.
- */
 @QuarkusTest
-@TestProfile(ContainerDataPlaneProfile.class)
+@TestProfile(EksImdsDockerIntegrationTest.Profile.class)
 class EksImdsDockerIntegrationTest {
+
+    public static final class Profile implements QuarkusTestProfile {
+        @Override
+        public Map<String, String> getConfigOverrides() {
+            return Map.of(
+                    "floci.services.eks.imds", "true",
+                    "floci.services.eks.imds-pod-network", "true");
+        }
+    }
 
     private static final Logger LOG = Logger.getLogger(EksImdsDockerIntegrationTest.class);
     private static final String TEST_IMAGE = "alpine:3.21";
@@ -71,8 +79,6 @@ class EksImdsDockerIntegrationTest {
             LOG.warn("Docker daemon is not available; skipping EksImdsDockerIntegrationTest");
         }
         Assumptions.assumeTrue(dockerAvailable, "Docker daemon must be available for EKS IMDS integration test");
-        Assumptions.assumeTrue(dockerHostResolver.isLinuxHost(),
-                "Link-local IMDS container test requires a Linux host; on macOS/Windows, container-to-host proxy traffic arrives from 127.0.0.1 which collides across clusters");
         metadataServer.start().join();
     }
 
@@ -100,9 +106,7 @@ class EksImdsDockerIntegrationTest {
                 .withName("floci-eks-imds-test-" + clusterName)
                 .withPrivileged(true)
                 .withHostDockerInternalOnLinux()
-                // PID 1 gets no default SIGTERM handler, so a bare "sleep 300" sits out the
-                // whole stopAndRemove grace period when @AfterEach tears the container down.
-                .withCmd(List.of("sh", "-c", "trap 'exit 0' TERM; sleep 300 & wait"))
+                .withCmd(List.of("sleep", "300"))
                 .build();
 
         containerId = lifecycleManager.createAndStart(spec).containerId();
@@ -115,7 +119,7 @@ class EksImdsDockerIntegrationTest {
         eksClusterManager.configureLinkLocalMetadataEndpoint(cluster, containerId);
 
         // IMDSv2 token test
-        String tokenCmd = "curl -s -f -X PUT http://169.254.169.254/latest/api/token -H 'x-aws-ec2-metadata-token-ttl-seconds: 21600'";
+        String tokenCmd = "curl -s --fail-with-body -X PUT http://169.254.169.254/latest/api/token -H 'x-aws-ec2-metadata-token-ttl-seconds: 21600'";
         String token = execInContainer(containerId, new String[]{"sh", "-c", tokenCmd});
         assertNotNull(token, "IMDSv2 token response should not be null");
         assertTrue(!token.isBlank(), "IMDSv2 token should not be blank");
@@ -130,6 +134,22 @@ class EksImdsDockerIntegrationTest {
         String imdsv1Cmd = "wget -q -O - http://169.254.169.254/latest/meta-data/instance-id";
         String v1InstanceId = execInContainer(containerId, new String[]{"sh", "-c", imdsv1Cmd});
         assertEquals(instanceId.trim(), v1InstanceId.trim(), "IMDSv1 and IMDSv2 instance IDs should match");
+
+        // Pod-isolation test: ordinary pods in their own network namespace cannot reach link-local IMDS
+        // Tested using wget (tool guaranteed by alpine:3.21 image)
+        String podIsolationCmd = """
+                if command -v unshare >/dev/null 2>&1; then
+                  unshare -n wget -q -O - -T 2 http://169.254.169.254/latest/meta-data/instance-id
+                else
+                  ip netns add pod-test 2>/dev/null || true
+                  ip netns exec pod-test wget -q -O - -T 2 http://169.254.169.254/latest/meta-data/instance-id
+                  ret=$?
+                  ip netns del pod-test 2>/dev/null || true
+                  exit $ret
+                fi
+                """;
+        ExecResult podResult = execInContainerWithExitCode(containerId, new String[]{"sh", "-c", podIsolationCmd});
+        assertNotEquals(0L, podResult.exitCode(), "IMDS should not be reachable from an isolated pod network namespace");
 
         // Pod network namespace test: ordinary pods in their own network namespace reach link-local IMDS
         // via the rules programmed for the pod CIDR (10.42.0.0/16).
@@ -177,7 +197,7 @@ class EksImdsDockerIntegrationTest {
             // and fails because port 80 is redirected to 9999.
             execInContainer(containerId, new String[]{"sh", "-c",
                     "iptables -t nat -D PREROUTING -j FLOCI-LINK-LOCAL"});
-            ContainerExec.Result intercepted = execInContainerWithExitCode(containerId, new String[]{"sh", "-c",
+            ExecResult intercepted = execInContainerWithExitCode(containerId, new String[]{"sh", "-c",
                     "ip netns exec pod-test wget -q -O - -T 2 http://169.254.169.254/latest/meta-data/instance-id"});
             assertNotEquals(0, intercepted.exitCode(),
                     "Without FLOCI-LINK-LOCAL chain, pod request should be intercepted by CNI-HOSTPORT-DNAT and fail");
@@ -198,6 +218,21 @@ class EksImdsDockerIntegrationTest {
                     iptables -t nat -X CNI-HOSTPORT-DNAT 2>/dev/null || true
                     """});
         }
+        assertEquals("600", execInContainer(containerId,
+                new String[]{"stat", "-c", "%a", "/var/lib/floci-imds-proxy.json"}).trim());
+        String spoofed = execInContainer(containerId, new String[]{"curl", "-fsS",
+                "-H", "X-Floci-IMDS-Capability: attacker-supplied",
+                "http://169.254.169.254/latest/meta-data/instance-id"});
+        assertEquals(instanceId.trim(), spoofed.trim());
+        String directStatus = execInContainer(containerId, new String[]{"curl", "-sS", "-o", "/dev/null",
+                "-w", "%{http_code}", "http://host.docker.internal:" + config.services().ec2().imdsPort()
+                + "/latest/meta-data/instance-id"}).trim();
+        assertTrue(List.of("401", "404").contains(directStatus), "Direct metadata access must require proxy identity");
+        eksClusterManager.unregisterMetadataEndpoint(cluster);
+        String revokedStatus = execInContainer(containerId, new String[]{"curl", "-sS", "-o", "/dev/null",
+                "-w", "%{http_code}", "-H", "x-aws-ec2-metadata-token: " + token.trim(),
+                "http://169.254.169.254/latest/meta-data/instance-id"}).trim();
+        assertEquals("401", revokedStatus);
     }
 
     private boolean isDockerAvailable() {
@@ -209,14 +244,45 @@ class EksImdsDockerIntegrationTest {
         }
     }
 
-    private ContainerExec.Result execInContainerWithExitCode(String containerId, String[] cmd) {
-        return ContainerExec.run(dockerClient, containerId, cmd, 30).throwIfTimedOut(containerId);
+    record ExecResult(long exitCode, String stdout, String stderr) {}
+
+    private ExecResult execInContainerWithExitCode(String containerId, String[] cmd) throws Exception {
+        ExecCreateCmdResponse exec = dockerClient.execCreateCmd(containerId)
+                .withCmd(cmd)
+                .withAttachStdout(true)
+                .withAttachStderr(true)
+                .exec();
+
+        StringBuilder stdout = new StringBuilder();
+        StringBuilder stderr = new StringBuilder();
+        boolean completed = dockerClient.execStartCmd(exec.getId())
+                .exec(new ResultCallback.Adapter<Frame>() {
+                    @Override
+                    public void onNext(Frame frame) {
+                        if (frame != null && frame.getPayload() != null) {
+                            String text = new String(frame.getPayload(), StandardCharsets.UTF_8);
+                            if (frame.getStreamType() == com.github.dockerjava.api.model.StreamType.STDERR) {
+                                stderr.append(text);
+                            } else {
+                                stdout.append(text);
+                            }
+                        }
+                    }
+                })
+                .awaitCompletion(30, TimeUnit.SECONDS);
+
+        if (!completed) {
+            throw new RuntimeException("exec timed out in container " + containerId);
+        }
+        Long exitCode = dockerClient.inspectExecCmd(exec.getId()).exec().getExitCodeLong();
+        return new ExecResult(exitCode != null ? exitCode : -1L, stdout.toString(), stderr.toString());
     }
 
     private String execInContainer(String containerId, String[] cmd) throws Exception {
-        ContainerExec.Result result = execInContainerWithExitCode(containerId, cmd);
+        ExecResult result = execInContainerWithExitCode(containerId, cmd);
         if (result.exitCode() != 0) {
-            throw new RuntimeException("exec failed with code " + result.exitCode() + ": " + result.stderr());
+            throw new RuntimeException("exec failed with code " + result.exitCode()
+                    + ": " + result.stderr() + "\n" + result.stdout());
         }
         return result.stdout();
     }

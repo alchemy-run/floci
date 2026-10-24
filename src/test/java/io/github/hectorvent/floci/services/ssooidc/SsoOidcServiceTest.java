@@ -2,24 +2,16 @@ package io.github.hectorvent.floci.services.ssooidc;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.github.hectorvent.floci.core.common.Base64Url;
-import io.github.hectorvent.floci.core.common.Digests;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
-import io.github.hectorvent.floci.services.ssooidc.model.AuthorizationCode;
-import io.github.hectorvent.floci.services.ssooidc.model.DeviceAuthorization;
 import io.github.hectorvent.floci.services.ssooidc.model.RegisteredClient;
-import io.github.hectorvent.floci.services.ssooidc.model.TokenSession;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-
-import java.nio.charset.StandardCharsets;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class SsoOidcServiceTest {
     private final ObjectMapper mapper = new ObjectMapper();
@@ -67,7 +59,7 @@ class SsoOidcServiceTest {
         request.put("clientId", client.clientId());
         request.put("clientSecret", client.clientSecret());
         request.put("startUrl", "https://example.awsapps.com/start");
-        DeviceAuthorization authorization = service.startDeviceAuthorization(request);
+        var authorization = service.startDeviceAuthorization(request);
 
         assertEquals(client.clientId(), authorization.clientId());
         assertEquals(64, authorization.deviceCode().length());
@@ -93,7 +85,7 @@ class SsoOidcServiceTest {
         start.put("clientId", client.clientId());
         start.put("clientSecret", client.clientSecret());
         start.put("startUrl", "https://example.awsapps.com/start");
-        DeviceAuthorization authorization = service.startDeviceAuthorization(start);
+        var authorization = service.startDeviceAuthorization(start);
 
         ObjectNode token = mapper.createObjectNode();
         token.put("clientId", client.clientId());
@@ -103,10 +95,10 @@ class SsoOidcServiceTest {
         assertOidcError("authorization_pending", () -> service.createToken(token));
         assertOidcError("slow_down", () -> service.createToken(token));
 
-        DeviceAuthorization approvedAuthorization = service.startDeviceAuthorization(start);
+        var approvedAuthorization = service.startDeviceAuthorization(start);
         service.authorizeDevice(approvedAuthorization.userCode(), "11111111-1111-1111-1111-111111111111");
         token.put("deviceCode", approvedAuthorization.deviceCode());
-        TokenSession session = service.createToken(token);
+        var session = service.createToken(token);
         assertEquals("Token Client", client.clientName());
         assertEquals(64, session.accessToken().length());
         assertEquals(64, session.refreshToken().length());
@@ -128,8 +120,9 @@ class SsoOidcServiceTest {
         register.putArray("redirectUris").add("http://127.0.0.1:8400/callback");
         RegisteredClient client = service.registerClient(register);
         String verifier = "01234567890123456789012345678901234567890123456789";
-        String challenge = Base64Url.encode(Digests.sha256(verifier.getBytes(StandardCharsets.US_ASCII)));
-        AuthorizationCode code = service.createAuthorizationCode(client.clientId(),
+        String challenge = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(
+                sha256(verifier));
+        var code = service.createAuthorizationCode(client.clientId(),
                 "http://127.0.0.1:8400/callback", challenge);
 
         ObjectNode token = mapper.createObjectNode();
@@ -147,7 +140,7 @@ class SsoOidcServiceTest {
     void createIamTokenSupportsRefreshJwtBearerAndTokenExchangeBranches() {
         String sourceApplication = "arn:aws:sso::123456789012:application/ssoins-7223b02a5d9f7c8e/apl-1111111111111111";
         String targetApplication = "arn:aws:sso::123456789012:application/ssoins-7223b02a5d9f7c8e/apl-2222222222222222";
-        TokenSession source = service.issueIamToken(sourceApplication, List.of("api:read"), true);
+        var source = service.issueIamToken(sourceApplication, java.util.List.of("api:read"), true);
 
         ObjectNode refresh = mapper.createObjectNode();
         refresh.put("grantType", "refresh_token");
@@ -168,12 +161,20 @@ class SsoOidcServiceTest {
         exchange.put("subjectToken", source.accessToken());
         exchange.put("subjectTokenType", "urn:ietf:params:oauth:token-type:access_token");
         exchange.put("requestedTokenType", "urn:ietf:params:oauth:token-type:access_token");
-        TokenSession exchanged = service.createIamToken(exchange, targetApplication, List.of("openid"));
+        var exchanged = service.createIamToken(exchange, targetApplication, java.util.List.of("openid"));
         assertEquals(targetApplication, exchanged.clientId());
         assertNull(exchanged.refreshToken());
 
         assertOidcError("invalid_grant",
                 () -> service.createIamToken(exchange, sourceApplication, java.util.List.of("openid")));
+    }
+    private static byte[] sha256(String value) {
+        try {
+            return java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     @Test

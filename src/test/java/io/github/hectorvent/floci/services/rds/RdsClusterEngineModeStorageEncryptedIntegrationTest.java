@@ -1,12 +1,15 @@
 package io.github.hectorvent.floci.services.rds;
 
-import io.github.hectorvent.floci.testing.RdsMockProfile;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-import static io.github.hectorvent.floci.testing.RdsRequests.rds;
+import java.util.Map;
+
+import static io.restassured.RestAssured.given;
+import static io.restassured.http.ContentType.URLENC;
 import static org.hamcrest.Matchers.containsString;
 
 /**
@@ -17,11 +20,27 @@ import static org.hamcrest.Matchers.containsString;
  * reports EngineMode (defaulting to provisioned) in DescribeDBClusters, same as StorageEncrypted.
  */
 @QuarkusTest
-@TestProfile(RdsMockProfile.class)
+@TestProfile(RdsClusterEngineModeStorageEncryptedIntegrationTest.NoContainersProfile.class)
 class RdsClusterEngineModeStorageEncryptedIntegrationTest {
+
+    public static class NoContainersProfile implements QuarkusTestProfile {
+        @Override
+        public Map<String, String> getConfigOverrides() {
+            return Map.of("floci.services.rds.mock", "true");
+        }
+    }
 
     private static final String ID = "engine-mode-cluster";
     private static final String NON_AURORA_ID = "engine-mode-non-aurora-cluster";
+
+    private static io.restassured.specification.RequestSpecification rds(String action) {
+        return given().header("Authorization",
+                        "AWS4-HMAC-SHA256 Credential=test/20260615/us-east-1/rds/aws4_request, "
+                        + "SignedHeaders=content-type;host, Signature=test")
+                .contentType(URLENC)
+                .formParam("Action", action)
+                .formParam("Version", "2014-10-31");
+    }
 
     @AfterEach
     void cleanUp() {

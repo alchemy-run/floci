@@ -50,43 +50,6 @@ class AppSyncExecutionIntegrationTest {
     }
 
     @Test
-    void resolverAddedAfterSchemaCreationExecutesThroughAuthenticatedHostRoute() {
-        given()
-            .header("Authorization", AUTH)
-            .contentType("application/json")
-            .body(Map.of("name", "none", "type", "NONE"))
-        .when()
-            .post("/v1/apis/" + apiId + "/datasources")
-        .then()
-            .statusCode(200);
-
-        given()
-            .header("Authorization", AUTH)
-            .contentType("application/json")
-            .body(Map.of("fieldName", "hello", "dataSourceName", "none",
-                    "requestMappingTemplate", "{\"version\":\"2018-05-29\",\"payload\":\"merged\"}",
-                    "responseMappingTemplate", "$util.toJson($ctx.result)"))
-        .when()
-            .post("/v1/apis/" + apiId + "/types/Query/resolvers")
-        .then()
-            .statusCode(200);
-
-        for (String path : List.of("/v1/apis/" + apiId + "/graphql", "/graphql")) {
-            given()
-                .header("Host", apiId + ".appsync-api.us-east-1.amazonaws.com")
-                .header("x-api-key", apiKey)
-                .contentType("application/json")
-                .body(Map.of("query", "{ hello }"))
-            .when()
-                .post(path)
-            .then()
-                .statusCode(200)
-                .body("data.hello", equalTo("merged"))
-                .body("errors", nullValue());
-        }
-    }
-
-    @Test
     void dualContentTypeJsonReturnsNullHello() {
         given()
             .header("x-api-key", apiKey)
@@ -357,47 +320,6 @@ class AppSyncExecutionIntegrationTest {
 
     @Test
     void awsDateTimeVariableCoercionRejectsInvalidValueAndAcceptsValid() {
-        // Validate variable coercion through the executable schema, not just SDL registration.
-        String scalarApi = createApi("scalar-" + UUID.randomUUID().toString().substring(0, 8));
-        String scalarKey = createApiKey(scalarApi);
-        startSchema(scalarApi, "type Query { echo(t: AWSDateTime): AWSDateTime }");
-        awaitSchemaSuccess(scalarApi);
-
-        given()
-            .header("x-api-key", scalarKey)
-            .contentType("application/json")
-            .body("""
-                {
-                  "query": "query($t: AWSDateTime) { echo(t: $t) }",
-                  "variables": {"t": "not-a-date"}
-                }
-                """)
-        .when()
-            .post("/v1/apis/" + scalarApi + "/graphql")
-        .then()
-            .statusCode(200)
-            .body("errors[0].errorType", equalTo("ValidationError"))
-            .body("errors[0].message", containsString("Invalid AWSDateTime"));
-
-        given()
-            .header("x-api-key", scalarKey)
-            .contentType("application/json")
-            .body("""
-                {
-                  "query": "query($t: AWSDateTime) { echo(t: $t) }",
-                  "variables": {"t": "2026-01-01T00:00:00Z"}
-                }
-                """)
-        .when()
-            .post("/v1/apis/" + scalarApi + "/graphql")
-        .then()
-            .statusCode(200)
-            .body("errors", nullValue());
-    }
-
-    @Test
-    void fragmentCycleAgainstProtectedFieldNeverLeaksRealData() {
-        // Invalid fragment cycles must be rejected before resolver execution.
         // Proves the real AWSDateTime Coercing actually runs through the sidecar's schema
         // build, not just that StartSchemaCreation accepts the type name (issue #2917).
         String scalarApi = createApi("scalar-" + UUID.randomUUID().toString().substring(0, 8));

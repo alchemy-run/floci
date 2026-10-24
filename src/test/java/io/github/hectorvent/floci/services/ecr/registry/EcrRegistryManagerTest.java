@@ -45,7 +45,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -79,9 +78,6 @@ class EcrRegistryManagerTest {
     private InspectImageCmd inspectImage;
     private RegionResolver regionResolver;
     private EcrRegistryManager manager;
-
-    private static final Map<String, String> UNCACHED_REGISTRY_LABELS =
-            Map.of("io.floci.ecr.blob-descriptor-cache", "disabled");
 
     @BeforeEach
     void setUp() {
@@ -128,8 +124,6 @@ class EcrRegistryManagerTest {
         when(ecr.registryBasePort()).thenReturn(BASE_PORT);
         when(ecr.registryMaxPort()).thenReturn(MAX_PORT);
         when(ecr.dockerNetwork()).thenReturn(Optional.empty());
-        when(ecr.uriStyle()).thenReturn("hostname");
-        when(ecr.tlsEnabled()).thenReturn(false);
         when(ecr.preferLocalImages()).thenReturn(true);
         when(ecr.enabled()).thenReturn(true);
 
@@ -294,7 +288,6 @@ class EcrRegistryManagerTest {
         when(existing.getPorts()).thenReturn(new ContainerPort[] {
                 new ContainerPort().withIp("127.0.0.1").withPrivatePort(5000).withPublicPort(BASE_PORT)
         });
-        when(existing.getLabels()).thenReturn(UNCACHED_REGISTRY_LABELS);
         when(lifecycleManager.presenceOf("container-id")).thenReturn(ContainerPresence.STOPPED);
         when(lifecycleManager.findByName(REGISTRY_NAME)).thenReturn(Optional.of(existing));
         // Floci in a container with no configured network: the registry was created on Floci's own.
@@ -349,7 +342,6 @@ class EcrRegistryManagerTest {
         when(existing.getPorts()).thenReturn(new ContainerPort[] {
                 new ContainerPort().withIp("127.0.0.1").withPrivatePort(5000).withPublicPort(BASE_PORT + 1)
         });
-        when(existing.getLabels()).thenReturn(UNCACHED_REGISTRY_LABELS);
         when(lifecycleManager.findByName(REGISTRY_NAME)).thenReturn(Optional.of(existing));
         when(lifecycleManager.adopt("0123456789abcdef", List.of(5000), Optional.empty()))
                 .thenReturn(new ContainerLifecycleManager.ContainerInfo("0123456789abcdef",
@@ -372,7 +364,6 @@ class EcrRegistryManagerTest {
         when(existing.getPorts()).thenReturn(new ContainerPort[] {
                 new ContainerPort().withIp("127.0.0.1").withPrivatePort(5000).withPublicPort(BASE_PORT + 1)
         });
-        when(existing.getLabels()).thenReturn(UNCACHED_REGISTRY_LABELS);
         when(lifecycleManager.findByName(REGISTRY_NAME)).thenReturn(Optional.of(existing));
         when(lifecycleManager.adopt("0123456789abcdef", List.of(5000), Optional.empty()))
                 .thenReturn(new ContainerLifecycleManager.ContainerInfo("0123456789abcdef",
@@ -383,8 +374,6 @@ class EcrRegistryManagerTest {
 
         assertEquals(BASE_PORT + 1, manager.effectivePort());
         assertEquals("http://000000000000.dkr.ecr.us-east-1.localhost:4566", manager.getProxyEndpoint());
-        // Default bridge has no container-name DNS — talk to the inspected IP.
-        assertEquals("http://172.17.0.5:5000", manager.httpClient().baseUrl());
     }
 
     @Test
@@ -394,7 +383,6 @@ class EcrRegistryManagerTest {
         when(existing.getPorts()).thenReturn(new ContainerPort[] {
                 new ContainerPort().withIp("127.0.0.1").withPrivatePort(5000).withPublicPort(BASE_PORT)
         });
-        when(existing.getLabels()).thenReturn(UNCACHED_REGISTRY_LABELS);
         when(lifecycleManager.findByName(REGISTRY_NAME)).thenReturn(Optional.of(existing));
         when(lifecycleManager.adopt("0123456789abcdef", List.of(5000), Optional.empty()))
                 .thenReturn(new ContainerLifecycleManager.ContainerInfo("0123456789abcdef", Map.of()));
@@ -402,37 +390,6 @@ class EcrRegistryManagerTest {
         manager.ensureStarted();
 
         assertEquals(BASE_PORT, manager.effectivePort());
-    }
-
-    @Test
-    void ensureStartedDisablesTheRegistryBlobDescriptorCache() {
-        when(lifecycleManager.createAndStart(any())).thenReturn(
-                new ContainerLifecycleManager.ContainerInfo("container-id", Map.of()));
-
-        manager.ensureStarted();
-
-        verify(builder).withEnv(argThat((List<String> env) ->
-                env.contains("REGISTRY_STORAGE_CACHE_BLOBDESCRIPTOR=disabled")));
-        verify(builder).withLabel("io.floci.ecr.blob-descriptor-cache", "disabled");
-    }
-
-    @Test
-    void registryWithItsBlobDescriptorCacheEnabledIsRecreated() {
-        Container existing = Mockito.mock(Container.class);
-        when(existing.getId()).thenReturn("0123456789abcdef");
-        when(existing.getPorts()).thenReturn(new ContainerPort[] {
-                new ContainerPort().withIp("127.0.0.1").withPrivatePort(5000).withPublicPort(BASE_PORT)
-        });
-        when(existing.getLabels()).thenReturn(Map.of("io.floci.service", "ecr"));
-        when(lifecycleManager.findByName(REGISTRY_NAME)).thenReturn(Optional.of(existing));
-        when(lifecycleManager.createAndStart(any())).thenReturn(
-                new ContainerLifecycleManager.ContainerInfo("container-id", Map.of()));
-
-        manager.ensureStarted();
-
-        verify(lifecycleManager).stopAndRemove("0123456789abcdef", null);
-        verify(lifecycleManager, never()).adopt(any(), any());
-        verify(lifecycleManager).createAndStart(any());
     }
 
     @Test

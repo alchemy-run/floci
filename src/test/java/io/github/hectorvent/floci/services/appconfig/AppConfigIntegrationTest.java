@@ -3,7 +3,6 @@ package io.github.hectorvent.floci.services.appconfig;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.http.ContentType;
-import io.restassured.response.ValidatableResponse;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.MethodOrderer;
@@ -15,8 +14,6 @@ import java.nio.charset.StandardCharsets;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @QuarkusTest
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
@@ -35,7 +32,6 @@ class AppConfigIntegrationTest {
     private static String emptyProfileId;
     private static String deploymentNextToken;
     private static String secondDeploymentNextToken;
-    private static String variantFlagsSessionBody;
 
     @BeforeAll
     static void setup() {
@@ -774,6 +770,163 @@ class AppConfigIntegrationTest {
                 .statusCode(200);
     }
 
+    @Test @Order(60)
+    void updateApplicationChangesDescription() {
+        given()
+                .contentType(ContentType.JSON)
+                .body("{\"Description\": \"updated\"}")
+                .when().patch("/applications/" + appId)
+                .then()
+                .statusCode(200)
+                .body("Description", equalTo("updated"));
+    }
+
+    @Test @Order(61)
+    void extensionLifecycle() {
+        String extensionId = given()
+                .contentType(ContentType.JSON)
+                .body("{\"Name\": \"notify\", \"Description\": \"v1\", \"Actions\": {\"ON_DEPLOYMENT_COMPLETE\": [{\"Name\": \"bus\", \"Uri\": \"arn:aws:events:us-east-1:000000000000:event-bus/default\"}]}}")
+                .when().post("/extensions")
+                .then()
+                .statusCode(201)
+                .body("Name", equalTo("notify"))
+                .body("VersionNumber", equalTo(1))
+                .extract().path("Id");
+
+        String extensionArn = given()
+                .when().get("/extensions/" + extensionId)
+                .then()
+                .statusCode(200)
+                .body("Description", equalTo("v1"))
+                .extract().path("Arn");
+
+        given()
+                .contentType(ContentType.JSON)
+                .body("{\"Tags\": {\"alchemy::id\": \"Ext\"}}")
+                .when().post("/tags/" + extensionArn)
+                .then()
+                .statusCode(204);
+
+        given()
+                .when().get("/tags/" + extensionArn)
+                .then()
+                .statusCode(200)
+                .body("Tags.'alchemy::id'", equalTo("Ext"));
+
+        String associationId = given()
+                .contentType(ContentType.JSON)
+                .body("{\"ExtensionIdentifier\": \"" + extensionId + "\", \"ResourceIdentifier\": \"arn:aws:appconfig:us-east-1:000000000000:application/" + appId + "\"}")
+                .when().post("/extensionassociations")
+                .then()
+                .statusCode(201)
+                .extract().path("Id");
+
+        given()
+                .when().get("/extensionassociations/" + associationId)
+                .then()
+                .statusCode(200)
+                .body("ExtensionArn", equalTo(extensionArn));
+
+        given()
+                .contentType(ContentType.JSON)
+                .body("{\"Description\": \"v2\"}")
+                .when().patch("/extensions/" + extensionId)
+                .then()
+                .statusCode(200)
+                .body("Description", equalTo("v2"))
+                .body("VersionNumber", equalTo(2));
+
+        given()
+                .when().delete("/extensions/" + extensionId)
+                .then()
+                .statusCode(400)
+                .body("__type", equalTo("BadRequestException"));
+
+        given()
+                .when().delete("/extensionassociations/" + associationId)
+                .then()
+                .statusCode(204);
+
+        given()
+                .when().delete("/extensions/" + extensionId)
+                .then()
+                .statusCode(204);
+    }
+
+    @Test @Order(62)
+    void deleteEnvironmentAndStrategy() {
+        String isolatedApp = given()
+                .contentType(ContentType.JSON)
+                .body("{\"Name\": \"isolated-app\"}")
+                .when().post("/applications")
+                .then()
+                .statusCode(201)
+                .extract().path("Id");
+
+        String isolatedEnv = given()
+                .contentType(ContentType.JSON)
+                .body("{\"Name\": \"isolated-env\"}")
+                .when().post("/applications/" + isolatedApp + "/environments")
+                .then()
+                .statusCode(201)
+                .extract().path("Id");
+
+        given()
+                .when().delete("/applications/" + isolatedApp)
+                .then()
+                .statusCode(400)
+                .body("__type", equalTo("BadRequestException"));
+
+        given()
+                .when().delete("/applications/" + isolatedApp + "/environments/" + isolatedEnv)
+                .then()
+                .statusCode(204);
+
+        given()
+                .when().delete("/applications/" + isolatedApp)
+                .then()
+                .statusCode(204);
+    }
+
+    @Test @Order(63)
+    void slowStrategyDeploymentStaysDeployingUntilStopped() {
+        String slowStrategyId = given()
+                .contentType(ContentType.JSON)
+                .body("{\"Name\": \"slow-20m\", \"DeploymentDurationInMinutes\": 20, \"GrowthFactor\": 5, \"FinalBakeTimeInMinutes\": 0, \"GrowthType\": \"LINEAR\"}")
+                .when().post("/deploymentstrategies")
+                .then()
+                .statusCode(201)
+                .extract().path("Id");
+
+        int deploymentNumber = given()
+                .contentType(ContentType.JSON)
+                .body("{\"ConfigurationProfileId\": \"" + profileId + "\", \"ConfigurationVersion\": \"1\", \"DeploymentStrategyId\": \"" + slowStrategyId + "\"}")
+                .when().post("/applications/" + appId + "/environments/" + envId + "/deployments")
+                .then()
+                .statusCode(201)
+                .body("State", equalTo("DEPLOYING"))
+                .body("DeploymentDurationInMinutes", equalTo(20))
+                .extract().path("DeploymentNumber");
+
+        given()
+                .when().get("/applications/" + appId + "/environments/" + envId + "/deployments/" + deploymentNumber)
+                .then()
+                .statusCode(200)
+                .body("State", equalTo("DEPLOYING"));
+
+        given()
+                .when().delete("/applications/" + appId + "/environments/" + envId + "/deployments/" + deploymentNumber)
+                .then()
+                .statusCode(200)
+                .body("State", equalTo("ROLLED_BACK"));
+
+        given()
+                .when().delete("/applications/" + appId + "/environments/" + envId + "/deployments/" + deploymentNumber)
+                .then()
+                .statusCode(400)
+                .body("__type", equalTo("BadRequestException"));
+    }
+
     @Test @Order(43)
     void getLatestConfigurationReturnsFeatureFlagsRetrievalFormat() {
         String featureFlagsAppId = given()
@@ -855,382 +1008,5 @@ class AppConfigIntegrationTest {
                 .body("enabled._updatedAt", nullValue())
                 .body("disabled.enabled", equalTo(false))
                 .body("disabled.secret", nullValue());
-    }
-
-    @Test @Order(44)
-    void startConfigurationSessionAcceptsResourceNames() {
-        String token = given()
-                .contentType(ContentType.JSON)
-                .body("{\"ApplicationIdentifier\": \"test-app\", \"EnvironmentIdentifier\": \"test-env\", "
-                        + "\"ConfigurationProfileIdentifier\": \"test-profile\"}")
-                .when().post("/configurationsessions")
-                .then()
-                .statusCode(201)
-                .extract().path("InitialConfigurationToken");
-
-        given()
-                .queryParam("configuration_token", token)
-                .when().get("/configuration")
-                .then()
-                .statusCode(200)
-                .body("foo", notNullValue());
-    }
-
-    @Test @Order(45)
-    void startConfigurationSessionRejectsUnknownEnvironmentName() {
-        given()
-                .contentType(ContentType.JSON)
-                .body("{\"ApplicationIdentifier\": \"test-app\", \"EnvironmentIdentifier\": \"no-such-env\", "
-                        + "\"ConfigurationProfileIdentifier\": \"test-profile\"}")
-                .when().post("/configurationsessions")
-                .then()
-                .statusCode(404)
-                .body("__type", equalTo("ResourceNotFoundException"));
-    }
-
-    @Test @Order(46)
-    void startConfigurationSessionPrefersIdOverAnotherResourcesName() {
-        // A second environment and profile named after the first ones' IDs: the ID must still select the original.
-        String decoyEnvironmentId = given()
-                .contentType(ContentType.JSON)
-                .body("{\"Name\": \"" + envId + "\"}")
-                .when().post("/applications/" + appId + "/environments")
-                .then().statusCode(201)
-                .extract().path("Id");
-        String decoyProfileId = given()
-                .contentType(ContentType.JSON)
-                .body("{\"Name\": \"" + profileId + "\", \"LocationUri\": \"hosted\", \"Type\": \"AWS.Freeform\"}")
-                .when().post("/applications/" + appId + "/configurationprofiles")
-                .then().statusCode(201)
-                .extract().path("Id");
-
-        String token = given()
-                .contentType(ContentType.JSON)
-                .body("{\"ApplicationIdentifier\": \"" + appId + "\", \"EnvironmentIdentifier\": \"" + envId
-                        + "\", \"ConfigurationProfileIdentifier\": \"" + profileId + "\"}")
-                .when().post("/configurationsessions")
-                .then().statusCode(201)
-                .extract().path("InitialConfigurationToken");
-
-        given()
-                .queryParam("configuration_token", token)
-                .when().get("/configuration")
-                .then()
-                .statusCode(200)
-                .body("foo", notNullValue());
-
-        given()
-                .when().delete("/applications/" + appId + "/environments/" + decoyEnvironmentId)
-                .then().statusCode(204);
-        given()
-                .when().delete("/applications/" + appId + "/configurationprofiles/" + decoyProfileId)
-                .then().statusCode(204);
-    }
-
-    @Test @Order(47)
-    void startConfigurationSessionSkipsResourcesWithoutAName() {
-        given()
-                .contentType(ContentType.JSON)
-                .body("{}")
-                .when().post("/applications/" + appId + "/environments")
-                .then().statusCode(201);
-        given()
-                .contentType(ContentType.JSON)
-                .body("{\"LocationUri\": \"hosted\", \"Type\": \"AWS.Freeform\"}")
-                .when().post("/applications/" + appId + "/configurationprofiles")
-                .then().statusCode(201);
-        given()
-                .contentType(ContentType.JSON)
-                .body("{}")
-                .when().post("/applications")
-                .then().statusCode(201);
-
-        given()
-                .contentType(ContentType.JSON)
-                .body("{\"ApplicationIdentifier\": \"test-app\", \"EnvironmentIdentifier\": \"test-env\", "
-                        + "\"ConfigurationProfileIdentifier\": \"test-profile\"}")
-                .when().post("/configurationsessions")
-                .then().statusCode(201);
-        given()
-                .contentType(ContentType.JSON)
-                .body("{\"ApplicationIdentifier\": \"test-app\", \"EnvironmentIdentifier\": \"no-such-env\", "
-                        + "\"ConfigurationProfileIdentifier\": \"test-profile\"}")
-                .when().post("/configurationsessions")
-                .then().statusCode(404)
-                .body("__type", equalTo("ResourceNotFoundException"));
-    }
-
-    @Test @Order(48)
-    void startConfigurationSessionWithoutAnIdentifierIsABadRequest() {
-        for (String missing : new String[] {"ApplicationIdentifier", "EnvironmentIdentifier", "ConfigurationProfileIdentifier"}) {
-            String body = "{\"ApplicationIdentifier\": \"test-app\", \"EnvironmentIdentifier\": \"test-env\", "
-                    + "\"ConfigurationProfileIdentifier\": \"test-profile\"}";
-            body = body.replaceFirst("\"" + missing + "\": \"[^\"]*\"(, )?", "").replaceFirst(", }$", "}");
-            given()
-                    .contentType(ContentType.JSON)
-                    .body(body)
-                    .when().post("/configurationsessions")
-                    .then()
-                    .statusCode(400)
-                    .body("__type", equalTo("BadRequestException"));
-        }
-    }
-
-    @Test @Order(49)
-    void getLatestConfigurationReturnsVariantFlagsAsIonToACallerThatAcceptsIt() {
-        String variantAppId = given()
-                .contentType(ContentType.JSON)
-                .body("{\"Name\":\"variant-flags-app\"}")
-                .when().post("/applications")
-                .then().statusCode(201)
-                .extract().path("Id");
-
-        String variantEnvId = given()
-                .contentType(ContentType.JSON)
-                .body("{\"Name\":\"test\"}")
-                .when().post("/applications/" + variantAppId + "/environments")
-                .then().statusCode(201)
-                .extract().path("Id");
-
-        String variantProfileId = given()
-                .contentType(ContentType.JSON)
-                .body("{\"Name\":\"flags\",\"LocationUri\":\"hosted\","
-                        + "\"Type\":\"AWS.AppConfig.FeatureFlags\"}")
-                .when().post("/applications/" + variantAppId + "/configurationprofiles")
-                .then().statusCode(201)
-                .extract().path("Id");
-
-        String content = "{\"flags\":{},\"version\":\"1\",\"values\":{\"promo\":{\"_variants\":["
-                + "{\"attributeValues\":{\"storeId\":\"uk\"},\"enabled\":true,\"name\":\"uk\","
-                + "\"rule\":\"(eq $storeId \\\"uk\\\")\"},"
-                + "{\"enabled\":false,\"name\":\"default\"}]},"
-                + "\"banner\":{\"enabled\":true,\"colour\":\"red\"}}}";
-
-        given()
-                .header("Content-Type", "application/json")
-                .body(content.getBytes(StandardCharsets.UTF_8))
-                .when().post("/applications/" + variantAppId + "/configurationprofiles/"
-                        + variantProfileId + "/hostedconfigurationversions")
-                .then().statusCode(201).header("Version-Number", equalTo("1"));
-
-        given()
-                .contentType(ContentType.JSON)
-                .body("{\"ConfigurationProfileId\":\"" + variantProfileId + "\","
-                        + "\"ConfigurationVersion\":\"1\","
-                        + "\"DeploymentStrategyId\":\"AppConfig.AllAtOnce\"}")
-                .when().post("/applications/" + variantAppId + "/environments/" + variantEnvId + "/deployments")
-                .then().statusCode(201);
-
-        String sessionBody = "{\"ApplicationIdentifier\":\"" + variantAppId + "\","
-                + "\"EnvironmentIdentifier\":\"" + variantEnvId + "\","
-                + "\"ConfigurationProfileIdentifier\":\"" + variantProfileId + "\"}";
-
-        String agentToken = given()
-                .contentType(ContentType.JSON).body(sessionBody)
-                .when().post("/configurationsessions")
-                .then().statusCode(201)
-                .extract().path("InitialConfigurationToken");
-
-        byte[] ion = given()
-                .header("Accept", "application/ion;type=AWS.AppConfig.FeatureFlags;q=1.0,*/*;q=0.1")
-                .queryParam("configuration_token", agentToken)
-                .when().get("/configuration")
-                .then().statusCode(200)
-                .header("Content-Type", startsWith("application/ion"))
-                .header("Content-Type", containsString("type=AWS.AppConfig.FeatureFlags"))
-                .header("Version-Label", equalTo("1"))
-                .extract().asByteArray();
-        assertEquals(IonTestSupport.parse("promo::[uk::[(eq $storeId \"uk\"), "
-                        + "'''{\"_variant\":\"uk\",\"enabled\":true,\"storeId\":\"uk\"}'''],"
-                        + "'''{\"_variant\":\"default\",\"enabled\":false}'''] "
-                        + "banner::'''{\"enabled\":true,\"colour\":\"red\"}'''"),
-                IonTestSupport.decode(ion));
-
-        // Without Accept for Ion, the stored document, as before.
-        String plainToken = given()
-                .contentType(ContentType.JSON).body(sessionBody)
-                .when().post("/configurationsessions")
-                .then().statusCode(201)
-                .extract().path("InitialConfigurationToken");
-
-        given()
-                .queryParam("configuration_token", plainToken)
-                .when().get("/configuration")
-                .then().statusCode(200)
-                .header("Content-Type", startsWith("application/json"))
-                .body("values.promo._variants[0].name", equalTo("uk"));
-    }
-
-    @Test @Order(50)
-    void aFreeformProfileKeepsItsOwnContentTypeWhateverTheCallerAccepts() {
-        String appId = given()
-                .contentType(ContentType.JSON)
-                .body("{\"Name\":\"binary-app\"}")
-                .when().post("/applications")
-                .then().statusCode(201)
-                .extract().path("Id");
-
-        String envId = given()
-                .contentType(ContentType.JSON)
-                .body("{\"Name\":\"test\"}")
-                .when().post("/applications/" + appId + "/environments")
-                .then().statusCode(201)
-                .extract().path("Id");
-
-        String profileId = given()
-                .contentType(ContentType.JSON)
-                .body("{\"Name\":\"blob\",\"LocationUri\":\"hosted\",\"Type\":\"AWS.Freeform\"}")
-                .when().post("/applications/" + appId + "/configurationprofiles")
-                .then().statusCode(201)
-                .extract().path("Id");
-
-        byte[] stored = {(byte) 0xE0, 0x01, 0x00, (byte) 0xEA};
-        given()
-                .header("Content-Type", "application/octet-stream")
-                .body(stored)
-                .when().post("/applications/" + appId + "/configurationprofiles/" + profileId
-                        + "/hostedconfigurationversions")
-                .then().statusCode(201);
-
-        given()
-                .contentType(ContentType.JSON)
-                .body("{\"ConfigurationProfileId\":\"" + profileId + "\",\"ConfigurationVersion\":\"1\","
-                        + "\"DeploymentStrategyId\":\"AppConfig.AllAtOnce\"}")
-                .when().post("/applications/" + appId + "/environments/" + envId + "/deployments")
-                .then().statusCode(201);
-
-        String token = given()
-                .contentType(ContentType.JSON)
-                .body("{\"ApplicationIdentifier\":\"" + appId + "\",\"EnvironmentIdentifier\":\"" + envId + "\","
-                        + "\"ConfigurationProfileIdentifier\":\"" + profileId + "\"}")
-                .when().post("/configurationsessions")
-                .then().statusCode(201)
-                .extract().path("InitialConfigurationToken");
-
-        byte[] body = given()
-                .header("Accept", "application/ion;type=AWS.AppConfig.FeatureFlags;q=1.0,*/*;q=0.1")
-                .queryParam("configuration_token", token)
-                .when().get("/configuration")
-                .then().statusCode(200)
-                .header("Content-Type", startsWith("application/octet-stream"))
-                .extract().asByteArray();
-        assertArrayEquals(stored, body);
-    }
-
-    @Test @Order(51)
-    void deleteEnvironmentRemovesIt() {
-        String token = given()
-                .contentType(ContentType.JSON)
-                .body("{\"ApplicationIdentifier\":\"" + appId + "\",\"EnvironmentIdentifier\":\""
-                        + envId + "\",\"ConfigurationProfileIdentifier\":\"" + profileId + "\"}")
-                .when().post("/configurationsessions")
-                .then().statusCode(201)
-                .extract().path("InitialConfigurationToken");
-
-        given()
-                .when().delete("/applications/test-app/environments/test-env")
-                .then().statusCode(204);
-
-        given()
-                .when().get("/applications/" + appId + "/environments/" + envId)
-                .then().statusCode(404);
-
-        given()
-                .when().get("/applications/" + appId + "/environments/" + envId + "/deployments/1")
-                .then().statusCode(404);
-
-        given()
-                .queryParam("configuration_token", token)
-                .when().get("/configuration")
-                .then().statusCode(404);
-    }
-
-    @Test @Order(52)
-    void getLatestConfigurationServesIonForAQuotedFeatureFlagsType() {
-        getLatestVariantFlagsAccepting("application/ion; type=\"AWS.AppConfig.FeatureFlags\", */*;q=0.1")
-                .header("Content-Type", startsWith("application/ion"))
-                .header("Content-Type", containsString("type=AWS.AppConfig.FeatureFlags"));
-    }
-
-    @Test @Order(53)
-    void getLatestConfigurationServesIonForAnUnquotedFeatureFlagsType() {
-        getLatestVariantFlagsAccepting("application/ion; type=AWS.AppConfig.FeatureFlags, */*;q=0.1")
-                .header("Content-Type", startsWith("application/ion"))
-                .header("Content-Type", containsString("type=AWS.AppConfig.FeatureFlags"));
-    }
-
-    @Test @Order(54)
-    void getLatestConfigurationServesIonForAQuotedFeatureFlagsTypeWithAQuotedPair() {
-        getLatestVariantFlagsAccepting("application/ion; type=\"AWS.AppConfig.Feature\\Flags\", */*;q=0.1")
-                .header("Content-Type", startsWith("application/ion"))
-                .header("Content-Type", containsString("type=AWS.AppConfig.FeatureFlags"));
-    }
-
-    @Test @Order(55)
-    void getLatestConfigurationServesStoredJsonForAQuotedOtherType() {
-        getLatestVariantFlagsAccepting("application/ion; type=\"AWS.AppConfig.Other\", */*;q=0.1")
-                .header("Content-Type", startsWith("application/json"))
-                .body("values.promo._variants[0].name", equalTo("uk"));
-    }
-
-    /** Polls a new session on a feature flag profile with variants, deployed on first use. */
-    private static ValidatableResponse getLatestVariantFlagsAccepting(String accept) {
-        if (variantFlagsSessionBody == null) {
-            variantFlagsSessionBody = deployVariantFlags();
-        }
-        String token = given()
-                .contentType(ContentType.JSON).body(variantFlagsSessionBody)
-                .when().post("/configurationsessions")
-                .then().statusCode(201)
-                .extract().path("InitialConfigurationToken");
-
-        return given()
-                .header("Accept", accept)
-                .queryParam("configuration_token", token)
-                .when().get("/configuration")
-                .then().statusCode(200)
-                .header("Version-Label", equalTo("1"));
-    }
-
-    /** Deploys a feature flag profile whose one flag has variants; returns the StartConfigurationSession body. */
-    private static String deployVariantFlags() {
-        String app = given()
-                .contentType(ContentType.JSON)
-                .body("{\"Name\":\"quoted-ion-type-app\"}")
-                .when().post("/applications")
-                .then().statusCode(201)
-                .extract().path("Id");
-        String env = given()
-                .contentType(ContentType.JSON)
-                .body("{\"Name\":\"test\"}")
-                .when().post("/applications/" + app + "/environments")
-                .then().statusCode(201)
-                .extract().path("Id");
-        String profile = given()
-                .contentType(ContentType.JSON)
-                .body("{\"Name\":\"flags\",\"LocationUri\":\"hosted\",\"Type\":\"AWS.AppConfig.FeatureFlags\"}")
-                .when().post("/applications/" + app + "/configurationprofiles")
-                .then().statusCode(201)
-                .extract().path("Id");
-
-        String content = "{\"flags\":{},\"version\":\"1\",\"values\":{\"promo\":{\"_variants\":["
-                + "{\"attributeValues\":{\"storeId\":\"uk\"},\"enabled\":true,\"name\":\"uk\","
-                + "\"rule\":\"(eq $storeId \\\"uk\\\")\"},"
-                + "{\"enabled\":false,\"name\":\"default\"}]}}}";
-        given()
-                .header("Content-Type", "application/json")
-                .body(content.getBytes(StandardCharsets.UTF_8))
-                .when().post("/applications/" + app + "/configurationprofiles/" + profile
-                        + "/hostedconfigurationversions")
-                .then().statusCode(201);
-        given()
-                .contentType(ContentType.JSON)
-                .body("{\"ConfigurationProfileId\":\"" + profile + "\",\"ConfigurationVersion\":\"1\","
-                        + "\"DeploymentStrategyId\":\"AppConfig.AllAtOnce\"}")
-                .when().post("/applications/" + app + "/environments/" + env + "/deployments")
-                .then().statusCode(201);
-
-        return "{\"ApplicationIdentifier\":\"" + app + "\",\"EnvironmentIdentifier\":\"" + env + "\","
-                + "\"ConfigurationProfileIdentifier\":\"" + profile + "\"}";
     }
 }

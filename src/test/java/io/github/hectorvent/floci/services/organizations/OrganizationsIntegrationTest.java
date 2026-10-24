@@ -562,28 +562,14 @@ class OrganizationsIntegrationTest {
 
     @Test
     @Order(40)
-    void tagPolicyCanBeCreatedButNotAttachedBeforeItsPolicyTypeIsEnabled() {
-        String pendingId = organizations("CreatePolicy",
-                "{\"Name\":\"PendingCostCenter\",\"Type\":\"TAG_POLICY\",\"Content\":" + quote(TAG_POLICY_CONTENT) + "}")
-        .when()
-            .post("/")
-        .then()
-            .statusCode(200)
-            .body("Policy.PolicySummary.Type", equalTo("TAG_POLICY"))
-            .extract().jsonPath().getString("Policy.PolicySummary.Id");
-
-        organizations("AttachPolicy", "{\"PolicyId\":\"" + pendingId + "\",\"TargetId\":\"" + rootId + "\"}")
+    void tagPolicyRequiresItsPolicyTypeEnabled() {
+        organizations("CreatePolicy",
+                "{\"Name\":\"CostCenter\",\"Type\":\"TAG_POLICY\",\"Content\":" + quote(TAG_POLICY_CONTENT) + "}")
         .when()
             .post("/")
         .then()
             .statusCode(400)
             .body("__type", equalTo("PolicyTypeNotEnabledException"));
-
-        organizations("DeletePolicy", "{\"PolicyId\":\"" + pendingId + "\"}")
-        .when()
-            .post("/")
-        .then()
-            .statusCode(200);
     }
 
     @Test

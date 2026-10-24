@@ -40,12 +40,10 @@ public class BedrockAgentCoreToolsController {
     @Inject
     public BedrockAgentCoreToolsController(BedrockAgentCoreToolsService service,
                                            RegionResolver regionResolver,
-                                           ObjectMapper objectMapper,
-            EmulatorConfig config) {
+                                           ObjectMapper objectMapper) {
         this.service = service;
         this.regionResolver = regionResolver;
         this.objectMapper = objectMapper;
-        this.config = config;
     }
 
     @PUT
@@ -318,5 +316,6 @@ public class BedrockAgentCoreToolsController {
     }
 
 
-    private final EmulatorConfig config;
+    @Inject
+    EmulatorConfig config;
 }

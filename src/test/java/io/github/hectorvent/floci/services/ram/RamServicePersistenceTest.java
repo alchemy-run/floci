@@ -4,10 +4,10 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
-import io.github.hectorvent.floci.services.organizations.OrganizationsService;
-import io.github.hectorvent.floci.services.organizations.model.Organization;
 import io.github.hectorvent.floci.services.ram.model.ResourceShare;
 import io.github.hectorvent.floci.services.ram.model.SharedResource;
+import io.github.hectorvent.floci.services.organizations.OrganizationsService;
+import io.github.hectorvent.floci.services.organizations.model.Organization;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
@@ -41,15 +41,15 @@ class RamServicePersistenceTest {
         RamService reloaded = serviceWithStorage(storage);
 
         assertTrue(reloaded.isSharingWithOrganizationEnabled(OWNER));
-        List<ResourceShare> owned = reloaded.getResourceShares(OWNER, "SELF", "us-east-1");
+        List<ResourceShare> owned = reloaded.getResourceShares(OWNER, "SELF");
         assertEquals(1, owned.size());
         assertEquals(created.getResourceShareArn(), owned.getFirst().getResourceShareArn());
         assertEquals(created.getCreationTime(), owned.getFirst().getCreationTime());
 
-        List<ResourceShare> shared = reloaded.getResourceShares(ACCEPTER, "OTHER-ACCOUNTS", "us-east-1");
+        List<ResourceShare> shared = reloaded.getResourceShares(ACCEPTER, "OTHER-ACCOUNTS");
         assertEquals(1, shared.size());
         List<SharedResource> resources = reloaded.listResources(
-                ACCEPTER, "OTHER-ACCOUNTS", List.of(created.getResourceShareArn()), "us-east-1");
+                ACCEPTER, "OTHER-ACCOUNTS", List.of(created.getResourceShareArn()));
         assertEquals(1, resources.size());
         assertEquals(TGW_ARN, resources.getFirst().arn());
     }

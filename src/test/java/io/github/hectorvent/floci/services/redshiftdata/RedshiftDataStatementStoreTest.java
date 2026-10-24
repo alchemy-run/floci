@@ -5,15 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import io.github.hectorvent.floci.config.EmulatorConfig;
-import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
-import io.github.hectorvent.floci.core.storage.StorageFactory;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -25,80 +18,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.*;
 
 class RedshiftDataStatementStoreTest {
-
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void receiptSweepFailureDoesNotPreventOwnedStatementEviction(boolean receiptFailure) {
-        StorageFactory factory = mock(StorageFactory.class);
-        AccountAwareStorageBackend<RedshiftDataStatementStore.StoredStatement> backend =
-                AccountAwareStorageBackend.inMemory("000000000000");
-        when(factory.<RedshiftDataStatementStore.StoredStatement>create(eq("redshift-data"),
-                eq("statements.json"), any())).thenReturn(backend);
-        EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
-        when(config.services().redshiftData().resultTtlHours()).thenReturn(24);
-        RedshiftDataIdempotencyStore receipts = mock(RedshiftDataIdempotencyStore.class);
-        if (receiptFailure) {
-            doThrow(new UncheckedIOException(new IOException("receipt replacement failed")))
-                    .when(receipts).sweep();
-        }
-        RedshiftDataStatementStore store = new RedshiftDataStatementStore(factory, config, receipts);
-        Instant now = Instant.now();
-        store.putForAccount("111111111111", statement("same-id", now.minus(Duration.ofHours(48))));
-        store.putForAccount("222222222222", statement("same-id", now.minus(Duration.ofHours(1))));
-        RedshiftDataStatementStore.StoredStatement active = statement("active", now.minus(Duration.ofHours(48)));
-        active.status = RedshiftDataStatementStore.Status.STARTED;
-        store.putForAccount("111111111111", active);
-
-        store.sweep();
-
-        verify(receipts).sweep();
-        assertNull(store.getForAccount("111111111111", "same-id"));
-        assertNotNull(store.getForAccount("222222222222", "same-id"));
-        assertNotNull(store.getForAccount("111111111111", "active"));
-    }
-
-    @Test
-    void recoveryFailsInterruptedWorkWithoutChangingTerminalResults() {
-        RedshiftDataStatementStore store = new RedshiftDataStatementStore(24, Clock.systemUTC());
-        RedshiftDataStatementStore.StoredStatement active = statement("active", Instant.now());
-        active.status = RedshiftDataStatementStore.Status.STARTED;
-        store.put(active);
-        store.put(statement("finished", Instant.now()));
-        store.start();
-        try {
-            assertEquals(RedshiftDataStatementStore.Status.FAILED, store.get("active").status);
-            assertEquals("Execution interrupted by emulator restart", store.get("active").error);
-            assertEquals(RedshiftDataStatementStore.Status.FINISHED, store.get("finished").status);
-        } finally {
-            store.stop();
-        }
-    }
-
-    @Test
-    void sweepRetainsActiveStatementsOlderThanTtl() {
-        Instant now = Instant.parse("2026-10-10T00:00:00Z");
-        RedshiftDataStatementStore store = new RedshiftDataStatementStore(24, Clock.fixed(now, ZoneOffset.UTC));
-        RedshiftDataStatementStore.StoredStatement active = statement("active", now.minus(Duration.ofHours(25)));
-        active.status = RedshiftDataStatementStore.Status.SUBMITTED;
-        store.put(active);
-        store.sweep();
-        assertNotNull(store.get("active"));
-    }
-
-    @Test
-    void storedSnapshotDoesNotChangeWhenWorkerMutatesItsRecord() {
-        RedshiftDataStatementStore store = new RedshiftDataStatementStore(24, Clock.systemUTC());
-        RedshiftDataStatementStore.StoredStatement original = statement("snapshot", Instant.now());
-        original.status = RedshiftDataStatementStore.Status.STARTED;
-        store.put(original);
-        original.status = RedshiftDataStatementStore.Status.FINISHED;
-        assertEquals(RedshiftDataStatementStore.Status.STARTED, store.get("snapshot").status);
-        store.get("snapshot").status = RedshiftDataStatementStore.Status.FAILED;
-        assertEquals(RedshiftDataStatementStore.Status.STARTED, store.get("snapshot").status);
-    }
 
     private static RedshiftDataStatementStore.StoredStatement statement(String id, Instant createdAt) {
         RedshiftDataStatementStore.StoredStatement s = new RedshiftDataStatementStore.StoredStatement();

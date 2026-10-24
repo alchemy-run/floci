@@ -79,7 +79,8 @@ class ApiGatewayV2DomainNameIntegrationTest {
     @Test
     @Order(3)
     void aDomainNameConfigurationIsRequired() {
-        // V2 requires configuration objects; v1 also supports an omitted configuration.
+        // AWS: "Invalid input. Expected one domain name configuration" — the REST API takes none,
+        // so the two endpoints do not share this rule.
         given()
             .contentType(ContentType.JSON)
             .body("{\"domainName\":\"no-configuration.example.com\"}")
@@ -87,7 +88,7 @@ class ApiGatewayV2DomainNameIntegrationTest {
             .post("/v2/domainnames")
         .then()
             .statusCode(400)
-            .body(containsString("Expected one or more domain name configurations"));
+            .body(containsString("Expected one domain name configuration"));
     }
 
     @Test
@@ -117,99 +118,21 @@ class ApiGatewayV2DomainNameIntegrationTest {
 
     @Test
     @Order(3)
-    void anInvalidRoutingModeIsRefused() {
+    void anUnsupportedRoutingModeIsRefused() {
+        // floci does not emulate routing rules, so it says so rather than quietly creating a
+        // domain that routes by API mapping regardless.
         given()
             .contentType(ContentType.JSON)
             .body("""
                     {"domainName":"routing.example.com",
                      "domainNameConfigurations":[{"endpointType":"REGIONAL"}],
-                     "routingMode":"INVALID_MODE"}
+                     "routingMode":"ROUTING_RULE_ONLY"}
                     """)
         .when()
             .post("/v2/domainnames")
         .then()
             .statusCode(400)
-            .body(containsString("Invalid routingMode"));
-    }
-
-    @Test
-    @Order(3)
-    void controlPlaneSettingsRoundTripWithoutSplittingTheSharedDomain() {
-        String domain = "v2-control-plane.example.com";
-        String path = "/v2/domainnames/" + domain;
-        given().contentType(ContentType.JSON).body("""
-                {"domainName":"%s","routingMode":"ROUTING_RULE_ONLY",
-                 "apiMappingSelectionExpression":"$request.header.original",
-                 "mutualTlsAuthentication":{"truststoreUri":"s3://trust/original.pem","truststoreVersion":"1"},
-                 "domainNameConfigurations":[
-                   {"certificateArn":"arn:primary","endpointType":"REGIONAL","ipAddressType":"dualstack",
-                    "ownershipVerificationCertificateArn":"arn:ownership"},
-                   {"certificateArn":"arn:secondary","endpointType":"EDGE","securityPolicy":"TLS_1_0",
-                    "apiGatewayDomainName":"secondary.example.com"}]}
-                """.formatted(domain))
-                .post("/v2/domainnames").then().statusCode(201)
-                .body("routingMode", is("ROUTING_RULE_ONLY"))
-                .body("apiMappingSelectionExpression", is("$request.header.original"))
-                .body("mutualTlsAuthentication.truststoreUri", is("s3://trust/original.pem"))
-                .body("domainNameConfigurations.size()", is(2))
-                .body("domainNameConfigurations[0].ipAddressType", is("dualstack"))
-                .body("domainNameConfigurations[0].ownershipVerificationCertificateArn", is("arn:ownership"))
-                .body("domainNameConfigurations[1].certificateArn", is("arn:secondary"))
-                .body("domainNameConfigurations[1].apiGatewayDomainName", is("secondary.example.com"));
-        try {
-            given().get(path).then().statusCode(200)
-                    .body("routingMode", is("ROUTING_RULE_ONLY"))
-                    .body("mutualTlsAuthentication.truststoreVersion", is("1"))
-                    .body("domainNameConfigurations[1].securityPolicy", is("TLS_1_0"));
-            given().get("/v2/domainnames").then().statusCode(200)
-                    .body("items.find { it.domainName == '" + domain + "' }.domainNameConfigurations.size()", is(2));
-            given().get("/domainnames/" + domain).then().statusCode(200)
-                    .body("certificateArn", is("arn:primary"));
-
-            given().contentType(ContentType.JSON).body("""
-                    {"routingMode":"ROUTING_RULE_THEN_API_MAPPING",
-                     "apiMappingSelectionExpression":"$request.header.updated",
-                     "mutualTlsAuthentication":{"truststoreUri":"s3://trust/updated.pem","truststoreVersion":"2"},
-                     "domainNameConfigurations":[{"certificateArn":"arn:primary-updated","endpointType":"REGIONAL"},
-                                                 {"certificateArn":"arn:secondary-updated","endpointType":"EDGE"}]}
-                    """).patch(path).then().statusCode(200)
-                    .body("routingMode", is("ROUTING_RULE_THEN_API_MAPPING"))
-                    .body("apiMappingSelectionExpression", is("$request.header.updated"))
-                    .body("mutualTlsAuthentication.truststoreVersion", is("2"))
-                    .body("domainNameConfigurations[1].certificateArn", is("arn:secondary-updated"));
-
-            given().contentType(ContentType.JSON).body("""
-                    {"routingMode":"API_MAPPING_ONLY",
-                     "mutualTlsAuthentication":{"truststoreUri":"s3://trust/wrong.pem"},
-                     "domainNameConfigurations":[{"certificateArn":"arn:wrong"},{"endpointType":"INVALID"}]}
-                    """).patch(path).then().statusCode(400);
-            given().get(path).then().statusCode(200)
-                    .body("routingMode", is("ROUTING_RULE_THEN_API_MAPPING"))
-                    .body("apiMappingSelectionExpression", is("$request.header.updated"))
-                    .body("mutualTlsAuthentication.truststoreUri", is("s3://trust/updated.pem"))
-                    .body("domainNameConfigurations[0].certificateArn", is("arn:primary-updated"))
-                    .body("domainNameConfigurations[1].certificateArn", is("arn:secondary-updated"));
-
-            given().contentType(ContentType.JSON).body("""
-                    {"patchOperations":[{"op":"replace","path":"/certificateArn","value":"arn:v1-updated"}]}
-                    """).patch("/domainnames/" + domain).then().statusCode(200);
-            given().get(path).then().statusCode(200)
-                    .body("domainNameConfigurations[0].certificateArn", is("arn:v1-updated"))
-                    .body("domainNameConfigurations[1].certificateArn", is("arn:secondary-updated"))
-                    .body("routingMode", is("ROUTING_RULE_THEN_API_MAPPING"))
-                    .body("mutualTlsAuthentication.truststoreVersion", is("2"));
-
-            given().contentType(ContentType.JSON)
-                    .body("{\"mutualTlsAuthentication\":null,\"domainNameConfigurations\":[]}")
-                    .patch(path).then().statusCode(200)
-                    .body("mutualTlsAuthentication", nullValue())
-                    .body("domainNameConfigurations.size()", is(0));
-            given().get(path).then().statusCode(200)
-                    .body("mutualTlsAuthentication", nullValue())
-                    .body("domainNameConfigurations.size()", is(0));
-        } finally {
-            given().delete(path).then().statusCode(204);
-        }
+            .body(containsString("API_MAPPING_ONLY"));
     }
 
     @Test
@@ -337,7 +260,7 @@ class ApiGatewayV2DomainNameIntegrationTest {
     @Order(7)
     void rootSpellingsCollapseToOneRecordOnWrite() {
         // The read path has always normalised the root to "(none)"; the write path now does too, so
-        // "/" cannot end up stored beside it as a second record that means the same thing, and a
+        // "/" cannot end up stored beside it as a second record that means the same thing — and a
         // mapping created as "" can be read back as "", which it could not before.
         String otherDomain = "root-spelling.example.com";
         given()
@@ -430,24 +353,18 @@ class ApiGatewayV2DomainNameIntegrationTest {
 
     @Test
     @Order(6)
-    void malformedDomainSettingsAreRefused() {
+    void inputsFlociCannotHonourAreRefused() {
+        // Accepting these would answer with a domain that behaves differently from the request.
         String[] bodies = {
             """
             {"domainName":"mtls.example.com","domainNameConfigurations":[{"endpointType":"REGIONAL"}],
-             "mutualTlsAuthentication":"not-an-object"}""",
+             "mutualTlsAuthentication":{"truststoreUri":"s3://bucket/truststore.pem"}}""",
             """
             {"domainName":"dualstack.example.com",
-             "domainNameConfigurations":[{"endpointType":"REGIONAL","ipAddressType":"ipv7"}]}""",
+             "domainNameConfigurations":[{"endpointType":"REGIONAL","ipAddressType":"dualstack"}]}""",
             """
             {"domainName":"ownership.example.com","domainNameConfigurations":[
-                {"endpointType":"REGIONAL","ownershipVerificationCertificateArn":42}]}""",
-            """
-            {"domainName":"bad-config.example.com","domainNameConfigurations":[{"endpointType":"REGIONAL"},7]}""",
-            """
-            {"domainName":"bad-expression.example.com","domainNameConfigurations":[{}],
-             "apiMappingSelectionExpression":{"invalid":true}}""",
-            """
-            {"domainName":"private.example.com","domainNameConfigurations":[{"endpointType":"PRIVATE"}]}"""
+                {"endpointType":"REGIONAL","ownershipVerificationCertificateArn":"arn:aws:acm:us-east-1:0:certificate/o"}]}"""
         };
         for (String body : bodies) {
             given()

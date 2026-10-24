@@ -6,7 +6,6 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.services.cloudtrail.CloudTrailEventService;
-import io.github.hectorvent.floci.services.detective.model.DetectiveMember;
 import io.github.hectorvent.floci.services.detective.model.DetectiveState;
 import io.github.hectorvent.floci.services.organizations.OrganizationsService;
 import io.github.hectorvent.floci.services.organizations.model.Organization;
@@ -79,7 +78,7 @@ class DetectiveServiceTest {
         when(regionResolver.getAccountId()).thenReturn(ADMIN_ACCOUNT);
         String graphArn = service.graphArn(REGION);
 
-        DetectiveMember member = service.createMember(REGION, graphArn, MEMBER_ACCOUNT, null);
+        var member = service.createMember(REGION, graphArn, MEMBER_ACCOUNT, null);
 
         assertEquals(MEMBER_ACCOUNT, member.getAccountId());
         assertNull(member.getEmailAddress());

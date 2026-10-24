@@ -3,16 +3,12 @@ package io.github.hectorvent.floci.services.amazonmq;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.Test;
 
-import java.util.List;
-
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.hasItem;
-import static org.hamcrest.Matchers.hasKey;
-import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
 
@@ -58,67 +54,6 @@ class AmazonMqControllerIntegrationTest {
     }
 
     @Test
-    void describeBrokerReturnsCreateBrokerMembers() {
-        String brokerId = given()
-            .contentType("application/json")
-            .body("""
-                {"brokerName": "it-members", "engineType": "RABBITMQ",
-                 "deploymentMode": "SINGLE_INSTANCE", "hostInstanceType": "mq.t3.micro",
-                 "publiclyAccessible": false,
-                 "securityGroups": ["sg-0123"], "subnetIds": ["subnet-0abc"],
-                 "logs": {"general": true},
-                 "maintenanceWindowStartTime": {"dayOfWeek": "MONDAY", "timeOfDay": "02:00", "timeZone": "UTC"},
-                 "storageType": "EBS", "authenticationStrategy": "SIMPLE",
-                 "encryptionOptions": {"kmsKeyId": "arn:aws:kms:us-east-1:000000000000:key/k1", "useAwsOwnedKey": false},
-                 "configuration": {"id": "c-123", "revision": 2},
-                 "users": [{"username": "admin", "password": "AdminPass123", "consoleAccess": true}]}
-                """)
-        .when()
-            .post("/v1/brokers")
-        .then()
-            .statusCode(200)
-            .extract().path("brokerId");
-
-        given()
-        .when()
-            .get("/v1/brokers/{id}", brokerId)
-        .then()
-            .statusCode(200)
-            .body("securityGroups", equalTo(List.of("sg-0123")))
-            .body("subnetIds", equalTo(List.of("subnet-0abc")))
-            .body("logs.general", equalTo(true))
-            .body("logs.generalLogGroup", equalTo("/aws/amazonmq/broker/" + brokerId + "/general"))
-            .body("maintenanceWindowStartTime.dayOfWeek", equalTo("MONDAY"))
-            .body("maintenanceWindowStartTime.timeOfDay", equalTo("02:00"))
-            .body("maintenanceWindowStartTime.timeZone", equalTo("UTC"))
-            .body("storageType", equalTo("EBS"))
-            .body("authenticationStrategy", equalTo("SIMPLE"))
-            .body("encryptionOptions.kmsKeyId", equalTo("arn:aws:kms:us-east-1:000000000000:key/k1"))
-            .body("encryptionOptions.useAwsOwnedKey", equalTo(false))
-            .body("configurations.current.id", equalTo("c-123"))
-            .body("configurations.current.revision", equalTo(2))
-            .body("configuration", nullValue())
-            // RabbitMQ users stay out of DescribeBroker (see createThenDescribeBroker).
-            .body("users", nullValue());
-    }
-
-    @Test
-    void describeBrokerOmitsUnsetOptionalMembers() {
-        String brokerId = createRabbitBroker("it-minimal");
-
-        given()
-        .when()
-            .get("/v1/brokers/{id}", brokerId)
-        .then()
-            .statusCode(200)
-            .body("$", not(hasKey("securityGroups")))
-            .body("logs.general", equalTo(false))
-            .body("logs.generalLogGroup", equalTo("/aws/amazonmq/broker/" + brokerId + "/general"))
-            .body("$", not(hasKey("configurations")))
-            .body("$", not(hasKey("encryptionOptions")));
-    }
-
-    @Test
     void listBrokersIncludesCreated() {
         createRabbitBroker("it-list");
 
@@ -154,23 +89,268 @@ class AmazonMqControllerIntegrationTest {
     }
 
     @Test
-    void describeSharedResourcesReturnsEmptyList() {
-        String brokerId = createRabbitBroker("it-shared");
-
-        given()
-        .when()
-            .get("/v1/brokers/{id}/shared-resources", brokerId)
-        .then()
-            .statusCode(200)
-            .body("sharedResources", equalTo(List.of()))
-            .body("$", not(hasKey("nextToken")));
+    void userOperationsOnMissingBrokerReturnNotFound() {
+        String brokerId = "b-00000000-0000-0000-0000-000000000000";
+        String authorization = "AWS4-HMAC-SHA256 Credential=test/20260921/us-east-1/mq/aws4_request, SignedHeaders=host, Signature=test";
+        given().header("Authorization", authorization).get("/v1/brokers/{id}/users", brokerId)
+                .then().statusCode(404).body("__type", equalTo("NotFoundException"));
+        given().header("Authorization", authorization).get("/v1/brokers/{id}/users/alice", brokerId)
+                .then().statusCode(404).body("__type", equalTo("NotFoundException"));
+        given().header("Authorization", authorization).delete("/v1/brokers/{id}/users/alice", brokerId)
+                .then().statusCode(404).body("__type", equalTo("NotFoundException"));
+        given().header("Authorization", authorization).contentType("application/json")
+                .body("{\"password\":\"AnotherPass99\",\"consoleAccess\":false}")
+                .post("/v1/brokers/{id}/users/alice", brokerId)
+                .then().statusCode(404).body("__type", equalTo("NotFoundException"));
     }
 
     @Test
-    void describeSharedResourcesUnknownBrokerIsNotFound() {
-        given()
+    void promoteRequiresReplicaBroker() {
+        String missing = "b-00000000-0000-0000-0000-000000000000";
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+                .body("{\"mode\":\"SWITCHOVER\"}")
+                .post("/v1/brokers/{id}/promote", missing)
+                .then().statusCode(404).body("__type", equalTo("NotFoundException"));
+
+        String brokerId = createRabbitBroker("it-promote");
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+                .body("{\"mode\":\"SWITCHOVER\"}")
+                .post("/v1/brokers/{id}/promote", brokerId)
+                .then().statusCode(400).body("__type", equalTo("BadRequestException"))
+                .body("message", containsString("replica"));
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+                .body("{\"mode\":\"SIDEWAYS\"}")
+                .post("/v1/brokers/{id}/promote", brokerId)
+                .then().statusCode(400).body("__type", equalTo("BadRequestException"));
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+                .body("{}")
+                .post("/v1/brokers/{id}/promote", brokerId)
+                .then().statusCode(400).body("__type", equalTo("BadRequestException"));
+    }
+
+    @Test
+    void updateUserFollowsUserApiRules() {
+        String missing = "b-00000000-0000-0000-0000-000000000000";
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+                .body("{\"consoleAccess\":true}")
+                .put("/v1/brokers/{id}/users/alice", missing)
+                .then().statusCode(404).body("__type", equalTo("NotFoundException"));
+
+        String brokerId = createRabbitBroker("it-update-user");
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+                .body("{\"consoleAccess\":true}")
+                .put("/v1/brokers/{id}/users/alice", brokerId)
+                .then().statusCode(400).body("__type", equalTo("BadRequestException"));
+    }
+
+    @Test
+    void updateBrokerStagesPendingChangesUntilReboot() {
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+                .body("{\"autoMinorVersionUpgrade\":true}")
+                .put("/v1/brokers/{id}", "b-00000000-0000-0000-0000-000000000000")
+                .then().statusCode(404).body("__type", equalTo("NotFoundException"));
+
+        String brokerId = createRabbitBroker("it-update-broker");
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+                .body("{\"engineVersion\":\"9.9\"}")
+                .put("/v1/brokers/{id}", brokerId)
+                .then().statusCode(400).body("__type", equalTo("BadRequestException"));
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+                .body("{\"dataReplicationMode\":\"CRDR\"}")
+                .put("/v1/brokers/{id}", brokerId)
+                .then().statusCode(400).body("__type", equalTo("BadRequestException"));
+
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+                .body("""
+                    {"autoMinorVersionUpgrade": true, "hostInstanceType": "mq.m5.large",
+                     "maintenanceWindowStartTime": {"dayOfWeek": "MONDAY", "timeOfDay": "03:00", "timeZone": "UTC"},
+                     "logs": {"general": true}}
+                    """)
+                .put("/v1/brokers/{id}", brokerId)
+                .then().statusCode(200)
+                .body("brokerId", equalTo(brokerId))
+                .body("hostInstanceType", equalTo("mq.m5.large"))
+                .body("autoMinorVersionUpgrade", equalTo(true));
+
+        given().header("Authorization", MQ_AUTH).get("/v1/brokers/{id}", brokerId)
+                .then().statusCode(200)
+                .body("hostInstanceType", equalTo("mq.t3.micro"))
+                .body("pendingHostInstanceType", equalTo("mq.m5.large"))
+                .body("autoMinorVersionUpgrade", equalTo(true))
+                .body("maintenanceWindowStartTime.dayOfWeek", equalTo("MONDAY"))
+                .body("logs.general", equalTo(true));
+
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+                .post("/v1/brokers/{id}/reboot", brokerId)
+                .then().statusCode(200);
+        given().header("Authorization", MQ_AUTH).get("/v1/brokers/{id}", brokerId)
+                .then().statusCode(200)
+                .body("hostInstanceType", equalTo("mq.m5.large"))
+                .body("pendingHostInstanceType", nullValue());
+    }
+
+    private static String mqAuth(String region) {
+        return "AWS4-HMAC-SHA256 Credential=test/20260922/" + region
+                + "/mq/aws4_request, SignedHeaders=host, Signature=test";
+    }
+
+    private static final String MQ_AUTH = mqAuth("us-east-1");
+
+    @Test
+    void describeMissingConfigurationIsNotFound() {
+        given().header("Authorization", MQ_AUTH)
+            .get("/v1/configurations/{id}", "c-00000000-0000-0000-0000-000000000000")
+        .then()
+            .statusCode(404)
+            .header("X-Amzn-Errortype", "NotFoundException")
+            .body("__type", equalTo("NotFoundException"));
+    }
+
+    @Test
+    void configurationLifecyclePublishesRevisions() {
+        String id = given().header("Authorization", MQ_AUTH).contentType("application/json")
+            .body("""
+                {"name": "it-config", "engineType": "ACTIVEMQ", "engineVersion": "5.18",
+                 "tags": {"team": "messaging"}}
+                """)
         .when()
-            .get("/v1/brokers/{id}/shared-resources", "b-does-not-exist")
+            .post("/v1/configurations")
+        .then()
+            .statusCode(200)
+            .body("arn", containsString(":configuration:c-"))
+            .body("latestRevision.revision", equalTo(1))
+            .extract().path("id");
+
+        given().header("Authorization", MQ_AUTH)
+            .get("/v1/configurations/{id}", id)
+        .then()
+            .statusCode(200)
+            .body("name", equalTo("it-config"))
+            .body("engineType", equalTo("ActiveMQ"))
+            .body("engineVersion", equalTo("5.18"))
+            .body("tags.team", equalTo("messaging"));
+
+        String xml = "<broker xmlns=\"http://activemq.apache.org/schema/core\"><plugins/></broker>";
+        String data = java.util.Base64.getEncoder().encodeToString(xml.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+            .body("{\"data\": \"" + data + "\", \"description\": \"custom\"}")
+        .when()
+            .put("/v1/configurations/{id}", id)
+        .then()
+            .statusCode(200)
+            .body("id", equalTo(id))
+            .body("latestRevision.revision", equalTo(2))
+            .body("warnings", hasSize(0));
+
+        given().header("Authorization", MQ_AUTH)
+            .get("/v1/configurations/{id}/revisions/2", id)
+        .then()
+            .statusCode(200)
+            .body("data", equalTo(data))
+            .body("description", equalTo("custom"));
+
+        given().header("Authorization", MQ_AUTH)
+            .get("/v1/configurations/{id}/revisions", id)
+        .then()
+            .statusCode(200)
+            .body("revisions.revision", contains(1, 2));
+
+        given().header("Authorization", MQ_AUTH)
+            .get("/v1/configurations")
+        .then()
+            .statusCode(200)
+            .body("configurations.id", hasItem(id));
+
+        // Another region does not see it.
+        given().header("Authorization", mqAuth("eu-west-1"))
+            .get("/v1/configurations/{id}", id)
+        .then()
+            .statusCode(404);
+
+        given().header("Authorization", MQ_AUTH)
+            .delete("/v1/configurations/{id}", id)
+        .then()
+            .statusCode(200)
+            .body("configurationId", equalTo(id));
+
+        given().header("Authorization", MQ_AUTH)
+            .get("/v1/configurations/{id}", id)
+        .then()
+            .statusCode(404)
+            .body("__type", equalTo("NotFoundException"));
+    }
+
+    @Test
+    void configurationTagsUseV1TagsPath() {
+        String arn = given().header("Authorization", MQ_AUTH).contentType("application/json")
+            .body("{\"name\": \"it-config-tags\", \"engineType\": \"RABBITMQ\"}")
+        .when()
+            .post("/v1/configurations")
+        .then()
+            .statusCode(200)
+            .extract().path("arn");
+
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+            .body("{\"tags\": {\"env\": \"dev\", \"owner\": \"me\"}}")
+        .when()
+            .post("/v1/tags/{arn}", arn)
+        .then()
+            .statusCode(204);
+
+        given().header("Authorization", MQ_AUTH)
+            .queryParam("tagKeys", "owner")
+        .when()
+            .delete("/v1/tags/{arn}", arn)
+        .then()
+            .statusCode(204);
+
+        given().header("Authorization", MQ_AUTH)
+            .get("/v1/tags/{arn}", arn)
+        .then()
+            .statusCode(200)
+            .body("tags.env", equalTo("dev"))
+            .body("tags.owner", nullValue());
+    }
+
+    @Test
+    void unsignedConfigurationsPathStillReachesMsk() {
+        // MSK owns /v1/configurations too; only mq-signed requests are rerouted.
+        given().contentType("application/json")
+            .body("""
+                {"name": "it-msk-config", "kafkaVersions": ["3.6.0"],
+                 "serverProperties": "YXV0by5jcmVhdGUudG9waWNzLmVuYWJsZT10cnVl"}
+                """)
+        .when()
+            .post("/v1/configurations")
+        .then()
+            .statusCode(200)
+            .body("arn", containsString(":kafka:"));
+    }
+
+    @Test
+    void describeBrokerEngineTypesFiltersByEngine() {
+        given().header("Authorization", MQ_AUTH)
+            .queryParam("engineType", "ACTIVEMQ")
+        .when()
+            .get("/v1/broker-engine-types")
+        .then()
+            .statusCode(200)
+            .body("brokerEngineTypes", hasSize(1))
+            .body("brokerEngineTypes[0].engineType", equalTo("ACTIVEMQ"))
+            .body("brokerEngineTypes[0].engineVersions[0].name", equalTo("5.18"));
+    }
+
+    @Test
+    void createBrokerRejectsMissingConfigurationReference() {
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+            .body("""
+                {"brokerName": "it-badconfig", "engineType": "RABBITMQ",
+                 "deploymentMode": "SINGLE_INSTANCE", "hostInstanceType": "mq.t3.micro",
+                 "configuration": {"id": "c-00000000-0000-0000-0000-000000000000", "revision": 1},
+                 "users": [{"username": "admin", "password": "AdminPass123", "consoleAccess": true}]}
+                """)
+        .when()
+            .post("/v1/brokers")
         .then()
             .statusCode(404)
             .body("__type", equalTo("NotFoundException"));

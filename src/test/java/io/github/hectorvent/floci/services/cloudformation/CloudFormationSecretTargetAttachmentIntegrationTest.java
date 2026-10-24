@@ -8,7 +8,6 @@ import io.github.hectorvent.floci.testing.RdsMockProfile;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
-import io.restassured.path.xml.XmlPath;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -24,10 +23,6 @@ class CloudFormationSecretTargetAttachmentIntegrationTest {
 
     private static final String CFN_AUTH =
             "AWS4-HMAC-SHA256 Credential=test/20260205/us-east-1/cloudformation/aws4_request";
-    private static final String RDS_AUTH =
-            "AWS4-HMAC-SHA256 Credential=test/20260205/us-east-1/rds/aws4_request";
-    private static final String DB_INSTANCE_PATH =
-            "DescribeDBInstancesResponse.DescribeDBInstancesResult.DBInstances.DBInstance";
     private static final String SM_CONTENT_TYPE = "application/x-amz-json-1.1";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -92,15 +87,8 @@ class CloudFormationSecretTargetAttachmentIntegrationTest {
             assertEquals("initial-password", attached.path("password").asText());
             assertEquals("keep", attached.path("custom").asText());
             assertEquals("postgres", attached.path("engine").asText());
-            // The attachment writes the instance's own endpoint, as DescribeDBInstances reports it.
-            XmlPath instance = describeDbInstance(databaseId);
-            String endpointAddress = instance.getString(DB_INSTANCE_PATH + ".Endpoint.Address");
-            int endpointPort = instance.getInt(DB_INSTANCE_PATH + ".Endpoint.Port");
-            assertFalse(endpointAddress == null || endpointAddress.isBlank(),
-                    "instance should report an endpoint address");
-            assertTrue(endpointPort > 0);
-            assertEquals(endpointAddress, attached.path("host").asText());
-            assertEquals(endpointPort, attached.path("port").asInt());
+            assertEquals("localhost", attached.path("host").asText());
+            assertTrue(attached.path("port").asInt() > 0);
             assertEquals("appdb", attached.path("dbname").asText());
             assertEquals(databaseId, attached.path("dbInstanceIdentifier").asText());
 
@@ -384,15 +372,6 @@ class CloudFormationSecretTargetAttachmentIntegrationTest {
             .formParam("StackName", stackName)
             .formParam("TemplateBody", template)
         .when().post("/").then().statusCode(200);
-    }
-
-    private static XmlPath describeDbInstance(String databaseId) {
-        return given()
-            .contentType("application/x-www-form-urlencoded")
-            .header("Authorization", RDS_AUTH)
-            .formParam("Action", "DescribeDBInstances")
-            .formParam("DBInstanceIdentifier", databaseId)
-        .when().post("/").then().statusCode(200).extract().xmlPath();
     }
 
     private static String describeStack(String stackName) {

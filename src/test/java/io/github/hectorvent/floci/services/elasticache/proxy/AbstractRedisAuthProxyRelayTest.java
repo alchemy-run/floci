@@ -1,6 +1,5 @@
 package io.github.hectorvent.floci.services.elasticache.proxy;
 
-import io.github.hectorvent.floci.testutil.FreePorts;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -14,9 +13,11 @@ class AbstractRedisAuthProxyRelayTest {
 
     @Test
     void closingBackendReleasesClientConnection() throws Exception {
-        try (ServerSocket backendServer = new ServerSocket(0)) {
-            int proxyPort = FreePorts.anyInterfacePort();
+        try (ServerSocket backendServer = new ServerSocket(0);
+             ServerSocket freePort = new ServerSocket(0)) {
+            int proxyPort = freePort.getLocalPort();
             TestProxy proxy = new TestProxy("127.0.0.1", backendServer.getLocalPort());
+            freePort.close();
             proxy.start(proxyPort);
 
             try (Socket client = new Socket("127.0.0.1", proxyPort)) {
@@ -37,9 +38,11 @@ class AbstractRedisAuthProxyRelayTest {
 
     @Test
     void clientHalfCloseStillAllowsBackendResponse() throws Exception {
-        try (ServerSocket backendServer = new ServerSocket(0)) {
-            int proxyPort = FreePorts.anyInterfacePort();
+        try (ServerSocket backendServer = new ServerSocket(0);
+             ServerSocket freePort = new ServerSocket(0)) {
+            int proxyPort = freePort.getLocalPort();
             TestProxy proxy = new TestProxy("127.0.0.1", backendServer.getLocalPort());
+            freePort.close();
             proxy.start(proxyPort);
 
             try (Socket client = new Socket("127.0.0.1", proxyPort)) {
@@ -67,9 +70,11 @@ class AbstractRedisAuthProxyRelayTest {
 
     @Test
     void clientHalfCloseClosesRelayWhenBackendStaysOpenAfterResponse() throws Exception {
-        try (ServerSocket backendServer = new ServerSocket(0)) {
-            int proxyPort = FreePorts.anyInterfacePort();
+        try (ServerSocket backendServer = new ServerSocket(0);
+             ServerSocket freePort = new ServerSocket(0)) {
+            int proxyPort = freePort.getLocalPort();
             TestProxy proxy = new TestProxy("127.0.0.1", backendServer.getLocalPort());
+            freePort.close();
             proxy.start(proxyPort);
 
             try (Socket client = new Socket("127.0.0.1", proxyPort)) {
@@ -96,9 +101,11 @@ class AbstractRedisAuthProxyRelayTest {
 
     @Test
     void keepsHealthyIdleConnectionOpenBeyondRelayShutdownDeadline() throws Exception {
-        try (ServerSocket backendServer = new ServerSocket(0)) {
-            int proxyPort = FreePorts.anyInterfacePort();
+        try (ServerSocket backendServer = new ServerSocket(0);
+             ServerSocket freePort = new ServerSocket(0)) {
+            int proxyPort = freePort.getLocalPort();
             TestProxy proxy = new TestProxy("127.0.0.1", backendServer.getLocalPort());
+            freePort.close();
             proxy.start(proxyPort);
 
             try (Socket client = new Socket("127.0.0.1", proxyPort)) {

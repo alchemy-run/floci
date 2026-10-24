@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.eks;
 
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RequestScopes;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
 import io.github.hectorvent.floci.services.ec2.model.SecurityGroup;
@@ -25,7 +26,7 @@ import static org.hamcrest.Matchers.startsWith;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
@@ -127,8 +128,8 @@ class EksClusterSecurityGroupIntegrationTest {
                 .formParam("Action", "DescribeSecurityGroups")
                 .formParam("GroupId.1", clusterSecurityGroupId)
                 .when().post("/")
-                .then().statusCode(200)
-                .body("DescribeSecurityGroupsResponse.securityGroupInfo.item.size()", equalTo(0));
+                .then().statusCode(400)
+                .body("Response.Errors.Error.Code", equalTo("InvalidGroup.NotFound"));
 
         given()
                 .formParam("Action", "DeleteSecurityGroup")
@@ -194,10 +195,10 @@ class EksClusterSecurityGroupIntegrationTest {
             assertEquals(nonDefaultAccount, nonDefaultSg.getOwnerId(), "Security group ownerId should match non-default account");
 
             // Verify it does NOT exist under the default account in EC2
-            SecurityGroup defaultAccountSg = RequestScopes.callAs("000000000000", () ->
-                    ec2Service.describeSecurityGroups("us-east-1", List.of(backfilledSgId), List.of(), Map.of())
-                            .stream().findFirst().orElse(null));
-            assertNull(defaultAccountSg, "Security group should not exist in EC2 under default account");
+            AwsException notInDefaultAccount = assertThrows(AwsException.class, () -> RequestScopes.callAs("000000000000", () ->
+                    ec2Service.describeSecurityGroups("us-east-1", List.of(backfilledSgId), List.of(), Map.of())),
+                    "Security group should not exist in EC2 under default account");
+            assertEquals("InvalidGroup.NotFound", notInDefaultAccount.getErrorCode());
 
             // Clean up security group
             RequestScopes.runAs(nonDefaultAccount, () -> ec2Service.deleteSecurityGroup("us-east-1", backfilledSgId));

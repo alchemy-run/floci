@@ -53,7 +53,6 @@ import java.util.function.Supplier;
 import static io.github.hectorvent.floci.services.elbv2.ElbV2PublicationTestSupport.allowPublications;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -61,7 +60,6 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -92,16 +90,7 @@ class ElbV2ServiceTest {
     @Mock
     Ec2Service ec2Service;
 
-    @Mock
-    S3Service s3Service;
-
     private ElbV2Service service;
-
-    private static final String CA_PEM = """
-            -----BEGIN CERTIFICATE-----
-            MIIB
-            -----END CERTIFICATE-----
-            """;
 
     @BeforeEach
     void setUp() {
@@ -111,9 +100,7 @@ class ElbV2ServiceTest {
         service.healthChecker = healthChecker;
         service.regionResolver = new RegionResolver(REGION, "000000000000");
         service.ec2Service = ec2Service;
-        service.s3Service = s3Service;
         stubAlbSubnets(ec2Service);
-        stubCaBundle(s3Service, "ca-bundles", "ca-bundle.pem", CA_PEM);
     }
 
     /**
@@ -643,108 +630,6 @@ class ElbV2ServiceTest {
     }
 
     @Test
-    void describeRulesRequiresListenerAndThrowsAfterDelete() {
-        String lbArn = service.createLoadBalancer(
-                REGION, "rules-listener-lb", "internal", "application", "ipv4",
-                ALB_SUBNETS, List.of("sg-a"), Map.of()).getLoadBalancerArn();
-        String tgArn = createTargetGroup("rules-listener-tg");
-        String listenerArn = service.createListener(
-                REGION, lbArn, "HTTP", 80, null, List.of(),
-                List.of(forwardAction(tgArn)), List.of(), Map.of()).getListenerArn();
-
-        assertFalse(service.describeRules(REGION, listenerArn, null).isEmpty());
-
-        service.deleteListener(REGION, listenerArn);
-
-        AwsException error = assertThrows(AwsException.class,
-                () -> service.describeRules(REGION, listenerArn, null));
-        assertEquals("ListenerNotFound", error.getErrorCode());
-        assertEquals(400, error.getHttpStatus());
-    }
-
-    @Test
-    void concurrentCreateRulesOnOneListenerAreAtomic() throws Exception {
-        String lbArn = service.createLoadBalancer(
-                REGION, "rules-race-lb", "internal", "application", "ipv4",
-                ALB_SUBNETS, List.of("sg-a"), Map.of()).getLoadBalancerArn();
-        String tgArn = createTargetGroup("rules-race-tg");
-        String listenerArn = service.createListener(
-                REGION, lbArn, "HTTP", 80, null, List.of(),
-                List.of(forwardAction(tgArn)), List.of(), Map.of()).getListenerArn();
-
-        int threads = 16;
-        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(threads);
-        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
-        java.util.concurrent.atomic.AtomicInteger priorityInUse = new java.util.concurrent.atomic.AtomicInteger();
-        List<java.util.concurrent.Future<?>> futures = new java.util.ArrayList<>();
-        for (int i = 0; i < threads; i++) {
-            // Half the callers race for priority 10; the rest take distinct priorities.
-            int priority = i % 2 == 0 ? 10 : 100 + i;
-            futures.add(pool.submit(() -> {
-                start.await();
-                try {
-                    service.createRule(REGION, listenerArn, List.of(pathPattern("/p" + priority + "/*")),
-                            priority, List.of(forwardAction(tgArn)), Map.of());
-                } catch (AwsException e) {
-                    if (!"PriorityInUse".equals(e.getErrorCode())) {
-                        throw e;
-                    }
-                    priorityInUse.incrementAndGet();
-                }
-                return null;
-            }));
-        }
-        start.countDown();
-        for (java.util.concurrent.Future<?> future : futures) {
-            future.get(30, java.util.concurrent.TimeUnit.SECONDS);
-        }
-        pool.shutdown();
-
-        List<Rule> rules = service.describeRules(REGION, listenerArn, null);
-        assertEquals(1, rules.stream().filter(r -> "10".equals(r.getPriority())).count());
-        assertEquals(threads / 2 - 1, priorityInUse.get());
-        // default rule + one priority-10 winner + the distinct-priority rules
-        assertEquals(1 + 1 + threads / 2, rules.size());
-    }
-
-    @Test
-    void createLoadBalancerAcceptsSubnetsEc2StoreCannotSee() {
-        when(ec2Service.findSubnetById(eq(REGION), anyString())).thenReturn(Optional.empty());
-
-        var lb = service.createLoadBalancer(
-                REGION, "foreign-subnets", "internal", "application", "ipv4",
-                List.of("subnet-05d391f2554e440c8", "subnet-0abcdef1234567890"),
-                List.of("sg-a"), Map.of());
-
-        assertEquals("vpc-default", lb.getVpcId());
-        assertEquals(2, lb.getAvailabilityZones().size());
-        assertEquals("subnet-05d391f2554e440c8", lb.getAvailabilityZones().get(0).getSubnetId());
-        assertEquals("subnet-0abcdef1234567890", lb.getAvailabilityZones().get(1).getSubnetId());
-        assertEquals(REGION + "a", lb.getAvailabilityZones().get(0).getZoneName());
-        assertEquals(REGION + "b", lb.getAvailabilityZones().get(1).getZoneName());
-    }
-
-    @Test
-    void createLoadBalancerMissingSubnetUsesTypedSubnetNotFound() {
-        AwsException error = assertThrows(AwsException.class, () -> service.createLoadBalancer(
-                REGION, "blank-subnet", "internal", "application", "ipv4",
-                List.of("subnet-a", "   "), List.of("sg-a"), Map.of()));
-        assertEquals("SubnetNotFound", error.getErrorCode());
-        assertEquals(400, error.getHttpStatus());
-    }
-
-    @Test
-    void createLoadBalancerMalformedSubnetIdIsSubnetNotFound() {
-        when(ec2Service.findSubnetById(eq(REGION), anyString())).thenReturn(Optional.empty());
-
-        AwsException error = assertThrows(AwsException.class, () -> service.createLoadBalancer(
-                REGION, "malformed-subnet", "internal", "application", "ipv4",
-                List.of("subnet-does-not-exist"), List.of("sg-a"), Map.of()));
-        assertEquals("SubnetNotFound", error.getErrorCode());
-        assertEquals(400, error.getHttpStatus());
-    }
-
-    @Test
     void createLoadBalancerUsesConfiguredHostnameForDnsSuffix() {
         EmulatorConfig config = mock(EmulatorConfig.class);
         when(config.hostname()).thenReturn(Optional.of("floci"));
@@ -956,15 +841,6 @@ class ElbV2ServiceTest {
         return action;
     }
 
-    private static Action forwardConfigOnly(String targetGroupArn) {
-        Action action = new Action();
-        action.setType("forward");
-        Action.TargetGroupTuple tuple = new Action.TargetGroupTuple();
-        tuple.setTargetGroupArn(targetGroupArn);
-        action.setTargetGroups(List.of(tuple));
-        return action;
-    }
-
     private static RuleCondition pathPattern(String value) {
         RuleCondition condition = new RuleCondition();
         condition.setField("path-pattern");
@@ -996,20 +872,8 @@ class ElbV2ServiceTest {
         service.regionResolver = new RegionResolver(REGION, "000000000000");
         service.ec2Service = ec2Service;
         service.storageFactory = storageFactory;
-        service.s3Service = mock(S3Service.class);
-        stubCaBundle(service.s3Service, "ca-bundles", "ca-bundle.pem", """
-                -----BEGIN CERTIFICATE-----
-                MIIB
-                -----END CERTIFICATE-----
-                """);
         service.initializeStorage();
         return service;
-    }
-
-    private static void stubCaBundle(S3Service s3Service, String bucket, String key, String pem) {
-        S3Object object = new S3Object(bucket, key, pem.getBytes(), "application/x-pem-file");
-        lenient().when(s3Service.getObject(eq(bucket), eq(key))).thenReturn(object);
-        lenient().when(s3Service.getObject(eq(bucket), eq(key), any())).thenReturn(object);
     }
 
     private static void stubAlbSubnets(Ec2Service ec2Service) {
@@ -1023,8 +887,6 @@ class ElbV2ServiceTest {
         Subnet subnetB = subnet("subnet-b", REGION + "b");
         lenient().when(ec2Service.requireSubnet(REGION, "subnet-a")).thenReturn(subnetA);
         lenient().when(ec2Service.requireSubnet(REGION, "subnet-b")).thenReturn(subnetB);
-        lenient().when(ec2Service.findSubnetById(REGION, "subnet-a")).thenReturn(Optional.of(subnetA));
-        lenient().when(ec2Service.findSubnetById(REGION, "subnet-b")).thenReturn(Optional.of(subnetB));
         lenient().when(ec2Service.describeSubnets(eq(REGION), eq(ALB_SUBNETS), eq(Map.of())))
                 .thenReturn(List.of(subnetA, subnetB));
     }

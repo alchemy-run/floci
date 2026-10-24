@@ -2,7 +2,6 @@ package io.github.hectorvent.floci.services.eks;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.eks.model.Cluster;
 import io.github.hectorvent.floci.services.eks.model.ClusterStatus;
@@ -53,16 +52,23 @@ class EksPodIdentityAssociationServiceTest {
         assertNull(created.ownerArn());
 
         // Verify serialization roundtrip
-        EksPodIdentityAssociationService.StoredAssociation stored =
+        EksPodIdentityService.StoredAssociation stored =
                 fixture.storage.scan(key -> true).getFirst();
         ObjectMapper mapper = new ObjectMapper();
-        EksPodIdentityAssociationService.StoredAssociation restored = mapper.readValue(
-                mapper.writeValueAsBytes(stored), EksPodIdentityAssociationService.StoredAssociation.class);
+        EksPodIdentityService.StoredAssociation restored = mapper.readValue(
+                mapper.writeValueAsBytes(stored), EksPodIdentityService.StoredAssociation.class);
         assertEquals(stored, restored);
 
         // Describe returns the same association
         PodIdentityAssociation described = fixture.service.describe(fixture.cluster, created.associationId());
         assertEquals(created, described);
+
+        fixture.service.tag(fixture.cluster, created.associationId(), Map.of("owner", "platform"), List.of("env"));
+        PodIdentityAssociation admissionAssociation = fixture.service.findAssociation(
+                fixture.cluster, NAMESPACE, SERVICE_ACCOUNT).orElseThrow();
+        assertEquals(Map.of("owner", "platform"), admissionAssociation.tags());
+        assertEquals(admissionAssociation, fixture.service.describe(fixture.cluster, created.associationId()));
+        assertEquals(created, fixture.service.create(fixture.cluster, request));
     }
 
     @Test
@@ -93,7 +99,7 @@ class EksPodIdentityAssociationServiceTest {
                 fixture.service.create(fixture.cluster, duplicateRequest));
         assertEquals("ResourceInUseException", exDup.getErrorCode());
         assertEquals(409, exDup.getHttpStatus());
-        assertTrue(exDup.getMessage().contains("Association already exists: " + first.associationId()));
+        assertEquals(first, fixture.service.describe(fixture.cluster, first.associationId()));
     }
 
     @Test
@@ -237,15 +243,27 @@ class EksPodIdentityAssociationServiceTest {
     }
 
     @Test
-    void inactiveClusterRejectsOperations() {
+    void inactiveClusterRejectsMutationsButServesReads() {
         Fixture fixture = fixture();
-        fixture.cluster.setStatus(ClusterStatus.CREATING);
-
         CreatePodIdentityAssociationRequest request = new CreatePodIdentityAssociationRequest(
                 fixture.cluster.getName(), NAMESPACE, SERVICE_ACCOUNT, ROLE, null, Map.of(), null, null, null);
-        assertThrows(AwsException.class, () -> fixture.service.create(fixture.cluster, request));
-        assertThrows(AwsException.class, () -> fixture.service.describe(fixture.cluster, "a-123"));
-        assertThrows(AwsException.class, () -> fixture.service.list(fixture.cluster, null, null, null, null));
+        PodIdentityAssociation created = fixture.service.create(fixture.cluster, request);
+        fixture.cluster.setStatus(ClusterStatus.CREATING);
+
+        CreatePodIdentityAssociationRequest another = new CreatePodIdentityAssociationRequest(
+                fixture.cluster.getName(), NAMESPACE, "other", ROLE, null, Map.of(), null, null, null);
+        assertEquals("InvalidRequestException", assertThrows(AwsException.class,
+                () -> fixture.service.create(fixture.cluster, another)).getErrorCode());
+        assertEquals("InvalidRequestException", assertThrows(AwsException.class,
+                () -> fixture.service.delete(fixture.cluster, created.associationId())).getErrorCode());
+
+        // Enumerating every cluster (e.g. an IaC list) must not fail on one that is still CREATING.
+        assertEquals(List.of(created.associationId()), fixture.service.list(fixture.cluster, null, null, null, null)
+                .associations().stream().map(summary -> summary.associationId()).toList());
+        assertEquals(created.associationArn(),
+                fixture.service.describe(fixture.cluster, created.associationId()).associationArn());
+        assertEquals("ResourceNotFoundException", assertThrows(AwsException.class,
+                () -> fixture.service.describe(fixture.cluster, "a-123")).getErrorCode());
     }
 
     @Test
@@ -266,52 +284,6 @@ class EksPodIdentityAssociationServiceTest {
         assertEquals(created.associationId(), found.get().associationId());
     }
 
-    @Test
-    void anAssociationOnAClusterWithoutAnArnLivesInTheDeploymentRegionAndPartition() {
-        Cluster cluster = new Cluster();
-        cluster.setName("cn-cluster");
-        cluster.setAccountId("123456789012");
-        cluster.setStatus(ClusterStatus.ACTIVE);
-        String chinaRole = "arn:aws-cn:iam::123456789012:role/pod-role";
-        IamService iam = mock(IamService.class);
-        when(iam.findRole("123456789012", "pod-role"))
-                .thenReturn(Optional.of(new IamRole("AROA-pod", "pod-role", "/", chinaRole, "{}")));
-        EksPodIdentityAssociationService service = new EksPodIdentityAssociationService(new InMemoryStorage<>(), iam,
-                new RegionResolver("cn-north-1", "000000000000"));
-
-        PodIdentityAssociation created = service.create(cluster, new CreatePodIdentityAssociationRequest(
-                cluster.getName(), NAMESPACE, SERVICE_ACCOUNT, chinaRole, "token-cn", Map.of(), null, false, null));
-
-        assertEquals("arn:aws-cn:eks:cn-north-1:123456789012:podidentityassociation/cn-cluster/"
-                + created.associationId(), created.associationArn());
-    }
-
-    @Test
-    void aRoleArnFromAnotherPartitionResolvesTheAccountsRoleTheWayStsDoes() {
-        Fixture fixture = fixture();
-        String chinaRole = "arn:aws-cn:iam::123456789012:role/pod-role";
-        String govTarget = "arn:aws-us-gov:iam::210987654321:role/target-role";
-
-        PodIdentityAssociation created = fixture.service.create(fixture.cluster, new CreatePodIdentityAssociationRequest(
-                fixture.cluster.getName(), NAMESPACE, SERVICE_ACCOUNT, chinaRole, null, Map.of(), govTarget,
-                null, null));
-
-        assertEquals(chinaRole, created.roleArn());
-        assertEquals(govTarget, created.targetRoleArn());
-        PodIdentityAssociation updated = fixture.service.update(fixture.cluster, created.associationId(),
-                new UpdatePodIdentityAssociationRequest(ROLE, null, null, null, null));
-        assertEquals(ROLE, updated.roleArn());
-
-        for (String rejected : List.of("arn:aws-cn:iam::123456789012:role/team/pod-role",
-                "arn:aws-cn:iam::111111111111:role/pod-role", "arn:bogus:iam::123456789012:role/pod-role")) {
-            AwsException ex = assertThrows(AwsException.class, () -> fixture.service.update(fixture.cluster,
-                    created.associationId(), new UpdatePodIdentityAssociationRequest(rejected, null, null, null, null)),
-                    rejected);
-            assertEquals("InvalidParameterException", ex.getErrorCode(), rejected);
-            assertEquals(ROLE, fixture.service.describe(fixture.cluster, created.associationId()).roleArn(), rejected);
-        }
-    }
-
     private static Fixture fixture() {
         Cluster cluster = new Cluster();
         cluster.setName("test-cluster");
@@ -323,12 +295,11 @@ class EksPodIdentityAssociationServiceTest {
         IamRole role = new IamRole("AROA-pod", "pod-role", "/", ROLE, "{}");
         when(iam.findRole("123456789012", "pod-role")).thenReturn(Optional.of(role));
 
-        InMemoryStorage<String, EksPodIdentityAssociationService.StoredAssociation> storage = new InMemoryStorage<>();
-        return new Fixture(cluster, iam, role, storage, new EksPodIdentityAssociationService(storage, iam,
-                new RegionResolver("us-east-1", "000000000000")));
+        InMemoryStorage<String, EksPodIdentityService.StoredAssociation> storage = new InMemoryStorage<>();
+        return new Fixture(cluster, iam, role, storage, new EksPodIdentityAssociationService(new EksPodIdentityService(storage, iam, new ObjectMapper())));
     }
 
     private record Fixture(Cluster cluster, IamService iam, IamRole role,
-                           InMemoryStorage<String, EksPodIdentityAssociationService.StoredAssociation> storage,
+                           InMemoryStorage<String, EksPodIdentityService.StoredAssociation> storage,
                            EksPodIdentityAssociationService service) {}
 }

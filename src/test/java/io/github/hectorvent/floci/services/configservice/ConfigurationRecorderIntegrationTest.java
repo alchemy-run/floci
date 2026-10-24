@@ -81,7 +81,6 @@ class ConfigurationRecorderIntegrationTest {
     @Test
     @Order(3)
     void startConfigurationRecorder() {
-        putDeliveryChannel();
         given()
             .header("X-Amz-Target", TARGET_PREFIX + "StartConfigurationRecorder")
             .contentType(CONTENT_TYPE)

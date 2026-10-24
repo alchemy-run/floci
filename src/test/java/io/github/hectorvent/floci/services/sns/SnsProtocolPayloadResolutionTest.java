@@ -27,8 +27,6 @@ class SnsProtocolPayloadResolutionTest {
     private static final String REGION = "us-east-1";
     private static final String ACCOUNT = "000000000000";
     private static final String BASE_URL = "http://localhost:4566";
-    private static final Map<String, String> VALID_GCM_ATTRS =
-            Map.of("PlatformCredential", "AIzaSyDummyFlociGcmServerKeyForTests00");
 
     private SnsService snsService;
     private SqsService sqsService;
@@ -127,7 +125,7 @@ class SnsProtocolPayloadResolutionTest {
         String topicArn = topic("mixed");
         String queueUrl = subscribeQueueTo(topicArn, "mixed-queue", Map.of("RawMessageDelivery", "true"));
 
-        PlatformApplication app = snsService.createPlatformApplication("android-app", "GCM", VALID_GCM_ATTRS, REGION);
+        PlatformApplication app = snsService.createPlatformApplication("android-app", "GCM", Map.of(), REGION);
         PlatformEndpoint device = snsService.createPlatformEndpoint(app.getArn(), "fcm-token", null, Map.of(), REGION);
         snsService.subscribe(topicArn, "application", device.getArn(), REGION, Map.of());
 

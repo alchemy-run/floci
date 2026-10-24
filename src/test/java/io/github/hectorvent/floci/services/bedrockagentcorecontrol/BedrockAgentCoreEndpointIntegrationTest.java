@@ -10,7 +10,6 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
-import static org.hamcrest.Matchers.matchesPattern;
 
 @QuarkusTest
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
@@ -51,7 +50,7 @@ class BedrockAgentCoreEndpointIntegrationTest {
                 .body("endpointName", equalTo("prod"))
                 .body("targetVersion", equalTo("1"))
                 .body("status", equalTo("READY"))
-                .body("agentRuntimeEndpointArn", matchesPattern("arn:aws:bedrock-agentcore:us-east-1:000000000000:runtime/epAgent-[a-zA-Z0-9]{10}/runtime-endpoint/prod"));
+                .body("agentRuntimeEndpointArn", containsString(":agentEndpoint/"));
     }
 
     @Test

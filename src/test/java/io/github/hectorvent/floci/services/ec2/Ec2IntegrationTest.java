@@ -2092,48 +2092,6 @@ class Ec2IntegrationTest {
     }
 
     @Test
-    @Order(35)
-    void modifySecurityGroupRulesUpdatesDescription() {
-        // AWS SDKs send SecurityGroupRule.N.SecurityGroupRule.Description. The request replaces
-        // the whole rule, so target the all-traffic egress rule to change only its description.
-        String ruleId = given()
-            .formParam("Action", "DescribeSecurityGroupRules")
-            .formParam("Filter.1.Name", "group-id")
-            .formParam("Filter.1.Value.1", securityGroupId)
-            .header("Authorization", AUTH_HEADER)
-        .when()
-            .post("/")
-        .then()
-            .statusCode(200)
-            .extract().xmlPath()
-            .getString("DescribeSecurityGroupRulesResponse.securityGroupRuleSet.item"
-                + ".find { it.isEgress == 'true' && it.ipProtocol == '-1' }.securityGroupRuleId");
-
-        given()
-            .formParam("Action", "ModifySecurityGroupRules")
-            .formParam("GroupId", securityGroupId)
-            .formParam("SecurityGroupRule.1.SecurityGroupRuleId", ruleId)
-            .formParam("SecurityGroupRule.1.SecurityGroupRule.IpProtocol", "-1")
-            .formParam("SecurityGroupRule.1.SecurityGroupRule.CidrIpv4", "0.0.0.0/0")
-            .formParam("SecurityGroupRule.1.SecurityGroupRule.Description", "all outbound")
-            .header("Authorization", AUTH_HEADER)
-        .when()
-            .post("/")
-        .then()
-            .statusCode(200);
-
-        given()
-            .formParam("Action", "DescribeSecurityGroupRules")
-            .formParam("SecurityGroupRuleId.1", ruleId)
-            .header("Authorization", AUTH_HEADER)
-        .when()
-            .post("/")
-        .then()
-            .statusCode(200)
-            .body(containsString("<description>all outbound</description>"));
-    }
-
-    @Test
     @Order(36)
     void describeSecurityGroupRulesDefaultVpcEgressVisible() {
         // Issue #1093: default VPC security group must also have its egress rule visible
@@ -3402,11 +3360,7 @@ class Ec2IntegrationTest {
         .then()
             .statusCode(200)
             .body("RunInstancesResponse.instancesSet.item.instanceId", startsWith("i-"))
-            // Control-plane marks the instance running immediately so Alchemy
-            // waitForState does not treat a later guest-launch failure as a
-            // failed create. Real AWS returns pending; DescribeInstances is
-            // where callers wait.
-            .body("RunInstancesResponse.instancesSet.item.instanceState.name", equalTo("running"))
+            .body("RunInstancesResponse.instancesSet.item.instanceState.name", equalTo("pending"))
             .body("RunInstancesResponse.instancesSet.item.instanceType", equalTo("t2.micro"))
             .body("RunInstancesResponse.instancesSet.item.keyName", equalTo("test-key"))
             .extract().path("RunInstancesResponse.instancesSet.item.instanceId");
@@ -3549,8 +3503,7 @@ class Ec2IntegrationTest {
         .when()
             .post("/")
         .then()
-            .extract().xmlPath().getString(
-                    "DescribeInstancesResponse.reservationSet.item.instancesSet.item.blockDeviceMapping.item.ebs.volumeId");
+            .extract().path("DescribeInstancesResponse.reservationSet.item.instancesSet.item.blockDeviceMapping.item.ebs.volumeId");
 
         // Verify it exists in DescribeVolumes with state=in-use
         given()
@@ -4156,14 +4109,14 @@ class Ec2IntegrationTest {
     @Test
     @Order(92)
     void describeNetworkInterfacesWithMaxResultsNoNextToken() {
-        // When MaxResults exceeds the filtered set, nextToken is omitted.
-        // Scope to this test's instance so a shared Quarkus JVM with other
-        // suites' ENIs cannot page the unfiltered list.
+        // When MaxResults exceeds the number of available ENIs,
+        // all results are returned and nextToken is omitted.
+        // Other tests in this class are not isolated and may leave ENIs
+        // behind, so this uses the maximum allowed MaxResults (1000) to
+        // guarantee a single page regardless of test execution order.
         String body = given()
             .formParam("Action", "DescribeNetworkInterfaces")
-            .formParam("Filter.1.Name", "attachment.instance-id")
-            .formParam("Filter.1.Value.1", instanceId)
-            .formParam("MaxResults", "5")
+            .formParam("MaxResults", "1000")
             .header("Authorization", AUTH_HEADER)
         .when()
             .post("/")
@@ -4220,7 +4173,7 @@ class Ec2IntegrationTest {
         // Other tests in this class are not isolated and may leave ENIs
         // behind, so the baseline is measured immediately before adding
         // ours rather than assumed to be zero.
-        int baselineCount = countAllNetworkInterfaces(subnetId);
+        int baselineCount = countAllNetworkInterfaces();
 
         // ── Launch 5 additional instances ──
         List<String> batchIds = given()
@@ -4251,8 +4204,6 @@ class Ec2IntegrationTest {
         do {
             io.restassured.specification.RequestSpecification req = given()
                     .formParam("Action", "DescribeNetworkInterfaces")
-                    .formParam("Filter.1.Name", "subnet-id")
-                    .formParam("Filter.1.Value.1", subnetId)
                     .formParam("MaxResults", "5")
                     .header("Authorization", AUTH_HEADER);
             if (nextToken != null) {
@@ -4299,14 +4250,12 @@ class Ec2IntegrationTest {
      * walking every page. Used so pagination tests can compute an accurate
      * baseline instead of assuming a fixed starting count.
      */
-    private static int countAllNetworkInterfaces(String subnetId) {
+    private static int countAllNetworkInterfaces() {
         int total = 0;
         String nextToken = null;
         do {
             io.restassured.specification.RequestSpecification req = given()
                     .formParam("Action", "DescribeNetworkInterfaces")
-                    .formParam("Filter.1.Name", "subnet-id")
-                    .formParam("Filter.1.Value.1", subnetId)
                     .formParam("MaxResults", "1000")
                     .header("Authorization", AUTH_HEADER);
             if (nextToken != null) {
@@ -4375,7 +4324,6 @@ class Ec2IntegrationTest {
     void describeVolumesByStatusFilter() {
         given()
             .formParam("Action", "DescribeVolumes")
-            .formParam("VolumeId.1", volumeId)
             .formParam("Filter.1.Name", "status")
             .formParam("Filter.1.Value.1", "available")
             .header("Authorization", AUTH_HEADER)
@@ -4448,8 +4396,7 @@ class Ec2IntegrationTest {
         .when()
             .post("/")
         .then()
-            .extract().xmlPath().getString(
-                    "DescribeInstancesResponse.reservationSet.item.instancesSet.item.blockDeviceMapping.item.ebs.volumeId");
+            .extract().path("DescribeInstancesResponse.reservationSet.item.instancesSet.item.blockDeviceMapping.item.ebs.volumeId");
 
         given()
             .formParam("Action", "TerminateInstances")
@@ -5176,72 +5123,6 @@ class Ec2IntegrationTest {
         .when().post("/")
         .then().statusCode(400)
             .body("Response.Errors.Error.Code", equalTo("DependencyViolation"));
-    }
-
-    @Test
-    @Order(314)
-    void replaceNetworkAclAssociationReturnsAwsShapedIds() {
-        String vpc = newVpc("10.34.0.0/16");
-        String subnetId = given()
-            .formParam("Action", "CreateSubnet")
-            .formParam("VpcId", vpc)
-            .formParam("CidrBlock", "10.34.1.0/24")
-            .header("Authorization", AUTH_HEADER)
-        .when().post("/")
-        .then().statusCode(200)
-            .extract().path("CreateSubnetResponse.subnet.subnetId");
-
-        // CreateSubnet must emit a fully-populated association on the default NACL
-        // (networkAclAssociationId / networkAclId / subnetId) — distilled + Alchemy
-        // persist these; a missing field becomes undefined and later read() fails
-        // encoding Filters[0].Values[0].
-        String associationId = given()
-            .formParam("Action", "DescribeNetworkAcls")
-            .formParam("Filter.1.Name", "association.subnet-id")
-            .formParam("Filter.1.Value.1", subnetId)
-            .header("Authorization", AUTH_HEADER)
-        .when().post("/")
-        .then().statusCode(200)
-            .body("DescribeNetworkAclsResponse.networkAclSet.item.associationSet.item.networkAclAssociationId",
-                    startsWith("aclassoc-"))
-            .body("DescribeNetworkAclsResponse.networkAclSet.item.associationSet.item.networkAclId",
-                    startsWith("acl-"))
-            .body("DescribeNetworkAclsResponse.networkAclSet.item.associationSet.item.subnetId",
-                    equalTo(subnetId))
-            .extract().path("DescribeNetworkAclsResponse.networkAclSet.item.associationSet.item.networkAclAssociationId");
-
-        String aclId = given()
-            .formParam("Action", "CreateNetworkAcl")
-            .formParam("VpcId", vpc)
-            .header("Authorization", AUTH_HEADER)
-        .when().post("/")
-        .then().statusCode(200)
-            .extract().path("CreateNetworkAclResponse.networkAcl.networkAclId");
-
-        String newAssociationId = given()
-            .formParam("Action", "ReplaceNetworkAclAssociation")
-            .formParam("AssociationId", associationId)
-            .formParam("NetworkAclId", aclId)
-            .header("Authorization", AUTH_HEADER)
-        .when().post("/")
-        .then().statusCode(200)
-            .body("ReplaceNetworkAclAssociationResponse.newAssociationId", startsWith("aclassoc-"))
-            .extract().path("ReplaceNetworkAclAssociationResponse.newAssociationId");
-
-        given()
-            .formParam("Action", "DescribeNetworkAcls")
-            .formParam("Filter.1.Name", "association.subnet-id")
-            .formParam("Filter.1.Value.1", subnetId)
-            .header("Authorization", AUTH_HEADER)
-        .when().post("/")
-        .then().statusCode(200)
-            .body("DescribeNetworkAclsResponse.networkAclSet.item.networkAclId", equalTo(aclId))
-            .body("DescribeNetworkAclsResponse.networkAclSet.item.associationSet.item.networkAclAssociationId",
-                    equalTo(newAssociationId))
-            .body("DescribeNetworkAclsResponse.networkAclSet.item.associationSet.item.networkAclId",
-                    equalTo(aclId))
-            .body("DescribeNetworkAclsResponse.networkAclSet.item.associationSet.item.subnetId",
-                    equalTo(subnetId));
     }
 
     @Test

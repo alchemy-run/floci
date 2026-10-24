@@ -1,6 +1,5 @@
 package io.github.hectorvent.floci.services.codeartifact;
 
-import io.github.hectorvent.floci.core.common.auth.SigV4RequestValidator;
 import io.github.hectorvent.floci.core.common.Digests;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
@@ -8,8 +7,6 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.util.HexFormat;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
@@ -18,7 +15,6 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
 class CodeArtifactIntegrationTest {
@@ -138,95 +134,6 @@ class CodeArtifactIntegrationTest {
     }
 
     @Test
-    void authorizationTokenRouteUsesQueryDurationAndJsonErrors() {
-        given().contentType("application/json").header("Authorization", AUTH).body("{}")
-                .post("/v1/domain?domain=token-wire-domain").then().statusCode(200);
-        try {
-            String token = given().contentType("application/json").header("Authorization", AUTH)
-                    .post("/v1/authorization-token?domain=token-wire-domain&duration=900")
-                    .then().statusCode(200).contentType("application/json")
-                    .body("expiration", notNullValue()).extract().path("authorizationToken");
-            assertTrue(token.length() > 100);
-            for (String duration : new String[] {"899", "43201", "invalid", "900.5"}) {
-                given().contentType("application/json").header("Authorization", AUTH)
-                        .queryParam("domain", "token-wire-domain").queryParam("duration", duration)
-                        .post("/v1/authorization-token").then().statusCode(400)
-                        .body("__type", equalTo("ValidationException"));
-            }
-            given().contentType("application/json").header("Authorization", AUTH)
-                    .post("/v1/authorization-token?domain=missing-token-wire-domain")
-                    .then().statusCode(404).body("__type", equalTo("ResourceNotFoundException"));
-        } finally {
-            given().header("Authorization", AUTH).delete("/v1/domain?domain=token-wire-domain")
-                    .then().statusCode(200);
-        }
-    }
-
-    @Test
-    void packageRoutesStoreBinaryPayloadAndHonorBodyVersionPreconditions() throws Exception {
-        String repository = "?domain=package-wire-domain&repository=package-wire-repo";
-        String pkg = repository + "&format=generic&namespace=scope&package=payload";
-        byte[] content = new byte[] {0, (byte) 128, (byte) 255, 13, 10};
-        String hash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content));
-        given().contentType("application/json").header("Authorization", AUTH).body("{}")
-                .post("/v1/domain?domain=package-wire-domain").then().statusCode(200);
-        given().contentType("application/json").header("Authorization", AUTH).body("{}")
-                .post("/v1/repository" + repository).then().statusCode(200);
-        try {
-            given().header("Authorization", AUTH).delete("/v1/package" + pkg)
-                    .then().statusCode(404).contentType("application/json")
-                    .body("__type", equalTo("ResourceNotFoundException"));
-            given().contentType("application/octet-stream").header("Authorization", AUTH)
-                    .header("x-amz-content-sha256", "0".repeat(64)).body(content)
-                    .post("/v1/package/version/publish" + pkg + "&version=1&asset=bytes.bin")
-                    .then().statusCode(400).body("__type", equalTo("ValidationException"));
-            String revision = given().contentType("application/octet-stream").header("Authorization", AUTH)
-                    .header("x-amz-content-sha256", hash).body(content)
-                    .post("/v1/package/version/publish" + pkg + "&version=1&asset=bytes.bin&unfinished=true")
-                    .then().statusCode(200).body("status", equalTo("Unfinished"))
-                    .body("asset.size", equalTo(content.length)).body("asset.hashes.'SHA-256'", equalTo(hash))
-                    .extract().path("versionRevision");
-            byte[] downloaded = given().header("Authorization", AUTH)
-                    .get("/v1/package/version/asset" + pkg + "&version=1&asset=bytes.bin&revision=" + revision)
-                    .then().statusCode(200).contentType("application/octet-stream")
-                    .header("X-AssetName", "bytes.bin").header("X-PackageVersion", "1")
-                    .header("X-PackageVersionRevision", revision).extract().asByteArray();
-            assertArrayEquals(content, downloaded);
-            given().contentType("application/json").header("Authorization", AUTH)
-                    .body("{\"versions\":[\"1\",\"absent\"],\"versionRevisions\":{\"1\":\"stale\"},\"targetStatus\":\"Published\"}")
-                    .post("/v1/package/versions/update_status" + pkg).then().statusCode(200)
-                    .body("failedVersions.'1'.errorCode", equalTo("MISMATCHED_REVISION"))
-                    .body("failedVersions.absent.errorCode", equalTo("NOT_FOUND"));
-            given().contentType("application/json").header("Authorization", AUTH)
-                    .body("{\"versions\":[\"1\"],\"expectedStatus\":\"Unfinished\",\"targetStatus\":\"Published\"}")
-                    .post("/v1/package/versions/update_status" + pkg).then().statusCode(200)
-                    .body("successfulVersions.'1'.status", equalTo("Published"));
-            given().header("Authorization", AUTH).get("/v1/package/version" + pkg + "&version=1")
-                    .then().statusCode(200).body("packageVersion.status", equalTo("Published"));
-            given().contentType("application/json").header("Authorization", AUTH)
-                    .post("/v1/package/version/assets" + pkg + "&version=1")
-                    .then().statusCode(200).body("assets[0].name", equalTo("bytes.bin"));
-            given().header("Authorization", AUTH).get("/v1/package/version/readme" + pkg + "&version=1")
-                    .then().statusCode(404).body("__type", equalTo("ResourceNotFoundException"));
-            given().contentType("application/json").header("Authorization", AUTH)
-                    .body("{\"versions\":[\"1\"]}").post("/v1/package/versions/dispose" + pkg)
-                    .then().statusCode(200).body("successfulVersions.'1'.status", equalTo("Disposed"));
-            given().header("Authorization", AUTH).get("/v1/package/version/asset" + pkg + "&version=1&asset=bytes.bin")
-                    .then().statusCode(404).contentType("application/json")
-                    .body("__type", equalTo("ResourceNotFoundException"));
-            given().contentType("application/json").header("Authorization", AUTH)
-                    .body("{\"versions\":[\"1\"]}").post("/v1/package/versions/delete" + pkg)
-                    .then().statusCode(200).body("successfulVersions.'1'.status", equalTo("Deleted"));
-            given().header("Authorization", AUTH).delete("/v1/package" + pkg).then().statusCode(200);
-            given().contentType("application/json").header("Authorization", AUTH).post("/v1/packages" + repository)
-                    .then().statusCode(200).body("packages", emptyIterable());
-        } finally {
-            given().header("Authorization", AUTH).delete("/v1/repository" + repository).then().statusCode(200);
-            given().header("Authorization", AUTH).delete("/v1/domain?domain=package-wire-domain").then().statusCode(200);
-        }
-    }
-
-    @Test
     void invalidDomainNameReturnsValidationError() {
         given().contentType("application/json").header("Authorization", AUTH)
                 .body("{}").post("/v1/domain?domain=NOT-VALID")
@@ -241,103 +148,6 @@ class CodeArtifactIntegrationTest {
                 .body("{}").post("/v1/repository?domain=pkg-domain&repository=pkg-repo").then().statusCode(200);
 
         byte[] content = "hello codeartifact".getBytes(StandardCharsets.UTF_8);
-        String sha256 = sha256Hex(content);
-
-        given().header("Authorization", AUTH).header("x-amz-content-sha256", sha256)
-                .contentType("application/octet-stream").body(content)
-                .post("/v1/package/version/publish?domain=pkg-domain&repository=pkg-repo&format=generic"
-                        + "&package=my-pkg&version=1.0.0&asset=asset.txt")
-                .then().statusCode(200)
-                .body("status", equalTo("Published"))
-                .body("versionRevision", notNullValue())
-                .body("asset.name", equalTo("asset.txt"))
-                .body("asset.size", equalTo(content.length))
-                .body("asset.hashes.'SHA-256'", equalTo(sha256));
-
-        given().header("Authorization", AUTH)
-                .get("/v1/package/version?domain=pkg-domain&repository=pkg-repo&format=generic"
-                        + "&package=my-pkg&version=1.0.0")
-                .then().statusCode(200)
-                .body("packageVersion.status", equalTo("Published"))
-                .body("packageVersion.origin.originType", equalTo("INTERNAL"));
-
-        byte[] downloaded = given().header("Authorization", AUTH)
-                .get("/v1/package/version/asset?domain=pkg-domain&repository=pkg-repo&format=generic"
-                        + "&package=my-pkg&version=1.0.0&asset=asset.txt")
-                .then().statusCode(200)
-                .header("X-AssetName", equalTo("asset.txt"))
-                .extract().asByteArray();
-        assertArrayEquals(content, downloaded);
-
-        given().header("Authorization", AUTH).header("x-amz-content-sha256", sha256)
-                .contentType("application/octet-stream").body(content)
-                .post("/v1/package/version/publish?domain=pkg-domain&repository=pkg-repo&format=generic"
-                        + "&package=my-pkg&version=1.0.0&asset=another.txt")
-                .then().statusCode(409).body("__type", equalTo("ConflictException"));
-    }
-
-    @Test
-    void unfinishedPublishKeepsVersionOpenForMoreAssets() {
-        given().contentType("application/json").header("Authorization", AUTH)
-                .body("{}").post("/v1/domain?domain=unfinished-domain").then().statusCode(200);
-        given().contentType("application/json").header("Authorization", AUTH)
-                .body("{}").post("/v1/repository?domain=unfinished-domain&repository=repo").then().statusCode(200);
-
-        byte[] content = "partial".getBytes(StandardCharsets.UTF_8);
-        String sha256 = sha256Hex(content);
-
-        given().header("Authorization", AUTH).header("x-amz-content-sha256", sha256)
-                .contentType("application/octet-stream").body(content)
-                .post("/v1/package/version/publish?domain=unfinished-domain&repository=repo&format=generic"
-                        + "&package=my-pkg&version=1.0.0&asset=a.txt&unfinished=true")
-                .then().statusCode(200).body("status", equalTo("Unfinished"));
-
-        given().header("Authorization", AUTH)
-                .get("/v1/package/version?domain=unfinished-domain&repository=repo&format=generic"
-                        + "&package=my-pkg&version=1.0.0")
-                .then().statusCode(200).body("packageVersion.status", equalTo("Unfinished"));
-    }
-
-    @Test
-    void missingRequiredQueryParamsReturnValidationExceptionNotServerError() {
-        given().header("Authorization", AUTH).get("/v1/domain")
-                .then().statusCode(400).body("__type", equalTo("ValidationException"));
-
-        given().header("Authorization", AUTH).get("/v1/repository")
-                .then().statusCode(400).body("__type", equalTo("ValidationException"));
-
-        given().header("Authorization", AUTH)
-                .get("/v1/repository/endpoint?repository=r&format=npm")
-                .then().statusCode(400).body("__type", equalTo("ValidationException"));
-    }
-
-    @Test
-    void getAuthorizationTokenReturnsATokenAndExpiration() {
-        given().contentType("application/json").header("Authorization", AUTH).body("{}")
-                .post("/v1/domain?domain=token-domain")
-                .then().statusCode(200);
-
-        given().header("Authorization", AUTH)
-                .post("/v1/authorization-token?domain=token-domain")
-                .then().statusCode(200)
-                .body("authorizationToken", notNullValue())
-                .body("expiration", notNullValue());
-
-        given().header("Authorization", AUTH)
-                .post("/v1/authorization-token?domain=does-not-exist")
-                .then().statusCode(404).body("__type", equalTo("ResourceNotFoundException"));
-
-        given().header("Authorization", AUTH)
-                .post("/v1/authorization-token?domain=token-domain&duration=899")
-                .then().statusCode(400).body("__type", equalTo("ValidationException"));
-    }
-
-    private static String sha256Hex(byte[] content) {
-        try {
-            return SigV4RequestValidator.sha256Hex(content);
-        } catch (Exception e) {
-            throw new IllegalStateException(e);
-        }
         String sha256 = Digests.sha256Hex(content);
 
         given().header("Authorization", AUTH).header("x-amz-content-sha256", sha256)

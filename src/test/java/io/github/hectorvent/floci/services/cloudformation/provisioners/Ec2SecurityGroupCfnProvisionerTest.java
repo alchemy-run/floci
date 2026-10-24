@@ -33,10 +33,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
-import io.github.hectorvent.floci.core.common.AwsException;
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.doThrow;
 
 /**
  * {@code AWS::EC2::SecurityGroup} in isolation: the attributes Ref and Fn::GetAtt read, the

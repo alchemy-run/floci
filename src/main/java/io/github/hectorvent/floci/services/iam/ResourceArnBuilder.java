@@ -77,20 +77,18 @@ public class ResourceArnBuilder {
     public ResourceArnBuilder(ObjectMapper objectMapper, Instance<IamService> iamService,
                               Instance<SecretsManagerService> secretsManagerService,
                               Instance<LambdaMicrovmsService> microvmsService,
-                              Instance<EksService> eksService,
-            Instance<ResourceArnResolver> arnResolvers) {
+                              Instance<EksService> eksService) {
         this.objectMapper = objectMapper;
         this.iamService = iamService;
         this.secretsManagerService = secretsManagerService;
         this.microvmsService = microvmsService;
         this.eksService = eksService;
-        this.arnResolvers = arnResolvers;
     }
 
     public ResourceArnBuilder(ObjectMapper objectMapper, Instance<IamService> iamService,
                               Instance<SecretsManagerService> secretsManagerService,
                               Instance<LambdaMicrovmsService> microvmsService) {
-        this(objectMapper, iamService, secretsManagerService, microvmsService, null, null);
+        this(objectMapper, iamService, secretsManagerService, microvmsService, null);
     }
 
     public ResourceArnBuilder(ObjectMapper objectMapper, Instance<IamService> iamService,
@@ -1591,7 +1589,8 @@ public class ResourceArnBuilder {
 
 
 
-    private final Instance<ResourceArnResolver> arnResolvers;
+    @Inject
+    Instance<ResourceArnResolver> arnResolvers;
 
     public String buildExecutionRoleArn(ContainerRequestContext ctx) {
         JsonNode body = readJsonBody(ctx);

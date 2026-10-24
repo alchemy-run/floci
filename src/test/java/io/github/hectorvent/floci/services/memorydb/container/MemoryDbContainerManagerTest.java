@@ -1,6 +1,5 @@
 package io.github.hectorvent.floci.services.memorydb.container;
 
-import com.github.dockerjava.api.DockerClient;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
@@ -8,6 +7,7 @@ import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
+import com.github.dockerjava.api.DockerClient;
 import org.jboss.logging.Logger;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -45,7 +45,7 @@ class MemoryDbContainerManagerTest {
         // Rollback must still fall back to the deterministic name so nothing is orphaned.
         manager.stopByClusterName("my-cluster");
 
-        verify(lifecycleManager).removeIfExists("floci-aws-memorydb-my-cluster");
+        verify(lifecycleManager).removeIfExists("floci-memorydb-my-cluster");
     }
 
     @Test
@@ -142,7 +142,7 @@ class MemoryDbContainerManagerTest {
             ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
             ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
             when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-            when(builder.build()).thenReturn(new ContainerSpec("test-image"));
+            when(builder.build()).thenReturn(mock(ContainerSpec.class));
 
             EmulatorConfig config = mock(EmulatorConfig.class);
             EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
@@ -170,7 +170,7 @@ class MemoryDbContainerManagerTest {
         ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
         ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-        when(builder.build()).thenReturn(new ContainerSpec("test-image"));
+        when(builder.build()).thenReturn(mock(ContainerSpec.class));
 
         ContainerLogStreamer logStreamer = mock(ContainerLogStreamer.class);
         lenient().when(logStreamer.generateLogStreamName(any())).thenReturn("log-stream");

@@ -59,7 +59,8 @@ public class AwsJsonController {
     private final VerifiedPermissionsJsonHandler verifiedPermissionsJsonHandler;
     private final BcmPricingCalculatorJsonHandler bcmPricingCalculatorJsonHandler;
     private final TimestreamInfluxDbJsonHandler timestreamInfluxDbJsonHandler;
-    private final TimestreamJsonHandler timestreamJsonHandler;
+    @Inject
+    TimestreamJsonHandler timestreamJsonHandler;
 
     @Inject
     public AwsJsonController(ObjectMapper objectMapper, ResolvedServiceCatalog catalog,
@@ -75,8 +76,7 @@ public class AwsJsonController {
                              MarketplaceJsonHandler marketplaceJsonHandler,
                              VerifiedPermissionsJsonHandler verifiedPermissionsJsonHandler,
                              BcmPricingCalculatorJsonHandler bcmPricingCalculatorJsonHandler,
-                             TimestreamInfluxDbJsonHandler timestreamInfluxDbJsonHandler,
-                             TimestreamJsonHandler timestreamJsonHandler) {
+                             TimestreamInfluxDbJsonHandler timestreamInfluxDbJsonHandler) {
         this.objectMapper = objectMapper;
         this.strictBodyReader = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.catalog = catalog;
@@ -94,7 +94,6 @@ public class AwsJsonController {
         this.verifiedPermissionsJsonHandler = verifiedPermissionsJsonHandler;
         this.bcmPricingCalculatorJsonHandler = bcmPricingCalculatorJsonHandler;
         this.timestreamInfluxDbJsonHandler = timestreamInfluxDbJsonHandler;
-        this.timestreamJsonHandler = timestreamJsonHandler;
     }
 
     /**

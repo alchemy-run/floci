@@ -38,11 +38,9 @@ public class CognitoJsonHandler {
     private final ObjectMapper objectMapper;
 
     @Inject
-    public CognitoJsonHandler(CognitoService service, ObjectMapper objectMapper,
-            CognitoManagedLoginBrandingService brandingService) {
+    public CognitoJsonHandler(CognitoService service, ObjectMapper objectMapper) {
         this.service = service;
         this.objectMapper = objectMapper;
-        this.brandingService = brandingService;
     }
 
     public Response handle(String action, JsonNode request, String region) {
@@ -1652,7 +1650,8 @@ public class CognitoJsonHandler {
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
-    private final CognitoManagedLoginBrandingService brandingService;
+    @Inject
+    CognitoManagedLoginBrandingService brandingService;
 
     private Response brandingResponse(ManagedLoginBranding branding, boolean merged) {
         ObjectNode response = objectMapper.createObjectNode();

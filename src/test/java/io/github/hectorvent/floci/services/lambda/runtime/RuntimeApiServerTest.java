@@ -19,15 +19,12 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Flow;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.SubmissionPublisher;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -64,13 +61,7 @@ class RuntimeApiServerTest {
     void tearDown() throws Exception {
         server.stop().get(5, TimeUnit.SECONDS);
         scheduler.shutdownNow();
-        // NOT close(): JDK HttpClient.close() blocks until every in-flight
-        // exchange completes, and the runtime API's /next is a LONG-POLL — a
-        // test that leaves one parked (or whose exchange was severed by the
-        // server.stop() above) pins close() forever and times out the whole
-        // CI job. Shut down hard and bound the drain instead.
-        httpClient.shutdownNow();
-        httpClient.awaitTermination(java.time.Duration.ofSeconds(5));
+        httpClient.close();
         // Await the close rather than firing it and moving on: Vertx.close() is asynchronous, so
         // an unawaited call lets the next test's setUp() create a new Vertx and bind a port while
         // this one's event loops and server sockets are still tearing down. Across a class with
@@ -268,9 +259,6 @@ class RuntimeApiServerTest {
     @Test
     @Timeout(15)
     void responseEndpoint_returns202WithStatusOkBody() throws Exception {
-        java.util.List<String> lines = new java.util.ArrayList<>();
-        server.setPlatformLogSink(lines::add);
-
         PendingInvocation invocation = new PendingInvocation(
                 "req-response", "{}".getBytes(), System.currentTimeMillis() + 60_000,
                 "arn:aws:lambda:us-east-1:000000000000:function:test",
@@ -293,8 +281,6 @@ class RuntimeApiServerTest {
         assertEquals("application/json",
                 response.headers().firstValue("Content-Type").orElse(""));
         assertEquals("OK", new JsonObject(response.body()).getString("status"));
-        assertTrue(lines.stream().anyMatch(line -> line.contains("\"ALCHEMY_REQUEST_FINALIZED\"")),
-                "response must emit a quoted request-finalized line: " + lines);
     }
 
     /**
@@ -1047,24 +1033,6 @@ class RuntimeApiServerTest {
         assertEquals("my-real-function", body.getString("functionName"));
         assertEquals("3", body.getString("functionVersion"));
         assertEquals("index.handler", body.getString("handler"));
-    }
-
-    @Test
-    @Timeout(10)
-    void extensionRegister_emitsPlatformLogLine() throws Exception {
-        java.util.List<String> lines = new java.util.ArrayList<>();
-        server.setPlatformLogSink(lines::add);
-
-        HttpResponse<String> response = httpClient.send(HttpRequest.newBuilder()
-                        .uri(URI.create("http://localhost:" + port + "/2020-01-01/extension/register"))
-                        .header("Lambda-Extension-Name", "alchemy-graceful-shutdown")
-                        .POST(HttpRequest.BodyPublishers.ofString("{\"events\":[]}"))
-                        .build(),
-                HttpResponse.BodyHandlers.ofString());
-
-        assertEquals(200, response.statusCode());
-        assertTrue(lines.stream().anyMatch(line -> line.contains("\"alchemy-graceful-shutdown\"")),
-                "register must emit a quoted EXTENSION name for CloudWatch phrase filters: " + lines);
     }
 
     /**
@@ -2335,90 +2303,6 @@ class RuntimeApiServerTest {
         throw new IOException("no free port in " + TEST_PORT_BASE + "-" + (TEST_PORT_BASE + TEST_PORT_RANGE));
     }
 
-    // ──────────────────────────── Streaming responses ────────────────────────────
-
-    @Test
-    @Timeout(15)
-    void streamingResponse_completesFutureAtHeaders_thenDeliversChunksLive() throws Exception {
-        PendingInvocation invocation = new PendingInvocation(
-                "req-streaming", "{}".getBytes(), System.currentTimeMillis() + 60_000,
-                "arn:aws:lambda:us-east-1:000000000000:function:test",
-                new CompletableFuture<>());
-        server.enqueue(invocation);
-        httpClient.send(HttpRequest.newBuilder()
-                        .uri(URI.create("http://localhost:" + port + "/2018-06-01/runtime/invocation/next"))
-                        .GET().build(),
-                HttpResponse.BodyHandlers.ofString());
-
-        StreamingRequestBody bodySource = new StreamingRequestBody();
-        CompletableFuture<HttpResponse<String>> post = httpClient.sendAsync(HttpRequest.newBuilder()
-                        .uri(URI.create("http://localhost:" + port
-                                + "/2018-06-01/runtime/invocation/req-streaming/response"))
-                        .header("Lambda-Runtime-Function-Response-Mode", "streaming")
-                        .header("Content-Type", "application/vnd.awslambda.http-integration-response")
-                        .POST(bodySource)
-                        .build(),
-                HttpResponse.BodyHandlers.ofString());
-
-        bodySource.write("chunk-1".getBytes());
-
-        // The future must complete while the response body is still open.
-        InvokeResult result = invocation.getResultFuture().get(5, TimeUnit.SECONDS);
-        assertTrue(result.isStreaming());
-        assertEquals("application/vnd.awslambda.http-integration-response",
-                result.getStream().getContentType());
-        assertEquals("chunk-1", new String(result.getStream().next()));
-
-        bodySource.write("chunk-2".getBytes());
-        assertEquals("chunk-2", new String(result.getStream().next()));
-
-        bodySource.close();
-        assertNull(result.getStream().next());
-        assertEquals(202, post.get(5, TimeUnit.SECONDS).statusCode());
-    }
-
-    @Test
-    @Timeout(15)
-    void streamingResponse_getPayloadDrainsWholeBody() throws Exception {
-        PendingInvocation invocation = new PendingInvocation(
-                "req-streaming-drain", "{}".getBytes(), System.currentTimeMillis() + 60_000,
-                "arn:aws:lambda:us-east-1:000000000000:function:test",
-                new CompletableFuture<>());
-        server.enqueue(invocation);
-        httpClient.send(HttpRequest.newBuilder()
-                        .uri(URI.create("http://localhost:" + port + "/2018-06-01/runtime/invocation/next"))
-                        .GET().build(),
-                HttpResponse.BodyHandlers.ofString());
-
-        HttpResponse<String> response = httpClient.send(HttpRequest.newBuilder()
-                        .uri(URI.create("http://localhost:" + port
-                                + "/2018-06-01/runtime/invocation/req-streaming-drain/response"))
-                        .header("Lambda-Runtime-Function-Response-Mode", "streaming")
-                        .POST(HttpRequest.BodyPublishers.ofString("hello streaming world"))
-                        .build(),
-                HttpResponse.BodyHandlers.ofString());
-        assertEquals(202, response.statusCode());
-
-        InvokeResult result = invocation.getResultFuture().get(5, TimeUnit.SECONDS);
-        assertTrue(result.isStreaming());
-        assertEquals("hello streaming world", new String(result.getPayload()));
-        // Drained payload is cached — a second read sees the same bytes.
-        assertEquals("hello streaming world", new String(result.getPayload()));
-    }
-
-    @Test
-    @Timeout(15)
-    void streamingResponse_unknownRequestId_stillAcknowledged() throws Exception {
-        HttpResponse<String> response = httpClient.send(HttpRequest.newBuilder()
-                        .uri(URI.create("http://localhost:" + port
-                                + "/2018-06-01/runtime/invocation/no-such-request/response"))
-                        .header("Lambda-Runtime-Function-Response-Mode", "streaming")
-                        .POST(HttpRequest.BodyPublishers.ofString("ignored"))
-                        .build(),
-                HttpResponse.BodyHandlers.ofString());
-        assertEquals(202, response.statusCode());
-    }
-
     /**
      * Polls until the extension is parked on {@code /extension/event/next}, so a test can race
      * {@code stop()} against a poll that has provably landed rather than one assumed to have
@@ -2436,46 +2320,5 @@ class RuntimeApiServerTest {
             Thread.sleep(1);
         }
         return server.isExtensionParked(extensionId);
-    }
-
-    /**
-     * Chunked HTTP/1.1 body that flushes each write as soon as the client
-     * subscribes. {@link HttpRequest.BodyPublishers#ofInputStream} cannot drive
-     * the live-streaming contract: its iterator reads one 16KiB buffer ahead and
-     * {@code hasNext()} blocks on an open {@link java.io.PipedInputStream} until
-     * a second buffer or EOF, so the POST headers never leave the JDK client.
-     */
-    private static final class StreamingRequestBody implements HttpRequest.BodyPublisher {
-        private final SubmissionPublisher<ByteBuffer> publisher = new SubmissionPublisher<>();
-
-        @Override
-        public long contentLength() {
-            return -1;
-        }
-
-        @Override
-        public void subscribe(Flow.Subscriber<? super ByteBuffer> subscriber) {
-            publisher.subscribe(subscriber);
-        }
-
-        void write(byte[] bytes) throws InterruptedException {
-            awaitSubscriber();
-            publisher.submit(ByteBuffer.wrap(bytes));
-        }
-
-        void close() throws InterruptedException {
-            awaitSubscriber();
-            publisher.close();
-        }
-
-        private void awaitSubscriber() throws InterruptedException {
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-            while (publisher.getNumberOfSubscribers() == 0 && System.nanoTime() < deadline) {
-                Thread.sleep(10);
-            }
-            if (publisher.getNumberOfSubscribers() == 0) {
-                throw new IllegalStateException("HttpClient never subscribed to streaming body");
-            }
-        }
     }
 }

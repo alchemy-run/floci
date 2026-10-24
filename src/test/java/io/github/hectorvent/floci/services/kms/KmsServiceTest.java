@@ -858,8 +858,7 @@ class KmsServiceTest {
         kmsService.cancelKeyDeletion(key.getKeyId(), REGION);
 
         KmsKey updated = kmsService.describeKey(key.getKeyId(), REGION);
-        assertEquals("Disabled", updated.getKeyState());
-        assertFalse(updated.isEnabled());
+        assertEquals("Enabled", updated.getKeyState());
         assertEquals(0, updated.getDeletionDate());
     }
 
@@ -2147,16 +2146,14 @@ class KmsServiceTest {
     @Test
     void getKeyRotationStatusDefaultFalse() {
         KmsKey key = kmsService.createKey(null, REGION);
-        assertFalse(kmsService.getKeyRotationStatus(key.getKeyId(), REGION).keyRotationEnabled());
+        assertFalse(kmsService.getKeyRotationStatus(key.getKeyId(), REGION));
     }
 
     @Test
     void enableAndGetKeyRotationStatus() {
         KmsKey key = kmsService.createKey(null, REGION);
         kmsService.enableKeyRotation(key.getKeyId(), REGION);
-        KmsService.KeyRotationStatus status = kmsService.getKeyRotationStatus(key.getKeyId(), REGION);
-        assertTrue(status.keyRotationEnabled());
-        assertEquals(365, status.rotationPeriodInDays());
+        assertTrue(kmsService.getKeyRotationStatus(key.getKeyId(), REGION));
     }
 
     @Test
@@ -2164,9 +2161,7 @@ class KmsServiceTest {
         KmsKey key = kmsService.createKey(null, REGION);
         kmsService.enableKeyRotation(key.getKeyId(), REGION);
         kmsService.disableKeyRotation(key.getKeyId(), REGION);
-        KmsService.KeyRotationStatus status = kmsService.getKeyRotationStatus(key.getKeyId(), REGION);
-        assertFalse(status.keyRotationEnabled());
-        assertNull(status.rotationPeriodInDays());
+        assertFalse(kmsService.getKeyRotationStatus(key.getKeyId(), REGION));
     }
 
     @Test
@@ -2189,7 +2184,7 @@ class KmsServiceTest {
         KmsKey key = kmsService.createKey(null, REGION);
         key.setKeySpec(KmsKeySpec.ECC_NIST_P256);
         key.setKeyUsage(KmsKeyUsage.SIGN_VERIFY);
-        assertFalse(kmsService.getKeyRotationStatus(key.getKeyId(), REGION).keyRotationEnabled());
+        assertFalse(kmsService.getKeyRotationStatus(key.getKeyId(), REGION));
     }
 
     @Test
@@ -2197,7 +2192,7 @@ class KmsServiceTest {
         KmsKey key = kmsService.createKey(null, REGION);
         key.setKeySpec(KmsKeySpec.HMAC_256);
         key.setKeyUsage(KmsKeyUsage.GENERATE_VERIFY_MAC);
-        assertFalse(kmsService.getKeyRotationStatus(key.getKeyId(), REGION).keyRotationEnabled());
+        assertFalse(kmsService.getKeyRotationStatus(key.getKeyId(), REGION));
     }
 
     // ── Issue #911 — RotateKeyOnDemand ──────────────────────────────────────
@@ -2955,9 +2950,8 @@ class KmsServiceTest {
             kmsService.cancelKeyDeletion(key.getKeyId(), REGION);
 
             KmsKey restored = kmsService.describeKey(key.getKeyId(), REGION);
-            assertEquals("Disabled", restored.getKeyState());
-            assertFalse(restored.isEnabled());
-            kmsService.enableKey(key.getKeyId(), REGION);
+            assertEquals("Enabled", restored.getKeyState());
+            assertTrue(restored.isEnabled());
             assertNotNull(kmsService.encrypt(key.getKeyId(), "hello".getBytes(StandardCharsets.UTF_8), REGION));
         }
 

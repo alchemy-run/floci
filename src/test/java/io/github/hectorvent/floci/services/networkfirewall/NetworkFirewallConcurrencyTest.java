@@ -1,7 +1,6 @@
 package io.github.hectorvent.floci.services.networkfirewall;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
@@ -88,7 +87,7 @@ class NetworkFirewallConcurrencyTest {
         create.put("FirewallName", NAME);
         create.put("VpcId", "vpc-0123456789abcdef0");
         create.put("SubnetChangeProtection", false);
-        ArrayNode mappings = create.putArray("SubnetMappings");
+        var mappings = create.putArray("SubnetMappings");
         for (int caller = 0; caller < CALLERS; caller++) {
             mappings.addObject().put("SubnetId", String.format("subnet-%017d", caller));
         }
@@ -179,70 +178,6 @@ class NetworkFirewallConcurrencyTest {
             assertEquals(1, succeeded.get(),
                     "exactly one caller may validate and rotate the shared current token; a "
                             + "nonatomic check-and-rotate lets more than one pass validation");
-            assertEquals(CALLERS - 1, rejected.get());
-        } finally {
-            pool.shutdownNow();
-        }
-    }
-
-    /**
-     * UpdateRuleGroup reads the stored rule group, checks the token and writes the replacement back.
-     * Concurrent updates carrying the same current token must not all apply: exactly one validates
-     * and rotates it, and the rest are stale.
-     */
-    @Test
-    void concurrentUpdateRuleGroup_onlyOneCallerWithTheSameTokenSucceeds() throws Exception {
-        ObjectMapper mapper = new ObjectMapper();
-        NetworkFirewallService service = new NetworkFirewallService(mapper,
-                new InMemoryStorage<>(), new InMemoryStorage<>(),
-                new InMemoryStorage<>(), new InMemoryStorage<>());
-
-        ObjectNode create = mapper.createObjectNode();
-        create.put("RuleGroupName", "ConcurrentUpdateRuleGroup");
-        create.put("Type", "STATEFUL");
-        create.put("Capacity", 100);
-        create.putObject("RuleGroup").putObject("RulesSource").put("RulesString", "pass ip any any");
-        ObjectNode created = service.createRuleGroup(create, REGION, ACCOUNT);
-        String ruleGroupArn = created.path("RuleGroupResponse").path("RuleGroupArn").asText();
-        String currentToken = created.path("UpdateToken").asText();
-
-        ExecutorService pool = Executors.newFixedThreadPool(CALLERS);
-        CountDownLatch start = new CountDownLatch(1);
-        List<Future<ObjectNode>> submitted = new ArrayList<>();
-        try {
-            for (int caller = 0; caller < CALLERS; caller++) {
-                int callerIndex = caller;
-                submitted.add(pool.submit(() -> {
-                    ObjectNode request = mapper.createObjectNode();
-                    request.put("RuleGroupArn", ruleGroupArn);
-                    request.put("UpdateToken", currentToken);
-                    request.putObject("RuleGroup").putObject("RulesSource")
-                            .put("RulesString", "drop ip any any # caller " + callerIndex);
-                    start.await();
-                    return service.updateRuleGroup(request);
-                }));
-            }
-            start.countDown();
-
-            AtomicInteger succeeded = new AtomicInteger();
-            AtomicInteger rejected = new AtomicInteger();
-            for (Future<ObjectNode> future : submitted) {
-                try {
-                    future.get(30, TimeUnit.SECONDS);
-                    succeeded.incrementAndGet();
-                } catch (ExecutionException e) {
-                    if (e.getCause() instanceof AwsException awsException
-                            && "InvalidTokenException".equals(awsException.getErrorCode())) {
-                        rejected.incrementAndGet();
-                    } else {
-                        throw e;
-                    }
-                }
-            }
-
-            assertEquals(1, succeeded.get(),
-                    "exactly one caller may validate and rotate the shared current token; without "
-                            + "the service lock more than one update passes the check and applies");
             assertEquals(CALLERS - 1, rejected.get());
         } finally {
             pool.shutdownNow();

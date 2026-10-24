@@ -1,7 +1,6 @@
 package io.github.hectorvent.floci.services.inspector2;
 
 import io.github.hectorvent.floci.services.organizations.OrganizationsService;
-import io.github.hectorvent.floci.services.organizations.model.Handshake;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
@@ -590,7 +589,7 @@ class Inspector2IntegrationTest {
     private void createOrganization(String managementAccountId, String... members) {
         organizationsService.createOrganization(managementAccountId, "ALL");
         for (String member : members) {
-            Handshake handshake = organizationsService.inviteAccountToOrganization(
+            var handshake = organizationsService.inviteAccountToOrganization(
                     managementAccountId, member, "ACCOUNT", null);
             organizationsService.acceptHandshake(member, handshake.getId());
         }

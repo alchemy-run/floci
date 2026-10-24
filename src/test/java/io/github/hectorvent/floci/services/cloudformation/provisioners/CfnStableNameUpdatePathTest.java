@@ -294,13 +294,7 @@ class CfnStableNameUpdatePathTest {
         LambdaMicrovmsService.MicrovmImage image = new LambdaMicrovmsService.MicrovmImage();
         image.name = name;
         image.imageArn = "arn:aws:lambda:us-east-1:000000000000:microvm-image:" + name;
-        image.state = "CREATED";
         image.latestActiveImageVersion = "1.0";
-        LambdaMicrovmsService.MicrovmImageVersion version = new LambdaMicrovmsService.MicrovmImageVersion();
-        version.imageVersion = "1.0";
-        version.state = "SUCCESSFUL";
-        version.status = "ACTIVE";
-        image.versions.add(version);
         return image;
     }
 

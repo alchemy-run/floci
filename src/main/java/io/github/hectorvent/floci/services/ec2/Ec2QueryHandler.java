@@ -59,8 +59,7 @@ public class Ec2QueryHandler {
     public Ec2QueryHandler(Ec2Service service, EmulatorConfig config, FlowLogService flowLogService,
                            Ec2EbsEncryptionService ebsEncryptionService,
                            Ec2SnapshotBlockPublicAccessService snapshotBlockPublicAccessService,
-                           Ec2IpamService ipamService, RegionResolver regionResolver, KmsService kmsService,
-                           Ec2ClientVpnService clientVpnService) {
+                           Ec2IpamService ipamService, RegionResolver regionResolver) {
         this.service = service;
         this.config = config;
         this.flowLogService = flowLogService;
@@ -68,8 +67,6 @@ public class Ec2QueryHandler {
         this.snapshotBlockPublicAccessService = snapshotBlockPublicAccessService;
         this.ipamService = ipamService;
         this.regionResolver = regionResolver;
-        this.kmsService = kmsService;
-        this.clientVpnService = clientVpnService;
     }
 
     public Response handle(String action, MultivaluedMap<String, String> params, String region) {
@@ -6710,9 +6707,11 @@ public class Ec2QueryHandler {
         return xml.build();
     }
 
-    private final KmsService kmsService;
+    @Inject
+    KmsService kmsService;
 
-    private final Ec2ClientVpnService clientVpnService;
+    @Inject
+    Ec2ClientVpnService clientVpnService;
 
     /**
      * Alchemy (and the AWS SDKs) send the primary ENI as

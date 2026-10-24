@@ -1,31 +1,23 @@
 package io.github.hectorvent.floci.services.elasticache;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.RequestContext;
+import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
+import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
-import io.github.hectorvent.floci.services.ec2.model.Subnet;
 import io.github.hectorvent.floci.services.elasticache.container.ElastiCacheContainerHandle;
 import io.github.hectorvent.floci.services.elasticache.container.ElastiCacheContainerManager;
-import io.github.hectorvent.floci.services.elasticache.container.ElastiCacheMemcachedContainerManager;
 import io.github.hectorvent.floci.services.elasticache.container.ValkeyClusterFormation;
 import io.github.hectorvent.floci.services.elasticache.model.AuthMode;
-import io.github.hectorvent.floci.services.elasticache.model.CacheCluster;
-import io.github.hectorvent.floci.services.elasticache.model.CacheClusterStatus;
-import io.github.hectorvent.floci.services.elasticache.model.CacheParameterGroup;
 import io.github.hectorvent.floci.services.elasticache.model.ClusterNode;
-import io.github.hectorvent.floci.services.elasticache.model.ElastiCacheUser;
-import io.github.hectorvent.floci.services.elasticache.model.ElastiCacheUserGroup;
-import io.github.hectorvent.floci.services.elasticache.model.Endpoint;
 import io.github.hectorvent.floci.services.elasticache.model.ReplicationGroup;
 import io.github.hectorvent.floci.services.elasticache.model.ReplicationGroupSettings;
 import io.github.hectorvent.floci.services.elasticache.model.ReplicationGroupStatus;
-import io.github.hectorvent.floci.services.elasticache.proxy.ElastiCacheAuthProxy;
 import io.github.hectorvent.floci.services.elasticache.proxy.ElastiCacheProxyManager;
 import io.github.hectorvent.floci.services.kms.KmsService;
 import io.github.hectorvent.floci.services.kms.model.KmsKey;
@@ -34,27 +26,18 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
-import java.lang.management.ManagementFactory;
-import java.lang.management.ThreadInfo;
-import java.lang.reflect.Field;
-import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -80,17 +63,13 @@ class ElastiCacheServiceTest {
     private ElastiCacheProxyManager proxyManager;
     private EmulatorConfig config;
     private ValkeyClusterFormation clusterFormation;
-    private StorageFactory storageFactory;
-    private ElastiCacheMemcachedContainerManager memcachedContainerManager;
-    private Ec2Service ec2Service;
-    private ElastiCacheProvisioningIds provisioningIds;
+    private ContainerDetector containerDetector;
 
     @BeforeEach
     void setUp() {
         containerManager = mock(ElastiCacheContainerManager.class);
         proxyManager = mock(ElastiCacheProxyManager.class);
-        provisioningIds = new ElastiCacheProvisioningIds();
-        storageFactory = mock(StorageFactory.class);
+        StorageFactory storageFactory = mock(StorageFactory.class);
         config = mock(EmulatorConfig.class);
 
         EmulatorConfig.ServicesConfig servicesConfig = mock(EmulatorConfig.ServicesConfig.class);
@@ -100,28 +79,21 @@ class ElastiCacheServiceTest {
         when(ecConfig.proxyBasePort()).thenReturn(16379);
         when(ecConfig.proxyMaxPort()).thenReturn(16399);
         when(ecConfig.defaultImage()).thenReturn("valkey/valkey:8");
-        when(ecConfig.defaultMemcachedImage()).thenReturn("memcached:1.6");
         when(config.hostname()).thenReturn(Optional.of("localhost"));
 
-        // Keyed by file name, as the real StorageFactory is: it hands the second caller of a path
-        // the first caller's backend, which is what lets the two services share one id namespace.
-        Map<String, AccountAwareStorageBackend<?>> backendsByFile = new ConcurrentHashMap<>();
-        when(storageFactory.create(anyString(), anyString(), any())).thenAnswer(inv ->
-                backendsByFile.computeIfAbsent(inv.getArgument(1),
-                        file -> AccountAwareStorageBackend.inMemory("000000000000")));
-        memcachedContainerManager = mock(ElastiCacheMemcachedContainerManager.class);
-        when(memcachedContainerManager.tryStart(anyString(), anyString(), any())).thenReturn(null);
-        when(containerManager.tryStart(anyString(), anyString(), any()))
+        when(storageFactory.create(anyString(), anyString(), any())).thenAnswer(inv -> AccountAwareStorageBackend.inMemory("000000000000"));
+        when(containerManager.tryStart(anyString(), anyString(), anyInt()))
                 .thenReturn(new ElastiCacheContainerHandle("cid", "grp", "localhost", 6379));
         doNothing().when(proxyManager).startProxy(anyString(), any(), anyInt(), anyString(), anyInt(), any());
-        ec2Service = mock(Ec2Service.class);
+        Ec2Service ec2Service = mock(Ec2Service.class);
         kmsService = mock(KmsService.class);
         when(kmsService.describeKey(any(), any())).thenThrow(
                 new AwsException("NotFoundException", "Key not found", 404));
         clusterFormation = mock(ValkeyClusterFormation.class);
+        containerDetector = mock(ContainerDetector.class);
         service = new ElastiCacheService(containerManager, proxyManager, clusterFormation,
-                storageFactory, config, ec2Service, new RegionResolver("us-east-1", "000000000000"),
-                kmsService, provisioningIds);
+                storageFactory, config, mock(DockerHostResolver.class), containerDetector,
+                ec2Service, new RegionResolver("us-east-1", "000000000000"), kmsService);
     }
 
     @Test
@@ -143,13 +115,13 @@ class ElastiCacheServiceTest {
         when(ec.defaultImage()).thenReturn("valkey/valkey:8");
         when(cfg.hostname()).thenReturn(Optional.of("localhost"));
         when(sf.create(anyString(), anyString(), any())).thenAnswer(inv -> AccountAwareStorageBackend.inMemory("000000000000"));
-        when(cm.start(anyString(), anyString(), any()))
+        when(cm.tryStart(anyString(), anyString(), anyInt()))
                 .thenReturn(new ElastiCacheContainerHandle("cid", "grp", "localhost", 6379));
         doNothing().when(pm).startProxy(anyString(), any(), anyInt(), anyString(), anyInt(), any());
         ElastiCacheService svc = new ElastiCacheService(cm, pm, mock(ValkeyClusterFormation.class),
                 sf, cfg, mock(Ec2Service.class),
                 new RegionResolver("us-east-1", "000000000000"),
-                mock(KmsService.class), provisioningIds);
+                mock(KmsService.class));
 
         svc.createReplicationGroup("g1", "d", AuthMode.PASSWORD, null, "us-east-1");
 
@@ -157,146 +129,6 @@ class ElastiCacheServiceTest {
                 () -> svc.createReplicationGroup("g2", "d", AuthMode.PASSWORD, null, "us-east-1"));
         assertEquals("InsufficientCacheClusterCapacity", ex.getErrorCode());
         assertEquals(400, ex.getHttpStatus());
-    }
-
-    @Test
-    void userAndUserGroupTagsPersistAndCanBeMutatedByArn() {
-        ElastiCacheUser defaultUser = service.createUser("default-user", "default", AuthMode.PASSWORD,
-                List.of("password"), "on ~* +@all", "redis");
-        ElastiCacheUser taggedUser = service.createUser("tagged-user", "tagged", AuthMode.PASSWORD,
-                List.of("password"), "on ~* +@all", "redis", Map.of("owner", "platform"));
-        assertEquals(Map.of("owner", "platform"), taggedUser.getTags());
-
-        ElastiCacheUserGroup taggedGroup = service.createUserGroup("tagged-group", "redis",
-                List.of(defaultUser.getUserId()), "us-east-1", Map.of("team", "cache"));
-        assertEquals(Map.of("team", "cache"), taggedGroup.getTags());
-
-        service.addTagsToResource(taggedUser.getArn(), Map.of("environment", "test"), "us-east-1");
-        assertEquals(Map.of("owner", "platform", "environment", "test"),
-                service.getUser("tagged-user").getTags());
-        service.removeTagsFromResource(taggedUser.getArn(), List.of("owner"), "us-east-1");
-        assertEquals(Map.of("environment", "test"), service.getUser("tagged-user").getTags());
-
-        service.addTagsToResource(taggedGroup.getArn(), Map.of("environment", "test"), "us-east-1");
-        assertEquals(Map.of("team", "cache", "environment", "test"),
-                service.getUserGroup("tagged-group").getTags());
-    }
-
-    @Test
-    void tagResourceRejectsSameIdResourceFromAnotherRegion() {
-        ElastiCacheUser user = service.createUser("regional-user", "regional", AuthMode.PASSWORD,
-                List.of("password"), "on ~* +@all", "redis");
-        String foreignRegionArn = user.getArn().replace(":us-east-1:", ":eu-west-1:");
-
-        AwsException error = assertThrows(AwsException.class,
-                () -> service.addTagsToResource(foreignRegionArn, Map.of("env", "test"), "eu-west-1"));
-
-        assertEquals("UserNotFound", error.getErrorCode());
-        assertTrue(service.getUser("regional-user").getTags().isEmpty());
-    }
-
-    @Test
-    void tagMutationsUseAwsInvalidArnErrorCode() {
-        AwsException addError = assertThrows(AwsException.class,
-                () -> service.addTagsToResource("not-an-arn", Map.of("env", "test"), "us-east-1"));
-        AwsException removeError = assertThrows(AwsException.class,
-                () -> service.removeTagsFromResource("not-an-arn", List.of("env"), "us-east-1"));
-
-        assertEquals("InvalidARN", addError.getErrorCode());
-        assertEquals("InvalidARN", removeError.getErrorCode());
-        assertEquals(400, addError.getHttpStatus());
-        assertEquals(400, removeError.getHttpStatus());
-    }
-
-    @Test
-    void tagMutationsReportMissingSubnetGroupWithAwsFaultCode() {
-        String arn = "arn:aws:elasticache:us-east-1:000000000000:subnetgroup:missing-tag-subnet";
-
-        AwsException addError = assertThrows(AwsException.class,
-                () -> service.addTagsToResource(arn, Map.of("env", "test"), "us-east-1"));
-        AwsException removeError = assertThrows(AwsException.class,
-                () -> service.removeTagsFromResource(arn, List.of("env"), "us-east-1"));
-
-        assertEquals("CacheSubnetGroupNotFoundFault", addError.getErrorCode());
-        assertEquals("CacheSubnetGroupNotFoundFault", removeError.getErrorCode());
-        assertEquals(400, addError.getHttpStatus());
-        assertEquals(400, removeError.getHttpStatus());
-    }
-
-    @Test
-    void tagWritesWaitForParameterGroupDeletion() throws Exception {
-        String name = "tag-delete-race-pg";
-        String arn = "arn:aws:elasticache:us-east-1:000000000000:parametergroup:" + name;
-        service.createCacheParameterGroup(name, "redis7", "tagged", Map.of());
-
-        Field locksField = ElastiCacheService.class.getDeclaredField("parameterGroupLocks");
-        locksField.setAccessible(true);
-        Object monitor = ((ConcurrentHashMap<?, ?>) locksField.get(service)).get(name);
-        ExecutorService pool = Executors.newSingleThreadExecutor();
-        AtomicReference<Thread> writer = new AtomicReference<>();
-        try {
-            Future<String> tag;
-            synchronized (monitor) {
-                tag = pool.submit(() -> {
-                    writer.set(Thread.currentThread());
-                    try {
-                        service.addTagsToResource(arn, Map.of("env", "test"), "us-east-1");
-                        return "tagged";
-                    } catch (AwsException error) {
-                        return error.getErrorCode();
-                    }
-                });
-                long ownerId = Thread.currentThread().threadId();
-                await().atMost(Duration.ofSeconds(5)).until(() -> {
-                    Thread thread = writer.get();
-                    ThreadInfo info = thread == null ? null
-                            : ManagementFactory.getThreadMXBean().getThreadInfo(thread.threadId());
-                    return tag.isDone() || info != null && info.getThreadState() == Thread.State.BLOCKED
-                            && info.getLockOwnerId() == ownerId && info.getLockInfo() != null
-                            && info.getLockInfo().getIdentityHashCode() == System.identityHashCode(monitor)
-                            && info.getLockInfo().getClassName().equals(monitor.getClass().getName());
-                });
-                assertFalse(tag.isDone(), "tagging bypassed the parameter-group lifecycle lock");
-                service.deleteCacheParameterGroup(name);
-            }
-            assertEquals("CacheParameterGroupNotFound", tag.get(5, TimeUnit.SECONDS));
-            assertTrue(service.findParameterGroup(name).isEmpty());
-        } finally {
-            pool.shutdownNow();
-            assertTrue(pool.awaitTermination(5, TimeUnit.SECONDS), "tag writer did not terminate");
-        }
-    }
-
-    @Test
-    void tagResourceDerivesPartitionFromRequestedRegion() {
-        ElastiCacheUserGroup group = service.createUserGroup("gov-group", "valkey", List.of(),
-                "us-gov-west-1");
-
-        service.addTagsToResource(group.getArn(), Map.of("env", "gov"), "us-gov-west-1");
-
-        assertEquals(Map.of("env", "gov"), service.getUserGroup("gov-group").getTags());
-    }
-
-    @Test
-    void tagMutationsSupportCacheClustersAndParameterGroups() {
-        CacheCluster cluster = service.createCacheCluster(cacheClusterRequest("tag-cluster", "redis", 1));
-        CacheParameterGroup parameterGroup = service.createCacheParameterGroup(
-                "tag-pg", "redis7", "tagged parameter group", Map.of("owner", "platform"));
-
-        service.addTagsToResource(cluster.getArn(), Map.of("environment", "test"), "us-east-1");
-        service.removeTagsFromResource(cluster.getArn(), List.of("environment"), "us-east-1");
-        assertTrue(service.findCacheClusters("tag-cluster").getFirst().getTags().isEmpty());
-
-        service.addTagsToResource("arn:aws:elasticache:us-east-1:000000000000:parametergroup:tag-pg",
-                Map.of("environment", "test"), "us-east-1");
-        assertEquals(Map.of("owner", "platform", "environment", "test"),
-                service.findParameterGroup(parameterGroup.getName()).orElseThrow().getTags());
-
-        AwsException wrongRegion = assertThrows(AwsException.class, () -> service.addTagsToResource(
-                "arn:aws:elasticache:eu-west-1:000000000000:parametergroup:tag-pg",
-                Map.of("wrong", "region"), "eu-west-1"));
-        assertEquals("CacheParameterGroupNotFound", wrongRegion.getErrorCode());
-        assertFalse(service.findParameterGroup("tag-pg").orElseThrow().getTags().containsKey("wrong"));
     }
 
     @Test
@@ -336,416 +168,21 @@ class ElastiCacheServiceTest {
     }
 
     @Test
-    void userGroupMembersAuthenticateAndMembershipChangesApplyAtOnce() {
-        service.createReplicationGroup("grp", "test", AuthMode.PASSWORD, null, "us-east-1");
-        service.createUser("default-user-id", "default", AuthMode.PASSWORD,
-                List.of("default-pass"), "on ~* +@all", null);
-        service.createUser("app-user-id", "app", AuthMode.PASSWORD,
-                List.of("app-pass"), "on ~* +@all", null);
-        ElastiCacheUserGroup userGroup = service.createUserGroup("App-Group", "redis",
-                List.of("default-user-id", "app-user-id"), "us-east-1");
-        assertEquals("app-group", userGroup.getUserGroupId());
-
-        service.modifyReplicationGroup("grp", List.of("App-Group"), null);
-        ReplicationGroup group = service.getReplicationGroup("grp");
-        assertEquals(Set.of("app-group"), group.getUserGroupIds());
-        assertTrue(group.getAssociatedUserIds().isEmpty());
-        assertTrue(service.validatePassword("grp", "app", "app-pass"));
-        assertTrue(service.validatePassword("grp", null, "default-pass"));
-
-        service.modifyUserGroup("app-group", null, List.of("app-user-id"), null);
-        assertFalse(service.validatePassword("grp", "app", "app-pass"));
-        service.modifyUserGroup("app-group", List.of("app-user-id"), null, null);
-        assertTrue(service.validatePassword("grp", "app", "app-pass"));
-
-        AwsException inUse = assertThrows(AwsException.class, () -> service.deleteUserGroup("app-group"));
-        assertEquals("InvalidUserGroupState", inUse.getErrorCode());
-
-        service.modifyReplicationGroup("grp", null, List.of("app-group"));
-        assertFalse(service.validatePassword("grp", "app", "app-pass"));
-        service.deleteUserGroup("app-group");
-        assertEquals("UserGroupNotFound",
-                assertThrows(AwsException.class, () -> service.getUserGroup("app-group")).getErrorCode());
-    }
-
-    @Test
-    void setUserGroupMembersReplacesCompleteMembershipAndEngine() {
-        service.createUser("default-user-id", "default", AuthMode.PASSWORD,
-                List.of("default-pass"), "on ~* +@all", null);
-        service.createUser("app-user-id", "app", AuthMode.PASSWORD,
-                List.of("app-pass"), "on ~* +@all", null);
-        service.createUser("extra-user-id", "extra", AuthMode.PASSWORD,
-                List.of("extra-pass"), "on ~* +@all", null);
-        service.createUserGroup("set-grp", "redis", List.of("default-user-id", "app-user-id"), "us-east-1");
-
-        ElastiCacheUserGroup updated = service.setUserGroupMembers("set-grp",
-                List.of("default-user-id", "extra-user-id"), "redis");
-        assertEquals(Set.of("default-user-id", "extra-user-id"), updated.getUserIds());
-        assertEquals("redis", updated.getEngine());
-
-        ElastiCacheUserGroup fetched = service.getUserGroup("set-grp");
-        assertEquals(Set.of("default-user-id", "extra-user-id"), fetched.getUserIds());
-    }
-
-    @Test
-    void setUserGroupMembersRejectsInvalidEngineOrMissingDefaultUserForRedis() {
-        service.createUser("default-user-id", "default", AuthMode.PASSWORD,
-                List.of("default-pass"), "on ~* +@all", null);
-        service.createUser("app-user-id", "app", AuthMode.PASSWORD,
-                List.of("app-pass"), "on ~* +@all", null);
-        service.createUserGroup("val-grp", "redis", List.of("default-user-id"), "us-east-1");
-
-        AwsException exMissing = assertThrows(AwsException.class,
-                () -> service.setUserGroupMembers("val-grp", List.of("app-user-id"), "redis"));
-        assertEquals("DefaultUserRequired", exMissing.getErrorCode());
-
-        AwsException exEngine = assertThrows(AwsException.class,
-                () -> service.setUserGroupMembers("val-grp", List.of("default-user-id"), "unknown"));
-        assertEquals("InvalidParameterValue", exEngine.getErrorCode());
-    }
-
-    @Test
-    void userGroupNeedsInTransitEncryptionOnTheReplicationGroup() {
-        service.createReplicationGroup("open", "test", AuthMode.NO_AUTH, null, "us-east-1");
-        service.createUser("default-user-id", "default", AuthMode.PASSWORD,
-                List.of("default-pass"), "on ~* +@all", null);
-        service.createUserGroup("grp-users", "redis", List.of("default-user-id"), "us-east-1");
-
-        AwsException refused = assertThrows(AwsException.class,
-                () -> service.modifyReplicationGroup("open", List.of("grp-users"), null));
-        assertEquals("InvalidParameterCombination", refused.getErrorCode());
-        assertTrue(service.getReplicationGroup("open").getUserGroupIds().isEmpty());
-    }
-
-    @Test
-    void createReplicationGroupRejectsAnUnknownUserGroupBeforeProvisioning() {
-        ElastiCacheService.CreateReplicationGroupRequest request = new ElastiCacheService.CreateReplicationGroupRequest(
-                "grp", "test", AuthMode.IAM, null, "us-east-1", "redis", null, null, null, null, null,
-                null, null, null, null, null, null, ReplicationGroupSettings.defaults(), Map.of(),
-                List.of("missing-group"), null);
-
-        AwsException refused = assertThrows(AwsException.class, () -> service.createReplicationGroup(request));
-
-        assertEquals("UserGroupNotFound", refused.getErrorCode());
-        verify(containerManager, never()).tryStart(anyString(), anyString(), any());
-    }
-
-    @Test
-    void userGroupMembersDecideEachUsersAuthenticationMode() {
-        service.createReplicationGroup("grp", "test", AuthMode.IAM, null, "us-east-1");
-        assertFalse(service.hasMembers("grp"),
-                "a cache with no users associated keeps the group level authentication mode");
-
-        service.createUser("default-user-id", "default", AuthMode.PASSWORD,
-                List.of("default-pass"), "on ~* +@all", null);
-        service.createUser("iam-user-id", "iam-app", AuthMode.IAM, List.of(), "on ~* +@all", null);
-        service.createUserGroup("iam-users", "redis", List.of("default-user-id", "iam-user-id"), "us-east-1");
-        service.modifyReplicationGroup("grp", List.of("iam-users"), null);
-
-        assertTrue(service.hasMembers("grp"));
-        assertEquals(AuthMode.IAM, service.memberAuthMode("grp", "iam-app"));
-        assertEquals(AuthMode.PASSWORD, service.memberAuthMode("grp", "default"),
-                "a password user cannot connect with an IAM token");
-        assertNull(service.memberAuthMode("grp", "anyone"));
-
-        service.modifyUserGroup("iam-users", null, List.of("iam-user-id"), null);
-        assertNull(service.memberAuthMode("grp", "iam-app"), "removing the member revokes its access");
-    }
-
-    @Test
-    void anEmptyUserGroupAdmitsNobody() {
-        service.createReplicationGroup(new ElastiCacheService.CreateReplicationGroupRequest(
-                "grp", "test", AuthMode.IAM, null, "us-east-1", "valkey", null, null, null, null, null,
-                null, null, null, null, null, null, ReplicationGroupSettings.defaults(), Map.of(), null, null));
-        service.createUserGroup("empty-users", "valkey", List.of(), "us-east-1");
-        service.modifyReplicationGroup("grp", List.of("empty-users"), null);
-
-        assertTrue(service.hasMembers("grp"));
-        assertNull(service.memberAuthMode("grp", "default"));
-        assertNull(service.memberAuthMode("grp", "anyone"));
-    }
-
-    @Test
-    void aCacheOnUserGroupsNoLongerTakesItsAuthToken() {
-        service.createReplicationGroup("grp", "test", AuthMode.PASSWORD, "group-token", "us-east-1");
-        service.createUser("default-user-id", "default", AuthMode.PASSWORD,
-                List.of("default-pass"), "on ~* +@all", null);
-        service.createUserGroup("redis-users", "redis", List.of("default-user-id"), "us-east-1");
-        assertTrue(service.validatePassword("grp", null, "group-token"));
-
-        service.modifyReplicationGroup("grp", List.of("redis-users"), null);
-
-        assertFalse(service.validatePassword("grp", null, "group-token"));
-        assertTrue(service.validatePassword("grp", null, "default-pass"));
-    }
-
-    @Test
-    void authTokenDeleteIsAllowedOnlyWhenMovingToUserGroups() {
-        service.createReplicationGroup("grp", "test", AuthMode.PASSWORD, "group-token", "us-east-1");
-        service.createUser("default-user-id", "default", AuthMode.PASSWORD,
-                List.of("default-pass"), "on ~* +@all", null);
-        service.createUserGroup("redis-users", "redis", List.of("default-user-id"), "us-east-1");
-
-        AwsException refused = assertThrows(AwsException.class, () -> service.modifyReplicationGroup(
-                "grp", null, null, false, true, ReplicationGroupSettings.unchanged()));
-        assertEquals("InvalidParameterCombination", refused.getErrorCode());
-        assertEquals("group-token", service.getReplicationGroup("grp").getAuthToken());
-
-        service.modifyReplicationGroup("grp", List.of("redis-users"), null, false, true,
-                ReplicationGroupSettings.unchanged());
-        assertNull(service.getReplicationGroup("grp").getAuthToken());
-
-        service.modifyReplicationGroup("grp", null, List.of("redis-users"));
-        ReplicationGroup group = service.getReplicationGroup("grp");
-        assertEquals(AuthMode.NO_AUTH, group.getAuthMode(), "no user group and no token leaves no access control");
-        assertTrue(group.isEncryptedInTransit());
-
-        service.modifyReplicationGroup("grp", List.of("redis-users"), null);
-        assertEquals(Set.of("redis-users"), service.getReplicationGroup("grp").getUserGroupIds());
-    }
-
-    @Test
-    void removeUserGroupsDropsEveryUserGroupAndTheAccessControl() {
-        service.createReplicationGroup("grp", "test", AuthMode.IAM, null, "us-east-1");
-        service.createUser("default-user-id", "default", AuthMode.PASSWORD,
-                List.of("default-pass"), "on ~* +@all", null);
-        service.createUserGroup("first-users", "redis", List.of("default-user-id"), "us-east-1");
-        service.createUserGroup("second-users", "redis", List.of("default-user-id"), "us-east-1");
-        service.modifyReplicationGroup("grp", List.of("first-users", "second-users"), null);
-
-        service.modifyReplicationGroup("grp", null, null, true, false, ReplicationGroupSettings.unchanged());
-
-        ReplicationGroup group = service.getReplicationGroup("grp");
-        assertTrue(group.getUserGroupIds().isEmpty());
-        assertEquals(AuthMode.NO_AUTH, group.getAuthMode());
-        assertTrue(group.isEncryptedInTransit());
-        assertFalse(service.hasMembers("grp"));
-    }
-
-    @Test
-    void aTokenKeptThroughUserGroupsAppliesAgainOnceTheyAreRemoved() {
-        service.createReplicationGroup("grp", "test", AuthMode.PASSWORD, "group-token", "us-east-1");
-        service.createUser("default-user-id", "default", AuthMode.PASSWORD,
-                List.of("default-pass"), "on ~* +@all", null);
-        service.createUserGroup("redis-users", "redis", List.of("default-user-id"), "us-east-1");
-        service.modifyReplicationGroup("grp", List.of("redis-users"), null);
-
-        service.modifyReplicationGroup("grp", null, List.of("redis-users"));
-
-        assertEquals(AuthMode.PASSWORD, service.getReplicationGroup("grp").getAuthMode());
-        assertTrue(service.validatePassword("grp", null, "group-token"));
-    }
-
-    @Test
-    void failedCreateReleasesItsUserGroupReservation() {
-        service.createUser("default-user-id", "default", AuthMode.PASSWORD,
-                List.of("default-pass"), "on ~* +@all", null);
-        service.createUserGroup("reserved", "redis", List.of("default-user-id"), "us-east-1");
-        when(containerManager.tryStart(anyString(), anyString(), any())).thenThrow(new RuntimeException("docker down"));
-        ElastiCacheService.CreateReplicationGroupRequest request = new ElastiCacheService.CreateReplicationGroupRequest(
-                "grp", "test", AuthMode.IAM, null, "us-east-1", "redis", null, null, null, null, null,
-                null, null, null, null, null, null, ReplicationGroupSettings.defaults(), Map.of(),
-                List.of("reserved"), null);
-
-        assertThrows(RuntimeException.class, () -> service.createReplicationGroup(request));
-
-        service.deleteUserGroup("reserved");
-        assertEquals("UserGroupNotFound",
-                assertThrows(AwsException.class, () -> service.getUserGroup("reserved")).getErrorCode());
-    }
-
-    @Test
-    void modifyUserCannotMoveAMemberToAnEngineItsUserGroupRejects() {
-        service.createUser("default-user-id", "default", AuthMode.PASSWORD,
-                List.of("default-pass"), "on ~* +@all", null);
-        service.createUserGroup("redis-users", "redis", List.of("default-user-id"), "us-east-1");
-
-        AwsException refused = assertThrows(AwsException.class,
-                () -> service.modifyUser("default-user-id", null, null, null, null, "valkey"));
-
-        assertEquals("InvalidParameterValue", refused.getErrorCode());
-        assertEquals("redis", service.getUser("default-user-id").getEngine());
-    }
-
-    @Test
-    void modifyUserCannotDropThePasswordOfAValkeyUserGroupMember() {
-        service.createUser("valkey-user-id", "vk", AuthMode.PASSWORD,
-                List.of("vk-pass"), "on ~* +@all", "valkey");
-        service.createUserGroup("vk-group", "valkey", List.of("valkey-user-id"), "us-east-1");
-
-        AwsException refused = assertThrows(AwsException.class,
-                () -> service.modifyUser("valkey-user-id", AuthMode.NO_AUTH, null, null, null, null));
-
-        assertEquals("InvalidParameterValue", refused.getErrorCode());
-        ElastiCacheUser user = service.getUser("valkey-user-id");
-        assertEquals(AuthMode.PASSWORD, user.getAuthMode());
-        assertEquals(List.of("vk-pass"), user.getPasswords());
-    }
-
-    @Test
-    void userGroupMembershipFollowsAwsRules() {
-        service.createUser("default-user-id", "default", AuthMode.PASSWORD,
-                List.of("default-pass"), "on ~* +@all", null);
-        service.createUser("second-default-id", "default", AuthMode.PASSWORD,
-                List.of("other-pass"), "on ~* +@all", null);
-        service.createUser("app-user-id", "app", AuthMode.PASSWORD,
-                List.of("app-pass"), "on ~* +@all", null);
-        service.createUser("valkey-user-id", "vk", AuthMode.PASSWORD,
-                List.of("vk-pass"), "on ~* +@all", "valkey");
-        service.createUser("open-user-id", "open", AuthMode.NO_AUTH, List.of(), "on ~* +@all", null);
-
-        assertEquals("DefaultUserRequired", assertThrows(AwsException.class,
-                () -> service.createUserGroup("no-default", "redis", List.of("app-user-id"), "us-east-1")).getErrorCode());
-        assertEquals("DuplicateUserName", assertThrows(AwsException.class,
-                () -> service.createUserGroup("two-defaults", "redis",
-                        List.of("default-user-id", "second-default-id"), "us-east-1")).getErrorCode());
-        assertEquals("InvalidParameterValue", assertThrows(AwsException.class,
-                () -> service.createUserGroup("mixed", "redis",
-                        List.of("default-user-id", "valkey-user-id"), "us-east-1")).getErrorCode());
-        assertEquals("InvalidParameterValue", assertThrows(AwsException.class,
-                () -> service.createUserGroup("vk-open", "valkey", List.of("open-user-id"), "us-east-1")).getErrorCode());
-
-        // a valkey user group needs no default user
-        service.createUserGroup("vk-group", "valkey", List.of("valkey-user-id", "app-user-id"), "us-east-1");
-        assertEquals("UserGroupAlreadyExists", assertThrows(AwsException.class,
-                () -> service.createUserGroup("VK-Group", "valkey", List.of("valkey-user-id"), "us-east-1")).getErrorCode());
-
-        service.deleteUser("app-user-id");
-        assertEquals(Set.of("valkey-user-id"), service.getUserGroup("vk-group").getUserIds());
-    }
-
-    @Test
-    void userErrorsUseTheBotocoreWireCodesWithoutTheFaultSuffix() {
-        service.createUser("dupe-user", "dupe", AuthMode.PASSWORD, List.of("pw"), "on ~* +@all", "redis");
-
-        AwsException duplicate = assertThrows(AwsException.class, () -> service.createUser(
-                "dupe-user", "dupe", AuthMode.PASSWORD, List.of("pw"), "on ~* +@all", "redis"));
-        assertEquals("UserAlreadyExists", duplicate.getErrorCode());
-        assertEquals(400, duplicate.getHttpStatus());
-        assertEquals("UserNotFound", assertThrows(AwsException.class, () -> service.getUser("absent")).getErrorCode());
-        assertEquals("UserNotFound",
-                assertThrows(AwsException.class, () -> service.listUsers("absent", null)).getErrorCode());
-        assertEquals("UserNotFound", assertThrows(AwsException.class, () -> service.deleteUser("absent")).getErrorCode());
-    }
-
-    @Test
     void singleArgAuthFallsBackToGroupAuthToken() {
         service.createReplicationGroup("grp", "test", AuthMode.PASSWORD, "group-token", "us-east-1");
 
         // Single-arg AUTH with group auth token should succeed
         assertTrue(service.validatePassword("grp", null, "group-token"));
-        assertTrue(service.validatePassword("grp", "default", "group-token"));
 
         // Single-arg AUTH with wrong password should fail
         assertFalse(service.validatePassword("grp", null, "wrong-token"));
     }
 
     @Test
-    void validatePasswordAdmitsNoAuthUserWithAnyPassword() {
-        service.createReplicationGroup("grp-nopass", "test", AuthMode.IAM, null, "us-east-1");
-        service.createUser("nopass-user-id", "nopass-user", AuthMode.NO_AUTH,
-                List.of(), "on ~* +@all", null);
-        service.modifyReplicationGroup("grp-nopass", List.of("nopass-user-id"), null);
-
-        assertTrue(service.hasMembers("grp-nopass"));
-        assertEquals(AuthMode.NO_AUTH, service.memberAuthMode("grp-nopass", "nopass-user"));
-        assertTrue(service.validatePassword("grp-nopass", "nopass-user", "any-password"));
-        assertTrue(service.validatePassword("grp-nopass", "nopass-user", ""));
-    }
-
-    @Test
-    void memberAuthModeResolvesPasswordIamAndNoAuthUsers() {
-        service.createReplicationGroup("grp-mixed", "test", AuthMode.IAM, null, "us-east-1");
-        service.createUser("u-def", "default", AuthMode.PASSWORD, List.of("def-pass"), "on ~* +@all", null);
-        service.createUser("u-iam", "iam-user", AuthMode.IAM, List.of(), "on ~* +@all", null);
-        service.createUser("u-nopass", "nopass-user", AuthMode.NO_AUTH, List.of(), "on ~* +@all", null);
-        service.modifyReplicationGroup("grp-mixed", List.of("u-def", "u-iam", "u-nopass"), null);
-
-        assertTrue(service.hasMembers("grp-mixed"));
-        assertEquals(AuthMode.PASSWORD, service.memberAuthMode("grp-mixed", "default"));
-        assertEquals(AuthMode.PASSWORD, service.memberAuthMode("grp-mixed", null));
-        assertEquals(AuthMode.IAM, service.memberAuthMode("grp-mixed", "iam-user"));
-        assertEquals(AuthMode.NO_AUTH, service.memberAuthMode("grp-mixed", "nopass-user"));
-        assertNull(service.memberAuthMode("grp-mixed", "unknown-user"));
-    }
-
-    @Test
-    void disabledUserCannotAuthenticateAndHasNoMemberAuthMode() {
-        service.createReplicationGroup("grp-disabled", "test", AuthMode.IAM, null, "us-east-1");
-        service.createUser("u-def-off", "default", AuthMode.NO_AUTH, List.of(), "off -@all", null);
-        service.createUser("u-pass-off", "disabled-pass", AuthMode.PASSWORD, List.of("secret"), "off -@all", null);
-        service.createUser("u-iam-off", "disabled-iam", AuthMode.IAM, List.of(), "off -@all", null);
-        service.createUser("u-pass-on", "enabled-pass", AuthMode.PASSWORD, List.of("secret"), "on ~* +@all", null);
-        service.modifyReplicationGroup("grp-disabled",
-                List.of("u-def-off", "u-pass-off", "u-iam-off", "u-pass-on"), null);
-
-        assertTrue(service.hasMembers("grp-disabled"));
-
-        // Disabled users have no effective memberAuthMode
-        assertNull(service.memberAuthMode("grp-disabled", "default"));
-        assertNull(service.memberAuthMode("grp-disabled", null));
-        assertNull(service.memberAuthMode("grp-disabled", "disabled-pass"));
-        assertNull(service.memberAuthMode("grp-disabled", "disabled-iam"));
-
-        // Enabled user resolves normally
-        assertEquals(AuthMode.PASSWORD, service.memberAuthMode("grp-disabled", "enabled-pass"));
-
-        // Disabled users cannot validate password
-        assertFalse(service.validatePassword("grp-disabled", "default", "any-password"));
-        assertFalse(service.validatePassword("grp-disabled", null, "any-password"));
-        assertFalse(service.validatePassword("grp-disabled", "disabled-pass", "secret"));
-
-        // Enabled user validates password successfully
-        assertTrue(service.validatePassword("grp-disabled", "enabled-pass", "secret"));
-    }
-
-    @Test
-    void deleteUserCleansUpGroupAssociationAndHasMembers() {
-        service.createReplicationGroup("grp-stale", "test", AuthMode.NO_AUTH, null, "us-east-1");
-        service.createUser("uid-stale", "user-stale", AuthMode.PASSWORD, List.of("pass123"), "on ~* +@all", null);
-        service.modifyReplicationGroup("grp-stale", List.of("uid-stale"), null);
-
-        assertTrue(service.hasMembers("grp-stale"));
-        assertTrue(service.getReplicationGroup("grp-stale").getAssociatedUserIds().contains("uid-stale"));
-
-        service.deleteUser("uid-stale");
-
-        assertFalse(service.hasMembers("grp-stale"));
-        assertFalse(service.getReplicationGroup("grp-stale").getAssociatedUserIds().contains("uid-stale"));
-    }
-
-    @Test
-    void modifyReplicationGroupRejectsDuplicateUserNames() {
-        service.createReplicationGroup("grp-dup", "test", AuthMode.NO_AUTH, null, "us-east-1");
-        service.createUser("uid-1", "same-name", AuthMode.PASSWORD, List.of("pass1"), "on ~* +@all", null);
-        service.createUser("uid-2", "same-name", AuthMode.NO_AUTH, List.of(), "on ~* +@all", null);
-
-        // Attempting to associate both users in the same call must fail with DuplicateUserName
-        AwsException ex = assertThrows(AwsException.class,
-                () -> service.modifyReplicationGroup("grp-dup", List.of("uid-1", "uid-2"), null));
-        assertEquals("DuplicateUserName", ex.getErrorCode());
-        assertEquals(400, ex.getHttpStatus());
-
-        // Associate uid-1 first
-        service.modifyReplicationGroup("grp-dup", List.of("uid-1"), null);
-        assertTrue(service.getReplicationGroup("grp-dup").getAssociatedUserIds().contains("uid-1"));
-
-        // Attempting to add uid-2 with the same username must also fail
-        AwsException ex2 = assertThrows(AwsException.class,
-                () -> service.modifyReplicationGroup("grp-dup", List.of("uid-2"), null));
-        assertEquals("DuplicateUserName", ex2.getErrorCode());
-        assertEquals(400, ex2.getHttpStatus());
-
-        // Validate password must not allow bypassing password check
-        assertTrue(service.validatePassword("grp-dup", "same-name", "pass1"));
-        assertFalse(service.validatePassword("grp-dup", "same-name", "wrong-pass"));
-    }
-
-    @Test
     void failedProvisioningRollsBackContainerAndReleasesProxyPort() {
         ElastiCacheContainerHandle handle =
                 new ElastiCacheContainerHandle("cid", "grp", "localhost", 6379);
-        when(containerManager.tryStart(anyString(), anyString(), any())).thenReturn(handle);
+        when(containerManager.tryStart(anyString(), anyString(), anyInt())).thenReturn(handle);
 
         // Proxy startup blows up after the port is reserved and the container is started.
         doThrow(new RuntimeException("proxy boom"))
@@ -771,10 +208,69 @@ class ElastiCacheServiceTest {
     }
 
     @Test
+    void containerEndpointAndMemberPortRemainReachable() {
+        when(containerDetector.isRunningInContainer()).thenReturn(true);
+        when(containerManager.tryStart(anyString(), anyString(), anyInt()))
+                .thenReturn(new ElastiCacheContainerHandle("cid", "grp", "172.20.0.3", 6379));
+
+        ReplicationGroup group = service.createReplicationGroup("grp", "test", AuthMode.NO_AUTH, null, "us-east-1");
+        service.setReplicaCount("grp", 1);
+
+        assertEquals(primaryHostname("grp"), group.getConfigurationEndpoint().address());
+        assertEquals(6379, group.getConfigurationEndpoint().port());
+        assertEquals(2, service.memberCacheClusters(group).size());
+        assertTrue(service.memberCacheClusters(group).stream().allMatch(member -> member.port() == 6379));
+
+        service.deleteReplicationGroup("grp", "final-snapshot");
+        assertEquals(1, service.listSnapshots("final-snapshot").size());
+        assertThrows(AwsException.class, () -> service.getReplicationGroup("grp"));
+    }
+
+    @Test
+    void usesAnAwsShapedHostnameWhenHostnameNotConfigured() {
+        ElastiCacheContainerManager reachableContainerManager = mock(ElastiCacheContainerManager.class);
+        ElastiCacheProxyManager reachableProxyManager = mock(ElastiCacheProxyManager.class);
+        StorageFactory storageFactory = mock(StorageFactory.class);
+        EmulatorConfig config = mock(EmulatorConfig.class);
+        DockerHostResolver dockerHostResolver = mock(DockerHostResolver.class);
+        EmulatorConfig.ServicesConfig servicesConfig = mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.ElastiCacheServiceConfig ecConfig = mock(EmulatorConfig.ElastiCacheServiceConfig.class);
+        when(config.services()).thenReturn(servicesConfig);
+        when(servicesConfig.elasticache()).thenReturn(ecConfig);
+        when(ecConfig.proxyBasePort()).thenReturn(16379);
+        when(ecConfig.proxyMaxPort()).thenReturn(16399);
+        when(ecConfig.defaultImage()).thenReturn("valkey/valkey:8");
+        when(config.hostname()).thenReturn(Optional.empty());
+        when(dockerHostResolver.resolve()).thenReturn("172.20.0.2");
+        when(storageFactory.create(anyString(), anyString(), any())).thenAnswer(inv -> AccountAwareStorageBackend.inMemory("000000000000"));
+        when(reachableContainerManager.tryStart(anyString(), anyString(), anyInt()))
+                .thenReturn(new ElastiCacheContainerHandle("cid", "grp", "172.20.0.3", 6379));
+
+        ElastiCacheService reachableService = new ElastiCacheService(
+                reachableContainerManager, reachableProxyManager, mock(ValkeyClusterFormation.class),
+                storageFactory, config, mock(Ec2Service.class),
+                new RegionResolver("us-east-1", "000000000000"), mock(KmsService.class));
+
+        ReplicationGroup group = reachableService.createReplicationGroup(
+                "grp", "test", AuthMode.NO_AUTH, null, "us-east-1");
+
+        assertEquals(primaryHostname("grp"), group.getConfigurationEndpoint().address());
+        // As on AWS the endpoint reports the default Port; host clients use the group's proxy,
+        // on the first port of the range.
+        assertEquals(6379, group.getConfigurationEndpoint().port());
+        assertEquals(16379, group.getProxyPort());
+    }
+
+    private static String primaryHostname(String groupId) {
+        return "master." + groupId + "." + ElastiCacheEndpoints.hash("000000000000", "us-east-1")
+                + ".use1.cache.localhost.floci.io";
+    }
+
+    @Test
     void failedContainerStartupCleansUpContainerByIdAndReleasesPort() {
         // Models a readiness timeout: start() throws without ever returning a handle.
         doThrow(new RuntimeException("readiness boom"))
-                .when(containerManager).tryStart(eq("grp"), anyString(), any());
+                .when(containerManager).tryStart(eq("grp"), anyString(), anyInt());
 
         assertThrows(RuntimeException.class,
                 () -> service.createReplicationGroup("grp", "test", AuthMode.PASSWORD, null, "us-east-1"));
@@ -783,7 +279,7 @@ class ElastiCacheServiceTest {
         verify(containerManager).stopByGroupId("grp");
 
         // The reserved proxy port was still released: a subsequent successful create reuses the base port.
-        when(containerManager.tryStart(anyString(), anyString(), any()))
+        when(containerManager.tryStart(anyString(), anyString(), anyInt()))
                 .thenReturn(new ElastiCacheContainerHandle("cid", "grp2", "localhost", 6379));
         ReplicationGroup recovered =
                 service.createReplicationGroup("grp2", "test", AuthMode.PASSWORD, null, "us-east-1");
@@ -796,14 +292,14 @@ class ElastiCacheServiceTest {
         return new ElastiCacheService.CreateReplicationGroupRequest(groupId, "test",
                 AuthMode.NO_AUTH, null, "us-east-1", "valkey", "8.2", "cache.t4g.micro",
                 "default.valkey8.cluster.on", null, null, numNodeGroups, replicasPerNodeGroup,
-                null, true, null, null, ReplicationGroupSettings.defaults(), Map.of(), null, null);
+                null, true, null, null, ReplicationGroupSettings.defaults(), Map.of());
     }
 
     private static ElastiCacheService.CreateReplicationGroupRequest singleNodeRequest(
             String groupId, Integer port) {
         return new ElastiCacheService.CreateReplicationGroupRequest(groupId, "test",
                 AuthMode.NO_AUTH, null, "us-east-1", null, null, null, null, null, null,
-                null, null, null, null, null, port, ReplicationGroupSettings.defaults(), Map.of(), null, null);
+                null, null, null, null, null, port, ReplicationGroupSettings.defaults(), Map.of());
     }
 
     // botocore models Port as an optional input on CreateReplicationGroup ("the port number on
@@ -814,9 +310,9 @@ class ElastiCacheServiceTest {
     void requestedPortIsHonoredWhenFreeAndInRange() {
         ReplicationGroup group = service.createReplicationGroup(singleNodeRequest("grp", 16390));
 
+        assertEquals(16390, group.getConfigurationEndpoint().port(), "The requested Port is the one reported");
         assertEquals(16390, group.getProxyPort(),
-                "A free, in-range requested Port must be the port the group reports");
-        assertEquals(16390, group.getConfigurationEndpoint().port());
+                "A free, in-range requested Port is also where host clients reach the group");
     }
 
     @Test
@@ -828,54 +324,111 @@ class ElastiCacheServiceTest {
     }
 
     @Test
-    void aSecondGroupOnATakenPortIsServedElsewhereRatherThanRefused() {
-        // AWS gives each cache a DNS name of its own, so 6379 is shared routinely and two groups
-        // on it coexist. Floci has one host and one port namespace, so the second group cannot
-        // have the port; refusing it diverged from AWS on an ordinary request, and reporting the
-        // pinned port while listening elsewhere would point its endpoint at the FIRST group's
-        // listener. It is served on a port of its own, and reports that port.
-        service.createReplicationGroup(singleNodeRequest("grp1", 16390));
-
+    void aPortAnotherGroupUsesIsHonoredWithFlociOnTheHost() {
+        // As on AWS every group has its own hostname, so a Port is never exclusive, with Floci on
+        // the host too: only the second group's host proxy moves aside.
+        ReplicationGroup first = service.createReplicationGroup(singleNodeRequest("grp1", 16390));
         ReplicationGroup second = service.createReplicationGroup(singleNodeRequest("grp2", 16390));
 
-        assertEquals(16379, second.getProxyPort(),
-                "The second group takes a free port rather than being refused");
-        assertEquals(second.getProxyPort(), second.getConfigurationEndpoint().port(),
-                "and its endpoint reports the port it is actually on, never the other group's");
+        assertEquals(16390, first.getConfigurationEndpoint().port());
+        assertEquals(16390, second.getConfigurationEndpoint().port());
+        assertEquals(16390, first.getProxyPort());
+        assertNotEquals(16390, second.getProxyPort());
+        verify(containerManager).tryStart(eq("grp2"), anyString(), eq(16390));
     }
 
     @Test
-    void aPortOutsideTheProxyRangeIsServedElsewhereRatherThanRefused() {
-        // The range bounds what Floci may listen on. It never bounded what AWS accepts.
+    void aPortOutsideTheProxyRangeIsHonoredWithFlociOnTheHost() {
+        // AWS accepts any Port from 1 to 65535. The engine listens on it; only the host proxy is
+        // confined to the range.
         ReplicationGroup group = service.createReplicationGroup(singleNodeRequest("grp", 9999));
 
+        assertEquals(9999, group.getConfigurationEndpoint().port());
         assertEquals(16379, group.getProxyPort());
-        assertEquals(16379, group.getConfigurationEndpoint().port(),
-                "An endpoint never advertises a port nothing is listening on");
-    }
-
-    // Both arms of the one range check that is left. The bound is RdsService's, applied to the
-    // same argument; nothing here establishes it is ElastiCache's real AWS limit.
-    @Test
-    void aPortBelowTheAcceptedRangeIsRejected() {
-        AwsException thrown = assertThrows(AwsException.class,
-                () -> service.createReplicationGroup(singleNodeRequest("grp", 80)));
-
-        assertEquals("InvalidParameterValue", thrown.getErrorCode());
-        assertTrue(thrown.getMessage().contains("1150"));
+        verify(containerManager).tryStart(eq("grp"), anyString(), eq(9999));
     }
 
     @Test
-    void aPortAboveTheAcceptedRangeIsRejected() {
+    void theDefaultPortIsSharedByEveryGroupWithFlociOnTheHost() {
+        ReplicationGroup first = service.createReplicationGroup(singleNodeRequest("grp1", 6379));
+        ReplicationGroup second = service.createReplicationGroup(singleNodeRequest("grp2", null));
+
+        assertEquals(6379, first.getConfigurationEndpoint().port());
+        assertEquals(6379, second.getConfigurationEndpoint().port());
+        assertTrue(service.memberCacheClusters(second).stream().allMatch(member -> member.port() == 6379));
+    }
+
+    @Test
+    void anInvalidPortIsRejectedWithFlociOnTheHost() {
         AwsException thrown = assertThrows(AwsException.class,
                 () -> service.createReplicationGroup(singleNodeRequest("grp", 70000)));
 
         assertEquals("InvalidParameterValue", thrown.getErrorCode());
-        assertTrue(thrown.getMessage().contains("65535"));
+        verify(containerManager, never()).tryStart(anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    void aPortAnotherGroupUsesIsHonoredWithFlociInDocker() {
+        // In Docker every group has its own engine container and address, as every AWS group has
+        // its own hostname, so a Port is never exclusive: a replacement with the same Port is
+        // created while the old group still exists.
+        when(containerDetector.isRunningInContainer()).thenReturn(true);
+        ReplicationGroup first = service.createReplicationGroup(singleNodeRequest("grp1", 16390));
+        ReplicationGroup second = service.createReplicationGroup(singleNodeRequest("grp2", 16390));
+
+        assertEquals(16390, first.getConfigurationEndpoint().port());
+        assertEquals(16390, second.getConfigurationEndpoint().port());
+        assertEquals(16390, second.getEnginePort());
+        assertEquals(16390, first.getProxyPort());
+        assertTrue(second.getProxyPort() != 16390, "The second host proxy moves aside, the Port does not");
+        assertFalse(first.getConfigurationEndpoint().address().equals(second.getConfigurationEndpoint().address()));
+        verify(containerManager).tryStart(eq("grp2"), anyString(), eq(16390));
+    }
+
+    @Test
+    void theDefaultPortIsSharedByEveryGroupWithFlociInDocker() {
+        when(containerDetector.isRunningInContainer()).thenReturn(true);
+        ReplicationGroup first = service.createReplicationGroup(singleNodeRequest("grp1", 6379));
+        ReplicationGroup second = service.createReplicationGroup(singleNodeRequest("grp2", null));
+
+        assertEquals(6379, first.getConfigurationEndpoint().port());
+        assertEquals(6379, second.getConfigurationEndpoint().port());
+        assertTrue(service.memberCacheClusters(second).stream().allMatch(member -> member.port() == 6379));
+    }
+
+    @Test
+    void aPortOutsideTheProxyRangeIsTheEnginePortWithFlociInDocker() {
+        when(containerDetector.isRunningInContainer()).thenReturn(true);
+        ReplicationGroup group = service.createReplicationGroup(singleNodeRequest("grp", 9999));
+
+        assertEquals(9999, group.getConfigurationEndpoint().port());
+        assertEquals(16379, group.getProxyPort());
+        verify(containerManager).tryStart(eq("grp"), anyString(), eq(9999));
+    }
+
+    @Test
+    void aTakenDefaultPortMovesTheHostProxyInsteadOfFailingTheCreateWithFlociInDocker() {
+        // Something else on this machine already listens on the group's Port: only the host
+        // proxy moves, the group keeps reporting its Port, which its own container serves.
+        when(containerDetector.isRunningInContainer()).thenReturn(true);
+        when(ecConfigOf(config).proxyBasePort()).thenReturn(6379);
+        doThrow(new RuntimeException("Address already in use")).doNothing()
+                .when(proxyManager).startProxy(eq("grp"), any(), eq(6379), anyString(), anyInt(), any());
+
+        ReplicationGroup group = service.createReplicationGroup(singleNodeRequest("grp", null));
+
+        assertEquals(6379, group.getConfigurationEndpoint().port());
+        assertTrue(group.getProxyPort() != 6379);
+        verify(proxyManager).startProxy(eq("grp"), any(), eq(group.getProxyPort()), anyString(), anyInt(), any());
+    }
+
+    private static EmulatorConfig.ElastiCacheServiceConfig ecConfigOf(EmulatorConfig config) {
+        return config.services().elasticache();
     }
 
     @Test
     void anUnpinnedCreateStillFallsBackWhenTheBasePortIsTaken() {
+        // The fallback survives for callers that named no port: only an explicit one is refused.
         service.createReplicationGroup(singleNodeRequest("grp1", 16379));
 
         ReplicationGroup second = service.createReplicationGroup(singleNodeRequest("grp2", null));
@@ -893,7 +446,7 @@ class ElastiCacheServiceTest {
                 new ElastiCacheService.CreateReplicationGroupRequest("grp", "test",
                         AuthMode.NO_AUTH, null, "us-east-1", "valkey", "8.2", "cache.t4g.micro",
                         "default.valkey8.cluster.on", null, null, 2, 1,
-                        null, true, null, 16390, ReplicationGroupSettings.defaults(), Map.of(), null, null));
+                        null, true, null, 16390, ReplicationGroupSettings.defaults(), Map.of()));
 
         assertEquals(16390, group.getConfigurationEndpoint().port());
         assertEquals(16390, group.getClusterNodes().getFirst().getProxyPort());
@@ -903,7 +456,7 @@ class ElastiCacheServiceTest {
     }
 
     private void stubPerNodeContainers() {
-        when(containerManager.start(anyString(), anyString(), any(), any())).thenAnswer(inv ->
+        when(containerManager.start(anyString(), anyString(), any())).thenAnswer(inv ->
                 new ElastiCacheContainerHandle("cid-" + inv.getArgument(0, String.class),
                         inv.getArgument(0, String.class), "localhost", 6379));
     }
@@ -933,7 +486,7 @@ class ElastiCacheServiceTest {
         assertEquals(16379, group.getConfigurationEndpoint().port());
 
         verify(clusterFormation).form(eq("grp"), any(), eq(2));
-        verify(containerManager, times(4)).start(anyString(), anyString(), any(), any());
+        verify(containerManager, times(4)).start(anyString(), anyString(), any());
         verify(proxyManager, times(4)).startProxy(anyString(), any(), anyInt(), anyString(), anyInt(), any());
     }
 
@@ -955,7 +508,7 @@ class ElastiCacheServiceTest {
 
         assertEquals("NodeGroupsPerReplicationGroupQuotaExceeded", ex.getErrorCode());
         assertEquals(400, ex.getHttpStatus());
-        verify(containerManager, never()).start(anyString(), anyString(), any(), any());
+        verify(containerManager, never()).start(anyString(), anyString(), any());
     }
 
     @Test
@@ -968,7 +521,7 @@ class ElastiCacheServiceTest {
         assertEquals(List.of("grp-001"),
                 service.memberCacheClusters(group).stream()
                         .map(ElastiCacheService.MemberCacheCluster::cacheClusterId).toList());
-        verify(containerManager, never()).start(anyString(), anyString(), any(), any());
+        verify(containerManager, never()).start(anyString(), anyString(), any());
     }
 
     @Test
@@ -1014,7 +567,7 @@ class ElastiCacheServiceTest {
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<String>> flags = ArgumentCaptor.forClass(List.class);
-        verify(containerManager).start(eq("grp-0001-001"), anyString(), flags.capture(), any());
+        verify(containerManager).start(eq("grp-0001-001"), anyString(), flags.capture());
         List<String> captured = flags.getValue();
         assertEquals("localhost", flagValue(captured, "--cluster-announce-hostname"));
         assertEquals("hostname", flagValue(captured, "--cluster-preferred-endpoint-type"));
@@ -1031,7 +584,7 @@ class ElastiCacheServiceTest {
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<String>> flags = ArgumentCaptor.forClass(List.class);
-        verify(containerManager).start(eq("grp-0001-001"), anyString(), flags.capture(), any());
+        verify(containerManager).start(eq("grp-0001-001"), anyString(), flags.capture());
         assertEquals("localhost.floci.io", flagValue(flags.getValue(), "--cluster-announce-hostname"));
         assertEquals("localhost.floci.io", group.getConfigurationEndpoint().address());
     }
@@ -1066,19 +619,19 @@ class ElastiCacheServiceTest {
         when(config.hostname()).thenReturn(Optional.of("localhost"));
         return new ElastiCacheService(containerManager, proxyManager, clusterFormation,
                 storageFactory, config, mock(Ec2Service.class),
-                new RegionResolver("us-east-1", "000000000000"), mock(KmsService.class), new ElastiCacheProvisioningIds());
+                new RegionResolver("us-east-1", "000000000000"), mock(KmsService.class));
     }
 
     private static void stubPerNodeContainers(ElastiCacheContainerManager containerManager) {
-        when(containerManager.start(anyString(), anyString(), any(), any())).thenAnswer(inv ->
+        when(containerManager.start(anyString(), anyString(), any())).thenAnswer(inv ->
                 new ElastiCacheContainerHandle("cid-" + inv.getArgument(0, String.class),
                         inv.getArgument(0, String.class), "localhost", 6379));
-        when(containerManager.start(anyString(), anyString(), any()))
+        when(containerManager.start(anyString(), anyString()))
                 .thenReturn(new ElastiCacheContainerHandle("cid", "grp", "localhost", 6379));
     }
 
     private static void stubSingleNodeContainer(ElastiCacheContainerManager containerManager) {
-        when(containerManager.tryStart(anyString(), anyString(), any())).thenAnswer(inv ->
+        when(containerManager.tryStart(anyString(), anyString(), anyInt())).thenAnswer(inv ->
                 new ElastiCacheContainerHandle("cid-" + inv.getArgument(0, String.class),
                         inv.getArgument(0, String.class), "localhost", 6379));
     }
@@ -1105,12 +658,15 @@ class ElastiCacheServiceTest {
 
         restarted.restorePersistedRuntime().join();
 
-        verify(restartedContainers).tryStart(eq("grp"), anyString(), any());
+        verify(restartedContainers).tryStart(eq("grp"), anyString(), anyInt());
         verify(restartedProxies).startProxy(eq("grp"), eq(AuthMode.PASSWORD), eq(16379),
                 eq("localhost"), eq(6379), any());
         ReplicationGroup restored = restarted.getReplicationGroup("grp");
         assertEquals(ReplicationGroupStatus.AVAILABLE, restored.getStatus());
-        assertEquals(16379, restored.getConfigurationEndpoint().port());
+        assertEquals(6379, restored.getConfigurationEndpoint().port(),
+                "The endpoint reports the group's Port, not where its host proxy listens");
+        assertEquals(16379, restored.getProxyPort());
+        assertEquals(primaryHostname("grp"), restored.getConfigurationEndpoint().address());
         assertEquals("cid-grp", restored.getContainerId(),
                 "A restored group must track the container it actually has");
 
@@ -1121,259 +677,12 @@ class ElastiCacheServiceTest {
     }
 
     @Test
-    void restorePersistedRuntimeRestoresEveryAccountUnderItsOwnAccount() {
-        String other = "111111111111";
-        StorageFactory storageFactory = sharedStorageFactory();
-        ElastiCacheContainerManager beforeRestart = mock(ElastiCacheContainerManager.class);
-        stubSingleNodeContainer(beforeRestart);
-        ElastiCacheService before = serviceWith(storageFactory, beforeRestart,
-                mock(ElastiCacheProxyManager.class), mock(ValkeyClusterFormation.class));
-        before.createReplicationGroup("grp", "test", AuthMode.NO_AUTH, null, "us-east-1");
-        before.createCacheCluster(cacheClusterRequest("cc", "redis", 1));
-        // Move both records to a non-default account, as a request under that account would have stored them.
-        AccountAwareStorageBackend<ReplicationGroup> groups =
-                storageFactory.<ReplicationGroup>create("elasticache", "elasticache-groups.json", null);
-        AccountAwareStorageBackend<CacheCluster> clusters =
-                storageFactory.<CacheCluster>create("elasticache", "elasticache-redis-clusters.json", null);
-        groups.putForAccount(other, "grp", groups.getForAccount("000000000000", "grp").orElseThrow());
-        groups.deleteForAccount("000000000000", "grp");
-        clusters.putForAccount(other, "cc", clusters.getForAccount("000000000000", "cc").orElseThrow());
-        clusters.deleteForAccount("000000000000", "cc");
-
-        ElastiCacheContainerManager restartedContainers = mock(ElastiCacheContainerManager.class);
-        stubSingleNodeContainer(restartedContainers);
-        ElastiCacheService restarted = serviceWith(storageFactory, restartedContainers,
-                mock(ElastiCacheProxyManager.class), mock(ValkeyClusterFormation.class));
-
-        restarted.restorePersistedRuntime().join();
-
-        verify(restartedContainers).tryStart(eq("grp"), anyString(), any());
-        verify(restartedContainers).tryStart(eq("cc"), anyString(), any());
-        assertEquals(ReplicationGroupStatus.AVAILABLE,
-                groups.getForAccount(other, "grp").orElseThrow().getStatus());
-        assertEquals(CacheClusterStatus.AVAILABLE,
-                clusters.getForAccount(other, "cc").orElseThrow().getCacheClusterStatus());
-        assertTrue(groups.getForAccount("000000000000", "grp").isEmpty(),
-                "A restore must not copy another account's group into the default account");
-        assertTrue(clusters.getForAccount("000000000000", "cc").isEmpty(),
-                "A restore must not copy another account's cluster into the default account");
-
-        ReplicationGroup next =
-                restarted.createReplicationGroup("grp2", "test", AuthMode.NO_AUTH, null, "us-east-1");
-        assertEquals(16381, next.getProxyPort(),
-                "Both restored records' ports (16379, 16380) must be reserved again");
-    }
-
-    @Test
-    void restoreMigratesUnprefixedLegacyRecordsInsteadOfRestoringThemEveryBoot() {
-        InMemoryStorage<String, Object> rawGroups = new InMemoryStorage<>();
-        InMemoryStorage<String, Object> rawClusters = new InMemoryStorage<>();
-        StorageFactory storageFactory = mock(StorageFactory.class);
-        Map<String, Object> backends = new ConcurrentHashMap<>();
-        backends.put("elasticache-groups.json", new AccountAwareStorageBackend<>(rawGroups, null, "000000000000"));
-        backends.put("elasticache-redis-clusters.json",
-                new AccountAwareStorageBackend<>(rawClusters, null, "000000000000"));
-        when(storageFactory.create(anyString(), anyString(), any())).thenAnswer(inv ->
-                backends.computeIfAbsent(inv.getArgument(1, String.class),
-                        key -> AccountAwareStorageBackend.inMemory("000000000000")));
-        ElastiCacheContainerManager beforeRestart = mock(ElastiCacheContainerManager.class);
-        stubSingleNodeContainer(beforeRestart);
-        ElastiCacheService before = serviceWith(storageFactory, beforeRestart,
-                mock(ElastiCacheProxyManager.class), mock(ValkeyClusterFormation.class));
-        before.createReplicationGroup("grp", "test", AuthMode.NO_AUTH, null, "us-east-1");
-        before.createCacheCluster(cacheClusterRequest("cc", "redis", 1));
-        // Rewrite both records under the unprefixed key data from before account prefixing used.
-        rawGroups.put("grp", rawGroups.get("000000000000/grp").orElseThrow());
-        rawGroups.delete("000000000000/grp");
-        rawClusters.put("cc", rawClusters.get("000000000000/cc").orElseThrow());
-        rawClusters.delete("000000000000/cc");
-
-        for (int boot = 1; boot <= 2; boot++) {
-            ElastiCacheContainerManager containers = mock(ElastiCacheContainerManager.class);
-            stubSingleNodeContainer(containers);
-            serviceWith(storageFactory, containers, mock(ElastiCacheProxyManager.class),
-                    mock(ValkeyClusterFormation.class)).restorePersistedRuntime().join();
-            verify(containers, times(1)).tryStart(eq("grp"), anyString(), any());
-            verify(containers, times(1)).tryStart(eq("cc"), anyString(), any());
-        }
-        assertEquals(Set.of("000000000000/grp"), rawGroups.keys(),
-                "The legacy key must be migrated, not left beside the restored copy");
-        assertEquals(Set.of("000000000000/cc"), rawClusters.keys(),
-                "The legacy key must be migrated, not left beside the restored copy");
-    }
-
-    /**
-     * Storage whose implicit account is whatever {@code account} holds, as a request's context
-     * sets it, so a test can act as another account and then fall back to the default one, the
-     * way the proxy thread does.
-     */
-    private static StorageFactory storageFollowing(AtomicReference<String> account) {
-        RequestContext requestContext = mock(RequestContext.class);
-        when(requestContext.getAccountId()).thenAnswer(inv -> account.get());
-        @SuppressWarnings("unchecked")
-        Instance<RequestContext> requestContextInstance = mock(Instance.class);
-        when(requestContextInstance.get()).thenReturn(requestContext);
-        StorageFactory storageFactory = mock(StorageFactory.class);
-        Map<String, Object> backends = new ConcurrentHashMap<>();
-        when(storageFactory.create(anyString(), anyString(), any())).thenAnswer(inv ->
-                backends.computeIfAbsent(inv.getArgument(1, String.class), key ->
-                        new AccountAwareStorageBackend<>(new InMemoryStorage<>(), requestContextInstance,
-                                "000000000000")));
-        return storageFactory;
-    }
-
-    private static void seedPasswordGroup(StorageFactory storageFactory, String accountId, int port) {
-        ReplicationGroup group = new ReplicationGroup();
-        group.setReplicationGroupId("grp");
-        group.setStatus(ReplicationGroupStatus.AVAILABLE);
-        group.setProxyPort(port);
-        group.setAuthMode(AuthMode.PASSWORD);
-        group.setAuthToken("secret-token");
-        storageFactory.<ReplicationGroup>create("elasticache", "elasticache-groups.json", null)
-                .putForAccount(accountId, "grp", group);
-    }
-
-    @Test
-    void restoredGroupOfAnotherAccountAcceptsItsPassword() {
-        StorageFactory storageFactory = storageFollowing(new AtomicReference<>("000000000000"));
-        ElastiCacheService svc = serviceWith(storageFactory, containerManager, proxyManager, clusterFormation);
-        seedPasswordGroup(storageFactory, "111111111111", 16379);
-
-        svc.restorePersistedRuntime().join();
-
-        ArgumentCaptor<ElastiCacheAuthProxy.PasswordValidator> validator =
-                ArgumentCaptor.forClass(ElastiCacheAuthProxy.PasswordValidator.class);
-        verify(proxyManager).startProxy(eq("grp"), eq(AuthMode.PASSWORD), eq(16379), anyString(), anyInt(),
-                validator.capture());
-        assertTrue(validator.getValue().validatePassword(null, "secret-token"));
-        assertEquals("111111111111", validator.getValue().ownerAccountId(),
-                "IAM tokens must be checked against the restored group's own account");
-    }
-
-    @Test
-    void deletingSameNamedRestoredGroupsOfTwoAccountsReleasesBothPorts() {
-        AtomicReference<String> account = new AtomicReference<>("000000000000");
-        StorageFactory storageFactory = storageFollowing(account);
-        ElastiCacheService svc = serviceWith(storageFactory, containerManager, proxyManager, clusterFormation);
-        seedPasswordGroup(storageFactory, "000000000000", 16379);
-        seedPasswordGroup(storageFactory, "111111111111", 16380);
-        svc.restorePersistedRuntime().join();
-
-        svc.deleteReplicationGroup("grp");
-        account.set("111111111111");
-        svc.deleteReplicationGroup("grp");
-
-        assertEquals(16379, svc.createReplicationGroup("new1", "test", AuthMode.NO_AUTH, null,
-                "us-east-1").getProxyPort());
-        assertEquals(16380, svc.createReplicationGroup("new2", "test", AuthMode.NO_AUTH, null,
-                "us-east-1").getProxyPort());
-    }
-
-    @Test
-    void restoredCacheClusterOfAnotherAccountAcceptsItsPassword() {
-        StorageFactory storageFactory = storageFollowing(new AtomicReference<>("000000000000"));
-        ElastiCacheService svc = serviceWith(storageFactory, containerManager, proxyManager, clusterFormation);
-        CacheCluster cluster = new CacheCluster();
-        cluster.setCacheClusterId("cc");
-        cluster.setCacheClusterStatus(CacheClusterStatus.AVAILABLE);
-        cluster.setConfigurationEndpoint(new Endpoint("localhost", 16379));
-        cluster.setAuthMode(AuthMode.PASSWORD);
-        cluster.setAuthToken("secret-token");
-        storageFactory.<CacheCluster>create("elasticache", "elasticache-redis-clusters.json", null)
-                .putForAccount("111111111111", "cc", cluster);
-
-        svc.restorePersistedRuntime().join();
-
-        ArgumentCaptor<ElastiCacheAuthProxy.PasswordValidator> validator =
-                ArgumentCaptor.forClass(ElastiCacheAuthProxy.PasswordValidator.class);
-        verify(proxyManager).startProxy(eq("cc"), eq(AuthMode.PASSWORD), eq(16379), anyString(), anyInt(),
-                validator.capture());
-        assertTrue(validator.getValue().validatePassword(null, "secret-token"));
-    }
-
-    @Test
-    void groupCreatedUnderAnotherAccountAcceptsItsPasswordOutsideTheRequest() {
-        AtomicReference<String> account = new AtomicReference<>("111111111111");
-        ElastiCacheService svc = serviceWith(storageFollowing(account), containerManager, proxyManager,
-                clusterFormation);
-        svc.createReplicationGroup("grp", "test", AuthMode.PASSWORD, "secret-token", "us-east-1");
-        ArgumentCaptor<ElastiCacheAuthProxy.PasswordValidator> validator =
-                ArgumentCaptor.forClass(ElastiCacheAuthProxy.PasswordValidator.class);
-        verify(proxyManager).startProxy(eq("grp"), eq(AuthMode.PASSWORD), anyInt(), anyString(), anyInt(),
-                validator.capture());
-
-        // The proxy authenticates on its own thread, where the store falls back to the default account.
-        account.set("000000000000");
-        assertTrue(validator.getValue().validatePassword(null, "secret-token"));
-        assertEquals("111111111111", validator.getValue().ownerAccountId());
-    }
-
-    @Test
-    void userGroupMemberOfAnotherAccountAuthenticatesOutsideTheRequest() {
-        AtomicReference<String> account = new AtomicReference<>("111111111111");
-        ElastiCacheService svc = serviceWith(storageFollowing(account), containerManager, proxyManager,
-                clusterFormation);
-        svc.createReplicationGroup("grp", "test", AuthMode.PASSWORD, null, "us-east-1");
-        svc.createUser("default-user-id", "default", AuthMode.PASSWORD, List.of("default-pass"),
-                "on ~* +@all", null);
-        svc.createUser("app-user-id", "app", AuthMode.PASSWORD, List.of("app-pass"), "on ~* +@all", null);
-        svc.createUserGroup("app-group", "redis", List.of("default-user-id", "app-user-id"), "us-east-1");
-        svc.modifyReplicationGroup("grp", List.of("app-group"), null);
-        ArgumentCaptor<ElastiCacheAuthProxy.PasswordValidator> validator =
-                ArgumentCaptor.forClass(ElastiCacheAuthProxy.PasswordValidator.class);
-        verify(proxyManager).startProxy(eq("grp"), any(), anyInt(), anyString(), anyInt(), validator.capture());
-
-        // The proxy authenticates on its own thread, where the store falls back to the default account.
-        account.set("000000000000");
-        assertTrue(validator.getValue().validatePassword("app", "app-pass"));
-    }
-
-    @Test
-    void groupOfAnotherAccountDroppingItsLastUserGroupChangesTheProxyAuthModeOutsideTheRequest() {
-        AtomicReference<String> account = new AtomicReference<>("111111111111");
-        ElastiCacheService svc = serviceWith(storageFollowing(account), containerManager, proxyManager,
-                clusterFormation);
-        svc.createReplicationGroup("grp", "test", AuthMode.PASSWORD, "group-token", "us-east-1");
-        svc.createUser("default-user-id", "default", AuthMode.PASSWORD, List.of("default-pass"),
-                "on ~* +@all", null);
-        svc.createUserGroup("redis-users", "redis", List.of("default-user-id"), "us-east-1");
-        svc.modifyReplicationGroup("grp", List.of("redis-users"), null, false, true,
-                ReplicationGroupSettings.unchanged());
-        svc.modifyReplicationGroup("grp", null, List.of("redis-users"));
-        ArgumentCaptor<ElastiCacheAuthProxy.PasswordValidator> validator =
-                ArgumentCaptor.forClass(ElastiCacheAuthProxy.PasswordValidator.class);
-        verify(proxyManager).startProxy(eq("grp"), eq(AuthMode.PASSWORD), anyInt(), anyString(), anyInt(),
-                validator.capture());
-
-        // ModifyReplicationGroup does not restart the proxy, which reads the mode on its own
-        // thread, where the store falls back to the default account.
-        account.set("000000000000");
-        assertEquals(AuthMode.NO_AUTH, validator.getValue().authMode());
-    }
-
-    @Test
-    void cacheClusterCreatedUnderAnotherAccountAcceptsItsPasswordOutsideTheRequest() {
-        AtomicReference<String> account = new AtomicReference<>("111111111111");
-        ElastiCacheService svc = serviceWith(storageFollowing(account), containerManager, proxyManager,
-                clusterFormation);
-        svc.createCacheCluster(cacheClusterRequest("cc", "redis", null, AuthMode.PASSWORD, "secret-token", null));
-        ArgumentCaptor<ElastiCacheAuthProxy.PasswordValidator> validator =
-                ArgumentCaptor.forClass(ElastiCacheAuthProxy.PasswordValidator.class);
-        verify(proxyManager).startProxy(eq("cc"), eq(AuthMode.PASSWORD), anyInt(), anyString(), anyInt(),
-                validator.capture());
-
-        // The proxy authenticates on its own thread, where the store falls back to the default account.
-        account.set("000000000000");
-        assertTrue(validator.getValue().validatePassword(null, "secret-token"));
-    }
-
-    @Test
     void singleNodeRestoreFailureReportsCreateFailedAndReleasesThePort() {
         StorageFactory storageFactory = storageWithSingleNodeGroup("grp");
 
         ElastiCacheContainerManager restartedContainers = mock(ElastiCacheContainerManager.class);
         // Only the restore fails: the create that checks the port was freed must still get through.
-        when(restartedContainers.tryStart(eq("grp"), anyString(), any()))
+        when(restartedContainers.tryStart(eq("grp"), anyString(), anyInt()))
                 .thenThrow(new RuntimeException("container failed"));
         ElastiCacheProxyManager restartedProxies = mock(ElastiCacheProxyManager.class);
         ElastiCacheService restarted = serviceWith(storageFactory, restartedContainers,
@@ -1398,7 +707,7 @@ class ElastiCacheServiceTest {
         StorageFactory storageFactory = storageWithSingleNodeGroup("grp");
 
         ElastiCacheContainerManager restartedContainers = mock(ElastiCacheContainerManager.class);
-        when(restartedContainers.tryStart(anyString(), anyString(), any())).thenReturn(null);
+        when(restartedContainers.tryStart(anyString(), anyString(), anyInt())).thenReturn(null);
         ElastiCacheProxyManager restartedProxies = mock(ElastiCacheProxyManager.class);
         ElastiCacheService restarted = serviceWith(storageFactory, restartedContainers,
                 restartedProxies, mock(ValkeyClusterFormation.class));
@@ -1424,7 +733,7 @@ class ElastiCacheServiceTest {
                 new ElastiCacheContainerHandle("cid-grp-restored", "grp", "localhost", 6379);
         // The delete lands in the window the group's monitor closes: the container is up, the
         // record has not been written back yet.
-        when(restartedContainers.tryStart(eq("grp"), anyString(), any())).thenAnswer(inv -> {
+        when(restartedContainers.tryStart(eq("grp"), anyString(), anyInt())).thenAnswer(inv -> {
             restarted.deleteReplicationGroup("grp");
             // Takes the port that delete just freed, so a restore that released it a second
             // time would hand the same port out twice.
@@ -1462,7 +771,7 @@ class ElastiCacheServiceTest {
 
         restarted.restorePersistedRuntime().join();
 
-        verify(restartedContainers, never()).tryStart(anyString(), anyString(), any());
+        verify(restartedContainers, never()).tryStart(anyString(), anyString(), anyInt());
         assertEquals(ReplicationGroupStatus.DELETING, restarted.getReplicationGroup("grp").getStatus());
     }
 
@@ -1484,7 +793,7 @@ class ElastiCacheServiceTest {
 
         restarted.restorePersistedRuntime().join();
 
-        verify(restartedContainers, times(4)).start(anyString(), anyString(), any(), any());
+        verify(restartedContainers, times(4)).start(anyString(), anyString(), any());
         verify(restartedFormation).form(eq("grp"), any(), eq(2));
         verify(restartedProxies, times(4)).startProxy(anyString(), any(), anyInt(), anyString(), anyInt(), any());
         ReplicationGroup restored = restarted.getReplicationGroup("grp");
@@ -1508,9 +817,9 @@ class ElastiCacheServiceTest {
                 .createReplicationGroup(clusterRequest("grp", 2, 0));
 
         ElastiCacheContainerManager restartedContainers = mock(ElastiCacheContainerManager.class);
-        when(restartedContainers.start(anyString(), anyString(), any(), any()))
-                .thenThrow(new RuntimeException("docker down"));
         when(restartedContainers.start(anyString(), anyString(), any()))
+                .thenThrow(new RuntimeException("docker down"));
+        when(restartedContainers.start(anyString(), anyString()))
                 .thenReturn(new ElastiCacheContainerHandle("cid", "grp", "localhost", 6379));
         ElastiCacheProxyManager restartedProxies = mock(ElastiCacheProxyManager.class);
         ElastiCacheService restarted = serviceWith(storageFactory, restartedContainers,
@@ -1542,7 +851,7 @@ class ElastiCacheServiceTest {
         ElastiCacheContainerManager restartedContainers = mock(ElastiCacheContainerManager.class);
         CountDownLatch restoreStarted = new CountDownLatch(1);
         CountDownLatch releaseRestore = new CountDownLatch(1);
-        when(restartedContainers.start(anyString(), anyString(), any(), any())).thenAnswer(inv -> {
+        when(restartedContainers.start(anyString(), anyString(), any())).thenAnswer(inv -> {
             restoreStarted.countDown();
             releaseRestore.await(5, TimeUnit.SECONDS);
             return new ElastiCacheContainerHandle("cid-" + inv.getArgument(0, String.class),
@@ -1566,7 +875,7 @@ class ElastiCacheServiceTest {
     void concurrentCreateForSameGroupIdIsRejectedWhileFirstIsProvisioning() throws InterruptedException {
         CountDownLatch startedLatch = new CountDownLatch(1);
         CountDownLatch releaseLatch = new CountDownLatch(1);
-        when(containerManager.tryStart(anyString(), anyString(), any())).thenAnswer(inv -> {
+        when(containerManager.tryStart(anyString(), anyString(), anyInt())).thenAnswer(inv -> {
             startedLatch.countDown();
             assertTrue(releaseLatch.await(5, TimeUnit.SECONDS), "test timed out waiting for release");
             return new ElastiCacheContainerHandle("cid", "grp", "localhost", 6379);
@@ -1579,7 +888,7 @@ class ElastiCacheServiceTest {
 
         AwsException ex = assertThrows(AwsException.class,
                 () -> service.createReplicationGroup("grp", "test", AuthMode.PASSWORD, null, "us-east-1"));
-        assertEquals("ReplicationGroupAlreadyExists", ex.jsonType());
+        assertEquals("ReplicationGroupAlreadyExistsFault", ex.jsonType());
         verify(containerManager, never()).stop(any());
         verify(containerManager, never()).stopByGroupId(anyString());
 
@@ -1638,7 +947,7 @@ class ElastiCacheServiceTest {
         assertEquals("InvalidParameterValue", missing.getErrorCode());
         assertEquals("KMS key does not exist with key id: alias/does-not-exist", missing.getMessage());
         assertThrows(AwsException.class, () -> service.getReplicationGroup("g1"));
-        verify(containerManager, never()).start(anyString(), anyString(), any());
+        verify(containerManager, never()).start(anyString(), anyString());
 
         AwsException combination = assertThrows(AwsException.class, () -> service.createReplicationGroup(
                 "g1", "d", AuthMode.NO_AUTH, null, "us-east-1",
@@ -1693,10 +1002,10 @@ class ElastiCacheServiceTest {
         assertEquals("01:00-02:00", service.getReplicationGroup("g1").getSnapshotWindow());
 
         // a refusal later in the same request must not leave the earlier part applied: the store
-        // hands out its own object, so settings applied before the user group check would stay visible
-        AwsException unknownUserGroup = assertThrows(AwsException.class, () -> service.modifyReplicationGroup(
-                "g1", List.of("no-such-user-group"), null, new ReplicationGroupSettings(null, null, 9, "03:00-04:00")));
-        assertEquals("UserGroupNotFound", unknownUserGroup.getErrorCode());
+        // hands out its own object, so settings applied before the user check would stay visible
+        AwsException unknownUser = assertThrows(AwsException.class, () -> service.modifyReplicationGroup(
+                "g1", List.of("no-such-user"), null, new ReplicationGroupSettings(null, null, 9, "03:00-04:00")));
+        assertEquals("UserNotFoundFault", unknownUser.getErrorCode());
         assertEquals(3, service.getReplicationGroup("g1").getSnapshotRetentionLimit());
         assertEquals("01:00-02:00", service.getReplicationGroup("g1").getSnapshotWindow());
     }
@@ -1713,7 +1022,7 @@ class ElastiCacheServiceTest {
                 .thenAnswer(inv -> AccountAwareStorageBackend.inMemory("000000000000"));
         ElastiCacheService svc = new ElastiCacheService(containerManager, proxyManager, clusterFormation,
                 factory, config, mock(Ec2Service.class),
-                new RegionResolver("us-east-1", "000000000000"), kmsService, provisioningIds);
+                new RegionResolver("us-east-1", "000000000000"), kmsService);
         svc.createReplicationGroup("g1", "d", AuthMode.NO_AUTH, null, "us-east-1");
 
         pausing.pauseOn(PausingStorageBackend.Call.PUT, "g1");
@@ -1749,7 +1058,7 @@ class ElastiCacheServiceTest {
         return new ElastiCacheService.CreateReplicationGroupRequest(groupId, "test",
                 AuthMode.NO_AUTH, null, "us-east-1", null, null, null,
                 parameterGroupName, null, null, null, null,
-                null, null, null, null, ReplicationGroupSettings.defaults(), Map.of(), null, null);
+                null, null, null, null, ReplicationGroupSettings.defaults(), Map.of());
     }
 
     @Test
@@ -1759,8 +1068,8 @@ class ElastiCacheServiceTest {
 
         assertEquals("CacheParameterGroupNotFound", ex.getErrorCode());
         assertEquals(404, ex.getHttpStatus());
+        verify(containerManager, never()).start(anyString(), anyString());
         verify(containerManager, never()).start(anyString(), anyString(), any());
-        verify(containerManager, never()).start(anyString(), anyString(), any(), any());
         assertThrows(AwsException.class, () -> service.getReplicationGroup("grp"));
     }
 
@@ -1786,7 +1095,7 @@ class ElastiCacheServiceTest {
         service.createCacheParameterGroup("custom-pg", "redis7", "in use", Map.of());
         CountDownLatch startedLatch = new CountDownLatch(1);
         CountDownLatch releaseLatch = new CountDownLatch(1);
-        when(containerManager.tryStart(anyString(), anyString(), any())).thenAnswer(inv -> {
+        when(containerManager.tryStart(anyString(), anyString(), anyInt())).thenAnswer(inv -> {
             startedLatch.countDown();
             assertTrue(releaseLatch.await(5, TimeUnit.SECONDS), "test timed out waiting for release");
             return new ElastiCacheContainerHandle("cid", "grp", "localhost", 6379);
@@ -1832,11 +1141,11 @@ class ElastiCacheServiceTest {
                 new AccountAwareStorageBackend<>(new InMemoryStorage<>(), requestContextInstance, "000000000000"));
         ElastiCacheService svc = new ElastiCacheService(containerManager, proxyManager, clusterFormation,
                 factory, config, mock(Ec2Service.class),
-                new RegionResolver("us-east-1", "000000000000"), kmsService, provisioningIds);
+                new RegionResolver("us-east-1", "000000000000"), kmsService);
 
         CountDownLatch startedLatch = new CountDownLatch(1);
         CountDownLatch releaseLatch = new CountDownLatch(1);
-        when(containerManager.tryStart(anyString(), anyString(), any())).thenAnswer(inv -> {
+        when(containerManager.tryStart(anyString(), anyString(), anyInt())).thenAnswer(inv -> {
             startedLatch.countDown();
             assertTrue(releaseLatch.await(5, TimeUnit.SECONDS), "test timed out waiting for release");
             return new ElastiCacheContainerHandle("cid", "grp", "localhost", 6379);
@@ -1869,64 +1178,9 @@ class ElastiCacheServiceTest {
     }
 
     @Test
-    void aUserGroupClaimHeldByOneAccountDoesNotBlockAnotherAccountsDeleteOfItsOwnSameNamedGroup()
-            throws InterruptedException {
-        ConcurrentHashMap<Thread, String> accountByThread = new ConcurrentHashMap<>();
-        RequestContext requestContext = mock(RequestContext.class);
-        when(requestContext.getAccountId()).thenAnswer(inv -> accountByThread.get(Thread.currentThread()));
-        @SuppressWarnings("unchecked")
-        Instance<RequestContext> requestContextInstance = mock(Instance.class);
-        when(requestContextInstance.get()).thenReturn(requestContext);
-        StorageFactory factory = mock(StorageFactory.class);
-        when(factory.create(anyString(), anyString(), any())).thenAnswer(inv ->
-                new AccountAwareStorageBackend<>(new InMemoryStorage<>(), requestContextInstance, "000000000000"));
-        ElastiCacheService svc = new ElastiCacheService(containerManager, proxyManager, clusterFormation,
-                factory, config, mock(Ec2Service.class),
-                new RegionResolver("us-east-1", "000000000000"), kmsService, provisioningIds);
-
-        CountDownLatch startedLatch = new CountDownLatch(1);
-        CountDownLatch releaseLatch = new CountDownLatch(1);
-        when(containerManager.tryStart(anyString(), anyString(), any())).thenAnswer(inv -> {
-            startedLatch.countDown();
-            assertTrue(releaseLatch.await(5, TimeUnit.SECONDS), "test timed out waiting for release");
-            return new ElastiCacheContainerHandle("cid", "grp", "localhost", 6379);
-        });
-
-        // Account A: owns shared-ug and is provisioning a replication group that names it.
-        Thread accountA = new Thread(() -> {
-            accountByThread.put(Thread.currentThread(), "111111111111");
-            svc.createUser("default-user-id", "default", AuthMode.PASSWORD,
-                    List.of("default-pass"), "on ~* +@all", null);
-            svc.createUserGroup("shared-ug", "redis", List.of("default-user-id"), "us-east-1");
-            svc.createReplicationGroup(new ElastiCacheService.CreateReplicationGroupRequest(
-                    "grp", "test", AuthMode.IAM, null, "us-east-1", "redis", null, null, null, null, null,
-                    null, null, null, null, null, null, ReplicationGroupSettings.defaults(), Map.of(),
-                    List.of("shared-ug"), null));
-        });
-        accountA.start();
-        assertTrue(startedLatch.await(5, TimeUnit.SECONDS), "create never reached container start");
-
-        // Account B: owns an unrelated shared-ug of its own; account A's claim must not hold it.
-        accountByThread.put(Thread.currentThread(), "222222222222");
-        svc.createUser("default-user-id", "default", AuthMode.PASSWORD,
-                List.of("default-pass"), "on ~* +@all", null);
-        svc.createUserGroup("shared-ug", "redis", List.of("default-user-id"), "us-east-1");
-        svc.deleteUserGroup("shared-ug");
-
-        // Account A's own user group is still held by its in-flight create.
-        accountByThread.put(Thread.currentThread(), "111111111111");
-        assertEquals("InvalidUserGroupState",
-                assertThrows(AwsException.class, () -> svc.deleteUserGroup("shared-ug")).getErrorCode());
-
-        releaseLatch.countDown();
-        accountA.join(5000);
-        assertEquals(Set.of("shared-ug"), svc.getReplicationGroup("grp").getUserGroupIds());
-    }
-
-    @Test
     void aFailedCreateReleasesItsClaimOnTheParameterGroup() {
         service.createCacheParameterGroup("custom-pg", "redis7", "in use", Map.of());
-        when(containerManager.tryStart(anyString(), anyString(), any()))
+        when(containerManager.tryStart(anyString(), anyString(), anyInt()))
                 .thenThrow(new RuntimeException("docker is down"));
 
         assertThrows(RuntimeException.class,
@@ -1943,695 +1197,190 @@ class ElastiCacheServiceTest {
 
         AwsException ex = assertThrows(AwsException.class,
                 () -> service.createReplicationGroup(requestWithParameterGroup("grp", "custom-pg")));
-        assertEquals("ReplicationGroupAlreadyExists", ex.jsonType());
+        assertEquals("ReplicationGroupAlreadyExistsFault", ex.jsonType());
 
         service.deleteCacheParameterGroup("custom-pg");
         assertTrue(service.findParameterGroup("custom-pg").isEmpty());
     }
 
-    // ── CreateCacheCluster: single-node redis/valkey ──────────────────────────
-
-    private static ElastiCacheService.CreateCacheClusterRequest cacheClusterRequest(
-            String clusterId, String engine, Integer numCacheNodes) {
-        return cacheClusterRequest(clusterId, engine, numCacheNodes, AuthMode.NO_AUTH, null, null);
-    }
-
-    private static ElastiCacheService.CreateCacheClusterRequest cacheClusterRequest(
-            String clusterId, String engine, Integer numCacheNodes, AuthMode authMode,
-            String authToken, String parameterGroupName) {
-        return new ElastiCacheService.CreateCacheClusterRequest(clusterId, engine, null, null,
-                numCacheNodes, null, authMode, authToken, parameterGroupName, null,
-                null, null, null, null, null, null, null, null, "us-east-1", Map.of());
+    private void stubContainerPerGroup() {
+        when(containerDetector.isRunningInContainer()).thenReturn(true);
+        when(containerManager.tryStart(anyString(), anyString(), anyInt())).thenAnswer(inv ->
+                new ElastiCacheContainerHandle("cid-" + inv.getArgument(0, String.class),
+                        inv.getArgument(0, String.class), "172.20.0." + (10 + inv.getArgument(0, String.class).length()),
+                        inv.getArgument(2, Integer.class)));
     }
 
     @Test
-    void singleNodeRedisClusterIsBackedByAValkeyContainerBehindAProxy() {
-        // The point of the path: terraform's aws_elasticache_cluster with engine "redis" sends
-        // this call, and the endpoint it reads back has to answer. That means a container and a
-        // proxy on the port the describe reports, not a metadata-only record.
-        CacheCluster cluster = service.createCacheCluster(cacheClusterRequest("tf-redis", "redis", 1));
+    void containerModeGivesEveryGroupTheDefaultPortOnItsOwnAddress() {
+        // On AWS every group has its own hostname, so two groups both listen on 6379.
+        stubContainerPerGroup();
 
-        assertEquals("redis", cluster.getEngine());
-        assertEquals("7.1", cluster.getEngineVersion());
-        assertEquals("cache.t4g.micro", cluster.getCacheNodeType());
-        assertEquals(1, cluster.getNumCacheNodes());
-        assertEquals(CacheClusterStatus.AVAILABLE, cluster.getCacheClusterStatus());
-        assertEquals("localhost", cluster.getConfigurationEndpoint().address());
-        assertEquals(16379, cluster.getConfigurationEndpoint().port());
-        assertEquals("arn:aws:elasticache:us-east-1:000000000000:cluster:tf-redis", cluster.getArn());
+        ReplicationGroup first = service.createReplicationGroup(singleNodeRequest("grp", null));
+        ReplicationGroup second = service.createReplicationGroup(singleNodeRequest("grp-two", null));
 
-        verify(containerManager).tryStart(eq("tf-redis"), eq("valkey/valkey:8"), any());
-        verify(proxyManager).startProxy(eq("tf-redis"), eq(AuthMode.NO_AUTH), eq(16379),
-                eq("localhost"), eq(6379), any());
-
-        // read back through a separate call, not the create's own return value
-        assertEquals("tf-redis", service.findCacheClusters("tf-redis").getFirst().getCacheClusterId());
+        assertEquals(6379, first.getConfigurationEndpoint().port());
+        assertEquals(6379, second.getConfigurationEndpoint().port());
+        assertFalse(first.getConfigurationEndpoint().address()
+                .equals(second.getConfigurationEndpoint().address()));
+        assertTrue(first.getProxyPort() != second.getProxyPort(), "Host proxies still need their own ports");
+        verify(containerManager).tryStart(eq("grp"), anyString(), eq(6379));
+        verify(containerManager).tryStart(eq("grp-two"), anyString(), eq(6379));
+        assertTrue(service.memberCacheClusters(second).stream().allMatch(member -> member.port() == 6379));
     }
 
     @Test
-    void valkeyCacheClusterTakesTheValkeyEngineVersionDefault() {
-        assertEquals("8.1", service.createCacheCluster(cacheClusterRequest("tf-valkey", "valkey", null))
-                .getEngineVersion());
+    void containerModeHonorsAPortAnotherGroupAlreadyUses() {
+        // A replacement with a new Port is created before the old group is deleted, and any number
+        // of groups may pin the same Port: the Port is not a global resource.
+        stubContainerPerGroup();
+
+        service.createReplicationGroup(singleNodeRequest("grp", 16390));
+        ReplicationGroup replacement = service.createReplicationGroup(singleNodeRequest("grp-two", 16390));
+
+        assertEquals(16390, replacement.getConfigurationEndpoint().port());
+        assertEquals(16390, replacement.getEnginePort());
+        assertTrue(replacement.getProxyPort() != 16390, "The proxy port moves aside, the Port does not");
+        verify(containerManager).tryStart(eq("grp-two"), anyString(), eq(16390));
     }
 
     @Test
-    void redisCacheClusterWithMoreThanOneNodeIsRefusedAsOnAws() {
-        AwsException ex = assertThrows(AwsException.class,
-                () -> service.createCacheCluster(cacheClusterRequest("too-big", "redis", 2)));
+    void containerModeAcceptsAPortOutsideTheProxyRange() {
+        stubContainerPerGroup();
 
-        assertEquals("InvalidParameterValue", ex.getErrorCode());
-        assertEquals("NumCacheNodes should be 1 if engine is redis", ex.getMessage());
-        verify(containerManager, never()).tryStart(eq("too-big"), anyString(), any());
-        assertTrue(service.findCacheClusters("too-big").isEmpty());
+        ReplicationGroup group = service.createReplicationGroup(singleNodeRequest("grp", 7000));
+
+        assertEquals(7000, group.getConfigurationEndpoint().port());
+        assertEquals(16379, group.getProxyPort());
     }
 
     @Test
-    void duplicateCacheClusterIdIsRefused() {
-        service.createCacheCluster(cacheClusterRequest("dupe", "redis", 1));
+    void containerModeRejectsAnInvalidPort() {
+        stubContainerPerGroup();
 
-        AwsException ex = assertThrows(AwsException.class,
-                () -> service.createCacheCluster(cacheClusterRequest("dupe", "redis", 1)));
-        // botocore elasticache/2015-02-02 codes this CacheClusterAlreadyExists: the Fault suffix
-        // is the shape name, not the wire code, and an SDK matches on the code.
-        assertEquals("CacheClusterAlreadyExists", ex.getErrorCode());
+        AwsException thrown = assertThrows(AwsException.class,
+                () -> service.createReplicationGroup(singleNodeRequest("grp", 70000)));
+
+        assertEquals("InvalidParameterValue", thrown.getErrorCode());
+        verify(containerManager, never()).tryStart(anyString(), anyString(), anyInt());
     }
 
     @Test
-    void deletingACacheClusterStopsItsProxyAndContainerAndFreesThePort() {
-        service.createCacheCluster(cacheClusterRequest("cc", "redis", 1));
-
-        service.deleteCacheCluster("cc");
-
-        verify(proxyManager).stopProxy("cc");
-        verify(containerManager).stop(any());
-        assertTrue(service.findCacheClusters("cc").isEmpty());
-        assertEquals("CacheClusterNotFound",
-                assertThrows(AwsException.class, () -> service.deleteCacheCluster("cc")).getErrorCode());
-
-        // the freed proxy port goes to the next cluster rather than being leaked
-        assertEquals(16379, service.createCacheCluster(cacheClusterRequest("cc2", "redis", 1))
-                .getConfigurationEndpoint().port());
-    }
-
-    @Test
-    void aCacheClusterAndAReplicationGroupNeverShareAProxyPort() {
-        service.createReplicationGroup("grp", "d", AuthMode.NO_AUTH, null, "us-east-1");
-
-        assertEquals(16380, service.createCacheCluster(cacheClusterRequest("cc", "redis", 1))
-                .getConfigurationEndpoint().port());
-    }
-
-    @Test
-    void aCacheClusterHoldsItsParameterGroupAgainstDeletion() {
-        service.createCacheParameterGroup("cc-pg", "redis7", "in use", Map.of());
-        service.createCacheCluster(
-                cacheClusterRequest("cc", "redis", 1, AuthMode.NO_AUTH, null, "cc-pg"));
-
-        assertEquals("InvalidCacheParameterGroupState",
-                assertThrows(AwsException.class, () -> service.deleteCacheParameterGroup("cc-pg"))
-                        .getErrorCode());
-    }
-
-    @Test
-    void anAuthTokenOnACacheClusterIsValidatedAgainstThatClusterAlone() {
-        service.createCacheCluster(
-                cacheClusterRequest("auth-cc", "redis", 1, AuthMode.PASSWORD, "s3cret-token", null));
-
-        assertTrue(service.validateCacheClusterPassword("auth-cc", null, "s3cret-token"));
-        assertFalse(service.validateCacheClusterPassword("auth-cc", null, "wrong"));
-        assertFalse(service.validateCacheClusterPassword("other-cc", null, "s3cret-token"));
-    }
-
-    @Test
-    void aCacheClusterCannotTakeTheIdOfALiveReplicationGroup() {
-        // Not a cosmetic clash. Both name their container valkey-<id> and register their proxy
-        // under the id, so letting this through would have ElastiCacheContainerManager.start
-        // removeIfExists the group's running container and the proxy registry overwrite its
-        // entry, leaving a listener bound that nothing can stop.
-        service.createReplicationGroup("shared", "d", AuthMode.NO_AUTH, null, "us-east-1");
-
-        AwsException ex = assertThrows(AwsException.class,
-                () -> service.createCacheCluster(cacheClusterRequest("shared", "redis", 1)));
-
-        assertEquals("CacheClusterAlreadyExists", ex.getErrorCode());
-        // the live group kept its container and its proxy: nothing was started or removed for the
-        // refused request
-        verify(containerManager, times(1)).tryStart(eq("shared"), anyString(), any());
-        verify(containerManager, never()).stopByGroupId("shared");
-        verify(proxyManager, times(1)).startProxy(eq("shared"), any(), anyInt(), anyString(), anyInt(), any());
-        assertEquals("shared", service.getReplicationGroup("shared").getReplicationGroupId());
-    }
-
-    @Test
-    void aReplicationGroupCannotTakeTheIdOfALiveCacheCluster() {
-        service.createCacheCluster(cacheClusterRequest("shared", "redis", 1));
-
-        AwsException ex = assertThrows(AwsException.class,
-                () -> service.createReplicationGroup("shared", "d", AuthMode.NO_AUTH, null, "us-east-1"));
-
-        assertEquals("ReplicationGroupAlreadyExists", ex.getErrorCode());
-        verify(containerManager, times(1)).tryStart(eq("shared"), anyString(), any());
-        verify(containerManager, never()).stopByGroupId("shared");
-        assertEquals("shared", service.findCacheClusters("shared").getFirst().getCacheClusterId());
-    }
-
-    @Test
-    void twoConcurrentCreatesOfOneIdCannotBothProvisionIt() throws Exception {
-        // The stored-record check alone cannot separate them: neither create has stored anything
-        // while the other is inside tryStart, so both would pass it, and the loser's rollback
-        // would stopByGroupId the winner's container out from under it.
-        CountDownLatch startedLatch = new CountDownLatch(1);
-        CountDownLatch releaseLatch = new CountDownLatch(1);
-        when(containerManager.tryStart(eq("raced"), anyString(), any())).thenAnswer(inv -> {
-            startedLatch.countDown();
-            assertTrue(releaseLatch.await(5, TimeUnit.SECONDS), "test timed out waiting for release");
-            return new ElastiCacheContainerHandle("cid", "raced", "localhost", 6379);
-        });
-
-        Thread winner = new Thread(() -> service.createCacheCluster(cacheClusterRequest("raced", "redis", 1)));
-        winner.start();
-        assertTrue(startedLatch.await(5, TimeUnit.SECONDS), "create never reached container start");
-
-        AwsException ex = assertThrows(AwsException.class,
-                () -> service.createCacheCluster(cacheClusterRequest("raced", "redis", 1)));
-        assertEquals("CacheClusterAlreadyExists", ex.getErrorCode());
-        // the loser must not have reached for the container the winner is still starting
-        verify(containerManager, never()).stopByGroupId("raced");
-
-        releaseLatch.countDown();
-        winner.join(5000);
-        assertEquals("raced", service.findCacheClusters("raced").getFirst().getCacheClusterId());
-        verify(containerManager, times(1)).tryStart(eq("raced"), anyString(), any());
-    }
-
-    @Test
-    void aReplicationGroupCreateIsBlockedByAnInFlightCacheClusterCreateOfThatId() throws Exception {
-        CountDownLatch startedLatch = new CountDownLatch(1);
-        CountDownLatch releaseLatch = new CountDownLatch(1);
-        when(containerManager.tryStart(eq("raced"), anyString(), any())).thenAnswer(inv -> {
-            startedLatch.countDown();
-            assertTrue(releaseLatch.await(5, TimeUnit.SECONDS), "test timed out waiting for release");
-            return new ElastiCacheContainerHandle("cid", "raced", "localhost", 6379);
-        });
-
-        Thread cacheCluster = new Thread(() -> service.createCacheCluster(cacheClusterRequest("raced", "redis", 1)));
-        cacheCluster.start();
-        assertTrue(startedLatch.await(5, TimeUnit.SECONDS), "create never reached container start");
-
-        assertEquals("ReplicationGroupAlreadyExists",
-                assertThrows(AwsException.class, () -> service.createReplicationGroup(
-                        "raced", "d", AuthMode.NO_AUTH, null, "us-east-1")).getErrorCode());
-        verify(containerManager, never()).stopByGroupId("raced");
-
-        releaseLatch.countDown();
-        cacheCluster.join(5000);
-    }
-
-    @Test
-    void theOptionalMembersARequestCarriesAreStoredAndTheRestDefaulted() {
-        // Every one of these is an optional aws_elasticache_cluster argument. Dropping any of them
-        // reads back as unset on the next plan, which is a diff terraform can never settle.
-        CacheCluster cluster = service.createCacheCluster(new ElastiCacheService.CreateCacheClusterRequest(
-                "settings-cc", "redis", null, null, 1, null, AuthMode.NO_AUTH, null, null, null,
-                5, "03:00-05:00", "Tue:04:00-Tue:05:00", "us-east-1b", List.of("sg-123"),
-                "ipv4", "ipv4", true, "us-east-1", Map.of()));
-
-        assertEquals(5, cluster.getSnapshotRetentionLimit());
-        assertEquals("03:00-05:00", cluster.getSnapshotWindow());
-        assertEquals("tue:04:00-tue:05:00", cluster.getPreferredMaintenanceWindow());
-        assertEquals("us-east-1b", cluster.getPreferredAvailabilityZone());
-        assertEquals(List.of("sg-123"), cluster.getSecurityGroupIds());
-        assertTrue(cluster.isAtRestEncryptionEnabled());
-
-        // and a request that carries none of them still reads back concrete values, not zeroes
-        CacheCluster bare = service.createCacheCluster(cacheClusterRequest("bare-cc", "redis", 1));
-        assertEquals(0, bare.getSnapshotRetentionLimit());
-        assertEquals("00:00-01:00", bare.getSnapshotWindow());
-        assertEquals("mon:00:00-mon:03:00", bare.getPreferredMaintenanceWindow());
-        assertEquals("us-east-1a", bare.getPreferredAvailabilityZone());
-        assertEquals("ipv4", bare.getNetworkType());
-        assertEquals("ipv4", bare.getIpDiscovery());
-        assertFalse(bare.isAtRestEncryptionEnabled());
-    }
-
-    @Test
-    void theSnapshotMembersTakeTheReplicationGroupsChecks() {
-        AwsException ex = assertThrows(AwsException.class,
-                () -> service.createCacheCluster(new ElastiCacheService.CreateCacheClusterRequest(
-                        "bad-cc", "redis", null, null, 1, null, AuthMode.NO_AUTH, null, null, null,
-                        99, null, null, null, null, null, null, null, "us-east-1", Map.of())));
-        assertEquals("InvalidParameterValue", ex.getErrorCode());
-        assertTrue(ex.getMessage().contains("Retention limit must be between 0 and 35"), ex.getMessage());
-
-        assertEquals("InvalidParameterValue",
-                assertThrows(AwsException.class,
-                        () -> service.createCacheCluster(new ElastiCacheService.CreateCacheClusterRequest(
-                                "bad-cc", "redis", null, null, 1, null, AuthMode.NO_AUTH, null, null, null,
-                                null, null, "notaday:04:00-notaday:05:00", null, null, null, null, null,
-                                "us-east-1", Map.of()))).getErrorCode());
-
-        // a refused request provisions nothing
-        verify(containerManager, never()).tryStart(eq("bad-cc"), anyString(), any());
-        assertTrue(service.findCacheClusters("bad-cc").isEmpty());
-    }
-
-    @Test
-    void aStandaloneClusterIsListedAsAnExplorerResource() {
-        service.createCacheCluster(cacheClusterRequest("explorer-cc", "redis", 1));
-
-        assertTrue(service.getResources().stream().anyMatch(r ->
-                        "arn:aws:elasticache:us-east-1:000000000000:cluster:explorer-cc".equals(r.arn())),
-                "the standalone cluster must appear in the resource explorer alongside groups");
-    }
-
-    /** A second service over the same stores: what a restart leaves behind, minus the runtime. */
-    private ElastiCacheService serviceAfterRestart() {
-        return new ElastiCacheService(containerManager, proxyManager, clusterFormation,
-                storageFactory, config, ec2Service, new RegionResolver("us-east-1", "000000000000"),
-                kmsService, provisioningIds);
-    }
-
-    private ElastiCacheMemcachedService memcachedService() {
-        return new ElastiCacheMemcachedService(memcachedContainerManager, storageFactory, config, provisioningIds,
-                ElastiCacheMemcachedServiceTest.REGION_RESOLVER);
-    }
-
-    @Test
-    void aPersistedClusterKeepsItsPortAcrossARestart() {
-        // Before this, nothing re-added the port to usedPorts on startup: the restored cluster
-        // went on advertising 16379 while the next create was handed the same 16379, and the
-        // first delete then freed the second cluster's reservation.
-        assertEquals(16379, service.createCacheCluster(cacheClusterRequest("persisted", "redis", 1))
-                .getConfigurationEndpoint().port());
-
-        ElastiCacheService restarted = serviceAfterRestart();
-        restarted.restorePersistedRuntime().join();
-
-        assertEquals(16380, restarted.createCacheCluster(cacheClusterRequest("after", "redis", 1))
-                .getConfigurationEndpoint().port());
-        assertEquals(16379, restarted.findCacheClusters("persisted").getFirst()
-                .getConfigurationEndpoint().port());
-    }
-
-    private static StorageFactory storageWithStandaloneCluster(String clusterId) {
-        StorageFactory storageFactory = sharedStorageFactory();
-        ElastiCacheContainerManager beforeRestart = mock(ElastiCacheContainerManager.class);
-        stubSingleNodeContainer(beforeRestart);
-        serviceWith(storageFactory, beforeRestart, mock(ElastiCacheProxyManager.class),
-                mock(ValkeyClusterFormation.class))
-                .createCacheCluster(cacheClusterRequest(clusterId, "redis", 1, AuthMode.PASSWORD,
-                        "a-long-enough-auth-token", null));
-        return storageFactory;
-    }
-
-    @Test
-    void restorePersistedRuntimeReprovisionsStandaloneCacheClusters() {
-        // The shape aws_elasticache_cluster actually creates. Left unrestored it is the exact
-        // state #4094 fixed for every other shape: available with nothing behind the endpoint.
-        StorageFactory storageFactory = storageWithStandaloneCluster("tf-redis");
-
-        ElastiCacheContainerManager restartedContainers = mock(ElastiCacheContainerManager.class);
-        stubSingleNodeContainer(restartedContainers);
-        ElastiCacheProxyManager restartedProxies = mock(ElastiCacheProxyManager.class);
-        ElastiCacheService restarted = serviceWith(storageFactory, restartedContainers,
-                restartedProxies, mock(ValkeyClusterFormation.class));
-
-        restarted.restorePersistedRuntime().join();
-
-        verify(restartedContainers).tryStart(eq("tf-redis"), anyString(), any());
-        verify(restartedProxies).startProxy(eq("tf-redis"), eq(AuthMode.PASSWORD), eq(16379),
-                eq("localhost"), eq(6379), any());
-        CacheCluster restored = restarted.findCacheClusters("tf-redis").getFirst();
-        assertEquals(CacheClusterStatus.AVAILABLE, restored.getCacheClusterStatus());
-        assertEquals(16379, restored.getConfigurationEndpoint().port());
-        assertEquals("cid-tf-redis", restored.getContainerId(),
-                "A restored cluster must track the container it actually has");
-    }
-
-    @Test
-    void standaloneClusterRestoreFailureReportsRestoreFailedAndReleasesThePort() {
-        StorageFactory storageFactory = storageWithStandaloneCluster("tf-redis");
-
-        ElastiCacheContainerManager restartedContainers = mock(ElastiCacheContainerManager.class);
-        // Only the restore fails: the create that checks the port was freed must still get through.
-        when(restartedContainers.tryStart(eq("tf-redis"), anyString(), any()))
-                .thenThrow(new RuntimeException("container failed"));
-        ElastiCacheProxyManager restartedProxies = mock(ElastiCacheProxyManager.class);
-        ElastiCacheService restarted = serviceWith(storageFactory, restartedContainers,
-                restartedProxies, mock(ValkeyClusterFormation.class));
-
-        restarted.restorePersistedRuntime().join();
-
-        CacheCluster failed = restarted.findCacheClusters("tf-redis").getFirst();
-        assertEquals(CacheClusterStatus.RESTORE_FAILED, failed.getCacheClusterStatus(),
-                "restore-failed is the value CacheClusterStatus models; create-failed is not");
-        assertNull(failed.getConfigurationEndpoint(),
-                "A cluster whose data plane is gone must not advertise an endpoint");
-        verify(restartedProxies, never()).startProxy(anyString(), any(), anyInt(), anyString(),
-                anyInt(), any());
-
-        CacheCluster next = restarted.createCacheCluster(cacheClusterRequest("next", "redis", 1));
-        assertEquals(16379, next.getConfigurationEndpoint().port(),
-                "The failed restore's port must be released for the next cluster");
-    }
-
-    @Test
-    void standaloneClusterRestoreWithoutADockerDaemonKeepsTheClusterAvailable() {
-        StorageFactory storageFactory = storageWithStandaloneCluster("tf-redis");
-
-        ElastiCacheContainerManager restartedContainers = mock(ElastiCacheContainerManager.class);
-        when(restartedContainers.tryStart(anyString(), anyString(), any())).thenReturn(null);
-        ElastiCacheProxyManager restartedProxies = mock(ElastiCacheProxyManager.class);
-        ElastiCacheService restarted = serviceWith(storageFactory, restartedContainers,
-                restartedProxies, mock(ValkeyClusterFormation.class));
-
-        restarted.restorePersistedRuntime().join();
-
-        CacheCluster restored = restarted.findCacheClusters("tf-redis").getFirst();
-        assertEquals(CacheClusterStatus.AVAILABLE, restored.getCacheClusterStatus(),
-                "No reachable daemon is the create path's documented degraded mode, not a failure");
-        assertNull(restored.getContainerId());
-        verify(restartedProxies, never()).startProxy(anyString(), any(), anyInt(), anyString(),
-                anyInt(), any());
-    }
-
-    @Test
-    void restorePersistedRuntimeSkipsStandaloneClustersBeingDeleted() {
-        StorageFactory storageFactory = storageWithStandaloneCluster("tf-redis");
-        ElastiCacheContainerManager beforeRestart = mock(ElastiCacheContainerManager.class);
-        stubSingleNodeContainer(beforeRestart);
-        ElastiCacheService before = serviceWith(storageFactory, beforeRestart,
-                mock(ElastiCacheProxyManager.class), mock(ValkeyClusterFormation.class));
-        // The in-memory backend hands back the stored instance, so this is the persisted record.
-        before.findCacheClusters("tf-redis").getFirst()
-                .setCacheClusterStatus(CacheClusterStatus.DELETING);
-
-        ElastiCacheContainerManager restartedContainers = mock(ElastiCacheContainerManager.class);
-        stubSingleNodeContainer(restartedContainers);
-        ElastiCacheService restarted = serviceWith(storageFactory, restartedContainers,
-                mock(ElastiCacheProxyManager.class), mock(ValkeyClusterFormation.class));
-
-        restarted.restorePersistedRuntime().join();
-
-        verify(restartedContainers, never()).tryStart(anyString(), anyString(), any());
-        assertEquals(CacheClusterStatus.DELETING,
-                restarted.findCacheClusters("tf-redis").getFirst().getCacheClusterStatus());
-    }
-
-    @Test
-    void restoreDoesNotResurrectAStandaloneClusterDeletedWhileItWasRestoring() {
-        StorageFactory storageFactory = storageWithStandaloneCluster("tf-redis");
-
-        ElastiCacheContainerManager restartedContainers = mock(ElastiCacheContainerManager.class);
-        ElastiCacheProxyManager restartedProxies = mock(ElastiCacheProxyManager.class);
-        ElastiCacheService restarted = serviceWith(storageFactory, restartedContainers,
-                restartedProxies, mock(ValkeyClusterFormation.class));
-        ElastiCacheContainerHandle restoredHandle =
-                new ElastiCacheContainerHandle("cid-restored", "tf-redis", "localhost", 6379);
-        // The delete lands in the window the cluster's monitor closes: the container is up, the
-        // record has not been written back yet.
-        when(restartedContainers.tryStart(eq("tf-redis"), anyString(), any())).thenAnswer(inv -> {
-            restarted.deleteCacheCluster("tf-redis");
-            // Takes the port that delete just freed, so a restore that released it a second
-            // time would hand the same port out twice.
-            restarted.createCacheCluster(cacheClusterRequest("after", "redis", 1));
-            return restoredHandle;
-        });
-
-        restarted.restorePersistedRuntime().join();
-
-        assertTrue(restarted.findCacheClusters("tf-redis").isEmpty(),
-                "A cluster deleted while it was restoring must stay deleted");
-        verify(restartedProxies, never()).startProxy(eq("tf-redis"), any(), anyInt(), anyString(),
-                anyInt(), any());
-        verify(restartedContainers).stop(restoredHandle);
-
-        CacheCluster next = restarted.createCacheCluster(cacheClusterRequest("third", "redis", 1));
-        assertEquals(16380, next.getConfigurationEndpoint().port(),
-                "The abandoned restore must leave 'after' holding the port the delete released");
-    }
-
-    @Test
-    void deletingARestoredClusterFreesThePortItActuallyHolds() {
-        service.createCacheCluster(cacheClusterRequest("persisted", "redis", 1));
-        ElastiCacheService restarted = serviceAfterRestart();
-        restarted.restorePersistedRuntime().join();
-        restarted.createCacheCluster(cacheClusterRequest("after", "redis", 1));
-
-        restarted.deleteCacheCluster("persisted");
-
-        // 16379 is free again because that record owned it; 16380 is still the other cluster's
-        assertEquals(16379, restarted.createCacheCluster(cacheClusterRequest("third", "redis", 1))
-                .getConfigurationEndpoint().port());
-        assertEquals(16380, restarted.findCacheClusters("after").getFirst()
-                .getConfigurationEndpoint().port());
-    }
-
-    @Test
-    void deletingARecordThatNeverHeldItsPortDoesNotFreeTheHoldersPort() {
-        // Two records advertising one port: only one can hold it. Here the holder is the created
-        // cluster and the other record never reserved anything, so its delete must leave the
-        // reservation alone rather than hand a live cluster's port to the next create.
-        service.createCacheCluster(cacheClusterRequest("holder", "redis", 1));
-        AccountAwareStorageBackend<CacheCluster> store = storageFactory.create("elasticache",
-                "elasticache-redis-clusters.json", new TypeReference<Map<String, CacheCluster>>() {});
-        store.put("squatter", new CacheCluster("squatter", CacheClusterStatus.AVAILABLE, "redis",
-                "7.1", new Endpoint("localhost", 16379), Instant.now()));
-
-        service.deleteCacheCluster("squatter");
-
-        assertEquals(16380, service.createCacheCluster(cacheClusterRequest("next", "redis", 1))
-                        .getConfigurationEndpoint().port(),
-                "16379 is still held by the cluster that actually reserved it");
-    }
-
-    @Test
-    void deletingAGroupThatNeverHeldItsPortDoesNotFreeTheHoldersPort() {
-        // The same asymmetry on the replication-group side: a group written straight into the
-        // store advertises 16379 without ever reserving it, so its delete must not free the
-        // reservation the cluster is holding.
-        service.createCacheCluster(cacheClusterRequest("holder", "redis", 1));
-        AccountAwareStorageBackend<ReplicationGroup> store = storageFactory.create("elasticache",
-                "elasticache-groups.json", new TypeReference<Map<String, ReplicationGroup>>() {});
-        store.put("squatter", new ReplicationGroup("squatter", "d", ReplicationGroupStatus.AVAILABLE,
-                AuthMode.NO_AUTH, new Endpoint("localhost", 16379), Instant.now(), 16379));
-
-        service.deleteReplicationGroup("squatter");
-
-        assertEquals(16380, service.createCacheCluster(cacheClusterRequest("next", "redis", 1))
-                        .getConfigurationEndpoint().port(),
-                "16379 is still held by the cluster that actually reserved it");
-    }
-
-    @Test
-    void deletingAGroupCreatedInProcessFreesItsPort() {
-        // The ordinary path, which the squatter and restored-group tests both step around: a
-        // group created here holds its port, so its delete has to give it back.
-        service.createReplicationGroup("grp", "d", AuthMode.NO_AUTH, null, "us-east-1");
+    void deletingAContainerModeGroupReleasesOnlyItsProxyPort() {
+        stubContainerPerGroup();
+        ReplicationGroup first = service.createReplicationGroup(singleNodeRequest("grp", null));
 
         service.deleteReplicationGroup("grp");
+        ReplicationGroup next = service.createReplicationGroup(singleNodeRequest("grp-two", null));
 
-        assertEquals(16379, service.createCacheCluster(cacheClusterRequest("next", "redis", 1))
-                .getConfigurationEndpoint().port());
+        assertEquals(first.getProxyPort(), next.getProxyPort());
+        assertEquals(6379, next.getConfigurationEndpoint().port());
     }
 
     @Test
-    void deletingARestoredGroupFreesThePortItActuallyHolds() {
-        service.createReplicationGroup("persisted", "d", AuthMode.NO_AUTH, null, "us-east-1");
-        ElastiCacheService restarted = serviceAfterRestart();
-        restarted.restorePersistedRuntime().join();
-        restarted.createCacheCluster(cacheClusterRequest("after", "redis", 1));
+    @SuppressWarnings("unchecked")
+    void addingShardsJoinsNewNodesAndRebalancesSlotsEvenly() {
+        stubPerNodeContainers();
+        service.createReplicationGroup(clusterRequest("grp", 2, 0));
 
-        restarted.deleteReplicationGroup("persisted");
+        ReplicationGroup group = service.modifyShardConfiguration("grp", 3, List.of(), List.of());
 
-        // 16379 is free again because that group owned it; 16380 is still the cluster's.
-        assertEquals(16379, restarted.createCacheCluster(cacheClusterRequest("third", "redis", 1))
-                .getConfigurationEndpoint().port());
+        assertEquals(3, group.getNumNodeGroups());
+        assertEquals(List.of("0001", "0002", "0003"), group.getClusterNodes().stream()
+                .map(ClusterNode::getNodeGroupId).toList());
+        assertEquals(List.of("0-5460", "5461-10921", "10922-16383"), group.getClusterNodes().stream()
+                .map(ClusterNode::getSlots).toList());
+        assertEquals("grp-0003-001", group.getClusterNodes().get(2).getMemberClusterId());
+        assertEquals(3, group.getClusterNodes().stream().map(ClusterNode::getProxyPort).distinct().count());
+
+        ArgumentCaptor<List<ValkeyClusterFormation.ShardMember>> members = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<Map<String, String>> current = ArgumentCaptor.forClass(Map.class);
+        ArgumentCaptor<Map<String, String>> desired = ArgumentCaptor.forClass(Map.class);
+        verify(clusterFormation).reshard(eq("grp"), members.capture(), current.capture(), desired.capture());
+        assertEquals(Map.of("0001", "0-8191", "0002", "8192-16383"), current.getValue());
+        assertEquals(Map.of("0001", "0-5460", "0002", "5461-10921", "0003", "10922-16383"), desired.getValue());
+        assertEquals(List.of(false, false, true), members.getValue().stream()
+                .map(ValkeyClusterFormation.ShardMember::joining).toList());
+        verify(containerManager, times(3)).start(anyString(), anyString(), any());
+        verify(proxyManager).startProxy(eq("grp-0003-001"), any(), anyInt(), anyString(), anyInt(), any());
+        assertEquals(3, service.getReplicationGroup("grp").getClusterNodes().size());
     }
 
     @Test
-    void aReplicationGroupCannotTakeTheIdOfAMemcachedCluster() {
-        // The third store counts too: CreateReplicationGroup would otherwise name a group after
-        // a live memcached cluster and take over its container and proxy registration.
-        memcachedService().createCacheCluster(ElastiCacheMemcachedServiceTest.request("shared-id"));
+    void removingAShardMovesItsSlotsAwayAndStopsItsNodes() {
+        stubPerNodeContainers();
+        service.createReplicationGroup(clusterRequest("grp", 3, 0));
 
-        AwsException ex = assertThrows(AwsException.class, () -> service.createReplicationGroup(
-                "shared-id", "d", AuthMode.NO_AUTH, null, "us-east-1"));
+        ReplicationGroup group = service.modifyShardConfiguration("grp", 2, List.of("0002"), List.of());
 
-        assertEquals("ReplicationGroupAlreadyExists", ex.getErrorCode());
-        verify(containerManager, never()).tryStart(eq("shared-id"), anyString(), any());
+        assertEquals(List.of("0001", "0003"), group.getClusterNodes().stream()
+                .map(ClusterNode::getNodeGroupId).toList());
+        assertEquals(List.of("0-8191", "8192-16383"), group.getClusterNodes().stream()
+                .map(ClusterNode::getSlots).toList());
+        verify(clusterFormation).reshard(eq("grp"),
+                argThat(members -> members.stream().filter(ValkeyClusterFormation.ShardMember::leaving)
+                        .map(ValkeyClusterFormation.ShardMember::nodeGroupId).toList().equals(List.of("0002"))),
+                any(), eq(Map.of("0001", "0-8191", "0003", "8192-16383")));
+        verify(proxyManager).stopProxy("grp-0002-001");
+        verify(containerManager, times(1)).stop(any());
     }
 
     @Test
-    void aPersistedReplicationGroupAlsoKeepsItsPortAcrossARestart() {
-        service.createReplicationGroup("grp", "d", AuthMode.NO_AUTH, null, "us-east-1");
+    void retainingShardsRemovesTheRest() {
+        stubPerNodeContainers();
+        service.createReplicationGroup(clusterRequest("grp", 3, 0));
 
-        ElastiCacheService restarted = serviceAfterRestart();
-        restarted.restorePersistedRuntime().join();
+        ReplicationGroup group = service.modifyShardConfiguration("grp", 1, List.of(), List.of("0003"));
 
-        assertEquals(16380, restarted.createCacheCluster(cacheClusterRequest("after", "redis", 1))
-                .getConfigurationEndpoint().port());
+        assertEquals(List.of("0003"), group.getClusterNodes().stream().map(ClusterNode::getNodeGroupId).toList());
+        assertEquals("0-16383", group.getClusterNodes().getFirst().getSlots());
+        assertEquals(group.getClusterNodes().getFirst().getProxyPort(), group.getConfigurationEndpoint().port());
     }
 
     @Test
-    void aCacheClusterCannotTakeTheIdOfAMemcachedCluster() {
-        // One namespace: DescribeCacheClusters answers from every store, so two records sharing
-        // an id would have it reported twice, each with a different engine.
-        memcachedService().createCacheCluster(ElastiCacheMemcachedServiceTest.request("shared-id"));
+    void decreasingShardsWithoutNamingThemIsRejected() {
+        stubPerNodeContainers();
+        service.createReplicationGroup(clusterRequest("grp", 2, 0));
 
-        AwsException ex = assertThrows(AwsException.class,
-                () -> service.createCacheCluster(cacheClusterRequest("shared-id", "redis", 1)));
+        AwsException missing = assertThrows(AwsException.class,
+                () -> service.modifyShardConfiguration("grp", 1, List.of(), List.of()));
+        assertEquals("InvalidParameterValue", missing.getErrorCode());
 
-        assertEquals("CacheClusterAlreadyExists", ex.getErrorCode());
-        verify(containerManager, never()).tryStart(eq("shared-id"), anyString(), any());
+        AwsException unknown = assertThrows(AwsException.class,
+                () -> service.modifyShardConfiguration("grp", 1, List.of("0009"), List.of()));
+        assertEquals("InvalidParameterValue", unknown.getErrorCode());
+
+        AwsException both = assertThrows(AwsException.class,
+                () -> service.modifyShardConfiguration("grp", 1, List.of("0002"), List.of("0001")));
+        assertEquals("InvalidParameterCombination", both.getErrorCode());
+        verify(clusterFormation, never()).reshard(anyString(), any(), any(), any());
     }
 
     @Test
-    void aMemcachedClusterCannotTakeTheIdOfARedisClusterOrAGroup() {
-        ElastiCacheMemcachedService memcached = memcachedService();
-        service.createCacheCluster(cacheClusterRequest("redis-id", "redis", 1));
-        service.createReplicationGroup("group-id", "d", AuthMode.NO_AUTH, null, "us-east-1");
+    void aFailedReshardRollsBackTheAddedNodesAndKeepsTheTopology() {
+        stubPerNodeContainers();
+        service.createReplicationGroup(clusterRequest("grp", 2, 0));
+        doThrow(new RuntimeException("reshard boom"))
+                .when(clusterFormation).reshard(anyString(), any(), any(), any());
 
-        assertEquals("CacheClusterAlreadyExists",
-                assertThrows(AwsException.class, () -> memcached.createCacheCluster(ElastiCacheMemcachedServiceTest.request("redis-id")))
-                        .getErrorCode());
-        assertEquals("CacheClusterAlreadyExists",
-                assertThrows(AwsException.class, () -> memcached.createCacheCluster(ElastiCacheMemcachedServiceTest.request("group-id")))
-                        .getErrorCode());
-        verify(memcachedContainerManager, never()).tryStart(eq("redis-id"), anyString(), any());
-        verify(memcachedContainerManager, never()).tryStart(eq("group-id"), anyString(), any());
+        assertThrows(RuntimeException.class,
+                () -> service.modifyShardConfiguration("grp", 3, List.of(), List.of()));
+
+        verify(proxyManager).stopProxy("grp-0003-001");
+        verify(containerManager, times(1)).stop(any());
+        ReplicationGroup group = service.getReplicationGroup("grp");
+        assertEquals(2, group.getNumNodeGroups());
+        assertEquals(List.of("0-8191", "8192-16383"), group.getClusterNodes().stream()
+                .map(ClusterNode::getSlots).toList());
     }
 
     @Test
-    void aMemcachedCreateIsRefusedWhileAReplicationGroupCreateHoldsTheSameIdInFlight()
-            throws InterruptedException {
-        // The stores were the only thing the memcached path consulted, and neither path writes
-        // its record until its container has started. Held in that window, a group create and a
-        // memcached create for one id both saw three empty stores and both went on to write,
-        // leaving the id in two stores with one describe reporting it twice.
-        ElastiCacheMemcachedService memcached = memcachedService();
-        CountDownLatch startedLatch = new CountDownLatch(1);
-        CountDownLatch releaseLatch = new CountDownLatch(1);
-        when(containerManager.tryStart(anyString(), anyString(), any())).thenAnswer(inv -> {
-            startedLatch.countDown();
-            assertTrue(releaseLatch.await(5, TimeUnit.SECONDS), "test timed out waiting for release");
-            return new ElastiCacheContainerHandle("cid", "grp", "localhost", 6379);
-        });
+    void shardCountOnAClusterModeDisabledGroupOnlyRecordsTheCount() {
+        service.createReplicationGroup("grp", "test", AuthMode.NO_AUTH, null, "us-east-1");
 
-        Thread groupCreate = new Thread(() ->
-                service.createReplicationGroup("shared-id", "d", AuthMode.NO_AUTH, null, "us-east-1"));
-        groupCreate.start();
-        assertTrue(startedLatch.await(5, TimeUnit.SECONDS), "create never reached container start");
+        ReplicationGroup group = service.modifyShardConfiguration("grp", 2, List.of(), List.of());
 
-        AwsException ex = assertThrows(AwsException.class,
-                () -> memcached.createCacheCluster(ElastiCacheMemcachedServiceTest.request("shared-id")));
-        assertEquals("CacheClusterAlreadyExists", ex.getErrorCode());
-        verify(memcachedContainerManager, never()).tryStart(eq("shared-id"), anyString(), any());
-
-        releaseLatch.countDown();
-        groupCreate.join(5000);
-
-        // One record for the id, in the store the winning create writes.
-        assertEquals("shared-id", service.getReplicationGroup("shared-id").getReplicationGroupId());
-        assertTrue(memcached.listCacheClusters(null).isEmpty(),
-                "the refused memcached create must not have written a second record for the id");
-    }
-
-    @Test
-    void anUnknownCacheSubnetGroupIsRefused() {
-        AwsException ex = assertThrows(AwsException.class,
-                () -> service.createCacheCluster(new ElastiCacheService.CreateCacheClusterRequest(
-                        "sng-cc", "redis", null, null, 1, null, AuthMode.NO_AUTH, null, null,
-                        "no-such-group", null, null, null, null, null, null, null, null,
-                        "us-east-1", Map.of())));
-
-        assertEquals("CacheSubnetGroupNotFoundFault", ex.getErrorCode());
-        // and nothing was provisioned against the name that does not resolve
-        verify(containerManager, never()).tryStart(eq("sng-cc"), anyString(), any());
-        assertTrue(service.findCacheClusters("sng-cc").isEmpty());
-    }
-
-    @Test
-    void aKnownCacheSubnetGroupIsAcceptedAndReported() {
-        Subnet subnet = new Subnet();
-        subnet.setSubnetId("subnet-1");
-        subnet.setVpcId("vpc-1");
-        subnet.setAvailabilityZone("us-east-1a");
-        when(ec2Service.describeSubnets(anyString(), any(), any())).thenReturn(List.of(subnet));
-        service.createCacheSubnetGroup("real-group", "d", List.of("subnet-1"), Map.of());
-
-        CacheCluster cluster = service.createCacheCluster(new ElastiCacheService.CreateCacheClusterRequest(
-                "sng-cc", "redis", null, null, 1, null, AuthMode.NO_AUTH, null, null,
-                "real-group", null, null, null, null, null, null, null, null,
-                "us-east-1", Map.of()));
-
-        assertEquals("real-group", cluster.getCacheSubnetGroupName());
-    }
-
-    @Test
-    void deleteCacheSubnetGroupInUseByClusterThrows() {
-        Subnet subnet = new Subnet();
-        subnet.setSubnetId("subnet-1");
-        subnet.setVpcId("vpc-1");
-        subnet.setAvailabilityZone("us-east-1a");
-        when(ec2Service.describeSubnets(anyString(), any(), any())).thenReturn(List.of(subnet));
-        service.createCacheSubnetGroup("used-group", "d", List.of("subnet-1"), Map.of());
-
-        service.createCacheCluster(new ElastiCacheService.CreateCacheClusterRequest(
-                "sng-cluster", "redis", null, null, 1, null, AuthMode.NO_AUTH, null, null,
-                "used-group", null, null, null, null, null, null, null, null,
-                "us-east-1", Map.of()));
-
-        AwsException ex = assertThrows(AwsException.class, () -> service.deleteCacheSubnetGroup("used-group"));
-        assertEquals("CacheSubnetGroupInUse", ex.getErrorCode());
-        assertEquals(400, ex.getHttpStatus());
-    }
-
-    @Test
-    void deleteCacheSubnetGroupInUseByReplicationGroupThrows() {
-        Subnet subnet = new Subnet();
-        subnet.setSubnetId("subnet-1");
-        subnet.setVpcId("vpc-1");
-        subnet.setAvailabilityZone("us-east-1a");
-        when(ec2Service.describeSubnets(anyString(), any(), any())).thenReturn(List.of(subnet));
-        service.createCacheSubnetGroup("rg-used-group", "d", List.of("subnet-1"), Map.of());
-
-        service.createReplicationGroup(new ElastiCacheService.CreateReplicationGroupRequest(
-                "rg-cluster", "desc", AuthMode.NO_AUTH, null, "us-east-1", null, null, null,
-                null, "rg-used-group", null, null, null, null, null, null, null,
-                ReplicationGroupSettings.defaults(), Map.of(), null, null));
-
-        AwsException ex = assertThrows(AwsException.class, () -> service.deleteCacheSubnetGroup("rg-used-group"));
-        assertEquals("CacheSubnetGroupInUse", ex.getErrorCode());
-        assertEquals(400, ex.getHttpStatus());
-    }
-
-    @Test
-    void deleteCacheSubnetGroupNotInUseSucceeds() {
-        Subnet subnet = new Subnet();
-        subnet.setSubnetId("subnet-1");
-        subnet.setVpcId("vpc-1");
-        subnet.setAvailabilityZone("us-east-1a");
-        when(ec2Service.describeSubnets(anyString(), any(), any())).thenReturn(List.of(subnet));
-        service.createCacheSubnetGroup("free-group", "d", List.of("subnet-1"), Map.of());
-
-        service.deleteCacheSubnetGroup("free-group");
-
-        assertThrows(AwsException.class, () -> service.describeCacheSubnetGroups("free-group"));
-    }
-
-    @Test
-    void aCacheClusterCreatedWithoutDockerStillReachesAvailable() {
-        when(containerManager.tryStart(anyString(), anyString(), any())).thenReturn(null);
-
-        CacheCluster cluster = service.createCacheCluster(cacheClusterRequest("no-docker", "redis", 1));
-
-        assertEquals(CacheClusterStatus.AVAILABLE, cluster.getCacheClusterStatus());
-        verify(proxyManager, never()).startProxy(eq("no-docker"), any(), anyInt(), anyString(), anyInt(), any());
-
-        // delete must not reach for a container that was never created
-        service.deleteCacheCluster("no-docker");
-        verify(containerManager, never()).stop(any());
-        verify(containerManager).stopByGroupId("no-docker");
+        assertEquals(2, group.getNumNodeGroups());
+        verify(clusterFormation, never()).reshard(anyString(), any(), any(), any());
     }
 }

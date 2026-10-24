@@ -23,8 +23,6 @@ import java.security.KeyFactory;
 import java.security.PublicKey;
 import java.security.Signature;
 import java.security.spec.RSAPublicKeySpec;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
@@ -236,7 +234,7 @@ class CognitoIntegrationTest {
         JsonNode payload = decodeJwtPayload(accessToken);
         assertEquals("RS256", header.path("alg").asText());
         assertEquals(poolId, header.path("kid").asText());
-        assertEquals("https://cognito-idp.us-east-1.amazonaws.com/" + poolId, payload.path("iss").asText());
+        assertEquals("http://localhost:4566/" + poolId, payload.path("iss").asText());
         assertEquals(USERNAME, payload.path("username").asText());
         assertEquals("access", payload.path("token_use").asText());
 
@@ -272,7 +270,7 @@ class CognitoIntegrationTest {
                 .asString();
 
         JsonNode document = OBJECT_MAPPER.readTree(openIdResponse);
-        assertEquals("https://cognito-idp.us-east-1.amazonaws.com/" + poolId, document.path("issuer").asText());
+        assertEquals("http://localhost:4566/" + poolId, document.path("issuer").asText());
         assertEquals(
                 "http://localhost:4566/" + poolId + "/.well-known/jwks.json",
                 document.path("jwks_uri").asText());

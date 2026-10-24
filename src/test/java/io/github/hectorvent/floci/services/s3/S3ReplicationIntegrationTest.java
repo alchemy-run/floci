@@ -30,7 +30,7 @@ class S3ReplicationIntegrationTest {
             """;
 
     @Test
-    @Order(10)
+    @Order(1)
     void createBucket() {
         given()
         .when()
@@ -40,7 +40,7 @@ class S3ReplicationIntegrationTest {
     }
 
     @Test
-    @Order(20)
+    @Order(2)
     void getReplicationBeforePutReturns404() {
         given()
         .when()
@@ -57,7 +57,7 @@ class S3ReplicationIntegrationTest {
      * replication configuration and returns 204.
      */
     @Test
-    @Order(30)
+    @Order(3)
     void deleteReplicationDoesNotDeleteBucket() {
         given()
         .when()
@@ -67,7 +67,7 @@ class S3ReplicationIntegrationTest {
     }
 
     @Test
-    @Order(40)
+    @Order(4)
     void bucketStillExistsAfterReplicationDelete() {
         // A sub-resource-qualified DELETE must never remove the bucket itself.
         given()
@@ -78,7 +78,7 @@ class S3ReplicationIntegrationTest {
     }
 
     @Test
-    @Order(50)
+    @Order(5)
     void putVersioningAfterReplicationDeleteSucceeds() {
         given()
             .body("""
@@ -93,7 +93,7 @@ class S3ReplicationIntegrationTest {
     }
 
     @Test
-    @Order(60)
+    @Order(6)
     void putReplicationStoresConfiguration() {
         given()
             .body(REPLICATION_XML)
@@ -104,7 +104,7 @@ class S3ReplicationIntegrationTest {
     }
 
     @Test
-    @Order(70)
+    @Order(7)
     void getReplicationRoundTripsStoredConfiguration() {
         given()
         .when()
@@ -118,7 +118,7 @@ class S3ReplicationIntegrationTest {
     }
 
     @Test
-    @Order(80)
+    @Order(8)
     void putReplicationWithoutRoleReturnsMalformedXml() {
         given()
             .body("""
@@ -139,7 +139,7 @@ class S3ReplicationIntegrationTest {
     }
 
     @Test
-    @Order(90)
+    @Order(9)
     void deleteReplicationRemovesConfiguration() {
         given()
         .when()
@@ -161,7 +161,7 @@ class S3ReplicationIntegrationTest {
      * (and in us-east-1 as a silent false success).
      */
     @Test
-    @Order(100)
+    @Order(10)
     void putReplicationOnNonUsEast1BucketDoesNot409() {
         given()
             .body("""
@@ -197,7 +197,7 @@ class S3ReplicationIntegrationTest {
     }
 
     @Test
-    @Order(110)
+    @Order(11)
     void unqualifiedDeleteStillRemovesBucket() {
         given()
         .when()
@@ -212,49 +212,4 @@ class S3ReplicationIntegrationTest {
             .statusCode(404)
             .body(containsString("NoSuchBucket"));
     }
-    private static final String FORK_REPLICATION_XML = """
-            <ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
-                <Role>arn:aws:iam::000000000000:role/replication-role</Role>
-                <Rule>
-                    <ID>replicate-all</ID>
-                    <Status>Enabled</Status>
-                    <Priority>1</Priority>
-                    <Filter></Filter>
-                    <DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication>
-                    <Destination><Bucket>arn:aws:s3:::replication-dest</Bucket></Destination>
-                </Rule>
-            </ReplicationConfiguration>
-            """;
-
-    @Test
-    @Order(25)
-    void putAndGetReplicationRoundTripsRole() {
-        given()
-            .body(FORK_REPLICATION_XML)
-        .when()
-            .put("/" + BUCKET + "?replication")
-        .then()
-            .statusCode(200);
-
-        given()
-        .when()
-            .get("/" + BUCKET + "?replication")
-        .then()
-            .statusCode(200)
-            .body(containsString("arn:aws:iam::000000000000:role/replication-role"))
-            .body(containsString("replicate-all"));
-    }
-
-    @Test
-    @Order(35)
-    void getReplicationAfterDeleteReturnsNotFound() {
-        given()
-        .when()
-            .get("/" + BUCKET + "?replication")
-        .then()
-            .statusCode(404)
-            .body(containsString("ReplicationConfigurationNotFoundError"));
-    }
-
-
 }

@@ -1,9 +1,6 @@
 package io.github.hectorvent.floci.config;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.hectorvent.floci.services.acm.AcmDnsValidation;
-import io.github.hectorvent.floci.services.acm.model.KeyAlgorithm;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
@@ -37,9 +34,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * End to end, with TLS on and the real certificate manager: an ACM certificate is requested and
- * DNS-validated, the three custom domain operations are called over the wire with their normal
- * responses, and a
+ * End to end, with TLS on and the real certificate manager: an ACM certificate is requested, the
+ * three custom domain operations are called over the wire with their normal responses, and a
  * client that trusts only the chain ACM returned, sends each domain as SNI and verifies the
  * server's identity for it completes the handshake, where it failed before the domain existed.
  * A reset takes the names back. The fixture leaf carries no 127.0.0.1 SAN and the socket connects
@@ -63,7 +59,9 @@ class CustomDomainTlsIntegrationTest {
 
     @Test
     void customDomainsAreServedUnderTheAcmChainAsSoonAsTheyExist() throws Exception {
-        String certificateArn = AcmDnsValidation.requestIssuedCertificate("*.custom-domain-it.localhost.floci.io");
+        JsonNode requested = awsActionJson("CertificateManager", "RequestCertificate",
+                "{\"DomainName\": \"*.custom-domain-it.localhost.floci.io\", \"ValidationMethod\": \"DNS\"}");
+        String certificateArn = requested.path("CertificateArn").asText();
         String chain = awsActionJson("CertificateManager", "GetCertificate",
                 "{\"CertificateArn\": \"" + certificateArn + "\"}").path("CertificateChain").asText();
         assertTrue(chain.contains("BEGIN CERTIFICATE"), chain);

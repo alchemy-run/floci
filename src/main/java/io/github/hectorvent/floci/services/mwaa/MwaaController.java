@@ -36,10 +36,8 @@ public class MwaaController {
     private final MwaaService mwaaService;
 
     @Inject
-    public MwaaController(MwaaService mwaaService,
-            MwaaRestApiInvoker restApiInvoker) {
+    public MwaaController(MwaaService mwaaService) {
         this.mwaaService = mwaaService;
-        this.restApiInvoker = restApiInvoker;
     }
 
     @PUT
@@ -89,7 +87,8 @@ public class MwaaController {
         return Response.ok(mwaaService.createCliToken(name)).build();
     }
 
-    private final MwaaRestApiInvoker restApiInvoker;
+    @Inject
+    MwaaRestApiInvoker restApiInvoker;
 
     @POST
     @Path("/restapi/{name}")

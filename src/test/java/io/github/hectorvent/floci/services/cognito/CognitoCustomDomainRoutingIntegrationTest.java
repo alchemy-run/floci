@@ -208,7 +208,7 @@ class CognitoCustomDomainRoutingIntegrationTest {
                 .get("/" + poolA + "/.well-known/openid-configuration")
         .then()
                 .statusCode(200)
-                .body("issuer", equalTo("https://cognito-idp.us-east-1.amazonaws.com/" + poolA))
+                .body("issuer", equalTo(FLOCI_URL + "/" + poolA))
                 .body("jwks_uri", equalTo(FLOCI_URL + "/" + poolA + "/.well-known/jwks.json"))
                 .body("token_endpoint", equalTo("https://" + DOMAIN + "/oauth2/token"))
                 .body("userinfo_endpoint", equalTo("https://" + DOMAIN + "/oauth2/userInfo"));

@@ -1,14 +1,15 @@
 package io.github.hectorvent.floci.services.sagemaker;
 
-import io.github.hectorvent.floci.testing.IndependentServiceSettingsProfile;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
+import io.quarkus.test.junit.QuarkusTestProfile;
 import io.restassured.response.Response;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -27,15 +28,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * reason naming the fix, rather than falling back to CPU. A job that reports {@code Completed}
  * after training on the wrong hardware leaves an artifact that looks legitimate.
  *
- * <p>{@link IndependentServiceSettingsProfile}, which this class shares with other classes that
- * each call a different service, turns the feature on because {@code application.yml} ships it
- * off. Devices are deliberately left unset, which is what makes the third case reachable.
- * SageMaker has no way to delete a training job, so the jobs these cases start stay behind; no
- * other class on that profile calls SageMaker.
+ * <p>The profile turns the feature on because {@code application.yml} ships it off. Devices are
+ * deliberately left unset, which is what makes the third case reachable.
  */
 @QuarkusTest
-@TestProfile(IndependentServiceSettingsProfile.class)
+@TestProfile(SageMakerGpuIntegrationTest.GpuEnabledProfile.class)
 class SageMakerGpuIntegrationTest {
+
+    public static class GpuEnabledProfile implements QuarkusTestProfile {
+        @Override
+        public Map<String, String> getConfigOverrides() {
+            return Map.of("floci.services.sagemaker.gpu.enabled", "true");
+        }
+    }
 
     private static final String AUTH =
             "AWS4-HMAC-SHA256 Credential=test/20260205/us-east-1/sagemaker/aws4_request";

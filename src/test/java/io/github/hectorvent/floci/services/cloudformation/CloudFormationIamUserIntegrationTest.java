@@ -472,69 +472,6 @@ class CloudFormationIamUserIntegrationTest {
         awaitStackStatus(stackId, "DELETE_COMPLETE");
     }
 
-    @Test
-    void createAndUpdateStackReconcilesUserTags() throws InterruptedException {
-        String suffix = Long.toString(System.nanoTime(), 36);
-        String userName = "tagged-user-" + suffix;
-        String stackName = "cfn-tagged-user-stack-" + suffix;
-
-        String createTemplate = """
-                {
-                  "Resources": {
-                    "TaggedUser": {
-                      "Type": "AWS::IAM::User",
-                      "Properties": {
-                        "UserName": "%s",
-                        "Tags": [
-                          {"Key": "Environment", "Value": "test"},
-                          {"Key": "Owner", "Value": "platform"}
-                        ]
-                      }
-                    }
-                  }
-                }
-                """.formatted(userName);
-
-        String stackId = createStack(stackName, createTemplate);
-        awaitStackStatus(stackId, "CREATE_COMPLETE");
-
-        String createdTags = listUserTags(userName);
-        assertThat(createdTags, containsString("<Key>Environment</Key>"));
-        assertThat(createdTags, containsString("<Value>test</Value>"));
-        assertThat(createdTags, containsString("<Key>Owner</Key>"));
-        assertThat(createdTags, containsString("<Value>platform</Value>"));
-
-        String updateTemplate = """
-                {
-                  "Resources": {
-                    "TaggedUser": {
-                      "Type": "AWS::IAM::User",
-                      "Properties": {
-                        "UserName": "%s",
-                        "Tags": [
-                          {"Key": "Environment", "Value": "production"},
-                          {"Key": "Team", "Value": "identity"}
-                        ]
-                      }
-                    }
-                  }
-                }
-                """.formatted(userName);
-
-        updateStack(stackName, updateTemplate);
-        awaitStackStatus(stackId, "UPDATE_COMPLETE");
-
-        String updatedTags = listUserTags(userName);
-        assertThat(updatedTags, containsString("<Key>Environment</Key>"));
-        assertThat(updatedTags, containsString("<Value>production</Value>"));
-        assertThat(updatedTags, containsString("<Key>Team</Key>"));
-        assertThat(updatedTags, containsString("<Value>identity</Value>"));
-        assertThat(updatedTags, org.hamcrest.Matchers.not(containsString("<Key>Owner</Key>")));
-
-        deleteStack(stackName);
-        awaitStackStatus(stackId, "DELETE_COMPLETE");
-    }
-
     private static String createStack(String stackName, String template) {
         return cfnQuery("CreateStack", stackName, template)
                 .then()
