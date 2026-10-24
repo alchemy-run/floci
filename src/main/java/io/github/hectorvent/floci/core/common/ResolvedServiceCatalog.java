@@ -34,7 +34,6 @@ import io.github.hectorvent.floci.services.cloudfront.CloudFrontKvsDataPlaneCont
 import io.github.hectorvent.floci.services.cloudfront.CloudFrontServingController;
 import io.github.hectorvent.floci.services.cloudfront.edge.CloudFrontEdgeController;
 import io.github.hectorvent.floci.services.codeartifact.CodeArtifactMavenController;
-import io.github.hectorvent.floci.services.codeartifact.CodeArtifactPypiController;
 import io.github.hectorvent.floci.services.cognito.CognitoOAuthController;
 import io.github.hectorvent.floci.services.cognito.CognitoWellKnownController;
 import io.github.hectorvent.floci.services.controlcatalog.ControlCatalogController;
@@ -792,8 +791,7 @@ public class ResolvedServiceCatalog {
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("codeartifact"), Set.of(),
                         Set.of(io.github.hectorvent.floci.services.codeartifact.CodeArtifactController.class,
-                                CodeArtifactMavenController.class,
-                                CodeArtifactPypiController.class)),
+                                CodeArtifactMavenController.class)),
                 descriptor("verifiedpermissions", "verifiedpermissions", config.services().verifiedpermissions().enabled(), true,
                         "verifiedpermissions", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),

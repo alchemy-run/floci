@@ -5,24 +5,24 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.core.common.AwsRegions;
 import io.github.hectorvent.floci.core.common.JsonErrorResponseUtils;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.AuthorizationToken;
 import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.DomainView;
+import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.PackageCoordinate;
 import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.PackageVersionAssetResult;
-import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.PackageVersionReadmeResult;
 import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.PublishPackageVersionResult;
 import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.ResourcePolicy;
+import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.VersionMutation;
 import io.github.hectorvent.floci.services.codeartifact.model.CodeArtifactPackageVersion;
 import io.github.hectorvent.floci.services.codeartifact.model.CodeArtifactRepository;
 import io.github.hectorvent.floci.services.codeartifact.model.ExternalConnection;
 import io.github.hectorvent.floci.services.codeartifact.model.PackageAsset;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.BeanParam;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
@@ -307,7 +307,25 @@ public class CodeArtifactController {
         return ok(single("repository", repositoryDescription(r)));
     }
 
-    // ------------------------------------------------------- package versions
+    public static class PackageQuery {
+        @QueryParam("domain") public String domain;
+        @QueryParam("domain-owner") public String owner;
+        @QueryParam("repository") public String repository;
+        @QueryParam("format") public String format;
+        @QueryParam("namespace") public String namespace;
+        @QueryParam("package") public String name;
+        @QueryParam("version") public String version;
+        @QueryParam("max-results") public String maxResults;
+        @QueryParam("next-token") public String nextToken;
+
+        PackageCoordinate coordinate(String region) {
+            return new PackageCoordinate(region, domain, owner, repository, format, namespace, name);
+        }
+
+        Integer pageSize() {
+            return Pagination.parseMaxResults(maxResults, "ValidationException");
+        }
+    }
 
     @POST
     @Path("/v1/package/version/publish")
@@ -331,51 +349,23 @@ public class CodeArtifactController {
 
     @GET
     @Path("/v1/package")
-    public Response describePackage(@Context HttpHeaders headers, @QueryParam("domain") String domain,
-                                    @QueryParam("domain-owner") String domainOwner,
-                                    @QueryParam("repository") String repository,
-                                    @QueryParam("format") String format,
-                                    @QueryParam("namespace") String namespace,
-                                    @QueryParam("package") String packageName) {
-        String region = regionResolver.resolveRegion(headers);
-        CodeArtifactService.PackageDescription described = service.describePackage(region, domain, domainOwner,
-                repository, format, namespace, packageName);
-        return ok(single("package", packageDescription(described)));
+    public Response describePackage(@Context HttpHeaders headers, @BeanParam PackageQuery query) {
+        return Response.ok(service.describePackage(query.coordinate(regionResolver.resolveRegion(headers)))).build();
     }
 
     @DELETE
     @Path("/v1/package")
-    public Response deletePackage(@Context HttpHeaders headers, @QueryParam("domain") String domain,
-                                  @QueryParam("domain-owner") String domainOwner,
-                                  @QueryParam("repository") String repository,
-                                  @QueryParam("format") String format,
-                                  @QueryParam("namespace") String namespace,
-                                  @QueryParam("package") String packageName) {
-        String region = regionResolver.resolveRegion(headers);
-        CodeArtifactService.PackageDescription deleted = service.deletePackage(region, domain, domainOwner,
-                repository, format, namespace, packageName);
-        return ok(single("deletedPackage", deletedPackageDescription(deleted)));
+    public Response deletePackage(@Context HttpHeaders headers, @BeanParam PackageQuery query) {
+        return Response.ok(service.deletePackage(query.coordinate(regionResolver.resolveRegion(headers)))).build();
     }
 
     @POST
     @Path("/v1/package")
-    public Response putPackageOriginConfiguration(@Context HttpHeaders headers, @QueryParam("domain") String domain,
-                                                  @QueryParam("domain-owner") String domainOwner,
-                                                  @QueryParam("repository") String repository,
-                                                  @QueryParam("format") String format,
-                                                  @QueryParam("namespace") String namespace,
-                                                  @QueryParam("package") String packageName, String body) {
-        JsonNode req = readTree(body);
-        JsonNode restrictions = req.get("restrictions");
-        String region = regionResolver.resolveRegion(headers);
-        CodeArtifactService.PackageDescription described = service.putPackageOriginConfiguration(region, domain,
-                domainOwner, repository, format, namespace, packageName, text(restrictions, "publish"),
-                text(restrictions, "upstream"));
-        ObjectNode response = objectMapper.createObjectNode();
-        ObjectNode restrictionsNode = response.putObject("originConfiguration").putObject("restrictions");
-        restrictionsNode.put("publish", described.publishRestriction());
-        restrictionsNode.put("upstream", described.upstreamRestriction());
-        return ok(response);
+    public Response putPackageOriginConfiguration(@Context HttpHeaders headers, @BeanParam PackageQuery query,
+                                                   String body) {
+        JsonNode request = readTree(body);
+        return Response.ok(service.putPackageOriginConfiguration(query.coordinate(regionResolver.resolveRegion(headers)),
+                stringMap(request.get("restrictions")))).build();
     }
 
     @GET
@@ -393,8 +383,34 @@ public class CodeArtifactController {
         return ok(single("packageVersion", packageVersionDescription(pv)));
     }
 
+    @POST
+    @Path("/v1/packages")
+    public Response listPackages(@Context HttpHeaders headers, @BeanParam PackageQuery query,
+                                  @QueryParam("package-prefix") String prefix, @QueryParam("publish") String publish,
+                                  @QueryParam("upstream") String upstream) {
+        return Response.ok(service.listPackages(query.coordinate(regionResolver.resolveRegion(headers)), prefix,
+                publish, upstream, query.pageSize(), query.nextToken)).build();
+    }
+
+    @POST
+    @Path("/v1/package/versions")
+    public Response listPackageVersions(@Context HttpHeaders headers, @BeanParam PackageQuery query,
+                                         @QueryParam("status") String status, @QueryParam("originType") String originType,
+                                         @QueryParam("sortBy") String sortBy) {
+        return Response.ok(service.listPackageVersions(query.coordinate(regionResolver.resolveRegion(headers)), status,
+                originType, sortBy, query.pageSize(), query.nextToken)).build();
+    }
+
+    @POST
+    @Path("/v1/package/version/assets")
+    public Response listPackageVersionAssets(@Context HttpHeaders headers, @BeanParam PackageQuery query) {
+        return Response.ok(service.listPackageVersionAssets(query.coordinate(regionResolver.resolveRegion(headers)),
+                query.version, query.pageSize(), query.nextToken)).build();
+    }
+
     @GET
     @Path("/v1/package/version/asset")
+    @Produces(MediaType.APPLICATION_OCTET_STREAM)
     public Response getPackageVersionAsset(@Context HttpHeaders headers, @QueryParam("domain") String domain,
                                             @QueryParam("domain-owner") String domainOwner,
                                             @QueryParam("repository") String repository,
@@ -414,131 +430,92 @@ public class CodeArtifactController {
                 .build();
     }
 
-    @POST
-    @Path("/v1/package/version/assets")
-    @Consumes(MediaType.WILDCARD)
-    public Response listPackageVersionAssets(@Context HttpHeaders headers, @QueryParam("domain") String domain,
-                                              @QueryParam("domain-owner") String domainOwner,
-                                              @QueryParam("repository") String repository,
-                                              @QueryParam("format") String format,
-                                              @QueryParam("namespace") String namespace,
-                                              @QueryParam("package") String packageName,
-                                              @QueryParam("version") String version,
-                                              @QueryParam("max-results") String maxResults,
-                                              @QueryParam("next-token") String nextToken) {
-        String region = regionResolver.resolveRegion(headers);
-        CodeArtifactService.PackageVersionAssetsListResult result = service.listPackageVersionAssets(region, domain,
-                domainOwner, repository, format, namespace, packageName, version,
-                Pagination.parseMaxResults(maxResults, "ValidationException"), nextToken);
-        ObjectNode response = objectMapper.createObjectNode();
-        response.put("format", result.format());
-        if (result.namespace() != null) {
-            response.put("namespace", result.namespace());
-        }
-        response.put("package", result.packageName());
-        response.put("version", result.version());
-        response.put("versionRevision", result.versionRevision());
-        ArrayNode assets = response.putArray("assets");
-        result.assets().forEach(asset -> {
-            ObjectNode node = assets.addObject();
-            node.put("name", asset.name());
-            node.put("size", asset.size());
-            ObjectNode hashes = node.putObject("hashes");
-            asset.hashes().forEach(hashes::put);
-        });
-        if (result.nextToken() != null) {
-            response.put("nextToken", result.nextToken());
-        }
-        return ok(response);
-    }
-
-    @POST
-    @Path("/v1/package/versions")
-    @Consumes(MediaType.WILDCARD)
-    public Response listPackageVersions(@Context HttpHeaders headers, @QueryParam("domain") String domain,
-                                         @QueryParam("domain-owner") String domainOwner,
-                                         @QueryParam("repository") String repository,
-                                         @QueryParam("format") String format,
-                                         @QueryParam("namespace") String namespace,
-                                         @QueryParam("package") String packageName,
-                                         @QueryParam("status") String status,
-                                         @QueryParam("sortBy") String sortBy,
-                                         @QueryParam("max-results") String maxResults,
-                                         @QueryParam("next-token") String nextToken,
-                                         @QueryParam("originType") String originType) {
-        String region = regionResolver.resolveRegion(headers);
-        CodeArtifactService.ListPackageVersionsResult result = service.listPackageVersions(region, domain,
-                domainOwner, repository, format, namespace, packageName, status, sortBy,
-                Pagination.parseMaxResults(maxResults, "ValidationException"), nextToken, originType);
-        ObjectNode response = objectMapper.createObjectNode();
-        if (result.defaultDisplayVersion() != null) {
-            response.put("defaultDisplayVersion", result.defaultDisplayVersion());
-        }
-        response.put("format", result.format());
-        if (result.namespace() != null) {
-            response.put("namespace", result.namespace());
-        }
-        response.put("package", result.packageName());
-        ArrayNode versions = response.putArray("versions");
-        result.versions().forEach(summary -> {
-            ObjectNode node = versions.addObject();
-            node.put("version", summary.version());
-            node.put("revision", summary.revision());
-            node.put("status", summary.status());
-            ObjectNode origin = node.putObject("origin");
-            origin.put("originType", "INTERNAL");
-            origin.putObject("domainEntryPoint").put("repositoryName", repository);
-        });
-        if (result.nextToken() != null) {
-            response.put("nextToken", result.nextToken());
-        }
-        return ok(response);
-    }
-
     @GET
     @Path("/v1/package/version/readme")
-    public Response getPackageVersionReadme(@Context HttpHeaders headers, @QueryParam("domain") String domain,
-                                             @QueryParam("domain-owner") String domainOwner,
-                                             @QueryParam("repository") String repository,
-                                             @QueryParam("format") String format,
-                                             @QueryParam("namespace") String namespace,
-                                             @QueryParam("package") String packageName,
-                                             @QueryParam("version") String version) {
-        String region = regionResolver.resolveRegion(headers);
-        PackageVersionReadmeResult result = service.getPackageVersionReadme(region, domain, domainOwner, repository,
-                format, namespace, packageName, version);
-        return ok(packageVersionReadme(result));
+    public Response getPackageVersionReadme(@Context HttpHeaders headers, @BeanParam PackageQuery query) {
+        return Response.ok(service.getPackageVersionReadme(query.coordinate(regionResolver.resolveRegion(headers)),
+                query.version)).build();
+    }
+
+    @POST
+    @Path("/v1/package/version/dependencies")
+    public Response listPackageVersionDependencies(@Context HttpHeaders headers, @BeanParam PackageQuery query) {
+        return Response.ok(service.listPackageVersionDependencies(query.coordinate(regionResolver.resolveRegion(headers)),
+                query.version)).build();
+    }
+
+    @POST
+    @Path("/v1/package/versions/update_status")
+    public Response updatePackageVersionsStatus(@Context HttpHeaders headers, @BeanParam PackageQuery query, String body) {
+        return Response.ok(service.mutatePackageVersions(query.coordinate(regionResolver.resolveRegion(headers)),
+                "status", versionMutation(readTree(body)))).build();
+    }
+
+    @POST
+    @Path("/v1/package/versions/dispose")
+    public Response disposePackageVersions(@Context HttpHeaders headers, @BeanParam PackageQuery query, String body) {
+        return Response.ok(service.mutatePackageVersions(query.coordinate(regionResolver.resolveRegion(headers)),
+                "dispose", versionMutation(readTree(body)))).build();
+    }
+
+    @POST
+    @Path("/v1/package/versions/delete")
+    public Response deletePackageVersions(@Context HttpHeaders headers, @BeanParam PackageQuery query, String body) {
+        return Response.ok(service.mutatePackageVersions(query.coordinate(regionResolver.resolveRegion(headers)),
+                "delete", versionMutation(readTree(body)))).build();
     }
 
     @POST
     @Path("/v1/package/versions/copy")
-    public Response copyPackageVersions(@Context HttpHeaders headers, @QueryParam("domain") String domain,
-                                         @QueryParam("domain-owner") String domainOwner,
-                                         @QueryParam("source-repository") String sourceRepository,
-                                         @QueryParam("destination-repository") String destinationRepository,
-                                         @QueryParam("format") String format,
-                                         @QueryParam("namespace") String namespace,
-                                         @QueryParam("package") String packageName, String body) {
-        JsonNode req = readTree(body);
-        String region = regionResolver.resolveRegion(headers);
-        CodeArtifactService.CopyPackageVersionsResult result = service.copyPackageVersions(region, domain,
-                domainOwner, sourceRepository, destinationRepository, format, namespace, packageName,
-                readStringArray(req.get("versions"), "versions"), readStringMap(req.get("versionRevisions")),
-                readBoolean(req, "allowOverwrite"), readBoolean(req, "includeFromUpstream"));
-        ObjectNode response = objectMapper.createObjectNode();
-        ObjectNode successfulVersions = response.putObject("successfulVersions");
-        result.successfulVersions().forEach((version, outcome) -> {
-            ObjectNode node = successfulVersions.putObject(version);
-            node.put("revision", outcome.revision());
-            node.put("status", outcome.status());
+    public Response copyPackageVersions(@Context HttpHeaders headers, @BeanParam PackageQuery query,
+                                         @QueryParam("source-repository") String source,
+                                         @QueryParam("destination-repository") String destination, String body) {
+        PackageCoordinate coordinate = new PackageCoordinate(regionResolver.resolveRegion(headers), query.domain,
+                query.owner, source, query.format, query.namespace, query.name);
+        return Response.ok(service.copyPackageVersions(coordinate, destination, versionMutation(readTree(body)))).build();
+    }
+
+    private VersionMutation versionMutation(JsonNode request) {
+        List<String> versions = null;
+        if (request.hasNonNull("versions")) {
+            if (!request.get("versions").isArray()) {
+                throw new AwsException("ValidationException", "versions must be an array.", 400);
+            }
+            versions = new ArrayList<>();
+            for (JsonNode version : request.get("versions")) {
+                if (!version.isTextual()) {
+                    throw new AwsException("ValidationException", "versions must contain strings.", 400);
+                }
+                versions.add(version.textValue());
+            }
+        }
+        return new VersionMutation(versions, stringMap(request.get("versionRevisions")), text(request, "expectedStatus"),
+                text(request, "targetStatus"), booleanValue(request, "allowOverwrite"),
+                booleanValue(request, "includeFromUpstream"));
+    }
+
+    private boolean booleanValue(JsonNode request, String field) {
+        if (request.hasNonNull(field) && !request.get(field).isBoolean()) {
+            throw new AwsException("ValidationException", field + " must be a boolean.", 400);
+        }
+        return request.path(field).asBoolean(false);
+    }
+
+    private Map<String, String> stringMap(JsonNode node) {
+        Map<String, String> result = new LinkedHashMap<>();
+        if (node == null || node.isNull()) {
+            return result;
+        }
+        if (!node.isObject()) {
+            throw new AwsException("ValidationException", "Expected a string map.", 400);
+        }
+        node.properties().forEach(entry -> {
+            if (!entry.getValue().isTextual()) {
+                throw new AwsException("ValidationException", "Expected a string map.", 400);
+            }
+            result.put(entry.getKey(), entry.getValue().textValue());
         });
-        ObjectNode failedVersions = response.putObject("failedVersions");
-        result.failedVersions().forEach((version, failure) -> {
-            ObjectNode node = failedVersions.putObject(version);
-            node.put("errorCode", failure.errorCode());
-            node.put("errorMessage", failure.errorMessage());
-        });
-        return ok(response);
+        return result;
     }
 
     // -------------------------------------------------------------------- tags
@@ -571,15 +548,14 @@ public class CodeArtifactController {
     private ObjectNode domainDescription(DomainView view) {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("arn", view.domain().getArn());
-        node.put("assetSizeBytes", view.assetSizeBytes());
+        node.put("assetSizeBytes", 0L);
         node.put("createdTime", view.domain().getCreatedTime());
         node.put("encryptionKey", view.domain().getEncryptionKey());
         node.put("name", view.domain().getName());
         node.put("owner", view.domain().getOwner());
         node.put("repositoryCount", view.repositoryCount());
         // AWS's internal per-domain bucket naming is not publicly documented; this is a synthesized placeholder.
-        node.put("s3BucketArn", AwsArnUtils.Arn.global(AwsRegions.partitionFor(view.domain().getRegion()), "s3", "",
-                "codeartifact-" + view.domain().getRegion() + "-" + view.domain().getOwner()).toString());
+        node.put("s3BucketArn", "arn:aws:s3:::codeartifact-" + view.domain().getRegion() + "-" + view.domain().getOwner());
         node.put("status", "Active");
         return node;
     }
@@ -661,38 +637,6 @@ public class CodeArtifactController {
         return node;
     }
 
-    private ObjectNode packageDescription(CodeArtifactService.PackageDescription described) {
-        ObjectNode node = objectMapper.createObjectNode();
-        node.put("format", described.format());
-        if (described.namespace() != null) {
-            node.put("namespace", described.namespace());
-        }
-        node.put("name", described.packageName());
-        ObjectNode restrictions = node.putObject("originConfiguration").putObject("restrictions");
-        restrictions.put("publish", described.publishRestriction());
-        restrictions.put("upstream", described.upstreamRestriction());
-        return node;
-    }
-
-    /**
-     * {@code PackageSummary}, real AWS's response type for {@code deletedPackage}, names the
-     * package's name field {@code package}, not {@code name}: a different field name than
-     * {@code PackageDescription} uses for the same data in {@code DescribePackage}'s response,
-     * confirmed against the API reference.
-     */
-    private ObjectNode deletedPackageDescription(CodeArtifactService.PackageDescription described) {
-        ObjectNode node = objectMapper.createObjectNode();
-        node.put("format", described.format());
-        if (described.namespace() != null) {
-            node.put("namespace", described.namespace());
-        }
-        node.put("package", described.packageName());
-        ObjectNode restrictions = node.putObject("originConfiguration").putObject("restrictions");
-        restrictions.put("publish", described.publishRestriction());
-        restrictions.put("upstream", described.upstreamRestriction());
-        return node;
-    }
-
     private ObjectNode packageVersionDescription(CodeArtifactPackageVersion pv) {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("format", pv.getFormat());
@@ -708,20 +652,9 @@ public class CodeArtifactController {
         }
         ObjectNode origin = node.putObject("origin");
         origin.put("originType", "INTERNAL");
+        origin.putObject("domainEntryPoint").put("repositoryName",
+                pv.getOriginRepository() == null ? pv.getRepositoryName() : pv.getOriginRepository());
         node.putArray("licenses");
-        return node;
-    }
-
-    private ObjectNode packageVersionReadme(PackageVersionReadmeResult result) {
-        ObjectNode node = objectMapper.createObjectNode();
-        node.put("format", result.format());
-        if (result.namespace() != null) {
-            node.put("namespace", result.namespace());
-        }
-        node.put("package", result.packageName());
-        node.put("version", result.version());
-        node.put("versionRevision", result.versionRevision());
-        node.put("readme", result.readme());
         return node;
     }
 
@@ -775,53 +708,6 @@ public class CodeArtifactController {
         }
         upstreamsArray.forEach(n -> upstreams.add(text(n, "repositoryName")));
         return upstreams;
-    }
-
-    private List<String> readStringArray(JsonNode arrayNode, String field) {
-        List<String> values = new ArrayList<>();
-        if (arrayNode == null || arrayNode.isNull()) {
-            return values;
-        }
-        if (!arrayNode.isArray()) {
-            throw new AwsException("ValidationException", field + " must be an array of strings.", 400);
-        }
-        arrayNode.forEach(n -> {
-            if (!n.isTextual()) {
-                throw new AwsException("ValidationException", field + " must be an array of strings.", 400);
-            }
-            values.add(n.textValue());
-        });
-        return values;
-    }
-
-    private Map<String, String> readStringMap(JsonNode objectNode) {
-        Map<String, String> values = new LinkedHashMap<>();
-        if (objectNode == null || objectNode.isNull()) {
-            return values;
-        }
-        if (!objectNode.isObject()) {
-            throw new AwsException("ValidationException",
-                    "versionRevisions must be an object of string to string.", 400);
-        }
-        objectNode.fields().forEachRemaining(e -> {
-            if (!e.getValue().isTextual()) {
-                throw new AwsException("ValidationException",
-                        "versionRevisions['" + e.getKey() + "'] must be a string.", 400);
-            }
-            values.put(e.getKey(), e.getValue().textValue());
-        });
-        return values;
-    }
-
-    private static boolean readBoolean(JsonNode req, String field) {
-        JsonNode value = req == null ? null : req.get(field);
-        if (value == null || value.isNull()) {
-            return false;
-        }
-        if (!value.isBoolean()) {
-            throw new AwsException("ValidationException", field + " must be a boolean.", 400);
-        }
-        return value.asBoolean();
     }
 
     private static String text(JsonNode node, String field) {
