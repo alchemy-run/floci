@@ -580,7 +580,7 @@ public class LambdaService implements ResourceProvider {
         if (code != null) {
             String imageUri = (String) code.get("ImageUri");
             if (imageUri != null) {
-                fn.setImageUri(imageUri);
+                applyImageUri(fn, imageUri);
             }
             String zipFileBase64 = (String) code.get("ZipFile");
             if (zipFileBase64 != null) {
