@@ -44,11 +44,6 @@ public class EmrCluster {
     private String ec2Attributes;
     private String applications;
     private String configurations;
-    // The cluster's BootstrapActions (BootstrapActionConfig list) as given, raw JSON; null when none.
-    private String bootstrapActions;
-    // The cluster's ManagedScalingPolicy and AutoTerminationPolicy as given, raw JSON; null when none.
-    private String managedScalingPolicy;
-    private String autoTerminationPolicy;
     private String region;
     private Instant creationDateTime;
     private Instant readyDateTime;
@@ -57,6 +52,10 @@ public class EmrCluster {
     private List<EmrStep> steps = new ArrayList<>();
     private List<EmrInstanceGroup> instanceGroups = new ArrayList<>();
     private List<EmrInstanceFleet> instanceFleets = new ArrayList<>();
+    private List<EmrBootstrapAction> bootstrapActions = new ArrayList<>();
+    // Idle timeout in seconds of the attached auto-termination policy; null when none is attached.
+    private Long autoTerminationIdleTimeout;
+    private EmrManagedScalingPolicy managedScalingPolicy;
 
     public EmrCluster() {}
 
@@ -159,15 +158,6 @@ public class EmrCluster {
     public String getConfigurations() { return configurations; }
     public void setConfigurations(String configurations) { this.configurations = configurations; }
 
-    public String getBootstrapActions() { return bootstrapActions; }
-    public void setBootstrapActions(String bootstrapActions) { this.bootstrapActions = bootstrapActions; }
-
-    public String getManagedScalingPolicy() { return managedScalingPolicy; }
-    public void setManagedScalingPolicy(String managedScalingPolicy) { this.managedScalingPolicy = managedScalingPolicy; }
-
-    public String getAutoTerminationPolicy() { return autoTerminationPolicy; }
-    public void setAutoTerminationPolicy(String autoTerminationPolicy) { this.autoTerminationPolicy = autoTerminationPolicy; }
-
     public String getRegion() { return region; }
     public void setRegion(String region) { this.region = region; }
 
@@ -192,11 +182,18 @@ public class EmrCluster {
     public List<EmrInstanceFleet> getInstanceFleets() { return instanceFleets; }
     public void setInstanceFleets(List<EmrInstanceFleet> instanceFleets) { this.instanceFleets = instanceFleets; }
 
-    private Long autoTerminationIdleTimeout;
+    public List<EmrBootstrapAction> getBootstrapActions() { return bootstrapActions; }
+    public void setBootstrapActions(List<EmrBootstrapAction> bootstrapActions) {
+        this.bootstrapActions = bootstrapActions;
+    }
 
     public Long getAutoTerminationIdleTimeout() { return autoTerminationIdleTimeout; }
-
     public void setAutoTerminationIdleTimeout(Long autoTerminationIdleTimeout) {
         this.autoTerminationIdleTimeout = autoTerminationIdleTimeout;
+    }
+
+    public EmrManagedScalingPolicy getManagedScalingPolicy() { return managedScalingPolicy; }
+    public void setManagedScalingPolicy(EmrManagedScalingPolicy managedScalingPolicy) {
+        this.managedScalingPolicy = managedScalingPolicy;
     }
 }
