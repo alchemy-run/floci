@@ -744,6 +744,7 @@ public class SqsService implements Resettable, ResourceProvider {
 
         validateMaximumMessageSize(attributes);
         attributes = validateMessageRetentionPeriod(attributes);
+        attributes = withNormalizedPolicy(attributes);
 
         String accountId = regionResolver.getAccountId();
         String queueUrl = buildQueueUrl(region, accountId, queueName);
@@ -782,6 +783,8 @@ public class SqsService implements Resettable, ResourceProvider {
             getOrCreateQueue(storageKey).activity().accessed();
             return withCurrentQueueUrl(existing, region);
         }
+
+        validateRedrivePolicy(attributes, accountId, region);
 
         Queue queue = new Queue(queueName, queueUrl);
         queue.setAccountId(regionResolver.getAccountId());
@@ -1780,6 +1783,13 @@ public class SqsService implements Resettable, ResourceProvider {
                         "The specified queue does not exist.", 400));
         validateMaximumMessageSize(attributes);
         attributes = validateMessageRetentionPeriod(attributes);
+        attributes = withNormalizedPolicy(attributes);
+        String sourceAccountId = accountFromQueueUrl(queue.getQueueUrl());
+        validateRedrivePolicy(attributes,
+                sourceAccountId != null ? sourceAccountId : regionResolver.getAccountId(), region);
+        if (attributes != null && attributes.containsKey("RedrivePolicy")) {
+            redrivePolicyCache.remove(storageKey);
+        }
         if (attributes != null) {
             for (Map.Entry<String, String> entry : attributes.entrySet()) {
                 if (entry.getValue() == null || entry.getValue().isEmpty()) {
@@ -2548,5 +2558,36 @@ public class SqsService implements Resettable, ResourceProvider {
         }
         String dlqUrl = queueUrlFromArn(targetArn, region);
         return dlqUrl != null && getQueueByUrl(regionKey(region, dlqUrl), dlqUrl).isPresent();
+    }
+
+    /**
+     * AWS rejects a RedrivePolicy whose {@code deadLetterTargetArn} does not name an existing
+     * queue in the source queue's own account and region. Only the policy being written is
+     * checked: deleting the dead-letter queue afterwards leaves the source queue usable.
+     */
+    private void validateRedrivePolicy(Map<String, String> attributes, String sourceAccountId, String region) {
+        if (attributes == null) {
+            return;
+        }
+        String raw = attributes.get("RedrivePolicy");
+        if (raw == null || raw.isEmpty()) {
+            return;
+        }
+        JsonNode policy;
+        try {
+            policy = POLICY_MAPPER.readTree(raw);
+        } catch (Exception e) {
+            LOG.debugv("RedrivePolicy is not JSON, skipping dead-letter target check: {0}", raw);
+            return;
+        }
+        JsonNode target = policy == null ? null : policy.get("deadLetterTargetArn");
+        if (target == null || !target.isTextual()) {
+            return;
+        }
+        if (!deadLetterTargetExists(target.asText(), sourceAccountId, region)) {
+            throw new AwsException("InvalidParameterValue",
+                    "Value " + raw + " for parameter RedrivePolicy is invalid. "
+                            + "Reason: Dead letter target does not exist.", 400);
+        }
     }
 }
