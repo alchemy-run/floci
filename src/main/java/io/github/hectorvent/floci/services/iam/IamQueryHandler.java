@@ -439,12 +439,14 @@ public class IamQueryHandler {
 
     /**
      * {@code Base32StringSeed} and {@code QRCodePNG} are both typed as base64-encoded binary, so
-     * the base32 seed string goes out base64-wrapped. The QR code is not returned: encoding a PNG
-     * would mean a new dependency for an optional field, and the {@code otpauth://} URI it encodes
-     * is derivable from the seed that is returned. {@code aws iam create-virtual-mfa-device} works
-     * against this with {@code --bootstrap-method Base32StringSeed}, and fails only when asked for
-     * the QR code specifically.
+     * the base32 seed string goes out base64-wrapped. AWS returns both; the QR code here is a
+     * well-formed placeholder PNG rather than an encoding of the {@code otpauth://} URI, which would
+     * mean a new dependency for an optional field, and that URI is derivable from the seed.
      */
+    /** A 1x1 PNG, base64-encoded: the {@code QRCodePNG} every new virtual MFA device reports. */
+    private static final String PLACEHOLDER_QR_CODE_PNG =
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNgAAAAAgABSK+kcQAAAABJRU5ErkJggg==";
+
     private Response handleCreateVirtualMFADevice(MultivaluedMap<String, String> params) {
         VirtualMfaDevice device = iamService.createVirtualMfaDevice(
                 getParam(params, "VirtualMFADeviceName"), getParam(params, "Path"),
@@ -453,6 +455,7 @@ public class IamQueryHandler {
                 .start("VirtualMFADevice")
                 .elem("SerialNumber", device.getSerialNumber())
                 .elem("Base32StringSeed", base64(device.getBase32Seed()))
+                .elem("QRCodePNG", PLACEHOLDER_QR_CODE_PNG)
                 .raw(tagsElement(new TreeMap<>(device.getTags())))
                 .end("VirtualMFADevice")
                 .build();
