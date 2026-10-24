@@ -730,12 +730,33 @@ public class AcmService implements ResourceProvider {
         }
         cert = current;
         boolean changed = false;
-        if (cert.getStatus() == CertificateStatus.PENDING_VALIDATION && cert.getCreatedAt() != null
-                && !Instant.now().isBefore(cert.getCreatedAt().plusSeconds(validationWaitSeconds))) {
-            cert.setStatus(CertificateStatus.ISSUED);
-            cert.setIssuedAt(Instant.now());
-            LOG.debugv("Certificate {0} issued after the validation wait", cert.getArn());
-            changed = true;
+        if (cert.getStatus() == CertificateStatus.PENDING_VALIDATION) {
+            boolean validated;
+            if (cert.getValidationMethod() == ValidationMethod.DNS) {
+                List<HostedZone> zones = route53Service != null
+                    ? route53Service.listHostedZones(null, 0) : List.of();
+                List<DomainValidation> validations = cert.getDomainValidationOptions().stream()
+                    .map(validation -> new DomainValidation(validation.domainName(), validation.validationDomain(),
+                        hasValidationRecord(validation.resourceRecord(), zones) ? "SUCCESS" : "PENDING_VALIDATION",
+                        validation.validationMethod(), validation.resourceRecord(), validation.validationEmails()))
+                    .toList();
+                if (!validations.equals(cert.getDomainValidationOptions())) {
+                    cert.setDomainValidationOptions(validations);
+                    changed = true;
+                }
+                validated = !validations.isEmpty()
+                    && validations.stream().allMatch(validation -> "SUCCESS".equals(validation.validationStatus()));
+            } else {
+                validated = cert.getValidationMethod() == ValidationMethod.EMAIL && validationWaitSeconds >= 0
+                    && cert.getCreatedAt() != null
+                    && !Instant.now().isBefore(cert.getCreatedAt().plusSeconds(validationWaitSeconds));
+            }
+            if (validated) {
+                cert.setStatus(CertificateStatus.ISSUED);
+                cert.setIssuedAt(Instant.now());
+                LOG.debugv("Certificate {0} issued after domain validation", cert.getArn());
+                changed = true;
+            }
         }
         boolean issued = cert.getStatus() == CertificateStatus.ISSUED || cert.getIssuedAt() != null;
         if (issued && !cert.getDomainValidationOptions().stream()
@@ -1065,5 +1086,35 @@ public class AcmService implements ResourceProvider {
     private static String normalizeDnsName(String name) {
         String normalized = name.toLowerCase(Locale.ROOT);
         return normalized.endsWith(".") ? normalized : normalized + ".";
+    }
+
+    private boolean hasValidationRecord(ResourceRecord record, List<HostedZone> zones) {
+        if (record == null || !"CNAME".equals(record.type())) {
+            return false;
+        }
+        String name = normalizeDnsName(record.name());
+        String value = normalizeDnsName(record.value());
+        for (HostedZone zone : zones) {
+            String zoneName = normalizeDnsName(zone.getName());
+            if (zone.isPrivateZone() || !(name.equals(zoneName) || name.endsWith("." + zoneName))) {
+                continue;
+            }
+            try {
+                if (route53Service.listResourceRecordSets(zone.getId(), null, null, 0).stream()
+                        .filter(recordSet -> "CNAME".equals(recordSet.getType())
+                            && normalizeDnsName(recordSet.getName()).equals(name)
+                            && recordSet.getRecords() != null)
+                        .flatMap(recordSet -> recordSet.getRecords().stream())
+                        .anyMatch(answer -> normalizeDnsName(answer.getValue()).equals(value))) {
+                    return true;
+                }
+            } catch (AwsException exception) {
+                if (!"NoSuchHostedZone".equals(exception.getErrorCode())) {
+                    throw exception;
+                }
+                LOG.debugv("Hosted zone {0} was deleted during certificate validation", zone.getId());
+            }
+        }
+        return false;
     }
 }

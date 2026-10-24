@@ -14436,12 +14436,8 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     }
 
     /** Drops every tag on a resource another EC2 control plane (Client VPN) has deleted. */
-    public void deleteResourceTags(String resourceId) {
-        tags.delete(resourceId);
-    }
-
-    public List<Tag> resourceTags(String resourceId) {
-        return List.copyOf(tags.get(resourceId).orElse(List.of()));
+    public void deleteResourceTags(String region, String resourceId) {
+        removeTags(region, resourceId);
     }
 
     /**

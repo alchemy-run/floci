@@ -346,7 +346,7 @@ public class Ec2ClientVpnService {
                         + " has associated target networks. Disassociate them before deleting the endpoint.", 400);
             }
             endpoints.delete(key(region, endpointId));
-            ec2.deleteResourceTags(endpointId);
+            ec2.deleteResourceTags(region, endpointId);
             String arn = endpointArn(endpoint);
             for (String certificate : certificateArns(endpoint.getServerCertificateArn(),
                     endpoint.getAuthenticationOptions())) {
@@ -366,7 +366,7 @@ public class Ec2ClientVpnService {
     }
 
     public List<Tag> tags(ClientVpnEndpoint endpoint) {
-        return ec2.resourceTags(endpoint.getClientVpnEndpointId());
+        return ec2.resourceTags(endpoint.getRegion(), endpoint.getClientVpnEndpointId());
     }
 
     public String endpointArn(ClientVpnEndpoint endpoint) {

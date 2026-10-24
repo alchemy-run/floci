@@ -435,7 +435,10 @@ public class NativeDynamoDbTableService {
                 throughput != null ? throughput.writeCapacityUnits() : null,
                 request.gsiCreates(), request.gsiDeletes(), request.attributeDefinitions(),
                 request.vectorCreates(), request.vectorDeletes(),
-                settings.billingMode(), region);
+                settings.billingMode(), region, replicaUpdates || !request.gsiUpdates().isEmpty()
+                        || settings.deletionProtectionEnabled() != null || settings.tableClass() != null
+                        || settings.onDemandThroughput() != null || settings.streamEnabled() != null
+                        || settings.sseEnabled() != null);
 
         for (GsiThroughputUpdate update : request.gsiUpdates()) {
             GlobalSecondaryIndex gsi = table.findGsi(update.indexName()).orElseThrow();

@@ -2446,6 +2446,21 @@ public class DynamoDbService {
                                         List<AttributeDefinition> newAttrDefs,
                                         List<VectorIndexCreate> vectorCreates, List<String> vectorDeletes,
                                         String billingMode, String region) {
+        return updateTable(tableName, readCapacity, writeCapacity, gsiCreates, gsiDeletes, newAttrDefs,
+                vectorCreates, vectorDeletes, billingMode, region, false);
+    }
+
+    /**
+     * @param hasOtherUpdates whether the request changes anything besides the fields passed here
+     *                        (streams, SSE, table class, deletion protection, GSI or replica
+     *                        updates), so an unchanged ProvisionedThroughput is only rejected when
+     *                        it is the sole thing in the update.
+     */
+    public TableDefinition updateTable(String tableName, Long readCapacity, Long writeCapacity,
+                                        List<GlobalSecondaryIndex> gsiCreates, List<String> gsiDeletes,
+                                        List<AttributeDefinition> newAttrDefs,
+                                        List<VectorIndexCreate> vectorCreates, List<String> vectorDeletes,
+                                        String billingMode, String region, boolean hasOtherUpdates) {
         String canonicalTableName = canonicalTableName(region, tableName);
         String storageKey = regionKey(region, canonicalTableName);
         TableDefinition table = tableStore.get(storageKey)
@@ -2461,7 +2476,15 @@ public class DynamoDbService {
             throw new AwsException("ValidationException",
                     "The parameter 'ProvisionedThroughput.WriteCapacityUnits' must be greater than 0", 400);
         }
-        if (readCapacity != null && writeCapacity != null
+        boolean otherUpdates = hasOtherUpdates
+                || (gsiCreates != null && !gsiCreates.isEmpty())
+                || (gsiDeletes != null && !gsiDeletes.isEmpty())
+                || (newAttrDefs != null && !newAttrDefs.isEmpty())
+                || (vectorCreates != null && !vectorCreates.isEmpty())
+                || (vectorDeletes != null && !vectorDeletes.isEmpty())
+                || billingMode != null;
+        if (!otherUpdates
+                && readCapacity != null && writeCapacity != null
                 && "PROVISIONED".equals(table.getBillingMode())
                 && readCapacity.equals(table.getProvisionedThroughput().getReadCapacityUnits())
                 && writeCapacity.equals(table.getProvisionedThroughput().getWriteCapacityUnits())) {
