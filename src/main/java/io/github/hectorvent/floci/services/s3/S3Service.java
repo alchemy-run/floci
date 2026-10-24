@@ -1838,7 +1838,7 @@ public class S3Service implements Resettable, ResourceProvider {
                             : readFile(location.accountId(), bucketName, key),
                     data -> { });
             snapshot.object().setData(snapshot.body());
-            return snapshot.object();
+            return reportedAs(snapshot.object(), versionId);
         }
         if (versionId != null) {
             // An explicit version's file is immutable once written (see storeObjectInternal) and
@@ -2040,7 +2040,7 @@ public class S3Service implements Resettable, ResourceProvider {
                             ? resolveVersionedPathForRead(location.accountId(), bucketName, key, "null")
                             : resolveObjectPathForRead(location.accountId(), bucketName, key)),
                     S3Service::closeQuietly);
-            return objectRead(snapshot.object(), snapshot.body());
+            return objectRead(reportedAs(snapshot.object(), versionId), snapshot.body());
         }
         if (versionId == null) {
             Snapshot<FileChannel> snapshot = readLatestSnapshot(bucketName, key, versionId,
@@ -2144,7 +2144,21 @@ public class S3Service implements Resettable, ResourceProvider {
     }
 
     public S3Object getObjectMetadata(String bucketName, String key, String versionId) {
-        return copyObject(getStoredObject(bucketName, key, versionId));
+        return reportedAs(copyObject(getStoredObject(bucketName, key, versionId)), versionId);
+    }
+
+    /**
+     * The version id a response reports: a null version selected with {@code versionId=null} is
+     * reported under that id, as S3 does, though it is stored without one.
+     */
+    static String reportedVersionId(String storedVersionId, String requestedVersionId) {
+        return storedVersionId == null && "null".equals(requestedVersionId) ? "null" : storedVersionId;
+    }
+
+    /** {@code copy}, a detached copy of a stored version, reporting the id {@link #reportedVersionId} gives. */
+    private static S3Object reportedAs(S3Object copy, String requestedVersionId) {
+        copy.setVersionId(reportedVersionId(copy.getVersionId(), requestedVersionId));
+        return copy;
     }
 
     public GetObjectAttributesResult getObjectAttributes(String bucketName, String key, String versionId,
@@ -2325,7 +2339,10 @@ public class S3Service implements Resettable, ResourceProvider {
         return RequestScopes.callAs(ownedBucket.account(), () -> {
             synchronized (bucket) {
                 checkDeletePrecondition(bucketName, key, ifMatch);
-                return deleteObjectLocked(bucket, bucketName, key, versionId, bypassGovernance, OBJECT_REMOVED_EVENT);
+                S3Object deleted = deleteObjectLocked(bucket, bucketName, key, versionId, bypassGovernance,
+                        OBJECT_REMOVED_EVENT);
+                return deleted != null && deleted.getVersionId() == null && "null".equals(versionId)
+                        ? reportedAs(copyObject(deleted), versionId) : deleted;
             }
         });
     }
@@ -3265,7 +3282,8 @@ public class S3Service implements Resettable, ResourceProvider {
      * null, and returns that version's id.
      */
     public String putObjectTagging(String bucketName, String key, String versionId, Map<String, String> tags) {
-        return updateObjectTagging(bucketName, key, versionId, "PUT", tags != null ? tags : new HashMap<>());
+        return reportedVersionId(updateObjectTagging(bucketName, key, versionId, "PUT",
+                tags != null ? tags : new HashMap<>()), versionId);
     }
 
     public Map<String, String> getObjectTagging(String bucketName, String key) {
@@ -3289,7 +3307,8 @@ public class S3Service implements Resettable, ResourceProvider {
      */
     public ObjectTaggingResult getObjectTaggingResult(String bucketName, String key, String versionId) {
         S3Object obj = getTaggingTargetEntry(bucketName, key, versionId, "GET").value();
-        return new ObjectTaggingResult(obj.getVersionId(), obj.getTags() != null ? obj.getTags() : Map.of());
+        return new ObjectTaggingResult(reportedVersionId(obj.getVersionId(), versionId),
+                obj.getTags() != null ? obj.getTags() : Map.of());
     }
 
     public void deleteObjectTagging(String bucketName, String key) {
@@ -3301,7 +3320,8 @@ public class S3Service implements Resettable, ResourceProvider {
      * null, and returns that version's id.
      */
     public String deleteObjectTagging(String bucketName, String key, String versionId) {
-        return updateObjectTagging(bucketName, key, versionId, "DELETE", new HashMap<>());
+        return reportedVersionId(updateObjectTagging(bucketName, key, versionId, "DELETE", new HashMap<>()),
+                versionId);
     }
 
     /**

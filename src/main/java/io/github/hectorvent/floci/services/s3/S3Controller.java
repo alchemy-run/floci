@@ -3184,6 +3184,8 @@ public class S3Controller {
         String sourceBucket = sourceObject.bucket();
         authorizeCopySourceRead(httpHeaders, uriInfo, sourceObject, authorization);
         authorizeCopiedTags(httpHeaders, uriInfo, sourceObject, destBucket, destKey, authorization);
+        String copiedSourceVersionId = copySourceVersionId(sourceBucket, sourceObject.objectKey(),
+                sourceObject.versionId());
         String copyContentEncoding = toPersistedContentEncoding(httpHeaders.getHeaderString("Content-Encoding"));
         String copyContentDisposition = httpHeaders.getHeaderString("Content-Disposition");
         String copyCacheControl = httpHeaders.getHeaderString("Cache-Control");
@@ -3259,8 +3261,28 @@ public class S3Controller {
         if (copy.getVersionId() != null) {
             response.header("x-amz-version-id", copy.getVersionId());
         }
+        if (copiedSourceVersionId != null) {
+            response.header("x-amz-copy-source-version-id", copiedSourceVersionId);
+        }
         appendSseCustomerHeaders(response, copy);
         return response.build();
+    }
+
+    /**
+     * The id of the source version a copy reads, reported as {@code x-amz-copy-source-version-id}.
+     * A copy source that names a delete marker by its version id is rejected as S3 rejects it.
+     */
+    private String copySourceVersionId(String sourceBucket, String sourceKey, String sourceVersionId) {
+        try {
+            return s3Service.getObjectMetadata(sourceBucket, sourceKey, sourceVersionId).getVersionId();
+        } catch (S3DeleteMarkerException marker) {
+            if (sourceVersionId != null) {
+                throw new AwsException("InvalidRequest",
+                        "The source of a copy request may not specifically refer to a delete marker by version id.",
+                        400);
+            }
+            throw marker;
+        }
     }
 
     // GetObjectAttributes is the one S3 response whose ETag comes without the surrounding quotes.
@@ -3275,6 +3297,8 @@ public class S3Controller {
         String sourceBucket = sourceObject.bucket();
         authorizeCopySourceRead(httpHeaders, uriInfo, sourceObject, authorization);
         String copySourceRange = httpHeaders.getHeaderString("x-amz-copy-source-range");
+        String copiedSourceVersionId = copySourceVersionId(sourceBucket, sourceObject.objectKey(),
+                sourceObject.versionId());
         String eTag = s3Service.uploadPartCopy(destBucket, destKey, uploadId, partNumber,
                 sourceBucket, sourceObject.objectKey(), sourceObject.versionId(), copySourceRange,
                 copySourceSseCustomerHeaders(httpHeaders),
@@ -3293,6 +3317,9 @@ public class S3Controller {
                 .end("CopyPartResult")
                 .build();
         Response.ResponseBuilder response = Response.ok(xml).type(MediaType.APPLICATION_XML);
+        if (copiedSourceVersionId != null) {
+            response.header("x-amz-copy-source-version-id", copiedSourceVersionId);
+        }
         if (destinationUpload.getServerSideEncryption() != null) {
             response.header("x-amz-server-side-encryption", destinationUpload.getServerSideEncryption());
         }
