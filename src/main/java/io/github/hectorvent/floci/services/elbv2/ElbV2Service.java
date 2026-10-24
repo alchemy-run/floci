@@ -1967,6 +1967,19 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
                 + revocation.getS3Bucket() + "/" + revocation.getS3Key();
     }
 
+    private Subnet lookupEc2Subnet(String region, String subnetId) {
+        if (ec2Service == null) {
+            return null;
+        }
+        try {
+            return ec2Service.findSubnetById(region, subnetId).orElse(null);
+        } catch (AwsException e) {
+            if ("InvalidSubnetID.NotFound".equals(e.getErrorCode())) {
+                return null;
+            }
+            throw e;
+        }
+    }
 
     private static Subnet synthesizeAcceptedSubnet(String region, String subnetId, int index) {
         Subnet subnet = new Subnet();

@@ -19,6 +19,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import java.util.Arrays;
 
 /**
  * Verifies AWS SigV4 presigned-URL auth tokens: a GET request against the target's own
@@ -373,5 +374,34 @@ public final class SigV4RequestValidator {
             sb.append(String.format("%02x", b));
         }
         return sb.toString();
+    }
+
+    private static String findRawParam(String[] rawPairs, String name) {
+        for (String pair : rawPairs) {
+            int eq = pair.indexOf('=');
+            if (eq >= 0 && name.equals(pair.substring(0, eq))) {
+                return urlDecode(pair.substring(eq + 1));
+            }
+        }
+        return null;
+    }
+
+    private static String rawParamName(String rawPair) {
+        int eq = rawPair.indexOf('=');
+        return eq >= 0 ? rawPair.substring(0, eq) : rawPair;
+    }
+
+    public static String sha256Hex(String input) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        return hexEncode(digest.digest(input.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    public static String sha256Hex(byte[] input) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        return hexEncode(digest.digest(input));
+    }
+
+    private static String urlDecode(String value) {
+        return URLDecoder.decode(value, StandardCharsets.UTF_8);
     }
 }

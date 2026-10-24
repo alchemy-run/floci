@@ -544,6 +544,19 @@ public class CertificateGenerator {
         return verifier.verify(signature);
     }
 
+    public X509Certificate parseCertificate(String certPem) {
+        try (PEMParser parser = new PEMParser(new StringReader(certPem))) {
+            Object obj = parser.readObject();
+            if (obj instanceof X509CertificateHolder holder) {
+                return new JcaX509CertificateConverter()
+                    .getCertificate(holder);
+            }
+            throw new IllegalArgumentException("Invalid certificate PEM format");
+        } catch (Exception e) {
+            LOG.error("Failed to parse certificate", e);
+            throw new CertificateMaterialException("Certificate parsing failed: " + e.getMessage(), e);
+        }
+    }
 
     public PrivateKey parsePrivateKey(String keyPem) {
         try (PEMParser parser = new PEMParser(new StringReader(keyPem))) {
@@ -559,7 +572,7 @@ public class CertificateGenerator {
             throw new IllegalArgumentException("Invalid private key PEM format");
         } catch (Exception e) {
             LOG.error("Failed to parse private key", e);
-            throw new CertificateGenerationException("Private key parsing failed: " + e.getMessage(), e);
+            throw new CertificateMaterialException("Private key parsing failed: " + e.getMessage(), e);
         }
     }
 }

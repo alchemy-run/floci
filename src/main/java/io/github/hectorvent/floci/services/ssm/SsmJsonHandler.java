@@ -1468,70 +1468,7 @@ public class SsmJsonHandler {
         this.objectMapper = objectMapper;
     }
 
-    public Response handle(String action, JsonNode request, String region) {
-        return switch (action) {
-            // Parameter Store
-            case "PutParameter" -> handlePutParameter(request, region);
-            case "GetParameter" -> handleGetParameter(request, region);
-            case "GetParameters" -> handleGetParameters(request, region);
-            case "GetParametersByPath" -> handleGetParametersByPath(request, region);
-            case "DeleteParameter" -> handleDeleteParameter(request, region);
-            case "DeleteParameters" -> handleDeleteParameters(request, region);
-            case "GetParameterHistory" -> handleGetParameterHistory(request, region);
-            case "DescribeParameters" -> handleDescribeParameters(request, region);
-            case "LabelParameterVersion" -> handleLabelParameterVersion(request, region);
-            case "UnlabelParameterVersion" -> handleUnlabelParameterVersion(request, region);
-            case "AddTagsToResource" -> handleAddTagsToResource(request, region);
-            case "ListTagsForResource" -> handleListTagsForResource(request, region);
-            case "RemoveTagsFromResource" -> handleRemoveTagsFromResource(request, region);
-            // Run Command (public API)
-            case "SendCommand" -> handleSendCommand(request, region);
-            case "GetCommandInvocation" -> handleGetCommandInvocation(request, region);
-            case "ListCommands" -> handleListCommands(request, region);
-            case "ListCommandInvocations" -> handleListCommandInvocations(request, region);
-            case "CancelCommand" -> handleCancelCommand(request, region);
-            case "DescribeInstanceInformation" -> handleDescribeInstanceInformation(request, region);
-            // Service settings (LZA ssm-block-public-document-sharing)
-            case "GetServiceSetting" -> handleGetServiceSetting(request, region);
-            case "UpdateServiceSetting" -> handleUpdateServiceSetting(request, region);
-            case "ResetServiceSetting" -> handleResetServiceSetting(request, region);
-            // Patch Manager (read-only: AWS-owned predefined baselines)
-            case "DescribePatchBaselines" -> handleDescribePatchBaselines(request, region);
-            case "GetDefaultPatchBaseline" -> handleGetDefaultPatchBaseline(request, region);
-            // Documents
-            case "GetDocument" -> handleGetDocument(request, region);
-            case "DescribeDocument" -> handleDescribeDocument(request, region);
-            case "DeleteDocument" -> handleDeleteDocument(request, region);
-            case "CreateDocument" -> handleCreateDocument(request, region);
-            case "UpdateDocument" -> handleUpdateDocument(request, region);
-            // Document share permissions
-            case "ModifyDocumentPermission" -> handleModifyDocumentPermission(request, region);
-            case "DescribeDocumentPermission" -> handleDescribeDocumentPermission(request, region);
-            case "ListDocuments" -> handleListDocuments(request, region);
-            // Associations
-            case "CreateAssociation" -> handleCreateAssociation(request, region);
-            case "UpdateAssociation" -> handleUpdateAssociation(request, region);
-            case "DescribeAssociation" -> handleDescribeAssociation(request, region);
-            case "DeleteAssociation" -> handleDeleteAssociation(request, region);
-            case "ListAssociations" -> handleListAssociations(request, region);
-            // Read-only list operations (resources not modeled: empty results)
-            case "DescribeMaintenanceWindows" -> handleDescribeMaintenanceWindows(request, region);
-            // Agent registration (internal, not in public SDK)
-            case "UpdateInstanceInformation" -> handleUpdateInstanceInformation(request, region);
-            default -> Response.status(400)
-                    .entity(new AwsErrorResponse("UnsupportedOperation", "Operation " + action + " is not supported."))
-                    .build();
-        };
-    }
 
-    private Response handleGetParameter(JsonNode request, String region) {
-        String name = request.path("Name").asText();
-        Parameter param = ssmService.getParameter(name, region);
-
-        ObjectNode response = objectMapper.createObjectNode();
-        response.set("Parameter", parameterToNode(param));
-        return Response.ok(response).build();
-    }
 
     private Response handleGetParameters(JsonNode request, String region) {
         List<String> names = new ArrayList<>();

@@ -584,4 +584,20 @@ public final class ContainerStorageHelper {
             return true;
         }
     }
+
+    /**
+     * Ensures the named volume exists and mounts it to {@code internalMount} in the container.
+     * Must only be called when {@link #isNamedVolumeMode} returns {@code true}.
+     */
+    public static void applyStorage(
+            ContainerBuilder.Builder builder,
+            ContainerLifecycleManager lifecycleManager,
+            EmulatorConfig config,
+            String service,
+            String volumeId,
+            String fallbackId,
+            String internalMount) {
+        String volumeName = resourceName(config, service, volumeId, fallbackId);
+        applyNamedVolume(builder, lifecycleManager, volumeName, internalMount);
+    }
 }

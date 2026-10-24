@@ -150,6 +150,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import io.github.hectorvent.floci.services.ec2.model.DhcpOptions;
 
 @ApplicationScoped
 public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettable {
@@ -14208,5 +14209,151 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
             }
         }
         return converted;
+    }
+
+
+
+
+
+    public RouteTableAssociation replaceRouteTableAssociation(String region, String associationId, String routeTableId) {
+        ensureDefaultResources(region);
+        RouteTableAssociation existing = null;
+        RouteTable oldTable = null;
+        for (RouteTable rt : routeTables.scan(k -> true)) {
+            if (!rt.getRegion().equals(region)) {
+                continue;
+            }
+            for (RouteTableAssociation assoc : rt.getAssociations()) {
+                if (associationId.equals(assoc.getRouteTableAssociationId())) {
+                    existing = assoc;
+                    oldTable = rt;
+                    break;
+                }
+            }
+            if (existing != null) {
+                break;
+            }
+        }
+        if (existing == null) {
+            throw new AwsException("InvalidAssociationID.NotFound",
+                    "The association ID '" + associationId + "' does not exist", 400);
+        }
+        RouteTableAssociation moved = new RouteTableAssociation();
+        moved.setRouteTableAssociationId("rtbassoc-" + randomHex(8));
+        moved.setRouteTableId(routeTableId);
+        moved.setSubnetId(existing.getSubnetId());
+        moved.setGatewayId(existing.getGatewayId());
+        moved.setMain(existing.isMain());
+        moved.setAssociationState("associated");
+
+        String sourceKey = key(region, oldTable.getRouteTableId());
+        String targetKey = key(region, routeTableId);
+        synchronized (lowerLockOf(sourceKey, targetKey)) {
+            synchronized (higherLockOf(sourceKey, targetKey)) {
+                RouteTable from = getRequiredRouteTable(region, oldTable.getRouteTableId());
+                List<RouteTableAssociation> fromNext = new ArrayList<>(from.getAssociations());
+                fromNext.removeIf(a -> associationId.equals(a.getRouteTableAssociationId()));
+                from.setAssociations(fromNext);
+                routeTables.put(sourceKey, from);
+
+                RouteTable to = getRequiredRouteTable(region, routeTableId);
+                List<RouteTableAssociation> toNext = new ArrayList<>(to.getAssociations());
+                toNext.add(moved);
+                to.setAssociations(toNext);
+                routeTables.put(targetKey, to);
+            }
+        }
+        return moved;
+    }
+
+    public Snapshot createSnapshot(String region, String volumeId, String description, List<Tag> snapshotTags) {
+        Volume volume = getRequiredVolume(region, volumeId);
+        Snapshot snapshot = new Snapshot();
+        snapshot.setSnapshotId("snap-" + randomHex(17));
+        snapshot.setVolumeId(volumeId);
+        snapshot.setVolumeSize(volume.getSize());
+        snapshot.setEncrypted(volume.isEncrypted());
+        snapshot.setDescription(description);
+        snapshot.setOwnerId(callerAccountId());
+        snapshot.setState("completed");
+        snapshot.setProgress("100%");
+        snapshot.setStartTime(Instant.now());
+        snapshot.setRegion(region);
+        if (snapshotTags != null && !snapshotTags.isEmpty()) {
+            snapshot.setTags(new ArrayList<>(snapshotTags));
+            tags.put(snapshot.getSnapshotId(), new ArrayList<>(snapshotTags));
+        }
+        snapshots.put(key(region, snapshot.getSnapshotId()), snapshot);
+        return snapshot;
+    }
+
+    public void deleteSnapshot(String region, String snapshotId) {
+        if (snapshots.get(key(region, snapshotId)).isEmpty()) {
+            throw new AwsException("InvalidSnapshot.NotFound",
+                    "The snapshot '" + snapshotId + "' does not exist.", 400);
+        }
+        snapshots.delete(key(region, snapshotId));
+        tags.delete(snapshotId);
+    }
+
+    public void modifyNetworkInterfaceAttribute(String region, String networkInterfaceId, String description,
+                                                Boolean sourceDestCheck, List<String> groupIds) {
+        NetworkInterface ni = requireStandaloneNetworkInterface(region, networkInterfaceId);
+        if (description != null) {
+            ni.setDescription(description);
+        }
+        if (sourceDestCheck != null) {
+            ni.setSourceDestCheck(sourceDestCheck);
+        }
+        if (groupIds != null) {
+            List<GroupIdentifier> groups = new ArrayList<>();
+            for (String groupId : groupIds) {
+                SecurityGroup sg = getRequiredSecurityGroup(region, groupId);
+                groups.add(new GroupIdentifier(sg.getGroupId(), sg.getGroupName()));
+            }
+            ni.setGroups(groups);
+        }
+        networkInterfaces.put(key(region, networkInterfaceId), ni);
+    }
+
+    /** Drops every tag on a resource another EC2 control plane (Client VPN) has deleted. */
+    public void deleteResourceTags(String resourceId) {
+        tags.delete(resourceId);
+    }
+
+    public List<Tag> resourceTags(String resourceId) {
+        return List.copyOf(tags.get(resourceId).orElse(List.of()));
+    }
+
+    /**
+     * Resolves a subnet by ID. Tries the caller's region first, then any region
+     * in the current account, then every account. Cross-service callers (ELBv2,
+     * RDS, EKS) can run with a different RequestContext than the creating EC2
+     * call, so a strict {@code region::id} get misses a subnet that describe
+     * just returned.
+     */
+    public Optional<Subnet> findSubnetById(String region, String subnetId) {
+        if (subnetId == null || subnetId.isBlank()) {
+            return Optional.empty();
+        }
+        ensureDefaultResources(region);
+        Subnet exact = subnets.get(key(region, subnetId)).orElse(null);
+        if (exact != null) {
+            return Optional.of(exact);
+        }
+        Optional<Subnet> currentAccount = subnets.scan(k -> true).stream()
+                .filter(s -> subnetId.equals(s.getSubnetId()))
+                .findFirst();
+        if (currentAccount.isPresent()) {
+            return currentAccount;
+        }
+        if (subnets instanceof AccountAwareStorageBackend<?> raw) {
+            @SuppressWarnings("unchecked")
+            AccountAwareStorageBackend<Subnet> aware = (AccountAwareStorageBackend<Subnet>) raw;
+            return aware.scanAllAccounts().stream()
+                    .filter(s -> subnetId.equals(s.getSubnetId()))
+                    .findFirst();
+        }
+        return Optional.empty();
     }
 }

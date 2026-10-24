@@ -1,6 +1,5 @@
 package io.github.hectorvent.floci.services.eks;
 
-import io.github.hectorvent.floci.core.common.Digests;
 import io.github.hectorvent.floci.services.iam.IamService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -36,8 +35,7 @@ class EksTokenValidator {
     private static final String EMPTY_PAYLOAD_SHA256 =
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
     private static final String REQUIRED_SIGNED_HEADERS = "host;x-k8s-aws-id";
-    private static final Duration TOKEN_LIFETIME = Duration.ofMinutes(15);
-    private static final int MAX_PRESIGN_EXPIRY_SECONDS = (int) TOKEN_LIFETIME.toSeconds();
+    private static final int MAX_PRESIGN_EXPIRY_SECONDS = 60;
     private static final int MAX_TOKEN_LENGTH = 4096;
     private static final Duration MAX_FUTURE_SKEW = Duration.ofMinutes(5);
     private static final DateTimeFormatter DATETIME_FORMAT =
@@ -56,8 +54,7 @@ class EksTokenValidator {
         this.clock = clock;
     }
 
-    /** {@code keyAccountId} owns a long-term key, from the lookup that verified it; null for a temporary key. */
-    record VerifiedToken(String accessKeyId, String region, String keyAccountId) {}
+    record VerifiedToken(String accessKeyId, String region) {}
 
     boolean validate(String token, String clusterName) {
         return verify(token, clusterName).isPresent();
@@ -86,24 +83,22 @@ class EksTokenValidator {
                 return Optional.empty();
             }
 
-            IamService.OwnedSecretKey key = secretKey(scope.accessKeyId(), parameters.get("X-Amz-Security-Token"));
-            if (key == null) {
+            String secretKey = secretKey(scope.accessKeyId(), parameters.get("X-Amz-Security-Token"));
+            if (secretKey == null) {
                 return Optional.empty();
             }
-            String secretKey = key.secretAccessKey();
 
             String canonicalRequest = canonicalRequest(request, parameters, clusterName);
             String stringToSign = ALGORITHM + "\n"
                     + parameters.get("X-Amz-Date") + "\n"
                     + scope.value() + "\n"
-                    + Digests.sha256Hex(canonicalRequest);
+                    + sha256Hex(canonicalRequest);
             String expectedSignature = hexEncode(hmacSha256(
                     deriveSigningKey(secretKey, scope.date(), scope.region(), scope.service()), stringToSign));
             boolean valid = MessageDigest.isEqual(
                     expectedSignature.getBytes(StandardCharsets.UTF_8),
                     parameters.get("X-Amz-Signature").getBytes(StandardCharsets.UTF_8));
-            return valid ? Optional.of(new VerifiedToken(scope.accessKeyId(), scope.region(), key.accountId()))
-                    : Optional.empty();
+            return valid ? Optional.of(new VerifiedToken(scope.accessKeyId(), scope.region())) : Optional.empty();
         } catch (Exception exception) {
             LOG.debugv("EKS IAM token validation rejected a malformed token: {0}", exception.getMessage());
             return Optional.empty();
@@ -160,18 +155,19 @@ class EksTokenValidator {
 
     private boolean isCurrent(Instant signedAt, String expiryText) {
         int expirySeconds = Integer.parseInt(expiryText);
-        if (expirySeconds < 0 || expirySeconds > MAX_PRESIGN_EXPIRY_SECONDS) {
+        if (expirySeconds <= 0 || expirySeconds > MAX_PRESIGN_EXPIRY_SECONDS) {
             return false;
         }
         Instant now = clock.instant();
-        return !signedAt.isAfter(now.plus(MAX_FUTURE_SKEW)) && !now.isAfter(signedAt.plus(TOKEN_LIFETIME));
+        return !signedAt.isAfter(now.plus(MAX_FUTURE_SKEW)) && !now.isAfter(signedAt.plusSeconds(expirySeconds));
     }
 
-    private IamService.OwnedSecretKey secretKey(String accessKeyId, String sessionToken) {
+    private String secretKey(String accessKeyId, String sessionToken) {
         if (iamService.isSeededDeployerAccessKey(accessKeyId)) {
             return null;
         }
-        return iamService.findSecretKeyInAnyAccount(accessKeyId, sessionToken).orElse(null);
+        Optional<String> secretKey = iamService.findSecretKey(accessKeyId, sessionToken);
+        return secretKey.orElse(null);
     }
 
     private static CredentialScope parseCredentialScope(String encodedCredential) {
@@ -230,6 +226,10 @@ class EksTokenValidator {
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec(key, "HmacSHA256"));
         return mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static String sha256Hex(String input) throws Exception {
+        return hexEncode(MessageDigest.getInstance("SHA-256").digest(input.getBytes(StandardCharsets.UTF_8)));
     }
 
     private static String hexEncode(byte[] bytes) {

@@ -2,14 +2,17 @@ package io.github.hectorvent.floci.services.eks;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.core.common.Base64Url;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.eks.model.AccessEntry;
+import io.github.hectorvent.floci.services.eks.model.AccessScope;
+import io.github.hectorvent.floci.services.eks.model.AssociateAccessPolicyRequest;
+import io.github.hectorvent.floci.services.eks.model.AssociatedAccessPolicy;
 import io.github.hectorvent.floci.services.eks.model.Cluster;
 import io.github.hectorvent.floci.services.eks.model.ClusterStatus;
 import io.github.hectorvent.floci.services.eks.model.CreateAccessEntryRequest;
+import io.github.hectorvent.floci.services.eks.model.UpdateAccessEntryRequest;
 import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.iam.model.IamRole;
 import io.github.hectorvent.floci.services.iam.model.IamUser;
@@ -19,6 +22,7 @@ import jakarta.inject.Inject;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
@@ -26,11 +30,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-import io.github.hectorvent.floci.services.eks.model.AccessScope;
-import io.github.hectorvent.floci.services.eks.model.AssociateAccessPolicyRequest;
-import io.github.hectorvent.floci.services.eks.model.AssociatedAccessPolicy;
-import io.github.hectorvent.floci.services.eks.model.UpdateAccessEntryRequest;
-import java.util.ArrayList;
 
 /** Access-entry management metadata; Kubernetes authorization is handled separately. */
 @ApplicationScoped
@@ -49,7 +48,16 @@ public class EksAccessEntryService {
     }
 
     @RegisterForReflection
-    public record StoredEntry(AccessEntry entry, String principalId, String clientRequestToken) {}
+    public record StoredEntry(AccessEntry entry, String principalId, String clientRequestToken,
+                              List<AssociatedAccessPolicy> accessPolicies) {
+        StoredEntry(AccessEntry entry, String principalId, String clientRequestToken) {
+            this(entry, principalId, clientRequestToken, List.of());
+        }
+
+        List<AssociatedAccessPolicy> policies() {
+            return accessPolicies == null ? List.of() : accessPolicies;
+        }
+    }
 
     @RegisterForReflection
     public record Page(List<String> accessEntries, String nextToken) {}
@@ -85,17 +93,8 @@ public class EksAccessEntryService {
                 : iam.findUser(arn[4], name).filter(value -> principal.equals(value.getArn()))
                         .map(IamUser::getUserId).orElseThrow(() -> invalid("IAM user does not exist"));
         String username = node ? "system:node:{{EC2PrivateDNSName}}" : request.username();
-        if (username != null && !node && (username.isBlank()
-                || username.matches("^(system|eks|aws|amazon|iam):.*"))) {
-            throw invalid("Invalid username");
-        }
         if (username != null && !node) {
-            for (String placeholder : List.of("{{SessionName}}", "{{SessionNameRaw}}")) {
-                int position = username.indexOf(placeholder);
-                if (position >= 0 && !username.substring(0, position).contains(":")) {
-                    throw invalid("A session-name placeholder must be preceded by a colon");
-                }
-            }
+            validateStandardUsername(username);
         }
         if (username == null) {
             username = role ? "arn:" + arn[1] + ":sts::" + arn[4] + ":assumed-role/" + name + "/{{SessionName}}"
@@ -103,9 +102,7 @@ public class EksAccessEntryService {
         }
         List<String> groups = node ? List.of("system:nodes")
                 : request.kubernetesGroups() == null ? List.of() : request.kubernetesGroups();
-        if (groups.stream().anyMatch(group -> group == null || group.isBlank())) {
-            throw invalid("kubernetesGroups must contain nonempty strings");
-        }
+        validateGroups(groups);
         Map<String, String> tags = request.tags() == null ? Map.of() : request.tags();
         if (tags.size() > 50 || tags.entrySet().stream().anyMatch(tag -> tag.getKey() == null
                 || tag.getKey().isEmpty() || tag.getKey().length() > 128 || tag.getValue() == null
@@ -150,18 +147,91 @@ public class EksAccessEntryService {
     }
 
     public synchronized AccessEntry describe(Cluster cluster, String principal) {
+        return stored(cluster, principal).entry();
+    }
+
+    /**
+     * UpdateAccessEntry: an omitted username or kubernetesGroups keeps its current value, a
+     * supplied kubernetesGroups replaces the list. Node entries have neither to change.
+     */
+    public synchronized AccessEntry update(Cluster cluster, String principal, UpdateAccessEntryRequest request) {
         requireApiAccess(cluster);
-        return entries.get(prefix(cluster) + principal).map(StoredEntry::entry)
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Access entry not found", 404));
+        StoredEntry stored = stored(cluster, principal);
+        AccessEntry current = stored.entry();
+        String username = request == null ? null : request.username();
+        List<String> groups = request == null ? null : request.kubernetesGroups();
+        if (!"STANDARD".equals(current.type()) && (username != null || groups != null)) {
+            throw invalid(current.type() + " entries cannot specify username or kubernetesGroups");
+        }
+        if (username != null) {
+            validateStandardUsername(username);
+        }
+        if (groups != null) {
+            validateGroups(groups);
+        }
+        AccessEntry updated = new AccessEntry(current.accessEntryArn(), current.clusterName(), current.principalArn(),
+                current.type(), username != null ? username : current.username(),
+                groups != null ? List.copyOf(groups) : current.kubernetesGroups(), current.tags(),
+                current.createdAt(), Instant.now().toEpochMilli() / 1000.0);
+        entries.put(prefix(cluster) + principal, new StoredEntry(updated, stored.principalId(),
+                stored.clientRequestToken(), stored.policies()));
+        return updated;
+    }
+
+    /** Associating a policy that is already associated replaces its access scope. */
+    public synchronized AssociatedAccessPolicy associateAccessPolicy(Cluster cluster, String principal,
+                                                                     AssociateAccessPolicyRequest request) {
+        requireApiAccess(cluster);
+        StoredEntry stored = stored(cluster, principal);
+        if (!"STANDARD".equals(stored.entry().type())) {
+            throw invalid("Access policies can only be associated with STANDARD access entries");
+        }
+        String policyArn = request == null ? null : request.policyArn();
+        validatePolicyArn(cluster, policyArn);
+        AccessScope scope = normalizeScope(request.accessScope());
+        double now = Instant.now().toEpochMilli() / 1000.0;
+        List<AssociatedAccessPolicy> policies = new ArrayList<>();
+        double associatedAt = now;
+        for (AssociatedAccessPolicy existing : stored.policies()) {
+            if (existing.policyArn().equals(policyArn)) {
+                associatedAt = existing.associatedAt();
+            } else {
+                policies.add(existing);
+            }
+        }
+        AssociatedAccessPolicy association = new AssociatedAccessPolicy(policyArn, scope, associatedAt, now);
+        policies.add(association);
+        policies.sort(Comparator.comparing(AssociatedAccessPolicy::policyArn));
+        entries.put(prefix(cluster) + principal, new StoredEntry(stored.entry(), stored.principalId(),
+                stored.clientRequestToken(), List.copyOf(policies)));
+        return association;
+    }
+
+    public synchronized void disassociateAccessPolicy(Cluster cluster, String principal, String policyArn) {
+        requireApiAccess(cluster);
+        StoredEntry stored = stored(cluster, principal);
+        List<AssociatedAccessPolicy> remaining = stored.policies().stream()
+                .filter(policy -> !policy.policyArn().equals(policyArn)).toList();
+        if (remaining.size() == stored.policies().size()) {
+            throw new AwsException("ResourceNotFoundException",
+                    "The access policy " + policyArn + " is not associated with " + principal, 404);
+        }
+        entries.put(prefix(cluster) + principal, new StoredEntry(stored.entry(), stored.principalId(),
+                stored.clientRequestToken(), remaining));
+    }
+
+    public synchronized List<AssociatedAccessPolicy> listAssociatedAccessPolicies(Cluster cluster, String principal) {
+        return stored(cluster, principal).policies();
     }
 
     public synchronized void delete(Cluster cluster, String principal) {
-        describe(cluster, principal);
+        requireApiAccess(cluster);
+        stored(cluster, principal);
         entries.delete(prefix(cluster) + principal);
     }
 
     public synchronized Page list(Cluster cluster, Integer maxResults, String nextToken) {
-        requireApiAccess(cluster);
+        requireApiAuthenticationMode(cluster);
         int limit = maxResults == null ? 100 : maxResults;
         if (limit < 1 || limit > 100) {
             throw invalid("maxResults must be between 1 and 100");
@@ -187,7 +257,8 @@ public class EksAccessEntryService {
                 .map(stored -> stored.entry().principalArn()).filter(principal -> principal.compareTo(cursor) > 0)
                 .sorted(Comparator.naturalOrder()).toList();
         List<String> page = remaining.stream().limit(limit).toList();
-        String token = remaining.size() > limit ? Base64Url.encode(prefix + "\n" + page.getLast()) : null;
+        String token = remaining.size() > limit ? Base64.getUrlEncoder().withoutPadding().encodeToString(
+                (prefix + "\n" + page.getLast()).getBytes(StandardCharsets.UTF_8)) : null;
         return new Page(page, token);
     }
 
@@ -202,23 +273,6 @@ public class EksAccessEntryService {
         // A recreated cluster must not inherit access entries or pagination tokens from its predecessor.
         return cluster.getArn() + "/" + Objects.toString(cluster.getCreatedAt()) + "/";
     }
-
-    private static void requireApiAccess(Cluster cluster) {
-        if (cluster.getAccessConfig() == null || "CONFIG_MAP".equals(cluster.getAccessConfig().authenticationMode())) {
-            throw new AwsException("InvalidRequestException", "Cluster authentication mode must be API or API_AND_CONFIG_MAP", 400);
-        }
-        if (cluster.getStatus() != ClusterStatus.ACTIVE) {
-            throw new AwsException("InvalidRequestException", "Cluster must be ACTIVE", 400);
-        }
-    }
-
-    private static AwsException invalid(String message) {
-        return new AwsException("InvalidParameterException", message, 400);
-    }
-
-
-
-
 
     private StoredEntry stored(Cluster cluster, String principal) {
         requireApiAuthenticationMode(cluster);
@@ -279,5 +333,16 @@ public class EksAccessEntryService {
         if (cluster.getAccessConfig() == null || "CONFIG_MAP".equals(cluster.getAccessConfig().authenticationMode())) {
             throw new AwsException("InvalidRequestException", "Cluster authentication mode must be API or API_AND_CONFIG_MAP", 400);
         }
+    }
+
+    private static void requireApiAccess(Cluster cluster) {
+        requireApiAuthenticationMode(cluster);
+        if (cluster.getStatus() != ClusterStatus.ACTIVE) {
+            throw new AwsException("InvalidRequestException", "Cluster must be ACTIVE", 400);
+        }
+    }
+
+    private static AwsException invalid(String message) {
+        return new AwsException("InvalidParameterException", message, 400);
     }
 }

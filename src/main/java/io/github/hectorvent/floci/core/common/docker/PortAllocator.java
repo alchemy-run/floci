@@ -228,4 +228,22 @@ public class PortAllocator {
             return Set.of();
         }
     }
+
+    /**
+     * Finds any free TCP port using ephemeral port allocation.
+     * This is the fastest method when any port will do.
+     *
+     * @return a free port
+     * @throws RuntimeException if no free port can be allocated
+     */
+    public int allocateAny() {
+        try (ServerSocket socket = new ServerSocket(0)) {
+            socket.setReuseAddress(true);
+            int port = socket.getLocalPort();
+            LOG.debugv("Allocated ephemeral port {0}", String.valueOf(port));
+            return port;
+        } catch (IOException e) {
+            throw new RuntimeException("Could not find a free port", e);
+        }
+    }
 }

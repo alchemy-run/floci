@@ -892,55 +892,6 @@ public class EmrService {
         return result;
     }
 
-    public void modifyInstanceGroups(String clusterId, List<InstanceGroupModification> modifications) {
-        // ClusterId is optional on the wire; instance group ids are globally unique.
-        List<EmrCluster> candidates = clusterId != null
-                ? List.of(requireCluster(clusterId))
-                : new ArrayList<>(clusterStore.scan(k -> true));
-        List<EmrCluster> touched = new ArrayList<>();
-        List<Runnable> updates = new ArrayList<>();
-        // Validate every modification before applying any: the call succeeds or fails atomically.
-        for (InstanceGroupModification mod : modifications) {
-            if (mod.instanceCount() != null && mod.instanceCount() < 0) {
-                throw new AwsException("ValidationException",
-                        "Instance count for instance group " + mod.instanceGroupId() + " must not be negative.", 400);
-            }
-            EmrCluster owner = null;
-            EmrInstanceGroup target = null;
-            for (EmrCluster c : candidates) {
-                for (EmrInstanceGroup g : c.getInstanceGroups()) {
-                    if (g.getId().equals(mod.instanceGroupId())) {
-                        owner = c;
-                        target = g;
-                    }
-                }
-            }
-            if (target == null) {
-                throw new AwsException("InvalidRequestException",
-                        "Instance group id '" + mod.instanceGroupId() + "' is not valid.", 400);
-            }
-            if (mod.instanceCount() != null) {
-                if ("MASTER".equals(target.getInstanceGroupType())
-                        && mod.instanceCount() != target.getRequestedInstanceCount()) {
-                    throw new AwsException("ValidationException",
-                            "The instance count of the master instance group cannot be modified.", 400);
-                }
-                EmrInstanceGroup group = target;
-                int count = mod.instanceCount();
-                updates.add(() -> {
-                    group.setRequestedInstanceCount(count);
-                    group.setRunningInstanceCount(count);
-                });
-            }
-            if (!touched.contains(owner)) {
-                touched.add(owner);
-            }
-        }
-        updates.forEach(Runnable::run);
-        for (EmrCluster c : touched) {
-            clusterStore.put(c.getId(), c);
-        }
-    }
 
     public Long getAutoTerminationIdleTimeout(String clusterId) {
         return requireCluster(clusterId).getAutoTerminationIdleTimeout();

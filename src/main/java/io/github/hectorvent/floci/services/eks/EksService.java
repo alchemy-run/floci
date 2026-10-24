@@ -1,34 +1,27 @@
 package io.github.hectorvent.floci.services.eks;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
+import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.RequestScopes;
-import io.github.hectorvent.floci.core.common.ReservedTags;
 import io.github.hectorvent.floci.core.common.TagHandler;
-import io.github.hectorvent.floci.core.common.docker.UserDataPipeline;
-import io.github.hectorvent.floci.core.resource.ExplorerResource;
-import io.github.hectorvent.floci.core.resource.ResourceProvider;
-import io.github.hectorvent.floci.core.resource.SupportedResourceType;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
-import io.github.hectorvent.floci.services.ec2.Ec2InstanceLaunchListener;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
 import io.github.hectorvent.floci.services.ec2.Ipv4Cidrs;
 import io.github.hectorvent.floci.services.ec2.SecurityGroupPolicy;
-import io.github.hectorvent.floci.services.ec2.model.Instance;
 import io.github.hectorvent.floci.services.ec2.model.IpPermission;
-import io.github.hectorvent.floci.services.ec2.model.LaunchTemplateData;
 import io.github.hectorvent.floci.services.ec2.model.SecurityGroup;
 import io.github.hectorvent.floci.services.ec2.model.Tag;
 import io.github.hectorvent.floci.services.ec2.model.UserIdGroupPair;
 import io.github.hectorvent.floci.services.ec2.model.Vpc;
-import io.github.hectorvent.floci.services.eks.model.AccessConfig;
 import io.github.hectorvent.floci.services.eks.model.CertificateAuthority;
 import io.github.hectorvent.floci.services.eks.model.Cluster;
+import io.github.hectorvent.floci.services.eks.model.AccessConfig;
 import io.github.hectorvent.floci.services.eks.model.ClusterIdentity;
 import io.github.hectorvent.floci.services.eks.model.ClusterStatus;
 import io.github.hectorvent.floci.services.eks.model.CreateClusterRequest;
@@ -46,15 +39,24 @@ import io.github.hectorvent.floci.services.eks.model.NodegroupStatus;
 import io.github.hectorvent.floci.services.eks.model.OidcIdentity;
 import io.github.hectorvent.floci.services.eks.model.Provider;
 import io.github.hectorvent.floci.services.eks.model.ResourcesVpcConfig;
+import io.github.hectorvent.floci.services.eks.model.Update;
+import io.github.hectorvent.floci.services.eks.model.UpdateNodegroupConfigRequest;
+import io.github.hectorvent.floci.services.eks.model.UpdateNodegroupVersionRequest;
+import io.github.hectorvent.floci.services.eks.model.UpdateParam;
+import io.quarkus.runtime.annotations.RegisterForReflection;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Comparator;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.HexFormat;
@@ -62,26 +64,27 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import io.github.hectorvent.floci.core.resource.ExplorerResource;
+import io.github.hectorvent.floci.core.resource.ResourceProvider;
+import io.github.hectorvent.floci.core.resource.SupportedResourceType;
 
 @ApplicationScoped
-public class EksService implements TagHandler, ResourceProvider, Ec2InstanceLaunchListener {
+public class EksService implements TagHandler, ResourceProvider {
 
     private static final Logger LOG = Logger.getLogger(EksService.class);
-
-    private record UserDataClaim(String userData, CompletableFuture<UserDataPipeline.ExecutionResult> future) {}
 
     private static final List<String> ALL_LOG_TYPES = List.of(
             "api", "audit", "authenticator", "controllerManager", "scheduler"
@@ -97,6 +100,7 @@ public class EksService implements TagHandler, ResourceProvider, Ec2InstanceLaun
     private final StorageBackend<String, Cluster> storage;
     private final StorageBackend<String, Nodegroup> nodeGroupStorage;
     private final StorageBackend<String, FargateProfile> fargateProfileStorage;
+    private final StorageBackend<String, StoredNodegroupUpdate> nodegroupUpdateStorage;
     private final EmulatorConfig config;
     private final RegionResolver regionResolver;
     private final EksClusterManager clusterManager;
@@ -106,12 +110,16 @@ public class EksService implements TagHandler, ResourceProvider, Ec2InstanceLaun
     private final EksPodIdentityAssociationService podIdentityAssociations;
     private final EksAddonService addons;
     private final ScheduledExecutorService poller = Executors.newSingleThreadScheduledExecutor();
-    private final Map<String, UserDataClaim> appliedClusterUserData = new ConcurrentHashMap<>();
-    private final Map<String, Object> nodeGroupCapacityLocks = new ConcurrentHashMap<>();
-    private final Map<String, CompletableFuture<Boolean>> pendingFirstNodeGroups = new ConcurrentHashMap<>();
-    // Storage hands every caller the same live Cluster, and Cluster keeps identity equality.
-    private final Set<Cluster> clustersBeingDeleted = ConcurrentHashMap.newKeySet();
-    private final Set<String> restoringClusters = ConcurrentHashMap.newKeySet();
+    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final Set<String> TAINT_EFFECTS = Set.of("NO_SCHEDULE", "NO_EXECUTE", "PREFER_NO_SCHEDULE");
+
+    /** How long a nodegroup update stays InProgress (nodegroup UPDATING) before it completes. */
+    Duration nodegroupUpdateDuration = Duration.ofSeconds(3);
+
+    /** A nodegroup Update plus what is needed to settle it lazily and replay it idempotently. */
+    @RegisterForReflection
+    public record StoredNodegroupUpdate(Update update, String nodegroupName, String clientRequestToken,
+                                        String requestFingerprint, long completesAtEpochMillis) {}
 
     @Inject
     public EksService(StorageFactory storageFactory, EmulatorConfig config,
@@ -128,6 +136,9 @@ public class EksService implements TagHandler, ResourceProvider, Ec2InstanceLaun
         this.fargateProfileStorage = storageFactory.create("eks", "eks-fargate-profiles.json",
                 new TypeReference<Map<String, FargateProfile>>() {
                 });
+        this.nodegroupUpdateStorage = storageFactory.create("eks", "eks-nodegroup-updates.json",
+                new TypeReference<Map<String, StoredNodegroupUpdate>>() {
+                });
         this.config = config;
         this.regionResolver = regionResolver;
         this.clusterManager = clusterManager;
@@ -136,9 +147,6 @@ public class EksService implements TagHandler, ResourceProvider, Ec2InstanceLaun
         this.accessEntries = accessEntries;
         this.podIdentityAssociations = podIdentityAssociations;
         this.addons = addons;
-        if (this.clusterManager != null) {
-            this.clusterManager.setEc2Service(this.ec2Service);
-        }
     }
 
     public EksService(StorageFactory storageFactory, EmulatorConfig config,
@@ -156,31 +164,15 @@ public class EksService implements TagHandler, ResourceProvider, Ec2InstanceLaun
                 oidcService, accessEntries, null, null);
     }
 
-    /** Called at boot so this lazily created bean runs {@link #init()}, which restarts persisted clusters. */
-    public void restorePersistedRuntime() {
-        int persistedClusters = allClusterEntries().size();
-        if (persistedClusters > 0) {
-            LOG.infov("Found {0} persisted EKS cluster record(s)", persistedClusters);
-        }
-    }
-
     @PostConstruct
     public void init() {
         backfillOidcIdentities();
         backfillClusterSecurityGroups();
         backfillLogging();
-        if (clusterManager != null && ec2Service != null) {
-            clusterManager.addNodeRegistrationListener(nodeInst -> {
-                String reg = nodeInst.getRegion() != null ? nodeInst.getRegion() : regionResolver.getRegion();
-                ec2Service.restoreAttachedVolumesForInstance(reg, nodeInst);
-            });
-        }
         if (!config.services().eks().mock()) {
             restorePersistedClusters();
-        } else {
-            restoreMockJoinedInstances();
+            startReadinessPoller();
         }
-        startReadinessPoller();
     }
 
     /**
@@ -224,12 +216,7 @@ public class EksService implements TagHandler, ResourceProvider, Ec2InstanceLaun
                 LOG.infov("Restoring k3s container for persisted EKS cluster {0}", cluster.getName());
                 cluster.setStatus(ClusterStatus.CREATING);
                 cluster.setPodCidr(EksClusterManager.DEFAULT_POD_CIDR);
-                if (cluster.getNodeInstanceType() == null) {
-                    firstNodeGroup(cluster.getName(), entry.accountId()).ifPresent(group ->
-                            cluster.setNodeInstanceType(selectedNodeInstanceType(group)));
-                }
                 clusterManager.restoreCluster(cluster);
-                restoreJoinedInstances(entry.accountId(), cluster);
             } catch (Exception e) {
                 if (!clusterManager.isDockerReachable()) {
                     // Same degradation as create: a restored cluster is metadata that stands on
@@ -249,108 +236,13 @@ public class EksService implements TagHandler, ResourceProvider, Ec2InstanceLaun
 
     private List<AccountAwareStorageBackend.AccountEntry<Cluster>> allClusterEntries() {
         if (storage instanceof AccountAwareStorageBackend<Cluster> aware) {
-            return aware.scanAllAccountEntries(k -> true).stream().peek(entry -> {
-                if (entry.value() != null && entry.value().getAccountId() == null) {
-                    entry.value().setAccountId(entry.accountId());
-                }
-            }).toList();
+            return aware.scanAllAccountEntries(k -> true);
         }
         return storage.scan(k -> true).stream()
                 .map(cluster -> new AccountAwareStorageBackend.AccountEntry<>(
                         cluster.getAccountId() != null ? cluster.getAccountId() : regionResolver.getAccountId(),
                         cluster.getName(), cluster))
                 .toList();
-    }
-
-    private boolean isClusterDeleting(String accountId, Cluster cluster) {
-        return cluster != null && cluster.getName() != null
-                && (cluster.getStatus() == ClusterStatus.DELETING
-                || clustersBeingDeleted.stream().anyMatch(c -> cluster.getName().equals(c.getName())
-                && (accountId == null || c.getAccountId() == null || accountId.equals(c.getAccountId()))));
-    }
-
-    private void saveClusterIfNotDeleting(String accountId, String clusterName, Consumer<Cluster> mutator) {
-        synchronized (clustersBeingDeleted) {
-            Cluster current = findAuthenticationCluster(accountId, clusterName).orElse(null);
-            if (current != null && !isClusterDeleting(accountId, current)) {
-                if (current.getAccountId() == null) {
-                    current.setAccountId(accountId);
-                }
-                mutator.accept(current);
-                putClusterForAccount(accountId, current);
-            }
-        }
-    }
-
-    private void restoreJoinedInstances(String accountId, Cluster cluster) {
-        if (cluster == null || cluster.getJoinedInstanceIds() == null || ec2Service == null
-                || isClusterDeleting(accountId, cluster) || findAuthenticationCluster(accountId, cluster.getName()).isEmpty()) {
-            return;
-        }
-        if (cluster.getAccountId() == null) {
-            cluster.setAccountId(accountId);
-        }
-        Set<String> prunedInstanceIds = new HashSet<>();
-        for (Map.Entry<String, String> instEntry : new ArrayList<>(cluster.getJoinedInstanceIds().entrySet())) {
-            if (isClusterDeleting(accountId, cluster) || findAuthenticationCluster(accountId, cluster.getName()).isEmpty()) {
-                return;
-            }
-            String instId = instEntry.getKey();
-            String reg = instEntry.getValue();
-            RequestScopes.runAs(accountId, reg, () -> {
-                Instance inst = ec2Service.getInstance(reg, instId).orElse(null);
-                if (inst == null || (inst.getState() != null && "terminated".equals(inst.getState().getName()))) {
-                    cluster.getJoinedInstanceIds().remove(instId);
-                    prunedInstanceIds.add(instId);
-                } else {
-                    try {
-                        clusterManager.joinInstance(cluster, inst);
-                    } catch (Exception e) {
-                        LOG.warnv("Failed to re-join instance {0} on restore of cluster {1}: {2}",
-                                instId, cluster.getName(), e.getMessage());
-                    }
-                }
-            });
-        }
-        if (!prunedInstanceIds.isEmpty()) {
-            saveClusterIfNotDeleting(accountId, cluster.getName(), current -> {
-                if (current.getJoinedInstanceIds() != null) {
-                    prunedInstanceIds.forEach(current.getJoinedInstanceIds()::remove);
-                }
-            });
-        }
-    }
-
-    private void restoreMockJoinedInstances() {
-        for (AccountAwareStorageBackend.AccountEntry<Cluster> entry : allClusterEntries()) {
-            restoreJoinedInstances(entry.accountId(), entry.value());
-        }
-    }
-
-    private Optional<Nodegroup> firstNodeGroup(String clusterName, String accountId) {
-        String prefix = clusterName + "/";
-        List<Nodegroup> groups;
-        if (nodeGroupStorage instanceof AccountAwareStorageBackend<Nodegroup> aware) {
-            groups = aware.scanAllAccountEntries(key -> key.startsWith(prefix)).stream()
-                    .filter(entry -> accountId.equals(entry.accountId()))
-                    .map(AccountAwareStorageBackend.AccountEntry::value).toList();
-        } else {
-            groups = nodeGroupStorage.scan(key -> key.startsWith(prefix));
-        }
-        return groups.stream().filter(group -> group.getStatus() == NodegroupStatus.ACTIVE)
-                .min(Comparator.comparing(Nodegroup::getCreatedAt,
-                        Comparator.nullsLast(Comparator.naturalOrder()))
-                .thenComparing(Nodegroup::getNodegroupName));
-    }
-
-    List<Nodegroup> listNodeGroupsForCluster(String clusterName, String accountId) {
-        String prefix = clusterName + "/";
-        if (nodeGroupStorage instanceof AccountAwareStorageBackend<Nodegroup> aware) {
-            return aware.scanAllAccountEntries(key -> key.startsWith(prefix)).stream()
-                    .filter(entry -> accountId == null || accountId.equals(entry.accountId()))
-                    .map(AccountAwareStorageBackend.AccountEntry::value).toList();
-        }
-        return nodeGroupStorage.scan(key -> key.startsWith(prefix));
     }
 
     /**
@@ -377,9 +269,7 @@ public class EksService implements TagHandler, ResourceProvider, Ec2InstanceLaun
                         cluster.getIdentity().getOidc().getIssuer());
                 continue;
             }
-            // The cluster's own region, from its ARN: the issuer must match the one create mints there.
-            String issuer = oidcService.newIssuerUrl(
-                    AwsArnUtils.regionOrDefault(cluster.getArn(), config.defaultRegion()));
+            String issuer = oidcService.newIssuerUrl(config.defaultRegion());
             cluster.setIdentity(new ClusterIdentity(new OidcIdentity(issuer)));
             oidcService.ensureKeyForAccount(accountId, cluster.getName(), issuer);
             putClusterForAccount(accountId, cluster);
@@ -397,49 +287,11 @@ public class EksService implements TagHandler, ResourceProvider, Ec2InstanceLaun
     }
 
     void deleteClusterForAccount(String accountId, String clusterName) {
-        Cluster cluster = (storage instanceof AccountAwareStorageBackend<Cluster> aware)
-                ? aware.getForAccount(accountId, clusterName).orElse(null)
-                : storage.get(clusterName).orElse(null);
-        if (cluster != null) {
-            if (cluster.getAccountId() == null) {
-                cluster.setAccountId(accountId);
-            }
-            clustersBeingDeleted.add(cluster);
-            cluster.setStatus(ClusterStatus.DELETING);
+        if (storage instanceof AccountAwareStorageBackend<Cluster> aware) {
+            aware.deleteForAccount(accountId, clusterName);
+            return;
         }
-        try {
-            clearAppliedClusterUserData(cluster, clusterName);
-            if (cluster == null || cluster.getArn() == null) {
-                String fallbackArn = AwsArnUtils.Arn.of("eks", config.defaultRegion(), accountId,
-                        "cluster/" + clusterName).toString();
-                appliedClusterUserData.remove(fallbackArn);
-            }
-            synchronized (clustersBeingDeleted) {
-                if (storage instanceof AccountAwareStorageBackend<Cluster> aware) {
-                    aware.deleteForAccount(accountId, clusterName);
-                    return;
-                }
-                storage.delete(clusterName);
-            }
-        } finally {
-            if (cluster != null) {
-                clustersBeingDeleted.remove(cluster);
-            }
-        }
-    }
-
-    private void clearAppliedClusterUserData(Cluster cluster, String fallbackName) {
-        if (cluster != null) {
-            if (cluster.getArn() != null) {
-                appliedClusterUserData.remove(cluster.getArn());
-            }
-            if (cluster.getName() != null) {
-                appliedClusterUserData.remove(cluster.getName());
-            }
-        }
-        if (fallbackName != null) {
-            appliedClusterUserData.remove(fallbackName);
-        }
+        storage.delete(clusterName);
     }
 
     private SecurityGroup createClusterSecurityGroup(String region, String clusterName, String vpcId) {
@@ -452,7 +304,7 @@ public class EksService implements TagHandler, ResourceProvider, Ec2InstanceLaun
                     new Tag("kubernetes.io/cluster/" + clusterName, "owned"),
                     new Tag("aws:eks:cluster-name", clusterName)
             );
-            ec2Service.createSystemTags(region, List.of(sg.getGroupId()), tags);
+            ec2Service.createTags(region, List.of(sg.getGroupId()), tags);
 
             UserIdGroupPair selfPair = new UserIdGroupPair();
             selfPair.setGroupId(sg.getGroupId());
@@ -575,18 +427,8 @@ public class EksService implements TagHandler, ResourceProvider, Ec2InstanceLaun
     public void shutdown() {
         poller.shutdownNow();
         if (!config.services().eks().mock()) {
-            boolean keepRunning = config.services().eks().keepRunningOnShutdown();
             for (Cluster cluster : allClusters()) {
-                try {
-                    if (keepRunning) {
-                        clusterManager.detachCluster(cluster);
-                    } else {
-                        clusterManager.stopCluster(cluster);
-                    }
-                } catch (RuntimeException e) {
-                    LOG.warnv("Could not clean up EKS cluster {0} during shutdown: {1}",
-                            cluster.getName(), e.getMessage());
-                }
+                clusterManager.stopCluster(cluster);
             }
         }
     }
@@ -653,18 +495,6 @@ public class EksService implements TagHandler, ResourceProvider, Ec2InstanceLaun
         }
 
         cluster.setRoleArn(request.getRoleArn());
-
-        List<String> clusterArgs;
-        try {
-            clusterArgs = EksClusterArgs.parseAndValidateClusterArgs(request.getTags(), name);
-        } catch (IllegalArgumentException e) {
-            throw new AwsException("InvalidParameterException", e.getMessage(), 400);
-        }
-        if (!clusterArgs.isEmpty()) {
-            cluster.setClusterArgs(clusterArgs);
-        }
-        cluster.setTags(request.getTags() != null ? ReservedTags.stripReservedTags(request.getTags()) : new HashMap<>());
-
         ResourcesVpcConfig vpcConfig = buildVpcConfigResponse(request.getResourcesVpcConfig(), resolvedVpcId);
         SecurityGroup clusterSg = null;
         if (ec2Service != null && !vpcConfig.getVpcId().isBlank()) {
@@ -686,6 +516,7 @@ public class EksService implements TagHandler, ResourceProvider, Ec2InstanceLaun
         cluster.setLogging(buildLogging(request.getLogging()));
         cluster.setEncryptionConfig(buildEncryptionConfig(request.getEncryptionConfig()));
         cluster.setStatus(ClusterStatus.CREATING);
+        cluster.setTags(request.getTags() != null ? new HashMap<>(request.getTags()) : new HashMap<>());
         cluster.setPlatformVersion("eks.1");
         cluster.setCertificateAuthority(new CertificateAuthority(""));
 
@@ -742,39 +573,8 @@ public class EksService implements TagHandler, ResourceProvider, Ec2InstanceLaun
                 ? aware.getForAccount(accountId, name) : storage.get(name);
     }
 
-    /**
-     * The ARN of what an EKS route names in the caller's account, looked up as its handler looks it up: the
-     * cluster {@code clusterName} when {@code collection} is null, or else the node group, Fargate profile,
-     * add-on, access entry or Pod Identity association {@code name} in that cluster, by the route's
-     * collection segment, or for the update {@code name} the add-on it was made to. Empty when there is none,
-     * or the handler would refuse the lookup.
-     */
-    public Optional<String> findResourceArn(String clusterName, String collection, String name) {
-        Optional<Cluster> cluster = storage.get(clusterName);
-        if (cluster.isEmpty() || collection == null) {
-            return cluster.map(Cluster::getArn);
-        }
-        try {
-            return Optional.ofNullable(switch (collection) {
-                case "node-groups" -> describeNodeGroup(clusterName, name).getNodegroupArn();
-                case "fargate-profiles" -> describeFargateProfile(clusterName, name).getFargateProfileArn();
-                case "addons" -> addons.describe(cluster.get(), name).addonArn();
-                case "access-entries" -> accessEntries.describe(cluster.get(), name).accessEntryArn();
-                case "pod-identity-associations" -> podIdentityAssociations.describe(cluster.get(), name).associationArn();
-                case "updates" -> {
-                    String addon = addons.updateAddonName(cluster.get(), name);
-                    yield addon == null ? null : addons.describe(cluster.get(), addon).addonArn();
-                }
-                default -> null;
-            });
-        } catch (AwsException expected) {
-            // The handler answers this lookup with the same error, so the route names no resource to act on.
-            return Optional.empty();
-        }
-    }
-
     public Cluster describeCluster(String name) {
-        Cluster cluster = storage.get(name)
+        Cluster cluster = storage.get(name).filter(this::inRequestRegion)
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException",
                         "No cluster found for name: " + name, 404));
         if (cluster.getLogging() == null) {
@@ -783,118 +583,37 @@ public class EksService implements TagHandler, ResourceProvider, Ec2InstanceLaun
         return cluster;
     }
 
-    @Override
-    public void onInstanceLaunched(String accountId, String region, Instance instance) {
-        extractInstanceClusterName(instance).ifPresent(name ->
-                RequestScopes.runAs(accountId, region, () -> {
-                    try {
-                        Cluster cluster = describeCluster(name);
-                        validateInstanceRegion(cluster, instance);
-                        saveClusterIfNotDeleting(accountId, name, current ->
-                                clusterManager.recordJoinedInstanceId(current, instance));
-                    } catch (AwsException e) {
-                        LOG.warnv("Cannot join instance {0} to cluster {1}: {2}",
-                                instance.getInstanceId(), name, e.getMessage());
-                    } catch (Exception e) {
-                        LOG.warnv("Failed to join instance {0} to cluster {1}: {2}",
-                                instance.getInstanceId(), name, e.getMessage());
-                    }
-                }));
-    }
-
-    private Optional<String> extractInstanceClusterName(Instance instance) {
-        return (instance != null && instance.getUserData() != null && !instance.getUserData().isBlank())
-                ? EksBootstrapUserData.extractClusterName(instance.getUserData()) : Optional.empty();
-    }
-
-    void joinInstance(String clusterName, Instance instance) {
-        Cluster cluster = describeCluster(clusterName);
-        validateInstanceRegion(cluster, instance);
-        clusterManager.joinInstance(cluster, instance);
-        storage.put(cluster.getName(), cluster);
-    }
-
-    void joinInstance(String clusterName, String instanceId) {
-        String region = resolveClusterRegion(describeCluster(clusterName));
-        Instance instance = ec2Service != null ? ec2Service.getInstance(region, instanceId).orElse(null) : null;
-        if (instance == null) {
-            throw new AwsException("InvalidInstanceID.NotFound", "The instance ID '" + instanceId + "' does not exist", 400);
-        }
-        joinInstance(clusterName, instance);
-    }
-
-    private void validateInstanceRegion(Cluster cluster, Instance instance) {
-        String clusterReg = resolveClusterRegion(cluster);
-        String instReg = instance.getRegion();
-        if (instReg == null && instance.getPlacement() != null && instance.getPlacement().getAvailabilityZone() != null) {
-            String az = instance.getPlacement().getAvailabilityZone();
-            if (az.length() > 1 && Character.isLetter(az.charAt(az.length() - 1))) {
-                instReg = az.substring(0, az.length() - 1);
-            }
-        }
-        if (instReg != null && !instReg.equals(clusterReg)) {
-            throw new AwsException("InvalidParameterException", "Cannot join instance " + instance.getInstanceId()
-                    + " in region " + instReg + " to cluster " + cluster.getName() + " in region " + clusterReg, 400);
-        }
-    }
-
-    List<Instance> getJoinedInstances(String clusterName) {
-        return clusterManager.getJoinedInstances(describeCluster(clusterName));
-    }
-
-    boolean isInstanceJoined(String clusterName, String instanceId) {
-        return clusterManager.isInstanceJoined(describeCluster(clusterName), instanceId);
+    private boolean inRequestRegion(Cluster cluster) {
+        String region = cluster.getArn() == null ? config.defaultRegion() : AwsArnUtils.parse(cluster.getArn()).region();
+        return regionResolver.getRegion().equals(region);
     }
 
     public List<String> listClusters() {
         return storage.scan(k -> true).stream()
+                .filter(this::inRequestRegion)
                 .map(Cluster::getName)
+                .sorted()
                 .collect(Collectors.toList());
     }
 
     public Cluster deleteCluster(String name) {
-        Cluster cluster = storage.get(name)
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                        "No cluster found for name: " + name, 404));
-        if (cluster.getAccountId() == null) {
-            cluster.setAccountId(regionResolver.getAccountId());
-        }
+        Cluster cluster = describeCluster(name);
 
-        // One delete at a time per cluster, so a delete that fails cannot restore the status or
-        // state of a cluster another delete is tearing down.
-        if (!clustersBeingDeleted.add(cluster)) {
-            throw new AwsException("ResourceInUseException",
-                    "Cluster is already being deleted: " + name, 409);
+        cluster.setStatus(ClusterStatus.DELETING);
+        if (!config.services().eks().mock()) {
+            clusterManager.stopCluster(cluster);
         }
-        try {
-            ClusterStatus previousStatus = cluster.getStatus();
-            cluster.setStatus(ClusterStatus.DELETING);
-            if (!config.services().eks().mock()) {
-                try {
-                    clusterManager.stopCluster(cluster);
-                } catch (RuntimeException e) {
-                    // The cluster record is kept for a retry, so it must not stay stuck in DELETING.
-                    cluster.setStatus(previousStatus);
-                    throw e;
-                }
-            }
-            deleteClusterSecurityGroup(cluster);
-            accessEntries.deleteClusterEntries(cluster);
-            if (podIdentityAssociations != null) {
-                podIdentityAssociations.deleteClusterAssociations(cluster);
-            }
-            if (addons != null) {
-                addons.deleteClusterAddons(cluster);
-            }
-            synchronized (clustersBeingDeleted) {
-                storage.delete(name);
-                clearAppliedClusterUserData(cluster, name);
-                oidcService.deleteKey(name);
-            }
-            return cluster;
-        } finally {
-            clustersBeingDeleted.remove(cluster);
+        deleteClusterSecurityGroup(cluster);
+        accessEntries.deleteClusterEntries(cluster);
+        if (podIdentityAssociations != null) {
+            podIdentityAssociations.deleteClusterAssociations(cluster);
         }
+        if (addons != null) {
+            addons.deleteClusterAddons(cluster);
+        }
+        storage.delete(name);
+        oidcService.deleteKey(name);
+        return cluster;
     }
 
     public Nodegroup createNodeGroup(String clusterName, CreateNodeGroupRequest request) {
@@ -942,7 +661,7 @@ public class EksService implements TagHandler, ResourceProvider, Ec2InstanceLaun
         }
 
         String region = resolveClusterRegion(cluster);
-        LaunchTemplateData launchTemplateData = validateLaunchTemplate(region, request.getLaunchTemplate());
+        validateLaunchTemplate(region, request.getLaunchTemplate());
 
         String accountId = regionResolver.getAccountId();
         String id = UUID.randomUUID().toString();
@@ -982,147 +701,13 @@ public class EksService implements TagHandler, ResourceProvider, Ec2InstanceLaun
         nodeGroup.setLabels(request.getLabels() != null ? new HashMap<>(request.getLabels()) : null);
         nodeGroup.setTags(request.getTags() != null ? new HashMap<>(request.getTags()) : new HashMap<>());
 
-        String capacityKey = accountId + "/" + clusterName;
-        Object capacityLock = nodeGroupCapacityLocks.computeIfAbsent(capacityKey,
-                ignored -> new Object());
-        boolean hasUserData = launchTemplateData != null && launchTemplateData.getUserData() != null
-                && !launchTemplateData.getUserData().isBlank();
-        Cluster currentCluster;
-        CompletableFuture<Boolean> pendingFirst;
-        boolean ownsPendingFirst = false;
-        synchronized (capacityLock) {
-            if (nodeGroupStorage.get(storageKey).isPresent()) {
-                throw new AwsException("ResourceInUseException",
-                        "Nodegroup already exists: " + nodegroupName, 409);
-            }
-            currentCluster = describeCluster(clusterName);
-            pendingFirst = pendingFirstNodeGroups.get(capacityKey);
-            boolean firstGroup = firstNodeGroup(clusterName, accountId).isEmpty() && pendingFirst == null;
-            if (firstGroup && !config.services().eks().mock() && clusterManager != null) {
-                applyFirstNodeGroupCapacity(clusterName, nodegroupName, currentCluster, nodeGroup);
-                if (currentCluster.getContainerId() != null && currentCluster.getStatus() == ClusterStatus.ACTIVE) {
-                    LOG.infov("EKS cluster {0} is already running; nodegroup {1} node labels and taints are not applied to the running node",
-                            clusterName, nodegroupName);
-                }
-            } else if (!firstGroup && pendingFirst == null
-                    && !config.services().eks().mock() && clusterManager != null) {
-                if (currentCluster.getNodeInstanceType() == null) {
-                    firstNodeGroup(clusterName, accountId).ifPresent(group ->
-                            currentCluster.setNodeInstanceType(selectedNodeInstanceType(group)));
-                    storage.put(clusterName, currentCluster);
-                }
-                if (!nodeGroup.getInstanceTypes().isEmpty()
-                        && !nodeGroup.getInstanceTypes().contains(currentCluster.getNodeInstanceType())) {
-                    LOG.warnv("EKS cluster {0} has one shared node; nodegroup {1} cannot change its capacity from {2}",
-                            clusterName, nodegroupName, currentCluster.getNodeInstanceType());
-                }
-                firstNodeGroup(clusterName, accountId).ifPresent(first -> {
-                    if (!nodegroupName.equals(first.getNodegroupName())) {
-                        LOG.warnv(
-                                "EKS cluster {0} has one shared node; nodegroup {1} metadata (labels/taints) is not applied to the node (already represented by nodegroup {2})",
-                                clusterName, nodegroupName, first.getNodegroupName());
-                    }
-                });
-            }
-
-            if (nodeGroup.getStatus() == NodegroupStatus.ACTIVE && (hasUserData || pendingFirst != null)) {
-                nodeGroup.setStatus(NodegroupStatus.CREATING);
-                if (firstGroup && hasUserData) {
-                    pendingFirst = new CompletableFuture<>();
-                    ownsPendingFirst = true;
-                }
-            }
-            nodeGroupStorage.put(storageKey, nodeGroup);
-            if (ownsPendingFirst) {
-                pendingFirstNodeGroups.put(capacityKey, pendingFirst);
-            }
-        }
-        if (nodeGroup.getStatus() == NodegroupStatus.CREATING && hasUserData) {
-            try {
-                applyNodeGroupUserData(currentCluster, nodegroupName, launchTemplateData.getUserData(), nodeGroup);
-            } catch (Throwable e) {
-                synchronized (capacityLock) {
-                    if (nodeGroupStorage.get(storageKey)
-                            .filter(saved -> arn.equals(saved.getNodegroupArn())).isPresent()) {
-                        nodeGroupStorage.delete(storageKey);
-                    }
-                    if (ownsPendingFirst) {
-                        pendingFirstNodeGroups.remove(capacityKey, pendingFirst);
-                        pendingFirst.complete(false);
-                    }
-                }
-                throw e;
-            }
-        }
-        if (pendingFirst != null && !ownsPendingFirst) {
-            pendingFirst.join();
-        }
-        synchronized (capacityLock) {
-            boolean stored = false;
-            try {
-                if (nodeGroupStorage.get(storageKey)
-                        .filter(saved -> arn.equals(saved.getNodegroupArn())).isPresent()) {
-                    if (nodeGroup.getStatus() == NodegroupStatus.CREATING) {
-                        if (!ownsPendingFirst && firstNodeGroup(clusterName, accountId).isEmpty()
-                                && !config.services().eks().mock() && clusterManager != null) {
-                            Cluster refreshedCluster = describeCluster(clusterName);
-                            applyFirstNodeGroupCapacity(clusterName, nodegroupName, refreshedCluster, nodeGroup);
-                        }
-                        if (nodeGroup.getStatus() == NodegroupStatus.CREATING) {
-                            nodeGroup.setStatus(NodegroupStatus.ACTIVE);
-                        }
-                    }
-                    nodeGroupStorage.put(storageKey, nodeGroup);
-                    stored = true;
-                }
-            } finally {
-                if (ownsPendingFirst) {
-                    pendingFirstNodeGroups.remove(capacityKey, pendingFirst);
-                    pendingFirst.complete(stored && nodeGroup.getStatus() == NodegroupStatus.ACTIVE);
-                }
-            }
-        }
+        nodeGroupStorage.put(storageKey, nodeGroup);
         return nodeGroup;
     }
 
-    private void applyFirstNodeGroupCapacity(String clusterName, String nodegroupName,
-                                              Cluster currentCluster, Nodegroup nodeGroup) {
-        String selectedType = selectedNodeInstanceType(nodeGroup);
-        String previousType = EksClusterManager.nodeInstanceType(currentCluster);
-        currentCluster.setNodeInstanceType(selectedType);
-        if (currentCluster.getContainerId() != null && !selectedType.equals(previousType)) {
-            try {
-                if (!clusterManager.restartForNodeCapacity(currentCluster, previousType)) {
-                    nodeGroup.setStatus(NodegroupStatus.CREATE_FAILED);
-                    nodeGroup.setHealth(failedNodeGroupHealth(nodegroupName,
-                            "Could not apply node capacity; the previous node was restored"));
-                }
-                // Set only now: before the swap the poller would verify the old container, still
-                // answering while it stops. A failed swap restarts the previous node, so it is
-                // verified too.
-                currentCluster.setFinalizePending(true);
-            } catch (RuntimeException e) {
-                currentCluster.setNodeInstanceType(previousType);
-                currentCluster.setStatus(ClusterStatus.FAILED);
-                nodeGroup.setStatus(NodegroupStatus.CREATE_FAILED);
-                nodeGroup.setHealth(failedNodeGroupHealth(nodegroupName, e.getMessage()));
-                LOG.errorv("EKS cluster {0} could not recover after node capacity change: {1}",
-                        clusterName, e.getMessage());
-            }
-        }
-        storage.put(clusterName, currentCluster);
-    }
-
-    private String selectedNodeInstanceType(Nodegroup group) {
-        String requestedType = group.getInstanceTypes() == null || group.getInstanceTypes().isEmpty()
-                ? null : group.getInstanceTypes().getFirst();
-        String selectedType = clusterManager.selectNodeInstanceType(requestedType);
-        return selectedType != null ? selectedType : EksClusterManager.DEFAULT_NODE_INSTANCE_TYPE;
-    }
-
-    private LaunchTemplateData validateLaunchTemplate(String region, Object launchTemplateObj) {
+    private void validateLaunchTemplate(String region, Object launchTemplateObj) {
         if (!(launchTemplateObj instanceof Map<?, ?> map)) {
-            return null;
+            return;
         }
 
         String id = asNonBlankString(map.get("id"));
@@ -1136,7 +721,7 @@ public class EksService implements TagHandler, ResourceProvider, Ec2InstanceLaun
         }
 
         try {
-            return ec2Service.resolveLaunchTemplateData(region, id, name, version);
+            ec2Service.resolveLaunchTemplateData(region, id, name, version);
         } catch (AwsException e) {
             switch (e.getErrorCode()) {
                 case "InvalidLaunchTemplateId.NotFound", "InvalidLaunchTemplateName.NotFoundException" ->
@@ -1159,9 +744,359 @@ public class EksService implements TagHandler, ResourceProvider, Ec2InstanceLaun
 
     public Nodegroup describeNodeGroup(String clusterName, String nodegroupName) {
         describeCluster(clusterName);
-        return nodeGroupStorage.get(nodeGroupKey(clusterName, nodegroupName))
+        Nodegroup nodegroup = nodeGroupStorage.get(nodeGroupKey(clusterName, nodegroupName))
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException",
                         "No nodegroup found for name: " + nodegroupName, 404));
+        settleNodegroupUpdates(clusterName, nodegroup);
+        return nodegroup;
+    }
+
+    /**
+     * UpdateNodegroupConfig: applies scaling, label/taint deltas, updateConfig and
+     * nodeRepairConfig, then reports the nodegroup UPDATING with an InProgress ConfigUpdate
+     * until {@link #nodegroupUpdateDuration} elapses.
+     */
+    public synchronized Update updateNodegroupConfig(String clusterName, String nodegroupName,
+                                                     UpdateNodegroupConfigRequest request) {
+        Nodegroup nodegroup = describeNodeGroup(clusterName, nodegroupName);
+        if (request == null) {
+            throw new AwsException("InvalidParameterException", "No changes needed", 400);
+        }
+        String fingerprint = fingerprint(request);
+        Optional<Update> replay = replayNodegroupUpdate(clusterName, nodegroupName,
+                request.clientRequestToken(), fingerprint);
+        if (replay.isPresent()) {
+            return replay.get();
+        }
+        requireNodegroupUpdatable(nodegroup);
+
+        List<UpdateParam> params = new ArrayList<>();
+        NodegroupScalingConfig scaling = nodegroup.getScalingConfig();
+        if (request.scalingConfig() != null) {
+            scaling = mergeScalingConfig(nodegroup.getScalingConfig(), request.scalingConfig());
+            params.add(new UpdateParam("MinSize", String.valueOf(scaling.getMinSize())));
+            params.add(new UpdateParam("MaxSize", String.valueOf(scaling.getMaxSize())));
+            params.add(new UpdateParam("DesiredSize", String.valueOf(scaling.getDesiredSize())));
+        }
+        Map<String, String> labels = nodegroup.getLabels();
+        if (request.labels() != null) {
+            labels = applyLabels(nodegroup.getLabels(), request.labels(), params);
+        }
+        List<Object> taints = nodegroup.getTaints();
+        if (request.taints() != null) {
+            taints = applyTaints(nodegroup.getTaints(), request.taints(), params);
+        }
+        Object updateConfig = nodegroup.getUpdateConfig();
+        if (request.updateConfig() != null) {
+            updateConfig = mergeUpdateConfig(nodegroup.getUpdateConfig(), request.updateConfig(), params);
+        }
+        Object nodeRepairConfig = nodegroup.getNodeRepairConfig();
+        if (request.nodeRepairConfig() != null) {
+            Object enabled = request.nodeRepairConfig().get("enabled");
+            if (enabled != null && !(enabled instanceof Boolean)) {
+                throw new AwsException("InvalidParameterException", "nodeRepairConfig.enabled must be a boolean", 400);
+            }
+            nodeRepairConfig = new LinkedHashMap<>(request.nodeRepairConfig());
+            params.add(new UpdateParam("NodeRepairEnabled", String.valueOf(Boolean.TRUE.equals(enabled))));
+        }
+        if (params.isEmpty()) {
+            throw new AwsException("InvalidParameterException", "No changes needed", 400);
+        }
+
+        nodegroup.setScalingConfig(scaling);
+        nodegroup.setLabels(labels);
+        nodegroup.setTaints(taints);
+        nodegroup.setUpdateConfig(updateConfig);
+        nodegroup.setNodeRepairConfig(nodeRepairConfig);
+        return startNodegroupUpdate(clusterName, nodegroup, "ConfigUpdate", params,
+                request.clientRequestToken(), fingerprint);
+    }
+
+    /**
+     * UpdateNodegroupVersion: moves the nodegroup to {@code version} (default: the cluster's
+     * version) and its release version, never past the control plane and never backwards.
+     */
+    public synchronized Update updateNodegroupVersion(String clusterName, String nodegroupName,
+                                                      UpdateNodegroupVersionRequest request) {
+        Cluster cluster = describeCluster(clusterName);
+        Nodegroup nodegroup = describeNodeGroup(clusterName, nodegroupName);
+        UpdateNodegroupVersionRequest body = request != null ? request
+                : new UpdateNodegroupVersionRequest(null, null, null, null, null);
+        String fingerprint = fingerprint(body);
+        Optional<Update> replay = replayNodegroupUpdate(clusterName, nodegroupName,
+                body.clientRequestToken(), fingerprint);
+        if (replay.isPresent()) {
+            return replay.get();
+        }
+        requireNodegroupUpdatable(nodegroup);
+
+        String target = body.version() != null && !body.version().isBlank() ? body.version().trim() : cluster.getVersion();
+        Matcher targetMatcher = K8S_VERSION_PATTERN.matcher(target == null ? "" : target);
+        if (!targetMatcher.matches()) {
+            throw new AwsException("InvalidParameterException",
+                    "The specified parameter version is not valid: " + target, 400);
+        }
+        int targetMinor = Integer.parseInt(targetMatcher.group(1));
+        Matcher clusterMatcher = K8S_VERSION_PATTERN.matcher(Objects.toString(cluster.getVersion(), ""));
+        if (clusterMatcher.matches() && targetMinor > Integer.parseInt(clusterMatcher.group(1))) {
+            throw new AwsException("InvalidParameterException", "Requested Nodegroup Kubernetes version "
+                    + target + " is newer than the cluster Kubernetes version " + cluster.getVersion(), 400);
+        }
+        Matcher currentMatcher = K8S_VERSION_PATTERN.matcher(Objects.toString(nodegroup.getVersion(), ""));
+        if (currentMatcher.matches() && targetMinor < Integer.parseInt(currentMatcher.group(1))) {
+            throw new AwsException("InvalidParameterException", "Requested Nodegroup Kubernetes version "
+                    + target + " is older than the current Nodegroup version " + nodegroup.getVersion(), 400);
+        }
+        if (body.launchTemplate() != null) {
+            if (nodegroup.getLaunchTemplate() == null) {
+                throw new AwsException("InvalidParameterException",
+                        "launchTemplate can only be updated on a nodegroup created with a launch template", 400);
+            }
+            validateLaunchTemplate(resolveClusterRegion(cluster), body.launchTemplate());
+        }
+        String releaseVersion = body.releaseVersion() != null && !body.releaseVersion().isBlank()
+                ? body.releaseVersion().trim() : target + "-eks-1";
+
+        List<UpdateParam> params = new ArrayList<>();
+        params.add(new UpdateParam("Version", target));
+        params.add(new UpdateParam("ReleaseVersion", releaseVersion));
+        if (body.launchTemplate() != null) {
+            Object ltName = body.launchTemplate().get("name");
+            Object ltVersion = body.launchTemplate().get("version");
+            if (ltName != null) {
+                params.add(new UpdateParam("LaunchTemplateName", ltName.toString()));
+            }
+            if (ltVersion != null) {
+                params.add(new UpdateParam("LaunchTemplateVersion", ltVersion.toString()));
+            }
+            nodegroup.setLaunchTemplate(new LinkedHashMap<>(body.launchTemplate()));
+        }
+        nodegroup.setVersion(target);
+        nodegroup.setReleaseVersion(releaseVersion);
+        return startNodegroupUpdate(clusterName, nodegroup, "VersionUpdate", params,
+                body.clientRequestToken(), fingerprint);
+    }
+
+    public Update describeNodegroupUpdate(String clusterName, String nodegroupName, String updateId) {
+        Nodegroup nodegroup = describeNodeGroup(clusterName, nodegroupName);
+        return nodegroupUpdateStorage.get(nodegroupUpdateKey(clusterName, nodegroup.getNodegroupName(), updateId))
+                .map(stored -> effectiveUpdate(stored, System.currentTimeMillis()))
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "No update found for ID: " + updateId, 404));
+    }
+
+    List<String> listNodegroupUpdateIds(String clusterName, String nodegroupName) {
+        String prefix = nodeGroupKey(clusterName, nodegroupName) + "/";
+        return nodegroupUpdateStorage.scan(key -> key.startsWith(prefix)).stream()
+                .map(stored -> stored.update().id())
+                .toList();
+    }
+
+    private Update startNodegroupUpdate(String clusterName, Nodegroup nodegroup, String type,
+                                        List<UpdateParam> params, String clientRequestToken, String fingerprint) {
+        Instant now = Instant.now();
+        nodegroup.setStatus(NodegroupStatus.UPDATING);
+        nodegroup.setModifiedAt(now);
+        nodeGroupStorage.put(nodeGroupKey(clusterName, nodegroup.getNodegroupName()), nodegroup);
+        Update update = new Update(UUID.randomUUID().toString(), "InProgress", type, List.copyOf(params),
+                now.toEpochMilli() / 1000.0, List.of());
+        nodegroupUpdateStorage.put(nodegroupUpdateKey(clusterName, nodegroup.getNodegroupName(), update.id()),
+                new StoredNodegroupUpdate(update, nodegroup.getNodegroupName(), clientRequestToken, fingerprint,
+                        now.toEpochMilli() + nodegroupUpdateDuration.toMillis()));
+        return update;
+    }
+
+    private Optional<Update> replayNodegroupUpdate(String clusterName, String nodegroupName,
+                                                   String clientRequestToken, String fingerprint) {
+        if (clientRequestToken == null || clientRequestToken.isBlank()) {
+            return Optional.empty();
+        }
+        String prefix = nodeGroupKey(clusterName, nodegroupName) + "/";
+        long now = System.currentTimeMillis();
+        return nodegroupUpdateStorage.scan(key -> key.startsWith(prefix)).stream()
+                .filter(stored -> clientRequestToken.equals(stored.clientRequestToken())
+                        && fingerprint.equals(stored.requestFingerprint()))
+                .findFirst()
+                .map(stored -> effectiveUpdate(stored, now));
+    }
+
+    /** Completes elapsed updates and returns the nodegroup to ACTIVE once none is in progress. */
+    private void settleNodegroupUpdates(String clusterName, Nodegroup nodegroup) {
+        if (nodegroup.getStatus() != NodegroupStatus.UPDATING) {
+            return;
+        }
+        String prefix = nodeGroupKey(clusterName, nodegroup.getNodegroupName()) + "/";
+        long now = System.currentTimeMillis();
+        boolean inProgress = nodegroupUpdateStorage.scan(key -> key.startsWith(prefix)).stream()
+                .anyMatch(stored -> now < stored.completesAtEpochMillis());
+        if (!inProgress) {
+            nodegroup.setStatus(NodegroupStatus.ACTIVE);
+            nodeGroupStorage.put(nodeGroupKey(clusterName, nodegroup.getNodegroupName()), nodegroup);
+        }
+    }
+
+    private static Update effectiveUpdate(StoredNodegroupUpdate stored, long nowMillis) {
+        Update update = stored.update();
+        if (!"InProgress".equals(update.status()) || nowMillis < stored.completesAtEpochMillis()) {
+            return update;
+        }
+        return new Update(update.id(), "Successful", update.type(), update.params(), update.createdAt(),
+                update.errors());
+    }
+
+    private static void requireNodegroupUpdatable(Nodegroup nodegroup) {
+        if (nodegroup.getStatus() != NodegroupStatus.ACTIVE && nodegroup.getStatus() != NodegroupStatus.DEGRADED) {
+            throw new AwsException("ResourceInUseException", "Nodegroup " + nodegroup.getNodegroupName()
+                    + " cannot be updated while it is " + nodegroup.getStatus(), 409);
+        }
+    }
+
+    private static NodegroupScalingConfig mergeScalingConfig(NodegroupScalingConfig current,
+                                                             NodegroupScalingConfig requested) {
+        NodegroupScalingConfig merged = new NodegroupScalingConfig();
+        merged.setMinSize(requested.getMinSize() != null ? requested.getMinSize()
+                : current != null ? current.getMinSize() : null);
+        merged.setMaxSize(requested.getMaxSize() != null ? requested.getMaxSize()
+                : current != null ? current.getMaxSize() : null);
+        merged.setDesiredSize(requested.getDesiredSize() != null ? requested.getDesiredSize()
+                : current != null ? current.getDesiredSize() : null);
+        Integer min = merged.getMinSize();
+        Integer max = merged.getMaxSize();
+        Integer desired = merged.getDesiredSize();
+        if (min == null || max == null || desired == null || min < 0 || max < 1 || desired < 0) {
+            throw new AwsException("InvalidParameterException",
+                    "scalingConfig requires minSize >= 0, maxSize >= 1 and desiredSize >= 0", 400);
+        }
+        if (min > max) {
+            throw new AwsException("InvalidParameterException",
+                    "Minimum capacity " + min + " can't be greater than maximum capacity " + max, 400);
+        }
+        if (desired < min || desired > max) {
+            throw new AwsException("InvalidParameterException", "Desired capacity " + desired
+                    + " must be between minimum capacity " + min + " and maximum capacity " + max, 400);
+        }
+        return merged;
+    }
+
+    private static Map<String, String> applyLabels(Map<String, String> current, UpdateNodegroupConfigRequest.Labels delta,
+                                                   List<UpdateParam> params) {
+        Map<String, String> add = delta.addOrUpdateLabels() == null ? Map.of() : delta.addOrUpdateLabels();
+        List<String> remove = delta.removeLabels() == null ? List.of() : delta.removeLabels();
+        for (Map.Entry<String, String> label : add.entrySet()) {
+            if (label.getKey() == null || label.getKey().isBlank() || label.getKey().length() > 63
+                    || label.getValue() == null || label.getValue().length() > 63) {
+                throw new AwsException("InvalidParameterException", "Invalid label: " + label.getKey(), 400);
+            }
+            if (remove.contains(label.getKey())) {
+                throw new AwsException("InvalidParameterException",
+                        "Label " + label.getKey() + " cannot be both added and removed", 400);
+            }
+        }
+        Map<String, String> updated = current == null ? new LinkedHashMap<>() : new LinkedHashMap<>(current);
+        remove.forEach(updated::remove);
+        updated.putAll(add);
+        if (!add.isEmpty()) {
+            params.add(new UpdateParam("LabelsToAdd", toJson(add)));
+        }
+        if (!remove.isEmpty()) {
+            params.add(new UpdateParam("LabelsToRemove", toJson(remove)));
+        }
+        return updated.isEmpty() && current == null ? null : updated;
+    }
+
+    private static List<Object> applyTaints(List<Object> current, UpdateNodegroupConfigRequest.Taints delta,
+                                            List<UpdateParam> params) {
+        List<Map<String, Object>> add = delta.addOrUpdateTaints() == null ? List.of() : delta.addOrUpdateTaints();
+        List<Map<String, Object>> remove = delta.removeTaints() == null ? List.of() : delta.removeTaints();
+        for (Map<String, Object> taint : add) {
+            Object key = taint.get("key");
+            if (key == null || key.toString().isBlank() || key.toString().length() > 63
+                    || !TAINT_EFFECTS.contains(String.valueOf(taint.get("effect")))) {
+                throw new AwsException("InvalidParameterException",
+                        "Taints require a key and an effect of NO_SCHEDULE, NO_EXECUTE or PREFER_NO_SCHEDULE", 400);
+            }
+        }
+        List<Object> updated = new ArrayList<>(current == null ? List.of() : current);
+        for (Map<String, Object> taint : remove) {
+            updated.removeIf(existing -> existing instanceof Map<?, ?> map
+                    && Objects.equals(map.get("key"), taint.get("key"))
+                    && (taint.get("effect") == null || Objects.equals(map.get("effect"), taint.get("effect"))));
+        }
+        for (Map<String, Object> taint : add) {
+            updated.removeIf(existing -> existing instanceof Map<?, ?> map
+                    && Objects.equals(map.get("key"), taint.get("key"))
+                    && Objects.equals(map.get("effect"), taint.get("effect")));
+            updated.add(new LinkedHashMap<>(taint));
+        }
+        if (updated.size() > 50) {
+            throw new AwsException("InvalidParameterException", "A nodegroup can have at most 50 taints", 400);
+        }
+        if (!add.isEmpty()) {
+            params.add(new UpdateParam("TaintsToAdd", toJson(add)));
+        }
+        if (!remove.isEmpty()) {
+            params.add(new UpdateParam("TaintsToRemove", toJson(remove)));
+        }
+        return updated.isEmpty() && current == null ? null : updated;
+    }
+
+    private static Object mergeUpdateConfig(Object current, Map<String, Object> requested, List<UpdateParam> params) {
+        Object maxUnavailable = requested.get("maxUnavailable");
+        Object percentage = requested.get("maxUnavailablePercentage");
+        Object strategy = requested.get("updateStrategy");
+        if (maxUnavailable != null && percentage != null) {
+            throw new AwsException("InvalidParameterException",
+                    "Specify either maxUnavailable or maxUnavailablePercentage, not both", 400);
+        }
+        for (Object value : Arrays.asList(maxUnavailable, percentage)) {
+            if (value != null && (!(value instanceof Integer number) || number < 1 || number > 100)) {
+                throw new AwsException("InvalidParameterException",
+                        "maxUnavailable and maxUnavailablePercentage must be between 1 and 100", 400);
+            }
+        }
+        if (strategy != null && !"DEFAULT".equals(strategy) && !"MINIMAL".equals(strategy)) {
+            throw new AwsException("InvalidParameterException", "updateStrategy must be DEFAULT or MINIMAL", 400);
+        }
+        Map<String, Object> merged = new LinkedHashMap<>();
+        if (maxUnavailable == null && percentage == null && current instanceof Map<?, ?> existing) {
+            if (existing.get("maxUnavailable") != null) {
+                merged.put("maxUnavailable", existing.get("maxUnavailable"));
+            }
+            if (existing.get("maxUnavailablePercentage") != null) {
+                merged.put("maxUnavailablePercentage", existing.get("maxUnavailablePercentage"));
+            }
+        }
+        if (maxUnavailable != null) {
+            merged.put("maxUnavailable", maxUnavailable);
+            params.add(new UpdateParam("MaxUnavailable", maxUnavailable.toString()));
+        }
+        if (percentage != null) {
+            merged.put("maxUnavailablePercentage", percentage);
+            params.add(new UpdateParam("MaxUnavailablePercentage", percentage.toString()));
+        }
+        if (strategy != null) {
+            merged.put("updateStrategy", strategy);
+            params.add(new UpdateParam("UpdateStrategy", strategy.toString()));
+        } else if (current instanceof Map<?, ?> existing && existing.get("updateStrategy") != null) {
+            merged.put("updateStrategy", existing.get("updateStrategy"));
+        }
+        return merged;
+    }
+
+    private static String fingerprint(Object request) {
+        return toJson(request);
+    }
+
+    private static String toJson(Object value) {
+        try {
+            return JSON.writeValueAsString(value);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private String nodegroupUpdateKey(String clusterName, String nodegroupName, String updateId) {
+        return nodeGroupKey(clusterName, nodegroupName) + "/" + updateId;
     }
 
     public List<String> listNodeGroups(String clusterName) {
@@ -1173,19 +1108,18 @@ public class EksService implements TagHandler, ResourceProvider, Ec2InstanceLaun
     }
 
     public Nodegroup deleteNodeGroup(String clusterName, String nodegroupName) {
-        Object capacityLock = nodeGroupCapacityLocks.computeIfAbsent(
-                regionResolver.getAccountId() + "/" + clusterName, ignored -> new Object());
-        synchronized (capacityLock) {
-            Nodegroup nodeGroup = describeNodeGroup(clusterName, nodegroupName);
-            nodeGroup.setStatus(NodegroupStatus.DELETING);
-            nodeGroup.setModifiedAt(Instant.now());
-            nodeGroupStorage.delete(nodeGroupKey(clusterName, nodegroupName));
-            return nodeGroup;
-        }
+        Nodegroup nodeGroup = describeNodeGroup(clusterName, nodegroupName);
+        nodeGroup.setStatus(NodegroupStatus.DELETING);
+        nodeGroup.setModifiedAt(Instant.now());
+        nodeGroupStorage.delete(nodeGroupKey(clusterName, nodegroupName));
+        String updatePrefix = nodeGroupKey(clusterName, nodegroupName) + "/";
+        nodegroupUpdateStorage.keys().stream().filter(key -> key.startsWith(updatePrefix)).toList()
+                .forEach(nodegroupUpdateStorage::delete);
+        return nodeGroup;
     }
 
     public FargateProfile createFargateProfile(String clusterName, CreateFargateProfileRequest request) {
-        Cluster cluster = describeCluster(clusterName);
+        describeCluster(clusterName);
 
         String fargateProfileName = request.getFargateProfileName();
         if (fargateProfileName == null || fargateProfileName.isBlank()) {
@@ -1201,7 +1135,7 @@ public class EksService implements TagHandler, ResourceProvider, Ec2InstanceLaun
                     "Fargate profile already exists: " + fargateProfileName, 409);
         }
 
-        String region = resolveClusterRegion(cluster);
+        String region = config.defaultRegion();
         String accountId = regionResolver.getAccountId();
         String id = UUID.randomUUID().toString();
         String arn = AwsArnUtils.Arn.of("eks", region, accountId,
@@ -1246,47 +1180,136 @@ public class EksService implements TagHandler, ResourceProvider, Ec2InstanceLaun
         return profile;
     }
 
+    /**
+     * ListUpdates for the cluster or, with exactly one filter, for one of its nodegroups, add-ons
+     * or capabilities. No capability can exist (CreateCapability is not implemented), so that
+     * filter resolves the parent first and then returns what is actually recorded.
+     */
+    public PaginatedResult<String> listUpdates(String clusterName, String nodegroupName, String addonName,
+                                               String capabilityName, Integer maxResults, String nextToken) {
+        Cluster cluster = describeCluster(clusterName);
+        long filters = Stream.of(nodegroupName, addonName, capabilityName)
+                .filter(value -> value != null && !value.isBlank()).count();
+        if (filters > 1) {
+            throw new AwsException("InvalidParameterException",
+                    "Specify at most one of nodegroupName, addonName and capabilityName", 400);
+        }
+        List<String> updateIds;
+        if (capabilityName != null && !capabilityName.isBlank()) {
+            describeCapability(clusterName, capabilityName);
+            updateIds = List.of();
+        } else if (nodegroupName != null && !nodegroupName.isBlank()) {
+            describeNodeGroup(clusterName, nodegroupName);
+            updateIds = listNodegroupUpdateIds(clusterName, nodegroupName);
+        } else if (addonName != null && !addonName.isBlank()) {
+            if (addons == null) {
+                throw new AwsException("ResourceNotFoundException", "No addon: " + addonName
+                        + " found for cluster: " + clusterName, 404);
+            }
+            addons.describe(cluster, addonName);
+            updateIds = addons.listUpdateIds(cluster, addonName);
+        } else {
+            updateIds = addons == null ? List.of() : addons.listUpdateIds(cluster, null);
+        }
+        return Pagination.paginate(updateIds, Function.identity(), maxResults, nextToken,
+                100, "InvalidParameterException");
+    }
+
+    /** No capability can exist because CreateCapability is not implemented. */
+    public void describeCapability(String clusterName, String capabilityName) {
+        describeCluster(clusterName);
+        throw new AwsException("ResourceNotFoundException",
+                "No capability found for name: " + capabilityName, 404);
+    }
+
+    /** No identity provider config can exist because AssociateIdentityProviderConfig is not implemented. */
+    public void describeIdentityProviderConfig(String clusterName, String type, String name) {
+        describeCluster(clusterName);
+        if (type == null || name == null || name.isBlank()) {
+            throw new AwsException("InvalidParameterException",
+                    "identityProviderConfig type and name are required", 400);
+        }
+        if (!"oidc".equals(type)) {
+            throw new AwsException("InvalidParameterException",
+                    "The identity provider config type " + type + " is not supported", 400);
+        }
+        throw new AwsException("ResourceNotFoundException",
+                "No identity provider config found for name: " + name, 404);
+    }
+
     @Override
     public String serviceKey() {
         return "eks";
     }
 
     @Override
-    public void tagResource(String region, String resourceArn, Map<String, String> tags) {
-        ReservedTags.rejectReservedTagsOnUpdate(tags);
-        String clusterName = extractClusterName(resourceArn);
-        Cluster cluster = storage.get(clusterName)
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                        "Resource not found: " + resourceArn, 404));
+    public int tagResourceSuccessStatus() {
+        return 200;
+    }
 
+    @Override
+    public int untagResourceSuccessStatus() {
+        return 200;
+    }
+
+    @Override
+    public void tagResource(String region, String resourceArn, Map<String, String> tags) {
+        Cluster cluster = taggedCluster(region, resourceArn);
+        if (resourceArn.contains(":podidentityassociation/")) {
+            podIdentityAssociations.tag(cluster, associationId(resourceArn), tags, null);
+            return;
+        }
         if (cluster.getTags() == null) {
             cluster.setTags(new HashMap<>());
         }
         cluster.getTags().putAll(tags);
-        storage.put(clusterName, cluster);
+        storage.put(cluster.getName(), cluster);
     }
 
     @Override
     public void untagResource(String region, String resourceArn, List<String> tagKeys) {
-        String clusterName = extractClusterName(resourceArn);
-        Cluster cluster = storage.get(clusterName)
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                        "Resource not found: " + resourceArn, 404));
-
+        Cluster cluster = taggedCluster(region, resourceArn);
+        if (resourceArn.contains(":podidentityassociation/")) {
+            podIdentityAssociations.tag(cluster, associationId(resourceArn), null, tagKeys);
+            return;
+        }
         if (cluster.getTags() != null && tagKeys != null) {
             tagKeys.forEach(cluster.getTags()::remove);
         }
-        storage.put(clusterName, cluster);
+        storage.put(cluster.getName(), cluster);
     }
 
     @Override
     public Map<String, String> listTags(String region, String resourceArn) {
-        String clusterName = extractClusterName(resourceArn);
-        Cluster cluster = storage.get(clusterName)
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                        "Resource not found: " + resourceArn, 404));
-
+        Cluster cluster = taggedCluster(region, resourceArn);
+        if (resourceArn.contains(":podidentityassociation/")) {
+            return podIdentityAssociations.describe(cluster, associationId(resourceArn)).tags();
+        }
         return cluster.getTags() != null ? cluster.getTags() : Map.of();
+    }
+
+    private Cluster taggedCluster(String region, String resourceArn) {
+        String[] arn = resourceArn == null ? new String[0] : resourceArn.split(":", 6);
+        if (arn.length != 6 || !"arn".equals(arn[0]) || !"eks".equals(arn[2])) {
+            throw new AwsException("InvalidParameterException", "Invalid EKS resource ARN", 400);
+        }
+        String[] resource = arn[5].split("/", -1);
+        boolean association = resource.length == 3 && "podidentityassociation".equals(resource[0]);
+        if ((!association && !(resource.length == 2 && "cluster".equals(resource[0])))
+                || !arn[3].equals(region == null ? regionResolver.getRegion() : region)
+                || !arn[4].equals(regionResolver.getAccountId())) {
+            throw new AwsException("ResourceNotFoundException", "Resource not found: " + resourceArn, 404);
+        }
+        Cluster cluster = describeCluster(resource[1]);
+        String expected = association ? podIdentityAssociations.describe(cluster, resource[2]).associationArn() : cluster.getArn();
+        if (!resourceArn.equals(expected)) {
+            throw new AwsException("ResourceNotFoundException", "Resource not found: " + resourceArn, 404);
+        }
+        return cluster;
+    }
+
+    private static String associationId(String resourceArn) {
+        return resourceArn.substring(resourceArn.lastIndexOf('/') + 1);
     }
 
     public void tagResource(String resourceArn, Map<String, String> tags) {
@@ -1299,16 +1322,6 @@ public class EksService implements TagHandler, ResourceProvider, Ec2InstanceLaun
 
     public Map<String, String> listTagsForResource(String resourceArn) {
         return listTags(null, resourceArn);
-    }
-
-    private String extractClusterName(String resourceArn) {
-        // arn:aws:eks:us-east-1:000000000000:cluster/my-cluster
-        int idx = resourceArn.lastIndexOf('/');
-        if (idx < 0 || idx == resourceArn.length() - 1) {
-            throw new AwsException("InvalidParameterException",
-                    "Invalid resource ARN: " + resourceArn, 400);
-        }
-        return resourceArn.substring(idx + 1);
     }
 
     /**
@@ -1546,98 +1559,6 @@ public class EksService implements TagHandler, ResourceProvider, Ec2InstanceLaun
         return health;
     }
 
-    private Map<String, List<Object>> failedNodeGroupHealth(String nodegroupName, String message) {
-        Map<String, List<Object>> health = new LinkedHashMap<>();
-        Map<String, Object> issue = new LinkedHashMap<>();
-        issue.put("code", "NodeCreationFailure");
-        issue.put("message", message);
-        issue.put("resourceIds", List.of(nodegroupName));
-        health.put("issues", List.of(issue));
-        return health;
-    }
-
-    static volatile Runnable userDataClaimWaitingHook;
-
-    private void applyNodeGroupUserData(Cluster cluster, String nodegroupName, String userData, Nodegroup nodeGroup) {
-        String clusterKey = cluster.getArn() != null ? cluster.getArn() : cluster.getName();
-        CompletableFuture<UserDataPipeline.ExecutionResult> future = new CompletableFuture<>();
-        UserDataClaim claim = new UserDataClaim(userData, future);
-
-        // putIfAbsent claims the slot atomically. If another caller is already executing, we wait
-        // for their execution to complete so that failure in the winner propagates to all racing
-        // nodegroups rather than letting them proceed ACTIVE on a failed bootstrap.
-        UserDataClaim existing = appliedClusterUserData.putIfAbsent(clusterKey, claim);
-        if (existing != null) {
-            Runnable hook = userDataClaimWaitingHook;
-            if (hook != null) {
-                hook.run();
-            }
-
-            UserDataPipeline.ExecutionResult winnerResult;
-            try {
-                winnerResult = existing.future().join();
-            } catch (Throwable t) {
-                Throwable cause = t.getCause() != null ? t.getCause() : t;
-                winnerResult = UserDataPipeline.ExecutionResult.failed(
-                        -1L, 1, 1, "UserData execution failed: " + cause.getMessage());
-            }
-
-            if (winnerResult != null && !winnerResult.isSuccess()) {
-                failNodeGroupUserData(nodeGroup, nodegroupName, cluster, winnerResult);
-                return;
-            }
-
-            if (existing.userData().equals(userData)) {
-                LOG.infov("Nodegroup {0} specifies identical launch template user data already applied to cluster {1}; skipping",
-                        nodegroupName, cluster.getName());
-            } else {
-                LOG.warnv("Nodegroup {0} specifies launch template user data that differs from previously applied user data for cluster {1}; skipping execution because Floci runs a single shared container per cluster",
-                        nodegroupName, cluster.getName());
-            }
-            return;
-        }
-
-        if (clusterManager == null) {
-            claim.future().complete(UserDataPipeline.ExecutionResult.skipped("No cluster manager"));
-            return;
-        }
-
-        UserDataPipeline.ExecutionResult result = null;
-        try {
-            result = clusterManager.executeUserData(cluster, nodegroupName, userData);
-            if (result == null) {
-                result = UserDataPipeline.ExecutionResult.skipped("UserData execution returned no result");
-            }
-            claim.future().complete(result);
-        } catch (Throwable t) {
-            claim.future().completeExceptionally(t);
-            appliedClusterUserData.remove(clusterKey, claim);
-            throw t;
-        } finally {
-            if (result != null && !result.isSuccess()) {
-                // Release the claim so a later node group can retry the bootstrap. The conditional
-                // remove only drops our own claim, not one a concurrent delete/recreate or a newer
-                // caller has since put in its place.
-                appliedClusterUserData.remove(clusterKey, claim);
-            }
-        }
-
-        if (result != null && !result.isSuccess()) {
-            failNodeGroupUserData(nodeGroup, nodegroupName, cluster, result);
-        }
-    }
-
-    private void failNodeGroupUserData(Nodegroup nodeGroup, String nodegroupName, Cluster cluster,
-            UserDataPipeline.ExecutionResult result) {
-        nodeGroup.setStatus(NodegroupStatus.CREATE_FAILED);
-        String failureDetail = result != null && result.getFailureMessage() != null
-                ? result.getFailureMessage()
-                : "UserData execution failed for EKS cluster " + cluster.getName();
-        nodeGroup.setHealth(failedNodeGroupHealth(nodegroupName, failureDetail));
-        LOG.warnv("Nodegroup {0} failed to execute launch template user data: {1}",
-                nodegroupName, failureDetail);
-    }
-
     private FargateProfile.Health defaultFargateProfileHealth() {
         FargateProfile.Health health = new FargateProfile.Health();
         health.setIssues(List.of());
@@ -1645,63 +1566,22 @@ public class EksService implements TagHandler, ResourceProvider, Ec2InstanceLaun
     }
 
     private void startReadinessPoller() {
-        poller.scheduleAtFixedRate(this::pollClusterReadiness, 2, 3, TimeUnit.SECONDS);
-    }
-
-    void pollClusterReadiness() {
-        try {
-            for (AccountAwareStorageBackend.AccountEntry<Cluster> entry : allClusterEntries()) {
-                Cluster cluster = entry.value();
-                boolean replacedNode = cluster.getStatus() == ClusterStatus.ACTIVE && cluster.isFinalizePending();
-                if (cluster.getStatus() == ClusterStatus.CREATING || replacedNode) {
-                    if (clusterManager.isReady(cluster)) {
-                        clusterManager.finalizeCluster(cluster);
-                        // A delete that ran while the API server was probed must not get its
-                        // cluster written back.
-                        synchronized (clustersBeingDeleted) {
-                            if (isClusterDeleting(entry.accountId(), cluster)) {
-                                continue;
-                            }
-                            cluster.setFinalizePending(false);
+        poller.scheduleAtFixedRate(() -> {
+            try {
+                for (Cluster cluster : allClusters()) {
+                    if (cluster.getStatus() == ClusterStatus.CREATING) {
+                        if (clusterManager.isReady(cluster)) {
+                            LOG.infov("EKS cluster {0} is now ACTIVE", cluster.getName());
+                            clusterManager.finalizeCluster(cluster);
                             cluster.setStatus(ClusterStatus.ACTIVE);
                             putCluster(cluster);
                         }
-                        if (replacedNode) {
-                            LOG.infov("Replaced k3s node of EKS cluster {0} is ready", cluster.getName());
-                        } else {
-                            LOG.infov("EKS cluster {0} is now ACTIVE", cluster.getName());
-                        }
-                        restoreJoinedInstancesAsync(entry.accountId(), cluster);
                     }
-                } else if (cluster.getStatus() == ClusterStatus.ACTIVE && hasPendingJoinedInstances(cluster)) {
-                    restoreJoinedInstancesAsync(entry.accountId(), cluster);
                 }
+            } catch (Exception e) {
+                LOG.error("Error in EKS readiness poller", e);
             }
-        } catch (Exception e) {
-            LOG.error("Error in EKS readiness poller", e);
-        }
-    }
-
-    private void restoreJoinedInstancesAsync(String accountId, Cluster cluster) {
-        if (cluster == null || cluster.getName() == null || isClusterDeleting(accountId, cluster)) {
-            return;
-        }
-        String key = (accountId != null ? accountId : "default") + "/" + cluster.getName();
-        if (!restoringClusters.add(key)) {
-            return;
-        }
-        CompletableFuture.runAsync(() -> {
-            try {
-                restoreJoinedInstances(accountId, cluster);
-            } finally {
-                restoringClusters.remove(key);
-            }
-        });
-    }
-
-    private boolean hasPendingJoinedInstances(Cluster cluster) {
-        return cluster != null && cluster.getJoinedInstanceIds() != null
-                && cluster.getJoinedInstanceIds().keySet().stream().anyMatch(id -> !clusterManager.isInstanceJoined(cluster, id));
+        }, 2, 3, TimeUnit.SECONDS);
     }
 
     public Optional<Cluster> findClusterByIssuer(String issuer) {

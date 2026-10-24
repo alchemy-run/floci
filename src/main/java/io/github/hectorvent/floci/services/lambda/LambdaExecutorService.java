@@ -460,48 +460,4 @@ public class LambdaExecutorService implements Resettable {
         }
     }
 
-    private InvokeResult executeSync(LambdaFunction fn, byte[] payload, String requestId) {
-        ContainerHandle handle;
-        try {
-            handle = warmPool.acquire(fn);
-        } catch (Exception e) {
-            LOG.warnv("Failed to acquire container for function {0}: {1}", fn.getFunctionName(), e.getMessage());
-            return new InvokeResult(200, "Unhandled",
-                    buildErrorPayload("Failed to start Lambda container: " + e.getMessage(), "Lambda.InitError"),
-                    null, requestId);
-        }
-        try {
-            PendingInvocation invocation = PendingInvocation.withExecutionTimeout(
-                    requestId, payload, fn.getTimeout(), fn.getFunctionArn(),
-                    new CompletableFuture<>());
-
-            handle.getRuntimeApiServer().enqueue(invocation);
-
-            int queueBudgetSeconds = Math.max(60, fn.getTimeout() * 8);
-            CompletableFuture.anyOf(invocation.getDispatchedFuture(), invocation.getResultFuture())
-                    .get(queueBudgetSeconds + RUNTIME_DISPATCH_GRACE_SECONDS, TimeUnit.SECONDS);
-            InvokeResult result = invocation.getResultFuture().get();
-
-            warmPool.release(handle);
-            return result;
-
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            warmPool.destroyHandle(handle);
-            return new InvokeResult(200, "Unhandled", buildErrorPayload("Invocation interrupted", "Interrupted"), null, requestId);
-        } catch (Exception e) {
-            Throwable cause = e instanceof ExecutionException && e.getCause() != null ? e.getCause() : e;
-            if (cause instanceof TimeoutException) {
-                LOG.warnv("Function {0} timed out after {1}s", fn.getFunctionName(), fn.getTimeout());
-                warmPool.destroyHandle(handle);
-                return new InvokeResult(200, "Unhandled",
-                        buildErrorPayload("Task timed out after " + fn.getTimeout() + " seconds", "Function.TimedOut"),
-                        null, requestId);
-            }
-            LOG.warnv("Invocation error for function {0}: {1}", fn.getFunctionName(), cause.getMessage());
-            warmPool.destroyHandle(handle);
-            return new InvokeResult(200, "Unhandled",
-                    buildErrorPayload(cause.getMessage(), "InvocationError"), null, requestId);
-        }
-    }
 }

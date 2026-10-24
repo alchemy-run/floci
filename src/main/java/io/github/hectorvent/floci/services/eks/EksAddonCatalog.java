@@ -11,6 +11,7 @@ import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -54,7 +55,28 @@ public class EksAddonCatalog {
                 return List.of();
             }
             CatalogWrapper wrapper = MAPPER.readValue(is, CatalogWrapper.class);
-            return wrapper.addons() != null ? List.copyOf(wrapper.addons()) : List.of();
+            List<AddonInfo> loaded = new ArrayList<>(wrapper.addons() != null ? wrapper.addons() : List.of());
+            AddonInfo historical = EksCatalogService.historicalVpcCni();
+            int index = -1;
+            for (int i = 0; i < loaded.size(); i++) {
+                if (historical.addonName().equals(loaded.get(i).addonName())) {
+                    index = i;
+                    break;
+                }
+            }
+            if (index < 0) {
+                loaded.add(historical);
+            } else {
+                AddonInfo current = loaded.get(index);
+                List<AddonVersionInfo> versions = new ArrayList<>(historical.addonVersions());
+                current.addonVersions().stream()
+                        .filter(version -> versions.stream().noneMatch(existing ->
+                                existing.addonVersion().equals(version.addonVersion())))
+                        .forEach(versions::add);
+                loaded.set(index, new AddonInfo(current.addonName(), current.type(), List.copyOf(versions),
+                        current.publisher(), current.owner()));
+            }
+            return List.copyOf(loaded);
         } catch (IOException e) {
             LOG.errorv(e, "Failed to load EKS addon versions catalog from {0}", CATALOG_RESOURCE_NAME);
             return List.of();
@@ -160,6 +182,9 @@ public class EksAddonCatalog {
     private static AddonInfo filterByK8s(AddonInfo addon, String k8s) {
         List<AddonVersionInfo> filtered = addon.addonVersions().stream()
                 .filter(v -> isCompatible(v, k8s, false))
+                .map(v -> new AddonVersionInfo(v.addonVersion(), v.architecture(),
+                        v.compatibilities().stream().filter(c -> k8s.equals(c.clusterVersion())).toList(),
+                        v.requiresConfiguration(), v.requiresIamPermissions()))
                 .toList();
         return filtered.isEmpty() ? null
                 : new AddonInfo(addon.addonName(), addon.type(), filtered, addon.publisher(), addon.owner());

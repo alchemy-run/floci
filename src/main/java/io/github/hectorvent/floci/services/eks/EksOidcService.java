@@ -4,9 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.github.hectorvent.floci.core.common.AwsEndpoints;
 import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.core.common.Base64Url;
 import io.github.hectorvent.floci.core.common.OidcIssuerKeyLookup;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
@@ -48,7 +46,7 @@ public class EksOidcService implements OidcIssuerKeyLookup {
 
     private static final Logger LOG = Logger.getLogger(EksOidcService.class);
 
-    public static final String STS_AUDIENCE = "sts.amazonaws.com"; // partition-literal: web-identity audience; no source outside the commercial partition (P9)
+    public static final String STS_AUDIENCE = "sts.amazonaws.com";
     private static final int DEFAULT_TOKEN_LIFETIME_SECONDS = 86400;
     private static final int MAX_TOKEN_LIFETIME_SECONDS = 604800;
 
@@ -69,7 +67,7 @@ public class EksOidcService implements OidcIssuerKeyLookup {
      */
     public String newIssuerUrl(String region) {
         String id = UUID.randomUUID().toString().replace("-", "").toUpperCase();
-        return "https://" + AwsEndpoints.host("oidc.eks", region) + "/id/" + id;
+        return "https://oidc.eks." + region + ".amazonaws.com/id/" + id;
     }
 
     /**
@@ -180,8 +178,8 @@ public class EksOidcService implements OidcIssuerKeyLookup {
         long exp = now + lifetime;
         String subject = "system:serviceaccount:" + namespace + ":" + serviceAccount;
 
-        String header = Base64Url.encode(writeJson(buildHeader(key.getKeyId())));
-        String payload = Base64Url.encode(writeJson(
+        String header = base64Url(writeJson(buildHeader(key.getKeyId())));
+        String payload = base64Url(writeJson(
                 buildClaims(issuer, aud, subject, namespace, serviceAccount, now, exp)));
 
         String signingInput = header + "." + payload;
@@ -237,7 +235,7 @@ public class EksOidcService implements OidcIssuerKeyLookup {
             Signature signature = Signature.getInstance("SHA256withRSA");
             signature.initSign(privateKey);
             signature.update(signingInput.getBytes(StandardCharsets.UTF_8));
-            return Base64Url.encode(signature.sign());
+            return base64Url(signature.sign());
         } catch (GeneralSecurityException e) {
             throw new IllegalStateException("EKS OIDC token signing failed", e);
         }
@@ -259,6 +257,10 @@ public class EksOidcService implements OidcIssuerKeyLookup {
         } catch (GeneralSecurityException | IllegalArgumentException e) {
             throw new IllegalStateException("Failed to load EKS OIDC private key", e);
         }
+    }
+
+    private static String base64Url(byte[] data) {
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(data);
     }
 
     /**
@@ -291,9 +293,5 @@ public class EksOidcService implements OidcIssuerKeyLookup {
         }
         pem.append("-----END ").append(type).append("-----\n");
         return pem.toString();
-    }
-
-    private static String base64Url(byte[] data) {
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(data);
     }
 }

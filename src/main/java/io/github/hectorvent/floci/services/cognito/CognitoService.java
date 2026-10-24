@@ -7254,118 +7254,7 @@ public class CognitoService implements ResourceProvider {
         return user;
     }
 
-    private Map<String, Object> getUserAttributeVerificationCodeUnderUserLock(
-            String poolId, String username, String attributeName) {
-        if (!"email".equals(attributeName) && !"phone_number".equals(attributeName)) {
-            throw new AwsException("InvalidParameterException",
-                    "Invalid attribute name. Only phone_number and email can be verified.", 400);
-        }
 
-        CognitoUser user = adminGetUser(poolId, username);
-        UserPool pool = describeUserPool(poolId);
-        String destination = attributeVerificationDestination(user, attributeName);
-        if (destination == null) {
-            throw new AwsException("InvalidParameterException",
-                    "email".equals(attributeName)
-                            ? "User does not have a valid registered email address"
-                            : "User does not have a valid registered phone number",
-                    400);
-        }
-
-        String deliveryMedium = "email".equals(attributeName) ? "EMAIL" : "SMS";
-        VerificationCode.Purpose purpose = "email".equals(attributeName)
-                ? VerificationCode.Purpose.EMAIL_ATTRIBUTE_VERIFICATION
-                : VerificationCode.Purpose.PHONE_ATTRIBUTE_VERIFICATION;
-        ensureVerificationWiring();
-        try {
-            String code = verificationCodeService.issue(poolId, user.getUsername(),
-                    purpose, Duration.ofHours(24));
-            dispatchAttributeVerificationCode(pool, user, attributeName, destination, purpose, code);
-        } catch (VerificationCodeException e) {
-            throw mapVerificationCodeException(e);
-        }
-
-        Map<String, Object> response = new LinkedHashMap<>();
-        response.put("AttributeName", attributeName);
-        response.put("DeliveryMedium", deliveryMedium);
-        response.put("Destination",
-                "email".equals(attributeName) ? maskEmail(destination) : maskPhoneNumber(destination));
-        return response;
-    }
-
-    private List<Map<String, Object>> updateUserAttributesUnderUserLock(
-            String poolId, String username, Map<String, String> attributes) {
-        UserPool pool = describeUserPool(poolId);
-        CognitoUser currentUser = adminGetUser(poolId, username);
-
-        // Validate every entry (alias availability) before mutating the user or issuing any
-        // verification code. Otherwise a later entry failing leaves an earlier entry's code
-        // live against a user record that was never actually updated, and the request's
-        // attribute order would silently change what gets left behind.
-        for (Map.Entry<String, String> attribute : attributes.entrySet()) {
-            String attributeName = attribute.getKey();
-            String value = attribute.getValue();
-            if (isVerifiableContactAttribute(attributeName) && blankToNull(value) != null) {
-                ensureAliasAvailable(pool, currentUser, attributeName, value);
-            }
-        }
-
-        CognitoUser updatedUser = MAPPER.convertValue(currentUser, CognitoUser.class);
-        List<Map<String, Object>> deliveryDetails = new ArrayList<>();
-
-        try {
-            for (Map.Entry<String, String> attribute : attributes.entrySet()) {
-                String attributeName = attribute.getKey();
-                String value = attribute.getValue();
-
-                if (blankToNull(value) == null) {
-                    // AWS: "To delete an attribute from the user, submit the attribute in
-                    // your API request with a blank value."
-                    updatedUser.getAttributes().remove(attributeName);
-                    updatedUser.getAttributes().remove(attributeName + "_verified");
-                    updatedUser.getPendingAttributes().remove(attributeName);
-                    continue;
-                }
-
-                if (!isVerifiableContactAttribute(attributeName)) {
-                    updatedUser.getAttributes().put(attributeName, value);
-                    continue;
-                }
-
-                VerificationCode.Purpose purpose = verificationPurpose(attributeName);
-                ensureVerificationWiring();
-                String verificationCode = verificationCodeService.issue(
-                        poolId, currentUser.getUsername(), purpose, Duration.ofHours(24));
-                dispatchAttributeVerificationCode(pool, currentUser, attributeName, value,
-                        purpose, verificationCode);
-
-                if (requiresVerificationBeforeUpdate(pool, attributeName)) {
-                    updatedUser.getPendingAttributes().put(attributeName, value);
-                } else {
-                    updatedUser.getAttributes().put(attributeName, value);
-                    updatedUser.getAttributes().put(attributeName + "_verified", "false");
-                    updatedUser.getPendingAttributes().remove(attributeName);
-                }
-
-                Map<String, Object> detail = new LinkedHashMap<>();
-                detail.put("AttributeName", attributeName);
-                detail.put("DeliveryMedium", deliveryMedium(attributeName));
-                detail.put("Destination", maskAttributeDestination(attributeName, value));
-                deliveryDetails.add(detail);
-            }
-        } catch (VerificationCodeException e) {
-            throw mapVerificationCodeException(e);
-        } catch (AwsException e) {
-            throw e;
-        } catch (RuntimeException e) {
-            throw new AwsException("CodeDeliveryFailureException",
-                    "Failed to deliver verification code", 400);
-        }
-
-        updatedUser.setLastModifiedDate(System.currentTimeMillis() / 1000L);
-        userStore.put(userKey(poolId, updatedUser.getUsername()), updatedUser);
-        return deliveryDetails;
-    }
 
     public List<Map<String, Object>> adminListDevices(String userPoolId, String username) {
         adminGetUser(userPoolId, username);
@@ -7411,14 +7300,6 @@ public class CognitoService implements ResourceProvider {
                 .encodeToString((raw + "|" + signature).getBytes(StandardCharsets.UTF_8));
     }
 
-    private void dispatchAttributeVerificationCode(UserPool pool, CognitoUser user,
-                                                    String attributeName, String destination,
-                                                    VerificationCode.Purpose purpose, String code) {
-        CognitoUser deliveryUser = MAPPER.convertValue(user, CognitoUser.class);
-        deliveryUser.getAttributes().put(attributeName, destination);
-        messageDispatcher.dispatch(pool, deliveryUser, purpose, code,
-                List.of(deliveryMedium(attributeName)));
-    }
 
     private void rollbackSignUpConfirmationArtifacts(String userPoolId, String username,
             String userKey) {
