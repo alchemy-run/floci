@@ -404,7 +404,10 @@ public class SnsService implements Resettable, ResourceProvider {
 
     public Map<String, String> getSmsAttributes(List<String> names, String region) {
         String key = smsAttributesKey(region);
-        Map<String, String> stored = smsAttributesStore.get(key).orElse(Map.of());
+        // An account that has set nothing still reports its default message type.
+        Map<String, String> stored = new LinkedHashMap<>();
+        stored.put("DefaultSMSType", "Promotional");
+        stored.putAll(smsAttributesStore.get(key).orElse(Map.of()));
         if (names == null || names.isEmpty()) {
             return new LinkedHashMap<>(stored);
         }

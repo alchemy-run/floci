@@ -3332,10 +3332,14 @@ public class NativeDynamoDbJsonHandler {
         }
 
         if (table.getStreamArn() != null) {
-            ObjectNode streamSpecNode = objectMapper.createObjectNode();
-            streamSpecNode.put("StreamEnabled", table.isStreamEnabled());
-            streamSpecNode.put("StreamViewType", table.getStreamViewType());
-            node.set("StreamSpecification", streamSpecNode);
+            // A disabled stream keeps its ARN and label, but the table no longer reports a
+            // StreamSpecification, as DescribeTable on AWS does once the stream is turned off.
+            if (table.isStreamEnabled()) {
+                ObjectNode streamSpecNode = objectMapper.createObjectNode();
+                streamSpecNode.put("StreamEnabled", true);
+                streamSpecNode.put("StreamViewType", table.getStreamViewType());
+                node.set("StreamSpecification", streamSpecNode);
+            }
             node.put("LatestStreamArn", table.getStreamArn());
             String label = table.getStreamArn().contains("/stream/")
                     ? table.getStreamArn().substring(table.getStreamArn().lastIndexOf("/stream/") + 8)
