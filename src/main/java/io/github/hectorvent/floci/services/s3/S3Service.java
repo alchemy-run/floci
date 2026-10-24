@@ -2195,7 +2195,11 @@ public class S3Service implements Resettable, ResourceProvider {
                         ? new AwsException("NoSuchVersion", "The specified version does not exist.", 404)
                         : new AwsException("NoSuchKey", "The specified key does not exist.", 404));
         if (object.isDeleteMarker()) {
-            throw new AwsException("NoSuchKey", "The specified key does not exist.", 404);
+            // S3's delete-marker rules: a marker named by its version id is 405 MethodNotAllowed,
+            // a marker that is the current version reads as a missing key.
+            throw versionId != null
+                    ? S3DeleteMarkerException.selected(object)
+                    : S3DeleteMarkerException.current(object);
         }
         return new AccountAwareStorageBackend.OwnedEntry<>(ownedBucket.account(), object);
     }

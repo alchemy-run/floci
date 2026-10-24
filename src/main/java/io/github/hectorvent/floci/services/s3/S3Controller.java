@@ -844,7 +844,9 @@ public class S3Controller {
                 byte[] tags = readWholeBody(body);
                 s3Service.authorizeObjectWrite(bucket, key, versionId, "s3:PutObjectTagging", authorization,
                         S3ObjectActions.taggingBodyConditions(new String(tags, StandardCharsets.UTF_8)));
-                return handlePutObjectTagging(bucket, key, versionId, tags);
+                String objectKey = key;
+                return concealingMisses(bucket, httpHeaders, authorization, true,
+                        () -> handlePutObjectTagging(bucket, objectKey, versionId, tags));
             }
             if (hasQueryParam(uriInfo, "retention")) {
                 String retention = new String(readWholeBody(body), StandardCharsets.UTF_8);
@@ -858,14 +860,19 @@ public class S3Controller {
                 if (overrides && s3Service.isAuthEnforced()) {
                     s3Service.authorizeObjectWrite(bucket, key, "s3:BypassGovernanceRetention", authorization);
                 }
-                return handlePutObjectRetention(bucket, key, versionId, retention, effectiveBypass(bypass, overrides));
+                boolean effectiveBypass = effectiveBypass(bypass, overrides);
+                String objectKey = key;
+                return concealingMisses(bucket, httpHeaders, authorization, true,
+                        () -> handlePutObjectRetention(bucket, objectKey, versionId, retention, effectiveBypass));
             }
             if (hasQueryParam(uriInfo, "legal-hold")) {
                 byte[] legalHold = readWholeBody(body);
                 s3Service.authorizeObjectWrite(bucket, key, null, "s3:PutObjectLegalHold", authorization,
                         S3ObjectActions.legalHoldBodyConditions(
                                 new String(legalHold, StandardCharsets.UTF_8), clock.instant()));
-                return handlePutObjectLegalHold(bucket, key, versionId, legalHold);
+                String objectKey = key;
+                return concealingMisses(bucket, httpHeaders, authorization, true,
+                        () -> handlePutObjectLegalHold(bucket, objectKey, versionId, legalHold));
             }
             if (hasQueryParam(uriInfo, "acl")) {
                 s3Service.authorizeObjectWrite(bucket, key, versionId, "s3:PutObjectAcl", authorization, null);
@@ -1121,7 +1128,8 @@ public class S3Controller {
                     closeQuietly(read);
                 }
             }
-        } catch (AwsException e) {
+        } catch (AwsException miss) {
+            AwsException e = concealUnlistableMiss(miss, bucket, httpHeaders, authorization, true);
             emitCloudTrailEvent("GetObject", bucket, key, 0L, 0L, e.getErrorCode(), e.getMessage());
             if (S3Service.isWebsiteErrorDocumentTrigger(e) && isWebsiteRequest(httpHeaders, uriInfo)) {
                 Response websiteError = serveWebsiteErrorResponse(bucket, authorization, e);
@@ -1426,7 +1434,8 @@ public class S3Controller {
                     checksumDescribesRange && checksumMode);
             emitCloudTrailEvent("HeadObject", bucket, key, 0L, obj.getSize(), null, null);
             return resp.build();
-        } catch (AwsException e) {
+        } catch (AwsException miss) {
+            AwsException e = concealUnlistableMiss(miss, bucket, httpHeaders, authorization, true);
             emitCloudTrailEvent("HeadObject", bucket, key, 0L, 0L, e.getErrorCode(), e.getMessage());
             if (S3Service.isWebsiteErrorDocumentTrigger(e) && isWebsiteRequest(httpHeaders, uriInfo)) {
                 Response websiteError = serveWebsiteErrorResponse(bucket, authorization, e);
@@ -1528,8 +1537,10 @@ public class S3Controller {
 
             if (hasQueryParam(uriInfo, "tagging")) {
                 s3Service.authorizeObjectWrite(bucket, key, versionId, "s3:DeleteObjectTagging", authorization, null);
-                return withVersionId(Response.noContent(), s3Service.deleteObjectTagging(bucket, key, versionId))
-                        .build();
+                String objectKey = key;
+                return concealingMisses(bucket, httpHeaders, authorization, true,
+                        () -> withVersionId(Response.noContent(), s3Service.deleteObjectTagging(bucket, objectKey, versionId))
+                                .build());
             }
             if (hasQueryParam(uriInfo, "annotation")) {
                 // The user guide: "The BypassGovernanceRetention permission does not apply to annotation
@@ -1678,8 +1689,11 @@ public class S3Controller {
 
             if (hasQueryParam(uriInfo, "restore")) {
                 s3Service.authorizeObjectWrite(bucket, key, "s3:RestoreObject", authorization);
-                s3Service.restoreObject(bucket, key, versionId, new String(body, StandardCharsets.UTF_8));
-                return Response.accepted().build();
+                String objectKey = key;
+                return concealingMisses(bucket, httpHeaders, authorization, false, () -> {
+                    s3Service.restoreObject(bucket, objectKey, versionId, new String(body, StandardCharsets.UTF_8));
+                    return Response.accepted().build();
+                });
             }
 
             if (hasQueryParam(uriInfo, "select")) {
@@ -5019,5 +5033,44 @@ public class S3Controller {
         return authorization;
     }
 
+    /**
+     * A missing key or version is answered with 403 AccessDenied, as S3 does, when the caller may
+     * not list the bucket: only a principal with {@code s3:ListBucket} learns that it is missing.
+     */
+    private AwsException concealUnlistableMiss(AwsException e, String bucket, HttpHeaders httpHeaders,
+                                               S3Service.RequestAuthorization authorization,
+                                               boolean concealDeleteMarkerVersion) {
+        boolean missing = "NoSuchKey".equals(e.getErrorCode()) || "NoSuchVersion".equals(e.getErrorCode());
+        boolean deleteMarkerVersion = concealDeleteMarkerVersion && e instanceof S3DeleteMarkerException;
+        if (!missing && !deleteMarkerVersion) {
+            return e;
+        }
+        String authorizationHeader = httpHeaders != null ? httpHeaders.getHeaderString("Authorization") : null;
+        if (authorizationHeader == null) {
+            return e;
+        }
+        String bucketArn = S3PublicAccessEvaluator.bucketArn("aws", bucket);
+        try {
+            S3Service.SignedPrincipalResourcePolicyEvaluation evaluation =
+                    s3Service.signedPrincipalResourcePolicyDecision(bucket, "s3:ListBucket", bucketArn,
+                            authorization != null ? authorization : S3Service.RequestAuthorization.unsigned());
+            iamEnforcementFilter.authorizeAdditionalResourceForSession(authorizationHeader, "s3:ListBucket",
+                    bucketArn, evaluation.decision(), evaluation.resourceOwnerAccountId());
+            return e;
+        } catch (AwsException denied) {
+            return denied;
+        }
+    }
 
+    /** Runs an object operation whose not-found answers are subject to {@link #concealUnlistableMiss}. */
+    private Response concealingMisses(String bucket, HttpHeaders httpHeaders,
+                                      S3Service.RequestAuthorization authorization,
+                                      boolean concealDeleteMarkerVersion, java.util.function.Supplier<Response> operation) {
+        try {
+            return operation.get();
+        } catch (AwsException e) {
+            return xmlErrorResponse(concealUnlistableMiss(e, bucket, httpHeaders, authorization,
+                    concealDeleteMarkerVersion), bucket);
+        }
+    }
 }
