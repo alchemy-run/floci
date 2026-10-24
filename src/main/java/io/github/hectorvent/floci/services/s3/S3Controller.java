@@ -5068,7 +5068,9 @@ public class S3Controller {
                                                S3Service.RequestAuthorization authorization,
                                                boolean concealDeleteMarkerVersion) {
         boolean missing = "NoSuchKey".equals(e.getErrorCode()) || "NoSuchVersion".equals(e.getErrorCode());
-        boolean deleteMarkerVersion = concealDeleteMarkerVersion && e instanceof S3DeleteMarkerException;
+        // A delete marker refused as MethodNotAllowed, by the read path or by tagging's own lookup.
+        boolean deleteMarkerVersion = concealDeleteMarkerVersion
+                && (e instanceof S3DeleteMarkerException || "MethodNotAllowed".equals(e.getErrorCode()));
         if (!missing && !deleteMarkerVersion) {
             return e;
         }
