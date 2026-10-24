@@ -810,20 +810,33 @@ public class AutoScalingService implements PassedRoleLookup {
             throw new AwsException("ValidationError",
                     "HealthStatus must be Healthy or Unhealthy.", 400);
         }
-        updateGroupOfInstance(region, instanceId, asg -> asg.getInstances().stream()
-                .filter(instance -> instanceId.equals(instance.getInstanceId()))
-                .findFirst()
-                .ifPresent(instance -> instance.setHealthStatus(healthStatus)));
+        updateGroupOfInstance(region, instanceId, () -> instanceNotAuthorized("SetInstanceHealth", instanceId),
+                asg -> asg.getInstances().stream()
+                        .filter(instance -> instanceId.equals(instance.getInstanceId()))
+                        .findFirst()
+                        .ifPresent(instance -> instance.setHealthStatus(healthStatus)));
     }
 
     /** Applies {@code update} to the group holding {@code instanceId}, under that group's lock. */
     private void updateGroupOfInstance(String region, String instanceId, Consumer<AutoScalingGroup> update) {
+        updateGroupOfInstance(region, instanceId, () -> instanceNotFound(instanceId), update);
+    }
+
+    /**
+     * As above, failing with {@code notFound} when no group holds the instance. Instance-scoped
+     * writes that name no group ({@code SetInstanceHealth}, {@code TerminateInstanceInAutoScalingGroup})
+     * are authorized against the instance's owning group, so for them an instance in no group is an
+     * {@code AccessDenied}: the caller's group-scoped grant cannot match.
+     */
+    private void updateGroupOfInstance(String region, String instanceId,
+                                       java.util.function.Supplier<AwsException> notFound,
+                                       Consumer<AutoScalingGroup> update) {
         String name = groups.values().stream()
                 .filter(Objects::nonNull)
                 .filter(g -> region.equals(g.getRegion()) && containsInstance(g, instanceId))
                 .map(AutoScalingGroup::getAutoScalingGroupName)
                 .findFirst()
-                .orElseThrow(() -> instanceNotFound(instanceId));
+                .orElseThrow(notFound);
         String key = asgKey(region, name);
         synchronized (lockFor(key)) {
             // Re-read under the lock: the group may have been deleted or replaced since the scan.
@@ -885,7 +898,8 @@ public class AutoScalingService implements PassedRoleLookup {
 
     public void terminateInstanceInAutoScalingGroup(String region, String instanceId,
                                                      boolean decrementDesiredCapacity) {
-        updateGroupOfInstance(region, instanceId, asg -> {
+        updateGroupOfInstance(region, instanceId,
+                () -> instanceNotAuthorized("TerminateInstanceInAutoScalingGroup", instanceId), asg -> {
             releaseRefreshOwnership(asg, List.of(instanceId));
             asg.getInstances().stream()
                     .filter(i -> instanceId.equals(i.getInstanceId()))
@@ -2162,5 +2176,19 @@ public class AutoScalingService implements PassedRoleLookup {
             throw new AwsException("ValidationError", "InstanceIds is required.", 400);
         }
         return instanceIds;
+    }
+
+    /**
+     * Instance-scoped writes ({@code SetInstanceHealth}, {@code TerminateInstanceInAutoScalingGroup})
+     * carry no group name. AWS resolves the instance to its owning group for resource-level
+     * authorization; a well-formed id that belongs to no group is an {@code AccessDenied}
+     * (the caller's group-scoped grant does not match), not a {@code ValidationError}.
+     */
+    private static AwsException instanceNotAuthorized(String action, String instanceId) {
+        return new AwsException("AccessDenied",
+                "User is not authorized to perform: autoscaling:" + action
+                        + " because instance '" + instanceId
+                        + "' is not associated with an Auto Scaling group.",
+                403);
     }
 }
