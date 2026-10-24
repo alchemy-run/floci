@@ -92,14 +92,328 @@ public class GlueJsonHandler {
     }
 
     public Response handle(String action, JsonNode request, String region) throws Exception {
-        Response response = dispatch(action, request, region);
-        // Runs and crawls finish when they are started, stopped or read (they settle on read), so
-        // after those requests an activated CONDITIONAL trigger watching them gets to fire. Catalog
-        // and definition requests cannot finish a run and skip the evaluation.
-        if (RUN_ACTIONS.contains(action)) {
-            triggerService.fireConditionalTriggers();
-        }
-        return response;
+        return switch (action) {
+            case "CreateDatabase" -> {
+                Database db = mapper.treeToValue(request.get("DatabaseInput"), Database.class);
+                @SuppressWarnings("unchecked")
+                Map<String, String> tags = request.has("Tags")
+                        ? mapper.convertValue(request.get("Tags"), Map.class)
+                        : null;
+                glueService.createDatabase(db, tags, region);
+                yield Response.ok().build();
+            }
+            case "GetDatabase" -> {
+                String name = request.get("Name").asText();
+                Database db = glueService.getDatabase(name);
+                yield Response.ok(Map.of("Database", db)).build();
+            }
+            case "GetDatabases" -> {
+                yield Response.ok(Map.of("DatabaseList", glueService.getDatabases())).build();
+            }
+            case "DeleteDatabase" -> {
+                String name = request.get("Name").asText();
+                glueService.deleteDatabase(name, region);
+                yield Response.ok().build();
+            }
+            case "UpdateDatabase" -> {
+                String name = request.get("Name").asText();
+                Database db = mapper.treeToValue(request.get("DatabaseInput"), Database.class);
+                glueService.updateDatabase(name, db);
+                yield Response.ok().build();
+            }
+            case "CreateTable" -> {
+                String dbName = request.get("DatabaseName").asText();
+                Table table = mapper.treeToValue(request.get("TableInput"), Table.class);
+                glueService.createTable(dbName, table);
+                yield Response.ok().build();
+            }
+            case "GetTable" -> {
+                String dbName = request.get("DatabaseName").asText();
+                String tableName = request.get("Name").asText();
+                Table table = glueService.getTable(dbName, tableName);
+                yield Response.ok(Map.of("Table", table)).build();
+            }
+            case "CreatePartitionIndex" -> {
+                String dbName = request.get("DatabaseName").asText();
+                String tableName = request.get("TableName").asText();
+                PartitionIndex index = mapper.treeToValue(request.get("PartitionIndex"), PartitionIndex.class);
+                glueService.createPartitionIndex(dbName, tableName, index);
+                // AWS answers with an empty body, as it does for CreateTable above.
+                yield Response.ok().build();
+            }
+            case "DeletePartitionIndex" -> {
+                String dbName = request.get("DatabaseName").asText();
+                String tableName = request.get("TableName").asText();
+                String indexName = request.get("IndexName").asText();
+                glueService.deletePartitionIndex(dbName, tableName, indexName);
+                yield Response.ok().build();
+            }
+            case "GetPartitionIndexes" -> {
+                String dbName = request.get("DatabaseName").asText();
+                String tableName = request.get("TableName").asText();
+                // The service resolves the table first, so a missing one is reported as such
+                // rather than as an empty index list.
+                yield Response.ok(Map.of(
+                        "PartitionIndexDescriptorList",
+                        glueService.getPartitionIndexes(dbName, tableName))).build();
+            }
+            case "GetTables" -> {
+                String dbName = request.get("DatabaseName").asText();
+                yield Response.ok(Map.of("TableList", glueService.getTables(dbName))).build();
+            }
+            case "UpdateTable" -> {
+                String dbName = request.get("DatabaseName").asText();
+                Table table = mapper.treeToValue(request.get("TableInput"), Table.class);
+                glueService.updateTable(dbName, table, request.path("VersionId").asText(null),
+                        request.path("SkipArchive").asBoolean(false));
+                yield Response.ok().build();
+            }
+            case "GetTableVersions" -> {
+                String dbName = request.get("DatabaseName").asText();
+                String tableName = request.get("TableName").asText();
+                yield Response.ok(Map.of("TableVersions", glueService.getTableVersions(dbName, tableName))).build();
+            }
+            case "GetTableVersion" -> {
+                String dbName = request.get("DatabaseName").asText();
+                String tableName = request.get("TableName").asText();
+                yield Response.ok(Map.of("TableVersion", glueService.getTableVersion(
+                        dbName, tableName, request.path("VersionId").asText(null)))).build();
+            }
+            case "DeleteTableVersion" -> {
+                String dbName = request.get("DatabaseName").asText();
+                String tableName = request.get("TableName").asText();
+                glueService.deleteTableVersion(dbName, tableName, request.path("VersionId").asText(null));
+                yield Response.ok().build();
+            }
+            case "BatchDeleteTableVersion" -> {
+                String dbName = request.get("DatabaseName").asText();
+                String tableName = request.get("TableName").asText();
+                List<String> versionIds = mapper.convertValue(request.get("VersionIds"), STRING_LIST);
+                yield Response.ok(Map.of("Errors", glueService.batchDeleteTableVersions(
+                        dbName, tableName, versionIds == null ? List.of() : versionIds))).build();
+            }
+            case "SearchTables" -> handleSearchTables(request);
+            case "DeleteTable" -> {
+                String dbName = request.get("DatabaseName").asText();
+                String tableName = request.get("Name").asText();
+                glueService.deleteTable(dbName, tableName);
+                yield Response.ok().build();
+            }
+            case "BatchDeleteTable" -> {
+                String dbName = request.get("DatabaseName").asText();
+                List<String> tableNames = mapper.convertValue(request.get("TablesToDelete"), STRING_LIST);
+                yield Response.ok(Map.of("Errors", glueService.batchDeleteTables(dbName, tableNames))).build();
+            }
+            case "UpdateColumnStatisticsForTable" -> handleUpdateColumnStatisticsForTable(request);
+            case "GetColumnStatisticsForTable" -> handleGetColumnStatisticsForTable(request);
+            case "DeleteColumnStatisticsForTable" -> handleDeleteColumnStatisticsForTable(request);
+            case "CreatePartition" -> {
+                String dbName = request.get("DatabaseName").asText();
+                String tableName = request.get("TableName").asText();
+                Partition partition = mapper.treeToValue(request.get("PartitionInput"), Partition.class);
+                glueService.createPartition(dbName, tableName, partition);
+                yield Response.ok().build();
+            }
+            case "BatchCreatePartition" -> handleBatchCreatePartition(request);
+            case "BatchUpdatePartition" -> handleBatchUpdatePartition(request);
+            case "GetPartition" -> handleGetPartition(request);
+            case "BatchGetPartition" -> handleBatchGetPartition(request);
+            case "GetPartitions" -> {
+                String dbName = request.get("DatabaseName").asText();
+                String tableName = request.get("TableName").asText();
+                String expression = request.path("Expression").asText(null);
+                yield Response.ok(Map.of("Partitions", glueService.getPartitions(dbName, tableName, expression))).build();
+            }
+            case "DeletePartition" -> handleDeletePartition(request);
+            case "BatchDeletePartition" -> handleBatchDeletePartition(request);
+            case "UpdatePartition" -> handleUpdatePartition(request);
+            case "UpdateColumnStatisticsForPartition" -> handleUpdateColumnStatisticsForPartition(request);
+            case "GetColumnStatisticsForPartition" -> handleGetColumnStatisticsForPartition(request);
+            case "DeleteColumnStatisticsForPartition" -> handleDeleteColumnStatisticsForPartition(request);
+            case "CreateUserDefinedFunction" -> handleCreateUserDefinedFunction(request);
+            case "GetUserDefinedFunction" -> handleGetUserDefinedFunction(request);
+            case "GetUserDefinedFunctions" -> handleGetUserDefinedFunctions(request);
+            case "UpdateUserDefinedFunction" -> handleUpdateUserDefinedFunction(request);
+            case "DeleteUserDefinedFunction" -> handleDeleteUserDefinedFunction(request);
+            case "CreateRegistry" -> handleCreateRegistry(request, region);
+            case "GetRegistry" -> handleGetRegistry(request, region);
+            case "ListRegistries" -> handleListRegistries(request);
+            case "UpdateRegistry" -> handleUpdateRegistry(request, region);
+            case "DeleteRegistry" -> handleDeleteRegistry(request, region);
+            case "CreateSchema" -> handleCreateSchema(request, region);
+            case "RegisterSchemaVersion" -> handleRegisterSchemaVersion(request, region);
+            case "GetSchemaByDefinition" -> handleGetSchemaByDefinition(request, region);
+            case "GetSchemaVersion" -> handleGetSchemaVersion(request, region);
+            case "GetSchema" -> handleGetSchema(request, region);
+            case "UpdateSchema" -> handleUpdateSchema(request, region);
+            case "ListSchemas" -> handleListSchemas(request, region);
+            case "ListSchemaVersions" -> handleListSchemaVersions(request, region);
+            case "DeleteSchema" -> handleDeleteSchema(request, region);
+            case "DeleteSchemaVersions" -> handleDeleteSchemaVersions(request, region);
+            case "GetSchemaVersionsDiff" -> handleGetSchemaVersionsDiff(request, region);
+            case "CheckSchemaVersionValidity" -> handleCheckSchemaVersionValidity(request);
+            case "PutSchemaVersionMetadata" -> handlePutSchemaVersionMetadata(request);
+            case "RemoveSchemaVersionMetadata" -> handleRemoveSchemaVersionMetadata(request);
+            case "QuerySchemaVersionMetadata" -> handleQuerySchemaVersionMetadata(request);
+            case "TagResource" -> handleTagResource(request, region);
+            case "UntagResource" -> handleUntagResource(request, region);
+            case "GetTags" -> handleGetTags(request, region);
+            case "CreateJob" -> {
+                CreateJobRequest req = mapper.treeToValue(request, CreateJobRequest.class);
+                Job job = toDomain(req);
+                glueService.createJob(job, req.getTags(), region);
+                yield Response.ok(new CreateJobResponse(job.getName())).build();
+            }
+            case "GetJob" -> {
+                GetJobRequest req = mapper.treeToValue(request, GetJobRequest.class);
+                yield Response.ok(new GetJobResponse(glueService.getJob(req.getJobName()))).build();
+            }
+            case "GetJobs" -> {
+                Integer maxResults = readMaxResults(request);
+                String nextToken = readNextToken(request);
+                GlueService.Page<Job> page = glueService.getJobs(maxResults, nextToken);
+                yield Response.ok(pageResponse("Jobs", page.items(), page.nextToken())).build();
+            }
+            case "UpdateJob" -> {
+                UpdateJobRequest req = mapper.treeToValue(request, UpdateJobRequest.class);
+                glueService.updateJob(req.getJobName(), req.getJobUpdate());
+                yield Response.ok(new UpdateJobResponse(req.getJobName())).build();
+            }
+            case "DeleteJob" -> {
+                DeleteJobRequest req = mapper.treeToValue(request, DeleteJobRequest.class);
+                glueService.deleteJob(req.getJobName(), region);
+                yield Response.ok(new DeleteJobResponse(req.getJobName())).build();
+            }
+            case "CreateClassifier" -> {
+                Classifier classifier = mapper.treeToValue(request, Classifier.class);
+                glueService.createClassifier(classifier);
+                yield Response.ok().build();
+            }
+            case "GetClassifier" -> Response.ok(Map.of(
+                    "Classifier", glueService.getClassifier(request.path("Name").asText(null)))).build();
+            case "GetClassifiers" -> {
+                GlueService.Page<Classifier> page = glueService.getClassifiers(
+                        readMaxResults(request), readNextToken(request));
+                yield Response.ok(pageResponse("Classifiers", page.items(), page.nextToken())).build();
+            }
+            case "UpdateClassifier" -> {
+                Classifier classifier = mapper.treeToValue(request, Classifier.class);
+                glueService.updateClassifier(classifier);
+                yield Response.ok().build();
+            }
+            case "DeleteClassifier" -> {
+                glueService.deleteClassifier(request.path("Name").asText(null));
+                yield Response.ok().build();
+            }
+            case "CreateCrawler" -> {
+                CreateCrawlerRequest req = mapper.treeToValue(request, CreateCrawlerRequest.class);
+                Crawler crawler = toDomain(req);
+                glueService.createCrawler(crawler, req.getTags(), region);
+                yield Response.ok().build();
+            }
+            case "GetCrawler" -> {
+                GetCrawlerRequest req = mapper.treeToValue(request, GetCrawlerRequest.class);
+                yield Response.ok(new GetCrawlerResponse(glueService.getCrawler(req.getName()))).build();
+            }
+            case "GetCrawlers" -> {
+                GetCrawlersRequest req = mapper.treeToValue(request, GetCrawlersRequest.class);
+                GlueService.Page<Crawler> page = glueService.getCrawlers(req.getMaxResults(), req.getNextToken());
+                GetCrawlersResponse res = new GetCrawlersResponse();
+                res.setCrawlers(page.items());
+                res.setNextToken(page.nextToken());
+                yield Response.ok(res).build();
+            }
+            case "UpdateCrawler" -> {
+                UpdateCrawlerRequest req = mapper.treeToValue(request, UpdateCrawlerRequest.class);
+                Crawler update = toDomain(req);
+                glueService.updateCrawler(update);
+                yield Response.ok().build();
+            }
+            case "DeleteCrawler" -> {
+                DeleteCrawlerRequest req = mapper.treeToValue(request, DeleteCrawlerRequest.class);
+                glueService.deleteCrawler(req.getName(), region);
+                yield Response.ok().build();
+            }
+            case "StartJobRun" -> handleStartJobRun(request);
+            case "GetJobRun" -> handleGetJobRun(request);
+            case "GetJobRuns" -> handleGetJobRuns(request);
+            case "BatchStopJobRun" -> handleBatchStopJobRun(request);
+            case "GetJobBookmark" -> handleGetJobBookmark(request);
+            case "ResetJobBookmark" -> handleResetJobBookmark(request);
+            case "StartCrawler" -> {
+                glueService.startCrawler(request.get("Name").asText());
+                yield Response.ok().build();
+            }
+            case "StopCrawler" -> {
+                glueService.stopCrawler(request.get("Name").asText());
+                yield Response.ok().build();
+            }
+            case "CreateConnection" -> handleCreateConnection(request, region);
+            case "GetConnection" -> handleGetConnection(request);
+            case "GetConnections" -> handleGetConnections(request);
+            case "UpdateConnection" -> handleUpdateConnection(request, region);
+            case "DeleteConnection" -> {
+                glueService.deleteConnection(request.path("ConnectionName").asText(null), region);
+                yield Response.ok(Map.of()).build();
+            }
+            case "BatchDeleteConnection" -> {
+                List<String> names = request.hasNonNull("ConnectionNameList")
+                        ? mapper.convertValue(request.get("ConnectionNameList"), STRING_LIST)
+                        : null;
+                yield Response.ok(glueService.batchDeleteConnections(names, region)).build();
+            }
+            case "TestConnection" -> handleTestConnection(request);
+            case "PutResourcePolicy" -> {
+                String hash = glueService.putResourcePolicy(
+                        request.path("PolicyInJson").asText(null),
+                        request.path("PolicyHashCondition").asText(null),
+                        request.path("PolicyExistsCondition").asText(null),
+                        request.path("EnableHybrid").asText(null));
+                yield Response.ok(Map.of("PolicyHash", hash)).build();
+            }
+            case "GetResourcePolicy" -> Response.ok(glueService.getResourcePolicy()).build();
+            case "GetResourcePolicies" -> {
+                GlueService.Page<GluePolicy> page =
+                        glueService.getResourcePolicies(readMaxResults(request), readNextToken(request));
+                yield Response.ok(pageResponse("GetResourcePoliciesResponseList", page.items(), page.nextToken())).build();
+            }
+            case "DeleteResourcePolicy" -> {
+                glueService.deleteResourcePolicy(request.path("PolicyHashCondition").asText(null));
+                yield Response.ok(Map.of()).build();
+            }
+            case "GetDataCatalogEncryptionSettings" -> Response.ok(Map.of(
+                    "DataCatalogEncryptionSettings", glueService.getDataCatalogEncryptionSettings())).build();
+            case "PutDataCatalogEncryptionSettings" -> {
+                DataCatalogEncryptionSettings settings = request.hasNonNull("DataCatalogEncryptionSettings")
+                        ? mapper.treeToValue(request.get("DataCatalogEncryptionSettings"), DataCatalogEncryptionSettings.class)
+                        : null;
+                glueService.putDataCatalogEncryptionSettings(settings);
+                yield Response.ok(Map.of()).build();
+            }
+            case "CreateSecurityConfiguration" -> {
+                SecurityConfiguration configuration = glueService.createSecurityConfiguration(
+                        request.path("Name").asText(null), request.get("EncryptionConfiguration"), region);
+                yield Response.ok(Map.of(
+                        "Name", configuration.getName(),
+                        "CreatedTimestamp", configuration.getCreatedTimeStamp().getEpochSecond())).build();
+            }
+            case "GetSecurityConfiguration" -> {
+                SecurityConfiguration configuration = glueService.getSecurityConfiguration(
+                        request.path("Name").asText(null), region);
+                yield Response.ok(Map.of("SecurityConfiguration", configuration)).build();
+            }
+            case "DeleteSecurityConfiguration" -> {
+                glueService.deleteSecurityConfiguration(request.path("Name").asText(null), region);
+                yield Response.ok(Map.of()).build();
+            }
+            // Read-only Glue actions for resources the emulator does not model. The AWS SDK
+            // expects each to return a 200 with its result key present (empty), so we emit the
+            // documented empty shape rather than an InvalidAction 400 that callers can't read.
+            case "ListDataQualityRulesets" -> Response.ok(Map.of("Rulesets", List.of())).build();
+            case "GetSecurityConfigurations" -> Response.ok(Map.of(
+                    "SecurityConfigurations", glueService.getSecurityConfigurations(region))).build();
+            default -> throw new AwsException("InvalidAction", "Action " + action + " is not supported", 400);
+        };
     }
 
     private Response dispatch(String action, JsonNode request, String region) throws Exception {
