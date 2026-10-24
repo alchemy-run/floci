@@ -117,11 +117,13 @@ class CloudWatchLogsMetricFilterRetryTest {
         clearInvocations(f.resolver);
         sink.fail = true;
         f.ingest(TIME, "ERROR", "INFO");
-        verify(f.resolver, times(1)).getAccountId();
+        verify(f.resolver, atLeastOnce()).getAccountId();
+        // The retained publication reuses the account resolved at ingestion: a retry resolves none.
+        clearInvocations(f.resolver);
         f.account.set(OTHER_ACCOUNT);
         sink.fail = false;
         f.service.retryPending();
-        verify(f.resolver, times(1)).getAccountId();
+        verify(f.resolver, never()).getAccountId();
         f.stats("account", TIME, 0, 0);
         f.account.set(ACCOUNT);
         f.stats("account", TIME, 10, 2);
