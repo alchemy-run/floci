@@ -1008,7 +1008,7 @@ floci:
       spark-image: apache/spark:3.5.2-scala2.12-java17-python3-ubuntu # FLOCI_SERVICES_EMRSERVERLESS_SPARK_IMAGE
       spark-home: /opt/spark # FLOCI_SERVICES_EMRSERVERLESS_SPARK_HOME
       job-timeout-seconds: 300 # FLOCI_SERVICES_EMRSERVERLESS_JOB_TIMEOUT_SECONDS; 1-900
-      job-run-duration-seconds: 0   # 0 = BATCH job runs succeed as soon as they start
+      job-run-duration-seconds: 10  # BATCH job runs succeed this long after they start (0 = at once), so a fresh run can still be cancelled
     ssoadmin:
       enabled: true
     ssooidc:
