@@ -659,7 +659,9 @@ public class CloudFrontServingController {
 
     /** The viewer's {@code Range} resolved against an object, unless its {@code If-Range} no longer matches it. */
     private static ByteRange.Resolution resolveRange(ViewerRange viewerRange, S3Object obj) {
-        String rangeHeader = ByteRange.rangeApplies(viewerRange.ifRange(), obj.getETag(), obj.getLastModified())
+        // A request that names no range (an origin fetch for a custom error page, say) reads it all.
+        String rangeHeader = viewerRange != null
+                && ByteRange.rangeApplies(viewerRange.ifRange(), obj.getETag(), obj.getLastModified())
                 ? viewerRange.range() : null;
         return ByteRange.resolve(rangeHeader, obj.getSize());
     }
