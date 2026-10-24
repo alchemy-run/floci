@@ -853,7 +853,11 @@ public class EcrService implements ResourceProvider {
         if (size == null) {
             throw layersNotFound(layerDigest, repositoryName, repo.getRegistryId());
         }
-        return registryManager.blobUrl(repo.getRepositoryUri(), layerDigest);
+        // AWS always answers with a pre-signed https:// URL, and clients (Alchemy's bindings among
+        // them) check for it, so the address is reported over https even when Floci's registry
+        // endpoint serves plain HTTP.
+        String url = registryManager.blobUrl(repo.getRepositoryUri(), layerDigest);
+        return url.startsWith("http://") ? "https://" + url.substring("http://".length()) : url;
     }
 
     /** Cancels the registry upload session of a layer upload left idle for a day. */
