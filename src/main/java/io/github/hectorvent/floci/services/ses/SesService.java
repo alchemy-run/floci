@@ -1763,7 +1763,13 @@ public class SesService {
                 // fail the length check ahead of sender verification (probe-confirmed; the
                 // verified-sender case is unprobed). The bulk sender and return path are checked
                 // by requireBulkAddress.
-                String messageId = sendSimpleEmail(entryRequest, rendered, validateEnvelope(entryRequest));
+                String effectiveConfigSet = validateEnvelope(entryRequest);
+                // The bulk sender must be verified as any sender is; an unverified one fails the
+                // entry with MESSAGE_REJECTED rather than the whole request.
+                requireVerifiedSenders(List.of(
+                        new SendingAddress(request.source(), null),
+                        new SendingAddress(request.returnPath(), null)), request.region());
+                String messageId = sendSimpleEmail(entryRequest, rendered, effectiveConfigSet);
                 results.add(BulkEmailEntryResult.success(messageId));
             } catch (AwsException e) {
                 results.add(BulkEmailEntryResult.failure(
