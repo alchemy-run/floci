@@ -106,6 +106,9 @@ public class NativeDynamoDbJsonHandler {
             case "BatchGetItem" -> handleBatchGetItem(request, region);
             case "UpdateTable" -> handleUpdateTable(request, region);
             case "DescribeTimeToLive" -> handleDescribeTimeToLive(request, region);
+            case "UpdateContributorInsights" -> handleUpdateContributorInsights(request, region);
+            case "DescribeContributorInsights" -> handleDescribeContributorInsights(request, region);
+            case "ListContributorInsights" -> handleListContributorInsights(request, region);
             case "UpdateTimeToLive" -> handleUpdateTimeToLive(request, region);
             case "DescribeContinuousBackups" -> handleDescribeContinuousBackups(request, region);
             case "UpdateContinuousBackups" -> handleUpdateContinuousBackups(request, region);
@@ -3743,5 +3746,66 @@ public class NativeDynamoDbJsonHandler {
             params.add(parameter);
         }
         return params;
+    }
+
+    // Contributor Insights: tracked per table and index, with no rules to report.
+    private Response handleUpdateContributorInsights(JsonNode request, String region) {
+        String tableName = request.path("TableName").asText();
+        String indexName = contributorInsightsIndexName(request);
+        String action = request.path("ContributorInsightsAction").asText(null);
+        String status = dynamoDbService.updateContributorInsights(tableName, indexName, action, region);
+
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("TableName", tableName);
+        if (indexName != null) {
+            response.put("IndexName", indexName);
+        }
+        response.put("ContributorInsightsStatus", status);
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeContributorInsights(JsonNode request, String region) {
+        String tableName = request.path("TableName").asText();
+        String indexName = contributorInsightsIndexName(request);
+        String status = dynamoDbService.describeContributorInsights(tableName, indexName, region);
+
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("TableName", tableName);
+        if (indexName != null) {
+            response.put("IndexName", indexName);
+        }
+        response.put("ContributorInsightsStatus", status);
+        response.putArray("ContributorInsightsRuleList");
+        return Response.ok(response).build();
+    }
+
+    private Response handleListContributorInsights(JsonNode request, String region) {
+        String tableNameFilter = request.path("TableName").asText(null);
+        if (tableNameFilter != null && tableNameFilter.isBlank()) {
+            tableNameFilter = null;
+        }
+
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode summaries = response.putArray("ContributorInsightsSummaries");
+        for (TableDefinition table : dynamoDbService.listTableDefinitions(region)) {
+            if (tableNameFilter != null && !tableNameFilter.equals(table.getTableName())) {
+                continue;
+            }
+            ObjectNode tableSummary = summaries.addObject();
+            tableSummary.put("TableName", table.getTableName());
+            tableSummary.put("ContributorInsightsStatus", table.getContributorInsightsStatus());
+            for (Map.Entry<String, String> entry : table.getIndexContributorInsightsStatus().entrySet()) {
+                ObjectNode indexSummary = summaries.addObject();
+                indexSummary.put("TableName", table.getTableName());
+                indexSummary.put("IndexName", entry.getKey());
+                indexSummary.put("ContributorInsightsStatus", entry.getValue());
+            }
+        }
+        return Response.ok(response).build();
+    }
+
+    private static String contributorInsightsIndexName(JsonNode request) {
+        String indexName = request.path("IndexName").asText(null);
+        return indexName == null || indexName.isBlank() ? null : indexName;
     }
 }
