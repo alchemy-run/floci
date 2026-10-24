@@ -3550,5 +3550,48 @@ public class IamQueryHandler {
         return Response.ok(AwsQueryResponse.envelope("ListInstanceProfileTags", AwsNamespaces.IAM, result)).build();
     }
 
-    private final IamExtendedQueryHandler extendedHandler;
+    @Inject
+    public IamQueryHandler(IamService iamService, IamPolicyEvaluator policyEvaluator,
+                           AccountResolver accountResolver, IamExtendedQueryHandler extendedHandler) {
+        this.iamService = iamService;
+        this.policyEvaluator = policyEvaluator;
+        this.accountResolver = accountResolver;
+        this.extendedHandler = extendedHandler;
+    }
+
+    private Response handleUpdateAccessKey(MultivaluedMap<String, String> params) {
+        iamService.updateAccessKey(getParam(params, "UserName"),
+                getParam(params, "AccessKeyId"), getParam(params, "Status"));
+        return Response.ok(AwsQueryResponse.envelopeNoResult("UpdateAccessKey", AwsNamespaces.IAM)).build();
+    }
+
+    private String instanceProfileXml(InstanceProfile p) {
+        var xml = new XmlBuilder()
+                .elem("InstanceProfileName", p.getInstanceProfileName())
+                .elem("InstanceProfileId", p.getInstanceProfileId())
+                .elem("Arn", p.getArn())
+                .elem("Path", p.getPath())
+                .elem("CreateDate", isoDate(p.getCreateDate()))
+                .start("Roles");
+        for (String roleName : p.getRoleNames()) {
+            try {
+                IamRole role = iamService.getRole(roleName);
+                xml.start("member").raw(roleXml(role, false)).end("member");
+            } catch (AwsException ignored) {}
+        }
+        return xml.end("Roles")
+                .raw(tagsElement(p.getTags()))
+                .build();
+    }
+
+    private Map<String, String> extractTags(MultivaluedMap<String, String> params) {
+        Map<String, String> tags = new HashMap<>();
+        for (int i = 1; ; i++) {
+            String key = params.getFirst("Tags.member." + i + ".Key");
+            String value = params.getFirst("Tags.member." + i + ".Value");
+            if (key == null) break;
+            tags.put(key, value != null ? value : "");
+        }
+        return tags;
+    }
 }

@@ -815,6 +815,14 @@ public class OrganizationsJsonHandler {
         return values;
     }
 
+    private Response accountsResponse(PaginatedResult<OrganizationAccount> page) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode accounts = response.putArray("Accounts");
+        page.items().forEach(account -> accounts.add(accountNode(account)));
+        putNextToken(response, page.nextToken());
+        return Response.ok(response).build();
+    }
+
     private Response listEffectivePolicyValidationErrors(JsonNode request, String caller) {
         if (request.hasNonNull("MaxResults")) {
             int maxResults = request.get("MaxResults").asInt();
@@ -844,5 +852,13 @@ public class OrganizationsJsonHandler {
         }
         putNextToken(response, page.nextToken());
         return Response.ok(response).build();
+    }
+
+    private ObjectNode organizationalUnitNode(OrganizationalUnit unit) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("Id", unit.getId());
+        node.put("Arn", unit.getArn());
+        node.put("Name", unit.getName());
+        return node;
     }
 }

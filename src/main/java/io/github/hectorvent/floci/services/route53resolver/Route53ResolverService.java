@@ -886,6 +886,45 @@ public class Route53ResolverService {
 
     private final Ec2Service ec2;
 
+    @Inject
+    public Route53ResolverService(StorageFactory storageFactory, ObjectMapper objectMapper, Ec2Service ec2) {
+        this.domainListStore = storageFactory.create("route53resolver", "route53resolver-domain-lists.json",
+                new TypeReference<Map<String, ObjectNode>>() {});
+        this.endpointStore = storageFactory.create("route53resolver", "route53resolver-endpoints.json",
+                new TypeReference<Map<String, ObjectNode>>() {});
+        this.ruleStore = storageFactory.create("route53resolver", "route53resolver-rules.json",
+                new TypeReference<Map<String, ObjectNode>>() {});
+        this.ruleAssociationStore = storageFactory.create("route53resolver",
+                "route53resolver-rule-associations.json", new TypeReference<Map<String, ObjectNode>>() {});
+        this.endpointIpRequestStore = storageFactory.create("route53resolver",
+                "route53resolver-endpoint-ip-requests.json",
+                new TypeReference<Map<String, ObjectNode>>() {});
+        this.objectMapper = objectMapper;
+        this.ec2 = ec2;
+    }
+
+    public List<ObjectNode> listCustomFirewallDomainLists(String region) {
+        return domainListStore.scan(key -> true).stream()
+                .filter(list -> region.equals(regionOf(list))).map(this::resourceView).toList();
+    }
+
+    public ObjectNode listResolverEndpointIpAddresses(JsonNode request, String region) {
+        String id = requireText(request, "ResolverEndpointId", INVALID_PARAMETER);
+        requireRegion(getResolverEndpoint(id), region);
+        ObjectNode record = require(endpointIpRequestStore, id, "resolver endpoint addresses");
+        if (!record.path("IpAddresses").isArray()) {
+            throw new AwsException("InternalServiceErrorException",
+                    "Resolver endpoint has no persisted network interface addresses", 500);
+        }
+        List<ObjectNode> addresses = new ArrayList<>();
+        for (JsonNode address : record.path("IpAddresses")) {
+            ObjectNode view = ((ObjectNode) address).deepCopy();
+            view.remove("_NetworkInterfaceId");
+            addresses.add(view);
+        }
+        return page(addresses, request, "IpAddresses", region + ":" + id);
+    }
+
     private void validateEndpointOptions(JsonNode request) {
         String endpointType = text(request, "ResolverEndpointType");
         if (endpointType != null) {
@@ -1096,6 +1135,47 @@ public class Route53ResolverService {
                     .encodeToString((prefix + end).getBytes(StandardCharsets.UTF_8)));
         }
         return result;
+    }
+
+    public ObjectNode listTagsForResource(JsonNode request, String region) {
+        String arn = requireText(request, "ResourceArn", INVALID_PARAMETER);
+        ObjectNode resource = taggedResource(arn, region);
+        List<ObjectNode> tags = new ArrayList<>();
+        resource.path("_Tags").fields().forEachRemaining(entry -> tags.add(objectMapper.createObjectNode()
+                .put("Key", entry.getKey()).put("Value", entry.getValue().asText())));
+        tags.sort(Comparator.comparing(tag -> tag.path("Key").asText()));
+        return page(tags, request, "Tags", arn);
+    }
+
+    public synchronized void tagResource(JsonNode request, String region) {
+        String arn = requireText(request, "ResourceArn", INVALID_PARAMETER);
+        ObjectNode resource = taggedResource(arn, region).deepCopy();
+        if (!request.path("Tags").isArray() || request.path("Tags").isEmpty()) {
+            throw new AwsException(INVALID_PARAMETER, "Tags is required", 400);
+        }
+        ObjectNode tags = resource.withObject("/_Tags");
+        tags.setAll(parseTags(request.path("Tags")));
+        if (tags.size() > 200) {
+            throw new AwsException("LimitExceededException", "Too many tags", 400);
+        }
+        resourceStore(arn).put(text(resource, "Id"), resource);
+    }
+
+    public synchronized void untagResource(JsonNode request, String region) {
+        String arn = requireText(request, "ResourceArn", INVALID_PARAMETER);
+        ObjectNode resource = taggedResource(arn, region).deepCopy();
+        JsonNode keys = request.path("TagKeys");
+        if (!keys.isArray() || keys.isEmpty()) {
+            throw new AwsException(INVALID_PARAMETER, "TagKeys is required", 400);
+        }
+        ObjectNode tags = resource.withObject("/_Tags");
+        for (JsonNode key : keys) {
+            if (!key.isTextual() || key.asText().isBlank()) {
+                throw new AwsException(INVALID_PARAMETER, "Tag keys must not be empty", 400);
+            }
+            tags.remove(key.asText());
+        }
+        resourceStore(arn).put(text(resource, "Id"), resource);
     }
 
     private ObjectNode parseTags(JsonNode input) {

@@ -526,6 +526,24 @@ public class BedrockAgentCoreControlService {
 
     private static final Pattern RUNTIME_ID_PATTERN = Pattern.compile("[a-zA-Z][a-zA-Z0-9_]{0,99}-[a-zA-Z0-9]{10}");
 
+    @Inject
+    public BedrockAgentCoreControlService(StorageFactory storageFactory, RegionResolver regionResolver,
+                                          BedrockAgentCoreIdentityService identityService) {
+        this(storageFactory.create("bedrockagentcore", "bedrock-agentcore-runtimes.json",
+                new TypeReference<Map<String, AgentRuntime>>() {}), regionResolver, identityService);
+    }
+
+    /** {@code arn:aws:bedrock-agentcore:<region>:<account>:runtime/<agentRuntimeId>}; versions are separate fields. */
+    public String arn(AgentRuntime runtime, String region) {
+        return regionResolver.buildArn(ARN_SERVICE, region, "runtime/" + runtime.getAgentRuntimeId());
+    }
+
+    /** {@code arn:aws:bedrock-agentcore:<region>:<account>:runtime/<agentRuntimeId>/runtime-endpoint/<name>}. */
+    public String endpointArn(AgentRuntime runtime, AgentRuntimeEndpoint endpoint, String region) {
+        return regionResolver.buildArn(ARN_SERVICE, region,
+                "runtime/" + runtime.getAgentRuntimeId() + "/runtime-endpoint/" + endpoint.getName());
+    }
+
     /** The runtime id of a {@code runtime/<id>} or {@code runtime/<id>/runtime-endpoint/<name>} resource. */
     private static String runtimeIdFromResource(String resource) {
         String rest = resource.substring("runtime/".length());

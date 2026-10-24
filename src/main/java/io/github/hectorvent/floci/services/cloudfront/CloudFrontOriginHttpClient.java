@@ -445,6 +445,70 @@ final class CloudFrontOriginHttpClient implements AutoCloseable {
                 new LocalDevDnsResolver(resolver, target, !originHost.equals(target)), List.of(target));
     }
 
+    HttpResponse<byte[]> send(HttpRequest request, HttpResponse.BodyHandler<byte[]> bodyHandler)
+            throws IOException, InterruptedException {
+        return send(request, Map.of(), bodyHandler);
+    }
+
+    HttpResponse<byte[]> send(HttpRequest request, Map<String, String> originHeaders,
+                              HttpResponse.BodyHandler<byte[]> bodyHandler)
+            throws IOException, InterruptedException {
+        return send(request, originHeaders, bodyHandler, null);
+    }
+
+    HttpResponse<byte[]> send(HttpRequest request, Map<String, String> originHeaders,
+                              HttpResponse.BodyHandler<byte[]> bodyHandler, byte[] requestBody)
+            throws IOException, InterruptedException {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new InterruptedException("CloudFront origin request interrupted");
+        }
+        if (request.bodyPublisher().filter(publisher -> publisher.contentLength() != 0).isPresent()) {
+            throw new IOException("CloudFront origin request bodies are not supported");
+        }
+
+        ClassicRequestBuilder builder = ClassicRequestBuilder.create(request.method())
+                .setUri(request.uri())
+                .setVersion(HttpVersion.HTTP_1_1);
+        request.headers().map().forEach((name, values) ->
+                values.forEach(value -> builder.addHeader(name, value)));
+        if (requestBody != null && requestBody.length > 0) {
+            builder.setEntity(requestBody, ContentType.APPLICATION_OCTET_STREAM);
+        }
+        originHeaders.forEach(builder::setHeader);
+
+        HttpClientContext context = HttpClientContext.create();
+        Duration responseTimeout = request.timeout().orElse(RESPONSE_TIMEOUT);
+        context.setRequestConfig(RequestConfig.custom()
+                .setConnectionRequestTimeout(Timeout.of(CONNECT_TIMEOUT))
+                .setResponseTimeout(Timeout.of(responseTimeout))
+                .setRedirectsEnabled(false)
+                .setContentCompressionEnabled(false)
+                .setProtocolUpgradeEnabled(false)
+                .build());
+
+        try {
+            return client.execute(builder.build(), context, response -> {
+                Map<String, List<String>> responseHeaders = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+                for (Header header : response.getHeaders()) {
+                    responseHeaders.computeIfAbsent(header.getName(), ignored -> new ArrayList<>())
+                            .add(header.getValue());
+                }
+                byte[] body = response.getEntity() != null
+                        ? EntityUtils.toByteArray(response.getEntity())
+                        : new byte[0];
+                return new PinnedHttpResponse(
+                        response.getCode(), request,
+                        HttpHeaders.of(responseHeaders, (name, value) -> true),
+                        body, request.uri());
+            });
+        } catch (InterruptedIOException e) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new InterruptedException("CloudFront origin request interrupted");
+            }
+            throw e;
+        }
+    }
+
     private record PinnedHttpResponse(
             int statusCode,
             HttpRequest request,

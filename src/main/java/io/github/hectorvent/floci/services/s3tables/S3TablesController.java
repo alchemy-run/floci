@@ -325,6 +325,25 @@ public class S3TablesController {
     }
 
     @GET
+    @Path("/get-table")
+    public Response getTable(@Context HttpHeaders headers, @QueryParam("tableBucketARN") String tableBucketArn,
+                             @QueryParam("namespace") String namespace, @QueryParam("name") String name,
+                             @QueryParam("tableArn") String tableArn) {
+        S3Table table = tableArn == null ? service.getTable(decode(tableBucketArn), namespace, name, region(headers))
+                : service.getTableByArn(decode(tableArn), region(headers));
+        return Response.ok(tableRepresentation(table)).build();
+    }
+
+    @DELETE
+    @Path("/tables/{tableBucketARN}/{namespace}/{name}")
+    public Response deleteTable(@Context HttpHeaders headers, @Encoded @PathParam("tableBucketARN") String tableBucketArn,
+                                @PathParam("namespace") String namespace, @PathParam("name") String name,
+                                @QueryParam("versionToken") String versionToken) {
+        service.deleteTable(decode(tableBucketArn), namespace, name, versionToken, region(headers));
+        return Response.noContent().build();
+    }
+
+    @GET
     @Path("/tables/{tableBucketARN}/{namespace}/{name}/maintenance-job-status")
     public Response getTableMaintenanceJobStatus(@Context HttpHeaders headers,
                                                  @Encoded @PathParam("tableBucketARN") String tableBucketArn,

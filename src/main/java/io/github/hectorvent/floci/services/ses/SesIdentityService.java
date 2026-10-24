@@ -856,4 +856,46 @@ public class SesIdentityService implements SesTaggable {
             throw new AwsException("InvalidParameterValue", fieldName + " must not contain leading or trailing whitespace.", 400);
         }
     }
+
+    public Identity createEmailIdentity(String emailIdentity, String configurationSetName,
+                                        List<Tag> tags, String region,
+                                        Runnable configurationSetExistsCheck, String nextSigningKeyLength) {
+        // Validate with the wording the pre-atomic path produced (the verify methods' field names),
+        // so the key derivation's generic "Identity" message never surfaces on this API.
+        validateIdentityWhitespace(emailIdentity,
+                emailIdentity != null && emailIdentity.contains("@") ? "Email address" : "Domain");
+        String key = identityKey(region, emailIdentity);
+        Identity identity;
+        synchronized (identityCreationLock) {
+            if (identityStore.get(key).isPresent()) {
+                throw new AwsException("AlreadyExistsException",
+                        "Email identity " + emailIdentity + " already exist.", 400);
+            }
+            SesTags.validate(tags);
+            if (configurationSetExistsCheck != null) {
+                configurationSetExistsCheck.run();
+            }
+            if (nextSigningKeyLength != null
+                    && !Set.of("RSA_1024_BIT", "RSA_2048_BIT").contains(nextSigningKeyLength)) {
+                throw new AwsException("BadRequestException", "Invalid NextSigningKeyLength.", 400);
+            }
+            identity = emailIdentity.contains("@")
+                    ? new Identity(emailIdentity, "EmailAddress")
+                    : newDomainIdentity(emailIdentity);
+            identity.setVerificationStatus("Pending");
+            if (nextSigningKeyLength != null) {
+                identity.setDkimNextSigningKeyLength(nextSigningKeyLength);
+                identity.setDkimCurrentSigningKeyLength(nextSigningKeyLength);
+            }
+            if (configurationSetName != null) {
+                identity.setConfigurationSetName(configurationSetName);
+            }
+            if (tags != null) {
+                identity.setTags(tags);
+            }
+            identityStore.put(key, identity);
+        }
+        LOG.infov("Created email identity: {0} in region {1}", emailIdentity, region);
+        return identity;
+    }
 }

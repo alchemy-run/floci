@@ -1455,6 +1455,78 @@ public class CloudFrontServingController {
         }
     }
 
+    @Inject
+    public CloudFrontServingController(CloudFrontService service, S3Service s3Service,
+                                       EmulatorConfig emulatorConfig,
+                                       CurrentVertxRequest currentVertxRequest) {
+        this.service = service;
+        this.s3Service = s3Service;
+        this.currentVertxRequest = currentVertxRequest;
+        this.httpClient = new CloudFrontOriginHttpClient(
+                emulatorConfig.services().cloudfront().allowedPrivateOriginHosts().orElse(List.of()));
+    }
+
+    private Response serve(String distId, String rawViewerPath, String decodedViewerPath,
+                           String viewerScheme, String viewerHost,
+                           String viewerAuthorization,
+                           String viewerOrigin, String method,
+                           String accessControlRequestMethod,
+                           String accessControlRequestHeaders,
+                           String pragma) {
+        boolean includeBody = !"HEAD".equals(method);
+        boolean preflightRequest = "OPTIONS".equals(method)
+                && viewerOrigin != null && !viewerOrigin.isBlank()
+                && accessControlRequestMethod != null && !accessControlRequestMethod.isBlank();
+        Distribution dist = service.findByHost(viewerHost);
+        if (dist == null || !distId.equals(dist.getId())) {
+            return textError(404, "Distribution not found.");
+        }
+        DistributionConfig config = dist.getConfig();
+        if (config == null) {
+            return textError(502, "Distribution has no configuration.");
+        }
+        if (!config.isEnabled()) {
+            return textError(404, "Distribution is disabled.");
+        }
+
+        String normalized = CloudFrontRequestRouter.normalizePath(decodedViewerPath);
+
+        if (!CloudFrontRequestRouter.matchAllowedMethods(config, normalized).contains(method)) {
+            return textError(403, "Invalid method.");
+        }
+
+        // The response-headers policy of the behavior that matches the request applies to the final
+        // response CloudFront returns to the viewer, including any custom-error page substituted below.
+        String policyId = CloudFrontRequestRouter.matchResponseHeadersPolicyId(config, normalized);
+        ResponseHeadersPolicyConfigCodec.Directives directives = responseHeaderDirectives(
+                policyId, viewerOrigin, preflightRequest, pragma);
+
+        List<String> trustedKeyGroups =
+                CloudFrontRequestRouter.trustedKeyGroupsFor(config, normalized);
+        if (!trustedKeyGroups.isEmpty()) {
+            CloudFrontSignatureVerifier.Result verdict =
+                    verifySignedRequest(dist, rawViewerPath, trustedKeyGroups);
+            if (!verdict.allowed()) {
+                LOG.debugv("CloudFront denied a request for distribution {0}, path {1}: {2}",
+                        dist.getId(), rawViewerPath, verdict.reason());
+                return textError(403, "Access denied: " + verdict.reason());
+            }
+        }
+
+        OriginResponse origin = route(dist, normalized, rawViewerPath, decodedViewerPath,
+                viewerScheme, viewerAuthorization, method, viewerOrigin,
+                accessControlRequestMethod, accessControlRequestHeaders);
+
+        if (origin.status() >= 400) {
+            Response fallback = applyCustomError(
+                    dist, origin, viewerScheme, viewerAuthorization, includeBody, directives);
+            if (fallback != null) {
+                return fallback;
+            }
+        }
+        return toResponse(origin, includeBody, directives);
+    }
+
     /** CloudFront rejects ports in DomainName; this loopback form is an emulator-only dev origin. */
     public static boolean isLocalDevOrigin(String authority) {
         return CloudFrontOriginHttpClient.isLocalDevOrigin(authority);
@@ -1535,6 +1607,140 @@ public class CloudFrontServingController {
         return null;
     }
 
+    /** Selects an origin with the normalized path, then forwards the original viewer path. */
+    private OriginResponse route(Distribution distribution, String normalized,
+                                 String rawViewerPath, String decodedViewerPath,
+                                 String viewerScheme, String viewerAuthorization,
+                                 String method, String viewerOrigin,
+                                 String accessControlRequestMethod,
+                                 String accessControlRequestHeaders) {
+        DistributionConfig config = distribution.getConfig();
+        String originId = CloudFrontRequestRouter.matchTargetOriginId(config, normalized);
+        Origin origin = CloudFrontRequestRouter.findOrigin(config, originId);
+        if (origin == null) {
+            return OriginResponse.error(502, "No origin matched the request.");
+        }
+        if (CloudFrontRequestRouter.isS3Origin(origin)) {
+            if ("OPTIONS".equals(method)) {
+                return fetchS3Preflight(origin, viewerOrigin, accessControlRequestMethod,
+                        accessControlRequestHeaders);
+            }
+            String key = CloudFrontRequestRouter.resolveOriginKey(
+                    origin.getOriginPath(), decodedViewerPath, config.getDefaultRootObject());
+            return fetchFromS3(
+                    distribution, origin, key, viewerAuthorization, !"HEAD".equals(method));
+        }
+        String forwardUri = CloudFrontRequestRouter.resolveForwardUri(
+                origin.getOriginPath(), rawViewerPath, config.getDefaultRootObject());
+        // CloudFront forwards viewer query strings only when selected by a cache policy,
+        // origin request policy, or legacy ForwardedValues configuration. Those policy
+        // semantics are not modeled in the data plane yet, so the AWS default is to omit them.
+        return fetchFromCustomOrigin(origin, forwardUri, null, viewerScheme, method,
+                viewerOrigin, accessControlRequestMethod, accessControlRequestHeaders);
+    }
+
+    private OriginResponse fetchFromS3(
+            Distribution distribution,
+            Origin origin,
+            String key,
+            String viewerAuthorization,
+            boolean includeBody) {
+        return fetchFromS3(distribution, origin, key, viewerAuthorization, includeBody, null);
+    }
+
+    private void authorizeS3OriginRead(
+            Distribution distribution,
+            Origin origin,
+            String bucket,
+            String key,
+            String viewerAuthorization,
+            AccessControl accessControl) {
+        String oacId = origin.getOriginAccessControlId();
+        if (accessControl == null && oacId != null && !oacId.isBlank()) {
+            accessControl = AccessControl.configured(service.getOriginAccessControl(oacId));
+        }
+        if (accessControl != null) {
+            String signingBehavior = accessControl.signingBehavior();
+            // Even an empty Authorization header suppresses no-override signing.
+            boolean viewerSigned = viewerAuthorization != null;
+            boolean cloudFrontSigns = accessControl.enabled() && ("always".equalsIgnoreCase(signingBehavior)
+                    || ("no-override".equalsIgnoreCase(signingBehavior) && !viewerSigned));
+            if (cloudFrontSigns) {
+                s3Service.authorizeCloudFrontOacGetObject(
+                        bucket, key, distribution.getArn());
+                return;
+            }
+            if (viewerSigned) {
+                s3Service.authorizeCloudFrontViewerGetObject(
+                        bucket, key, viewerAuthorization);
+                return;
+            }
+            s3Service.authorizeAnonymousGetObject(bucket, key);
+            return;
+        }
+
+        String oaiId = originAccessIdentityId(origin);
+        if (oaiId != null) {
+            var oai = service.getCloudFrontOriginAccessIdentity(oaiId);
+            s3Service.authorizeCloudFrontOaiGetObject(
+                    bucket, key, oaiId, oai.getS3CanonicalUserId());
+            return;
+        }
+        s3Service.authorizeAnonymousGetObject(bucket, key);
+    }
+
+    /** Fetches from a custom (non-S3) origin. {@code forwardUri} already includes the origin path. */
+    private OriginResponse fetchFromCustomOrigin(Origin origin, String forwardUri, String rawQuery,
+                                                 String viewerScheme, String method, String viewerOrigin,
+                                                 String accessControlRequestMethod,
+                                                 String accessControlRequestHeaders) {
+        boolean includeBody = !"HEAD".equals(method);
+        try {
+            URI target = buildCustomOriginUri(
+                    origin, viewerScheme, forwardUri, rawQuery);
+            HttpRequest.Builder rb = HttpRequest.newBuilder()
+                    .uri(target)
+                    .timeout(Duration.ofSeconds(30));
+            // Origin custom headers: CloudFront adds these to every request it forwards to the origin
+            // (overriding any same-named viewer header), which is how a distribution restricts an origin
+            // to CloudFront-only traffic via a shared secret header.
+            Map<String, String> originHeaders = new LinkedHashMap<>();
+            List<Map<String, String>> customHeaders = origin.getCustomHeaders();
+            if (customHeaders != null) {
+                for (Map<String, String> header : customHeaders) {
+                    String name = header.get("HeaderName");
+                    String value = header.get("HeaderValue");
+                    if (name != null && value != null) {
+                        originHeaders.put(name, value);
+                    }
+                }
+            }
+            rb.method(method, HttpRequest.BodyPublishers.noBody());
+            if ("OPTIONS".equals(method)) {
+                addRequestHeader(rb, "Origin", viewerOrigin);
+                addRequestHeader(rb, "Access-Control-Request-Method", accessControlRequestMethod);
+                addRequestHeader(rb, "Access-Control-Request-Headers", accessControlRequestHeaders);
+            }
+            HttpResponse<byte[]> resp = httpClient.send(
+                    rb.build(), originHeaders, HttpResponse.BodyHandlers.ofByteArray());
+            String ct = resp.headers().firstValue("content-type").orElse(DEFAULT_CONTENT_TYPE);
+            byte[] body = resp.body() != null ? resp.body() : new byte[0];
+            long contentLength = includeBody ? body.length : responseContentLength(resp);
+            return new OriginResponse(resp.statusCode(), ct, includeBody ? body : null,
+                    contentLength, resp.headers().map());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOG.warnv("CloudFront custom origin fetch was interrupted for host {0}",
+                    safeOriginName(origin));
+            return OriginResponse.error(502, "Bad Gateway.");
+        } catch (Exception e) {
+            // Do not log the target URI: forwarded query strings can contain credentials or tokens.
+            LOG.warnv("CloudFront custom origin fetch failed for host {0}: {1}",
+                    safeOriginName(origin), e.getClass().getSimpleName());
+            return OriginResponse.error(502, "Bad Gateway.");
+        }
+    }
+
     private static long responseContentLength(HttpResponse<?> response) {
         try {
             return response.headers().firstValueAsLong("content-length").orElse(-1L);
@@ -1549,4 +1755,5 @@ public class CloudFrontServingController {
             request.header(name, value);
         }
     }
+
 }

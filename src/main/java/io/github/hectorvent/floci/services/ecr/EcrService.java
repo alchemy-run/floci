@@ -1600,6 +1600,19 @@ public class EcrService implements ResourceProvider {
 
     private final EventBridgeService eventBridgeService;
 
+    @Inject
+    public EcrService(StorageFactory factory,
+                      EcrRegistryManager registryManager,
+                      EmulatorConfig config,
+                      RegionResolver regionResolver,
+                      EventBridgeService eventBridgeService) {
+        this(factory.create("ecr", "repositories.json",
+                        new TypeReference<Map<String, Repository>>() {}),
+                factory.create("ecr", "image-metadata.json",
+                        new TypeReference<Map<String, ImageMetadata>>() {}),
+                registryManager, config, regionResolver, eventBridgeService);
+    }
+
     public void startImageScan(String repositoryName, String registryId, String region, ImageIdentifier imageId) {
         requireRepo(repositoryName, registryId, region);
         if (imageId == null || (imageId.getImageTag() == null && imageId.getImageDigest() == null)) {

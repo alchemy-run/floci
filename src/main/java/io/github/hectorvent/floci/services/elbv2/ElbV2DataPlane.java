@@ -1619,18 +1619,6 @@ public class ElbV2DataPlane {
 
     private final Map<Integer, String> sharedAddressAffinity = new ConcurrentHashMap<>();
 
-    public void startListener(Listener listener, String region, List<Rule> rules) {
-        try {
-            startListenerUnsafe(listener, region, rules);
-        } catch (RuntimeException e) {
-            // Control-plane Create/ModifyListener must not fail because the local
-            // HTTP proxy cannot bind (null port, NLB/TCP/TLS, port-in-use). AWS
-            // CreateListener is a control-plane call; leaking an NPE as
-            // InternalFailure: Unexpected error: null is what blocked ECS NLB/ALB.
-            LOG.errorf(e, "ELBv2 data-plane failed to start listener %s",
-                    listener != null ? listener.getListenerArn() : null);
-        }
-    }
 
     private void startListenerUnsafe(Listener listener, String region, List<Rule> rules) {
         if (config == null || config.services() == null || config.services().elbv2() == null
@@ -1715,6 +1703,33 @@ public class ElbV2DataPlane {
         sharedAddressAffinity.values().removeIf(listenerArn::equals);
     }
 
+    private HttpServer startPortServer(int port) {
+        if (isReservedByFloci(port)) {
+            // Returning null leaves `servers` untouched: computeIfAbsent skips a null mapping.
+            // The emulator's own port cannot be handed over, so the two cases need different
+            // advice: freeing floci.tls.aws-https-port is only meaningful for the TLS proxy.
+            String remedy = port == config.port()
+                    ? "This is the emulator's own port, so it cannot be freed; give the listener a different port."
+                    : "Set floci.tls.aws-https-port=0 (or disable TLS) to free it.";
+            LOG.warnv("ELBv2 listener port {0} is reserved by Floci itself; the listener is "
+                    + "registered but serves no traffic. {1}", String.valueOf(port), remedy);
+            return null;
+        }
+        HttpServer server = vertx.createHttpServer(new HttpServerOptions()
+                .setHost("0.0.0.0")
+                .setPort(port));
+        server.requestHandler(req -> handleRequest(req, port));
+        server.listen()
+                .onSuccess(s -> LOG.infov("ELBv2 listener port started on {0}", String.valueOf(port)))
+                .onFailure(err -> {
+                    servers.remove(port);
+                    clearPortBindings(port);
+                    server.close();
+                    LOG.warnv("ELBv2 listener port failed to start on {0}: {1}", String.valueOf(port), err.getMessage());
+                });
+        return server;
+    }
+
     private String resolveListenerArn(int port, HttpServerRequest req) {
         Map<String, String> listenersByHost = listenersByHostAndPort.get(port);
         if (listenersByHost == null || listenersByHost.isEmpty()) {
@@ -1791,9 +1806,194 @@ public class ElbV2DataPlane {
                 && Boolean.parseBoolean(loadBalancer.getAttributes().get(PRESERVE_HOST_HEADER_ATTRIBUTE));
     }
 
+    private void invokeLambdaTarget(io.vertx.core.http.HttpServerRequest req, TargetGroup tg, String functionArn,
+                                    String region) {
+        if (req.isEnded()) {
+            invokeLambdaWithBody(req, tg, functionArn, region, Buffer.buffer());
+            return;
+        }
+        ByteArrayOutputStream body = new ByteArrayOutputStream();
+        AtomicBoolean rejected = new AtomicBoolean();
+        req.handler(chunk -> {
+            if (rejected.get()) {
+                return;
+            }
+            if (body.size() > MAX_LAMBDA_BODY_BYTES - chunk.length()) {
+                rejected.set(true);
+                req.response().setStatusCode(413).end();
+                return;
+            }
+            body.writeBytes(chunk.getBytes());
+        });
+        req.exceptionHandler(error -> {
+            if (rejected.compareAndSet(false, true)) {
+                req.response().setStatusCode(502).end("Request body error");
+            }
+        });
+        req.endHandler(ignored -> {
+            if (rejected.get()) {
+                return;
+            }
+            invokeLambdaWithBody(req, tg, functionArn, region, Buffer.buffer(body.toByteArray()));
+        });
+    }
+
+    private void invokeLambdaWithBody(io.vertx.core.http.HttpServerRequest req, TargetGroup tg, String functionArn,
+                                      String region, Buffer body) {
+        boolean multiValueHeaders = multiValueHeadersEnabled(tg);
+        List<Map.Entry<String, String>> requestHeaders = new ArrayList<>();
+        for (Map.Entry<String, String> header : req.headers()) {
+            requestHeaders.add(header);
+        }
+        Map<String, Object> event = buildAlbEvent(req.method().name(), req.path(), req.query(), requestHeaders,
+                body != null ? body.getBytes() : new byte[0], tg.getTargetGroupArn(), multiValueHeaders);
+        // Lambda invocation is synchronous and may take seconds while a cold container
+        // boots and polls the Runtime API. The Runtime API itself runs on Vert.x event
+        // loops, so blocking the listener's event loop here would deadlock the runtime
+        // and the function would time out. Offload to a worker thread, same as WebSocket.
+        // ordered=false so independent ALB requests run in parallel on the worker pool.
+        vertx.<InvokeResult>executeBlocking(() -> {
+            byte[] payload = objectMapper.writeValueAsBytes(event);
+            return lambdaService.invoke(region, functionArn, payload, InvocationType.RequestResponse);
+        }, false).onSuccess(result -> {
+            try {
+                writeLambdaResponse(req, result, multiValueHeaders);
+            } catch (Exception e) {
+                LOG.errorf(e, "Error writing Lambda response for %s", functionArn);
+                req.response().setStatusCode(502).end("Lambda invocation error");
+            }
+        }).onFailure(e -> {
+            LOG.errorf(e, "Error invoking Lambda target %s", functionArn);
+            req.response().setStatusCode(502).end("Lambda invocation error");
+        });
+    }
+
+    private void writeLambdaResponse(io.vertx.core.http.HttpServerRequest req, InvokeResult result,
+                                     boolean multiValueHeadersEnabled) throws IOException {
+        if (result.getFunctionError() != null) {
+            req.response().setStatusCode(502).end("Lambda function error: " + result.getFunctionError());
+            return;
+        }
+
+        if (result.getPayload() == null || result.getPayload().length == 0) {
+            req.response().setStatusCode(200).end();
+            return;
+        }
+        Map<String, Object> lambdaResp = objectMapper.readValue(result.getPayload(),
+                new TypeReference<Map<String, Object>>() {});
+
+        Object responseBody = lambdaResp.get("body");
+        Boolean isBase64 = (Boolean) lambdaResp.get("isBase64Encoded");
+        byte[] decodedBody = null;
+        String textBody = null;
+        if (responseBody != null) {
+            if (Boolean.TRUE.equals(isBase64)) {
+                decodedBody = Base64.getDecoder().decode(String.valueOf(responseBody));
+                if (decodedBody.length > MAX_LAMBDA_BODY_BYTES) {
+                    req.response().setStatusCode(502).end();
+                    return;
+                }
+            } else {
+                textBody = String.valueOf(responseBody);
+                if (textBody.getBytes(StandardCharsets.UTF_8).length > MAX_LAMBDA_BODY_BYTES) {
+                    req.response().setStatusCode(502).end();
+                    return;
+                }
+            }
+        }
+
+        int statusCode = 200;
+        Object sc = lambdaResp.get("statusCode");
+        if (sc != null) {
+            statusCode = ((Number) sc).intValue();
+        }
+        req.response().setStatusCode(statusCode);
+
+        for (Map.Entry<String, String> header : lambdaResponseHeaders(lambdaResp, multiValueHeadersEnabled)) {
+            req.response().headers().add(header.getKey(), header.getValue());
+        }
+
+        if (responseBody == null) {
+            req.response().end();
+        } else if (decodedBody != null) {
+            req.response().end(Buffer.buffer(decodedBody));
+        } else {
+            req.response().end(textBody);
+        }
+    }
+
     static boolean multiValueHeadersEnabled(TargetGroup tg) {
         return tg != null && tg.getAttributes() != null
                 && Boolean.parseBoolean(tg.getAttributes().get(LAMBDA_MULTI_VALUE_HEADERS_ATTRIBUTE));
+    }
+
+    /**
+     * Builds the Lambda target event documented for Application Load Balancers. The target group's
+     * {@code lambda.multi_value_headers.enabled} attribute selects exactly one representation:
+     * {@code headers}/{@code queryStringParameters} (duplicate names keep the last value) or
+     * {@code multiValueHeaders}/{@code multiValueQueryStringParameters}. Header names are
+     * lowercased and query parameters are passed through without URL-decoding, as ALB does.
+     */
+    static Map<String, Object> buildAlbEvent(String method, String path, String query,
+                                             List<Map.Entry<String, String>> requestHeaders, byte[] body,
+                                             String targetGroupArn, boolean multiValueHeaders) {
+        Map<String, Object> event = new LinkedHashMap<>();
+        Map<String, Object> elb = new LinkedHashMap<>();
+        elb.put("targetGroupArn", targetGroupArn != null ? targetGroupArn : "");
+        event.put("requestContext", Map.of("elb", elb));
+        event.put("httpMethod", method);
+        event.put("path", path != null && !path.isEmpty() ? path : "/");
+
+        Map<String, String> queryParams = new LinkedHashMap<>();
+        Map<String, List<String>> multiValueQueryParams = new LinkedHashMap<>();
+        if (query != null && !query.isEmpty()) {
+            for (String pair : query.split("&")) {
+                if (pair.isEmpty()) {
+                    continue;
+                }
+                int eq = pair.indexOf('=');
+                String key = eq >= 0 ? pair.substring(0, eq) : pair;
+                String val = eq >= 0 ? pair.substring(eq + 1) : "";
+                queryParams.put(key, val);
+                multiValueQueryParams.computeIfAbsent(key, k -> new ArrayList<>()).add(val);
+            }
+        }
+
+        Map<String, String> headers = new LinkedHashMap<>();
+        Map<String, List<String>> multiValueHeaderMap = new LinkedHashMap<>();
+        String contentType = null;
+        for (Map.Entry<String, String> entry : requestHeaders) {
+            String key = entry.getKey().toLowerCase();
+            headers.put(key, entry.getValue());
+            multiValueHeaderMap.computeIfAbsent(key, k -> new ArrayList<>()).add(entry.getValue());
+            if ("content-type".equals(key)) {
+                contentType = entry.getValue();
+            }
+        }
+
+        if (multiValueHeaders) {
+            event.put("multiValueQueryStringParameters", multiValueQueryParams);
+            event.put("multiValueHeaders", multiValueHeaderMap);
+        } else {
+            event.put("queryStringParameters", queryParams);
+            event.put("headers", headers);
+        }
+
+        boolean isBase64 = false;
+        String bodyStr = "";
+        if (body != null && body.length > 0) {
+            if (contentType != null && !contentType.startsWith("text/") && !contentType.contains("json")
+                    && !contentType.contains("xml") && !contentType.contains("form")) {
+                bodyStr = Base64.getEncoder().encodeToString(body);
+                isBase64 = true;
+            } else {
+                bodyStr = new String(body, StandardCharsets.UTF_8);
+            }
+        }
+        event.put("body", bodyStr);
+        event.put("isBase64Encoded", isBase64);
+
+        return event;
     }
 
     /**
@@ -1836,5 +2036,83 @@ public class ElbV2DataPlane {
 
     private static boolean isLambdaResponseFramingHeader(String name) {
         return LAMBDA_RESPONSE_FRAMING_HEADERS.contains(name.toLowerCase());
+    }
+
+    private void proxyRequest(io.vertx.core.http.HttpServerRequest req, String host, int port,
+                              boolean preserveHostHeader) {
+        req.pause();
+        if (ElbV2TargetResolver.isIpLiteral(host)) {
+            try {
+                proxyRequestTo(req, ElbV2TargetResolver.resolveCheckedAddress(host), host, port, preserveHostHeader);
+            } catch (IOException e) {
+                rejectTarget(req, host, e);
+            }
+            return;
+        }
+        vertx.<String>executeBlocking(() -> ElbV2TargetResolver.resolveCheckedAddress(host))
+                .onSuccess(address -> proxyRequestTo(req, address, host, port, preserveHostHeader))
+                .onFailure(err -> rejectTarget(req, host, err));
+    }
+
+    private void proxyRequestTo(HttpServerRequest req, String address, String host, int port,
+                                boolean preserveHostHeader) {
+        RequestOptions opts = new RequestOptions()
+                .setHost(address)
+                .setPort(port)
+                .setURI(req.uri())
+                .setMethod(req.method());
+        proxyClient.request(opts)
+                .onSuccess(clientReq -> {
+                    req.headers().forEach(entry -> {
+                        if (!HOP_BY_HOP_HEADERS.contains(entry.getKey().toLowerCase())) {
+                            clientReq.putHeader(entry.getKey(), entry.getValue());
+                        }
+                    });
+                    if (!preserveHostHeader) {
+                        clientReq.putHeader("Host", host + ":" + port);
+                    }
+                    AtomicBoolean responseStarted = new AtomicBoolean();
+                    AtomicBoolean requestFailed = new AtomicBoolean();
+                    clientReq.response().onSuccess(resp -> {
+                        if (requestFailed.get()) {
+                            return;
+                        }
+                        responseStarted.set(true);
+                        req.response().setStatusCode(resp.statusCode());
+                        resp.headers().forEach(entry -> {
+                            if (!HOP_BY_HOP_HEADERS.contains(entry.getKey().toLowerCase())) {
+                                req.response().putHeader(entry.getKey(), entry.getValue());
+                            }
+                        });
+                        if (resp.getHeader("Content-Length") == null) {
+                            req.response().setChunked(true);
+                        }
+                        resp.pipeTo(req.response());
+                        resp.exceptionHandler(error -> {
+                            if (req.response().headWritten()) {
+                                req.response().close();
+                            } else {
+                                req.response().setStatusCode(502).end("Body error");
+                            }
+                        });
+                    }).onFailure(error -> {
+                        vertx.runOnContext(ignored -> {
+                            if (requestFailed.compareAndSet(false, true)) {
+                                if (responseStarted.get() || req.response().headWritten()) {
+                                    req.response().close();
+                                } else {
+                                    req.response().setStatusCode(502).end("Bad gateway");
+                                }
+                            }
+                        });
+                    });
+
+                    clientReq.send(req);
+                    req.resume();
+                })
+                .onFailure(err -> {
+                    req.resume();
+                    req.response().setStatusCode(503).end("Service unavailable");
+                });
     }
 }

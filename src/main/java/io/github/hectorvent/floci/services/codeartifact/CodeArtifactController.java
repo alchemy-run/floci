@@ -862,6 +862,27 @@ public class CodeArtifactController {
         }
     }
 
+    @GET
+    @Path("/v1/package")
+    public Response describePackage(@Context HttpHeaders headers, @BeanParam PackageQuery query) {
+        return Response.ok(service.describePackage(query.coordinate(regionResolver.resolveRegion(headers)))).build();
+    }
+
+    @DELETE
+    @Path("/v1/package")
+    public Response deletePackage(@Context HttpHeaders headers, @BeanParam PackageQuery query) {
+        return Response.ok(service.deletePackage(query.coordinate(regionResolver.resolveRegion(headers)))).build();
+    }
+
+    @POST
+    @Path("/v1/package")
+    public Response putPackageOriginConfiguration(@Context HttpHeaders headers, @BeanParam PackageQuery query,
+                                                   String body) {
+        JsonNode request = readTree(body);
+        return Response.ok(service.putPackageOriginConfiguration(query.coordinate(regionResolver.resolveRegion(headers)),
+                stringMap(request.get("restrictions")))).build();
+    }
+
     @POST
     @Path("/v1/packages")
     public Response listPackages(@Context HttpHeaders headers, @BeanParam PackageQuery query,
@@ -869,6 +890,29 @@ public class CodeArtifactController {
                                   @QueryParam("upstream") String upstream) {
         return Response.ok(service.listPackages(query.coordinate(regionResolver.resolveRegion(headers)), prefix,
                 publish, upstream, query.pageSize(), query.nextToken)).build();
+    }
+
+    @POST
+    @Path("/v1/package/versions")
+    public Response listPackageVersions(@Context HttpHeaders headers, @BeanParam PackageQuery query,
+                                         @QueryParam("status") String status, @QueryParam("originType") String originType,
+                                         @QueryParam("sortBy") String sortBy) {
+        return Response.ok(service.listPackageVersions(query.coordinate(regionResolver.resolveRegion(headers)), status,
+                originType, sortBy, query.pageSize(), query.nextToken)).build();
+    }
+
+    @POST
+    @Path("/v1/package/version/assets")
+    public Response listPackageVersionAssets(@Context HttpHeaders headers, @BeanParam PackageQuery query) {
+        return Response.ok(service.listPackageVersionAssets(query.coordinate(regionResolver.resolveRegion(headers)),
+                query.version, query.pageSize(), query.nextToken)).build();
+    }
+
+    @GET
+    @Path("/v1/package/version/readme")
+    public Response getPackageVersionReadme(@Context HttpHeaders headers, @BeanParam PackageQuery query) {
+        return Response.ok(service.getPackageVersionReadme(query.coordinate(regionResolver.resolveRegion(headers)),
+                query.version)).build();
     }
 
     @POST
@@ -897,6 +941,16 @@ public class CodeArtifactController {
     public Response deletePackageVersions(@Context HttpHeaders headers, @BeanParam PackageQuery query, String body) {
         return Response.ok(service.mutatePackageVersions(query.coordinate(regionResolver.resolveRegion(headers)),
                 "delete", versionMutation(readTree(body)))).build();
+    }
+
+    @POST
+    @Path("/v1/package/versions/copy")
+    public Response copyPackageVersions(@Context HttpHeaders headers, @BeanParam PackageQuery query,
+                                         @QueryParam("source-repository") String source,
+                                         @QueryParam("destination-repository") String destination, String body) {
+        PackageCoordinate coordinate = new PackageCoordinate(regionResolver.resolveRegion(headers), query.domain,
+                query.owner, source, query.format, query.namespace, query.name);
+        return Response.ok(service.copyPackageVersions(coordinate, destination, versionMutation(readTree(body)))).build();
     }
 
     private VersionMutation versionMutation(JsonNode request) {

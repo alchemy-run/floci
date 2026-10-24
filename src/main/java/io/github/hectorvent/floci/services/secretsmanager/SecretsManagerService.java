@@ -1943,4 +1943,23 @@ public class SecretsManagerService implements ResourceProvider {
             return java.util.Optional.empty();
         }
     }
+
+    public Secret putResourcePolicy(String secretId, String resourcePolicy, Boolean blockPublicPolicy, String region) {
+        if (resourcePolicy == null || resourcePolicy.isBlank() || resourcePolicy.length() > 20_480) {
+            throw new AwsException("InvalidParameterException", "ResourcePolicy must contain 1 to 20480 characters.", 400);
+        }
+        JsonNode parsedPolicy;
+        try {
+            parsedPolicy = objectMapper.readTree(resourcePolicy);
+        } catch (JsonProcessingException e) {
+            throw new AwsException("MalformedPolicyDocumentException", "The resource policy is not valid JSON.", 400);
+        }
+        if (parsedPolicy == null || !parsedPolicy.isObject()) {
+            throw new AwsException("MalformedPolicyDocumentException", "The resource policy is not a JSON object.", 400);
+        }
+        if (Boolean.TRUE.equals(blockPublicPolicy) && !ResourcePolicyValidator.validate(parsedPolicy).isEmpty()) {
+            throw new AwsException("PublicPolicyException", "The resource policy did not prevent broad access.", 400);
+        }
+        return putResourcePolicy(secretId, resourcePolicy, region);
+    }
 }

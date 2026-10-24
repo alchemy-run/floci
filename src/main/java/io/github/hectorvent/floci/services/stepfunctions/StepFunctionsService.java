@@ -3044,6 +3044,44 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
 
     private static final String RESULT_WRITER_RESOURCE = "arn:aws:states:::s3:putObject";
 
+    @Inject
+    public StepFunctionsService(StorageFactory storageFactory, RegionResolver regionResolver,
+                                AslExecutor aslExecutor, ObjectMapper objectMapper,
+                                SfnMockLoader mockLoader) {
+        this.stateMachineStore = storageFactory.create("stepfunctions", "sfn-state-machines.json",
+                new TypeReference<Map<String, StateMachine>>() {});
+        this.executionStore = storageFactory.create("stepfunctions", "sfn-executions.json",
+                new TypeReference<Map<String, Execution>>() {});
+        this.activityStore = storageFactory.create("stepfunctions", "sfn-activities.json",
+                new TypeReference<Map<String, Activity>>() {});
+        this.mapRunStore = storageFactory.create("stepfunctions", "sfn-map-runs.json",
+                new TypeReference<Map<String, MapRun>>() {});
+        // Keep the established state-machine/execution/activity/map-run factory order stable for
+        // embedders and tests that supply sequential backends. New stores are appended.
+        this.stateMachineAliasStore = storageFactory.create(
+                "stepfunctions", "sfn-state-machine-aliases.json",
+                new TypeReference<Map<String, StateMachineAlias>>() {});
+        this.regionResolver = regionResolver;
+        this.aslExecutor = aslExecutor;
+        this.objectMapper = objectMapper;
+        this.mockLoader = mockLoader;
+    }
+
+    public StateMachine updateStateMachine(String arn, String definition, String roleArn,
+                                           JsonNode loggingConfiguration, JsonNode tracingConfiguration) {
+        return updateStateMachine(arn, new UpdateStateMachineRequest(definition, roleArn,
+                loggingConfiguration, loggingConfiguration != null,
+                tracingConfiguration, tracingConfiguration != null,
+                null, false, false, null)).stateMachine();
+    }
+
+    public CompletableFuture<JsonNode> registerPendingToken(String token) {
+        CompletableFuture<JsonNode> future = new CompletableFuture<>();
+        pendingTaskTokens.put(token, future);
+        taskHeartbeatNanos.put(token, System.nanoTime());
+        return future;
+    }
+
     public double redriveExecution(String executionArn) {
         Execution exec = describeExecution(executionArn);
         String status = exec.getStatus();

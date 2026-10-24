@@ -274,6 +274,12 @@ public class AmazonMqController {
 
     private final AmazonMqConfigurationService configurations;
 
+    @Inject
+    public AmazonMqController(AmazonMqService service, AmazonMqConfigurationService configurations) {
+        this.service = service;
+        this.configurations = configurations;
+    }
+
     private static Map<String, Object> configurationRef(String id, Integer revision) {
         Map<String, Object> ref = new LinkedHashMap<>();
         ref.put("id", id);
@@ -342,6 +348,25 @@ public class AmazonMqController {
                 safeRequest.get("consoleAccess") instanceof Boolean flag ? flag : null,
                 strList(safeRequest.get("groups")));
         return Response.ok(Map.of()).build();
+    }
+
+    @GET
+    @Path("/v1/brokers/{broker-id}/users")
+    public Response listUsers(@PathParam("broker-id") String brokerId,
+                              @QueryParam("maxResults") String maxResultsParam,
+                              @QueryParam("nextToken") String nextToken) {
+        List<MqUser> all = service.listUsers(brokerId);
+        Integer maxResults = Pagination.parseMaxResults(maxResultsParam, "BadRequestException");
+        PaginatedResult<MqUser> page = Pagination.paginate(all, MqUser::getUsername, maxResults, nextToken,
+                100, "BadRequestException");
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("brokerId", brokerId);
+        body.put("maxResults", maxResults != null ? maxResults : 100);
+        body.put("users", page.items().stream().map(AmazonMqController::userSummary).toList());
+        if (page.nextToken() != null) {
+            body.put("nextToken", page.nextToken());
+        }
+        return Response.ok(body).build();
     }
 
     private static Map<String, Object> userSummary(MqUser user) {

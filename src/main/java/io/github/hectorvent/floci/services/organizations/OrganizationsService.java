@@ -2057,6 +2057,29 @@ public class OrganizationsService implements ScpProvider, RootAccessOrganization
         return new AwsException("AccessDeniedException", message, 400);
     }
 
+    @Inject
+    public OrganizationsService(StorageFactory storageFactory, ObjectMapper objectMapper,
+                                EmulatorConfig config) {
+        EmulatorConfig.OrganizationsServiceConfig organizationsConfig = config.services().organizations();
+        this.scpEnforcementEnabled = organizationsConfig.scpEnforcementEnabled();
+        this.managementAccountEmail = organizationsConfig.managementAccountEmail()
+                .map(OrganizationsService::requireValidConfiguredEmail)
+                .orElse(null);
+        this.objectMapper = objectMapper;
+        this.organizations = storageFactory.create("organizations", "organizations-organizations.json",
+                new TypeReference<Map<String, Organization>>() {});
+        this.accounts = storageFactory.create("organizations", "organizations-accounts.json",
+                new TypeReference<Map<String, OrganizationAccount>>() {});
+        this.organizationalUnits = storageFactory.create("organizations", "organizations-ous.json",
+                new TypeReference<Map<String, OrganizationalUnit>>() {});
+        this.policies = storageFactory.create("organizations", "organizations-policies.json",
+                new TypeReference<Map<String, OrganizationPolicy>>() {});
+        this.createAccountStatuses = storageFactory.create("organizations", "organizations-create-account-status.json",
+                new TypeReference<Map<String, CreateAccountStatus>>() {});
+        this.handshakes = storageFactory.create("organizations", "organizations-handshakes.json",
+                new TypeReference<Map<String, Handshake>>() {});
+    }
+
     /** One {@code EffectivePolicyValidationError}. */
     public record EffectivePolicyValidationError(String errorCode, String errorMessage, String pathToError,
                                                  List<String> contributingPolicies) {}

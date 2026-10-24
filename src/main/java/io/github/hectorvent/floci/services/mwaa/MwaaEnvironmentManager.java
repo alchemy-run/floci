@@ -731,6 +731,14 @@ public class MwaaEnvironmentManager {
     private static final String API_AUTH_BACKENDS =
             "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session";
 
+    private static String environmentIdentity(Environment environment) {
+        return environmentAccount(environment) + "." + environmentRegion(environment) + "." + environment.getName();
+    }
+
+    static String environmentRegion(Environment environment) {
+        return AwsArnUtils.regionOrDefault(environment.getArn(), "us-east-1");
+    }
+
     private static byte[] tarSingleFile(String entryName, byte[] content) {
         try {
             ByteArrayOutputStream out = new ByteArrayOutputStream();

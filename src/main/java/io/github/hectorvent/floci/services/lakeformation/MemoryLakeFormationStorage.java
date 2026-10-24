@@ -382,6 +382,11 @@ public class MemoryLakeFormationStorage implements LakeFormationStorage {
         return "unknown";
     }
 
+    @Override
+    public synchronized void registerResource(String region, ResourceInfo info) {
+        resourcesStorage.put(region + ":" + info.getResourceArn(), copyOf(info));
+    }
+
     private void pruneTagAssignments(String region, String catalogId, String tagKey, List<String> allowedValues) {
         String prefix = region + ":" + catalogId + ":";
         for (String key : resourceTagsStorage.keys()) {

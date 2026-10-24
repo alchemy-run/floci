@@ -490,6 +490,14 @@ public class EmrServerlessService {
 
     private final EmrServerlessJobService jobs;
 
+    @Inject
+    public EmrServerlessService(EmulatorConfig config, StorageFactory storageFactory, EmrServerlessJobService jobs) {
+        this.config = config;
+        this.jobs = jobs;
+        this.storage = storageFactory.create("emrserverless", "emr-serverless-applications.json",
+                new TypeReference<Map<String, Application>>() {});
+    }
+
     public PaginatedResult<ObjectNode> listJobRuns(String applicationId, Integer maxResults, String nextToken,
                                                    List<String> states, Double after, Double before, String mode) {
         getApplication(applicationId);

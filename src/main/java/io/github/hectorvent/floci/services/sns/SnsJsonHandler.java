@@ -566,9 +566,43 @@ public class SnsJsonHandler {
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
+    private Response handleCheckIfPhoneNumberIsOptedOut(JsonNode request, String region) {
+        String phone = textOrNull(firstPresent(request, "phoneNumber", "PhoneNumber"));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("isOptedOut", snsService.isPhoneNumberOptedOut(phone, region));
+        return Response.ok(response).build();
+    }
+
+    private Response handleListPhoneNumbersOptedOut(String region) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode numbers = response.putArray("phoneNumbers");
+        for (String number : snsService.listPhoneNumbersOptedOut(region)) {
+            numbers.add(number);
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleOptInPhoneNumber(JsonNode request, String region) {
+        String phone = textOrNull(firstPresent(request, "phoneNumber", "PhoneNumber"));
+        snsService.optInPhoneNumber(phone, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
     private Response handleListOriginationNumbers() {
         ObjectNode response = objectMapper.createObjectNode();
         response.putArray("PhoneNumbers");
+        return Response.ok(response).build();
+    }
+
+    private Response handleListSmsSandboxPhoneNumbers(String region) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode numbers = response.putArray("PhoneNumbers");
+        for (Map<String, String> number : snsService.listSmsSandboxPhoneNumbers(region)) {
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put("PhoneNumber", number.get("PhoneNumber"));
+            node.put("Status", number.get("Status"));
+            numbers.add(node);
+        }
         return Response.ok(response).build();
     }
 

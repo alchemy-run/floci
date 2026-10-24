@@ -180,6 +180,34 @@ public class CurJsonHandler {
         return (value != null && !value.isNull()) ? value.asText() : null;
     }
 
+    private Response handleDescribeReportDefinitions(JsonNode request) {
+        List<ReportDefinition> defs = service.describeReportDefinitions().stream()
+                .sorted(Comparator.comparing(ReportDefinition::getReportName)).toList();
+        int limit = request.path("MaxResults").asInt(5);
+        int start = 0;
+        try {
+            String token = stringOrNull(request, "NextToken");
+            if (token != null) {
+                start = Integer.parseInt(token);
+            }
+        } catch (NumberFormatException e) {
+            throw new AwsException("ValidationException", "Invalid NextToken.", 400);
+        }
+        if (limit < 1 || limit > 5 || start < 0 || start > defs.size()) {
+            throw new AwsException("ValidationException", "Invalid pagination parameters.", 400);
+        }
+        int end = Math.min(defs.size(), start + limit);
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode arr = response.putArray("ReportDefinitions");
+        for (ReportDefinition d : defs.subList(start, end)) {
+            arr.add(serialize(d));
+        }
+        if (end < defs.size()) {
+            response.put("NextToken", Integer.toString(end));
+        }
+        return Response.ok(response).build();
+    }
+
     private static Map<String, String> parseTags(JsonNode node) {
         Map<String, String> tags = new LinkedHashMap<>();
         if (node.isArray()) {

@@ -1545,6 +1545,34 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
 
     private final ContainerDetector containerDetector;
 
+    @Inject
+    public ContainerLauncher(ContainerBuilder containerBuilder,
+                             ContainerLifecycleManager lifecycleManager,
+                             ContainerLogStreamer logStreamer,
+                             ImageResolver imageResolver,
+                             RuntimeApiServerFactory runtimeApiServerFactory,
+                             DockerHostResolver dockerHostResolver,
+                             ContainerDetector containerDetector,
+                             EmulatorConfig config,
+                             EcrRegistryManager ecrRegistryManager,
+                             LambdaLayerService layerService,
+                             LaunchedContainerAwsEnv awsEnv,
+                             LambdaExecutionRoleCredentials executionRoleCredentials) {
+        this.containerBuilder = containerBuilder;
+        this.lifecycleManager = lifecycleManager;
+        this.logStreamer = logStreamer;
+        this.imageResolver = imageResolver;
+        this.runtimeApiServerFactory = runtimeApiServerFactory;
+        this.dockerHostResolver = dockerHostResolver;
+        this.containerDetector = containerDetector;
+        this.config = config;
+        this.ecrRegistryManager = ecrRegistryManager;
+        this.layerService = layerService;
+        this.awsEnv = awsEnv;
+        this.executionRoleCredentials = executionRoleCredentials;
+        this.populateSemaphore = new java.util.concurrent.Semaphore(resolvePopulateConcurrency(config));
+    }
+
     private static String sha256Hex(String value) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
@@ -1608,6 +1636,86 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
         if (failure != null) {
             throw new IOException("Failed to stream tar for function " + functionName
                     + " from " + sourcePath, failure);
+        }
+    }
+
+    private void launchExtensions(DockerClient dockerClient, String containerId, String functionName,
+                                  RuntimeApiServer runtimeApiServer, LogDestination logDestination) {
+        List<String> extensionNames = listExtensionBinaries(dockerClient, containerId, functionName);
+        // Arm the readiness barrier before starting any extension process, so the latch already
+        // exists when the first one starts polling /extension/event/next — otherwise a
+        // fast-starting extension could become ready before there is anything to count it down.
+        runtimeApiServer.expectExtensions(extensionNames.size());
+        for (String name : extensionNames) {
+            try {
+                String path = EXTENSIONS_DIR + "/" + name;
+                var create = dockerClient.execCreateCmd(containerId)
+                        .withCmd(path)
+                        .withAttachStdout(true)
+                        .withAttachStderr(true);
+                String execId = create.exec().getId();
+                // Detached: an extension runs for the container's whole lifetime, so this must not
+                // block the launch waiting for it to exit.
+                //
+                // The callback forwards the exec's output to the function's CloudWatch log group,
+                // the same destination the container's PID 1 output goes to. That has to be done
+                // explicitly: `docker logs` only covers PID 1, so an exec's stream never reaches
+                // the container log and an observability extension's output would vanish entirely.
+                // Draining is also required in its own right — an unread exec pipe fills up and
+                // stalls the extension process.
+                dockerClient.execStartCmd(execId).exec(logStreamer.execLogCallbackForAccount(
+                        logDestination.accountId(), logDestination.logGroup(), logDestination.logStream(),
+                        logDestination.region(),
+                        "lambda:" + functionName + ":" + name));
+                LOG.infov("Launched extension {0} for function {1} (container {2})",
+                        name, functionName, containerId);
+            } catch (Exception e) {
+                LOG.warnv(e, "Failed to launch extension {0} for function {1}; continuing without it",
+                        name, functionName);
+            }
+        }
+    }
+
+    /**
+     * Lists file names directly under {@link #EXTENSIONS_DIR} inside the container, or an empty
+     * list if the directory doesn't exist or the probe fails (most functions have no extensions).
+     *
+     * <p>Uses Docker's archive API ({@code copyArchiveFromContainerCmd}) rather than {@code exec}ing
+     * a shell/{@code find}/{@code basename} pipeline inside the container: a minimal or distroless
+     * function image can have a valid extension binary under {@code /opt/extensions} without any of
+     * those utilities present, which would silently look like "no extensions" to a shell-based probe.
+     * The archive API only talks to the Docker daemon, so it works regardless of the image contents.
+     */
+    private List<String> listExtensionBinaries(DockerClient dockerClient, String containerId, String functionName) {
+        try (InputStream tarStream = dockerClient.copyArchiveFromContainerCmd(containerId, EXTENSIONS_DIR).exec();
+             TarArchiveInputStream tar = new TarArchiveInputStream(tarStream)) {
+
+            List<String> names = new ArrayList<>();
+            TarArchiveEntry entry;
+            while ((entry = tar.getNextEntry()) != null) {
+                if (!tar.canReadEntryData(entry) || entry.isDirectory()) {
+                    continue;
+                }
+                // Docker wraps the requested directory itself as a leading path component (e.g.
+                // "extensions/lambda-adapter"); only direct children count as extension binaries,
+                // matching the real init system's non-recursive scan of the directory.
+                String name = entry.getName();
+                int slash = name.indexOf('/');
+                if (slash < 0 || name.indexOf('/', slash + 1) >= 0) {
+                    continue;
+                }
+                if ((entry.getMode() & 0111) == 0) {
+                    continue;
+                }
+                names.add(name.substring(slash + 1));
+            }
+            return names;
+        } catch (NotFoundException e) {
+            return List.of();
+        } catch (Exception e) {
+            LOG.debugv("Could not list {0} for function {1} ({2}); assuming no extensions",
+                    EXTENSIONS_DIR, functionName, e.getMessage());
+            return List.of();
         }
     }
 

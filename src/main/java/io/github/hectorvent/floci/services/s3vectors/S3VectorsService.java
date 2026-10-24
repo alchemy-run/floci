@@ -484,8 +484,154 @@ public class S3VectorsService {
         public double getDistance() { return distance; }
     }
 
+    public VectorBucket getVectorBucket(String bucketName, String vectorBucketArn, String region) {
+        String name = resolveBucketName(bucketName, vectorBucketArn);
+        String key = buildStorageKey(region, name);
+        return store.get(key).orElseThrow(() ->
+                new AwsException("NotFoundException", "The vector bucket " + name + " does not exist.", 404));
+    }
 
+    public void deleteVectorBucket(String bucketName, String vectorBucketArn, String region) {
+        VectorBucket bucket = getVectorBucket(bucketName, vectorBucketArn, region);
+        if (!bucket.getIndexes().isEmpty()) {
+            throw new AwsException("ConflictException", "The vector bucket " + bucket.getVectorBucketName() + " is not empty.", 409);
+        }
+        store.delete(buildStorageKey(region, bucket.getVectorBucketName()));
+        LOG.infov("Deleted Vector Bucket: {0}", bucket.getVectorBucketName());
+    }
 
+    public void putVectorBucketPolicy(String bucketName, String vectorBucketArn, String policy, String region) {
+        VectorBucket bucket = getVectorBucket(bucketName, vectorBucketArn, region);
+        bucket.setPolicy(policy);
+        store.put(buildStorageKey(region, bucket.getVectorBucketName()), bucket);
+    }
+
+    public String getVectorBucketPolicy(String bucketName, String vectorBucketArn, String region) {
+        VectorBucket bucket = getVectorBucket(bucketName, vectorBucketArn, region);
+        if (bucket.getPolicy() == null) {
+            throw new AwsException("NotFoundException",
+                    "The vector bucket " + bucket.getVectorBucketName() + " does not have a policy.", 404);
+        }
+        return bucket.getPolicy();
+    }
+
+    public void deleteVectorBucketPolicy(String bucketName, String vectorBucketArn, String region) {
+        VectorBucket bucket = getVectorBucket(bucketName, vectorBucketArn, region);
+        if (bucket.getPolicy() == null) {
+            throw new AwsException("NotFoundException",
+                    "The vector bucket " + bucket.getVectorBucketName() + " does not have a policy.", 404);
+        }
+        bucket.setPolicy(null);
+        store.put(buildStorageKey(region, bucket.getVectorBucketName()), bucket);
+    }
+
+    public VectorIndex getIndex(String bucketName, String indexName, String indexArn, String region) {
+        String[] ids = resolveBucketAndIndex(bucketName, indexName, indexArn);
+        VectorBucket bucket = getVectorBucket(ids[0], region);
+        VectorIndex index = bucket.getIndexes().get(ids[1]);
+        if (index == null) {
+            throw new AwsException("NotFoundException", "The index " + ids[1] + " does not exist in bucket " + ids[0] + ".", 404);
+        }
+        return index;
+    }
+
+    public List<VectorIndex> listIndexes(String bucketName, String vectorBucketArn, String region) {
+        VectorBucket bucket = getVectorBucket(bucketName, vectorBucketArn, region);
+        return bucket.getIndexes().values().stream()
+                .sorted(Comparator.comparing(VectorIndex::getIndexName))
+                .collect(Collectors.toList());
+    }
+
+    public void deleteIndex(String bucketName, String indexName, String indexArn, String region) {
+        String[] ids = resolveBucketAndIndex(bucketName, indexName, indexArn);
+        VectorBucket bucket = getVectorBucket(ids[0], region);
+        if (!bucket.getIndexes().containsKey(ids[1])) {
+            throw new AwsException("NotFoundException", "The index " + ids[1] + " does not exist.", 404);
+        }
+        bucket.getIndexes().remove(ids[1]);
+        store.put(buildStorageKey(region, ids[0]), bucket);
+        LOG.infov("Deleted Index: {0}", ids[1]);
+    }
+
+    public void putVectors(String bucketName, String indexName, String indexArn, List<VectorData> vectors, String region) {
+        String[] ids = resolveBucketAndIndex(bucketName, indexName, indexArn);
+        VectorBucket bucket = getVectorBucket(ids[0], region);
+        VectorIndex index = getIndex(ids[0], ids[1], region);
+
+        for (VectorData v : vectors) {
+            if (v.getData() != null && v.getData().size() != index.getDimension()) {
+                throw new AwsException("ValidationException",
+                        "Vector dimension " + v.getData().size() + " does not match index dimension " + index.getDimension(), 400);
+            }
+            index.getVectors().put(v.getKey(), v);
+        }
+        store.put(buildStorageKey(region, ids[0]), bucket);
+        LOG.infov("Put {0} vectors into index {1}", vectors.size(), ids[1]);
+    }
+
+    public List<VectorData> getVectors(String bucketName, String indexName, String indexArn, List<String> keys, String region) {
+        VectorIndex index = getIndex(bucketName, indexName, indexArn, region);
+        List<VectorData> result = new ArrayList<>();
+        for (String key : keys) {
+            VectorData v = index.getVectors().get(key);
+            if (v != null) {
+                result.add(v);
+            }
+        }
+        return result;
+    }
+
+    public void deleteVectors(String bucketName, String indexName, String indexArn, List<String> keys, String region) {
+        String[] ids = resolveBucketAndIndex(bucketName, indexName, indexArn);
+        VectorBucket bucket = getVectorBucket(ids[0], region);
+        VectorIndex index = getIndex(ids[0], ids[1], region);
+        for (String key : keys) {
+            index.getVectors().remove(key);
+        }
+        store.put(buildStorageKey(region, ids[0]), bucket);
+        LOG.infov("Deleted {0} vectors from index {1}", keys.size(), ids[1]);
+    }
+
+    public List<VectorData> listVectors(String bucketName, String indexName, String indexArn, String region) {
+        VectorIndex index = getIndex(bucketName, indexName, indexArn, region);
+        return index.getVectors().values().stream()
+                .sorted(Comparator.comparing(VectorData::getKey))
+                .collect(Collectors.toList());
+    }
+
+    public List<QueryResult> queryVectors(String bucketName, String indexName, String indexArn,
+                                          List<Float> queryVector, Object filter, int topK, String region) {
+        VectorIndex index = getIndex(bucketName, indexName, indexArn, region);
+        if (queryVector.size() != index.getDimension()) {
+            throw new AwsException("ValidationException",
+                    "Query vector dimension " + queryVector.size() + " does not match index dimension " + index.getDimension(), 400);
+        }
+
+        S3VectorsMetadataFilter metadataFilter = S3VectorsMetadataFilter.compile(filter);
+        String metric = index.getDistanceMetric() != null ? index.getDistanceMetric().toLowerCase() : "cosine";
+        List<QueryResult> results = new ArrayList<>();
+
+        for (VectorData v : index.getVectors().values()) {
+            if (!metadataFilter.matches(v.getMetadata())) {
+                continue;
+            }
+            double distance = 0.0;
+            switch (metric) {
+                case "euclidean":
+                    distance = calculateEuclideanDistance(queryVector, v.getData());
+                    break;
+                case "cosine":
+                default:
+                    distance = calculateCosineDistance(queryVector, v.getData());
+                    break;
+            }
+            results.add(new QueryResult(v, distance));
+        }
+
+        results.sort(Comparator.comparingDouble(QueryResult::getDistance));
+
+        return results.stream().limit(topK).collect(Collectors.toList());
+    }
 
     public Map<String, String> listTags(String resourceArn, String region) {
         TaggedResource resource = resolveTaggedResource(resourceArn, region);

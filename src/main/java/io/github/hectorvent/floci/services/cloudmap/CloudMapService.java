@@ -896,6 +896,66 @@ public class CloudMapService {
         return sb.toString();
     }
 
+    @Inject
+    public CloudMapService(StorageFactory storageFactory, EmulatorConfig config,
+                           RegionResolver regionResolver) {
+        this.namespaceStore = storageFactory.create("cloudmap", "cloudmap-namespaces.json",
+                new TypeReference<Map<String, Namespace>>() {});
+        this.serviceStore = storageFactory.create("cloudmap", "cloudmap-services.json",
+                new TypeReference<Map<String, Service>>() {});
+        this.instanceStore = storageFactory.create("cloudmap", "cloudmap-instances.json",
+                new TypeReference<Map<String, Instance>>() {});
+        this.operationStore = storageFactory.create("cloudmap", "cloudmap-operations.json",
+                new TypeReference<Map<String, Operation>>() {});
+        this.regionResolver = regionResolver;
+        this.completionDelaySeconds = config.services().cloudmap().operationCompletionDelaySeconds();
+        this.scheduler = completionDelaySeconds > 0
+                ? Executors.newSingleThreadScheduledExecutor(r -> {
+                    Thread t = new Thread(r, "cloudmap-ops");
+                    t.setDaemon(true);
+                    return t;
+                })
+                : null;
+    }
+
+    public Operation createPublicDnsNamespace(String name, String creatorRequestId,
+                                              String description, Map<String, String> tags, String region,
+                                              Long soaTtl) {
+        Namespace ns = newNamespace(name, "DNS_PUBLIC", description, creatorRequestId, tags, region);
+        ns.setHostedZoneId(generateHostedZoneId());
+        if (soaTtl != null) {
+            ns.setSoaTtl(soaTtl);
+        }
+        namespaceStore.put(ns.getId(), ns);
+        return submitOperation("CREATE_NAMESPACE", "NAMESPACE", ns.getId(), region);
+    }
+
+    public Operation createPrivateDnsNamespace(String name, String vpc, String creatorRequestId,
+                                               String description, Map<String, String> tags, String region,
+                                               Long soaTtl) {
+        if (vpc == null || vpc.isBlank()) {
+            throw new AwsException("InvalidInput", "Vpc is required for a private DNS namespace.", 400);
+        }
+        Namespace ns = newNamespace(name, "DNS_PRIVATE", description, creatorRequestId, tags, region);
+        ns.setVpc(vpc);
+        ns.setHostedZoneId(generateHostedZoneId());
+        if (soaTtl != null) {
+            ns.setSoaTtl(soaTtl);
+        }
+        namespaceStore.put(ns.getId(), ns);
+        return submitOperation("CREATE_NAMESPACE", "NAMESPACE", ns.getId(), region);
+    }
+
+    public List<Namespace> listNamespaces(String region, Map<String, List<String>> filters) {
+        List<Namespace> result = new ArrayList<>();
+        for (Namespace n : scan(namespaceStore)) {
+            if (region.equals(n.getRegion()) && matchesNamespaceFilters(n, filters)) {
+                result.add(n);
+            }
+        }
+        return result;
+    }
+
     private boolean matchesNamespaceFilters(Namespace ns, Map<String, List<String>> filters) {
         if (filters == null || filters.isEmpty()) {
             return true;
@@ -955,6 +1015,22 @@ public class CloudMapService {
             ns.setSoaTtl(soaTtl);
         }
         namespaceStore.put(ns.getId(), ns);
+    }
+
+    public Operation updateService(String id, String description, String dnsConfig,
+                                   String healthCheckConfig, String region) {
+        Service service = requireService(id);
+        if (description != null) {
+            service.setDescription(description);
+        }
+        if (dnsConfig != null) {
+            service.setDnsConfig(mergeDnsConfig(service.getDnsConfig(), dnsConfig));
+        }
+        // AWS UpdateService replaces HealthCheckConfig with whatever was
+        // supplied — omitting it deletes the existing config.
+        service.setHealthCheckConfig(healthCheckConfig);
+        serviceStore.put(service.getId(), service);
+        return submitOperation("UPDATE_SERVICE", "SERVICE", service.getId(), region);
     }
 
     public Map<String, String> getServiceAttributes(String serviceId) {

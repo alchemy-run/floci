@@ -316,6 +316,20 @@ public class CognitoIdentityService {
 
     private final StorageBackend<String, CognitoFederatedIdentity> identities;
 
+    public CognitoIdentityService(StorageBackend<String, IdentityPool> pools,
+                                 StorageBackend<String, CognitoFederatedIdentity> identities,
+                                 RegionResolver regionResolver) {
+        this.pools = pools;
+        this.identities = identities;
+        this.regionResolver = regionResolver;
+    }
+
+    public List<IdentityPool> listIdentityPools() {
+        return pools.scan(key -> true).stream()
+                .sorted(Comparator.comparing(IdentityPool::getIdentityPoolId))
+                .toList();
+    }
+
     public CognitoFederatedIdentity getId(String identityPoolId, Map<String, String> logins, String region) {
         IdentityPool pool = describeIdentityPool(identityPoolId, region);
         boolean authenticated = logins != null && !logins.isEmpty();

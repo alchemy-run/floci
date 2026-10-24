@@ -532,6 +532,30 @@ public class AppConfigService {
 
     private final ConcurrentHashMap<String, ScheduledFuture<?>> pendingCompletions = new ConcurrentHashMap<>();
 
+    @Inject
+    public AppConfigService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver,
+                            Instance<LambdaService> lambdaService, Instance<EventBridgeService> eventBridgeService,
+                            ObjectMapper objectMapper) {
+        this.applicationStore = storageFactory.create("appconfig", "appconfig-applications.json", new TypeReference<>() {});
+        this.environmentStore = storageFactory.create("appconfig", "appconfig-environments.json", new TypeReference<>() {});
+        this.profileStore = storageFactory.create("appconfig", "appconfig-profiles.json", new TypeReference<>() {});
+        this.strategyStore = storageFactory.create("appconfig", "appconfig-strategies.json", new TypeReference<>() {});
+        this.versionStore = storageFactory.create("appconfig", "appconfig-versions.json", new TypeReference<>() {});
+        this.deploymentStore = storageFactory.create("appconfig", "appconfig-deployments.json", new TypeReference<>() {});
+        this.activeConfigStore = storageFactory.create("appconfig", "appconfig-active-configs.json", new TypeReference<>() {});
+        this.extensionStore = storageFactory.create("appconfig", "appconfig-extensions.json", new TypeReference<>() {});
+        this.associationStore = storageFactory.create("appconfig", "appconfig-extension-associations.json", new TypeReference<>() {});
+        this.regionResolver = regionResolver;
+        this.lambdaService = lambdaService;
+        this.eventBridgeService = eventBridgeService;
+        this.objectMapper = objectMapper;
+        this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread thread = new Thread(r, "appconfig-deployments");
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
+
     @PreDestroy
     void shutdown() {
         pendingCompletions.values().forEach(future -> future.cancel(false));
@@ -585,6 +609,25 @@ public class AppConfigService {
         }
         profileStore.put(profileId, profile);
         return profile;
+    }
+
+    public HostedConfigurationVersion createHostedConfigurationVersion(String appId, String profileId, byte[] content, String contentType, String description, String versionLabel) {
+        getConfigurationProfile(appId, profileId);
+        String prefix = appId + "::" + profileId + "::";
+        int nextVersion = versionStore.scan(k -> k.startsWith(prefix))
+                .stream().mapToInt(HostedConfigurationVersion::getVersionNumber).max().orElse(0) + 1;
+
+        HostedConfigurationVersion version = new HostedConfigurationVersion();
+        version.setApplicationId(appId);
+        version.setConfigurationProfileId(profileId);
+        version.setVersionNumber(nextVersion);
+        version.setContent(content);
+        version.setContentType(contentType);
+        version.setDescription(description);
+        version.setVersionLabel(versionLabel);
+
+        versionStore.put(prefix + nextVersion, version);
+        return version;
     }
 
     public DeploymentStrategy updateDeploymentStrategy(String id, Map<String, Object> request) {

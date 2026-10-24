@@ -723,6 +723,20 @@ public class StepFunctionsJsonHandler {
         return node.intValue();
     }
 
+    /** A failed item's result counts as written, as on AWS. */
+    private static void putMapRunCounts(ObjectNode counts, int total, int succeeded, int failed, boolean running) {
+        counts.put("pending", running ? total - succeeded - failed : 0);
+        counts.put("running", 0);
+        counts.put("succeeded", succeeded);
+        counts.put("failed", failed);
+        counts.put("timedOut", 0);
+        counts.put("aborted", running ? 0 : total - succeeded - failed);
+        counts.put("total", total);
+        counts.put("resultsWritten", succeeded + failed);
+        counts.put("failuresNotRedrivable", 0);
+        counts.put("pendingRedrive", 0);
+    }
+
     private Response handleTestState(JsonNode request) {
         StepFunctionsService.TestStateResult result = service.testState(
                 request.path("definition").asText(null),

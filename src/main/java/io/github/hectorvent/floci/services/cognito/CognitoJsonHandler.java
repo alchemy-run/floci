@@ -1652,6 +1652,24 @@ public class CognitoJsonHandler {
 
     private final CognitoManagedLoginBrandingService brandingService;
 
+    @Inject
+    public CognitoJsonHandler(CognitoService service, CognitoManagedLoginBrandingService brandingService,
+                              ObjectMapper objectMapper) {
+        this.service = service;
+        this.brandingService = brandingService;
+        this.objectMapper = objectMapper;
+    }
+
+    private Response brandingResponse(ManagedLoginBranding branding, boolean merged) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ObjectNode node = managedLoginBrandingToNode(branding);
+        if (merged) {
+            node.set("Settings", objectMapper.valueToTree(brandingService.mergedSettings(branding)));
+        }
+        response.set("ManagedLoginBranding", node);
+        return Response.ok(response).build();
+    }
+
     private Response handleAdminListDevices(JsonNode request) {
         List<Map<String, Object>> devices = service.adminListDevices(
                 request.path("UserPoolId").asText(),
@@ -1684,6 +1702,13 @@ public class CognitoJsonHandler {
         ObjectNode response = objectMapper.createObjectNode();
         response.set("RiskConfiguration", objectMapper.valueToTree(config));
         return Response.ok(response).build();
+    }
+
+    private Map<String, String> readStringMap(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return new HashMap<>();
+        }
+        return objectMapper.convertValue(node, new TypeReference<Map<String, String>>() {});
     }
 
     private Map<String, Object> objectMap(JsonNode node) {

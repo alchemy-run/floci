@@ -837,6 +837,26 @@ public class CloudControlService {
 
     private final Map<String, ReentrantLock> operationLocks = new ConcurrentHashMap<>();
 
+    @Inject
+    public CloudControlService(S3Service s3Service, Ec2Service ec2Service,
+                               IamService iamService, CloudFormationResourceProvisioner provisioner,
+                               ObjectMapper mapper, StorageFactory storageFactory) {
+        this(s3Service, ec2Service, iamService, provisioner, mapper,
+                storageFactory.create("cloudcontrol", "cloudcontrol-requests.json",
+                        new TypeReference<Map<String, PersistedRequest>>() {}),
+                storageFactory.create("cloudcontrol", "cloudcontrol-created.json",
+                        new TypeReference<Map<String, PersistedCreatedResource>>() {}));
+    }
+
+
+    public ProgressEvent requestStatus(String region, String accountId, String token) {
+        ProgressEvent event = requestStatus(accountId, token);
+        PersistedRequest persisted = requestStore.getForAccount(accountId, token).orElse(null);
+        if (persisted == null || !region.equals(persisted.region())) {
+            throw new AwsException("RequestTokenNotFoundException", "Request token " + token + " was not found.", 404);
+        }
+        return event;
+    }
 
     public List<ProgressEvent> listRequests(String region, String accountId, List<String> operations,
                                            List<String> statuses) {
@@ -848,10 +868,38 @@ public class CloudControlService {
                 .sorted(Comparator.comparing(ProgressEvent::requestToken)).toList();
     }
 
+    public ProgressEvent cancelRequest(String region, String accountId, String token) {
+        requestStatus(region, accountId, token);
+        ReentrantLock lock = operationLocks.get(token);
+        if (lock != null && lock.tryLock()) {
+            try {
+                ProgressEvent current = requestStatus(region, accountId, token);
+                if ("IN_PROGRESS".equals(current.operationStatus())) {
+                    return record(new ProgressEvent(current.typeName(), current.identifier(), token,
+                            current.operation(), "CANCEL_COMPLETE", "Cancelled before provisioning started.",
+                            null, accountId));
+                }
+            } finally {
+                lock.unlock();
+            }
+        }
+        throw new AwsException("ConcurrentModificationException", "The resource operation cannot be cancelled in its current state.", 400);
+    }
+
+    /**
+     * Stores a request's latest state, evicting the oldest finished tokens once the map grows past
+     * {@link #MAX_RETAINED_REQUESTS}. In-flight tokens are never evicted — a client still polling
+     * must not get RequestTokenNotFound.
+     */
+    private ProgressEvent record(String region, ProgressEvent event) {
+        persistRequest(new PersistedRequest(event, region, null, System.currentTimeMillis()));
+        return record(event);
+    }
 
     public Double eventTime(ProgressEvent event) {
         return requestStore.getForAccount(event.accountId(), event.requestToken())
                 .filter(request -> request.createdAt() > 0)
                 .map(request -> request.createdAt() / 1000.0).orElse(null);
     }
+
 }

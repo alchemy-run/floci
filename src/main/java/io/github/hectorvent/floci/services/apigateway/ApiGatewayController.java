@@ -2912,6 +2912,50 @@ public class ApiGatewayController {
         return node;
     }
 
+    @Inject
+    public ApiGatewayController(ApiGatewayService service, ApiGatewayV2Service v2Service,
+                                ApiGatewayV2OpenApiImporter v2OpenApiImporter,
+                                RegionResolver regionResolver, ObjectMapper objectMapper) {
+        this.service = service;
+        this.v2Service = v2Service;
+        this.v2OpenApiImporter = v2OpenApiImporter;
+        this.regionResolver = regionResolver;
+        this.objectMapper = objectMapper;
+    }
+
+    @POST
+    @Path("/restapis")
+    @Consumes(MediaType.WILDCARD)
+    public Response createRestApi(@Context HttpHeaders headers,
+                                  @QueryParam("mode") String mode,
+                                  String body) {
+        String region = regionResolver.resolveRegion(headers);
+        if ("import".equals(mode)) {
+            RestApi api = service.importRestApi(region, body);
+            return Response.status(201).entity(toApiNode(region, api).toString()).type(MediaType.APPLICATION_JSON).build();
+        }
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> request = objectMapper.readValue(body, Map.class);
+            RestApi api = service.createRestApi(region, request);
+            return Response.status(201).entity(toApiNode(region, api).toString()).type(MediaType.APPLICATION_JSON).build();
+        } catch (IOException e) {
+            throw new AwsException("BadRequestException", e.getMessage(), 400);
+        }
+    }
+
+    @PUT
+    @Path("/restapis/{apiId}")
+    @Consumes(MediaType.WILDCARD)
+    public Response putRestApi(@Context HttpHeaders headers,
+                               @PathParam("apiId") String apiId,
+                               @QueryParam("mode") String mode,
+                               String body) {
+        String region = regionResolver.resolveRegion(headers);
+        RestApi api = service.putRestApi(region, apiId, mode, body);
+        return Response.ok(toApiNode(region, api).toString()).type(MediaType.APPLICATION_JSON).build();
+    }
+
     @PATCH
     @Path("/usageplans/{usagePlanId}/keys/{keyId}/usage")
     public Response updateUsage(@Context HttpHeaders headers,
@@ -2989,6 +3033,77 @@ public class ApiGatewayController {
         return node;
     }
 
+    private ObjectNode toMethodNode(MethodConfig m) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("httpMethod", m.getHttpMethod());
+        node.put("authorizationType", m.getAuthorizationType());
+        node.put("apiKeyRequired", m.isApiKeyRequired());
+        if (m.getAuthorizerId() != null) node.put("authorizerId", m.getAuthorizerId());
+        if (m.getRequestValidatorId() != null) node.put("requestValidatorId", m.getRequestValidatorId());
+        if (m.getRequestParameters() != null && !m.getRequestParameters().isEmpty()) {
+            ObjectNode params = node.putObject("requestParameters");
+            m.getRequestParameters().forEach(params::put);
+        }
+        if (m.getRequestModels() != null && !m.getRequestModels().isEmpty()) {
+            ObjectNode models = objectMapper.createObjectNode();
+            m.getRequestModels().forEach(models::put);
+            node.set("requestModels", models);
+        }
+        if (m.getMethodIntegration() != null) {
+            node.set("methodIntegration", toIntegrationNode(m.getMethodIntegration()));
+        }
+        return node;
+    }
+
+    private ObjectNode toIntegrationNode(io.github.hectorvent.floci.services.apigateway.model.Integration i) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("type", i.getType());
+        node.put("httpMethod", i.getHttpMethod());
+        node.put("uri", i.getUri());
+        node.put("passthroughBehavior", i.getPassthroughBehavior());
+        if (i.getContentHandling() != null) node.put("contentHandling", i.getContentHandling());
+        if (i.getTimeoutInMillis() != null) node.put("timeoutInMillis", i.getTimeoutInMillis());
+        if (i.getConnectionType() != null) node.put("connectionType", i.getConnectionType());
+        if (i.getConnectionId() != null) node.put("connectionId", i.getConnectionId());
+        if (i.getCredentials() != null) node.put("credentials", i.getCredentials());
+        if (i.getCacheNamespace() != null) node.put("cacheNamespace", i.getCacheNamespace());
+        if (!i.getCacheKeyParameters().isEmpty()) {
+            ArrayNode keys = node.putArray("cacheKeyParameters");
+            i.getCacheKeyParameters().forEach(keys::add);
+        }
+        if (i.getTlsConfig() != null) {
+            node.putObject("tlsConfig")
+                    .put("insecureSkipVerification", i.getTlsConfig().isInsecureSkipVerification());
+        }
+        // Mapping configuration is what IaC tools diff against — omitting it read as drift.
+        if (!i.getRequestParameters().isEmpty()) {
+            ObjectNode params = node.putObject("requestParameters");
+            i.getRequestParameters().forEach(params::put);
+        }
+        if (!i.getRequestTemplates().isEmpty()) {
+            ObjectNode templates = node.putObject("requestTemplates");
+            i.getRequestTemplates().forEach(templates::put);
+        }
+        if (!i.getIntegrationResponses().isEmpty()) {
+            ObjectNode responses = node.putObject("integrationResponses");
+            i.getIntegrationResponses().forEach((status, ir) ->
+                    responses.set(status, toIntegrationResponseNode(ir)));
+        }
+        return node;
+    }
+
+    private ObjectNode toApiMappingNode(String storedPath, BasePathMapping mapping) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("apiMappingId", ApiGatewayService.apiMappingId(storedPath, mapping));
+        node.put("apiId", mapping.getRestApiId());
+        node.put("stage", mapping.getStage());
+        // v1 stores the root mapping as "(none)"; v2 expresses it as an empty key.
+        // Legacy records can report a different base path than their stored key.
+        String canonical = ApiGatewayService.canonicalBasePath(storedPath);
+        node.put("apiMappingKey", "(none)".equals(canonical) ? "" : canonical);
+        return node;
+    }
+
     /** Rejects a mapping whose API or stage does not exist, with the errors AWS gives for each. */
     private void requireApiAndStageExist(String region, String apiId, String stage) {
         try {
@@ -3006,6 +3121,28 @@ public class ApiGatewayController {
     /** Legacy records without a persisted ID retain their exact stored-path identity. */
     static String apiMappingId(String storedPath) {
         return ApiGatewayService.legacyApiMappingId(storedPath);
+    }
+
+    private ObjectNode toV2DomainNode(V2DomainName domain) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("domainName", domain.getDomainName());
+        if (domain.getDomainNameArn() != null) node.put("domainNameArn", domain.getDomainNameArn());
+        if (domain.getRoutingMode() != null) node.put("routingMode", domain.getRoutingMode());
+        if (domain.getApiMappingSelectionExpression() != null) {
+            node.put("apiMappingSelectionExpression", domain.getApiMappingSelectionExpression());
+        }
+        ArrayNode configs = node.putArray("domainNameConfigurations");
+        for (Map<String, Object> config : domain.getDomainNameConfigurations()) {
+            configs.add(objectMapper.valueToTree(config));
+        }
+        if (domain.getMutualTlsAuthentication() != null) {
+            node.set("mutualTlsAuthentication", objectMapper.valueToTree(domain.getMutualTlsAuthentication()));
+        }
+        if (domain.getTags() != null && !domain.getTags().isEmpty()) {
+            ObjectNode tags = node.putObject("tags");
+            domain.getTags().forEach(tags::put);
+        }
+        return node;
     }
 
     private ObjectNode exportOpenApi(String region, String apiId, String specification) {

@@ -288,6 +288,25 @@ public class LambdaUrlInvocationController {
 
     private final CurrentVertxRequest currentVertxRequest;
 
+    @Inject
+    public LambdaUrlInvocationController(LambdaService lambdaService, RegionResolver regionResolver,
+                                         ObjectMapper objectMapper, RequestContext requestContext,
+                                         CurrentVertxRequest currentVertxRequest) {
+        this.lambdaService = lambdaService;
+        this.regionResolver = regionResolver;
+        this.objectMapper = objectMapper;
+        this.requestContext = requestContext;
+        this.currentVertxRequest = currentVertxRequest;
+    }
+
+    @DELETE
+    @Path("/{proxy: .*}")
+    public CompletionStage<Response> handleDelete(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
+                                 @Context HttpHeaders headers, @Context UriInfo uriInfo, byte[] body) {
+        // AWS Function URLs forward DELETE request bodies to the event.
+        return invoke("DELETE", urlId, proxy, headers, uriInfo, body);
+    }
+
     /** Visible for tests: AWS SigV4 via Authorization header or query-string signing. */
     static boolean hasSigV4(HttpHeaders headers, UriInfo uriInfo) {
         String authorization = headers != null ? headers.getHeaderString("Authorization") : null;

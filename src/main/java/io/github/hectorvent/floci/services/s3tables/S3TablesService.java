@@ -381,6 +381,15 @@ public class S3TablesService {
         return ensureWarehouseLocation(bucket, tableByArn(bucket, tableArn), region);
     }
 
+    public synchronized void deleteTable(String tableBucketArn, String namespaceName, String name,
+                                         String versionToken, String region) {
+        TableBucket bucket = getTableBucket(tableBucketArn, region);
+        Namespace namespace = getNamespace(bucket, namespaceName);
+        assertCurrentToken(getTable(bucket, namespaceName, name), versionToken);
+        namespace.getTables().remove(name);
+        persist(bucket, region);
+    }
+
     public synchronized Map<String, Map<String, String>> getTableMaintenanceJobStatus(
             String tableBucketArn, String namespaceName, String name, String region) {
         TableBucket bucket = getTableBucket(tableBucketArn, region);

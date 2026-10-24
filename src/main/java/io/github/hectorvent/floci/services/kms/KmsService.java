@@ -2269,7 +2269,44 @@ public class KmsService implements ResourceProvider {
         return Set.of(new SupportedResourceType("kms:key", "kms", true));
     }
 
+    private String resolveKeyId(Map<String, String> tags) {
+        String overrideId = ReservedTags.extractOverrideKeyId(tags);
+        if (overrideId == null) {
+            return UUID.randomUUID().toString();
+        }
+
+        String normalized = overrideId.trim();
+        if (normalized.isEmpty()) {
+            throw new AwsException("TagException", "Override resource ID must not be blank.", 400);
+        }
+        if (normalized.length() > 256) {
+            throw new AwsException("TagException", "Override resource ID must be 256 characters or fewer.", 400);
+        }
+        return normalized;
+    }
+
     public record KeyRotationStatus(boolean keyRotationEnabled, Integer rotationPeriodInDays) {}
+
+    public void enableKeyRotation(String keyId, Integer rotationPeriodInDays, String region) {
+        KmsKey key = resolveKey(keyId, region);
+        validateRotationOrigin(key);
+        validateKeyIsUsableForCryptoOperations(key);
+        validateRotationKeySpec(key);
+        if (rotationPeriodInDays != null) {
+            if (rotationPeriodInDays < MIN_ROTATION_PERIOD_DAYS || rotationPeriodInDays > MAX_ROTATION_PERIOD_DAYS) {
+                throw new AwsException("ValidationException",
+                        "RotationPeriodInDays must be between " + MIN_ROTATION_PERIOD_DAYS
+                                + " and " + MAX_ROTATION_PERIOD_DAYS + ".",
+                        400);
+            }
+            key.setRotationPeriodInDays(rotationPeriodInDays);
+        } else if (key.getRotationPeriodInDays() <= 0) {
+            key.setRotationPeriodInDays(DEFAULT_ROTATION_PERIOD_DAYS);
+        }
+        key.setKeyRotationEnabled(true);
+        keyStore.put(region + "::" + key.getKeyId(), key);
+        LOG.infov("Enabled key rotation for KMS key: {0} in {1}", key.getKeyId(), region);
+    }
 
     private static final int DEFAULT_ROTATION_PERIOD_DAYS = 365;
 

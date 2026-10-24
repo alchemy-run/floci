@@ -1602,11 +1602,45 @@ public class ResourceArnBuilder {
 
     private final Instance<ResourceArnResolver> arnResolvers;
 
+    @Inject
+    public ResourceArnBuilder(ObjectMapper objectMapper, Instance<ResourceArnResolver> arnResolvers) {
+        this.objectMapper = objectMapper;
+        this.arnResolvers = arnResolvers;
+    }
+
     public String buildExecutionRoleArn(ContainerRequestContext ctx) {
         JsonNode body = readJsonBody(ctx);
         JsonNode role = body == null ? null : body.get("executionRoleArn");
         return role != null && role.isTextual() && !role.textValue().isBlank()
                 ? role.textValue() : null;
+    }
+
+    private String buildS3Arn(String path) {
+        // path: /bucket or /bucket/key
+        String stripped = path.startsWith("/") ? path.substring(1) : path;
+        if (stripped.isEmpty()) {
+            return AwsArnUtils.Arn.of("s3", "", "", "*").toString();
+        }
+        // S3VirtualHostFilter rewrites a bucket-level virtual-hosted request (GET /) to
+        // /bucket/, and the empty key after that separator is not part of the resource.
+        // A policy names the bucket as arn:aws:s3:::bucket, so the trailing slash has to
+        // go or a bucket-level ARN never matches. A key that itself ends in a slash
+        // (a folder marker such as folder/) keeps it, because there the slash is key data.
+        int firstSlash = stripped.indexOf('/');
+        if (firstSlash == stripped.length() - 1) {
+            stripped = stripped.substring(0, firstSlash);
+        }
+        return AwsArnUtils.Arn.of("s3", "", "", stripped).toString();
+    }
+
+    private String buildLambdaArn(String path, String region, String accountId) {
+        // path: /2015-03-31/functions/name or similar
+        String name = extractSegmentAfter(path, "functions");
+        if (name == null) return "*";
+        // strip qualifier if present
+        int colon = name.indexOf(':');
+        if (colon > 0) name = name.substring(0, colon);
+        return AwsArnUtils.Arn.of("lambda", region, accountId, "function:" + name).toString();
     }
 
     private String buildGuardDutyArn(ContainerRequestContext ctx, String path, String region, String accountId) {
@@ -1681,6 +1715,22 @@ public class ResourceArnBuilder {
             resource += "/sessions/" + sessionId;
         }
         return AwsArnUtils.Arn.of("emr-serverless", region, accountId, resource).toString();
+    }
+
+    private String buildSecretsManagerArn(ContainerRequestContext ctx, String region, String accountId) {
+        JsonNode json = readJsonBody(ctx);
+        if (json != null && json.isObject()) {
+            if (json.hasNonNull("SecretId")) {
+                String secretId = json.get("SecretId").asText().trim();
+                if (!secretId.isEmpty()) {
+                    String requestArn = AwsArnUtils.isArnFor(secretId, "secretsmanager")
+                            ? secretId
+                            : AwsArnUtils.Arn.of("secretsmanager", region, accountId, "secret:" + secretId).toString();
+                    return resolveStoredArn("secretsmanager", requestArn, region);
+                }
+            }
+        }
+        return AwsArnUtils.Arn.of("secretsmanager", region, accountId, "secret:*").toString();
     }
 
     /** The stored resource's real ARN when a resolver knows it, otherwise {@code requestArn}. */

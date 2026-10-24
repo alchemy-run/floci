@@ -1199,6 +1199,15 @@ public class AwsConfigService {
         return UUID.randomUUID().toString().replace("-", "").substring(0, 12);
     }
 
+    public synchronized void putConfigurationRecorder(String region, ConfigurationRecorder recorder,
+            List<Map<String, String>> requestedTags) {
+        boolean creating = !configurationRecorders.containsKey(region);
+        putConfigurationRecorder(region, recorder);
+        if (creating && requestedTags != null && !requestedTags.isEmpty()) {
+            tagResource(configurationRecorders.get(region).arn(), requestedTags);
+        }
+    }
+
     synchronized void requireRunningRecorder(String region) {
         if (!configurationRecorders.containsKey(region)
                 || !recorderRunning.getOrDefault(recorderStateKey(region), false)) {
@@ -1211,4 +1220,27 @@ public class AwsConfigService {
         return regionResolver.getAccountId() + "|" + region;
     }
 
+
+    public void tagResource(String arn, List<Map<String, String>> tagList) {
+        Map<String, String> tagMap = tags.computeIfAbsent(arn, k -> new ConcurrentHashMap<>());
+        for (Map<String, String> t : tagList) {
+            tagMap.put(t.get("Key"), t.get("Value"));
+        }
+        tags.put(arn, tagMap); // write back the in-place inner-map mutation
+    }
+
+    public void untagResource(String arn, List<String> tagKeys) {
+        Map<String, String> tagMap = tags.get(arn);
+        if (tagMap != null) {
+            tagKeys.forEach(tagMap::remove);
+            tags.put(arn, tagMap); // write back the in-place inner-map mutation
+        }
+    }
+
+    public List<Map<String, String>> listTagsForResource(String arn) {
+        Map<String, String> tagMap = tags.getOrDefault(arn, Map.of());
+        return tagMap.entrySet().stream()
+                .map(e -> Map.of("Key", e.getKey(), "Value", e.getValue()))
+                .collect(Collectors.toList());
+    }
 }

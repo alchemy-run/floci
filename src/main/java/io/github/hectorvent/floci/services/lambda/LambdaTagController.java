@@ -108,6 +108,15 @@ public class LambdaTagController {
 
     private final MicrovmImageService microvmImageService;
 
+    @Inject
+    public LambdaTagController(LambdaService lambdaService, MicrovmImageService microvmImageService,
+                               LambdaMicrovmsService microvmsService, ObjectMapper objectMapper) {
+        this.lambdaService = lambdaService;
+        this.microvmImageService = microvmImageService;
+        this.microvmsService = microvmsService;
+        this.objectMapper = objectMapper;
+    }
+
     /** {@code arn:aws:lambda:us-east-1:...} → {@code us-east-1}. */
     private static String regionFromArn(String arn) {
         String[] parts = arn.split(":");

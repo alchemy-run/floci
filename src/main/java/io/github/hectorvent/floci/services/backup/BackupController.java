@@ -609,6 +609,50 @@ public class BackupController {
     }
 
     @GET
+    @Path("/backup-vaults/")
+    public Response listBackupVaults(@Context HttpHeaders headers) {
+        String region = regionResolver.resolveRegion(headers);
+        List<BackupVault> vaults = service.listBackupVaults(region);
+        ObjectNode out = objectMapper.createObjectNode();
+        ArrayNode list = out.putArray("BackupVaultList");
+        for (BackupVault vault : vaults) {
+            ObjectNode item = objectMapper.valueToTree(vault);
+            item.remove(List.of("AccessPolicy", "SNSTopicArn", "BackupVaultEvents"));
+            list.add(item);
+        }
+        return Response.ok(out).build();
+    }
+
+    @GET
+    @Path("/backup-jobs/{backupJobId}")
+    public Response describeBackupJob(@Context HttpHeaders headers, @PathParam("backupJobId") String jobId) {
+        return Response.ok(service.describeBackupJob(jobId, regionResolver.resolveRegion(headers))).build();
+    }
+
+    @POST
+    @Path("/backup-jobs/{backupJobId}")
+    public Response stopBackupJob(@Context HttpHeaders headers, @PathParam("backupJobId") String jobId) {
+        service.stopBackupJob(jobId, regionResolver.resolveRegion(headers));
+        return Response.noContent().build();
+    }
+
+    @GET
+    @Path("/backup-jobs/")
+    public Response listBackupJobs(@Context HttpHeaders headers, @Context UriInfo uri) {
+        String region = regionResolver.resolveRegion(headers);
+        return Response.ok(service.page("BackupJobs", service.listBackupJobs(region), query(uri), region)).build();
+    }
+
+    @GET
+    @Path("/backup-vaults/{backupVaultName}/recovery-points/")
+    public Response listRecoveryPointsByBackupVault(@Context HttpHeaders headers, @Context UriInfo uri,
+                                                     @PathParam("backupVaultName") String vaultName) {
+        String region = regionResolver.resolveRegion(headers);
+        return Response.ok(service.page("RecoveryPoints", service.listRecoveryPointsByBackupVault(vaultName, region),
+                query(uri), region)).build();
+    }
+
+    @GET
     @Path("/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn: .+}/restore-metadata")
     public Response getRecoveryPointRestoreMetadata(@Context HttpHeaders headers,
                                                     @PathParam("backupVaultName") String vaultName,

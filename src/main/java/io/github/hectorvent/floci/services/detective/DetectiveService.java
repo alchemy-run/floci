@@ -198,6 +198,15 @@ public class DetectiveService implements Resettable {
 
     private final boolean cloudTrailEnabled;
 
+    @Inject
+    public DetectiveService(StorageFactory storageFactory, RegionResolver regionResolver,
+                            OrganizationsService organizationsService, CloudTrailEventService cloudTrailEvents,
+                            ObjectMapper objectMapper, EmulatorConfig config) {
+        this(storageFactory.create("detective", "detective-state.json",
+                new TypeReference<Map<String, DetectiveState>>() {}), regionResolver, organizationsService,
+                cloudTrailEvents, objectMapper, config.services().cloudtrail().enabled());
+    }
+
     public synchronized String createGraph(String region, Map<String, String> tags) {
         Map<String, String> validated = validateTags(tags);
         DetectiveState state = state(region);
@@ -488,5 +497,9 @@ public class DetectiveService implements Resettable {
 
     static AwsException unsupported(String operation) {
         return new AwsException("ValidationException", "Floci does not support Detective " + operation + ".", 400);
+    }
+
+    private static String graphArnForAccount(String accountId, String region, String id) {
+        return "arn:aws:detective:" + region + ":" + accountId + ":graph:" + id;
     }
 }

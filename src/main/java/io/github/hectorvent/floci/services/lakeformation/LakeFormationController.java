@@ -183,6 +183,16 @@ public class LakeFormationController {
 
     private final LakeFormationDataAccessService dataAccess;
 
+    @Inject
+    public LakeFormationController(LakeFormationService service, ObjectMapper mapper, RegionResolver regionResolver,
+                                   LakeFormationCatalogService catalog, LakeFormationDataAccessService dataAccess) {
+        this.service = service;
+        this.mapper = mapper;
+        this.regionResolver = regionResolver;
+        this.catalog = catalog;
+        this.dataAccess = dataAccess;
+    }
+
     @POST
     @Path("/GetDataLakePrincipal")
     public Response getDataLakePrincipal(@Context HttpHeaders headers, String body) {

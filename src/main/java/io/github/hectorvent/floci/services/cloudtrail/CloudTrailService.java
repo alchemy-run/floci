@@ -1073,4 +1073,77 @@ public class CloudTrailService {
         });
     }
 
+
+    private ObjectNode buildS3Record(S3EventInput in) {
+        ObjectNode record = mapper.createObjectNode();
+        record.put("eventVersion", EVENT_VERSION);
+        record.set("userIdentity", buildUserIdentity(in.accessKeyId()));
+        record.put("eventTime", DateTimeFormatter.ISO_INSTANT.format(
+                Instant.ofEpochMilli((in.eventTimeMillis() == 0L
+                        ? System.currentTimeMillis() : in.eventTimeMillis()))
+                        .truncatedTo(java.time.temporal.ChronoUnit.SECONDS)));
+        record.put("eventSource", S3_EVENT_SOURCE);
+        record.put("eventName", in.eventName());
+        record.put("awsRegion", in.region());
+        record.put("sourceIPAddress", in.sourceIp() == null ? "127.0.0.1" : in.sourceIp());
+        record.put("userAgent", in.userAgent() == null ? "" : in.userAgent());
+
+        if (in.errorCode() != null) {
+            record.put("errorCode", in.errorCode());
+            if (in.errorMessage() != null) {
+                record.put("errorMessage", in.errorMessage());
+            }
+        }
+
+        ObjectNode reqParams = mapper.createObjectNode();
+        if (in.bucketName() != null) reqParams.put("bucketName", in.bucketName());
+        reqParams.put("Host", in.bucketName() == null
+                ? "s3.amazonaws.com"
+                : in.bucketName() + ".s3.amazonaws.com");
+        if (in.key() != null) reqParams.put("key", in.key());
+        record.set("requestParameters", reqParams);
+        record.set("responseElements", mapper.nullNode());
+
+        ObjectNode addl = mapper.createObjectNode();
+        addl.put("SignatureVersion", "SigV4");
+        addl.put("CipherSuite", "TLS_AES_128_GCM_SHA256");
+        addl.put("bytesTransferredIn", in.bytesIn());
+        addl.put("AuthenticationMethod", "AuthHeader");
+        addl.put("bytesTransferredOut", in.bytesOut());
+        record.set("additionalEventData", addl);
+
+        record.put("requestID", UUID.randomUUID().toString().replace("-", "").substring(0, 16).toUpperCase());
+        record.put("eventID", UUID.randomUUID().toString());
+        record.put("readOnly", isReadOnlyEvent(in.eventName()));
+
+        if (in.bucketName() != null) {
+            ArrayNode resources = mapper.createArrayNode();
+            ObjectNode bucketRes = mapper.createObjectNode();
+            bucketRes.put("accountId", regionResolver.getAccountId());
+            bucketRes.put("type", "AWS::S3::Bucket");
+            bucketRes.put("ARN", "arn:aws:s3:::" + in.bucketName());
+            resources.add(bucketRes);
+            if (in.key() != null) {
+                ObjectNode objRes = mapper.createObjectNode();
+                objRes.put("type", "AWS::S3::Object");
+                objRes.put("ARN", "arn:aws:s3:::" + in.bucketName() + "/" + in.key());
+                resources.add(objRes);
+            }
+            record.set("resources", resources);
+        }
+
+        record.put("eventType", "AwsApiCall");
+        record.put("managementEvent", false);
+        record.put("eventCategory", "Data");
+
+        ObjectNode tls = mapper.createObjectNode();
+        tls.put("tlsVersion", "TLSv1.3");
+        tls.put("cipherSuite", "TLS_AES_128_GCM_SHA256");
+        tls.put("clientProvidedHostHeader", in.bucketName() == null
+                ? "s3.amazonaws.com"
+                : in.bucketName() + ".s3.amazonaws.com");
+        record.set("tlsDetails", tls);
+
+        return record;
+    }
 }

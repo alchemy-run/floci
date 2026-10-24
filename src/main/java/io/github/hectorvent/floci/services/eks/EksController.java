@@ -359,6 +359,18 @@ public class EksController {
 
     private final EksInsightsService insights;
 
+    @Inject
+    public EksController(EksService eksService, EksAccessEntryService accessEntries,
+                         EksPodIdentityAssociationService podIdentityAssociations,
+                         EksAddonService addons, EksCatalogService catalog, EksInsightsService insights) {
+        this.eksService = eksService;
+        this.accessEntries = accessEntries;
+        this.podIdentityAssociations = podIdentityAssociations;
+        this.addons = addons;
+        this.catalog = catalog;
+        this.insights = insights;
+    }
+
     @GET
     @Path("/access-policies")
     public Response listAccessPolicies(@QueryParam("maxResults") String maxResults,

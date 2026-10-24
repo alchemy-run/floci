@@ -646,6 +646,24 @@ public class EfsService implements Resettable {
 
     private final Ec2Service ec2Service;
 
+    @Inject
+    public EfsService(StorageFactory storageFactory, RegionResolver regionResolver, Ec2Service ec2Service) {
+        this.regionResolver = regionResolver;
+        this.ec2Service = ec2Service;
+        this.fileSystemStore = storageFactory.create("efs", "efs-filesystems.json",
+                new TypeReference<Map<String, FileSystem>>() {});
+        this.mountTargetStore = storageFactory.create("efs", "efs-mounttargets.json",
+                new TypeReference<Map<String, MountTarget>>() {});
+        this.accessPointStore = storageFactory.create("efs", "efs-accesspoints.json",
+                new TypeReference<Map<String, AccessPointDescription>>() {});
+        this.fileSystemPolicyStore = storageFactory.create("efs", "efs-policies.json",
+                new TypeReference<Map<String, String>>() {});
+        this.backupPolicyStore = storageFactory.create("efs", "efs-backuppolicies.json",
+                new TypeReference<Map<String, BackupPolicy>>() {});
+        this.lifecycleConfigurationStore = storageFactory.create("efs", "efs-lifecycle.json",
+                new TypeReference<Map<String, List<LifecyclePolicy>>>() {});
+    }
+
     private Subnet mountTargetSubnet(String region, String subnetId) {
         if (subnetId == null || subnetId.isBlank()) {
             throw EfsException.badRequest("SubnetId is required");

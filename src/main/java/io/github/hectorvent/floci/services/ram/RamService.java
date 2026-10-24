@@ -741,6 +741,194 @@ public class RamService {
     public record Page<T>(List<T> items, String nextToken) {}
 
     /**
+     * @param permissionArns managed permissions to attach; each must be an AWS managed permission
+     *                       or a customer managed permission the caller owns
+     * @param tags           tags applied to the share at creation
+     */
+    public ResourceShare createResourceShare(String name, List<String> principals, List<String> resourceArns,
+                                             List<String> sources, List<String> permissionArns,
+                                             Map<String, String> tags, boolean allowExternalPrincipals,
+                                             String region, String owningAccountId) {
+        requireValidArns(resourceArns);
+        requireValidArns(permissionArns);
+        for (String permissionArn : permissionArns) {
+            requirePermission(permissionArn, owningAccountId);
+        }
+        String arn = "arn:aws:ram:" + region + ":" + owningAccountId
+                + ":resource-share/" + UUID.randomUUID();
+        ResourceShare share = new ResourceShare(
+                arn, name, owningAccountId, principals, resourceArns, allowExternalPrincipals)
+                .withSources(List.copyOf(new LinkedHashSet<>(sources)))
+                .withPermissionArns(List.copyOf(new LinkedHashSet<>(permissionArns)))
+                .withTags(tags);
+        ResourceShare stored = putForOwner(share);
+        inviteAccountPrincipals(stored, principals);
+        return stored;
+    }
+
+    /** The unfiltered read: every share visible to the caller under {@code resourceOwner}. */
+    public List<ResourceShare> getResourceShares(String callerAccountId, String resourceOwner) {
+        return getResourceShares(callerAccountId, resourceOwner, null, List.of(), null);
+    }
+
+    /**
+     * @param resourceOwner {@code SELF} (shares the caller owns) or {@code OTHER-ACCOUNTS}
+     *                      (shares other accounts made visible to the caller)
+     * @param name exact share name to match, or null for any
+     * @param resourceShareArns share ARNs to restrict the result to, or empty for any
+     * @param resourceShareStatus one {@code ResourceShareStatus} value to match, or null for any
+     */
+    public List<ResourceShare> getResourceShares(String callerAccountId, String resourceOwner,
+                                                 String name, List<String> resourceShareArns,
+                                                 String resourceShareStatus) {
+        requireResourceOwner(resourceOwner);
+        requireResourceShareStatus(resourceShareStatus);
+        List<ResourceShare> result = new ArrayList<>();
+        for (ResourceShare share : allShares()) {
+            if (!isVisible(share, callerAccountId, resourceOwner)) {
+                continue;
+            }
+            if (name != null && !name.equals(share.getName())) {
+                continue;
+            }
+            if (!resourceShareArns.isEmpty() && !resourceShareArns.contains(share.getResourceShareArn())) {
+                continue;
+            }
+            if (resourceShareStatus != null && !resourceShareStatus.equals(share.getStatus())) {
+                continue;
+            }
+            result.add(share);
+        }
+        return result;
+    }
+
+    /**
+     * @param resourceShareArns restrict to invitations for these shares, or empty for any
+     * @param resourceShareInvitationArns restrict to these invitation ARNs, or empty for any
+     */
+    public List<ResourceShareInvitation> getResourceShareInvitations(String callerAccountId,
+                                                                      List<String> resourceShareArns,
+                                                                      List<String> resourceShareInvitationArns) {
+        requireValidArns(resourceShareArns);
+        requireValidArns(resourceShareInvitationArns);
+        List<ResourceShareInvitation> result = new ArrayList<>();
+        for (ResourceShareInvitation invitation : allInvitations()) {
+            // "Retrieves details about invitations that you have received": receiver only,
+            // not the sender (verified against the API reference; unlike GetResourceShares,
+            // there is no SELF/OTHER-ACCOUNTS style toggle here).
+            if (!callerAccountId.equals(invitation.receiverAccountId())) {
+                continue;
+            }
+            if (!resourceShareArns.isEmpty() && !resourceShareArns.contains(invitation.resourceShareArn())) {
+                continue;
+            }
+            if (!resourceShareInvitationArns.isEmpty()
+                    && !resourceShareInvitationArns.contains(invitation.resourceShareInvitationArn())) {
+                continue;
+            }
+            result.add(invitation);
+        }
+        return result;
+    }
+
+    public ResourceShareInvitation acceptResourceShareInvitation(String resourceShareInvitationArn,
+                                                                  String callerAccountId) {
+        return resolveInvitation(resourceShareInvitationArn, callerAccountId, "ACCEPTED");
+    }
+
+    public ResourceShareInvitation rejectResourceShareInvitation(String resourceShareInvitationArn,
+                                                                  String callerAccountId) {
+        return resolveInvitation(resourceShareInvitationArn, callerAccountId, "REJECTED");
+    }
+
+    private ResourceShareInvitation resolveInvitation(String resourceShareInvitationArn,
+                                                       String callerAccountId, String newStatus) {
+        if (!isValidArn(resourceShareInvitationArn)) {
+            throw new AwsException("MalformedArnException",
+                    "The specified Amazon Resource Name (ARN) has a format that isn't valid: "
+                            + resourceShareInvitationArn, 400);
+        }
+        // Serializes the status check against the write: two concurrent Accept calls on the
+        // same invitation must not both observe PENDING and both succeed.
+        synchronized (this) {
+            ResourceShareInvitation invitation = allInvitations().stream()
+                    .filter(i -> i.resourceShareInvitationArn().equals(resourceShareInvitationArn))
+                    .findFirst()
+                    .orElseThrow(() -> new AwsException("ResourceShareInvitationArnNotFoundException",
+                            "ResourceShareInvitation " + resourceShareInvitationArn + " does not exist.", 400));
+            // Only the invited account can act on its own invitation: the sender polls it via
+            // GetResourceShareInvitations but does not get to accept or reject on the receiver's
+            // behalf.
+            if (!callerAccountId.equals(invitation.receiverAccountId())) {
+                throw new AwsException("OperationNotPermittedException",
+                        "You do not have permission to accept or reject this invitation.", 400);
+            }
+            if ("ACCEPTED".equals(invitation.status())) {
+                throw new AwsException("ResourceShareInvitationAlreadyAcceptedException",
+                        "ResourceShareInvitation " + resourceShareInvitationArn + " has already been accepted.", 400);
+            }
+            if ("REJECTED".equals(invitation.status())) {
+                throw new AwsException("ResourceShareInvitationAlreadyRejectedException",
+                        "ResourceShareInvitation " + resourceShareInvitationArn + " has already been rejected.", 400);
+            }
+            ResourceShareInvitation updated = invitation.withStatus(newStatus);
+            putInvitation(updated);
+            return updated;
+        }
+    }
+
+    public List<SharedResource> listResources(String callerAccountId, String resourceOwner,
+                                              List<String> resourceShareArns) {
+        requireResourceOwner(resourceOwner);
+        List<SharedResource> result = new ArrayList<>();
+        for (ResourceShare share : allShares()) {
+            if (!isVisible(share, callerAccountId, resourceOwner)) {
+                continue;
+            }
+            // A deleted share stays readable via GetResourceShares (status DELETED)
+            // but its contents stop being consumable.
+            if ("DELETED".equals(share.getStatus())) {
+                continue;
+            }
+            if (!resourceShareArns.isEmpty() && !resourceShareArns.contains(share.getResourceShareArn())) {
+                continue;
+            }
+            for (String resourceArn : share.getResourceArns()) {
+                result.add(new SharedResource(resourceArn, ramResourceType(resourceArn),
+                        share.getResourceShareArn(), "AVAILABLE"));
+            }
+        }
+        return result;
+    }
+
+    public ResourceShare deleteResourceShare(String resourceShareArn, String callerAccountId) {
+        return putForOwner(
+                requireOwnedShare(resourceShareArn, callerAccountId).withStatus("DELETED"));
+    }
+
+    public ResourceShare updateResourceShare(String resourceShareArn, String name,
+                                             Boolean allowExternalPrincipals, String callerAccountId) {
+        ResourceShare share = requireOwnedShare(resourceShareArn, callerAccountId);
+        if (name != null) {
+            share = share.withName(name);
+        }
+        if (allowExternalPrincipals != null) {
+            share = share.withAllowExternalPrincipals(allowExternalPrincipals);
+        }
+        return putForOwner(share);
+    }
+
+    public ResourceShare associateResourceShare(String resourceShareArn, List<String> resourceArns,
+                                                List<String> principals, String callerAccountId) {
+        return associateResourceShare(resourceShareArn, resourceArns, principals, List.of(), callerAccountId);
+    }
+
+    public ResourceShare disassociateResourceShare(String resourceShareArn, List<String> resourceArns,
+                                                    List<String> principals, String callerAccountId) {
+        return disassociateResourceShare(resourceShareArn, resourceArns, principals, List.of(), callerAccountId);
+    }
+
+    /**
      * The owner's view of what its shares are associated with. A deleted share reports its
      * former associations as DISASSOCIATED, since deleting a share disassociates everything.
      *
@@ -1291,5 +1479,70 @@ public class RamService {
 
     private static AwsException invalidNextToken() {
         return new AwsException("InvalidNextTokenException", "The specified value for nextToken isn't valid.", 400);
+    }
+
+    /**
+     * @param resourceOwner {@code SELF} or {@code OTHER-ACCOUNTS}, same visibility rule as
+     *                      {@link #getResourceShares}
+     */
+    public List<PrincipalAssociation> listPrincipals(String callerAccountId, String resourceOwner,
+                                                      List<String> resourceShareArns) {
+        requireResourceOwner(resourceOwner);
+        List<PrincipalAssociation> result = new ArrayList<>();
+        for (ResourceShare share : allShares()) {
+            if (!isVisible(share, callerAccountId, resourceOwner)) {
+                continue;
+            }
+            // A deleted share stays readable via GetResourceShares (status DELETED)
+            // but its contents stop being consumable.
+            if ("DELETED".equals(share.getStatus())) {
+                continue;
+            }
+            if (!resourceShareArns.isEmpty() && !resourceShareArns.contains(share.getResourceShareArn())) {
+                continue;
+            }
+            for (String principal : share.getPrincipals()) {
+                result.add(new PrincipalAssociation(principal, share.getResourceShareArn(),
+                        share.getCreationTime(), share.getLastUpdatedTime(),
+                        isExternalPrincipal(share.getOwningAccountId(), principal)));
+            }
+        }
+        return result;
+    }
+
+    public void tagResource(String resourceShareArn, Map<String, String> newTags, String callerAccountId) {
+        ResourceShare share = requireOwnedShare(resourceShareArn, callerAccountId);
+        Map<String, String> merged = new LinkedHashMap<>(share.getTags());
+        merged.putAll(newTags);
+        putForOwner(share.withTags(merged));
+    }
+
+    public void untagResource(String resourceShareArn, List<String> tagKeys, String callerAccountId) {
+        ResourceShare share = requireOwnedShare(resourceShareArn, callerAccountId);
+        Map<String, String> remaining = new LinkedHashMap<>(share.getTags());
+        tagKeys.forEach(remaining::remove);
+        putForOwner(share.withTags(remaining));
+    }
+
+    /**
+     * Resolves a share the caller may mutate. A share owned by another account gets the same
+     * UnknownResourceException as one that was never created: AWS resolves a share ARN within
+     * the caller's own account, so a non-owner must not learn that the ARN exists, let alone
+     * be able to rename, retag, or delete it.
+     */
+    private ResourceShare requireOwnedShare(String resourceShareArn, String callerAccountId) {
+        return findOwnedShare(resourceShareArn, callerAccountId)
+                .orElseThrow(() -> new AwsException("UnknownResourceException",
+                        "ResourceShare " + resourceShareArn + " does not exist.", 400));
+    }
+
+    private Optional<ResourceShare> findOwnedShare(String resourceShareArn, String callerAccountId) {
+        return allShares().stream()
+                .filter(share -> share.getResourceShareArn().equals(resourceShareArn))
+                .filter(share -> share.getOwningAccountId().equals(callerAccountId))
+                // DELETED is terminal: the share stays readable via GetResourceShares for the
+                // retention window, but mutations resolve it like an ARN that never existed.
+                .filter(share -> !"DELETED".equals(share.getStatus()))
+                .findFirst();
     }
 }

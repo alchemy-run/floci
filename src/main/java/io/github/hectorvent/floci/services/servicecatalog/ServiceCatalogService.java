@@ -1592,6 +1592,26 @@ public class ServiceCatalogService {
 
     private final CloudFormationService cloudFormationService;
 
+    @Inject
+    public ServiceCatalogService(StorageFactory storageFactory, ObjectMapper objectMapper,
+                                 OrganizationsService organizationsService, CloudFormationService cloudFormationService) {
+        this.portfolioStore = storageFactory.create("servicecatalog", "servicecatalog-portfolios.json",
+                new TypeReference<Map<String, ObjectNode>>() {});
+        this.productStore = storageFactory.create("servicecatalog", "servicecatalog-products.json",
+                new TypeReference<Map<String, ObjectNode>>() {});
+        this.tagOptionStore = storageFactory.create("servicecatalog", "servicecatalog-tag-options.json",
+                new TypeReference<Map<String, ObjectNode>>() {});
+        this.associationStore = storageFactory.create("servicecatalog", "servicecatalog-associations.json",
+                new TypeReference<Map<String, ObjectNode>>() {});
+        this.shareStore = storageFactory.create("servicecatalog", "servicecatalog-shares.json",
+                new TypeReference<Map<String, ObjectNode>>() {});
+        this.provisionedProductStore = storageFactory.create("servicecatalog", "servicecatalog-provisioned-products.json",
+                new TypeReference<Map<String, ObjectNode>>() {});
+        this.objectMapper = objectMapper;
+        this.organizationsService = organizationsService;
+        this.cloudFormationService = cloudFormationService;
+    }
+
     private ObjectNode newRecord(ObjectNode product, String recordType, String status) {
         ObjectNode record = objectMapper.createObjectNode();
         record.put("Type", "RECORD");

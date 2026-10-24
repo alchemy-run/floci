@@ -398,4 +398,128 @@ public class PipesService implements TagHandler, ResourceProvider {
                             + MAX_PARALLELIZATION_FACTOR + " (got " + factor.asText() + ")", 400);
         }
     }
+
+    public Pipe createPipe(String name, String source, String target, String roleArn,
+                           String description, DesiredState desiredState, String enrichment,
+                           JsonNode sourceParameters, JsonNode targetParameters,
+                           JsonNode enrichmentParameters, Map<String, String> tags,
+                           JsonNode logConfiguration, String kmsKeyIdentifier,
+                           String region) {
+        if (name == null || name.isBlank()) {
+            throw new AwsException("ValidationException", "Name is required", 400);
+        }
+        if (source == null || source.isBlank()) {
+            throw new AwsException("ValidationException", "Source is required", 400);
+        }
+        if (target == null || target.isBlank()) {
+            throw new AwsException("ValidationException", "Target is required", 400);
+        }
+        if (roleArn == null || roleArn.isBlank()) {
+            throw new AwsException("ValidationException", "RoleArn is required", 400);
+        }
+
+        validateSourceConfiguration(source, sourceParameters);
+
+        String key = region + "::" + name;
+        if (storage.get(key).isPresent()) {
+            throw new AwsException("ConflictException",
+                    "Pipe " + name + " already exists.", 409);
+        }
+
+        String arn = regionResolver.buildArn("pipes", region, "pipe/" + name);
+        Instant now = Instant.now();
+
+        Pipe pipe = new Pipe();
+        pipe.setName(name);
+        pipe.setArn(arn);
+        pipe.setSource(source);
+        pipe.setTarget(target);
+        pipe.setRoleArn(roleArn);
+        pipe.setDescription(description);
+        DesiredState effectiveDesiredState = desiredState != null ? desiredState : DesiredState.RUNNING;
+        pipe.setDesiredState(effectiveDesiredState);
+        pipe.setCurrentState(effectiveDesiredState == DesiredState.RUNNING ? PipeState.RUNNING : PipeState.STOPPED);
+        pipe.setEnrichment(enrichment);
+        pipe.setSourceParameters(sourceParameters);
+        pipe.setTargetParameters(targetParameters);
+        pipe.setEnrichmentParameters(enrichmentParameters);
+        pipe.setTags(tags != null ? new HashMap<>(tags) : new HashMap<>());
+        pipe.setLogConfiguration(logConfiguration);
+        pipe.setKmsKeyIdentifier(kmsKeyIdentifier);
+        pipe.setCreationTime(now);
+        pipe.setLastModifiedTime(now);
+        pipe.setAccountId(regionResolver.getAccountId());
+
+        storage.put(key, pipe);
+        LOG.infov("Created pipe: {0}", name);
+
+        if (pipe.getCurrentState() == PipeState.RUNNING) {
+            poller.startPolling(pipe);
+        }
+        return pipe;
+    }
+
+    public Pipe updatePipe(String name, String target, String roleArn, String description,
+                           DesiredState desiredState, String enrichment,
+                           JsonNode sourceParameters, JsonNode targetParameters,
+                           JsonNode enrichmentParameters, JsonNode logConfiguration,
+                           String kmsKeyIdentifier, String region) {
+        return writePipeConfiguration(name, target, roleArn, description, desiredState, enrichment,
+                sourceParameters, targetParameters, enrichmentParameters, logConfiguration,
+                kmsKeyIdentifier, region, false);
+    }
+
+    /**
+     * Writes the pipe's configuration under the two meanings an unset property carries.
+     *
+     * <p>With {@code clearUnsetProperties} false, a null property leaves the pipe's value alone:
+     * that is what UpdatePipe promises its callers. With it true, a null property clears the pipe's
+     * value, which is what putting a pipe back to a configuration recorded in full needs; that
+     * configuration was accepted when it was written, so only the update path validates.
+     *
+     * <p>Validation runs on the same retrieved pipe the write then mutates, so a pipe replaced
+     * between two lookups cannot be validated as one pipe and updated as another.
+     */
+    private Pipe writePipeConfiguration(String name, String target, String roleArn, String description,
+                                        DesiredState desiredState, String enrichment,
+                                        JsonNode sourceParameters, JsonNode targetParameters,
+                                        JsonNode enrichmentParameters, JsonNode logConfiguration,
+                                        String kmsKeyIdentifier, String region, boolean clearUnsetProperties) {
+        String key = region + "::" + name;
+        Pipe pipe = storage.get(key)
+                .orElseThrow(() -> new AwsException("NotFoundException",
+                        "Pipe " + name + " does not exist.", 404));
+
+        if (!clearUnsetProperties) {
+            validateSourceConfiguration(pipe.getSource(),
+                    sourceParameters != null ? sourceParameters : pipe.getSourceParameters());
+        }
+
+        writeProperty(target, clearUnsetProperties, pipe::setTarget);
+        writeProperty(roleArn, clearUnsetProperties, pipe::setRoleArn);
+        writeProperty(description, clearUnsetProperties, pipe::setDescription);
+        writeProperty(enrichment, clearUnsetProperties, pipe::setEnrichment);
+        writeProperty(sourceParameters, clearUnsetProperties, pipe::setSourceParameters);
+        writeProperty(targetParameters, clearUnsetProperties, pipe::setTargetParameters);
+        writeProperty(enrichmentParameters, clearUnsetProperties, pipe::setEnrichmentParameters);
+        writeProperty(logConfiguration, false, pipe::setLogConfiguration);
+        writeProperty(kmsKeyIdentifier, false, pipe::setKmsKeyIdentifier);
+        // A pipe always has a desired state: createPipe defaults it to RUNNING and currentState is
+        // read off it. A null therefore leaves both alone on either path, rather than clearing a
+        // state the poller and currentState would then contradict.
+        if (desiredState != null) {
+            pipe.setDesiredState(desiredState);
+            pipe.setCurrentState(desiredState == DesiredState.RUNNING ? PipeState.RUNNING : PipeState.STOPPED);
+            if (desiredState == DesiredState.RUNNING) {
+                poller.startPolling(pipe);
+            } else {
+                poller.stopPolling(pipe);
+            }
+        }
+
+        pipe.setLastModifiedTime(Instant.now());
+        storage.put(key, pipe);
+        LOG.infov("Updated pipe: {0}", name);
+        return pipe;
+    }
 }

@@ -1137,6 +1137,26 @@ public class GuardDutyService {
 
     private final OrganizationsService organizationsService;
 
+    @Inject
+    public GuardDutyService(StorageFactory storageFactory, S3Service s3Service,
+                            OrganizationsService organizationsService) {
+        this(storageFactory.create(
+                        "guardduty",
+                        "guardduty-detectors.json",
+                        new TypeReference<Map<String, Detector>>() {
+                        }),
+                storageFactory.create(
+                        "guardduty",
+                        "guardduty-admin-accounts.json",
+                        new TypeReference<Map<String, AdminAccount>>() {
+                        }),
+                storageFactory.create(
+                        "guardduty",
+                        "guardduty-members.json",
+                        new TypeReference<Map<String, MemberAccount>>() {
+                        }), s3Service, organizationsService);
+    }
+
     public synchronized String createResource(String region, String detectorId, String kind, JsonNode request) {
         Detector detector = getDetector(region, detectorId);
         String token = request.has("clientToken") ? requireText(request, "clientToken") : null;
@@ -1934,6 +1954,12 @@ public class GuardDutyService {
 
     private static ObjectNode object() {
         return JsonNodeFactory.instance.objectNode();
+    }
+
+
+    private static String serviceRoleArn(String accountId) {
+        return "arn:aws:iam::" + accountId
+                + ":role/aws-service-role/guardduty.amazonaws.com/AWSServiceRoleForAmazonGuardDuty";
     }
 
 }

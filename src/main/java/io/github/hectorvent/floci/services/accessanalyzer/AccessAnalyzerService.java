@@ -144,7 +144,7 @@ public class AccessAnalyzerService implements Resettable {
         return tags;
     }
 
-    private static String text(JsonNode request, String field) {
+    static String text(JsonNode request, String field) {
         JsonNode node = request == null ? null : request.get(field);
         return node != null && node.isTextual() ? node.textValue() : null;
     }
@@ -153,7 +153,7 @@ public class AccessAnalyzerService implements Resettable {
         return region + "::" + analyzerName;
     }
 
-    private static AwsException validation(String message) {
+    static AwsException validation(String message) {
         return new AwsException("ValidationException", message, 400);
     }
 

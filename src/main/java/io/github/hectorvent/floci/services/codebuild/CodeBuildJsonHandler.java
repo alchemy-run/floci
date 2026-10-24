@@ -332,6 +332,11 @@ public class CodeBuildJsonHandler {
         return tags;
     }
 
+    private Response listProjects(String region) {
+        List<String> names = service.listProjects(region);
+        return Response.ok(Map.of("projects", names)).build();
+    }
+
     private Response getResourcePolicy(JsonNode req, String region, String account) {
         String policy = service.getResourcePolicy(region, account, req.path("resourceArn").asText(null));
         return Response.ok(policy == null ? Map.of() : Map.of("policy", policy)).build();
@@ -352,6 +357,10 @@ public class CodeBuildJsonHandler {
         List<String> ids = new ArrayList<>();
         req.path("ids").forEach(id -> ids.add(id.asText()));
         return Response.ok(service.batchDeleteBuilds(region, account, ids)).build();
+    }
+
+    private Response listBuilds(String region, String account) {
+        return Response.ok(Map.of("ids", service.listBuilds(region, account))).build();
     }
 
     private Response startBuildBatch(JsonNode req, String region, String account) {

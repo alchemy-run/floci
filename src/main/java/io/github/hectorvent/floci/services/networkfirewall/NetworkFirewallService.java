@@ -841,6 +841,77 @@ public class NetworkFirewallService {
 
     private final StorageBackend<String, ObjectNode> analysisReports;
 
+    public synchronized ObjectNode describeRuleGroup(JsonNode request, String region, String accountId) {
+        ObjectNode stored = requireRuleGroup(request, region, accountId);
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("UpdateToken", ensureStoredToken(ruleGroups, stored, ruleGroupArnOf(stored)));
+        if (stored.path("RuleGroup").isObject()) {
+            result.set("RuleGroup", stored.get("RuleGroup").deepCopy());
+        }
+        result.set("RuleGroupResponse", ruleGroupResponseView(stored));
+        return result;
+    }
+
+    /**
+     * UpdateRuleGroup modifies the rule group in place (ARN, id, capacity and tags are
+     * retained) and requires the caller's UpdateToken to match the current one.
+     * Description is part of the replaced definition; the optional configuration blocks
+     * are preserved when omitted.
+     */
+    public synchronized ObjectNode updateRuleGroup(JsonNode request, String region, String accountId) {
+        requireObject(request);
+        String requestedType = textOrNull(request, "Type");
+        if (requestedType != null) {
+            requireEnum(requestedType, RULE_GROUP_TYPES, "Type");
+        }
+        String token = requiredText(request, "UpdateToken");
+        ObjectNode stored = requireRuleGroup(request, region, accountId);
+        requireMatchingToken(stored, token);
+        ObjectNode current = (ObjectNode) stored.get("RuleGroupResponse");
+        String type = current.path("Type").asText("STATEFUL");
+        ObjectNode definition = ruleGroupDefinition(request, type);
+
+        ObjectNode updated = stored.deepCopy();
+        ObjectNode response = (ObjectNode) updated.get("RuleGroupResponse");
+        updated.set("RuleGroup", definition);
+        replaceOrRemove(request, response, "Description");
+        copyIfPresent(request, response, "SummaryConfiguration");
+        copyIfPresent(request, response, "SourceMetadata");
+        if (request.has("EncryptionConfiguration")) {
+            response.set("EncryptionConfiguration",
+                    encryptionConfiguration(request, response.get("EncryptionConfiguration")));
+        }
+        response.put("LastModifiedTime", nowEpochSeconds());
+        ObjectNode result = objectMapper.createObjectNode();
+        if (isDryRun(request)) {
+            result.put("UpdateToken", token);
+            result.set("RuleGroupResponse", ruleGroupResponseView(updated));
+            return result;
+        }
+        String newToken = UUID.randomUUID().toString();
+        updated.put("UpdateToken", newToken);
+        ruleGroups.put(ruleGroupArnOf(updated), updated);
+        result.put("UpdateToken", newToken);
+        result.set("RuleGroupResponse", ruleGroupResponseView(updated));
+        return result;
+    }
+
+    /** A rule group referenced by a firewall policy can't be deleted (InvalidOperationException). */
+    public synchronized ObjectNode deleteRuleGroup(JsonNode request, String region, String accountId) {
+        ObjectNode stored = requireRuleGroup(request, region, accountId);
+        String arn = ruleGroupArnOf(stored);
+        if (ruleGroupAssociations(arn) > 0) {
+            throw new AwsException("InvalidOperationException",
+                    "Unable to delete the object because it is still in use: " + arn, 400);
+        }
+        ObjectNode view = ruleGroupResponseView(stored);
+        view.put("RuleGroupStatus", "DELETING");
+        ruleGroups.delete(arn);
+        ObjectNode result = objectMapper.createObjectNode();
+        result.set("RuleGroupResponse", view);
+        return result;
+    }
+
     /**
      * Summaries are derived from the stored Suricata rules (RulesString or 5-tuple
      * StatefulRules) using the options selected in SummaryConfiguration.RuleOptions.
@@ -887,10 +958,119 @@ public class NetworkFirewallService {
         return result;
     }
 
+    public synchronized ObjectNode describeFirewallPolicy(JsonNode request, String region, String accountId) {
+        ObjectNode stored = requireFirewallPolicy(request, region, accountId);
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("UpdateToken", ensureStoredToken(firewallPolicies, stored, firewallPolicyArnOf(stored)));
+        result.set("FirewallPolicyResponse", firewallPolicyResponseView(stored));
+        if (stored.path("FirewallPolicy").isObject()) {
+            result.set("FirewallPolicy", stored.get("FirewallPolicy").deepCopy());
+        }
+        return result;
+    }
+
+    /** In-place update guarded by UpdateToken; ARN, id and tags are retained. */
+    public synchronized ObjectNode updateFirewallPolicy(JsonNode request, String region, String accountId) {
+        requireObject(request);
+        String token = requiredText(request, "UpdateToken");
+        ObjectNode stored = requireFirewallPolicy(request, region, accountId);
+        requireMatchingToken(stored, token);
+        ObjectNode definition = firewallPolicyDefinition(request);
+
+        ObjectNode updated = stored.deepCopy();
+        ObjectNode response = (ObjectNode) updated.get("FirewallPolicyResponse");
+        updated.set("FirewallPolicy", definition);
+        replaceOrRemove(request, response, "Description");
+        if (request.has("EncryptionConfiguration")) {
+            response.set("EncryptionConfiguration",
+                    encryptionConfiguration(request, response.get("EncryptionConfiguration")));
+        }
+        response.put("LastModifiedTime", nowEpochSeconds());
+        ObjectNode result = objectMapper.createObjectNode();
+        if (isDryRun(request)) {
+            result.put("UpdateToken", token);
+            result.set("FirewallPolicyResponse", firewallPolicyResponseView(updated));
+            return result;
+        }
+        String newToken = UUID.randomUUID().toString();
+        updated.put("UpdateToken", newToken);
+        firewallPolicies.put(firewallPolicyArnOf(updated), updated);
+        result.put("UpdateToken", newToken);
+        result.set("FirewallPolicyResponse", firewallPolicyResponseView(updated));
+        return result;
+    }
+
+    /** A policy still associated with a firewall can't be deleted (InvalidOperationException). */
+    public synchronized ObjectNode deleteFirewallPolicy(JsonNode request, String region, String accountId) {
+        ObjectNode stored = requireFirewallPolicy(request, region, accountId);
+        String arn = firewallPolicyArnOf(stored);
+        if (firewallPolicyAssociations(arn) > 0) {
+            throw new AwsException("InvalidOperationException",
+                    "Unable to delete the object because it is still in use: " + arn, 400);
+        }
+        ObjectNode view = firewallPolicyResponseView(stored);
+        view.put("FirewallPolicyStatus", "DELETING");
+        firewallPolicies.delete(arn);
+        ObjectNode result = objectMapper.createObjectNode();
+        result.set("FirewallPolicyResponse", view);
+        return result;
+    }
+
+    public ObjectNode listFirewallPolicies(JsonNode request) {
+        List<ObjectNode> items = firewallPolicies.scan(key -> true).stream()
+                .map(stored -> (ObjectNode) stored.path("FirewallPolicyResponse"))
+                .sorted(Comparator.comparing(response -> response.path("FirewallPolicyName").asText()))
+                .map(response -> objectMapper.createObjectNode()
+                        .put("Name", response.path("FirewallPolicyName").asText())
+                        .put("Arn", response.path("FirewallPolicyArn").asText()))
+                .toList();
+        return paginate(items, request, "FirewallPolicies");
+    }
+
     private static final int MAX_TAGS = 200;
 
+    public synchronized ObjectNode tagResource(JsonNode request) {
+        requireObject(request);
+        String arn = requiredText(request, "ResourceArn");
+        ArrayNode requested = validatedTags(request.get("Tags"), true);
+        TagTarget target = requireTagTarget(arn);
+        ArrayNode tags = target.tags();
+        for (JsonNode tag : requested) {
+            String key = tag.path("Key").asText();
+            removeTag(tags, key);
+            tags.add(tag.deepCopy());
+        }
+        if (tags.size() > MAX_TAGS) {
+            throw new AwsException("InvalidRequestException",
+                    "A resource can have at most " + MAX_TAGS + " tags.", 400);
+        }
+        target.holder().set("Tags", tags);
+        target.store().put(arn, target.stored());
+        return objectMapper.createObjectNode();
+    }
 
+    public synchronized ObjectNode untagResource(JsonNode request) {
+        requireObject(request);
+        String arn = requiredText(request, "ResourceArn");
+        ArrayNode keys = requiredArray(request, "TagKeys");
+        TagTarget target = requireTagTarget(arn);
+        ArrayNode tags = target.tags();
+        for (JsonNode key : keys) {
+            removeTag(tags, key.asText());
+        }
+        target.holder().set("Tags", tags);
+        target.store().put(arn, target.stored());
+        return objectMapper.createObjectNode();
+    }
 
+    public ObjectNode listTagsForResource(JsonNode request) {
+        requireObject(request);
+        String arn = requiredText(request, "ResourceArn");
+        TagTarget target = requireTagTarget(arn);
+        List<ObjectNode> tags = new ArrayList<>();
+        target.tags().forEach(tag -> tags.add((ObjectNode) tag));
+        return paginate(tags, request, "Tags");
+    }
 
     private static final int MAX_FLOW_FILTERS = 20;
 
@@ -947,8 +1127,66 @@ public class NetworkFirewallService {
         return response;
     }
 
+    public ObjectNode describeFlowOperation(JsonNode request) {
+        requireObject(request);
+        ObjectNode operation = requireFlowOperation(request);
+        ObjectNode response = objectMapper.createObjectNode();
+        for (String field : List.of("FirewallArn", "AvailabilityZone", "VpcEndpointAssociationArn",
+                "VpcEndpointId", "FlowOperationId", "FlowOperationType", "FlowOperationStatus",
+                "StatusMessage", "FlowRequestTimestamp", "FlowOperation")) {
+            copyIfPresent(operation, response, field);
+        }
+        return response;
+    }
 
+    public ObjectNode listFlowOperations(JsonNode request) {
+        requireObject(request);
+        ObjectNode firewall = requireFirewallByArn(request);
+        String firewallArn = firewall.path("FirewallArn").asText();
+        String type = textOrNull(request, "FlowOperationType");
+        if (type != null) {
+            requireEnum(type, FLOW_OPERATION_TYPES, "FlowOperationType");
+        }
+        String availabilityZone = textOrNull(request, "AvailabilityZone");
+        String vpcEndpointId = textOrNull(request, "VpcEndpointId");
+        String vpcEndpointAssociationArn = textOrNull(request, "VpcEndpointAssociationArn");
+        List<ObjectNode> items = new ArrayList<>();
+        flowOperations.scan(key -> true).stream()
+                .filter(operation -> firewallArn.equals(operation.path("FirewallArn").asText()))
+                .filter(operation -> type == null || type.equals(operation.path("FlowOperationType").asText()))
+                .filter(operation -> availabilityZone == null
+                        || availabilityZone.equals(operation.path("AvailabilityZone").asText(null)))
+                .filter(operation -> vpcEndpointId == null
+                        || vpcEndpointId.equals(operation.path("VpcEndpointId").asText(null)))
+                .filter(operation -> vpcEndpointAssociationArn == null
+                        || vpcEndpointAssociationArn.equals(operation.path("VpcEndpointAssociationArn").asText(null)))
+                .sorted(Comparator.comparingLong((ObjectNode operation) ->
+                                operation.path("FlowRequestTimestamp").asLong()).reversed()
+                        .thenComparing(operation -> operation.path("FlowOperationId").asText()))
+                .forEach(operation -> {
+                    ObjectNode metadata = objectMapper.createObjectNode();
+                    metadata.put("FlowOperationId", operation.path("FlowOperationId").asText());
+                    metadata.put("FlowOperationType", operation.path("FlowOperationType").asText());
+                    metadata.set("FlowRequestTimestamp", operation.path("FlowRequestTimestamp").deepCopy());
+                    metadata.put("FlowOperationStatus", operation.path("FlowOperationStatus").asText());
+                    items.add(metadata);
+                });
+        return paginate(items, request, "FlowOperations");
+    }
 
+    public ObjectNode listFlowOperationResults(JsonNode request) {
+        requireObject(request);
+        ObjectNode operation = requireFlowOperation(request);
+        List<ObjectNode> flows = new ArrayList<>();
+        operation.path("Flows").forEach(flow -> flows.add((ObjectNode) flow));
+        ObjectNode response = paginate(flows, request, "Flows");
+        for (String field : List.of("FirewallArn", "AvailabilityZone", "VpcEndpointAssociationArn",
+                "VpcEndpointId", "FlowOperationId", "FlowOperationStatus", "StatusMessage",
+                "FlowRequestTimestamp")) {
+            copyIfPresent(operation, response, field);
+        }
+        return response;
+    }
 
     private ObjectNode requireFirewallByArn(JsonNode request) {
         String firewallArn = requiredText(request, "FirewallArn");
@@ -1061,8 +1299,76 @@ public class NetworkFirewallService {
         return true;
     }
 
+    /**
+     * A report can only be generated for an analysis type enabled on the firewall through
+     * UpdateFirewallAnalysisSettings. Floci carries no traffic through a firewall, so a report
+     * completes immediately with no findings.
+     */
+    public synchronized ObjectNode startAnalysisReport(JsonNode request) {
+        requireObject(request);
+        ObjectNode firewall = require(firewalls, textOrNull(request, "FirewallArn"),
+                textOrNull(request, "FirewallName"), "Firewall", "FirewallArn", "FirewallName");
+        String analysisType = requiredText(request, "AnalysisType");
+        requireEnum(analysisType, ANALYSIS_TYPES, "AnalysisType");
+        if (!containsText(firewall.path("EnabledAnalysisTypes"), analysisType)) {
+            throw new AwsException("InvalidRequestException",
+                    "Analysis type " + analysisType + " is not enabled for firewall "
+                            + firewall.path("FirewallArn").asText() + ".", 400);
+        }
+        long now = nowEpochSeconds();
+        String reportId = UUID.randomUUID().toString();
+        ObjectNode report = objectMapper.createObjectNode();
+        report.put("AnalysisReportId", reportId);
+        report.put("FirewallArn", firewall.path("FirewallArn").asText());
+        report.put("AnalysisType", analysisType);
+        report.put("Status", "COMPLETED");
+        report.put("ReportTime", now);
+        report.put("StartTime", now - Duration.ofDays(30).toSeconds());
+        report.put("EndTime", now);
+        report.putArray("AnalysisReportResults");
+        analysisReports.put(reportId, report);
+        return objectMapper.createObjectNode().put("AnalysisReportId", reportId);
+    }
 
+    public ObjectNode listAnalysisReports(JsonNode request) {
+        requireObject(request);
+        ObjectNode firewall = require(firewalls, textOrNull(request, "FirewallArn"),
+                textOrNull(request, "FirewallName"), "Firewall", "FirewallArn", "FirewallName");
+        String firewallArn = firewall.path("FirewallArn").asText();
+        List<ObjectNode> items = new ArrayList<>();
+        analysisReports.scan(key -> true).stream()
+                .filter(report -> firewallArn.equals(report.path("FirewallArn").asText()))
+                .sorted(Comparator.comparingLong((ObjectNode report) -> report.path("ReportTime").asLong())
+                        .reversed()
+                        .thenComparing(report -> report.path("AnalysisReportId").asText()))
+                .forEach(report -> {
+                    ObjectNode summary = objectMapper.createObjectNode();
+                    for (String field : List.of("AnalysisReportId", "AnalysisType", "ReportTime", "Status")) {
+                        copyIfPresent(report, summary, field);
+                    }
+                    items.add(summary);
+                });
+        return paginate(items, request, "AnalysisReports");
+    }
 
+    public ObjectNode getAnalysisReportResults(JsonNode request) {
+        requireObject(request);
+        ObjectNode firewall = require(firewalls, textOrNull(request, "FirewallArn"),
+                textOrNull(request, "FirewallName"), "Firewall", "FirewallArn", "FirewallName");
+        String reportId = requiredText(request, "AnalysisReportId");
+        ObjectNode report = analysisReports.get(reportId).orElse(null);
+        if (report == null
+                || !firewall.path("FirewallArn").asText().equals(report.path("FirewallArn").asText())) {
+            throw notFound("Analysis report", reportId);
+        }
+        List<ObjectNode> results = new ArrayList<>();
+        report.path("AnalysisReportResults").forEach(result -> results.add((ObjectNode) result));
+        ObjectNode response = paginate(results, request, "AnalysisReportResults");
+        for (String field : List.of("Status", "StartTime", "EndTime", "ReportTime", "AnalysisType")) {
+            copyIfPresent(report, response, field);
+        }
+        return response;
+    }
 
     private static boolean containsText(JsonNode array, String expected) {
         for (JsonNode value : array) {
@@ -1475,5 +1781,23 @@ public class NetworkFirewallService {
 
     private static long nowEpochSeconds() {
         return Instant.now().getEpochSecond();
+    }
+
+    private static void requireObject(JsonNode request) {
+        if (request == null || !request.isObject()) {
+            throw new AwsException("InvalidRequestException", "A JSON request object is required.", 400);
+        }
+    }
+
+    /**
+     * The model enumerates {@code Type} as STATELESS, STATEFUL or STATEFUL_DOMAIN, and the value is
+     * both persisted and folded into the ARN. Only STATELESS gets the stateless ARN prefix; the two
+     * stateful variants share {@code stateful-rulegroup}, as AWS does. Left unchecked, any unmodelled
+     * value silently fell through to the stateful prefix and was stored as a rule group AWS would
+     * have rejected.
+     */
+    private static String ruleGroupArn(String region, String accountId, String type, String name) {
+        String prefix = "STATELESS".equals(type) ? "stateless-rulegroup" : "stateful-rulegroup";
+        return arn(region, accountId, prefix, name);
     }
 }

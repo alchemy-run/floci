@@ -2402,4 +2402,55 @@ final class CognitoAuthFlowHandler {
     private String regionForPool(UserPool pool) {
         return AwsArnUtils.regionOrDefault(pool.getArn(), regionResolver.getDefaultRegion());
     }
+
+    /**
+     * Fires the CustomMessage trigger, if configured, so the function can override the
+     * subject/body Cognito would otherwise deliver. Non-blocking: an unconfigured or
+     * failing trigger falls back to the pool's default templated message, mirroring how
+     * {@link #firePostAuthentication} and {@link #firePostConfirmation} tolerate errors.
+     */
+    Map<String, Object> fireCustomMessage(UserPool pool, UserPoolClient client, CognitoUser user,
+                                           String triggerSource) {
+        Map<String, Object> req = new HashMap<>();
+        req.put("codeParameter", CUSTOM_MESSAGE_CODE_PARAMETER);
+        req.put("usernameParameter", user.getUsername());
+        req.put("clientMetadata", Map.of());
+        TriggerResult result = invokeTrigger(pool, client, user, "CustomMessage", triggerSource, req);
+        if (!result.configured()) return null;
+        if (result.errored()) {
+            LOG.warnv("CustomMessage trigger failed for pool {0} (source {1}): {2}",
+                    pool.getId(), triggerSource, result.errorMessage());
+            return null;
+        }
+        return result.response();
+    }
+
+    private CognitoService.ClaimsOverride firePreTokenGeneration(UserPool pool, UserPoolClient client, CognitoUser user,
+                                                                  Map<String, String> clientMetadata, String triggerSource) {
+        Map<String, Object> req = new HashMap<>();
+        req.put("groupConfiguration", buildGroupConfiguration(user));
+        req.put("clientMetadata", clientMetadata == null ? Map.of() : clientMetadata);
+        // V2 lambdas (CognitoEventUserPoolsPreTokenGenV2) require `scopes` to deserialize.
+        // V1 lambdas tolerate the extra field.
+        req.put("scopes", List.of());
+        TriggerResult result = invokeTrigger(pool, client, user, "PreTokenGeneration", triggerSource, req);
+        if (!result.configured() || result.errored()) return null;
+
+        Map<String, Object> response = result.response();
+        if (response == null) return null;
+
+        // V2 response: claimsAndScopeOverrideDetails { idTokenGeneration, accessTokenGeneration, groupOverrideDetails }
+        if (response.get("claimsAndScopeOverrideDetails") instanceof Map<?, ?> v2) {
+            return parseV2Override(v2);
+        }
+        // V1 response: claimsOverrideDetails { claimsToAddOrOverride, claimsToSuppress, groupOverrideDetails }
+        if (response.get("claimsOverrideDetails") instanceof Map<?, ?> v1) {
+            return parseV1Override(v1);
+        }
+        return null;
+    }
+
+    CognitoService.ClaimsOverride preTokenGenerationForRefresh(UserPool pool, UserPoolClient client, CognitoUser user) {
+        return firePreTokenGeneration(pool, client, user, Map.of(), "TokenGeneration_RefreshTokens");
+    }
 }

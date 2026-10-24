@@ -82,6 +82,16 @@ public class DynamoDbJsonHandler {
 
     private final Object importLock = new Object();
 
+    @Inject
+    public DynamoDbJsonHandler(DynamoDbService dynamoDbService, DynamoDbStreamService dynamoDbStreamService,
+                               KinesisService kinesisService, ObjectMapper objectMapper) {
+        this.dynamoDbService = dynamoDbService;
+        this.dynamoDbStreamService = dynamoDbStreamService;
+        this.kinesisService = kinesisService;
+        this.objectMapper = objectMapper;
+        this.partiQLHandler = new DynamoDbPartiQLHandler(dynamoDbService, objectMapper);
+    }
+
     private Response handleCreateTable(JsonNode request, String region) {
         var table = createTableFromSpec(request, region, "ACTIVE");
 
@@ -1476,20 +1486,6 @@ public class DynamoDbJsonHandler {
         return (indexName == null || indexName.isBlank()) ? null : indexName;
     }
 
-    private Response handleUpdateContributorInsights(JsonNode request, String region) {
-        String tableName = request.path("TableName").asText();
-        String indexName = optionalIndexName(request);
-        String action = request.path("ContributorInsightsAction").asText(null);
-        String status = dynamoDbService.updateContributorInsights(tableName, indexName, action, region);
-
-        ObjectNode response = objectMapper.createObjectNode();
-        response.put("TableName", tableName);
-        if (indexName != null) {
-            response.put("IndexName", indexName);
-        }
-        response.put("ContributorInsightsStatus", status);
-        return Response.ok(response).build();
-    }
 
     private Response handleDescribeContributorInsights(JsonNode request, String region) {
         String tableName = request.path("TableName").asText();
@@ -2191,7 +2187,19 @@ public class DynamoDbJsonHandler {
         return Response.ok(response).build();
     }
 
+    private Response handleDescribeBackup(JsonNode request, String region) {
+        TableBackup backup = dynamoDbService.describeBackup(request.path("BackupArn").asText());
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("BackupDescription", backupDescriptionNode(backup));
+        return Response.ok(response).build();
+    }
 
+    private Response handleDeleteBackup(JsonNode request, String region) {
+        TableBackup backup = dynamoDbService.deleteBackup(request.path("BackupArn").asText());
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("BackupDescription", backupDescriptionNode(backup));
+        return Response.ok(response).build();
+    }
 
 
 
@@ -2221,7 +2229,29 @@ public class DynamoDbJsonHandler {
         return details;
     }
 
+    private ObjectNode backupDescriptionNode(TableBackup backup) {
+        ObjectNode description = objectMapper.createObjectNode();
+        description.set("BackupDetails", backupDetailsNode(backup));
+        ObjectNode source = objectMapper.createObjectNode();
+        source.put("TableName", backup.getTableName());
+        source.put("TableId", backup.getTableId());
+        source.put("TableArn", backup.getTableArn());
+        description.set("SourceTableDetails", source);
+        return description;
+    }
 
+    private Response handleExportTable(JsonNode request, String region) {
+        Map<String, Object> params = new java.util.HashMap<>();
+        request.fields().forEachRemaining(e -> params.put(e.getKey(), e.getValue().isTextual()
+                ? e.getValue().asText() : e.getValue()));
+
+        io.github.hectorvent.floci.services.dynamodb.model.ExportDescription desc =
+                dynamoDbService.exportTable(params, region);
+
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("ExportDescription", objectMapper.valueToTree(desc));
+        return Response.ok(response).build();
+    }
 
     private Response handleDescribeExport(JsonNode request, String region) {
         String exportArn = request.path("ExportArn").asText();

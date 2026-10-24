@@ -355,6 +355,19 @@ public class AmazonMqService implements ResourceProvider {
 
     private final Set<String> rebootsInFlight = ConcurrentHashMap.newKeySet();
 
+    @Inject
+    public AmazonMqService(StorageFactory storageFactory, EmulatorConfig config,
+                           RegionResolver regionResolver, RabbitMqManager rabbitMqManager,
+                           ActiveMqManager activeMqManager, AmazonMqConfigurationService configurations) {
+        this.storage = storageFactory.create("amazonmq", "amazonmq-brokers.json",
+                new TypeReference<Map<String, Broker>>() {});
+        this.config = config;
+        this.regionResolver = regionResolver;
+        this.rabbitMqManager = rabbitMqManager;
+        this.activeMqManager = activeMqManager;
+        this.configurations = configurations;
+    }
+
     private static String canonicalEngine(String engineType) {
         String upper = engineType == null ? "" : engineType.toUpperCase(Locale.ROOT);
         if (!ENGINE_RABBITMQ.equals(upper) && !ENGINE_ACTIVEMQ.equals(upper)) {

@@ -1133,6 +1133,17 @@ public class Route53Service implements Resettable {
         }
     }
 
+    public CreateZoneResult createHostedZone(String name, String callerReference, String comment,
+                                              boolean privateZone, String vpcId, String vpcRegion) {
+        if (privateZone && (vpcId == null || vpcId.isBlank())) {
+            throw new AwsException("InvalidInput",
+                    "A VPC is required when creating a private hosted zone.", 400);
+        }
+        VpcAssociation vpc = vpcId == null || vpcId.isBlank() ? null
+                : new VpcAssociation(vpcId, vpcRegion != null ? vpcRegion : "us-east-1");
+        return createHostedZone(name, callerReference, comment, vpc);
+    }
+
     public QueryLoggingConfig createQueryLoggingConfig(String hostedZoneId, String logGroupArn) {
         HostedZone zone = getHostedZone(hostedZoneId);
         for (QueryLoggingConfig existing : queryLogStore.scan(k -> true)) {
@@ -1186,6 +1197,59 @@ public class Route53Service implements Resettable {
                 : match.getRecords().stream().map(ResourceRecord::getValue).toList();
         return new DnsAnswer(match.getName(), match.getType(),
                 match.getTtl() != null ? match.getTtl() : 0L, values);
+    }
+
+    /**
+     * AWS {@code ListHostedZonesByName} order: labels reversed, then
+     * lexicographic (so {@code example.com.} sorts as {@code com.example}).
+     * Pagination starts at {@code dnsName} (inclusive). Same-name public zones
+     * sort before private so {@code MaxItems=1} exact lookups used by Alchemy
+     * ECS domain wiring and HostedZone adoption return the public zone.
+     */
+    public List<HostedZone> listHostedZonesByName(String dnsName, String hostedZoneId, int maxItems) {
+        List<HostedZone> all = new ArrayList<>(zoneStore.scan(k -> true));
+        for (HostedZone zone : all) {
+            zone.setName(normalizeName(zone.getName()));
+            zone.setResourceRecordSetCount(recordCount(zone.getId()));
+        }
+        all.sort(hostedZoneByNameOrder());
+
+        if (dnsName != null && !dnsName.isEmpty()) {
+            String normalized = normalizeName(dnsName);
+            int start = 0;
+            while (start < all.size() && compareDnsNames(all.get(start).getName(), normalized) < 0) {
+                start++;
+            }
+            all = new ArrayList<>(all.subList(start, all.size()));
+        }
+        if (hostedZoneId != null && !hostedZoneId.isEmpty()) {
+            String id = normalizeZoneId(hostedZoneId);
+            int idx = 0;
+            for (int i = 0; i < all.size(); i++) {
+                if (id.equals(all.get(i).getId())) {
+                    idx = i;
+                    break;
+                }
+            }
+            all = new ArrayList<>(all.subList(idx, all.size()));
+        }
+        if (maxItems > 0 && all.size() > maxItems) {
+            return all.subList(0, maxItems);
+        }
+        return all;
+    }
+
+    public synchronized HealthCheck createHealthCheck(String callerReference, HealthCheckConfig cfg) {
+        for (HealthCheck existing : healthCheckStore.scan(k -> true)) {
+            if (existing.getCallerReference().equals(callerReference)) {
+                throw new AwsException("HealthCheckAlreadyExists",
+                        "A health check with caller reference " + callerReference + " already exists.", 409);
+            }
+        }
+        String id = UUID.randomUUID().toString();
+        HealthCheck hc = new HealthCheck(id, callerReference, cfg);
+        healthCheckStore.put(id, hc);
+        return hc;
     }
 
     /**

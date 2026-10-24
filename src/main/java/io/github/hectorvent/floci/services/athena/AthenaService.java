@@ -1134,6 +1134,52 @@ public class AthenaService {
 
     private final ConcurrentHashMap<String, ResultSet> queryResults = new ConcurrentHashMap<>();
 
+    @Inject
+    public AthenaService(StorageFactory storageFactory,
+                         FlociDuckClient duckClient,
+                         GlueService glueService,
+                         S3Service s3Service,
+                         EmulatorConfig config,
+                         Vertx vertx,
+                         RegionResolver regionResolver,
+                         EventBridgeService eventBridgeService,
+                         ObjectMapper objectMapper,
+                         GlueViewDdlBuilder ddlBuilder) {
+        this.queryStore = storageFactory.create("athena", "queries.json",
+                new TypeReference<>() {});
+        this.workGroupStore = storageFactory.create("athena", "workgroups.json",
+                new TypeReference<>() {});
+        this.dataCatalogStore = storageFactory.create("athena", "datacatalogs.json",
+                new TypeReference<>() {});
+        this.namedQueryStore = storageFactory.create("athena", "named_queries.json",
+                new TypeReference<>() {});
+        this.preparedStatementStore = storageFactory.create("athena", "prepared_statements.json",
+                new TypeReference<>() {});
+        this.duckClient = duckClient;
+        this.glueService = glueService;
+        this.s3Service = s3Service;
+        this.config = config;
+        this.vertx = vertx;
+        this.regionResolver = regionResolver;
+        this.eventBridgeService = eventBridgeService;
+        this.objectMapper = objectMapper;
+        this.ddlBuilder = ddlBuilder;
+    }
+
+    public void deleteWorkGroup(String name, String region, boolean recursive) {
+        if (recursive) {
+            namedQueryStore.scan(k -> true).stream()
+                    .filter(q -> name.equals(q.getWorkGroup()))
+                    .map(NamedQuery::getNamedQueryId)
+                    .forEach(namedQueryStore::delete);
+            preparedStatementStore.scan(k -> true).stream()
+                    .filter(s -> name.equals(s.getWorkGroupName()))
+                    .map(s -> preparedStatementKey(s.getWorkGroupName(), s.getStatementName()))
+                    .forEach(preparedStatementStore::delete);
+        }
+        workGroupStore.delete(workGroupKey(region, name));
+    }
+
     public Map<String, Object> getDatabase(String catalog, String name) {
         Database database = glueService.getDatabase(name);
         Map<String, Object> detail = new LinkedHashMap<>();

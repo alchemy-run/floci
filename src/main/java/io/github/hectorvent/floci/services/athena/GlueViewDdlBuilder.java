@@ -145,6 +145,12 @@ public class GlueViewDdlBuilder {
 
     private final S3Service s3Service;
 
+    @Inject
+    public GlueViewDdlBuilder(GlueService glueService, S3Service s3Service) {
+        this.glueService = glueService;
+        this.s3Service = s3Service;
+    }
+
 
     /**
      * Projects the columns the catalog declares, rather than whatever the underlying files spell.

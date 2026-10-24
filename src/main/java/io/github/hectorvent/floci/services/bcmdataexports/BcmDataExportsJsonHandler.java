@@ -329,6 +329,12 @@ public class BcmDataExportsJsonHandler {
         return (value != null && !value.isNull()) ? value.asText() : null;
     }
 
+    private Response handleList(JsonNode request) {
+        List<ObjectNode> exports = service.listExports().stream()
+                .sorted(Comparator.comparing(Export::getExportArn)).map(this::serializeExportReference).toList();
+        return page(request, objectMapper.createObjectNode(), "Exports", exports);
+    }
+
     private Response handleListTags(JsonNode request) {
         ObjectNode response = objectMapper.createObjectNode();
         List<ObjectNode> tags = service.listTagsForResource(stringOrNull(request, "ResourceArn"))

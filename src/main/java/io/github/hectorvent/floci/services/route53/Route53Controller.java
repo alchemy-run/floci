@@ -949,6 +949,9 @@ public class Route53Controller {
             boolean inResourceRecords = false;
             boolean inAlias = false;
             boolean inHealthCheckConfig = false;
+            boolean inGeo = false;
+            boolean inCidr = false;
+            boolean inGeoProx = false;
 
             while (r.hasNext()) {
                 int event = r.next();
@@ -987,12 +990,9 @@ public class Route53Controller {
                                 currentAlias = new AliasTarget();
                             }
                         }
-                        case "GeoProximityLocation" -> inGeoProx = false;
-                        case "CidrRoutingConfig" -> inCidr = false;
-                        case "GeoLocation" -> inGeo = false;
-                        case "GeoProximityLocation" -> { if (inRrs) inGeoProx = true; }
-                        case "CidrRoutingConfig" -> { if (inRrs) inCidr = true; }
                         case "GeoLocation" -> { if (inRrs) inGeo = true; }
+                        case "CidrRoutingConfig" -> { if (inRrs) inCidr = true; }
+                        case "GeoProximityLocation" -> { if (inRrs) inGeoProx = true; }
                         case "Name" -> {
                             if (inRrs && !inAlias) {
                                 String n = r.getElementText();
@@ -1060,34 +1060,34 @@ public class Route53Controller {
                                         "true".equalsIgnoreCase(r.getElementText()));
                             }
                         }
-                        case "Bias" -> {
-                            if (inGeoProx && currentRrs != null) {
-                                try { currentRrs.setGeoProximityBias(Integer.parseInt(r.getElementText())); }
-                                catch (NumberFormatException ignored) {}
-                            }
+                        case "ContinentCode" -> {
+                            if (inGeo && currentRrs != null) currentRrs.setGeoContinentCode(r.getElementText());
+                        }
+                        case "CountryCode" -> {
+                            if (inGeo && currentRrs != null) currentRrs.setGeoCountryCode(r.getElementText());
+                        }
+                        case "SubdivisionCode" -> {
+                            if (inGeo && currentRrs != null) currentRrs.setGeoSubdivisionCode(r.getElementText());
+                        }
+                        case "CollectionId" -> {
+                            if (inCidr && currentRrs != null) currentRrs.setCidrCollectionId(r.getElementText());
+                        }
+                        case "LocationName" -> {
+                            if (inCidr && currentRrs != null) currentRrs.setCidrLocationName(r.getElementText());
+                        }
+                        case "AWSRegion" -> {
+                            if (inGeoProx && currentRrs != null) currentRrs.setGeoProximityAwsRegion(r.getElementText());
                         }
                         case "LocalZoneGroup" -> {
                             if (inGeoProx && currentRrs != null) {
                                 currentRrs.setGeoProximityLocalZoneGroup(r.getElementText());
                             }
                         }
-                        case "AWSRegion" -> {
-                            if (inGeoProx && currentRrs != null) currentRrs.setGeoProximityAwsRegion(r.getElementText());
-                        }
-                        case "LocationName" -> {
-                            if (inCidr && currentRrs != null) currentRrs.setCidrLocationName(r.getElementText());
-                        }
-                        case "CollectionId" -> {
-                            if (inCidr && currentRrs != null) currentRrs.setCidrCollectionId(r.getElementText());
-                        }
-                        case "SubdivisionCode" -> {
-                            if (inGeo && currentRrs != null) currentRrs.setGeoSubdivisionCode(r.getElementText());
-                        }
-                        case "CountryCode" -> {
-                            if (inGeo && currentRrs != null) currentRrs.setGeoCountryCode(r.getElementText());
-                        }
-                        case "ContinentCode" -> {
-                            if (inGeo && currentRrs != null) currentRrs.setGeoContinentCode(r.getElementText());
+                        case "Bias" -> {
+                            if (inGeoProx && currentRrs != null) {
+                                try { currentRrs.setGeoProximityBias(Integer.parseInt(r.getElementText())); }
+                                catch (NumberFormatException ignored) {}
+                            }
                         }
                     }
                 } else if (event == XMLStreamConstants.END_ELEMENT) {
@@ -1100,6 +1100,9 @@ public class Route53Controller {
                             inAlias = false;
                             currentAlias = null;
                         }
+                        case "GeoLocation" -> inGeo = false;
+                        case "CidrRoutingConfig" -> inCidr = false;
+                        case "GeoProximityLocation" -> inGeoProx = false;
                         case "ResourceRecordSet" -> {
                             if (inRrs && currentRrs != null) {
                                 if (currentRrs.getName() == null || currentRrs.getType() == null) {
@@ -1253,6 +1256,45 @@ public class Route53Controller {
             "cn-north-1", "cn-northwest-1",
             "af-south-1", "eu-south-1", "eu-south-2",
             "il-central-1", "mx-central-1");
+
+    @GET
+    @Path("/hostedzonesbyname")
+    public Response listHostedZonesByName(@Context UriInfo uriInfo) {
+        try {
+            String dnsName = queryParam(uriInfo, "dnsname", "DNSName", "dnsName");
+            String hostedZoneId = queryParam(uriInfo, "hostedzoneid", "HostedZoneId", "hostedZoneId");
+            int maxItems = queryInt(uriInfo, 100, "maxitems", "MaxItems", "maxItems");
+            List<HostedZone> fetched = service.listHostedZonesByName(dnsName, hostedZoneId, maxItems + 1);
+            boolean truncated = fetched.size() > maxItems;
+            List<HostedZone> zones = truncated ? fetched.subList(0, maxItems) : fetched;
+
+            XmlBuilder xml = new XmlBuilder()
+                    .start("ListHostedZonesByNameResponse", NS)
+                    .start("HostedZones");
+            for (HostedZone zone : zones) {
+                xml.raw(xmlHostedZone(zone));
+            }
+            xml.end("HostedZones")
+               .elem("IsTruncated", String.valueOf(truncated))
+               .elem("MaxItems", String.valueOf(maxItems));
+            if (dnsName != null && !dnsName.isEmpty()) {
+                xml.elem("DNSName", dnsName);
+            }
+            if (hostedZoneId != null && !hostedZoneId.isEmpty()) {
+                xml.elem("HostedZoneId", hostedZoneId);
+            }
+            if (truncated && !zones.isEmpty()) {
+                HostedZone next = fetched.get(maxItems);
+                xml.elem("NextDNSName", next.getName())
+                   .elem("NextHostedZoneId", next.getId());
+            }
+            xml.end("ListHostedZonesByNameResponse");
+
+            return Response.ok(xml.build(), XML).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
 
     @POST
     @Path("/queryloggingconfig")

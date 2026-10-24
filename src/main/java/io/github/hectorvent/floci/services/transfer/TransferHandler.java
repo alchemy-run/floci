@@ -444,6 +444,14 @@ public class TransferHandler {
 
     private final TransferIdentityProviderTester identityProviderTester;
 
+    @Inject
+    public TransferHandler(TransferService service, TransferIdentityProviderTester identityProviderTester,
+                           ObjectMapper objectMapper) {
+        this.service = service;
+        this.identityProviderTester = identityProviderTester;
+        this.objectMapper = objectMapper;
+    }
+
     private Response testIdentityProvider(JsonNode req, String region) {
         return Response.ok(identityProviderTester.testIdentityProvider(
                 textOrNull(req, "ServerId"),

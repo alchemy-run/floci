@@ -422,4 +422,20 @@ public class DetectiveController {
         }
         return result;
     }
+
+    private ObjectNode memberNode(String graphArn, String administratorId, DetectiveMember member) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("AccountId", member.getAccountId());
+        if (member.getEmailAddress() != null) {
+            node.put("EmailAddress", member.getEmailAddress());
+        }
+        node.put("Status", member.getStatus());
+        node.put("GraphArn", graphArn);
+        node.put("AdministratorId", administratorId);
+        node.put("InvitationType", member.getInvitationType());
+        if (member.getInvitedTime() != null) {
+            node.put("InvitedTime", member.getInvitedTime());
+        }
+        return node;
+    }
 }

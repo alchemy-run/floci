@@ -322,6 +322,50 @@ public class AppIntegrationsController {
     }
 
     @GET
+    @Path("/eventIntegrations")
+    public Response listEventIntegrations(@Context HttpHeaders headers,
+                                         @QueryParam("maxResults") String maxResults,
+                                         @QueryParam("nextToken") String nextToken) {
+        return page("EventIntegrations", appIntegrationsService.listEventIntegrations(regionResolver.resolveRegion(headers)),
+                EventIntegration::getName, this::eventIntegrationNode, maxResults, nextToken);
+    }
+
+    /**
+     * Associations are created by the consuming service (Amazon Connect and friends)
+     * when it binds a client to the integration. Floci has no path that creates one, so
+     * an existing integration always reports an empty list; a missing one still raises
+     * ResourceNotFoundException.
+     */
+    @GET
+    @Path("/eventIntegrations/{name}/associations")
+    public Response listEventIntegrationAssociations(@PathParam("name") String name,
+                                                     @Context HttpHeaders headers,
+                                                     @QueryParam("maxResults") String maxResults,
+                                                     @QueryParam("nextToken") String nextToken) {
+        appIntegrationsService.getEventIntegration(name, regionResolver.resolveRegion(headers));
+        return page("EventIntegrationAssociations", List.<ObjectNode>of(),
+                association -> association.path("EventIntegrationAssociationArn").asText(),
+                Function.identity(), maxResults, nextToken);
+    }
+
+    @GET
+    @Path("/dataIntegrations")
+    public Response listDataIntegrations(@Context HttpHeaders headers,
+                                        @QueryParam("maxResults") String maxResults,
+                                        @QueryParam("nextToken") String nextToken) {
+        return page("DataIntegrations", appIntegrationsService.listDataIntegrations(regionResolver.resolveRegion(headers)),
+                DataIntegration::getId, integration -> {
+                    ObjectNode summary = objectMapper.createObjectNode();
+                    summary.put("Arn", integration.getArn());
+                    summary.put("Name", integration.getName());
+                    if (integration.getSourceUri() != null) {
+                        summary.put("SourceURI", integration.getSourceUri());
+                    }
+                    return summary;
+                }, maxResults, nextToken);
+    }
+
+    @GET
     @Path("/dataIntegrations/{identifier}/associations")
     public Response listDataIntegrationAssociations(@PathParam("identifier") String identifier,
                                                    @Context HttpHeaders headers,

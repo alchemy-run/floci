@@ -686,6 +686,57 @@ public class AcmJsonHandler {
         return node;
     }
 
+    private ObjectNode buildCertificateSummary(Certificate cert) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("CertificateArn", cert.getArn());
+        node.put("DomainName", cert.getDomainName());
+
+        ArrayNode sans = objectMapper.createArrayNode();
+        if (cert.getSubjectAlternativeNames() != null) {
+            cert.getSubjectAlternativeNames().forEach(sans::add);
+        }
+        node.set("SubjectAlternativeNameSummaries", sans);
+        node.put("HasAdditionalSubjectAlternativeNames", false);
+
+        node.put("Status", cert.getStatus().name());
+        node.put("Type", cert.getType().name());
+
+        if (cert.getKeyAlgorithm() != null) {
+            node.put("KeyAlgorithm", cert.getKeyAlgorithm().getAwsName());
+        }
+
+        ArrayNode keyUsages = objectMapper.createArrayNode();
+        keyUsages.add("DIGITAL_SIGNATURE");
+        keyUsages.add("KEY_ENCIPHERMENT");
+        node.set("KeyUsages", keyUsages);
+
+        ArrayNode extKeyUsages = objectMapper.createArrayNode();
+        extKeyUsages.add("TLS_WEB_SERVER_AUTHENTICATION");
+        extKeyUsages.add("TLS_WEB_CLIENT_AUTHENTICATION");
+        node.set("ExtendedKeyUsages", extKeyUsages);
+
+        if (cert.getCreatedAt() != null) {
+            node.put("CreatedAt", cert.getCreatedAt().toEpochMilli() / 1000.0);
+        }
+        if (cert.getIssuedAt() != null) {
+            node.put("IssuedAt", cert.getIssuedAt().toEpochMilli() / 1000.0);
+        }
+        if (cert.getImportedAt() != null) {
+            node.put("ImportedAt", cert.getImportedAt().toEpochMilli() / 1000.0);
+        }
+        if (cert.getNotBefore() != null) {
+            node.put("NotBefore", cert.getNotBefore().toEpochMilli() / 1000.0);
+        }
+        if (cert.getNotAfter() != null) {
+            node.put("NotAfter", cert.getNotAfter().toEpochMilli() / 1000.0);
+        }
+
+        node.put("RenewalEligibility", "INELIGIBLE");
+        node.put("InUse", cert.getInUseBy() != null && !cert.getInUseBy().isEmpty());
+
+        return node;
+    }
+
     private boolean matchesFilterStatement(Certificate cert, JsonNode statement) {
         if (statement == null || statement.isMissingNode() || statement.isNull() || statement.isEmpty()) {
             return true;

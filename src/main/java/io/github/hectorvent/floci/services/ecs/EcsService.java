@@ -5910,6 +5910,67 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
         rejectOnFargate(parameters.get("swappiness") != null, "swappiness");
     }
 
+    public List<String> listTaskDefinitions(String familyPrefix, String status) {
+        return listTaskDefinitions(familyPrefix, status, null, null, null).arns();
+    }
+
+    /**
+     * Lists task definition ARNs.
+     *
+     * <p>Only {@code ACTIVE} revisions are listed unless another status is asked for, and the
+     * order is lexicographic by family then numeric by revision, so the newest revision of a
+     * family comes last (or first under {@code DESC}). Listing by ARN string alone would put
+     * revision 10 before revision 2.
+     */
+    public ListPage listTaskDefinitions(String familyPrefix, String status, String sort,
+                                                Integer maxResults, String nextToken) {
+        String effectiveStatus = status != null ? status : STATUS_ACTIVE;
+        Comparator<TaskDefinition> order = Comparator
+                .comparing(TaskDefinition::getFamily)
+                .thenComparingInt(TaskDefinition::getRevision);
+        if ("DESC".equals(sort)) {
+            order = order.reversed();
+        }
+        List<String> arns = taskDefinitions.values().stream()
+                .filter(td -> familyPrefix == null || td.getFamily().startsWith(familyPrefix))
+                .filter(td -> effectiveStatus.equals(td.getStatus()))
+                .sorted(order)
+                .map(TaskDefinition::getTaskDefinitionArn)
+                .toList();
+        return paginate(arns, maxResults, nextToken);
+    }
+
+    public List<String> listTaskDefinitionFamilies(String familyPrefix) {
+        return listTaskDefinitionFamilies(familyPrefix, null, null, null).arns();
+    }
+
+    /**
+     * Lists task definition family names.
+     *
+     * <p>Both active and inactive families are listed unless a status narrows it: {@code ACTIVE}
+     * keeps only the families that still have an ACTIVE revision, {@code INACTIVE} keeps only
+     * those that have none. A family survives the deregistration of all its revisions, which is
+     * why the unfiltered listing still names it.
+     */
+    public ListPage listTaskDefinitionFamilies(String familyPrefix, String status,
+                                                Integer maxResults, String nextToken) {
+        List<String> families = latestRevisions.keySet().stream()
+                .filter(f -> familyPrefix == null || f.startsWith(familyPrefix))
+                .filter(f -> matchesFamilyStatus(f, status))
+                .sorted()
+                .toList();
+        return paginate(families, maxResults, nextToken);
+    }
+
+    private boolean matchesFamilyStatus(String family, String status) {
+        if (status == null || "ALL".equals(status)) {
+            return true;
+        }
+        boolean hasActiveRevision = taskDefinitions.values().stream()
+                .anyMatch(td -> family.equals(td.getFamily()) && STATUS_ACTIVE.equals(td.getStatus()));
+        return STATUS_ACTIVE.equals(status) == hasActiveRevision;
+    }
+
     /** Echoes an ARN the caller supplied, otherwise builds the ARN the task would have had. */
     private String missingTaskArn(EcsCluster cluster, String taskRef, String region) {
         if (taskRef != null && taskRef.startsWith("arn:")) {
@@ -5917,6 +5978,17 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
         }
         return regionResolver.buildArn("ecs", region,
                 "task/" + cluster.getClusterName() + "/" + taskRef);
+    }
+
+    public List<String> listTasks(String clusterRef, String family, String desiredStatus,
+                                   String serviceName, String startedBy, String region) {
+        ListTasksRequest request = new ListTasksRequest();
+        request.setCluster(clusterRef);
+        request.setFamily(family);
+        request.setDesiredStatus(desiredStatus);
+        request.setServiceName(serviceName);
+        request.setStartedBy(startedBy);
+        return listTasks(request, region).arns();
     }
 
     public record TaskProtectionResult(List<ProtectedTask> protectedTasks, List<Failure> failures) {}

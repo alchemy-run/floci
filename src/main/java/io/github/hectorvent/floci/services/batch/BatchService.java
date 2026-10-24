@@ -2176,6 +2176,21 @@ public class BatchService {
         return out;
     }
 
+    public synchronized ObjectNode tagResource(JsonNode request) {
+        String arn = requiredText(request, "resourceArn");
+        Map<String, String> tags = stringMap(request.path("tags"));
+        validateTags(tags);
+        applyTags(arn, tags, null);
+        return objectMapper.createObjectNode();
+    }
+
+    public synchronized ObjectNode untagResource(JsonNode request) {
+        String arn = requiredText(request, "resourceArn");
+        List<String> keys = stringList(request.path("tagKeys"));
+        applyTags(arn, Map.of(), keys);
+        return objectMapper.createObjectNode();
+    }
+
     private void applyTags(String arn, Map<String, String> upsert, List<String> removed) {
         Optional<BatchComputeEnvironment> env = resolveComputeEnvironmentOptional(arn);
         if (env.isPresent()) {

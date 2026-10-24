@@ -294,6 +294,18 @@ public class BedrockAgentCoreMemoryController {
 
     private final BedrockAgentCoreMemoryRecordService recordService;
 
+    @Inject
+    public BedrockAgentCoreMemoryController(BedrockAgentCoreMemoryService service,
+                                            BedrockAgentCoreEventService eventService,
+                                            BedrockAgentCoreMemoryRecordService recordService,
+                                            RegionResolver regionResolver, ObjectMapper objectMapper) {
+        this.service = service;
+        this.eventService = eventService;
+        this.recordService = recordService;
+        this.regionResolver = regionResolver;
+        this.objectMapper = objectMapper;
+    }
+
     @POST
     @Path("/{memoryId}/actors")
     public Response listActors(@Context HttpHeaders headers, @PathParam("memoryId") String memoryId, String body) {

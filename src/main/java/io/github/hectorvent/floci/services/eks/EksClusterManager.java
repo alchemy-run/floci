@@ -3242,6 +3242,30 @@ public class EksClusterManager
     }
 
 
+    private static byte[] tarSingleFile(String entryName, String content, int mode) {
+        try {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] data = content.getBytes(StandardCharsets.UTF_8);
+            try (TarArchiveOutputStream tar = new TarArchiveOutputStream(out)) {
+                TarArchiveEntry entry = new TarArchiveEntry(entryName);
+                entry.setSize(data.length);
+                entry.setMode(mode);
+                tar.putArchiveEntry(entry);
+                tar.write(data);
+                tar.closeArchiveEntry();
+            }
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw new IllegalStateException("Could not build in-memory tar for " + entryName, e);
+        }
+    }
+
+    private void copyMetadataFile(String containerId, String name, String content, int mode) {
+        lifecycleManager.getDockerClient().copyArchiveToContainerCmd(containerId)
+                .withTarInputStream(new ByteArrayInputStream(tarSingleFile(name, content, mode)))
+                .withRemotePath("/var/lib")
+                .exec();
+    }
 
     record ContainerExecResult(long exitCode, String output) {
         String summary() {

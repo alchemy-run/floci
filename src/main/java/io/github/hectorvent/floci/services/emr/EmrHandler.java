@@ -939,6 +939,119 @@ public class EmrHandler {
 
     private final EmrStudioService studios;
 
+    @Inject
+    public EmrHandler(EmrService service, ObjectMapper objectMapper,
+                      EmrReleaseCatalog releaseCatalog, EmrStudioService studios) {
+        this.service = service;
+        this.objectMapper = objectMapper;
+        this.releaseCatalog = releaseCatalog;
+        this.studios = studios;
+    }
+
+    private Response handleModifyInstanceGroups(JsonNode request) {
+        List<EmrService.InstanceGroupModification> modifications = new ArrayList<>();
+        JsonNode groups = request.path("InstanceGroups");
+        if (groups.isArray()) {
+            for (JsonNode g : groups) {
+                JsonNode count = g.path("InstanceCount");
+                modifications.add(new EmrService.InstanceGroupModification(
+                        g.path("InstanceGroupId").asText(null),
+                        count.isNumber() ? Integer.valueOf(count.asInt()) : null));
+            }
+        }
+        service.modifyInstanceGroups(text(request, "ClusterId"), modifications);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleAddTags(JsonNode request, String region) {
+        String id = text(request, "ResourceId");
+        if (id != null && id.startsWith("es-")) {
+            studios.addTags(id, request.path("Tags"), region);
+        } else {
+            service.addTags(id, parseTags(request.path("Tags")));
+        }
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleRemoveTags(JsonNode request, String region) {
+        String id = text(request, "ResourceId");
+        if (id != null && id.startsWith("es-")) {
+            studios.removeTags(id, stringList(request.path("TagKeys")), region);
+        } else {
+            service.removeTags(id, stringList(request.path("TagKeys")));
+        }
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private ObjectNode stepNode(EmrStep step) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("Id", step.getId());
+        node.put("Name", step.getName());
+        ObjectNode config = node.putObject("Config");
+        if (step.getJar() != null) {
+            config.put("Jar", step.getJar());
+        }
+        if (step.getMainClass() != null) {
+            config.put("MainClass", step.getMainClass());
+        }
+        ArrayNode args = config.putArray("Args");
+        step.getArgs().forEach(args::add);
+        ObjectNode props = config.putObject("Properties");
+        step.getProperties().forEach(props::put);
+        node.put("ActionOnFailure", step.getActionOnFailure());
+        ObjectNode status = node.putObject("Status");
+        status.put("State", step.getState());
+        if (step.getStateChangeReason() != null) {
+            status.putObject("StateChangeReason").put("Message", step.getStateChangeReason());
+        }
+        ObjectNode timeline = status.putObject("Timeline");
+        putEpoch(timeline, "CreationDateTime", step.getCreationDateTime());
+        putEpoch(timeline, "StartDateTime", step.getStartDateTime());
+        putEpoch(timeline, "EndDateTime", step.getEndDateTime());
+        return node;
+    }
+
+    private ObjectNode syntheticInstanceNode(EmrCluster cluster, EmrInstanceGroup group, int index) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("Id", "ci-" + index + cluster.getId());
+        node.put("Ec2InstanceId", "i-" + String.format("%017d", index));
+        node.put("PublicDnsName", "ec2-203-0-113-" + index + ".compute-1.amazonaws.com");
+        node.put("PrivateDnsName", "ip-10-0-0-" + index + ".ec2.internal");
+        node.put("PrivateIpAddress", "10.0.0." + index);
+        node.put("InstanceGroupId", group.getId());
+        if (group.getMarket() != null) {
+            node.put("Market", group.getMarket());
+        }
+        node.put("InstanceType", group.getInstanceType());
+        node.putObject("Status").put("State", "RUNNING");
+        return node;
+    }
+
+    private List<EmrStep> parseSteps(JsonNode stepsNode) {
+        List<EmrStep> steps = new ArrayList<>();
+        if (!stepsNode.isArray()) {
+            return steps;
+        }
+        for (JsonNode s : stepsNode) {
+            EmrStep step = new EmrStep();
+            step.setName(s.path("Name").asText(null));
+            step.setActionOnFailure(s.path("ActionOnFailure").asText(null));
+            step.setExecutionRoleArn(s.path("ExecutionRoleArn").asText(null));
+            JsonNode jar = s.path("HadoopJarStep");
+            step.setJar(jar.path("Jar").asText(null));
+            step.setMainClass(jar.path("MainClass").asText(null));
+            step.setArgs(stringList(jar.path("Args")));
+            JsonNode props = jar.path("Properties");
+            if (props.isArray()) {
+                Map<String, String> map = new LinkedHashMap<>();
+                props.forEach(p -> map.put(p.path("Key").asText(), p.path("Value").asText()));
+                step.setProperties(map);
+            }
+            steps.add(step);
+        }
+        return steps;
+    }
+
     private List<EmrBootstrapAction> parseBootstrapActions(JsonNode actionsNode) {
         List<EmrBootstrapAction> actions = new ArrayList<>();
         if (!actionsNode.isArray()) {

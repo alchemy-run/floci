@@ -59,8 +59,7 @@ public class Ec2QueryHandler {
     public Ec2QueryHandler(Ec2Service service, EmulatorConfig config, FlowLogService flowLogService,
                            Ec2EbsEncryptionService ebsEncryptionService,
                            Ec2SnapshotBlockPublicAccessService snapshotBlockPublicAccessService,
-                           Ec2IpamService ipamService, RegionResolver regionResolver, KmsService kmsService,
-                           Ec2ClientVpnService clientVpnService) {
+                           Ec2IpamService ipamService, RegionResolver regionResolver) {
         this.service = service;
         this.config = config;
         this.flowLogService = flowLogService;
@@ -68,8 +67,6 @@ public class Ec2QueryHandler {
         this.snapshotBlockPublicAccessService = snapshotBlockPublicAccessService;
         this.ipamService = ipamService;
         this.regionResolver = regionResolver;
-        this.kmsService = kmsService;
-        this.clientVpnService = clientVpnService;
     }
 
     public Response handle(String action, MultivaluedMap<String, String> params, String region) {
@@ -6714,6 +6711,86 @@ public class Ec2QueryHandler {
 
     private final Ec2ClientVpnService clientVpnService;
 
+    @Inject
+    public Ec2QueryHandler(Ec2Service service, EmulatorConfig config, FlowLogService flowLogService,
+                           Ec2EbsEncryptionService ebsEncryptionService,
+                           Ec2SnapshotBlockPublicAccessService snapshotBlockPublicAccessService,
+                           Ec2IpamService ipamService, KmsService kmsService,
+                           Ec2ClientVpnService clientVpnService) {
+        this.service = service;
+        this.config = config;
+        this.flowLogService = flowLogService;
+        this.ebsEncryptionService = ebsEncryptionService;
+        this.snapshotBlockPublicAccessService = snapshotBlockPublicAccessService;
+        this.ipamService = ipamService;
+        this.kmsService = kmsService;
+        this.clientVpnService = clientVpnService;
+    }
+
+    public Ec2QueryHandler(Ec2Service service, EmulatorConfig config, FlowLogService flowLogService,
+                           Ec2EbsEncryptionService ebsEncryptionService,
+                           Ec2SnapshotBlockPublicAccessService snapshotBlockPublicAccessService,
+                           Ec2IpamService ipamService) {
+        this(service, config, flowLogService, ebsEncryptionService, snapshotBlockPublicAccessService,
+                ipamService, null);
+    }
+
+    public Ec2QueryHandler(Ec2Service service, EmulatorConfig config, FlowLogService flowLogService,
+                           KmsService kmsService) {
+        this(service, config, flowLogService, null, null, null, kmsService);
+    }
+
+    /**
+     * Alchemy (and the AWS SDKs) send the primary ENI as
+     * {@code NetworkInterface.1.*} instead of top-level {@code SubnetId} /
+     * {@code SecurityGroupId} / {@code AssociatePublicIpAddress}.
+     */
+    static PrimaryNetworkInterface parsePrimaryNetworkInterface(MultivaluedMap<String, String> p) {
+        PrimaryNetworkInterface first = null;
+        for (int i = 1; ; i++) {
+            String prefix = "NetworkInterface." + i + ".";
+            String deviceIndex = p.getFirst(prefix + "DeviceIndex");
+            String subnetId = p.getFirst(prefix + "SubnetId");
+            Boolean associate = parseOptionalBoolean(p.getFirst(prefix + "AssociatePublicIpAddress"));
+            String privateIp = p.getFirst(prefix + "PrivateIpAddress");
+            for (int j = 1; p.getFirst(prefix + "PrivateIpAddresses." + j + ".PrivateIpAddress") != null; j++) {
+                if (Boolean.TRUE.equals(parseOptionalBoolean(p.getFirst(prefix + "PrivateIpAddresses." + j + ".Primary")))) {
+                    String primary = p.getFirst(prefix + "PrivateIpAddresses." + j + ".PrivateIpAddress");
+                    if (privateIp != null && !privateIp.equals(primary)) {
+                        throw new AwsException("InvalidParameterCombination", "Conflicting primary private addresses", 400);
+                    }
+                    privateIp = primary;
+                }
+            }
+            String interfaceId = p.getFirst(prefix + "NetworkInterfaceId");
+            List<String> groups = new ArrayList<>();
+            groups.addAll(getStaticList(p, prefix + "SecurityGroupId"));
+            groups.addAll(getStaticList(p, prefix + "GroupId"));
+            groups.addAll(getStaticList(p, prefix + "Groups"));
+            if (deviceIndex == null && subnetId == null && associate == null && groups.isEmpty()
+                    && privateIp == null && interfaceId == null) {
+                break;
+            }
+            int index;
+            try {
+                index = deviceIndex == null ? 0 : Integer.parseInt(deviceIndex);
+                if (index < 0) {
+                    throw new NumberFormatException("negative device index");
+                }
+            } catch (NumberFormatException e) {
+                throw new AwsException("InvalidParameterValue", "Invalid network interface DeviceIndex", 400);
+            }
+            PrimaryNetworkInterface parsed = new PrimaryNetworkInterface(subnetId, groups, associate,
+                    privateIp, interfaceId, index);
+            if (first == null) {
+                first = parsed;
+            }
+            if ("0".equals(deviceIndex)) {
+                return parsed;
+            }
+        }
+        return first != null ? first : PrimaryNetworkInterface.empty();
+    }
 
     private static List<String> getStaticList(MultivaluedMap<String, String> p, String prefix) {
         List<String> result = new ArrayList<>();
@@ -6729,6 +6806,13 @@ public class Ec2QueryHandler {
             result.add(single);
         }
         return result;
+    }
+
+    static Boolean parseOptionalBoolean(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return "true".equalsIgnoreCase(value) || "1".equals(value);
     }
 
     record PrimaryNetworkInterface(String subnetId, List<String> securityGroupIds, Boolean associatePublicIpAddress,
@@ -6769,6 +6853,23 @@ public class Ec2QueryHandler {
             filters.put(name, values);
         }
         return filters;
+    }
+
+    private void applyResourceTags(MultivaluedMap<String, String> p, String region, String resourceType, String resourceId) {
+        List<Tag> tagList = parseTagsForResource(p, resourceType);
+        if (!tagList.isEmpty()) {
+            service.createTags(region, List.of(resourceId), tagList);
+        }
+    }
+
+    private LaunchTemplateData resolveRunInstancesLaunchTemplateData(MultivaluedMap<String, String> p, String region) {
+        String id = p.getFirst("LaunchTemplate.LaunchTemplateId");
+        String name = p.getFirst("LaunchTemplate.LaunchTemplateName");
+        String version = p.getFirst("LaunchTemplate.Version");
+        if ((id == null || id.isBlank()) && (name == null || name.isBlank())) {
+            return null;
+        }
+        return service.resolveLaunchTemplateData(region, id, name, version);
     }
 
     /**
@@ -7261,6 +7362,149 @@ public class Ec2QueryHandler {
         if (route.getInstanceId() != null) n++;
         if (route.getVpcEndpointId() != null) n++;
         return n;
+    }
+
+    private String instanceXml(Instance inst) {
+        XmlBuilder xml = new XmlBuilder()
+                .elem("instanceId", inst.getInstanceId())
+                .elem("imageId", inst.getImageId())
+                .start("instanceState")
+                .elem("code", inst.getState() != null ? String.valueOf(inst.getState().getCode()) : "16")
+                .elem("name", inst.getState() != null ? inst.getState().getName() : "running")
+                .end("instanceState")
+                .elem("privateDnsName", inst.getPrivateDnsName())
+                .elem("dnsName", inst.getPublicDnsName())
+                .elem("reason", inst.getStateTransitionReason())
+                .elem("keyName", inst.getKeyName())
+                .elem("amiLaunchIndex", String.valueOf(inst.getAmiLaunchIndex()))
+                .elem("instanceType", inst.getInstanceType())
+                .elem("launchTime", inst.getLaunchTime() != null ? ISO_FMT.format(inst.getLaunchTime()) : "");
+
+        if (inst.getPlacement() != null) {
+            xml.start("placement")
+                    .elem("availabilityZone", inst.getPlacement().getAvailabilityZone())
+                    .elem("tenancy", inst.getPlacement().getTenancy())
+                    .end("placement");
+        }
+
+        xml.start("monitoring").elem("state", inst.getMonitoring()).end("monitoring")
+                .elem("subnetId", inst.getSubnetId())
+                .elem("vpcId", inst.getVpcId())
+                .elem("privateIpAddress", inst.getPrivateIpAddress())
+                .elem("ipAddress", inst.getPublicIpAddress())
+                .elem("sourceDestCheck", String.valueOf(inst.isSourceDestCheck()))
+                .start("groupSet");
+        for (GroupIdentifier gi : inst.getSecurityGroups()) {
+            xml.start("item")
+                    .elem("groupId", gi.getGroupId())
+                    .elem("groupName", gi.getGroupName())
+                    .end("item");
+        }
+        xml.end("groupSet")
+                .elem("architecture", inst.getArchitecture())
+                .elem("rootDeviceType", inst.getRootDeviceType())
+                .elem("rootDeviceName", inst.getRootDeviceName())
+                .elem("virtualizationType", inst.getVirtualizationType())
+                .elem("hypervisor", inst.getHypervisor())
+                .elem("ebsOptimized", String.valueOf(inst.isEbsOptimized()))
+                .elem("enaSupport", String.valueOf(inst.isEnaSupport()))
+                .start("networkInterfaceSet");
+        for (InstanceNetworkInterface eni : inst.getNetworkInterfaces()) {
+            xml.start("item")
+                    .elem("networkInterfaceId", eni.getNetworkInterfaceId())
+                    .elem("subnetId", eni.getSubnetId())
+                    .elem("vpcId", eni.getVpcId())
+                    .elem("description", eni.getDescription())
+                    .elem("ownerId", eni.getOwnerId())
+                    .elem("status", eni.getStatus())
+                    .elem("macAddress", eni.getMacAddress())
+                    .elem("privateIpAddress", eni.getPrivateIpAddress())
+                    .elem("privateDnsName", eni.getPrivateDnsName())
+                    .elem("sourceDestCheck", String.valueOf(eni.isSourceDestCheck()))
+                    .start("groupSet");
+            for (GroupIdentifier gi : eni.getGroups()) {
+                xml.start("item")
+                        .elem("groupId", gi.getGroupId())
+                        .elem("groupName", gi.getGroupName())
+                        .end("item");
+            }
+            xml.end("groupSet")
+                    .start("attachment")
+                    .elem("attachmentId", eni.getAttachmentId())
+                    .elem("deviceIndex", String.valueOf(eni.getDeviceIndex()))
+                    .elem("status", "attached");
+            if (eni.getAttachTime() != null) {
+                xml.elem("attachTime", eni.getAttachTime());
+            }
+            xml.elem("deleteOnTermination", "true")
+                    .end("attachment");
+            if (inst.getPublicIpAddress() != null) {
+                xml.start("association")
+                        .elem("publicIp", inst.getPublicIpAddress())
+                        .elem("publicDnsName", inst.getPublicDnsName())
+                        .elem("ipOwnerId", "amazon")
+                        .end("association");
+            }
+            xml.start("privateIpAddressesSet")
+                    .start("item")
+                    .elem("privateIpAddress", eni.getPrivateIpAddress())
+                    .elem("privateDnsName", eni.getPrivateDnsName())
+                    .elem("primary", "true")
+                    .end("item")
+                    .end("privateIpAddressesSet")
+                    .end("item");
+        }
+        xml.end("networkInterfaceSet");
+        xml.elem("clientToken", inst.getClientToken());
+        if (inst.getStateReasonCode() != null || inst.getStateReasonMessage() != null) {
+            xml.start("stateReason")
+                    .elem("code", inst.getStateReasonCode())
+                    .elem("message", inst.getStateReasonMessage())
+                    .end("stateReason");
+        }
+        xml.start("cpuOptions")
+                .elem("coreCount", "1")
+                .elem("threadsPerCore", "1")
+                .end("cpuOptions");
+        appendMetadataOptions(xml, "metadataOptions", inst.effectiveMetadataOptions());
+        xml.start("maintenanceOptions")
+                .elem("autoRecovery", "default")
+                .end("maintenanceOptions")
+                .start("enclaveOptions")
+                .elem("enabled", "false")
+                .end("enclaveOptions")
+                .start("hibernationOptions")
+                .elem("configured", "false")
+                .end("hibernationOptions")
+                .start("privateDnsNameOptions")
+                .elem("hostnameType", "ip-name")
+                .elem("enableResourceNameDnsARecord", "false")
+                .elem("enableResourceNameDnsAAAARecord", "false")
+                .end("privateDnsNameOptions")
+                .start("capacityReservationSpecification")
+                .elem("capacityReservationPreference", "open")
+                .end("capacityReservationSpecification");
+        if (inst.getRootVolumeId() != null) {
+            xml.start("blockDeviceMapping")
+                    .start("item")
+                    .elem("deviceName", inst.getRootDeviceName())
+                    .start("ebs")
+                    .elem("volumeId", inst.getRootVolumeId())
+                    .elem("status", "attached")
+                    .elem("deleteOnTermination", "true")
+                    .elem("attachTime", inst.getLaunchTime() != null ? ISO_FMT.format(inst.getLaunchTime()) : "")
+                    .end("ebs")
+                    .end("item")
+                    .end("blockDeviceMapping");
+        }
+        if (inst.getIamInstanceProfileArn() != null) {
+            xml.start("iamInstanceProfile")
+                    .elem("arn", inst.getIamInstanceProfileArn())
+                    .elem("id", iamInstanceProfileId(inst.getInstanceId()))
+                    .end("iamInstanceProfile");
+        }
+        xml.raw(tagSetXml(inst.getTags()));
+        return xml.build();
     }
 
     private String decodeUserData(String userDataEncoded) {

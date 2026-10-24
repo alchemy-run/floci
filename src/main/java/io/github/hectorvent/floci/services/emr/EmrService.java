@@ -878,6 +878,70 @@ public class EmrService {
 
     static final long DEFAULT_IDLE_TIMEOUT_SECONDS = 3_600L;
 
+    public List<EmrCluster> listClusters(String region, List<String> states) {
+        List<EmrCluster> result = new ArrayList<>();
+        for (EmrCluster c : clusterStore.scan(k -> true)) {
+            if (!region.equals(c.getRegion())) {
+                continue;
+            }
+            if (states != null && !states.isEmpty() && !states.contains(c.getState())) {
+                continue;
+            }
+            result.add(c);
+        }
+        return result;
+    }
+
+    public void modifyInstanceGroups(String clusterId, List<InstanceGroupModification> modifications) {
+        // ClusterId is optional on the wire; instance group ids are globally unique.
+        List<EmrCluster> candidates = clusterId != null
+                ? List.of(requireCluster(clusterId))
+                : new ArrayList<>(clusterStore.scan(k -> true));
+        List<EmrCluster> touched = new ArrayList<>();
+        List<Runnable> updates = new ArrayList<>();
+        // Validate every modification before applying any: the call succeeds or fails atomically.
+        for (InstanceGroupModification mod : modifications) {
+            if (mod.instanceCount() != null && mod.instanceCount() < 0) {
+                throw new AwsException("ValidationException",
+                        "Instance count for instance group " + mod.instanceGroupId() + " must not be negative.", 400);
+            }
+            EmrCluster owner = null;
+            EmrInstanceGroup target = null;
+            for (EmrCluster c : candidates) {
+                for (EmrInstanceGroup g : c.getInstanceGroups()) {
+                    if (g.getId().equals(mod.instanceGroupId())) {
+                        owner = c;
+                        target = g;
+                    }
+                }
+            }
+            if (target == null) {
+                throw new AwsException("InvalidRequestException",
+                        "Instance group id '" + mod.instanceGroupId() + "' is not valid.", 400);
+            }
+            if (mod.instanceCount() != null) {
+                if ("MASTER".equals(target.getInstanceGroupType())
+                        && mod.instanceCount() != target.getRequestedInstanceCount()) {
+                    throw new AwsException("ValidationException",
+                            "The instance count of the master instance group cannot be modified.", 400);
+                }
+                EmrInstanceGroup group = target;
+                int count = mod.instanceCount();
+                updates.add(() -> {
+                    group.setRequestedInstanceCount(count);
+                    group.setRunningInstanceCount(count);
+                });
+            }
+            if (!touched.contains(owner)) {
+                touched.add(owner);
+            }
+        }
+        updates.forEach(Runnable::run);
+        for (EmrCluster c : touched) {
+            clusterStore.put(c.getId(), c);
+        }
+    }
+
     public Long getAutoTerminationIdleTimeout(String clusterId) {
         return requireCluster(clusterId).getAutoTerminationIdleTimeout();
     }
@@ -887,6 +951,55 @@ public class EmrService {
             throw new AwsException("ValidationException",
                     "The idle timeout must be between " + MIN_IDLE_TIMEOUT_SECONDS + " and "
                             + MAX_IDLE_TIMEOUT_SECONDS + " seconds.", 400);
+        }
+    }
+
+    private void validateManagedScalingPolicy(EmrCluster cluster, EmrManagedScalingPolicy policy) {
+        requireComputeLimit(policy.getUnitType(), "unitType");
+        requireComputeLimit(policy.getMinimumCapacityUnits(), "minimumCapacityUnits");
+        requireComputeLimit(policy.getMaximumCapacityUnits(), "maximumCapacityUnits");
+        String unitType = policy.getUnitType();
+        if (!List.of("InstanceFleetUnits", "Instances", "VCPU").contains(unitType)) {
+            throw new AwsException("ValidationException",
+                    "1 validation error detected: Value '" + unitType + "' at "
+                            + "'managedScalingPolicy.computeLimits.unitType' failed to satisfy constraint: "
+                            + "Member must satisfy enum value set: [InstanceFleetUnits, Instances, VCPU]", 400);
+        }
+        boolean fleets = "INSTANCE_FLEET".equals(cluster.getInstanceCollectionType());
+        if (fleets && "Instances".equals(unitType)) {
+            throw new AwsException("ValidationException",
+                    "The unit type Instances is not supported for clusters with instance fleets.", 400);
+        }
+        if (!fleets && "InstanceFleetUnits".equals(unitType)) {
+            throw new AwsException("ValidationException",
+                    "The unit type InstanceFleetUnits is not supported for clusters with instance groups.", 400);
+        }
+        int min = policy.getMinimumCapacityUnits();
+        int max = policy.getMaximumCapacityUnits();
+        if (min < 0) {
+            throw new AwsException("ValidationException",
+                    "MinimumCapacityUnits must not be negative.", 400);
+        }
+        if (min > max) {
+            throw new AwsException("ValidationException",
+                    "MinimumCapacityUnits must be less than or equal to MaximumCapacityUnits.", 400);
+        }
+        Integer onDemand = policy.getMaximumOnDemandCapacityUnits();
+        if (onDemand != null && (onDemand < 0 || onDemand > max)) {
+            throw new AwsException("ValidationException",
+                    "MaximumOnDemandCapacityUnits must be between 0 and MaximumCapacityUnits.", 400);
+        }
+        Integer core = policy.getMaximumCoreCapacityUnits();
+        if (core != null && (core < 0 || core > max)) {
+            throw new AwsException("ValidationException",
+                    "MaximumCoreCapacityUnits must be between 0 and MaximumCapacityUnits.", 400);
+        }
+        String strategy = policy.getScalingStrategy();
+        if (strategy != null && !List.of("DEFAULT", "ADVANCED").contains(strategy)) {
+            throw new AwsException("ValidationException",
+                    "1 validation error detected: Value '" + strategy + "' at "
+                            + "'managedScalingPolicy.scalingStrategy' failed to satisfy constraint: "
+                            + "Member must satisfy enum value set: [DEFAULT, ADVANCED]", 400);
         }
     }
 

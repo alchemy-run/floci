@@ -368,6 +368,23 @@ public class MemoryDbHandler {
         return node.isMissingNode() || node.isNull() ? null : node.asText(null);
     }
 
+    private Response handleListTags(JsonNode request, String region) {
+        Map<String, String> tags = service.listTags(text(request, "ResourceArn"), region);
+        return Response.ok(tagListResponse(tags)).build();
+    }
+
+    private Response handleTagResource(JsonNode request, String region) {
+        Map<String, String> tags = service.tagResource(text(request, "ResourceArn"),
+                parseTags(request.path("Tags")), region);
+        return Response.ok(tagListResponse(tags)).build();
+    }
+
+    private Response handleUntagResource(JsonNode request, String region) {
+        List<String> keys = parseStringList(request.path("TagKeys"));
+        Map<String, String> tags = service.untagResource(text(request, "ResourceArn"), keys, region);
+        return Response.ok(tagListResponse(tags)).build();
+    }
+
     private Response handleUpdateUser(JsonNode request, String region) {
         JsonNode authentication = request.path("AuthenticationMode");
         return single("User", userNode(service.updateUser(text(request, "UserName"),

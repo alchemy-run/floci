@@ -1415,6 +1415,15 @@ public class GlueJsonHandler {
         return crawler;
     }
 
+    @Inject
+    public GlueJsonHandler(GlueService glueService,
+                           GlueSchemaRegistryService schemaRegistryService,
+                           ObjectMapper mapper) {
+        this.glueService = glueService;
+        this.schemaRegistryService = schemaRegistryService;
+        this.mapper = mapper;
+    }
+
     @SuppressWarnings("unchecked")
     private Response handleStartJobRun(JsonNode request) {
         String jobName = request.get("JobName").asText();

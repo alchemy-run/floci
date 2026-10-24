@@ -100,6 +100,37 @@ public class ResourceShare {
 
     private final List<String> permissionArns;
 
+    @JsonCreator
+    public ResourceShare(
+            @JsonProperty("resourceShareArn") String resourceShareArn,
+            @JsonProperty("name") String name,
+            @JsonProperty("owningAccountId") String owningAccountId,
+            @JsonProperty("principals") List<String> principals,
+            @JsonProperty("resourceArns") List<String> resourceArns,
+            @JsonProperty("allowExternalPrincipals") boolean allowExternalPrincipals,
+            @JsonProperty("status") String status,
+            @JsonProperty("creationTime") Instant creationTime,
+            @JsonProperty("lastUpdatedTime") Instant lastUpdatedTime,
+            @JsonProperty("tags") Map<String, String> tags,
+            @JsonProperty("sources") List<String> sources,
+            @JsonProperty("permissionArns") List<String> permissionArns) {
+        this.resourceShareArn = resourceShareArn;
+        this.name = name;
+        this.owningAccountId = owningAccountId;
+        this.principals = List.copyOf(principals);
+        this.resourceArns = List.copyOf(resourceArns);
+        this.allowExternalPrincipals = allowExternalPrincipals;
+        this.status = status;
+        this.creationTime = creationTime;
+        // State persisted before lastUpdatedTime existed has never been mutated since it was
+        // written, so creation time is its correct last-updated value.
+        this.lastUpdatedTime = lastUpdatedTime == null ? creationTime : lastUpdatedTime;
+        this.tags = tags == null ? Map.of() : Map.copyOf(tags);
+        // State persisted before sources/permissionArns were modelled had neither.
+        this.sources = sources == null ? List.of() : List.copyOf(sources);
+        this.permissionArns = permissionArns == null ? List.of() : List.copyOf(permissionArns);
+    }
+
     public List<String> getSources() { return sources; }
 
     public List<String> getPermissionArns() { return permissionArns; }

@@ -392,6 +392,36 @@ public class KinesisAnalyticsV2JsonHandler {
         return groups;
     }
 
+    private Response handleCreateApplication(JsonNode request) {
+        String applicationName = request.path("ApplicationName").asText(null);
+        String runtimeEnvironment = request.path("RuntimeEnvironment").asText(null);
+        String serviceExecutionRole = request.path("ServiceExecutionRole").asText(null);
+        String applicationDescription = request.path("ApplicationDescription").asText(null);
+        String applicationMode = request.path("ApplicationMode").asText(null);
+
+        // Application code (the Flink JAR in S3) + parallelism, from ApplicationConfiguration.
+        JsonNode appConfig = request.path("ApplicationConfiguration");
+        JsonNode s3 = appConfig.path("ApplicationCodeConfiguration").path("CodeContent")
+                .path("S3ContentLocation");
+        String codeBucket = bucketFromArn(s3.path("BucketARN").asText(null));
+        String codeKey = s3.path("FileKey").asText(null);
+        String codeVersion = s3.path("ObjectVersion").asText(null);
+        int parallelism = appConfig.path("FlinkApplicationConfiguration")
+                .path("ParallelismConfiguration").path("Parallelism").asInt(1);
+        Map<String, Map<String, String>> environmentProperties =
+                parsePropertyGroups(appConfig.path("EnvironmentProperties").path("PropertyGroups"));
+        JsonNode snapshotsEnabledNode = appConfig.path("ApplicationSnapshotConfiguration").path("SnapshotsEnabled");
+        Boolean snapshotsEnabled = snapshotsEnabledNode.isMissingNode() || snapshotsEnabledNode.isNull()
+                ? null : snapshotsEnabledNode.asBoolean();
+
+        FlinkApplication app = service.createApplication(applicationName, runtimeEnvironment,
+                serviceExecutionRole, applicationDescription, applicationMode,
+                codeBucket, codeKey, codeVersion, parallelism, parseTags(request.path("Tags")),
+                environmentProperties, snapshotsEnabled, appConfig.path("FlinkApplicationConfiguration"),
+                parseLoggingStreams(request.path("CloudWatchLoggingOptions")));
+        return applicationDetailResponse(app);
+    }
+
     private Response handleMaintenance(JsonNode request) {
         FlinkApplication app = service.updateMaintenance(request.path("ApplicationName").asText(null),
                 request.path("ApplicationMaintenanceConfigurationUpdate")
@@ -519,6 +549,156 @@ public class KinesisAnalyticsV2JsonHandler {
         }
         options.forEach(option -> streams.add(option.path("LogStreamARN").asText(null)));
         return streams;
+    }
+
+    private Response handleCreateApplicationPresignedUrl(JsonNode request) {
+        String applicationName = request.path("ApplicationName").asText(null);
+        String urlType = request.path("UrlType").asText(null);
+        Long sessionExpirationDurationInSeconds = request.hasNonNull("SessionExpirationDurationInSeconds")
+                ? request.path("SessionExpirationDurationInSeconds").asLong() : null;
+        String url = service.createApplicationPresignedUrl(applicationName, urlType,
+                sessionExpirationDurationInSeconds);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("AuthorizedUrl", url);
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeApplication(JsonNode request) {
+        String applicationName = request.path("ApplicationName").asText(null);
+        return applicationDetailResponse(service.describeApplication(applicationName));
+    }
+
+    private Response handleListApplications(JsonNode request) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode summaries = response.putArray("ApplicationSummaries");
+        for (FlinkApplication app : service.listApplications()) {
+            ObjectNode summary = summaries.addObject();
+            summary.put("ApplicationName", app.getApplicationName());
+            summary.put("ApplicationARN", app.getApplicationArn());
+            summary.put("ApplicationStatus", app.getApplicationStatus().name());
+            summary.put("ApplicationVersionId", app.getApplicationVersionId());
+            summary.put("RuntimeEnvironment", app.getRuntimeEnvironment());
+            if (app.getApplicationMode() != null) {
+                summary.put("ApplicationMode", app.getApplicationMode());
+            }
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleStartApplication(JsonNode request) {
+        String applicationName = request.path("ApplicationName").asText(null);
+        service.validateRestore(applicationName, request.path("RunConfiguration").path("ApplicationRestoreConfiguration"));
+        service.startApplication(applicationName);
+        // AWS StartApplication returns an empty body.
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleStopApplication(JsonNode request) {
+        String applicationName = request.path("ApplicationName").asText(null);
+        service.stopApplication(applicationName);
+        // AWS StopApplication returns an empty body.
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleUpdateApplication(JsonNode request) {
+        String applicationName = request.path("ApplicationName").asText(null);
+        // The service validates the version or conditional token before mutating configuration.
+        Long currentVersionId = optionalLong(request, "CurrentApplicationVersionId");
+        String serviceExecutionRole = request.path("ServiceExecutionRoleUpdate").asText(null);
+
+        // ApplicationConfigurationUpdate.ApplicationCodeConfigurationUpdate.CodeContentUpdate
+        // .S3ContentLocationUpdate: a new JAR location to redeploy in place.
+        JsonNode appCfgUpdate = request.path("ApplicationConfigurationUpdate");
+        JsonNode s3Update = appCfgUpdate.path("ApplicationCodeConfigurationUpdate")
+                .path("CodeContentUpdate").path("S3ContentLocationUpdate");
+        String codeBucket = bucketFromArn(s3Update.path("BucketARNUpdate").asText(null));
+        String codeKey = s3Update.path("FileKeyUpdate").asText(null);
+        String codeVersion = s3Update.path("ObjectVersionUpdate").asText(null);
+        JsonNode parallelismUpdate = appCfgUpdate.path("FlinkApplicationConfigurationUpdate")
+                .path("ParallelismConfigurationUpdate").path("ParallelismUpdate");
+        Integer parallelism = parallelismUpdate.isMissingNode() || parallelismUpdate.isNull()
+                ? null : parallelismUpdate.asInt();
+        JsonNode snapshotsEnabledUpdate = appCfgUpdate.path("ApplicationSnapshotConfigurationUpdate")
+                .path("SnapshotsEnabledUpdate");
+        Boolean snapshotsEnabled = snapshotsEnabledUpdate.isMissingNode() || snapshotsEnabledUpdate.isNull()
+                ? null : snapshotsEnabledUpdate.asBoolean();
+
+        JsonNode propertyUpdates = appCfgUpdate.path("EnvironmentPropertyUpdates");
+        if (!propertyUpdates.isMissingNode() && !propertyUpdates.path("PropertyGroups").isArray()) {
+            throw new AwsException("InvalidArgumentException", "PropertyGroups must be an array", 400);
+        }
+        Map<String, Map<String, String>> properties = propertyUpdates.isMissingNode()
+                ? null : parsePropertyGroups(propertyUpdates.path("PropertyGroups"));
+        if (request.has("CloudWatchLoggingOptionUpdates") && !request.get("CloudWatchLoggingOptionUpdates").isArray()) {
+            throw new AwsException("InvalidArgumentException", "CloudWatchLoggingOptionUpdates must be an array", 400);
+        }
+        Map<String, String> loggingUpdates = new LinkedHashMap<>();
+        for (JsonNode option : request.path("CloudWatchLoggingOptionUpdates")) {
+            String id = option.path("CloudWatchLoggingOptionId").asText(null);
+            String stream = option.path("LogStreamARNUpdate").asText(null);
+            if (id == null || stream == null || loggingUpdates.put(id, stream) != null) {
+                throw new AwsException("InvalidArgumentException", "Invalid CloudWatchLoggingOptionUpdates", 400);
+            }
+        }
+        FlinkApplication app = service.updateApplication(applicationName, currentVersionId,
+                serviceExecutionRole, codeBucket, codeKey, codeVersion, parallelism, snapshotsEnabled,
+                properties, appCfgUpdate.path("FlinkApplicationConfigurationUpdate"),
+                request.path("RuntimeEnvironmentUpdate").asText(null),
+                request.path("ConditionalToken").asText(null), loggingUpdates);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("ApplicationDetail", applicationDetailNode(app));
+        response.put("OperationId", new ArrayList<>(app.getOperations().keySet()).getLast());
+        return Response.ok(response).build();
+    }
+
+    private Response handleDeleteApplication(JsonNode request) {
+        String applicationName = request.path("ApplicationName").asText(null);
+        // CreateTimestamp is epoch seconds on the wire (possibly fractional); the service validates it
+        // against the stored value.
+        Instant createTimestamp = request.hasNonNull("CreateTimestamp")
+                ? Instant.ofEpochMilli(Math.round(request.path("CreateTimestamp").asDouble() * 1000))
+                : null;
+        service.deleteApplication(applicationName, createTimestamp);
+        // AWS DeleteApplication returns an empty body.
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleCreateApplicationSnapshot(JsonNode request) {
+        String applicationName = request.path("ApplicationName").asText(null);
+        String snapshotName = request.path("SnapshotName").asText(null);
+        service.createApplicationSnapshot(applicationName, snapshotName);
+        // AWS CreateApplicationSnapshot returns an empty body.
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleDescribeApplicationSnapshot(JsonNode request) {
+        String applicationName = request.path("ApplicationName").asText(null);
+        String snapshotName = request.path("SnapshotName").asText(null);
+        Snapshot snapshot = service.describeApplicationSnapshot(applicationName, snapshotName);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("SnapshotDetails", snapshotDetailNode(snapshot));
+        return Response.ok(response).build();
+    }
+
+    private Response handleListApplicationSnapshots(JsonNode request) {
+        String applicationName = request.path("ApplicationName").asText(null);
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode summaries = response.putArray("SnapshotSummaries");
+        for (Snapshot snapshot : service.listApplicationSnapshots(applicationName)) {
+            summaries.add(snapshotDetailNode(snapshot));
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleDeleteApplicationSnapshot(JsonNode request) {
+        String applicationName = request.path("ApplicationName").asText(null);
+        String snapshotName = request.path("SnapshotName").asText(null);
+        Instant snapshotCreationTimestamp = request.hasNonNull("SnapshotCreationTimestamp")
+                ? Instant.ofEpochMilli(Math.round(request.path("SnapshotCreationTimestamp").asDouble() * 1000))
+                : null;
+        service.deleteApplicationSnapshot(applicationName, snapshotName, snapshotCreationTimestamp);
+        // AWS DeleteApplicationSnapshot returns an empty body.
+        return Response.ok(objectMapper.createObjectNode()).build();
     }
 
     private ObjectNode maintenanceNode(FlinkApplication app) {

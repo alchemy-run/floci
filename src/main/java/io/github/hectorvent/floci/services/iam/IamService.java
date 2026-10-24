@@ -6408,6 +6408,47 @@ public class IamService implements SessionAccountLookup, ResourceProvider {
     /** {@code tagListType} / {@code tagKeyListType} are both {@code max: 50}. */
     private static final int MAX_TAGS_PER_INSTANCE_PROFILE = 50;
 
+    @Inject
+    public IamService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver) {
+        this(
+            storageFactory.create("iam", "iam-users.json", new TypeReference<>() {}),
+            storageFactory.create("iam", "iam-groups.json", new TypeReference<>() {}),
+            storageFactory.create("iam", "iam-roles.json", new TypeReference<>() {}),
+            storageFactory.create("iam", "iam-policies.json", new TypeReference<>() {}),
+            storageFactory.create("iam", "iam-access-keys.json", new TypeReference<>() {}),
+            storageFactory.create("iam", "iam-instance-profiles.json", new TypeReference<>() {}),
+            storageFactory.create("iam", "iam-sessions.json", new TypeReference<>() {}),
+            storageFactory.create("iam", "iam-account-aliases.json", new TypeReference<>() {}),
+            storageFactory.create("iam", "iam-password-policy.json", new TypeReference<>() {}),
+            storageFactory.create("iam", "iam-login-profiles.json", new TypeReference<>() {}),
+            storageFactory.create("iam", "iam-oidc-providers.json", new TypeReference<>() {}),
+            storageFactory.create("iam", "iam-slr-deletions.json", new TypeReference<>() {}),
+            storageFactory.create("iam", "iam-org-root-features.json", new TypeReference<>() {}),
+            regionResolver,
+            config.services().iam().seedDeployerPrincipal(),
+            config.services().iam().accountAlias().orElse(null)
+        );
+    }
+
+    private static Map<String, IamPolicy> buildAwsManagedPolicies() {
+        Map<String, IamPolicy> catalog = new LinkedHashMap<>();
+        for (AwsManagedPolicies.ManagedPolicyDef def : AwsManagedPolicies.POLICIES) {
+            String arn = def.arn();
+            // The bundled document is the policy's current default version, served under the
+            // version id AWS actually reports for it (v3 for AmazonS3ReadOnlyAccess, v1 for
+            // AdministratorAccess) so GetPolicy/ListPolicyVersions match a real account.
+            // Superseded versions are not bundled, so they resolve to NoSuchEntity.
+            Instant now = Instant.now();
+            Instant updateDate = def.updateDate() != null ? def.updateDate() : now;
+            Instant createDate = def.createDate() != null ? def.createDate() : updateDate;
+            PolicyVersion defaultVersion = new PolicyVersion(
+                    def.defaultVersionId(), def.document(), true, updateDate);
+            catalog.put(arn, new IamPolicy("ANPA" + randomId(16), def.name(), def.path(), arn,
+                    def.description(), defaultVersion, createDate, updateDate));
+        }
+        return catalog;
+    }
+
     /**
      * Every dot- and hyphen-separated label contributes, because the leading one alone is not unique:
      * {@code rds.amazonaws.com} and {@code rds.application-autoscaling.amazonaws.com} are separate
@@ -6433,6 +6474,24 @@ public class IamService implements SessionAccountLookup, ResourceProvider {
                     "The request must include a valid AWSServiceName, for example es.amazonaws.com.", 400);
         }
         return derived.toString();
+    }
+
+    public InstanceProfile createInstanceProfile(String instanceProfileName, String path,
+                                                 Map<String, String> tags) {
+        if (instanceProfiles.get(instanceProfileName).isPresent()) {
+            throw new AwsException("EntityAlreadyExists",
+                    "Instance profile " + instanceProfileName + " already exists.", 409);
+        }
+        String profileId = "AIPA" + randomId(16);
+        String normalizedPath = normalizePath(path);
+        String arn = iamArn("instance-profile", normalizedPath, instanceProfileName);
+        InstanceProfile profile = new InstanceProfile(profileId, instanceProfileName, normalizedPath, arn);
+        if (tags != null) {
+            profile.getTags().putAll(tags);
+        }
+        instanceProfiles.put(instanceProfileName, profile);
+        LOG.infov("Created instance profile: {0}", instanceProfileName);
+        return profile;
     }
 
     boolean hasLoginProfile(String userName) {

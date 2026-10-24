@@ -440,6 +440,15 @@ public class CloudMapHandler {
         }
     }
 
+    private Response handleListNamespaces(JsonNode request, String region) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode arr = response.putArray("Namespaces");
+        for (Namespace ns : service.listNamespaces(region, parseFilters(request))) {
+            arr.add(buildNamespaceNode(ns));
+        }
+        return Response.ok(response).build();
+    }
+
     private Response handleUpdateService(JsonNode request, String region) {
         JsonNode spec = request.path("Service");
         Operation op = service.updateService(

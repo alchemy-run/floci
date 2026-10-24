@@ -40,5 +40,7 @@ public interface LakeFormationStorage {
     void addLFTagsToResource(String region, String catalogId, Resource resource, List<LFTagPair> lfTags);
     void removeLFTagsFromResource(String region, String catalogId, Resource resource, List<LFTagPair> lfTags);
 
+    void registerResource(String region, ResourceInfo info);
+
     List<LFTagPair> getResourceLFTags(String region, String catalogId, Resource resource);
 }

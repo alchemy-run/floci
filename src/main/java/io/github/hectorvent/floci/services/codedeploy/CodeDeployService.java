@@ -2144,4 +2144,26 @@ public class CodeDeployService {
         // The state machines do not enter a blue/green readiness or termination wait.
         throw new AwsException("DeploymentIsNotInReadyStateException", "Deployment is not waiting to continue", 400);
     }
+
+    public String putLifecycleEventHookExecutionStatus(String region, String deploymentId,
+                                                       String executionId, String status) {
+        Deployment deployment = getDeployment(region, deploymentId);
+        if (!"Lambda".equals(deployment.getComputePlatform()) && !"ECS".equals(deployment.getComputePlatform())) {
+            throw new AwsException("UnsupportedActionForDeploymentTypeException",
+                    "Lifecycle hook callbacks require a Lambda or ECS deployment", 400);
+        }
+        if (!"Succeeded".equals(status) && !"Failed".equals(status)) {
+            throw new AwsException("InvalidLifecycleEventHookExecutionStatusException",
+                    "Lifecycle hook status must be Succeeded or Failed", 400);
+        }
+        HookExecution execution = executionId == null ? null : hookExecutions.get(executionId);
+        if (execution == null || execution.deployment() != deployment) {
+            throw new AwsException("InvalidLifecycleEventHookExecutionIdException",
+                    "Lifecycle hook execution does not belong to this deployment", 400);
+        }
+        if (!execution.result().complete(status)) {
+            throw new AwsException("LifecycleEventAlreadyCompletedException", "Lifecycle hook has already completed", 400);
+        }
+        return executionId;
+    }
 }

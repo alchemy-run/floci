@@ -1859,6 +1859,215 @@ public class SesService {
         return identityService.verifyEmailIdentity(emailAddress, region);
     }
 
+    public Identity createEmailIdentity(String emailIdentity, String configurationSetName,
+                                        List<Tag> tags, String region, String nextSigningKeyLength) {
+        Runnable configurationSetExistsCheck = configurationSetName == null ? null
+                : () -> configSetService.get(configurationSetName, region);
+        return identityService.createEmailIdentity(emailIdentity, configurationSetName, tags, region,
+                configurationSetExistsCheck, nextSigningKeyLength);
+    }
+
+    public String sendEmail(String source, List<String> toAddresses, List<String> ccAddresses,
+                            List<String> bccAddresses, List<String> replyToAddresses, String returnPath,
+                            String subject, String bodyText, String bodyHtml,
+                            String configurationSetName, List<MessageTag> emailTags,
+                            List<MessageHeader> additionalHeaders, ListManagementOptions listManagement,
+                            String region) {
+        if (source == null || source.isBlank()) {
+            throw new AwsException("InvalidParameterValue", "Source email is required.", 400);
+        }
+        requireVerifiedSender(source, region);
+        boolean hasRecipient = (toAddresses != null && !toAddresses.isEmpty())
+                || (ccAddresses != null && !ccAddresses.isEmpty())
+                || (bccAddresses != null && !bccAddresses.isEmpty());
+        if (!hasRecipient) {
+            throw new AwsException("InvalidParameterValue", "At least one destination address is required.", 400);
+        }
+        String effectiveConfigSet = resolveDefaultConfigurationSet(configurationSetName, source, region);
+        configSetService.validateForSending(effectiveConfigSet, region);
+
+        // Resolve suppression before recording the message so a bad ListManagementOptions (e.g. an
+        // unknown contact list) fails the whole send without leaving an orphaned SentEmail record.
+        List<String> envelope = allRecipients(toAddresses, ccAddresses, bccAddresses);
+        Map<String, String> suppressedReasons = new LinkedHashMap<>(
+                collectSuppressedReasons(envelope, effectiveConfigSet, region));
+        // putIfAbsent so a suppression-list reason already set for an address (e.g. COMPLAINT) wins
+        // over the list-management opt-out and keeps its synthetic event type.
+        contactService.collectListManagementOptOuts(envelope, listManagement, region,
+                SesService::extractEmailAddress).forEach(suppressedReasons::putIfAbsent);
+
+        // A single-recipient list-managed send gets a functional unsubscribe link: the
+        // {{amazonSESUnsubscribeUrl}} body placeholder is replaced and the List-Unsubscribe headers
+        // are added, matching AWS (which only injects these for a single recipient). The link
+        // resolves to Floci's own /_aws/ses/unsubscribe endpoint.
+        if (hasListManagement(listManagement) && envelope.size() == 1) {
+            String url = buildUnsubscribeUrl(region, listManagement, extractEmailAddress(envelope.get(0)));
+            bodyText = replaceUnsubscribePlaceholder(bodyText, url);
+            bodyHtml = replaceUnsubscribePlaceholder(bodyHtml, url);
+            additionalHeaders = withUnsubscribeHeaders(additionalHeaders, url);
+        }
+
+        // Drop unsafe user-supplied headers (blank name or CR/LF in name/value) once here, so the
+        // stored SentEmail, the SMTP relay, and the published events all reflect the same sanitized
+        // set and no injection payload is retained on any surface.
+        if (additionalHeaders != null) {
+            additionalHeaders = additionalHeaders.stream().filter(MessageHeader::isSafe).toList();
+        }
+
+        String messageId = SesMessageIds.newMessageId();
+        String effectiveReturnPath = firstNonBlank(returnPath, source);
+        // SES accepts the message and then rejects it as a whole when the content scan trips, so
+        // the send still succeeds and a REJECT event is published in place of any delivery.
+        boolean rejected = SesContentScan.containsTestVirus(subject, bodyText, bodyHtml)
+                || SesContentScan.containsTestVirus(headerText(additionalHeaders));
+        SentEmail email = new SentEmail(messageId, region, source, toAddresses, ccAddresses,
+                bccAddresses, replyToAddresses, subject, bodyText, bodyHtml);
+        email.setReturnPath(effectiveReturnPath);
+        if (additionalHeaders != null && !additionalHeaders.isEmpty()) {
+            email.setHeaders(additionalHeaders);
+        }
+        if (rejected) {
+            email.discardContent(SesRecipientEvents.CONTENT_REJECT_REASON);
+        }
+        sentEmailService.record(region, messageId, email);
+
+        List<String> relayedTo = filterUnsuppressed(toAddresses, suppressedReasons);
+        List<String> relayedCc = filterUnsuppressed(ccAddresses, suppressedReasons);
+        List<String> relayedBcc = filterUnsuppressed(bccAddresses, suppressedReasons);
+        if (!rejected && sizeOf(relayedTo) + sizeOf(relayedCc) + sizeOf(relayedBcc) > 0) {
+            smtpRelay.relay(SmtpRelay.RelayMessage.builder(source)
+                    .returnPath(effectiveReturnPath)
+                    .to(relayedTo)
+                    .cc(relayedCc)
+                    .bcc(relayedBcc)
+                    .replyTo(replyToAddresses)
+                    .subject(subject)
+                    .bodyText(bodyText)
+                    .bodyHtml(bodyHtml)
+                    .headers(additionalHeaders)
+                    .messageId(messageId)
+                    .build());
+        } else {
+            LOG.infov("SES email accepted but not relayed ({0}): messageId={1}",
+                    rejected ? "content rejected" : "all recipients suppressed", messageId);
+        }
+
+        if (!rejected) {
+            LOG.infov("SES email sent: from={0}, to={1}, subject={2}, messageId={3}",
+                    source, toAddresses, subject, messageId);
+        }
+        publishSendEvents(effectiveConfigSet, messageId, source, subject,
+                toAddresses, ccAddresses, bccAddresses, envelope,
+                suppressedReasons, rejected, emailTags, additionalHeaders, region);
+        return messageId;
+    }
+
+    public String sendRawEmail(String source, List<String> destinations, String rawMessage,
+                               String returnPath, String configurationSetName, List<MessageTag> emailTags,
+                               ListManagementOptions listManagement, String region) {
+        if (rawMessage == null || rawMessage.isBlank()) {
+            throw new AwsException("InvalidParameterValue", "RawMessage.Data is required.", 400);
+        }
+        boolean hasExplicitDestinations = destinations != null && !destinations.isEmpty();
+        boolean sourceOmitted = source == null || source.isBlank();
+        // The MIME headers are always parsed: X-SES-CONFIGURATION-SET can name the configuration
+        // set that decides whether events are published at all, so the configuration set cannot be
+        // resolved before the message has been read.
+        SmtpRelay.ParsedRawMessage parsed = SmtpRelay.parseRawMessage(rawMessage);
+        SmtpRelay.RawMessageHeaders headers = parsed.headers();
+        // AWS accepts the configuration set either as a request field or as the
+        // X-SES-CONFIGURATION-SET header on the message itself; the request field wins.
+        String requestedConfigSet = firstNonBlank(configurationSetName, headers.configurationSet());
+        String effectiveConfigSet = resolveDefaultConfigurationSet(requestedConfigSet, source, region);
+        configSetService.validateForSending(effectiveConfigSet, region);
+        // Message tags work differently: AWS uses only the request field's tags when both are
+        // present and does not join the two sets, so the header tags apply only when no tag was
+        // passed as a parameter.
+        List<MessageTag> effectiveTags = (emailTags == null || emailTags.isEmpty())
+                ? headers.messageTags()
+                : emailTags;
+        String effectiveSource = sourceOmitted && !headers.from().isBlank()
+                ? headers.from()
+                : source;
+        if (effectiveSource == null || effectiveSource.isBlank()) {
+            // Shared by the v1 Query and v2 REST surfaces. Throw the v1-native code; the v2
+            // controller's remapV1Exception translates InvalidParameterValue -> BadRequestException.
+            // Verified against real AWS: v1 returns InvalidParameterValue and v2 BadRequestException,
+            // both with this message.
+            throw new AwsException("InvalidParameterValue", "Missing required header 'From'.", 400);
+        }
+        requireVerifiedSender(effectiveSource, region);
+        // FromEmailAddress was omitted, so the configuration set couldn't be resolved from the
+        // sender until the MIME "From" was parsed. Re-resolve from the effective sender now so an
+        // email identity's default configuration set still applies to a Raw send without an
+        // explicit FromEmailAddress.
+        if (sourceOmitted && (requestedConfigSet == null || requestedConfigSet.isBlank())) {
+            effectiveConfigSet = resolveDefaultConfigurationSet(requestedConfigSet, effectiveSource, region);
+            configSetService.validateForSending(effectiveConfigSet, region);
+        }
+        List<String> effectiveDestinations = hasExplicitDestinations
+                ? destinations
+                : allRecipients(headers.to(), headers.cc(), headers.bcc());
+        if (effectiveDestinations.isEmpty()) {
+            throw new AwsException("InvalidParameterValue",
+                    "At least one destination address is required.", 400);
+        }
+        // Resolve suppression before recording the message so a bad ListManagementOptions (e.g. an
+        // unknown contact list) fails the whole send without leaving an orphaned SentEmail record.
+        Map<String, String> suppressedReasons = new LinkedHashMap<>(
+                collectSuppressedReasons(effectiveDestinations, effectiveConfigSet, region));
+        // putIfAbsent so a suppression-list reason already set for an address (e.g. COMPLAINT) wins
+        // over the list-management opt-out and keeps its synthetic event type.
+        contactService.collectListManagementOptOuts(effectiveDestinations, listManagement, region,
+                        SesService::extractEmailAddress)
+                .forEach(suppressedReasons::putIfAbsent);
+
+        String messageId = SesMessageIds.newMessageId();
+        // The scan walks the decoded MIME, so a base64 attachment does not hide the content, and a
+        // message the parser cannot read is refused outright rather than stored and relayed unseen.
+        SesContentScan.Result scan = SesContentScan.scan(parsed.bytes(), parsed.message());
+        if (scan == SesContentScan.Result.UNREADABLE) {
+            throw new AwsException("InvalidParameterValue", "Raw message could not be parsed.", 400);
+        }
+        boolean rejected = scan == SesContentScan.Result.REJECTED;
+        // AWS routes bounces to the Return-Path carried by the message, falling back to the
+        // request's return path and then the sender. A rejected message keeps nothing read off its
+        // own headers, and that header's value reaches here unparsed, so it is dropped; an envelope
+        // read off the headers is a list of parsed addresses and carries no message text.
+        String effectiveReturnPath = rejected
+                ? firstNonBlank(returnPath, effectiveSource)
+                : firstNonBlank(headers.returnPath(), returnPath, effectiveSource);
+        SentEmail email = new SentEmail(messageId, region, effectiveSource, effectiveDestinations, rawMessage);
+        email.setReturnPath(effectiveReturnPath);
+        if (rejected) {
+            email.discardContent(SesRecipientEvents.CONTENT_REJECT_REASON);
+        }
+        sentEmailService.record(region, messageId, email);
+
+        List<String> relayedDestinations = filterUnsuppressed(effectiveDestinations, suppressedReasons);
+        if (!rejected && !relayedDestinations.isEmpty()) {
+            smtpRelay.relayRaw(new SmtpRelay.RawRelayMessage(effectiveSource, effectiveReturnPath,
+                    relayedDestinations, rawMessage, messageId));
+        } else {
+            LOG.infov("SES raw email accepted but not relayed ({0}): messageId={1}",
+                    rejected ? "content rejected" : "all recipients suppressed", messageId);
+        }
+
+        if (!rejected) {
+            LOG.infov("SES raw email sent: from={0}, messageId={1}", effectiveSource, messageId);
+        }
+        // The recipient lists are read off the message, so a rejected one publishes none of them
+        // either; mail.destination still carries the envelope.
+        List<String> publishedTo = rejected ? List.of() : headers.to();
+        List<String> publishedCc = rejected ? List.of() : headers.cc();
+        List<String> publishedBcc = rejected ? List.of() : headers.bcc();
+        publishSendEvents(effectiveConfigSet, messageId, effectiveSource,
+                headers.subject(), publishedTo, publishedCc, publishedBcc,
+                effectiveDestinations,
+                suppressedReasons, rejected, rejected ? requestTags(emailTags) : effectiveTags, List.of(), region);
+        return messageId;
+    }
+
     private static List<String> allRecipients(List<String> to, List<String> cc, List<String> bcc) {
         List<String> all = new ArrayList<>();
         if (to != null) {
@@ -1873,14 +2082,38 @@ public class SesService {
         return all;
     }
 
-    public List<TenantResourceAssociation> listTenantResources(String tenantName,
-                                                               String resourceTypeFilter,
-                                                               Integer pageSize, String nextToken,
+
+    public List<TenantResourceAssociation> listResourceTenants(String resourceArn, Integer pageSize,
+                                                               String nextToken, String accountId,
                                                                String region) {
         SesTenantService.validateListPaging(pageSize, nextToken);
-        SesTenantService.validateResourceTypeFilter(resourceTypeFilter);
-        Tenant tenant = tenantService.tenantForAssociation(tenantName, region);
-        return tenantService.listTenantResources(tenant, resourceTypeFilter, region);
+        SesTenantService.AssociationResource ref =
+                SesTenantService.parseResourceArn(resourceArn, accountId, region);
+        requireTenantResourceExists(ref, region);
+        return tenantService.listResourceTenants(ref, region);
+    }
+
+    /**
+     * The raw-content variant of the tenant send gate: when {@code FromEmailAddress} is omitted,
+     * the effective sender comes from the MIME {@code From} header — the same derivation
+     * {@code sendRawEmail} applies — so the gate must resolve it the same way before checking.
+     */
+    public void checkTenantRawSendAccess(String tenantName, String fromEmailAddress,
+                                         String rawMessage, String configurationSetName,
+                                         String accountId, String region) {
+        if (tenantName == null) {
+            return;
+        }
+        SmtpRelay.RawMessageHeaders headers = SmtpRelay.parseRawHeaders(rawMessage);
+        String effectiveSource = fromEmailAddress;
+        if (effectiveSource == null || effectiveSource.isBlank()) {
+            effectiveSource = headers.from().isBlank() ? null : headers.from();
+        }
+        // The gate sees the same configuration set the send will use, so one named only by the
+        // X-SES-CONFIGURATION-SET header cannot slip past the tenant association check.
+        checkTenantSendAccess(tenantName, effectiveSource,
+                firstNonBlank(configurationSetName, headers.configurationSet()), null,
+                accountId, region);
     }
 
     /**
@@ -1948,6 +2181,66 @@ public class SesService {
                 configurationSetName, emailTags, additionalHeaders, listManagement, region);
     }
 
+    public List<BulkEmailEntryResult> sendBulkTemplatedEmail(String source,
+                                                              List<String> replyToAddresses,
+                                                              String returnPath,
+                                                              String subject, String textPart, String htmlPart,
+                                                              JsonNode defaultTemplateData,
+                                                              List<BulkEmailEntry> entries,
+                                                              String configurationSetName,
+                                                              List<MessageTag> defaultEmailTags,
+                                                              List<MessageHeader> defaultHeaders,
+                                                              String region) {
+        if (source == null || source.isBlank()) {
+            throw new AwsException("InvalidParameterValue", "Source email is required.", 400);
+        }
+        requireInlineTemplateContent(subject, textPart, htmlPart);
+        if (entries == null || entries.isEmpty()) {
+            throw new AwsException("InvalidParameterValue",
+                    "At least one destination entry is required.", 400);
+        }
+        configSetService.validateForSending(configurationSetName, region);
+        if (entries.size() > MAX_BULK_DESTINATIONS) {
+            throw new AwsException("MessageRejected",
+                    "Number of destinations (" + entries.size() + ") exceeds the maximum of "
+                            + MAX_BULK_DESTINATIONS + ".", 400);
+        }
+        for (BulkEmailEntry entry : entries) {
+            int recipientCount = sizeOf(entry.toAddresses())
+                    + sizeOf(entry.ccAddresses())
+                    + sizeOf(entry.bccAddresses());
+            if (recipientCount > MAX_RECIPIENTS_PER_DESTINATION) {
+                throw new AwsException("MessageRejected",
+                        "Recipient count (" + recipientCount + ") in a destination exceeds the maximum of "
+                                + MAX_RECIPIENTS_PER_DESTINATION + ".", 400);
+            }
+        }
+
+        List<BulkEmailEntryResult> results = new ArrayList<>(entries.size());
+        for (BulkEmailEntry entry : entries) {
+            try {
+                JsonNode merged = mergeTemplateData(defaultTemplateData, entry.replacementTemplateData());
+                List<MessageTag> mergedTags = mergeEmailTags(defaultEmailTags, entry.replacementEmailTags());
+                List<MessageHeader> mergedHeaders = mergeHeaders(defaultHeaders, entry.replacementHeaders());
+                // SendBulkEmail has no ListManagementOptions field, so list-managed suppression
+                // does not apply to bulk sends.
+                String messageId = sendEmail(source,
+                        entry.toAddresses(), entry.ccAddresses(), entry.bccAddresses(),
+                        replyToAddresses, returnPath,
+                        SesTemplateService.applyTemplateData(subject, merged),
+                        SesTemplateService.applyTemplateData(textPart, merged),
+                        SesTemplateService.applyTemplateData(htmlPart, merged),
+                        configurationSetName, mergedTags, mergedHeaders, null, region);
+                results.add(BulkEmailEntryResult.success(messageId));
+            } catch (AwsException e) {
+                results.add(BulkEmailEntryResult.failure(
+                        mapErrorCodeToBulkStatus(e.getErrorCode()), e.getMessage()));
+            } catch (Exception e) {
+                results.add(BulkEmailEntryResult.failure(BulkEmailEntryResult.Status.FAILED, e.getMessage()));
+            }
+        }
+        return results;
+    }
 
     public MultiRegionEndpoint createMultiRegionEndpoint(String name, List<String> regions,
                                                          List<Tag> tags, String region) {

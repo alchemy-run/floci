@@ -428,4 +428,33 @@ public class ConfigServiceJsonHandler {
     }
 
     private final ConfigResourceService resources;
+
+    @Inject
+    public ConfigServiceJsonHandler(AwsConfigService service, ObjectMapper mapper, ConfigResourceService resources) {
+        this.service = service;
+        this.mapper = mapper;
+        this.resources = resources;
+    }
+
+    private Response tagResource(JsonNode req) {
+        String arn = req.path("ResourceArn").asText(null);
+        service.tagResource(arn, extractTags(req));
+        return Response.ok(mapper.createObjectNode()).build();
+    }
+
+    private Response untagResource(JsonNode req) {
+        String arn = req.path("ResourceArn").asText(null);
+        List<String> tagKeys = new ArrayList<>();
+        req.path("TagKeys").forEach(k -> tagKeys.add(k.asText()));
+        service.untagResource(arn, tagKeys);
+        return Response.ok(mapper.createObjectNode()).build();
+    }
+
+    private Response listTagsForResource(JsonNode req) {
+        String arn = req.path("ResourceArn").asText(null);
+        List<Map<String, String>> tagList = service.listTagsForResource(arn);
+        ObjectNode resp = mapper.createObjectNode();
+        resp.set("Tags", mapper.valueToTree(tagList));
+        return Response.ok(resp).build();
+    }
 }

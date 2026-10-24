@@ -706,6 +706,13 @@ public class WarmPool implements ContainerTeardown, Resettable {
 
     private final ConcurrentHashMap<String, Semaphore> inFlight = new ConcurrentHashMap<>();
 
+    @Inject
+    public WarmPool(LambdaRuntimeLauncher lambdaRuntimeLauncher, EmulatorConfig config) {
+        this.lambdaRuntimeLauncher = lambdaRuntimeLauncher;
+        this.config = config;
+        this.maxPoolSizePerFunction = DEFAULT_MAX_POOL_SIZE;
+    }
+
     private ContainerHandle acquireLeased(LambdaFunction fn) {
         boolean ephemeral = config != null && config.services().lambda().ephemeral();
         ContainerHandle handle = null;
@@ -788,4 +795,10 @@ public class WarmPool implements ContainerTeardown, Resettable {
         }
     }
 
+
+    private void drainAll() {
+        for (String functionName : new ArrayList<>(poolStates.keySet())) {
+            drainFunction(functionName);
+        }
+    }
 }

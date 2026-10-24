@@ -68,6 +68,14 @@ public class SageMakerJsonHandler {
 
     private final SageMakerHyperPodService hyperPod;
 
+    @Inject
+    public SageMakerJsonHandler(SageMakerService service, SageMakerFeatureStoreService featureStore,
+                                SageMakerHyperPodService hyperPod) {
+        this.service = service;
+        this.featureStore = featureStore;
+        this.hyperPod = hyperPod;
+    }
+
     private Object tags(String action, JsonNode request) {
         return featureStore.tags(action, request)
                 .or(() -> hyperPod.tags(action, request))

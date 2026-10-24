@@ -182,7 +182,7 @@ public class BedrockAgentCoreEventService {
      * that cannot be an id at all, and {@code ResourceNotFoundException} only for a well-formed id
      * that does not resolve.
      */
-    private void requireMemory(String memoryId, String region) {
+    void requireMemory(String memoryId, String region) {
         if (memoryId == null || !MEMORY_ID.matcher(memoryId).matches()) {
             throw new AwsException("ValidationException",
                     "Invalid memoryId: not a valid memory ID or ARN", 400);

@@ -934,6 +934,103 @@ public class SesReceiptRuleService {
 
     private static final Pattern RECIPIENT_ADDRESS_LABEL = Pattern.compile("^[A-Za-z0-9-]+$");
 
+    @Inject
+    public SesReceiptRuleService(StorageFactory storageFactory, S3Service s3Service,
+                                 SnsService snsService, LambdaService lambdaService, Clock clock) {
+        this.receiptRuleSetStore = storageFactory.create("ses", "ses-receipt-rule-sets.json",
+                new TypeReference<Map<String, ReceiptRuleSet>>() {});
+        this.receiptFilterStore = storageFactory.create("ses", "ses-receipt-filters.json",
+                new TypeReference<Map<String, ReceiptFilter>>() {});
+        this.s3Service = s3Service;
+        this.snsService = snsService;
+        this.lambdaService = lambdaService;
+        this.clock = clock;
+    }
+
+    /**
+     * Validates every resource an action points at against the local emulator, reproducing the
+     * checks real SES runs on create/update: any TopicArn must be a publishable SNS topic, an
+     * S3 bucket must exist, a Lambda function must be invokable, and a bounce sender must be a
+     * verified identity. Each check fires only when its member is present, matching AWS.
+     */
+    private void validateActionTargets(ReceiptRule rule, String region, Predicate<String> verifiedSender) {
+        if (rule.getActions().size() > MAX_ACTIONS_PER_RULE) {
+            // Probed: the 11th action is rejected at the service layer, like the rules-per-set cap.
+            throw new AwsException("LimitExceeded", "Too many actions", 400);
+        }
+        for (int i = 0; i < rule.getActions().size() - 1; i++) {
+            // Probed: a stop action anywhere but the last position is rejected.
+            if (rule.getActions().get(i).is("StopAction")) {
+                throw new AwsException("InvalidParameterValue",
+                        "Stop action, if any, must be placed at the end of the actions list", 400);
+            }
+        }
+        for (ReceiptAction action : rule.getActions()) {
+            String headerName = action.property("HeaderName");
+            if (action.is("AddHeaderAction") && headerName != null
+                    && !HEADER_NAME_CHARS.matcher(headerName).matches()) {
+                throw new AwsException("InvalidParameterValue", "Invalid header name: " + headerName, 400);
+            }
+            // Empty members get their own service-level messages before the existence checks
+            // (probed: they never reach the "no such resource" family).
+            String topicArn = action.property("TopicArn");
+            if (topicArn != null) {
+                // The shape check covers the probed empty-string case too (same message).
+                if (!SNS_TOPIC_ARN.matcher(topicArn).matches()) {
+                    throw new AwsException("InvalidSnsTopic", "Invalid SNS topic: " + topicArn, 400);
+                }
+                if (!snsService.topicExists(topicArn, region)) {
+                    throw new AwsException("InvalidSnsTopic",
+                            "Could not publish to SNS topic: " + topicArn, 400);
+                }
+            }
+            String bucketName = action.property("BucketName");
+            if (action.is("S3Action") && bucketName != null) {
+                if (bucketName.isEmpty()) {
+                    throw new AwsException("InvalidParameterValue", "Bucket name must not be empty", 400);
+                }
+                if (!s3Service.bucketExists(bucketName)) {
+                    throw new AwsException("InvalidS3Configuration", "No such bucket: " + bucketName, 400);
+                }
+            }
+            String functionArn = action.property("FunctionArn");
+            if (action.is("LambdaAction") && functionArn != null) {
+                if (functionArn.isEmpty()) {
+                    throw new AwsException("InvalidParameterValue",
+                            "Lambda function ARN must not be empty", 400);
+                }
+                // A bare function name or malformed ARN gets its own message before the
+                // existence lookup (probed), so a same-named local function cannot make a
+                // non-ARN value pass.
+                if (!LAMBDA_FUNCTION_ARN.matcher(functionArn).matches()) {
+                    throw new AwsException("InvalidLambdaFunction",
+                            "Invalid Lambda function: " + functionArn, 400);
+                }
+                if (!lambdaService.functionExists(region, functionArn)) {
+                    throw new AwsException("InvalidLambdaFunction",
+                            "Could not invoke Lambda function: " + functionArn, 400);
+                }
+            }
+            if (action.is("BounceAction")) {
+                String smtpReplyCode = action.property("SmtpReplyCode");
+                if (smtpReplyCode != null && smtpReplyCode.isEmpty()) {
+                    throw new AwsException("InvalidParameterValue",
+                            "Invalid SMTP reply code: " + smtpReplyCode, 400);
+                }
+                String message = action.property("Message");
+                if (message != null && message.isEmpty()) {
+                    throw new AwsException("InvalidParameterValue",
+                            "Invalid SMTP response message: " + message, 400);
+                }
+                String sender = action.property("Sender");
+                if (sender != null && !verifiedSender.test(sender)) {
+                    throw new AwsException("InvalidParameterValue",
+                            "Identity is not verified: " + sender, 400);
+                }
+            }
+        }
+    }
+
     private static void requireValidRecipients(ReceiptRule rule) {
         for (String recipient : rule.getRecipients()) {
             if (!isValidRecipient(recipient)) {

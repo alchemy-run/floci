@@ -4212,6 +4212,49 @@ public class LambdaService implements ResourceProvider {
 
     private LambdaImageDigestResolver imageDigestResolver;
 
+    @Inject
+    public LambdaService(LambdaFunctionStore functionStore,
+                          LambdaExecutorService executorService,
+                          LambdaConcurrencyLimiter concurrencyLimiter,
+                          WarmPool warmPool,
+                          CodeStore codeStore,
+                          ZipExtractor zipExtractor,
+                          EmulatorConfig config,
+                          RegionResolver regionResolver,
+                          EsmStore esmStore,
+                          LambdaAliasStore aliasStore,
+                          S3Service s3Service,
+                          SqsService sqsService,
+                          SqsEventSourcePoller poller,
+                          KinesisEventSourcePoller kinesisPoller,
+                          DynamoDbStreamsEventSourcePoller dynamodbStreamsPoller,
+                          StorageFactory storageFactory,
+                          LambdaLayerService layerService,
+                          Ec2Service ec2Service,
+                          CustomResourceLiveness customResourceLiveness,
+                          ObjectMapper objectMapper) {
+        this.customResourceLiveness = customResourceLiveness;
+        this.functionStore = functionStore;
+        this.executorService = executorService;
+        this.concurrencyLimiter = concurrencyLimiter;
+        this.warmPool = warmPool;
+        this.codeStore = codeStore;
+        this.zipExtractor = zipExtractor;
+        this.config = config;
+        this.regionResolver = regionResolver;
+        this.esmStore = esmStore;
+        this.aliasStore = aliasStore;
+        this.s3Service = s3Service;
+        this.sqsService = sqsService;
+        this.poller = poller;
+        this.kinesisPoller = kinesisPoller;
+        this.dynamodbStreamsPoller = dynamodbStreamsPoller;
+        this.storageFactory = storageFactory;
+        this.layerService = layerService;
+        this.ec2Service = ec2Service;
+        this.objectMapper = objectMapper;
+    }
+
 
     /** Test hook: wire the image digest resolver without CDI. */
     void setImageDigestResolver(LambdaImageDigestResolver imageDigestResolver) {
@@ -4358,6 +4401,18 @@ public class LambdaService implements ResourceProvider {
         return new ArrayList<>(List.of(topic));
     }
 
+    private static void validateLoggingConfig(Object value) {
+        if (!(value instanceof Map<?, ?> logging)) {
+            return;
+        }
+        validateEnum(logging.get("LogFormat"), "loggingConfig.logFormat", List.of("JSON", "Text"));
+        validateEnum(logging.get("ApplicationLogLevel"), "loggingConfig.applicationLogLevel",
+                List.of("TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"));
+        validateEnum(logging.get("SystemLogLevel"), "loggingConfig.systemLogLevel",
+                List.of("DEBUG", "INFO", "WARN"));
+        validateLogGroup(logging.get("LogGroup"));
+    }
+
     private void extractZipCodeBytes(LambdaFunction fn, byte[] zipBytes, String region) {
         Path codePath = codeStore.getCodePath(ownerAccount(fn), region, fn.getFunctionName());
         try {
@@ -4400,45 +4455,22 @@ public class LambdaService implements ResourceProvider {
         }
     }
 
+    public Map<String, Object> addPermission(String region, String functionName, Map<String, Object> request) {
+        return addPermission(region, functionName, null, request);
+    }
+
+    public Map<String, Object> getPolicy(String region, String functionName) {
+        return getPolicy(region, functionName, null);
+    }
+
+    public void removePermission(String region, String functionName, String statementId) {
+        removePermission(region, functionName, null, statementId);
+    }
+
     private static final String TAG_TYPE_FUNCTION = "function";
 
     private static final String TAG_TYPE_EVENT_SOURCE_MAPPING = "event-source-mapping";
 
-    /**
-     * Builds the IAM Condition block for AddPermission. AWS stores
-     * {@code InvokedViaFunctionUrl} as {@code Bool.lambda:InvokedViaFunctionUrl}
-     * and {@code FunctionUrlAuthType} as {@code StringEquals.lambda:FunctionUrlAuthType}.
-     */
-    static Map<String, Object> buildPermissionCondition(Map<String, Object> request) {
-        Map<String, Object> condition = new java.util.LinkedHashMap<>();
-        String sourceArn = (String) request.get("SourceArn");
-        String sourceAccount = (String) request.get("SourceAccount");
-        String functionUrlAuthType = (String) request.get("FunctionUrlAuthType");
-        Object invokedVia = request.get("InvokedViaFunctionUrl");
-
-        if (sourceArn != null && !sourceArn.isBlank()) {
-            condition.put("ArnLike", new java.util.LinkedHashMap<>(Map.of("AWS:SourceArn", sourceArn)));
-        }
-
-        Map<String, Object> stringEquals = new java.util.LinkedHashMap<>();
-        if (sourceAccount != null && !sourceAccount.isBlank()) {
-            stringEquals.put("AWS:SourceAccount", sourceAccount);
-        }
-        if (functionUrlAuthType != null && !functionUrlAuthType.isBlank()) {
-            stringEquals.put("lambda:FunctionUrlAuthType", functionUrlAuthType);
-        }
-        if (!stringEquals.isEmpty()) {
-            condition.put("StringEquals", stringEquals);
-        }
-
-        if (invokedVia != null) {
-            boolean invoked = invokedVia instanceof Boolean b ? b : Boolean.parseBoolean(invokedVia.toString());
-            if (invoked) {
-                condition.put("Bool", Map.of("lambda:InvokedViaFunctionUrl", "true"));
-            }
-        }
-        return condition;
-    }
 
 
     private void releaseVpcEnis(String region, LambdaFunction fn) {

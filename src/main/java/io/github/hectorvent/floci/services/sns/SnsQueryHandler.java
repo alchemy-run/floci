@@ -732,9 +732,43 @@ public class SnsQueryHandler {
         }
     }
 
+    private Response handleCheckIfPhoneNumberIsOptedOut(MultivaluedMap<String, String> params, String region) {
+        String phone = firstNonNull(getParam(params, "phoneNumber"), getParam(params, "PhoneNumber"));
+        boolean optedOut = snsService.isPhoneNumberOptedOut(phone, region);
+        String result = new XmlBuilder().elem("isOptedOut", optedOut).build();
+        return Response.ok(AwsQueryResponse.envelope("CheckIfPhoneNumberIsOptedOut", AwsNamespaces.SNS, result)).build();
+    }
+
+    private Response handleListPhoneNumbersOptedOut(String region) {
+        var xml = new XmlBuilder().start("phoneNumbers");
+        for (String number : snsService.listPhoneNumbersOptedOut(region)) {
+            xml.elem("member", number);
+        }
+        xml.end("phoneNumbers");
+        return Response.ok(AwsQueryResponse.envelope("ListPhoneNumbersOptedOut", AwsNamespaces.SNS, xml.build())).build();
+    }
+
+    private Response handleOptInPhoneNumber(MultivaluedMap<String, String> params, String region) {
+        String phone = firstNonNull(getParam(params, "phoneNumber"), getParam(params, "PhoneNumber"));
+        snsService.optInPhoneNumber(phone, region);
+        return Response.ok(AwsQueryResponse.envelopeNoResult("OptInPhoneNumber", AwsNamespaces.SNS)).build();
+    }
+
     private Response handleListOriginationNumbers() {
         var xml = new XmlBuilder().start("PhoneNumbers").end("PhoneNumbers");
         return Response.ok(AwsQueryResponse.envelope("ListOriginationNumbers", AwsNamespaces.SNS, xml.build())).build();
+    }
+
+    private Response handleListSmsSandboxPhoneNumbers(String region) {
+        var xml = new XmlBuilder().start("PhoneNumbers");
+        for (Map<String, String> number : snsService.listSmsSandboxPhoneNumbers(region)) {
+            xml.start("member")
+                    .elem("PhoneNumber", number.get("PhoneNumber"))
+                    .elem("Status", number.get("Status"))
+                    .end("member");
+        }
+        xml.end("PhoneNumbers");
+        return Response.ok(AwsQueryResponse.envelope("ListSMSSandboxPhoneNumbers", AwsNamespaces.SNS, xml.build())).build();
     }
 
     private static String firstNonNull(String a, String b) {

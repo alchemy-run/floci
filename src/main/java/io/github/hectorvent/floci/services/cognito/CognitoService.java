@@ -6766,6 +6766,38 @@ public class CognitoService implements ResourceProvider {
     private record DeliveryTarget(String attributeName, String deliveryMedium, String destination) {
     }
 
+    @Inject
+    public CognitoService(StorageFactory storageFactory, EmulatorConfig emulatorConfig,
+            RegionResolver regionResolver, LambdaService lambdaService, AcmService acmService,
+            SesService sesService, SnsService snsService, Clock clock,
+            TlsCertificateManager certificateManager) {
+        this(
+                storageFactory.create("cognito", "cognito-pools.json",
+                        new TypeReference<Map<String, UserPool>>() {}),
+                storageFactory.create("cognito", "cognito-clients.json",
+                        new TypeReference<Map<String, UserPoolClient>>() {}),
+                storageFactory.create("cognito", "cognito-resource-servers.json",
+                        new TypeReference<Map<String, ResourceServer>>() {}),
+                storageFactory.create("cognito", "cognito-domains.json",
+                        new TypeReference<Map<String, UserPoolDomain>>() {}),
+                storageFactory.create("cognito", "cognito-identity-providers.json",
+                        new TypeReference<Map<String, IdentityProvider>>() {}),
+                storageFactory.create("cognito", "cognito-users.json",
+                        new TypeReference<Map<String, CognitoUser>>() {}),
+                storageFactory.create("cognito", "cognito-groups.json",
+                        new TypeReference<Map<String, CognitoGroup>>() {}),
+                storageFactory.create("cognito", "cognito-revoked-tokens.json",
+                        new TypeReference<Map<String, RevokedTokenInfo>>() {}),
+                trimTrailingSlash(emulatorConfig.effectiveBaseUrl()),
+                regionResolver,
+                lambdaService,
+                acmService,
+                new VerificationCodeService(storageFactory, clock),
+                new CognitoMessageDispatcher(sesService, snsService),
+                certificateManager
+        );
+    }
+
     /**
      * AWS prefixes custom schema attributes with {@code custom:} (or {@code dev:}
      * for developer-only) on create. Standard attribute names are left unprefixed.
@@ -6871,13 +6903,168 @@ public class CognitoService implements ResourceProvider {
         return clientId == null || clientId.isBlank() ? "" : clientId;
     }
 
+    /** Records the candidate identity before mutation, including a create whose TLS setup fails. */
+    public UserPoolDomain createUserPoolDomain(String domain, String userPoolId,
+            Map<String, Object> customDomainConfig, Integer managedLoginVersion, Consumer<UserPoolDomain> beforeCreate) {
+        describeUserPool(userPoolId);
+        if (domain == null || domain.isBlank()) {
+            throw new AwsException("InvalidParameterException", "Domain is required", 400);
+        }
+        if (!findDomains(domain).isEmpty()) {
+            throw new AwsException("InvalidParameterException",
+                    "Domain " + domain + " already associated with another user pool", 400);
+        }
+
+        UserPoolDomain userPoolDomain = new UserPoolDomain();
+        userPoolDomain.setDomain(domain);
+        userPoolDomain.setUserPoolId(userPoolId);
+        userPoolDomain.setAwsAccountId(regionResolver.getAccountId());
+        userPoolDomain.setManagedLoginVersion(managedLoginVersion);
+        userPoolDomain.setStatus("ACTIVE");
+        userPoolDomain.setVersion(generateDomainVersion());
+        userPoolDomain.setS3Bucket("aws-cognito-prod-" + regionResolver.getRegion() + "-assets");
+
+        if (customDomainConfig != null) {
+            String certificateArn = (String) customDomainConfig.get("CertificateArn");
+            if (certificateArn == null || certificateArn.isBlank()) {
+                throw new AwsException("InvalidParameterException",
+                        "CertificateArn is required in CustomDomainConfig", 400);
+            }
+            requireUsableCertificate(certificateArn);
+            userPoolDomain.setCertificateArn(certificateArn);
+            Object securityPolicy = customDomainConfig.get("SecurityPolicy");
+            userPoolDomain.setSecurityPolicy(securityPolicy != null ? securityPolicy.toString() : "TLS_V1_2_2021");
+        }
+        // Describe returns a distribution for both domain types; Create only returns it for custom domains.
+        userPoolDomain.setCloudFrontDistribution(generateCloudFrontDomain());
+
+        // Check and write as one step: two accounts racing for one name write to different
+        // account-prefixed keys, so without the lock both would succeed and the name would be
+        // ambiguous for routing.
+        synchronized (domainLock) {
+            if (!findDomains(domain).isEmpty()) {
+                throw new AwsException("InvalidParameterException",
+                        "Domain " + domain + " already associated with another user pool", 400);
+            }
+            if (listUserPoolDomains(userPoolId).stream()
+                    .anyMatch(existing -> existing.isCustomDomain() == userPoolDomain.isCustomDomain())) {
+                throw new AwsException("InvalidParameterException",
+                        "User pool already has a domain of this type", 400);
+            }
+            beforeCreate.accept(userPoolDomain);
+            if (userPoolDomain.isCustomDomain()) {
+                registerCertificateUse(userPoolDomain.getCertificateArn(), userPoolDomain);
+            }
+            domainStore.put(domain, userPoolDomain);
+        }
+        // Outside the lock: the reissue blocks until the HTTPS listener has switched certificates.
+        // A prefix domain is served under amazoncognito.com on AWS, not by Floci; a custom domain is.
+        if (customDomainConfig != null && certificateManager != null) {
+            certificateManager.ensureHost(domain);
+        }
+        LOG.infov("Created User Pool Domain: {0} for pool {1}", domain, userPoolId);
+        return userPoolDomain;
+    }
+
     public List<UserPoolDomain> listUserPoolDomains(String userPoolId) {
         return domainStore.scan(k -> true).stream()
                 .filter(domain -> userPoolId.equals(domain.getUserPoolId()))
                 .toList();
     }
 
+    private UserPoolDomain updateUserPoolDomainLocked(String domain, String userPoolId,
+            Map<String, Object> customDomainConfig, Integer managedLoginVersion) {
+        describeUserPool(userPoolId);
+        UserPoolDomain userPoolDomain = MAPPER.convertValue(describeUserPoolDomain(domain), UserPoolDomain.class);
+        if (!userPoolDomain.getUserPoolId().equals(userPoolId)) {
+            throw new AwsException("ResourceNotFoundException", "Domain does not exist", 404);
+        }
+        String previousCertificateArn = userPoolDomain.getCertificateArn();
+        String certificateArn = previousCertificateArn;
+        if (customDomainConfig != null) {
+            if (!userPoolDomain.isCustomDomain()) {
+                throw new AwsException("InvalidParameterException",
+                        "CustomDomainConfig cannot be set on an Amazon Cognito prefix domain", 400);
+            }
+            certificateArn = (String) customDomainConfig.get("CertificateArn");
+            if (certificateArn == null || certificateArn.isBlank()) {
+                throw new AwsException("InvalidParameterException",
+                        "CertificateArn is required in CustomDomainConfig", 400);
+            }
+        }
+        // A new certificate is checked and registered before anything changes, so a failure leaves
+        // the domain on its current certificate.
+        boolean certificateChanged = !Objects.equals(certificateArn, previousCertificateArn);
+        if (certificateChanged) {
+            requireUsableCertificate(certificateArn);
+            registerCertificateUse(certificateArn, userPoolDomain);
+        }
+        if (customDomainConfig != null) {
+            userPoolDomain.setCertificateArn(certificateArn);
+            Object securityPolicy = customDomainConfig.get("SecurityPolicy");
+            if (securityPolicy != null) {
+                userPoolDomain.setSecurityPolicy(securityPolicy.toString());
+            }
+        }
+        if (managedLoginVersion != null) {
+            userPoolDomain.setManagedLoginVersion(managedLoginVersion);
+        }
+        userPoolDomain.setLastModifiedDate(System.currentTimeMillis() / 1000L);
+        domainStore.put(domain, userPoolDomain);
+        if (certificateChanged) {
+            acmService.removeInUseBy(previousCertificateArn,
+                    cloudFrontDistributionArn(userPoolDomain), CERTIFICATE_REGION);
+        }
+        LOG.infov("Updated User Pool Domain: {0} for pool {1}", domain, userPoolId);
+        return userPoolDomain;
+    }
 
+    /** Internal CloudFormation cleanup: never delete a different incarnation holding the name. */
+    public void deleteUserPoolDomain(UserPoolDomain expected) {
+        synchronized (domainLock) {
+            requireDomainSnapshotAccount(expected);
+            List<UserPoolDomain> matches = findDomains(expected.getDomain());
+            if (matches.stream().anyMatch(current -> !sameDomainIdentity(current, expected))) {
+                throw new AwsException("InvalidParameterException", "Domain identity changed during cleanup", 400);
+            }
+            UserPoolDomain observed = matches.isEmpty() ? expected : matches.getFirst();
+            if (observed.isCustomDomain()) {
+                // Keep the live record until release succeeds so retries retain its current certificate.
+                acmService.removeInUseBy(observed.getCertificateArn(),
+                        cloudFrontDistributionArn(observed), CERTIFICATE_REGION);
+            }
+            domainStore.delete(expected.getDomain());
+        }
+    }
+
+    /** Restores a deleted CloudFormation predecessor without allocating a new distribution. */
+    public void restoreUserPoolDomain(UserPoolDomain snapshot) {
+        UserPoolDomain restored = MAPPER.convertValue(snapshot, UserPoolDomain.class);
+        requireDomainSnapshotAccount(restored);
+        describeUserPool(restored.getUserPoolId());
+        synchronized (domainLock) {
+            List<UserPoolDomain> matches = findDomains(restored.getDomain());
+            if (matches.stream().anyMatch(current -> !sameDomainIdentity(current, restored))
+                    || listUserPoolDomains(restored.getUserPoolId()).stream().anyMatch(current ->
+                    current.isCustomDomain() == restored.isCustomDomain() && !sameDomainIdentity(current, restored))) {
+                throw new AwsException("InvalidParameterException", "Domain identity is occupied during restoration", 400);
+            }
+            if (restored.isCustomDomain()) {
+                requireUsableCertificate(restored.getCertificateArn());
+                registerCertificateUse(restored.getCertificateArn(), restored);
+            }
+            for (UserPoolDomain observed : matches) {
+                if (observed.isCustomDomain() && !Objects.equals(observed.getCertificateArn(), restored.getCertificateArn())) {
+                    acmService.removeInUseBy(observed.getCertificateArn(),
+                            cloudFrontDistributionArn(observed), CERTIFICATE_REGION);
+                }
+            }
+            domainStore.put(restored.getDomain(), restored);
+        }
+        if (restored.isCustomDomain() && certificateManager != null) {
+            certificateManager.ensureHost(restored.getDomain());
+        }
+    }
 
     private void requireDomainSnapshotAccount(UserPoolDomain snapshot) {
         if (!Objects.equals(regionResolver.getAccountId(), snapshot.getAwsAccountId())) {
@@ -6890,6 +7077,17 @@ public class CognitoService implements ResourceProvider {
                 && Objects.equals(current.getUserPoolId(), expected.getUserPoolId())
                 && Objects.equals(current.getAwsAccountId(), expected.getAwsAccountId())
                 && Objects.equals(current.getCloudFrontDistribution(), expected.getCloudFrontDistribution());
+    }
+
+    /**
+     * What a custom domain registers on its certificate: the CloudFront distribution that serves
+     * it, which is what ACM lists on AWS. Floci has no distribution object, so the id is the label
+     * of the generated CloudFront name.
+     */
+    private static String cloudFrontDistributionArn(UserPoolDomain userPoolDomain) {
+        String name = userPoolDomain.getCloudFrontDistribution();
+        String id = name.substring(0, name.indexOf('.')).toUpperCase(Locale.ROOT);
+        return "arn:aws:cloudfront::" + userPoolDomain.getAwsAccountId() + ":distribution/" + id;
     }
 
     private CognitoUser adminCreateUserUnderUserLock(String userPoolId,
@@ -6985,12 +7183,230 @@ public class CognitoService implements ResourceProvider {
         }
     }
 
+    public CognitoUser signUp(String clientId, String username, String password, Map<String, String> attributes) {
+        UserPoolClient client = clientStore.get(clientId)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Client not found",
+                        400));
+        String userPoolId = client.getUserPoolId();
+        // Locked on the requested username/alias, same reasoning as adminCreateUser: an alias
+        // pool has no canonical id to lock on until creation succeeds.
+        synchronized (userLock(userPoolId, username)) {
+            return signUpUnderUserLock(client, userPoolId, username, password, attributes);
+        }
+    }
+
+    private CognitoUser signUpUnderUserLock(UserPoolClient client, String userPoolId,
+            String username, String password, Map<String, String> attributes) {
+        UserPool pool = describeUserPool(userPoolId);
+
+        boolean aliasPool = usesAliasUsernames(pool);
+        Map<String, String> resolvedAttributes = attributes == null
+                ? new HashMap<>() : new HashMap<>(attributes);
+        String canonicalUsername = username;
+        if (aliasPool) {
+            String aliasAttribute = aliasAttributeForValue(pool, username);
+            if (findUserByAlias(userPoolId, aliasAttribute, username) != null) {
+                throw new AwsException("UsernameExistsException", "User already exists", 400);
+            }
+            resolvedAttributes.put(aliasAttribute, username);
+            canonicalUsername = UUID.randomUUID().toString();
+            resolvedAttributes.put("sub", canonicalUsername);
+        } else if (userStore.get(userKey(userPoolId, username)).isPresent()) {
+            throw new AwsException("UsernameExistsException", "User already exists", 400);
+        }
+
+        String key = userKey(userPoolId, canonicalUsername);
+
+        CognitoUser user = new CognitoUser();
+        user.setUsername(canonicalUsername);
+        user.setUserPoolId(userPoolId);
+        updateUserPassword(user, password);
+        user.setUserStatus("UNCONFIRMED");
+        user.getAttributes().putAll(resolvedAttributes);
+
+        // Ensure sub attribute is present (required by PreSignUp event)
+        if (!user.getAttributes().containsKey("sub")) {
+            user.getAttributes().put("sub", UUID.randomUUID().toString());
+        }
+
+        // Fire PreSignUp BEFORE persisting — allows the trigger to block signup
+        // (via lambda error) or auto-confirm/auto-verify the user (via response).
+        CognitoAuthFlowHandler.PreSignUpResponse preSignUp = authFlowHandler.firePreSignUp(
+                pool, client, user, Map.of(), Map.of(), "PreSignUp_SignUp");
+        if (preSignUp.autoConfirmUser()) {
+            user.setUserStatus("CONFIRMED");
+        }
+        if (preSignUp.autoVerifyEmail()) {
+            user.getAttributes().put("email_verified", "true");
+        }
+        if (preSignUp.autoVerifyPhone()) {
+            user.getAttributes().put("phone_number_verified", "true");
+        }
+
+        DeliveryTarget deliveryTarget = null;
+        boolean requiresConfirmationCode =
+                !preSignUp.autoConfirmUser() && verificationCodeService != null
+                        && messageDispatcher != null && isSignUpConfirmationEnabled(pool);
+        if (requiresConfirmationCode) {
+            deliveryTarget = resolveSignUpDeliveryTarget(pool, user);
+            if (deliveryTarget == null) {
+                throw new AwsException("InvalidParameterException",
+                        "Cannot confirm user because email or phone_number is missing", 400);
+            }
+        }
+
+        userStore.put(key, user);
+        LOG.infov("Signed up user {0} in pool {1} (status={2})",
+                username, userPoolId, user.getUserStatus());
+
+        if (requiresConfirmationCode) {
+            try {
+                String code = verificationCodeService.issue(pool.getId(), user.getUsername(),
+                        VerificationCode.Purpose.SIGNUP_CONFIRMATION, Duration.ofHours(24));
+                Map<String, Object> customMessage = authFlowHandler.fireCustomMessage(
+                        pool, client, user, "CustomMessage_SignUp");
+                messageDispatcher.dispatch(pool, user, VerificationCode.Purpose.SIGNUP_CONFIRMATION,
+                        code, List.of(deliveryTarget.deliveryMedium()), customMessage);
+            } catch (VerificationCodeException e) {
+                rollbackSignUpConfirmationArtifacts(pool.getId(), user.getUsername(), key);
+                throw mapVerificationCodeException(e);
+            } catch (RuntimeException e) {
+                rollbackSignUpConfirmationArtifacts(pool.getId(), user.getUsername(), key);
+                throw new AwsException("CodeDeliveryFailureException",
+                        "Failed to deliver the message.", 400);
+            }
+        }
+
+        // When PreSignUp auto-confirms, AWS Cognito also fires PostConfirmation.
+        // See: docs.aws.amazon.com/cognito/latest/developerguide/user-pool-lambda-pre-sign-up.html
+        if (preSignUp.autoConfirmUser()) {
+            authFlowHandler.firePostConfirmation(pool, client, user, Map.of(), "PostConfirmation_ConfirmSignUp");
+        }
+        return user;
+    }
+
+    private Map<String, Object> getUserAttributeVerificationCodeUnderUserLock(
+            String poolId, String username, String attributeName) {
+        if (!"email".equals(attributeName) && !"phone_number".equals(attributeName)) {
+            throw new AwsException("InvalidParameterException",
+                    "Invalid attribute name. Only phone_number and email can be verified.", 400);
+        }
+
+        CognitoUser user = adminGetUser(poolId, username);
+        UserPool pool = describeUserPool(poolId);
+        String destination = attributeVerificationDestination(user, attributeName);
+        if (destination == null) {
+            throw new AwsException("InvalidParameterException",
+                    "email".equals(attributeName)
+                            ? "User does not have a valid registered email address"
+                            : "User does not have a valid registered phone number",
+                    400);
+        }
+
+        String deliveryMedium = "email".equals(attributeName) ? "EMAIL" : "SMS";
+        VerificationCode.Purpose purpose = "email".equals(attributeName)
+                ? VerificationCode.Purpose.EMAIL_ATTRIBUTE_VERIFICATION
+                : VerificationCode.Purpose.PHONE_ATTRIBUTE_VERIFICATION;
+        ensureVerificationWiring();
+        try {
+            String code = verificationCodeService.issue(poolId, user.getUsername(),
+                    purpose, Duration.ofHours(24));
+            dispatchAttributeVerificationCode(pool, user, attributeName, destination, purpose, code);
+        } catch (VerificationCodeException e) {
+            throw mapVerificationCodeException(e);
+        }
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("AttributeName", attributeName);
+        response.put("DeliveryMedium", deliveryMedium);
+        response.put("Destination",
+                "email".equals(attributeName) ? maskEmail(destination) : maskPhoneNumber(destination));
+        return response;
+    }
+
+    private List<Map<String, Object>> updateUserAttributesUnderUserLock(
+            String poolId, String username, Map<String, String> attributes) {
+        UserPool pool = describeUserPool(poolId);
+        CognitoUser currentUser = adminGetUser(poolId, username);
+
+        // Validate every entry (alias availability) before mutating the user or issuing any
+        // verification code. Otherwise a later entry failing leaves an earlier entry's code
+        // live against a user record that was never actually updated, and the request's
+        // attribute order would silently change what gets left behind.
+        for (Map.Entry<String, String> attribute : attributes.entrySet()) {
+            String attributeName = attribute.getKey();
+            String value = attribute.getValue();
+            if (isVerifiableContactAttribute(attributeName) && blankToNull(value) != null) {
+                ensureAliasAvailable(pool, currentUser, attributeName, value);
+            }
+        }
+
+        CognitoUser updatedUser = MAPPER.convertValue(currentUser, CognitoUser.class);
+        List<Map<String, Object>> deliveryDetails = new ArrayList<>();
+
+        try {
+            for (Map.Entry<String, String> attribute : attributes.entrySet()) {
+                String attributeName = attribute.getKey();
+                String value = attribute.getValue();
+
+                if (blankToNull(value) == null) {
+                    // AWS: "To delete an attribute from the user, submit the attribute in
+                    // your API request with a blank value."
+                    updatedUser.getAttributes().remove(attributeName);
+                    updatedUser.getAttributes().remove(attributeName + "_verified");
+                    updatedUser.getPendingAttributes().remove(attributeName);
+                    continue;
+                }
+
+                if (!isVerifiableContactAttribute(attributeName)) {
+                    updatedUser.getAttributes().put(attributeName, value);
+                    continue;
+                }
+
+                VerificationCode.Purpose purpose = verificationPurpose(attributeName);
+                ensureVerificationWiring();
+                String verificationCode = verificationCodeService.issue(
+                        poolId, currentUser.getUsername(), purpose, Duration.ofHours(24));
+                dispatchAttributeVerificationCode(pool, currentUser, attributeName, value,
+                        purpose, verificationCode);
+
+                if (requiresVerificationBeforeUpdate(pool, attributeName)) {
+                    updatedUser.getPendingAttributes().put(attributeName, value);
+                } else {
+                    updatedUser.getAttributes().put(attributeName, value);
+                    updatedUser.getAttributes().put(attributeName + "_verified", "false");
+                    updatedUser.getPendingAttributes().remove(attributeName);
+                }
+
+                Map<String, Object> detail = new LinkedHashMap<>();
+                detail.put("AttributeName", attributeName);
+                detail.put("DeliveryMedium", deliveryMedium(attributeName));
+                detail.put("Destination", maskAttributeDestination(attributeName, value));
+                deliveryDetails.add(detail);
+            }
+        } catch (VerificationCodeException e) {
+            throw mapVerificationCodeException(e);
+        } catch (AwsException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new AwsException("CodeDeliveryFailureException",
+                    "Failed to deliver verification code", 400);
+        }
+
+        updatedUser.setLastModifiedDate(System.currentTimeMillis() / 1000L);
+        userStore.put(userKey(poolId, updatedUser.getUsername()), updatedUser);
+        return deliveryDetails;
+    }
 
     public List<Map<String, Object>> adminListDevices(String userPoolId, String username) {
         adminGetUser(userPoolId, username);
         // Device tracking is off unless DeviceConfiguration is set; a fresh user
         // has no remembered devices either way.
         return List.of();
+    }
+
+    public Map<String, Object> issueClientCredentialsToken(String clientId, String clientSecret, String scope) {
+        return issueClientCredentialsToken(clientId, clientSecret, scope, null);
     }
 
     private String regionFromPoolId(String poolId) {
@@ -7003,8 +7419,79 @@ public class CognitoService implements ResourceProvider {
         return regionResolver.getDefaultRegion();
     }
 
+    private Integer normalizeRefreshTokenValidity(Integer value) {
+        if (value != null && value == 0) {
+            return DEFAULT_REFRESH_TOKEN_VALIDITY_DAYS;
+        }
+        return value;
+    }
+
     int getAccessTokenExpiresInSeconds(UserPoolClient client) {
         return resolveAccessTokenLifetimeSeconds(client);
+    }
+
+    String buildRefreshToken(UserPool pool, String username, String clientId, String originJti) {
+        if (ensureRefreshTokenSecret(pool)) {
+            poolStore.put(pool.getId(), pool);
+        }
+        long issuedAt = System.currentTimeMillis();
+        String familyId = originJti != null ? originJti : UUID.randomUUID().toString();
+        String raw = pool.getId() + "|" + username + "|" + clientId + "|" + issuedAt + "|" + familyId;
+        String signature = hmacSha256(refreshTokenSecretBytes(pool), raw);
+        return Base64.getEncoder().withoutPadding()
+                .encodeToString((raw + "|" + signature).getBytes(StandardCharsets.UTF_8));
+    }
+
+    private void dispatchAttributeVerificationCode(UserPool pool, CognitoUser user,
+                                                    String attributeName, String destination,
+                                                    VerificationCode.Purpose purpose, String code) {
+        CognitoUser deliveryUser = MAPPER.convertValue(user, CognitoUser.class);
+        deliveryUser.getAttributes().put(attributeName, destination);
+        messageDispatcher.dispatch(pool, deliveryUser, purpose, code,
+                List.of(deliveryMedium(attributeName)));
+    }
+
+    private void rollbackSignUpConfirmationArtifacts(String userPoolId, String username,
+            String userKey) {
+        userStore.delete(userKey);
+        if (verificationCodeService != null) {
+            verificationCodeService.invalidatePrevious(userPoolId, username,
+                    VerificationCode.Purpose.SIGNUP_CONFIRMATION);
+        }
+    }
+
+    /**
+     * Issues and delivers a one-time code for a USER_AUTH EMAIL_OTP/SMS_OTP challenge, mirroring
+     * the SignUp/ForgotPassword code-delivery path. Returns the masked CODE_DELIVERY challenge
+     * parameters for the InitiateAuth/RespondToAuthChallenge response.
+     */
+    Map<String, String> issueSignInOtp(UserPool pool, CognitoUser user, VerificationCode.Purpose purpose,
+            String attributeName, String deliveryMedium, Map<String, Object> customMessageResponse) {
+        ensureVerificationWiring();
+        String destination = user.getAttributes().get(attributeName);
+        String code;
+        try {
+            code = verificationCodeService.issue(pool.getId(), user.getUsername(), purpose, Duration.ofMinutes(5));
+            messageDispatcher.dispatch(pool, user, purpose, code, List.of(deliveryMedium), customMessageResponse);
+        } catch (VerificationCodeException e) {
+            throw mapVerificationCodeException(e);
+        } catch (RuntimeException e) {
+            // The code was already issued and stored before dispatch failed; invalidate it so
+            // the rate limiter doesn't block an immediate retry for a code the user never
+            // received, matching how signUp's rollback treats the same failure shape.
+            verificationCodeService.invalidatePrevious(pool.getId(), user.getUsername(), purpose);
+            LOG.warnv(e, "Failed to deliver a USER_AUTH {0} code for pool {1}: {2}",
+                    purpose, pool.getId(), e.getMessage());
+            // Unlike SignUp/ResendConfirmationCode/ForgotPassword, none of InitiateAuth,
+            // AdminInitiateAuth, RespondToAuthChallenge or AdminRespondToAuthChallenge declare
+            // CodeDeliveryFailureException; all four declare InternalErrorException instead.
+            throw new AwsException("InternalErrorException", "Failed to deliver the message.", 500);
+        }
+        String masked = "email".equals(attributeName) ? maskEmail(destination) : maskPhoneNumber(destination);
+        Map<String, String> details = new LinkedHashMap<>();
+        details.put("CODE_DELIVERY_DELIVERY_MEDIUM", deliveryMedium);
+        details.put("CODE_DELIVERY_DESTINATION", masked);
+        return details;
     }
 
     private void adminSetUserMFAPreferenceUnderUserLock(

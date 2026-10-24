@@ -318,4 +318,17 @@ public class BedrockAgentCoreToolsController {
     private final BedrockAgentCoreSandboxRuntime sandboxRuntime;
 
     private final EmulatorConfig config;
+
+    @Inject
+    public BedrockAgentCoreToolsController(BedrockAgentCoreToolsService service,
+                                           BedrockAgentCoreSandboxRuntime sandboxRuntime,
+                                           EmulatorConfig config,
+                                           RegionResolver regionResolver,
+                                           ObjectMapper objectMapper) {
+        this.service = service;
+        this.sandboxRuntime = sandboxRuntime;
+        this.config = config;
+        this.regionResolver = regionResolver;
+        this.objectMapper = objectMapper;
+    }
 }

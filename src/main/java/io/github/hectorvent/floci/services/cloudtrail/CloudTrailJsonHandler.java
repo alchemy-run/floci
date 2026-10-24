@@ -311,6 +311,15 @@ public class CloudTrailJsonHandler {
 
     private final CloudTrailLakeService lake;
 
+    @Inject
+    public CloudTrailJsonHandler(CloudTrailService service, ObjectMapper mapper,
+                                CloudTrailEventService events, CloudTrailLakeService lake) {
+        this.service = service;
+        this.mapper = mapper;
+        this.events = events;
+        this.lake = lake;
+    }
+
     private Response getTrail(JsonNode req, String region) {
         ObjectNode response = mapper.createObjectNode();
         response.set("Trail", mapper.valueToTree(service.describeTrail(region, req.path("Name").asText(null))));
@@ -357,7 +366,48 @@ public class CloudTrailJsonHandler {
         return Response.ok(response).build();
     }
 
+    private Response addTags(JsonNode req, String region) {
+        String resourceId = req.path("ResourceId").asText(null);
+        if (isEventDataStore(resourceId)) {
+            lake.updateTags(resourceId, region, parseTagsList(req.path("TagsList")), List.of());
+        } else {
+            service.addTags(resourceId, parseTagsList(req.path("TagsList")));
+        }
+        return Response.ok(mapper.createObjectNode()).build();
+    }
+
+    private Response removeTags(JsonNode req, String region) {
+        String resourceId = req.path("ResourceId").asText(null);
+        List<String> keys = new ArrayList<>(parseTagsList(req.path("TagsList")).keySet());
+        if (isEventDataStore(resourceId)) {
+            lake.updateTags(resourceId, region, Map.of(), keys);
+        } else {
+            service.removeTags(resourceId, keys);
+        }
+        return Response.ok(mapper.createObjectNode()).build();
+    }
+
     private static boolean isEventDataStore(String arn) {
         return arn != null && arn.contains(":eventdatastore/");
+    }
+
+    private Response listTags(JsonNode req, String region) {
+        List<String> resourceIdList = extractStringList(req, "ResourceIdList");
+        ObjectNode resp = mapper.createObjectNode();
+        ArrayNode resourceTagList = resp.putArray("ResourceTagList");
+        for (String resourceId : resourceIdList) {
+            Map<String, String> tags = isEventDataStore(resourceId)
+                    ? lake.tags(resourceId, region) : service.listTags(resourceId);
+            ObjectNode entry = resourceTagList.addObject();
+            entry.put("ResourceId", resourceId);
+            ArrayNode tagsList = entry.putArray("TagsList");
+            tags.forEach((k, v) -> {
+                ObjectNode tag = tagsList.addObject().put("Key", k);
+                if (v != null) {
+                    tag.put("Value", v);
+                }
+            });
+        }
+        return Response.ok(resp).build();
     }
 }

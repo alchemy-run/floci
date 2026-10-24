@@ -696,6 +696,34 @@ public class CodeBuildService {
 
     private Map<String, JsonNode> reports = new ConcurrentHashMap<>();
 
+    @Inject
+    public CodeBuildService(CodeBuildRunner runner, EmulatorConfig config, StorageFactory storageFactory,
+                            ObjectMapper mapper) {
+        this.runner = runner;
+        this.config = config;
+        this.storageFactory = storageFactory;
+        this.mapper = mapper;
+    }
+
+    public synchronized void deleteReportGroup(String region, String arn, boolean deleteReports) {
+        if (arn == null || arn.isBlank()) {
+            throw new AwsException("InvalidInputException", "arn is required", 400);
+        }
+        Map<String, ReportGroup> store = reportGroupsFor(region);
+        if (store.containsKey(arn)) {
+            List<String> reportArns = reports.entrySet().stream()
+                    .filter(entry -> arn.equals(entry.getValue().path("reportGroupArn").asText()))
+                    .map(Map.Entry::getKey).toList();
+            if (!deleteReports && !reportArns.isEmpty()) {
+                throw new AwsException("InvalidInputException", "Report group contains reports", 400);
+            }
+            reportArns.forEach(reports::remove);
+            resourcePolicies.remove(arn);
+            store.remove(arn);
+            persistRegion(reportGroups, region);
+        }
+    }
+
     public synchronized String getResourcePolicy(String region, String account, String resourceArn) {
         requirePolicyResource(region, account, resourceArn);
         return resourcePolicies.get(resourceArn);
@@ -1003,5 +1031,24 @@ public class CodeBuildService {
             }
         }
         return Map.of("buildsDeleted", deleted, "buildsNotDeleted", notDeleted);
+    }
+
+    public List<String> listBuilds(String region, String account) {
+        return buildsFor(account, region).values().stream()
+                .sorted((a, b) -> Double.compare(
+                        b.getStartTime() != null ? b.getStartTime() : 0,
+                        a.getStartTime() != null ? a.getStartTime() : 0))
+                .map(Build::getId)
+                .collect(Collectors.toList());
+    }
+
+    public List<String> listBuildsForProject(String region, String account, String projectName) {
+        return buildsFor(account, region).values().stream()
+                .filter(b -> projectName.equals(b.getProjectName()))
+                .sorted((a, b) -> Double.compare(
+                        b.getStartTime() != null ? b.getStartTime() : 0,
+                        a.getStartTime() != null ? a.getStartTime() : 0))
+                .map(Build::getId)
+                .collect(Collectors.toList());
     }
 }

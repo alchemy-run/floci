@@ -1627,6 +1627,42 @@ public class SsmService implements ResourceProvider {
 
     private final KmsService kmsService;
 
+    @Inject
+    public SsmService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver,
+                      KmsService kmsService, Ec2ImageCatalog imageCatalog) {
+        this(
+                storageFactory.create("ssm", "ssm-parameters.json",
+                        new TypeReference<>() {
+                        }),
+                storageFactory.create("ssm", "ssm-history.json",
+                        new TypeReference<>() {
+                        }),
+                storageFactory.create("ssm", "ssm-document-permissions.json",
+                        new TypeReference<>() {
+                        }),
+                storageFactory.create("ssm", "ssm-documents.json",
+                        new TypeReference<>() {
+                        }),
+                storageFactory.create("ssm", "ssm-service-settings.json",
+                        new TypeReference<>() {
+                        }),
+                storageFactory.create("ssm", "ssm-associations.json",
+                        new TypeReference<>() {
+                        }),
+                config.services().ssm().maxParameterHistory(),
+                regionResolver,
+                imageCatalog, kmsService
+        );
+    }
+
+    public List<Parameter> getParameters(List<String> names, String region) {
+        List<Parameter> result = new ArrayList<>();
+        for (String name : names) {
+            findParameter(name, region).ifPresent(result::add);
+        }
+        return result;
+    }
+
     public record UnlabelResult(List<String> removedLabels, List<String> invalidLabels) {
     }
 
@@ -1650,6 +1686,25 @@ public class SsmService implements ResourceProvider {
             }
         }
         return resourceId;
+    }
+
+    public synchronized SsmDocument createDocument(String name, String content, String documentType,
+                                                   String documentFormat, String targetType,
+                                                   Map<String, String> tags, String region) {
+        String storageKey = regionKey(region, name);
+        if (documentStore.get(storageKey).isPresent()) {
+            throw new AwsException("DocumentAlreadyExists",
+                    "Document " + name + " already exists.", 400);
+        }
+        SsmDocument document = new SsmDocument(name, content, documentType);
+        document.setOwner(regionResolver.getAccountId());
+        if (documentFormat != null && !documentFormat.isBlank()) {
+            document.setDocumentFormat(documentFormat);
+        }
+        document.setTargetType(targetType);
+        document.setTags(tags);
+        documentStore.put(storageKey, document);
+        return document;
     }
 
     /** Adds and removes a document's tags (AddTagsToResource/RemoveTagsFromResource with ResourceType=Document). */

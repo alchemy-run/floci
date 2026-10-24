@@ -1098,6 +1098,25 @@ public class BackupService {
 
     private final StorageBackend<String, Map<String, Object>> copyJobStore;
 
+    @Inject
+    public BackupService(StorageFactory storageFactory, RegionResolver regionResolver,
+                         ObjectMapper objectMapper) {
+        this.vaultStore     = storageFactory.create("backup", "backup-vaults.json",     new TypeReference<>() {});
+        this.planStore      = storageFactory.create("backup", "backup-plans.json",      new TypeReference<>() {});
+        this.selectionStore = storageFactory.create("backup", "backup-selections.json", new TypeReference<>() {});
+        this.jobStore       = storageFactory.create("backup", "backup-jobs.json",       new TypeReference<>() {});
+        this.recoveryStore  = storageFactory.create("backup", "backup-recovery-points.json", new TypeReference<>() {});
+        this.regionResolver = regionResolver;
+        this.objectMapper = objectMapper;
+        this.restoreJobStore = storageFactory.create("backup", "backup-restore-jobs.json", new TypeReference<>() {});
+        this.copyJobStore = storageFactory.create("backup", "backup-copy-jobs.json", new TypeReference<>() {});
+    }
+
+    public List<BackupVault> listBackupVaults(String region) {
+        String prefix = region + ":";
+        return vaultStore.scan(k -> k.startsWith(prefix));
+    }
+
     public String getVaultPolicy(String vaultName, String region) {
         String policy = describeBackupVault(vaultName, region).getAccessPolicy();
         if (policy == null) {
@@ -1150,6 +1169,31 @@ public class BackupService {
         vault.setSnsTopicArn(null);
         vault.setBackupVaultEvents(null);
         vaultStore.put(vaultKey(region, vaultName), vault);
+    }
+
+    public BackupJob describeBackupJob(String jobId, String region) {
+        BackupJob job = describeBackupJob(jobId);
+        if (!inRegion(job.getBackupVaultArn(), region)) {
+            throw new AwsException("ResourceNotFoundException", "Backup job not found: " + jobId, 400);
+        }
+        return job;
+    }
+
+    public List<BackupJob> listBackupJobs(String region) {
+        return jobStore.scan(k -> true).stream().filter(job -> inRegion(job.getBackupVaultArn(), region)).toList();
+    }
+
+    public void stopBackupJob(String jobId, String region) {
+        BackupJob job = describeBackupJob(jobId, region);
+        String state = job.getState();
+        if ("COMPLETED".equals(state) || "ABORTED".equals(state) || "FAILED".equals(state)) {
+            throw new AwsException("InvalidRequestException",
+                    "Job cannot be stopped in state: " + state, 400);
+        }
+        job.setState("ABORTED");
+        job.setStatusMessage("Job stop requested");
+        job.setCompletionDate(Instant.now().getEpochSecond());
+        jobStore.put(jobId, job);
     }
 
     public Map<String, Object> getRecoveryPointRestoreMetadata(String vaultName, String arn, String region) {

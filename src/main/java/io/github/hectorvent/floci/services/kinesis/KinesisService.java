@@ -1411,6 +1411,47 @@ public class KinesisService implements ResourceProvider {
                 DEFAULT_SHARD_LIMIT, openShards, onDemand, DEFAULT_ON_DEMAND_STREAM_LIMIT);
     }
 
+    public KinesisConsumer registerStreamConsumer(String streamArn, String consumerName,
+                                                  Map<String, String> tags, String region) {
+        String streamName = streamNameFromArn(streamArn);
+        resolveStream(streamName, region);
+        boolean exists = listStreamConsumers(streamArn, region).stream()
+                .anyMatch(c -> c.getConsumerName().equals(consumerName));
+        if (exists) {
+            throw new AwsException("ResourceInUseException",
+                    "Consumer " + consumerName + " already exists on stream " + streamName, 400);
+        }
+        String consumerArn = streamArn + "/consumer/" + consumerName + ":" + System.currentTimeMillis();
+        KinesisConsumer consumer = new KinesisConsumer(consumerName, consumerArn, streamArn);
+        if (tags != null && !tags.isEmpty()) {
+            consumer.getTags().putAll(tags);
+        }
+        consumerStore.put(region + "::" + consumerArn, consumer);
+        LOG.infov("Registered Kinesis consumer: {0} for stream {1}", consumerName, streamArn);
+        return consumer;
+    }
+
+    public void deleteStream(String streamName, boolean enforceConsumerDeletion, String region) {
+        String storageKey = regionKey(region, streamName);
+        synchronized (lockFor(storageKey)) {
+            KinesisStream stream = resolveStream(streamName, region);
+            List<KinesisConsumer> consumers = consumerStore.scan(k -> true).stream()
+                    .filter(c -> stream.getStreamArn().equals(c.getStreamArn()))
+                    .toList();
+            if (!consumers.isEmpty()) {
+                if (!enforceConsumerDeletion) {
+                    throw new AwsException("ResourceInUseException",
+                            "Stream " + streamName + " has registered consumers", 400);
+                }
+                for (KinesisConsumer consumer : consumers) {
+                    consumerStore.delete(region + "::" + consumer.getConsumerArn());
+                }
+            }
+            store.delete(storageKey);
+        }
+        LOG.infov("Deleted Kinesis stream: {0}", streamName);
+    }
+
     public Map<String, String> listTagsForConsumer(String consumerArn, String region) {
         return resolveConsumer(consumerArn, region).getTags();
     }

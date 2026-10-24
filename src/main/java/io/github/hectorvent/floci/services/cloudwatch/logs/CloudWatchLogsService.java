@@ -1555,6 +1555,44 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
 
     private final Instance<KinesisService> kinesisServices;
 
+    @Inject
+    public CloudWatchLogsService(StorageFactory storageFactory,
+                                  EmulatorConfig config,
+                                  RegionResolver regionResolver,
+                                  Instance<LambdaService> lambdaServices,
+                                  Instance<IamService> iamServices,
+                                  Instance<KinesisService> kinesisServices,
+                                  Event<LogEventsIngested> logEventsIngested,
+                                  Event<LogGroupDeleted> logGroupDeleted) {
+        this(
+                storageFactory.create("cloudwatchlogs", "cwlogs-groups.json",
+                        new TypeReference<>() {}),
+                storageFactory.create("cloudwatchlogs", "cwlogs-streams.json",
+                        new TypeReference<>() {}),
+                storageFactory.create("cloudwatchlogs", "cwlogs-events.json",
+                        new TypeReference<>() {}),
+                storageFactory.create("cloudwatchlogs", "cwlogs-subscription-filters.json",
+                        new TypeReference<>() {}),
+                storageFactory.create("cloudwatchlogs", "cwlogs-destinations.json",
+                        new TypeReference<>() {}),
+                storageFactory.create("cloudwatchlogs", "cwlogs-metric-filters.json",
+                        new TypeReference<>() {}),
+                storageFactory.create("cloudwatchlogs", "cwlogs-resource-policies.json",
+                        new TypeReference<>() {}),
+                config.services().cloudwatchlogs().maxEventsPerQuery(),
+                config.services().cloudwatchlogs().maxStoredEvents(),
+                regionResolver,
+                config.defaultAccountId() != null ? config.defaultAccountId() : CANONICAL_ACCOUNT,
+                lambdaServices,
+                iamServices,
+                kinesisServices,
+                config.services().cloudwatchlogs().queryCompletionDelayMs(),
+                System::currentTimeMillis,
+                logEventsIngested,
+                logGroupDeleted
+        );
+    }
+
     private void migrateLegacyMetricFilters() {
         synchronized (metricFilterStore) {
             if (metricFilterStore instanceof AccountAwareStorageBackend<MetricFilter> aware) {
@@ -1599,6 +1637,96 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
     }
 
     public record PutLogEventsResult(String nextSequenceToken, Integer tooNewLogEventStartIndex) {}
+
+    /**
+     * Drops this group's events older than its retention policy. AWS expires them lazily in the
+     * background; doing it on ingest keeps the on-disk store from growing past what a
+     * {@code PutRetentionPolicy} promised.
+     */
+    private void evictEventsPastRetention(String accountId, String region, String groupName, long now) {
+        Integer retentionInDays = getForAccount(groupStore, accountId, groupKey(region, groupName))
+                .map(LogGroup::getRetentionInDays)
+                .orElse(null);
+        if (retentionInDays == null) {
+            return;
+        }
+        long cutoff = now - retentionInDays * 86_400_000L;
+        String groupPrefix = region + "::" + groupName + "::";
+        for (String key : List.copyOf(keysForAccount(eventStore, accountId))) {
+            if (!key.startsWith(groupPrefix)) {
+                continue;
+            }
+            boolean expired = getForAccount(eventStore, accountId, key)
+                    .map(event -> event.getTimestamp() < cutoff).orElse(false);
+            if (expired) {
+                deleteForAccount(eventStore, accountId, key);
+            }
+        }
+    }
+
+    /**
+     * Keeps an account's event store under {@link #maxStoredEvents} by dropping the oldest events.
+     * The store is persisted as a single document rewritten in full on each flush, so its size
+     * is the cost of every flush; without a ceiling a chatty function turns log ingestion into a
+     * sustained disk writer.
+     * <p>
+     * The ceiling is best-effort rather than atomic: this method is not synchronized, so two
+     * concurrent PutLogEvents calls for the same account can each scan and evict independently and
+     * briefly overshoot the cap. The next ingest corrects the drift, which mirrors how CloudWatch
+     * Logs itself deletes expired events lazily rather than at an exact boundary.
+     */
+    private void evictEventsBeyondCapacity(String accountId) {
+        List<String> keys = List.copyOf(keysForAccount(eventStore, accountId));
+        int excess = keys.size() - maxStoredEvents;
+        if (excess <= 0) {
+            return;
+        }
+        List<Map.Entry<String, LogEvent>> oldestFirst = new ArrayList<>(keys.size());
+        for (String key : keys) {
+            getForAccount(eventStore, accountId, key).ifPresent(event -> oldestFirst.add(Map.entry(key, event)));
+        }
+        oldestFirst.sort(Map.Entry.comparingByValue(EVENT_ORDER));
+        for (Map.Entry<String, LogEvent> entry : oldestFirst.subList(0, Math.min(excess, oldestFirst.size()))) {
+            deleteForAccount(eventStore, accountId, entry.getKey());
+        }
+        LOG.debugv("Evicted {0} oldest log event(s) to stay within the {1}-event store ceiling", excess, maxStoredEvents);
+    }
+
+    public FilteredLogEventsResult filterLogEvents(String groupName, List<String> streamNames,
+                                                    Long startTime, Long endTime,
+                                                    String filterPattern, int limit, String region) {
+        return filterLogEvents(groupName, streamNames, startTime, endTime, filterPattern, limit, null, region);
+    }
+
+    public void putSubscriptionFilter(String logGroupName, String filterName, String filterPattern,
+                                       String destinationArn, String roleArn, String distribution, String region) {
+        synchronized (metricFilterStore) {
+            String groupKey = groupKey(region, logGroupName);
+            groupStore.get(groupKey)
+                    .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                            "The specified log group does not exist: " + logGroupName, 400));
+            if (destinationArn == null || destinationArn.isBlank()) {
+                throw new AwsException("InvalidParameterException", "destinationArn is required.", 400);
+            }
+            validateSubscriptionDestination(destinationArn, roleArn, region);
+            String normalizedPattern = filterPattern != null ? filterPattern : "";
+            FilterPattern pattern = requireFilterPattern(normalizedPattern);
+            validateFilterRegexQuota(logGroupName, filterName, pattern, false, region);
+
+            SubscriptionFilter filter = new SubscriptionFilter();
+            filter.setFilterName(filterName);
+            filter.setLogGroupName(logGroupName);
+            filter.setFilterPattern(normalizedPattern);
+            filter.setDestinationArn(destinationArn);
+            filter.setRoleArn(roleArn);
+            filter.setDistribution(distribution != null ? distribution : "ByLogStream");
+            filter.setCreationTime(System.currentTimeMillis());
+
+            String filterKey = subscriptionFilterKey(region, logGroupName, filterName);
+            subscriptionFilterStore.put(filterKey, filter);
+            LOG.infov("Created subscription filter: {0} on log group: {1}", filterName, logGroupName);
+        }
+    }
 
     public LogDestination putDestination(String destinationName, String targetArn, String roleArn, String region) {
         if (destinationName == null || destinationName.isBlank()) {

@@ -6305,18 +6305,614 @@ public class AslExecutor {
 
     private final DynamoDbService dynamoDbService;
 
+    @Inject
+    public AslExecutor(LambdaExecutorService lambdaExecutor, LambdaFunctionStore functionStore,
+                       DynamoDbService dynamoDbService, DynamoDbJsonHandler dynamoDbJsonHandler,
+                       SqsJsonHandler sqsJsonHandler, SnsJsonHandler snsJsonHandler,
+                       CloudFormationQueryHandler cloudFormationHandler,
+                       Ec2Service ec2Service, S3Service s3Service,
+                       EcsService ecsService, EcsJsonHandler ecsJsonHandler,
+                       EventBridgeHandler eventBridgeHandler, SchedulerService schedulerService,
+                       SchedulerController schedulerController,
+                       ObjectMapper objectMapper, JsonataEvaluator jsonataEvaluator,
+                       Instance<StepFunctionsService> sfnService, EmulatorConfig config, Vertx vertx,
+                       CustomResourceLiveness customResourceLiveness) {
+        this(lambdaExecutor, functionStore, dynamoDbService, dynamoDbJsonHandler,
+                sqsJsonHandler, snsJsonHandler, cloudFormationHandler,
+                ec2Service, s3Service, ecsService, ecsJsonHandler,
+                eventBridgeHandler, schedulerService, schedulerController,
+                objectMapper, jsonataEvaluator, sfnService, config, vertx, customResourceLiveness,
+                Clock.systemUTC(), TimeUnit.NANOSECONDS::sleep, null);
+    }
+
+    private void doExecute(StateMachine sm, Execution exec, List<HistoryEvent> history,
+                           BiConsumer<Execution, List<HistoryEvent>> onUpdate) {
+        var chain = HistoryChain.of(history);
+        try {
+            JsonNode definition = objectMapper.readTree(sm.getDefinition());
+            JsonNode states = definition.path("States");
+            String startAt = definition.path("StartAt").asText();
+            String topLevelQueryLanguage = definition.path("QueryLanguage").asText("JSONPath");
+            JsonNode currentInput = parseInput(exec.getInput());
+            // The state machine's total budget, computed once so every state measures against the
+            // same instant. Long.MAX_VALUE stands for a definition with no TimeoutSeconds.
+            int timeoutSeconds = definition.path("TimeoutSeconds").asInt(0);
+            long executionDeadlineNanos = timeoutSeconds > 0
+                    ? System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds)
+                    : Long.MAX_VALUE;
+            JsonNode execContext = buildContext(exec, sm);
+            // Execution-scoped JSONata variables (the Assign field). Mutated in place as states
+            // assign, so later states observe earlier assignments.
+            ObjectNode variables = objectMapper.createObjectNode();
+
+            String currentStateName = startAt;
+            while (currentStateName != null && !abortedByCaller(exec)) {
+                if (System.nanoTime() >= executionDeadlineNanos) {
+                    throw new ExecutionTimedOutException();
+                }
+                JsonNode stateDef = states.path(currentStateName);
+                if (stateDef.isMissingNode()) {
+                    throw new RuntimeException("State not found: " + currentStateName);
+                }
+
+                StateResult stateResult;
+                try {
+                    stateResult = runState(chain, currentStateName, stateDef, currentInput, sm,
+                            topLevelQueryLanguage, execContext, variables, executionDeadlineNanos);
+                } catch (FailStateException e) {
+                    failExecution(exec, chain, e);
+                    onUpdate.accept(exec, history);
+                    return;
+                }
+                currentInput = stateResult.output();
+                currentStateName = stateResult.nextState();
+            }
+
+            succeedExecution(exec, chain, currentInput);
+            onUpdate.accept(exec, history);
+
+        } catch (ExecutionTimedOutException e) {
+            timeOutExecution(exec, chain);
+            onUpdate.accept(exec, history);
+        } catch (Exception e) {
+            LOG.warnv("ASL execution failed for {0}: {1}", exec.getExecutionArn(), e.getMessage());
+            // This path previously set only the status, leaving error and cause null forever on an
+            // execution DescribeExecution reports as FAILED.
+            failExecution(exec, chain, "States.Runtime",
+                    e.getMessage() != null ? e.getMessage() : "Unknown error");
+            onUpdate.accept(exec, history);
+        } catch (Error e) {
+            // An Error is not a state failure: it says the runtime itself is broken, and no retry
+            // of the state machine can get past it. Publishing the same terminal FAILED an
+            // exception produces is what keeps DescribeExecution from reporting RUNNING forever,
+            // and the rethrow keeps the Error itself from being swallowed here. The cause carries
+            // toString() rather than getMessage(), because an Error's message is often null and
+            // the type name is the whole diagnostic.
+            failExecution(exec, chain, "States.Runtime", e.toString());
+            onUpdate.accept(exec, history);
+            throw e;
+        } finally {
+            activeMocks.remove(exec.getExecutionArn());
+        }
+    }
+
+    /**
+     * Waits for the worker to answer the task token under the two independent bounds AWS enforces:
+     * {@code TimeoutSeconds} is the whole wait, and {@code HeartbeatSeconds} is the longest gap
+     * allowed between two SendTaskHeartbeat calls, each of which pushes that gap forward. Either
+     * clock ends the state as a {@link TaskTimedOutException}: the error is {@code States.Timeout}
+     * and there is no cause.
+     *
+     * <p>Both clocks start when the task is scheduled. AWS starts TimeoutSeconds when a worker
+     * picks the task up, which is the instant it emits ActivityStarted; Floci emits that event at
+     * schedule time, so there is no later instant to anchor on here.
+     */
+    private JsonNode awaitToken(CompletableFuture<JsonNode> future, JsonNode stateDef, String taskToken,
+                                long executionDeadlineNanos) throws Exception {
+        int timeoutSeconds = stateDef.path("TimeoutSeconds").asInt(0);
+        if (timeoutSeconds <= 0) {
+            timeoutSeconds = DEFAULT_TASK_TOKEN_TIMEOUT_SECONDS;
+        }
+        int heartbeatSeconds = stateDef.path("HeartbeatSeconds").asInt(0);
+        long timeoutDeadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
+        try {
+            while (true) {
+                long wakeAtNanos = Math.min(executionDeadlineNanos, Math.min(timeoutDeadlineNanos,
+                        heartbeatDeadlineNanos(taskToken, heartbeatSeconds)));
+                try {
+                    return future.get(wakeAtNanos - System.nanoTime(), TimeUnit.NANOSECONDS);
+                } catch (java.util.concurrent.TimeoutException e) {
+                    // The execution's budget is read first: when it is the clock that ran out, the
+                    // execution ends as TIMED_OUT and the task's own timeout never applies.
+                    if (System.nanoTime() >= executionDeadlineNanos) {
+                        future.cancel(true);
+                        throw new ExecutionTimedOutException();
+                    }
+                    if (System.nanoTime() >= timeoutDeadlineNanos) {
+                        future.cancel(true);
+                        throw new TaskTimedOutException("States.Timeout");
+                    }
+                    // Read the gap again rather than trusting the one this thread parked on: a
+                    // heartbeat that landed meanwhile has already moved it past now, and the task
+                    // goes back to waiting on the later deadline.
+                    if (System.nanoTime() >= heartbeatDeadlineNanos(taskToken, heartbeatSeconds)) {
+                        future.cancel(true);
+                        throw new TaskTimedOutException("States.HeartbeatTimeout");
+                    }
+                }
+            }
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof FailStateException fse) {
+                throw fse;
+            }
+            throw new FailStateException("States.TaskFailed",
+                    cause != null ? cause.getMessage() : "Task failed");
+        } finally {
+            sfnService.get().discardPendingToken(taskToken);
+        }
+    }
+
+    private JsonNode invokeResource(String resource, JsonNode input, StateMachine sm, String taskToken,
+                                    long executionDeadlineNanos, JsonNode rawParameters) throws Exception {
+        // Support Lambda resources: direct ARN or optimized integration
+        String functionName = null;
+        JsonNode lambdaPayload = input;
+        boolean optimizedLambdaInvoke = false;
+
+        if (resource.contains(":lambda:") && resource.contains(":function:")) {
+            // Direct Lambda ARN: arn:aws:lambda:region:account:function:name[:qualifier]
+            functionName = extractLambdaFunctionName(resource);
+        } else if (resource.startsWith("arn:aws:states:::lambda:invoke")) {
+            // Optimized Lambda integration — function name and payload come from resolved input
+            optimizedLambdaInvoke = true;
+            String fnRef = input.path("FunctionName").asText(null);
+            if (fnRef != null) {
+                functionName = extractLambdaFunctionName(fnRef);
+            }
+            JsonNode payload = input.path("Payload");
+            if (!payload.isMissingNode()) {
+                lambdaPayload = payload;
+            }
+        }
+
+        if (functionName != null) {
+            // Extract region from the state machine ARN: arn:aws:states:REGION:...
+            String region = extractRegionFromArn(sm.getStateMachineArn());
+            LambdaFunction fn = functionStore.get(region, functionName).orElse(null);
+            if (fn == null) {
+                // A missing function is a task failure on AWS, so it must stay reachable for
+                // Retry and Catch instead of surfacing as States.Runtime.
+                throw new FailStateException("Lambda.ResourceNotFoundException",
+                        "Lambda function not found: " + functionName);
+            }
+
+            byte[] payloadBytes = objectMapper.writeValueAsString(lambdaPayload).getBytes();
+            reportCustomResourceLiveness(payloadBytes);
+            InvokeResult result = lambdaExecutor.invoke(fn, payloadBytes, InvocationType.RequestResponse);
+
+            if (result.getFunctionError() != null) {
+                throw lambdaFunctionFailure(functionName, result);
+            }
+
+            byte[] responseBytes = result.getPayload();
+            JsonNode functionOutput = responseBytes != null && responseBytes.length > 0
+                    ? objectMapper.readTree(responseBytes)
+                    : NullNode.getInstance();
+
+            // A direct function ARN yields only the function output, while the optimized
+            // integration nests it in the Invoke response metadata.
+            if (!optimizedLambdaInvoke) {
+                return functionOutput;
+            }
+            ObjectNode invokeResponse = objectMapper.createObjectNode();
+            invokeResponse.put("ExecutedVersion", fn.getVersion() != null ? fn.getVersion() : "$LATEST");
+            invokeResponse.set("Payload", functionOutput);
+            invokeResponse.put("StatusCode", result.getStatusCode() > 0 ? result.getStatusCode() : 200);
+            return invokeResponse;
+        }
+
+        // DynamoDB optimized integrations (4 actions)
+        if (resource.startsWith("arn:aws:states:::dynamodb:")) {
+            String operation = resource.substring("arn:aws:states:::dynamodb:".length());
+            String region = extractRegionFromArn(sm.getStateMachineArn());
+            try {
+                return invokeDynamoDb(operation, input, region);
+            } catch (AwsException e) {
+                throw new FailStateException("DynamoDB." + e.getErrorCode(), e.getMessage());
+            }
+        }
+
+        // AWS SDK service integrations: DynamoDB
+        if (resource.startsWith("arn:aws:states:::aws-sdk:dynamodb:")) {
+            String camelCaseAction = resource.substring("arn:aws:states:::aws-sdk:dynamodb:".length());
+            String region = extractRegionFromArn(sm.getStateMachineArn());
+            return invokeAwsSdkDynamoDb(camelCaseAction, input, region);
+        }
+
+        // SQS optimized integration
+        if (resource.equals("arn:aws:states:::sqs:sendMessage")) {
+            String region = extractRegionFromArn(sm.getStateMachineArn());
+            return invokeOptimizedSqsSendMessage(input, region);
+        }
+
+        // HTTP optimized integration
+        if (resource.equals("arn:aws:states:::http:invoke")) {
+            String region = extractRegionFromArn(sm.getStateMachineArn());
+            return invokeHttp(input, region);
+        }
+
+        // AWS SDK service integration: SQS SendMessage
+        if (resource.equals("arn:aws:states:::aws-sdk:sqs:sendMessage")) {
+            String region = extractRegionFromArn(sm.getStateMachineArn());
+            return invokeAwsSdkSqsSendMessage(input, region);
+        }
+
+        // SNS optimized integration
+        if (resource.equals("arn:aws:states:::sns:publish")) {
+            String region = extractRegionFromArn(sm.getStateMachineArn());
+            return invokeSnsPublish(input, region, "SNS.");
+        }
+
+        // AWS SDK service integration: SNS Publish
+        if (resource.equals("arn:aws:states:::aws-sdk:sns:publish")) {
+            String region = extractRegionFromArn(sm.getStateMachineArn());
+            return invokeSnsPublish(input, region, "Sns.");
+        }
+
+        // AWS SDK service integration: CloudFormation (query protocol → JSON)
+        if (resource.startsWith("arn:aws:states:::aws-sdk:cloudformation:")) {
+            String action = resource.substring("arn:aws:states:::aws-sdk:cloudformation:".length());
+            String region = extractRegionFromArn(sm.getStateMachineArn());
+            return invokeAwsSdkCloudFormation(action, input, region);
+        }
+
+        // AWS SDK service integration: EC2 DescribeRegions
+        if (resource.equals("arn:aws:states:::aws-sdk:ec2:describeRegions")) {
+            return invokeAwsSdkEc2DescribeRegions();
+        }
+
+        // S3 PutObject — optimized and aws-sdk integrations
+        if (resource.equals("arn:aws:states:::s3:putObject")
+                || resource.equals("arn:aws:states:::aws-sdk:s3:putObject")) {
+            return invokeS3PutObject(input);
+        }
+
+        // ECS optimized integration: arn:aws:states:::ecs:runTask (request-response, .sync, .waitForTaskToken).
+        // The .waitForTaskToken suffix is already stripped by executeTaskState, so a waitForTaskToken
+        // variant arrives here as the bare runTask resource and simply launches the task while the token
+        // future blocks for SendTaskSuccess.
+        if (resource.startsWith("arn:aws:states:::ecs:runTask")) {
+            // A non-null taskToken means the original resource ended with .waitForTaskToken (stripped
+            // upstream). Its failure semantics match .sync — a task placement failure fails the state —
+            // whereas request-response returns the {Tasks,Failures} envelope without failing the state.
+            String mode = taskToken != null
+                    ? ".waitForTaskToken"
+                    : resource.substring("arn:aws:states:::ecs:runTask".length());
+            String region = extractRegionFromArn(sm.getStateMachineArn());
+            return invokeEcsRunTask(mode, input, region, executionDeadlineNanos);
+        }
+
+        // AWS SDK service integrations: Step Functions
+        if (resource.startsWith(AWS_SDK_SFN_PREFIX)) {
+            String action = resource.substring(AWS_SDK_SFN_PREFIX.length());
+            String region = extractRegionFromArn(sm.getStateMachineArn());
+            return invokeAwsSdkSfn(action, input, region);
+        }
+
+        // AWS SDK service integrations: EventBridge Scheduler
+        if (resource.startsWith(AWS_SDK_SCHEDULER_PREFIX)) {
+            String action = resource.substring(AWS_SDK_SCHEDULER_PREFIX.length());
+            String region = extractRegionFromArn(sm.getStateMachineArn());
+            return invokeAwsSdkScheduler(action, input, region);
+        }
+
+        // EventBridge optimized integration
+        if (resource.equals("arn:aws:states:::events:putEvents")) {
+            String region = extractRegionFromArn(sm.getStateMachineArn());
+            return invokeOptimizedPutEvents(input, region);
+        }
+
+        // Nested state machine integration
+        if (resource.startsWith("arn:aws:states:::states:startExecution")) {
+            String mode = resource.substring("arn:aws:states:::states:startExecution".length());
+            String region = extractRegionFromArn(sm.getStateMachineArn());
+            return invokeNestedStateMachine(mode, input, region, executionDeadlineNanos, rawParameters);
+        }
+
+        // Activity resource: arn:aws:states:{region}:{account}:activity:{name}
+        if (isActivityArn(resource)) {
+            if (taskToken == null) {
+                throw new FailStateException("States.TaskFailed",
+                        "Activity resource requires waitForTaskToken: " + resource);
+            }
+            String inputStr = objectMapper.writeValueAsString(input);
+            sfnService.get().enqueueActivityTask(resource, taskToken, inputStr);
+            return NullNode.getInstance(); // caller blocks via token future
+        }
+
+        throw new FailStateException("States.TaskFailed",
+                "Unsupported resource: " + resource);
+    }
+
+    private JsonNode invokeAwsSdkEc2DescribeRegions() {
+        ObjectNode result = objectMapper.createObjectNode();
+        ArrayNode regions = objectMapper.createArrayNode();
+        for (String name : ec2Service.describeRegions()) {
+            ObjectNode region = objectMapper.createObjectNode();
+            region.put("RegionName", name);
+            region.put("Endpoint", "ec2." + name + ".amazonaws.com");
+            region.put("OptInStatus", "opt-in-not-required");
+            regions.add(region);
+        }
+        result.set("Regions", regions);
+        return result;
+    }
+
+    private JsonNode invokeNestedStateMachine(String mode, JsonNode input, String region,
+                                              long executionDeadlineNanos, JsonNode rawParameters) throws Exception {
+        String smArn = input.path("StateMachineArn").asText(null);
+        if (smArn == null || smArn.isBlank()) {
+            throw new FailStateException("States.TaskFailed",
+                    "StateMachineArn is required for nested state machine execution");
+        }
+        // Preserve provenance: an Input produced by States.JsonToString is JSON text whose content is the
+        // child's wire input (so the child parses it back to an object); any other value is serialized as
+        // a JSON value. Also honor Name/Name.$ instead of always generating a random execution name.
+        boolean fromJsonToString = NestedExecutionInput.isJsonToStringInput(rawParameters);
+        String childInput = NestedExecutionInput.childInput(input.path("Input"), fromJsonToString, objectMapper);
+
+        // Honor Name/Name.$ without coercion: use it only when it resolves to a non-empty string. A Name
+        // that was SUPPLIED (Name or Name.$ in the raw Parameters) but did not resolve to such a string is
+        // a runtime error, not a silent fall-through to a generated name; a truly omitted Name generates one.
+        JsonNode nameNode = input.path("Name");
+        String childName;
+        if (nameNode.isTextual() && !nameNode.asText().isBlank()) {
+            childName = nameNode.asText();
+        } else if (rawParameters != null && rawParameters.isObject()
+                && (rawParameters.has("Name") || rawParameters.has("Name.$"))) {
+            throw new FailStateException("States.Runtime",
+                    "Nested StartExecution 'Name' must resolve to a non-empty string");
+        } else {
+            childName = null;
+        }
+
+        io.github.hectorvent.floci.services.stepfunctions.model.Execution exec;
+        try {
+            exec = sfnService.get().startExecution(smArn, childName, childInput, region);
+        } catch (AwsException e) {
+            // A StartExecution refusal (e.g. a reused STANDARD name) is a typed task failure a Catch or
+            // Retry can name, not a States.Runtime that nothing can catch. Same bridge as
+            // invokeAwsSdkSfnStartExecution, under the prefix this optimized integration reports on AWS.
+            throw new FailStateException(optimizedSfnErrorName(e.getErrorCode()), e.getMessage());
+        }
+        String execArn = exec.getExecutionArn();
+
+        if ("".equals(mode)) {
+            // Fire-and-forget: return { executionArn, startDate }
+            ObjectNode result = objectMapper.createObjectNode();
+            result.put("executionArn", execArn);
+            result.put("startDate", exec.getStartDate());
+            return result;
+        }
+
+        // .sync or .sync:2 — poll until terminal, or until the parent execution's TimeoutSeconds
+        // budget runs out, which ends the parent as TIMED_OUT and leaves the child running.
+        for (int i = 0; i < 600; i++) {
+            sleepOrTimeOutExecution(TimeUnit.MILLISECONDS.toNanos(100), executionDeadlineNanos);
+            io.github.hectorvent.floci.services.stepfunctions.model.Execution current =
+                    sfnService.get().describeExecution(execArn);
+            String status = current.getStatus();
+            if ("RUNNING".equals(status)) {
+                continue;
+            }
+            if ("SUCCEEDED".equals(status)) {
+                if (".sync:2".equals(mode)) {
+                    String out = current.getOutput();
+                    return objectMapper.readTree(out != null ? out : "null");
+                }
+                // .sync — full execution envelope; output field is a JSON string
+                ObjectNode envelope = objectMapper.createObjectNode();
+                envelope.put("executionArn", current.getExecutionArn());
+                envelope.put("stateMachineArn", current.getStateMachineArn());
+                envelope.put("name", current.getName());
+                envelope.put("status", current.getStatus());
+                envelope.put("startDate", current.getStartDate());
+                if (current.getStopDate() != null) {
+                    envelope.put("stopDate", current.getStopDate());
+                }
+                if (current.getInput() != null) {
+                    envelope.put("input", current.getInput());
+                }
+                if (current.getOutput() != null) {
+                    envelope.put("output", current.getOutput());
+                }
+                return envelope;
+            }
+            throw new FailStateException(
+                    current.getError() != null ? current.getError() : "States.TaskFailed",
+                    current.getCause() != null ? current.getCause()
+                            : "Nested execution ended with status: " + status);
+        }
+        throw new FailStateException("States.TaskFailed",
+                "Nested execution timed out: " + execArn);
+    }
+
+    /**
+     * Optimized ECS RunTask integration. Step Functions passes PascalCase parameters
+     * ({@code Cluster}, {@code TaskDefinition}, {@code Overrides.ContainerOverrides}, …)
+     * and expects PascalCase results, whereas Floci's ECS handlers use the lowerCamelCase
+     * of the ECS data-plane API — {@link #recaseKeys} bridges the two ends.
+     *
+     * @param mode "" for request-response (returns the RunTask {@code {Tasks,Failures}} response
+     *             without failing on a placement failure), ".sync" to block until the task reaches
+     *             STOPPED, or ".waitForTaskToken" to launch and let the token future carry the result
+     *             (both ".sync" and ".waitForTaskToken" fail the state on a placement failure).
+     */
+    private JsonNode invokeEcsRunTask(String mode, JsonNode input, String region,
+                                      long executionDeadlineNanos) throws Exception {
+        String taskDefinition = input.path("TaskDefinition").asText(null);
+        if (taskDefinition == null || taskDefinition.isBlank()) {
+            throw new FailStateException("States.TaskFailed",
+                    "TaskDefinition is required for the ecs:runTask integration");
+        }
+        String cluster = input.hasNonNull("Cluster") ? input.path("Cluster").asText() : null;
+        int count = input.path("Count").asInt(1);
+
+        LaunchType launchType = null;
+        String launchTypeRaw = input.path("LaunchType").asText(null);
+        if (launchTypeRaw != null && !launchTypeRaw.isBlank()) {
+            try {
+                launchType = LaunchType.valueOf(launchTypeRaw);
+            } catch (IllegalArgumentException e) {
+                throw new FailStateException("States.TaskFailed", "Unsupported LaunchType: " + launchTypeRaw);
+            }
+        }
+        String group = input.path("Group").asText(null);
+        String startedBy = input.path("StartedBy").asText(null);
+
+        // Parameters are PascalCase; the ECS handler's parsers expect the camelCase of the
+        // data-plane API, so recase each sub-tree before reusing them.
+        JsonNode overridesNode = recaseKeys(objectMapper,
+                input.path("Overrides").path("ContainerOverrides"), false);
+        List<ContainerOverride> overrides = ecsJsonHandler.parseContainerOverrides(overridesNode);
+
+        // NetworkConfiguration (awsvpc) is threaded through so it is not dropped at the boundary;
+        // awsvpc ENI attachments themselves are not emulated in the local mock profile.
+        JsonNode networkConfigNode = recaseKeys(objectMapper, input.path("NetworkConfiguration"), false);
+        NetworkConfiguration networkConfiguration = ecsJsonHandler.parseNetworkConfiguration(networkConfigNode);
+
+        List<EcsTask> launched;
+        try {
+            launched = ecsService.runTask(cluster, taskDefinition, count, launchType, group, startedBy,
+                    overrides, networkConfiguration, region);
+        } catch (AwsException e) {
+            throw new FailStateException("ECS." + e.getErrorCode(), e.getMessage());
+        }
+        // A task placement failure (no task launched) fails the state only for the .sync and
+        // .waitForTaskToken patterns, and AWS surfaces it with the AmazonECS.Unknown error name.
+        // Request-response never fails on a placement failure — it returns the { Tasks, Failures }
+        // envelope (possibly with empty Tasks) so the caller can inspect Failures itself.
+        boolean callbackOrSync = ".sync".equals(mode) || ".waitForTaskToken".equals(mode);
+        if (launched.isEmpty() && callbackOrSync) {
+            throw new FailStateException("AmazonECS.Unknown", "ecs:runTask launched no tasks");
+        }
+
+        if (mode.isEmpty() || ".waitForTaskToken".equals(mode)) {
+            // Request-response: return the RunTask response shape { Tasks: [...], Failures: [] }.
+            // The .waitForTaskToken launch phase lands here too — its return value is discarded once
+            // the task token supplies the real result, so returning the envelope just completes the launch.
+            ObjectNode resp = objectMapper.createObjectNode();
+            ArrayNode tasks = resp.putArray("Tasks");
+            for (EcsTask t : launched) {
+                tasks.add(recaseKeys(objectMapper, ecsJsonHandler.taskNode(t), true));
+            }
+            resp.putArray("Failures");
+            return resp;
+        }
+
+        if (!".sync".equals(mode)) {
+            // Only request-response (""), .sync and .waitForTaskToken are valid; reject typos rather
+            // than silently treating an unknown suffix as .sync.
+            throw new FailStateException("States.TaskFailed", "Unsupported ecs:runTask mode: " + mode);
+        }
+
+        // .sync — wait until every launched task reaches STOPPED, then surface success or failure.
+        // All tasks must be polled (not just the first): with Count > 1, a failure in any task must
+        // fail the state, otherwise tasks beyond the first would run unmonitored.
+        List<String> taskArns = launched.stream().map(EcsTask::getTaskArn).toList();
+        for (int i = 0; i < ECS_SYNC_POLL_ATTEMPTS; i++) {
+            sleepOrTimeOutExecution(TimeUnit.MILLISECONDS.toNanos(ECS_SYNC_POLL_INTERVAL_MS),
+                    executionDeadlineNanos);
+            List<EcsTask> described = ecsService.describeTasks(cluster, taskArns, region);
+            boolean allStopped = described.size() == taskArns.size()
+                    && described.stream().allMatch(t -> "STOPPED".equals(t.getLastStatus()));
+            if (!allStopped) {
+                continue;
+            }
+            // All terminal. Like real Step Functions, fail the state if any task's essential
+            // container exited non-zero or a task never ran a container (e.g. it failed to start).
+            for (EcsTask task : described) {
+                String cause = ecsTaskFailureCause(task, nonEssentialContainerNames(task, region));
+                if (cause != null) {
+                    throw new FailStateException("States.TaskFailed", cause);
+                }
+            }
+            // Success: a single task returns its description; multiple tasks return the array.
+            if (described.size() == 1) {
+                return recaseKeys(objectMapper, ecsJsonHandler.taskNode(described.get(0)), true);
+            }
+            ArrayNode arr = objectMapper.createArrayNode();
+            for (EcsTask task : described) {
+                arr.add(recaseKeys(objectMapper, ecsJsonHandler.taskNode(task), true));
+            }
+            return arr;
+        }
+        throw new FailStateException("States.Timeout",
+                "ecs:runTask.sync timed out waiting for tasks to stop: " + taskArns);
+    }
+
+    private ResolvedMapItems resolveListObjectsItems(JsonNode itemReader, JsonNode input, JsonNode context,
+                                                     boolean jsonata, ObjectNode variables) throws Exception {
+        JsonNode parameters = resolveItemReaderParameters(itemReader, input, context, jsonata, variables);
+        String bucket = parameters.path("Bucket").asText(null);
+        if (bucket == null) {
+            throw new FailStateException("States.Runtime", "ItemReader Parameters must include Bucket");
+        }
+        String prefix = parameters.path("Prefix").asText(null);
+
+        ArrayNode items = objectMapper.createArrayNode();
+        int maxItems = maxItems(itemReader);
+        try {
+            // MaxItems keeps the first keys in order, so the listing itself is capped.
+            for (S3Object object : s3Service.listObjects(bucket, prefix, null,
+                    maxItems > 0 ? maxItems : Integer.MAX_VALUE)) {
+                items.add(listObjectsItem(object, jsonata));
+            }
+        } catch (AwsException e) {
+            throw new FailStateException("States.ItemReaderFailed", e.getMessage());
+        }
+        return new ResolvedMapItems(items, MapItemsSource.ITEM_READER_ARRAY);
+    }
+
     private int maxItems(JsonNode itemReader) {
         return itemReader.path("ReaderConfig").path("MaxItems").asInt(0);
     }
 
-    private static FailStateException unwrapFail(Throwable error) {
-        Throwable current = error;
-        while (current != null) {
-            if (current instanceof FailStateException fail) {
-                return fail;
-            }
-            current = current.getCause();
+    private JsonNode applyInputPath(JsonNode stateDef, JsonNode input) {
+        if (!stateDef.has("InputPath")) {
+            return input;
         }
-        return null;
+        String path = stateDef.get("InputPath").asText();
+        if (path == null || path.equals("null")) {
+            return objectMapper.createObjectNode();
+        }
+        return resolvePath(path, input);
     }
+
+    private HttpRequestPayload requestPayload(JsonNode requestBody, String requestBodyEncoding) {
+        if ("URL_ENCODED".equalsIgnoreCase(requestBodyEncoding)) {
+            // TODO: Implement Transform.RequestBodyEncoding URL_ENCODED with AWS-compatible array formats.
+            throw new FailStateException("States.TaskFailed", "URL-encoded request bodies are not supported yet");
+        } else if ("NONE".equalsIgnoreCase(requestBodyEncoding)) {
+            try {
+                if (requestBody.isMissingNode() || requestBody.isNull()) {
+                    return new HttpRequestPayload(null, null, null);
+                }
+
+                return new HttpRequestPayload(
+                    Buffer.buffer(objectMapper.writeValueAsString(requestBody)),
+                    null,
+                    "application/json");
+            } catch (Exception e) {
+                throw new FailStateException("States.TaskFailed",
+                    "Failed to serialize HTTP request body to JSON: " + e.getMessage());
+            }
+        } else {
+            throw new FailStateException("States.TaskFailed",
+                "Unsupported body transformer: " + requestBodyEncoding);
+        }
+    }
+
+
 }

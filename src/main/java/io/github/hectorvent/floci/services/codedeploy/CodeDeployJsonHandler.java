@@ -408,4 +408,12 @@ public class CodeDeployJsonHandler {
                 req.path("deploymentWaitType").asText(null));
         return Response.ok(Map.of()).build();
     }
+
+    private Response putLifecycleEventHookExecutionStatus(JsonNode req, String region) {
+        String deploymentId = req.path("deploymentId").asText(null);
+        String executionId = req.path("lifecycleEventHookExecutionId").asText(null);
+        String status = req.path("status").asText(null);
+        String id = service.putLifecycleEventHookExecutionStatus(region, deploymentId, executionId, status);
+        return Response.ok(Map.of("lifecycleEventHookExecutionId", id)).build();
+    }
 }

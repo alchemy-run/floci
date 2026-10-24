@@ -2382,6 +2382,37 @@ public class IotService {
         return false;
     }
 
+    /**
+     * Deprecates a thing type, or with {@code undoDeprecate} reverts it to active. Deprecating an
+     * already deprecated type keeps its original deprecation date, which the deletion window
+     * counts from.
+     */
+    public void deprecateThingType(String thingTypeName, boolean undoDeprecate, String region) {
+        IotThingType type = describeThingType(thingTypeName, region);
+        if (undoDeprecate) {
+            type.setDeprecated(false);
+            type.setDeprecatedDate(null);
+        } else if (!type.isDeprecated()) {
+            type.setDeprecated(true);
+            type.setDeprecatedDate(clock.instant());
+        }
+        thingTypeStore.put(thingTypeKey(region, thingTypeName), type);
+    }
+
+    void handlePublish(String topic, byte[] payload, boolean evaluateRules, String region, String clientId) {
+        byte[] eventPayload = payload == null ? new byte[0] : payload;
+        publishEventRecorder.record(topic, eventPayload);
+        if (!evaluateRules) {
+            return;
+        }
+        for (IotTopicRule rule : rulesForPublish(region)) {
+            if (!rule.isRuleDisabled()) {
+                matchAndProject(rule, topic, clientId, eventPayload)
+                        .ifPresent(document -> executeTopicRule(rule, topic, eventPayload, document));
+            }
+        }
+    }
+
     private void publishShadowUpdate(ReservedShadowTopic topic, JsonNode request, String clientToken, String region,
                                      BiConsumer<String, byte[]> publisher) {
         JsonNode previous = shadowStore.get(shadowKey(region, topic.thingName(), topic.shadowName()))

@@ -229,6 +229,12 @@ public class EcsLoadBalancerRegistrar {
         }
     }
 
+    @Inject
+    public EcsLoadBalancerRegistrar(ElbV2Service elbV2Service, EcsContainerManager containerManager) {
+        this.elbV2Service = elbV2Service;
+        this.containerManager = containerManager;
+    }
+
     /**
      * Whether every target the task's load-balanced containers were registered as reports
      * {@code healthy}: ECS waits for the load balancer health check before it counts a task

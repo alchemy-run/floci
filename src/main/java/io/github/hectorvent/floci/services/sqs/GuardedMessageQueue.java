@@ -405,4 +405,35 @@ class GuardedMessageQueue {
         String candidate = slash > 0 ? trimmed.substring(0, slash) : trimmed;
         return candidate.matches("\\d{12}") ? candidate : null;
     }
+
+    Optional<Message> removeByReceiptHandle(String receiptHandle) {
+        try (Guard _ = hold()) {
+            Message removed = null;
+            for (Iterator<Message> it = messages.iterator(); it.hasNext(); ) {
+                Message m = it.next();
+                if (receiptHandle.equals(m.getReceiptHandle())) {
+                    removed = m;
+                    it.remove();
+                    break;
+                }
+            }
+            if (removed != null) {
+                persist();
+            }
+            return Optional.ofNullable(removed);
+        }
+    }
+
+    boolean changeVisibility(String receiptHandle, int visibilityTimeout) {
+        try (Guard _ = hold()) {
+            for (Message msg : messages) {
+                if (receiptHandle.equals(msg.getReceiptHandle())) {
+                    msg.setVisibleAt(Instant.now().plusSeconds(visibilityTimeout));
+                    persist();
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
 }

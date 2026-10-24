@@ -391,6 +391,21 @@ public class Ec2PortForwardManager {
 
     private final Ec2HttpPortMux httpPortMux;
 
+    @Inject
+    public Ec2PortForwardManager(DockerClient dockerClient,
+                                 ContainerBuilder containerBuilder,
+                                 ContainerLifecycleManager lifecycleManager,
+                                 PortAllocator portAllocator,
+                                 EmulatorConfig config,
+                                 Ec2HttpPortMux httpPortMux) {
+        this.dockerClient = dockerClient;
+        this.containerBuilder = containerBuilder;
+        this.lifecycleManager = lifecycleManager;
+        this.portAllocator = portAllocator;
+        this.config = config;
+        this.httpPortMux = httpPortMux;
+    }
+
     private boolean publishViaMux(Instance instance, int appPort) {
         if (httpPortMux == null) {
             return false;
@@ -424,5 +439,9 @@ public class Ec2PortForwardManager {
             return instance.getInstanceId() + ".localhost.floci.io";
         }
         return "localhost";
+    }
+
+    static String forwardContainerName(String instanceId, int appPort) {
+        return "floci-ec2-fwd-" + instanceId + "-" + appPort;
     }
 }

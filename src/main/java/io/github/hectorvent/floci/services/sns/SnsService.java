@@ -3060,6 +3060,36 @@ public class SnsService implements Resettable, ResourceProvider {
 
     private final Map<String, String> sandboxNumbers = new ConcurrentHashMap<>();
 
+    @Inject
+    public SnsService(StorageFactory storageFactory, EmulatorConfig config,
+                      RegionResolver regionResolver, SqsService sqsService,
+                      LambdaService lambdaService, FirehoseService firehoseService,
+                      ObjectMapper objectMapper) {
+        this(
+                storageFactory.create("sns", "sns-topics.json",
+                        new TypeReference<Map<String, Topic>>() {
+                        }),
+                storageFactory.create("sns", "sns-subscriptions.json",
+                        new TypeReference<Map<String, Subscription>>() {
+                        }),
+                storageFactory.create("sns", "sns-platform-applications.json",
+                        new TypeReference<Map<String, PlatformApplication>>() {
+                        }),
+                storageFactory.create("sns", "sns-platform-endpoints.json",
+                        new TypeReference<Map<String, PlatformEndpoint>>() {
+                        }),
+                storageFactory.create("sns", "sns-sms.json",
+                        new TypeReference<Map<String, SentSms>>() {
+                        }),
+                regionResolver,
+                sqsService,
+                lambdaService,
+                firehoseService,
+                config.effectiveBaseUrl(),
+                objectMapper
+        );
+    }
+
     public String getDataProtectionPolicy(String resourceArn, String region) {
         String key = topicKey(region, resourceArn);
         Topic topic = topicStore.get(key)
@@ -3078,6 +3108,192 @@ public class SnsService implements Resettable, ResourceProvider {
                         "Resource does not exist.", 404));
         topic.setDataProtectionPolicy(dataProtectionPolicy);
         topicStore.put(key, topic);
+    }
+
+    private void deliverMessage(Subscription sub, String message, String subject,
+                                Map<String, MessageAttributeValue> messageAttributes, String messageId,
+                                String topicArn, String messageGroupId, String messageDeduplicationId,
+                                String messageStructure) {
+        try {
+            // Under MessageStructure="json" every subscriber gets the value under its own
+            // protocol key, falling back to "default". The application case resolves against
+            // the push platform (APNS/GCM/...) inside capturePushForEndpoint instead.
+            String protocolMessage = "application".equals(sub.getProtocol())
+                    ? message
+                    : resolveProtocolPayload(sub.getProtocol(), message, messageStructure);
+            switch (sub.getProtocol()) {
+                case "sqs" -> {
+                    String region = extractRegionFromArn(sub.getEndpoint());
+                    if (region == null) {
+                        region = extractRegionFromArn(topicArn);
+                    }
+                    String queueUrl = sqsArnToUrl(sub.getEndpoint());
+                    boolean rawDelivery = "true".equalsIgnoreCase(sub.getAttributes().get("RawMessageDelivery"));
+                    String body = rawDelivery
+                            ? protocolMessage
+                            : buildSnsEnvelope(protocolMessage, subject, messageAttributes, topicArn, messageId);
+                    Map<String, MessageAttributeValue> sqsAttributes = rawDelivery
+                            ? toSqsMessageAttributes(messageAttributes)
+                            : Collections.emptyMap();
+                    sqsService.sendMessage(queueUrl, body, 0, messageGroupId, messageDeduplicationId, sqsAttributes, region);
+                    LOG.debugv("Delivered SNS message to SQS: {0} ({1}) raw={2}", sub.getEndpoint(), queueUrl, rawDelivery);
+                }
+                case "lambda" -> {
+                    String fnName = extractFunctionName(sub.getEndpoint());
+                    String region = extractRegionFromArn(sub.getEndpoint());
+                    String eventJson = buildSnsLambdaEvent(topicArn, messageId, protocolMessage,
+                            subject, messageAttributes, sub.getSubscriptionArn());
+                    lambdaService.invoke(region, fnName, eventJson.getBytes(), InvocationType.Event);
+                    LOG.debugv("Delivered SNS message to Lambda: {0}", sub.getEndpoint());
+                }
+                case "http", "https" -> {
+                    if (httpClient == null) break;
+                    boolean rawDelivery = "true".equalsIgnoreCase(sub.getAttributes().get("RawMessageDelivery"));
+                    String body = rawDelivery
+                            ? protocolMessage
+                            : buildSnsHttpNotification(protocolMessage, subject, messageAttributes, topicArn, messageId, sub.getSubscriptionArn());
+                    var requestBuilder = HttpRequest.newBuilder()
+                            .uri(URI.create(sub.getEndpoint()))
+                            .timeout(Duration.ofSeconds(5))
+                            .header("Content-Type", "text/plain; charset=UTF-8")
+                            .header("x-amz-sns-message-type", "Notification")
+                            .header("x-amz-sns-message-id", messageId)
+                            .header("x-amz-sns-topic-arn", topicArn)
+                            .header("x-amz-sns-subscription-arn", sub.getSubscriptionArn());
+                    if (rawDelivery) {
+                        requestBuilder.header("x-amz-sns-rawdelivery", "true");
+                    }
+                    HttpRequest request = requestBuilder
+                            .POST(HttpRequest.BodyPublishers.ofString(body))
+                            .build();
+                    String endpoint = sub.getEndpoint();
+                    httpClient.sendAsync(request, HttpResponse.BodyHandlers.discarding())
+                            .thenAccept(response -> logHttpResult("Delivered SNS notification", endpoint, response.statusCode()))
+                            .exceptionally(ex -> { LOG.warnv("Failed to deliver SNS message to {0}: {1}", endpoint, ex.getMessage()); return null; });
+                }
+                case "application" -> {
+                    String region = extractRegionFromArn(sub.getEndpoint());
+                    if (region == null) {
+                        region = extractRegionFromArn(topicArn);
+                    }
+                    String endpointArn = sub.getEndpoint();
+                    PlatformEndpoint endpoint = platformEndpointStore.get(endpointKey(region, endpointArn)).orElse(null);
+                    if (endpoint == null) {
+                        LOG.debugv("Skipping topic fan-out to missing platform endpoint {0}", endpointArn);
+                        break;
+                    }
+                    if (!"true".equalsIgnoreCase(endpoint.getAttributes().getOrDefault("Enabled", "true"))) {
+                        LOG.debugv("Skipping topic fan-out to disabled platform endpoint {0}", endpointArn);
+                        break;
+                    }
+                    PlatformApplication app = platformAppStore.get(
+                            platformAppKey(region, endpoint.getPlatformApplicationArn())).orElse(null);
+                    if (app == null || "false".equalsIgnoreCase(app.getAttributes().get("Enabled"))) {
+                        LOG.debugv("Skipping topic fan-out to endpoint {0}: platform application missing or disabled",
+                                endpointArn);
+                        break;
+                    }
+                    capturePushForEndpoint(endpoint, app, message, subject, messageStructure, messageAttributes);
+                    LOG.debugv("Delivered SNS message to platform endpoint: {0}", endpointArn);
+                }
+                case "firehose" -> {
+                    if (firehoseService == null) {
+                        break;
+                    }
+                    String streamName;
+                    String region;
+                    String accountId;
+                    if (AwsArnUtils.isArn(sub.getEndpoint())) {
+                        AwsArnUtils.Arn arn = AwsArnUtils.parse(sub.getEndpoint());
+                        region = arn.region().isEmpty() ? extractRegionFromArn(topicArn) : arn.region();
+                        accountId = arn.accountId().isEmpty() ? regionResolver.getAccountId() : arn.accountId();
+                        String resource = arn.resource();
+                        streamName = resource.startsWith("deliverystream/")
+                                ? resource.substring("deliverystream/".length())
+                                : resource;
+                    } else {
+                        streamName = sub.getEndpoint();
+                        region = extractRegionFromArn(topicArn);
+                        accountId = regionResolver.getAccountId();
+                    }
+                    if (region == null || region.isEmpty()) {
+                        region = regionResolver.getDefaultRegion();
+                    }
+                    if (accountId == null || accountId.isEmpty()) {
+                        accountId = regionResolver.getAccountId();
+                    }
+                    boolean rawDelivery = sub.getAttributes() != null
+                            && "true".equalsIgnoreCase(sub.getAttributes().get("RawMessageDelivery"));
+                    String body = rawDelivery
+                            ? protocolMessage
+                            : buildSnsEnvelope(protocolMessage, subject, messageAttributes, topicArn, messageId);
+                    byte[] data = body.getBytes(StandardCharsets.UTF_8);
+                    firehoseService.putRecord(accountId, region, streamName, new Record(data));
+                    LOG.debugv("Delivered SNS message to Firehose: {0} ({1}) raw={2}", sub.getEndpoint(), streamName, rawDelivery);
+                }
+                case "email", "email-json" -> LOG.infov("SNS email delivery (stub): to={0}, subject={1}, message={2}",
+                        sub.getEndpoint(), subject, protocolMessage);
+                case "sms" -> LOG.infov("SNS SMS delivery (stub): to={0}, message={1}", sub.getEndpoint(), protocolMessage);
+                default -> LOG.debugv("Protocol {0} delivery not implemented, skipping: {1}",
+                        sub.getProtocol(), sub.getEndpoint());
+            }
+        } catch (Exception e) {
+            // Delivery failures are per-subscriber and never reported to the publisher, which
+            // matches AWS. Both SNS and SQS now top out at 1048576 bytes, so a publish at the
+            // SNS limit no longer fits a queue at all: the non-raw sqs envelope wraps the body
+            // in a few hundred bytes of JSON, and escaping expands every control character
+            // below 0x20 to six bytes, so a publish made largely of them can serialize several
+            // times larger. A topic left at the 262144-byte default clears an ordinary queue
+            // with room to spare; a queue configured with a smaller MaximumMessageSize crosses
+            // the limit more easily. Either way the message is dropped here.
+            LOG.warnv("Failed to deliver SNS message to {0}: {1}", sub.getEndpoint(), e.getMessage());
+        }
+    }
+
+    private String buildSnsLambdaEvent(String topicArn, String messageId, String message,
+                                       String subject, Map<String, MessageAttributeValue> messageAttributes,
+                                       String subscriptionArn) {
+        try {
+            String timestamp = DateTimeFormatter.ISO_INSTANT.format(Instant.now());
+            ObjectNode snsNode = objectMapper.createObjectNode();
+            snsNode.put("Type", "Notification");
+            snsNode.put("MessageId", messageId);
+            snsNode.put("TopicArn", topicArn);
+            if (subject != null) {
+                snsNode.put("Subject", subject);
+            } else {
+                snsNode.putNull("Subject");
+            }
+            snsNode.put("Message", message);
+            snsNode.put("Timestamp", timestamp);
+            snsNode.put("SignatureVersion", "1");
+            snsNode.put("Signature", "EXAMPLE");
+            snsNode.put("SigningCertUrl", "EXAMPLE");
+            snsNode.put("UnsubscribeUrl", "EXAMPLE");
+            ObjectNode attrs = snsNode.putObject("MessageAttributes");
+            if (messageAttributes != null) {
+                for (var entry : messageAttributes.entrySet()) {
+                    ObjectNode attr = attrs.putObject(entry.getKey());
+                    attr.put("Type", entry.getValue().getDataType());
+                    if (entry.getValue().getBinaryValue() != null) {
+                        attr.put("Value", Base64.getEncoder()
+                                .encodeToString(entry.getValue().getBinaryValue()));
+                    } else {
+                        attr.put("Value", entry.getValue().getStringValue());
+                    }
+                }
+            }
+            ObjectNode record = objectMapper.createObjectNode();
+            record.put("EventVersion", "1.0");
+            record.put("EventSubscriptionArn", subscriptionArn);
+            record.put("EventSource", "aws:sns");
+            record.set("Sns", snsNode);
+            ObjectNode root = objectMapper.createObjectNode();
+            root.putArray("Records").add(record);
+            return objectMapper.writeValueAsString(root);
+        } catch (Exception e) {
+            return "{\"Records\":[]}";
+        }
     }
 
     private static final String FUNCTION_MARKER = ":function:";
@@ -3104,6 +3320,76 @@ public class SnsService implements Resettable, ResourceProvider {
         return qualifierSeparator >= 0 ? suffix.substring(0, qualifierSeparator) : suffix;
     }
 
+    private String buildSnsEnvelope(String message, String subject,
+                                    Map<String, MessageAttributeValue> messageAttributes,
+                                    String topicArn, String messageId) {
+        try {
+            String timestamp = DateTimeFormatter.ISO_INSTANT.format(Instant.now());
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put("Type", "Notification");
+            node.put("MessageId", messageId);
+            node.put("TopicArn", topicArn);
+            node.put("Timestamp", timestamp);
+            if (subject != null) {
+                node.put("Subject", subject);
+            }
+            node.put("Message", message);
+            ObjectNode attrs = node.putObject("MessageAttributes");
+            if (messageAttributes != null) {
+                for (var entry : messageAttributes.entrySet()) {
+                    ObjectNode attr = attrs.putObject(entry.getKey());
+                    attr.put("Type", entry.getValue().getDataType());
+                    if (entry.getValue().getBinaryValue() != null) {
+                        attr.put("Value", Base64.getEncoder()
+                                .encodeToString(entry.getValue().getBinaryValue()));
+                    } else {
+                        attr.put("Value", entry.getValue().getStringValue());
+                    }
+                }
+            }
+            return objectMapper.writeValueAsString(node);
+        } catch (Exception e) {
+            return "{}";
+        }
+    }
+
+    private String buildSnsHttpNotification(String message, String subject,
+                                             Map<String, MessageAttributeValue> messageAttributes,
+                                             String topicArn, String messageId, String subscriptionArn) {
+        try {
+            String timestamp = DateTimeFormatter.ISO_INSTANT.format(Instant.now());
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put("Type", "Notification");
+            node.put("MessageId", messageId);
+            node.put("TopicArn", topicArn);
+            node.put("Timestamp", timestamp);
+            if (subject != null) {
+                node.put("Subject", subject);
+            }
+            node.put("Message", message);
+            node.put("SignatureVersion", "1");
+            node.put("Signature", "EXAMPLE");
+            node.put("SigningCertURL", "EXAMPLE");
+            node.put("UnsubscribeURL", baseUrl + "/?Action=Unsubscribe&SubscriptionArn=" + subscriptionArn);
+            ObjectNode attrs = node.putObject("MessageAttributes");
+            if (messageAttributes != null) {
+                for (var entry : messageAttributes.entrySet()) {
+                    ObjectNode attr = attrs.putObject(entry.getKey());
+                    attr.put("Type", entry.getValue().getDataType());
+                    if (entry.getValue().getBinaryValue() != null) {
+                        attr.put("Value", Base64.getEncoder()
+                                .encodeToString(entry.getValue().getBinaryValue()));
+                    } else {
+                        attr.put("Value", entry.getValue().getStringValue());
+                    }
+                }
+            }
+            return objectMapper.writeValueAsString(node);
+        } catch (Exception e) {
+            return "{}";
+        }
+    }
+
     private static String sha256(String message) {
         try {
         	MessageDigest md = MessageDigest.getInstance("SHA-256");
@@ -3114,10 +3400,84 @@ public class SnsService implements Resettable, ResourceProvider {
         }
     }
 
+    public Map<String, String> getSmsAttributes(String region) {
+        Map<String, String> attrs = new java.util.LinkedHashMap<>();
+        attrs.put("DefaultSMSType", "Promotional");
+        Map<String, String> stored = smsAttributesByRegion.get(region);
+        if (stored != null) {
+            attrs.putAll(stored);
+        }
+        return attrs;
+    }
+
+    public boolean isPhoneNumberOptedOut(String phoneNumber, String region) {
+        return optedOutNumbers.contains(phoneKey(region, phoneNumber));
+    }
+
+    public List<String> listPhoneNumbersOptedOut(String region) {
+        String prefix = region + "::";
+        List<String> numbers = new ArrayList<>();
+        for (String key : optedOutNumbers) {
+            if (key.startsWith(prefix)) {
+                numbers.add(key.substring(prefix.length()));
+            }
+        }
+        return numbers;
+    }
+
+    public void optInPhoneNumber(String phoneNumber, String region) {
+        optedOutNumbers.remove(phoneKey(region, phoneNumber));
+    }
+
     public List<Map<String, String>> listOriginationNumbers() {
         return List.of();
     }
 
+    public List<Map<String, String>> listSmsSandboxPhoneNumbers(String region) {
+        String prefix = region + "::";
+        List<Map<String, String>> numbers = new ArrayList<>();
+        for (var entry : sandboxNumbers.entrySet()) {
+            if (!entry.getKey().startsWith(prefix)) {
+                continue;
+            }
+            numbers.add(Map.of(
+                    "PhoneNumber", entry.getKey().substring(prefix.length()),
+                    "Status", entry.getValue()));
+        }
+        return numbers;
+    }
+
+    public void createSmsSandboxPhoneNumber(String phoneNumber, String region) {
+        if (!isE164(phoneNumber)) {
+            throw new AwsException("InvalidParameter",
+                    "Invalid parameter: PhoneNumber Reason: invalid phone number",
+                    400);
+        }
+        sandboxNumbers.putIfAbsent(phoneKey(region, phoneNumber), "Pending");
+    }
+
+    private String defaultTopicPolicy(String topicArn) {
+        String account = regionResolver.getAccountId();
+        return "{\"Version\":\"2012-10-17\",\"Id\":\"__default_policy_ID\",\"Statement\":[{\"Sid\":\"__default_statement_ID\",\"Effect\":\"Allow\",\"Principal\":{\"AWS\":\"*\"},\"Action\":[\"SNS:GetTopicAttributes\",\"SNS:SetTopicAttributes\",\"SNS:AddPermission\",\"SNS:RemovePermission\",\"SNS:DeleteTopic\",\"SNS:Subscribe\",\"SNS:ListSubscriptionsByTopic\",\"SNS:Publish\"],\"Resource\":\""
+                + topicArn + "\",\"Condition\":{\"StringEquals\":{\"AWS:SourceAccount\":\"" + account + "\"}}}]}";
+    }
+
+    private ObjectNode parseTopicPolicy(String raw, String topicArn) {
+        String source = (raw == null || raw.isBlank()) ? defaultTopicPolicy(topicArn) : raw;
+        try {
+            JsonNode parsed = objectMapper.readTree(source);
+            if (parsed instanceof ObjectNode obj) {
+                return obj;
+            }
+        } catch (Exception e) {
+            LOG.debugv(e, "Failed to parse topic policy; resetting to default");
+        }
+        try {
+            return (ObjectNode) objectMapper.readTree(defaultTopicPolicy(topicArn));
+        } catch (Exception e) {
+            throw new AwsException("InvalidParameter", "Invalid parameter: Policy", 400);
+        }
+    }
 
     private static ArrayNode ensureStatementArray(ObjectNode policy) {
         JsonNode existing = policy.get("Statement");

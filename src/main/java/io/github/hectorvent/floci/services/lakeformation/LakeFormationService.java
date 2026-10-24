@@ -333,6 +333,15 @@ public class LakeFormationService {
 
     private final LakeFormationCatalogService catalog;
 
+    @Inject
+    public LakeFormationService(LakeFormationStorage storage, RegionResolver regionResolver,
+                                IamService iam, LakeFormationCatalogService catalog) {
+        this.storage = storage;
+        this.regionResolver = regionResolver;
+        this.iam = iam;
+        this.catalog = catalog;
+    }
+
     private IamRole serviceLinkedRole() {
         String name = "AWSServiceRoleForLakeFormationDataAccess";
         Optional<IamRole> existing = iam.findRole(regionResolver.getAccountId(), name);

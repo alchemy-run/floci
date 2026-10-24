@@ -799,6 +799,56 @@ public class MemoryDbService {
 
     private final Ec2Service ec2Service;
 
+    @Inject
+    public MemoryDbService(MemoryDbContainerManager containerManager,
+                           MemoryDbProxyManager proxyManager,
+                           SigV4Validator sigV4Validator,
+                           StorageFactory storageFactory,
+                           EmulatorConfig config,
+                           RegionResolver regionResolver,
+                           Ec2Service ec2Service) {
+        this.ec2Service = ec2Service;
+        this.containerManager = containerManager;
+        this.proxyManager = proxyManager;
+        this.sigV4Validator = sigV4Validator;
+        this.config = config;
+        this.regionResolver = regionResolver;
+        this.clusters = storageFactory.create("memorydb", "memorydb-clusters.json",
+                new TypeReference<Map<String, Cluster>>() {});
+        this.users = storageFactory.create("memorydb", "memorydb-users.json",
+                new TypeReference<Map<String, User>>() {});
+        this.acls = storageFactory.create("memorydb", "memorydb-acls.json",
+                new TypeReference<Map<String, Acl>>() {});
+        this.parameterGroups = storageFactory.create("memorydb", "memorydb-parameter-groups.json",
+                new TypeReference<Map<String, ParameterGroup>>() {});
+        this.subnetGroups = storageFactory.create("memorydb", "memorydb-subnet-groups.json",
+                new TypeReference<Map<String, SubnetGroup>>() {});
+        this.snapshots = storageFactory.create("memorydb", "memorydb-snapshots.json",
+                new TypeReference<Map<String, Snapshot>>() {});
+        this.events = storageFactory.create("memorydb", "memorydb-events.json",
+                new TypeReference<Map<String, Event>>() {});
+    }
+
+    public Cluster updateCluster(String name, String description, List<String> securityGroupIds, String region) {
+        Cluster cluster = getCluster(name, region);
+        if (description != null) {
+            cluster.setDescription(description);
+        }
+        if (securityGroupIds != null) {
+            cluster.setSecurityGroupIds(securityGroupIds);
+        }
+        clusters.put(key(region, name), cluster);
+        recordEvent(name, "cluster", "Cluster updated", region);
+        return cluster;
+    }
+
+    public Cluster deleteCluster(String name, String region, String finalSnapshotName) {
+        if (finalSnapshotName != null) {
+            createSnapshot(name, finalSnapshotName, Map.of(), region);
+        }
+        return deleteCluster(name, region);
+    }
+
     public synchronized User updateUser(String name, String accessString, AuthMode authMode,
                                         List<String> passwords, String region) {
         requireText(name, "UserName");
@@ -873,6 +923,24 @@ public class MemoryDbService {
                 throw new AwsException("UserNotFoundFault", "User " + userName + " not found.", 404);
             }
         }
+    }
+
+    public synchronized Map<String, String> listTags(String resourceArn, String region) {
+        return new LinkedHashMap<>(tagTarget(resourceArn, region).tags());
+    }
+
+    public synchronized Map<String, String> tagResource(String resourceArn, Map<String, String> tags, String region) {
+        TagTarget target = tagTarget(resourceArn, region);
+        target.tags().putAll(tags);
+        target.persist().run();
+        return new LinkedHashMap<>(target.tags());
+    }
+
+    public synchronized Map<String, String> untagResource(String resourceArn, List<String> tagKeys, String region) {
+        TagTarget target = tagTarget(resourceArn, region);
+        tagKeys.forEach(target.tags()::remove);
+        target.persist().run();
+        return new LinkedHashMap<>(target.tags());
     }
 
     private static final List<EngineVersion> ENGINE_VERSIONS = List.of(
@@ -1352,6 +1420,24 @@ public class MemoryDbService {
             }
             default -> throw invalid("Unsupported MemoryDB resource type.");
         };
+    }
+
+    /**
+     * Cluster endpoint hostname in the AWS shape
+     * {@code clustercfg.<cluster>.<id>.memorydb.<region>.amazonaws.com}, with the Floci wildcard
+     * domain (or the configured Floci hostname) in place of {@code amazonaws.com}. The embedded
+     * DNS resolves it to Floci for containers and public DNS resolves the default domain to
+     * loopback on the host. A configured IP address cannot carry a prefix and is used as is.
+     */
+    String resolveEndpointHost(String clusterName, String accountId, String region) {
+        String suffix = config.hostname()
+                .filter(h -> !h.isBlank() && !"localhost".equalsIgnoreCase(h))
+                .orElse(EmbeddedDnsServer.DEFAULT_SUFFIX);
+        if (IP_LITERAL.matcher(suffix).matches()) {
+            return suffix;
+        }
+        return "clustercfg." + clusterName.toLowerCase(Locale.ROOT) + "." + endpointId(accountId, region)
+                + ".memorydb." + region + "." + suffix;
     }
 
     private static String endpointId(String accountId, String region) {

@@ -942,6 +942,29 @@ public class CodeBuildRunner implements ContainerTeardown {
         static PhaseResult ofStopped() { return new PhaseResult(PhaseStatus.STOPPED, null); }
     }
 
+    @Inject
+    public CodeBuildRunner(DockerClient dockerClient,
+                           ContainerBuilder containerBuilder,
+                           ContainerLifecycleManager lifecycleManager,
+                           ContainerLogStreamer logStreamer,
+                           S3Service s3Service,
+                           SsmService ssmService,
+                           SecretsManagerService secretsManagerService,
+                           EmulatorConfig config,
+                           ContainerDetector containerDetector,
+                           RegionResolver regionResolver) {
+        this.dockerClient = dockerClient;
+        this.containerBuilder = containerBuilder;
+        this.lifecycleManager = lifecycleManager;
+        this.logStreamer = logStreamer;
+        this.s3Service = s3Service;
+        this.ssmService = ssmService;
+        this.secretsManagerService = secretsManagerService;
+        this.config = config;
+        this.containerDetector = containerDetector;
+        this.regionResolver = regionResolver;
+    }
+
     public void validateExecution(Build build, Project project) {
         String sourceType = project.getSource() != null ? project.getSource().getType() : "NO_SOURCE";
         if (!List.of("NO_SOURCE", "S3").contains(sourceType)) {

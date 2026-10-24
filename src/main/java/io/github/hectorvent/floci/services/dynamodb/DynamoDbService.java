@@ -5677,6 +5677,297 @@ public class DynamoDbService {
 
     private final ConcurrentHashMap<String, TableBackup> backups = new ConcurrentHashMap<>();
 
+    @Inject
+    public DynamoDbService(StorageFactory storageFactory, RegionResolver regionResolver,
+                           DynamoDbStreamService streamService,
+                           KinesisStreamingForwarder kinesisForwarder,
+                           S3Service s3Service,
+                           ObjectMapper objectMapper) {
+        this(storageFactory.create("dynamodb", "dynamodb-tables.json",
+                new TypeReference<Map<String, TableDefinition>>() {}),
+             storageFactory.create("dynamodb", "dynamodb-items.json",
+                new TypeReference<Map<String, Map<String, JsonNode>>>() {}),
+             storageFactory.create("dynamodb", "dynamodb-exports.json",
+                new TypeReference<Map<String, ExportDescription>>() {}),
+             storageFactory.create("dynamodb", "dynamodb-imports.json",
+                new TypeReference<Map<String, ImportTableDescription>>() {}),
+             regionResolver, streamService, kinesisForwarder, s3Service, objectMapper);
+    }
+
+    private JsonNode putItemInternal(String tableName, JsonNode item,
+                                  String conditionExpression,
+                                  JsonNode exprAttrNames, JsonNode exprAttrValues,
+                                  String region, String returnValuesOnConditionCheckFailure,
+                                  boolean shouldPersist,
+                                  Consumer<Runnable> deferredStreamEvents,
+                                  Map<String, ConcurrentSkipListMap<String, JsonNode>> stagedItems) {
+        String canonicalTableName = canonicalTableName(region, tableName);
+        String storageKey = regionKey(region, canonicalTableName);
+        TableDefinition table = tableStore.get(storageKey)
+                .orElseThrow(() -> resourceNotFoundException(canonicalTableName));
+
+        // Validate and normalize all number attributes before storage
+        final JsonNode normalizedItem = DynamoDbNumberUtils.normalizeNumbersInItem(item);
+        DynamoDbItemSize.validateSize(normalizedItem);
+        String itemKey = buildItemKey(table, normalizedItem);
+        validateIndexKeyTypes(table, normalizedItem, false);
+
+        return withItemLock(storageKey, itemKey, () -> {
+            var tableItems = itemsFor(storageKey, stagedItems, true);
+
+            JsonNode existing = tableItems.get(itemKey);
+
+            if (conditionExpression != null) {
+                evaluateCondition(existing, conditionExpression, exprAttrNames, exprAttrValues, returnValuesOnConditionCheckFailure);
+            }
+            requireItemNestingWithinLimit(normalizedItem);
+
+            tableItems.put(itemKey, normalizedItem);
+            if (shouldPersist) {
+                persistItems(storageKey);
+            }
+            LOG.debugv("Put item in {0}: key={1}", canonicalTableName, itemKey);
+            LOG.tracev("Put item in {0}: key={1} item={2}", canonicalTableName, itemKey, item);
+
+            String eventName = existing == null ? "INSERT" : "MODIFY";
+            // Captured in request scope on purpose: this event may be deferred to the batch drain,
+            // and resolving the account inside the lambda would fall back to the default account,
+            // which is the ambient-account bug this commit exists to remove.
+            String ownerAccountId = regionResolver.getAccountId();
+            Runnable streamEvent = () -> {
+                if (streamService != null) {
+                    streamService.captureEvent(canonicalTableName, eventName, existing, item, table, region);
+                }
+                if (kinesisForwarder != null) {
+                    kinesisForwarder.forward(eventName, existing, item, table, region, ownerAccountId);
+                }
+            };
+            if (deferredStreamEvents != null) {
+                deferredStreamEvents.accept(streamEvent);
+            } else {
+                streamEvent.run();
+            }
+            return existing;
+        });
+    }
+
+    private JsonNode deleteItemInternal(String tableName, JsonNode key,
+                                         String conditionExpression,
+                                         JsonNode exprAttrNames, JsonNode exprAttrValues,
+                                         String region, String returnValuesOnConditionCheckFailure,
+                                         boolean shouldPersist,
+                                         Consumer<Runnable> deferredStreamEvents,
+                                         Map<String, ConcurrentSkipListMap<String, JsonNode>> stagedItems) {
+        String canonicalTableName = canonicalTableName(region, tableName);
+        String storageKey = regionKey(region, canonicalTableName);
+        var table = requireActiveTable(storageKey, canonicalTableName);
+
+        String itemKey = buildItemKey(table, key, true);
+
+        return withItemLock(storageKey, itemKey, () -> {
+            var items = itemsFor(storageKey, stagedItems, false);
+            if (items == null) return null;
+
+            if (conditionExpression != null) {
+                JsonNode existing = items.get(itemKey);
+                evaluateCondition(existing, conditionExpression, exprAttrNames, exprAttrValues, returnValuesOnConditionCheckFailure);
+            }
+
+            JsonNode removed = items.remove(itemKey);
+            if (shouldPersist) {
+                persistItems(storageKey);
+            }
+            LOG.debugv("Deleted item from {0}: key={1}", canonicalTableName, itemKey);
+            LOG.tracev("Deleted item from {0}: key={1} removed={2}", canonicalTableName, itemKey, removed);
+
+            if (removed != null) {
+                // Captured in request scope on purpose: this event may be deferred to the batch drain,
+                // and resolving the account inside the lambda would fall back to the default account,
+                // which is the ambient-account bug this commit exists to remove.
+                String ownerAccountId = regionResolver.getAccountId();
+                Runnable streamEvent = () -> {
+                    if (streamService != null) {
+                        streamService.captureEvent(canonicalTableName, "REMOVE", removed, null, table, region);
+                    }
+                    if (kinesisForwarder != null) {
+                        kinesisForwarder.forward("REMOVE", removed, null, table, region, ownerAccountId);
+                    }
+                };
+                if (deferredStreamEvents != null) {
+                    deferredStreamEvents.accept(streamEvent);
+                } else {
+                    streamEvent.run();
+                }
+            }
+
+            return removed;
+        });
+    }
+
+    private UpdateResult updateItemInternal(String tableName, JsonNode key, JsonNode attributeUpdates,
+                                             String updateExpression,
+                                             JsonNode expressionAttrNames, JsonNode expressionAttrValues,
+                                             String returnValues, String conditionExpression, String region,
+                                             String returnValuesOnConditionCheckFailure,
+                                             boolean shouldPersist,
+                                             Consumer<Runnable> deferredStreamEvents,
+                                             Map<String, ConcurrentSkipListMap<String, JsonNode>> stagedItems,
+                                             UpdateSizeRule sizeRule) {
+        String canonicalTableName = canonicalTableName(region, tableName);
+        String storageKey = regionKey(region, canonicalTableName);
+        var table = requireActiveTable(storageKey, canonicalTableName);
+
+        String itemKey = buildItemKey(table, key, true);
+
+        return withItemLock(storageKey, itemKey, () -> {
+            var items = itemsFor(storageKey, stagedItems, true);
+
+            // Get existing item or create new one from key
+            JsonNode existing = items.get(itemKey);
+
+            if (conditionExpression != null) {
+                evaluateCondition(existing, conditionExpression, expressionAttrNames, expressionAttrValues, returnValuesOnConditionCheckFailure);
+            }
+
+            ObjectNode item;
+            if (existing != null) {
+                item = existing.deepCopy();
+            } else {
+                item = key.deepCopy();
+            }
+
+            var touchedPaths = new ArrayList<String>();
+            // Apply UpdateExpression (modern format: "SET #n = :val, age = :age REMOVE attr")
+            if (updateExpression != null) {
+                applyUpdateExpression(item, updateExpression, expressionAttrNames, expressionAttrValues, touchedPaths);
+            }
+            // Apply attribute updates (legacy format: AttributeUpdates)
+            else if (attributeUpdates != null && attributeUpdates.isObject()) {
+                Iterator<Map.Entry<String, JsonNode>> fields = attributeUpdates.fields();
+                while (fields.hasNext()) {
+                    var entry = fields.next();
+                    String attrName = entry.getKey();
+                    touchedPaths.add(attrName);
+                    JsonNode update = entry.getValue();
+                    String action = update.has("Action") ? update.get("Action").asText() : "PUT";
+                    JsonNode value = update.get("Value");
+
+                    switch (action) {
+                        case "PUT" -> { if (value != null) item.set(attrName, value); }
+                        case "DELETE" -> {
+                            if (value == null) {
+                                item.remove(attrName);
+                            } else {
+                                // Remove elements from a set
+                                JsonNode curAttr = item.get(attrName);
+                                if (curAttr != null) {
+                                    for (String setType : new String[]{"SS", "NS", "BS"}) {
+                                        if (curAttr.has(setType) && value.has(setType)) {
+                                            Set<String> removeSet = new HashSet<>();
+                                            for (JsonNode v : value.get(setType)) removeSet.add(v.asText());
+                                            ArrayNode newArr = objectMapper.createArrayNode();
+                                            for (JsonNode v : curAttr.get(setType)) {
+                                                if (!removeSet.contains(v.asText())) newArr.add(v);
+                                            }
+                                            if (newArr.isEmpty()) {
+                                                item.remove(attrName);
+                                            } else {
+                                                ((ObjectNode) curAttr).set(setType, newArr);
+                                            }
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        case "ADD" -> {
+                            if (value != null) {
+                                JsonNode curAttr = item.get(attrName);
+                                if (value.has("N")) {
+                                    BigDecimal delta = new BigDecimal(value.get("N").asText());
+                                    BigDecimal current = curAttr != null && curAttr.has("N")
+                                            ? new BigDecimal(curAttr.get("N").asText()) : BigDecimal.ZERO;
+                                    var sum = current.add(delta);
+                                    DynamoDbNumberUtils.checkArithmeticResult(sum);
+                                    ObjectNode numNode = objectMapper.createObjectNode();
+                                    numNode.put("N", sum.stripTrailingZeros().toPlainString());
+                                    item.set(attrName, numNode);
+                                } else {
+                                    // Add elements to a set
+                                    for (String setType : new String[]{"SS", "NS", "BS"}) {
+                                        if (value.has(setType)) {
+                                            if (curAttr == null || !curAttr.has(setType)) {
+                                                item.set(attrName, value);
+                                            } else {
+                                                Set<String> existingSet = new LinkedHashSet<>();
+                                                for (JsonNode v : curAttr.get(setType)) existingSet.add(v.asText());
+                                                for (JsonNode v : value.get(setType)) existingSet.add(v.asText());
+                                                ArrayNode newArr = objectMapper.createArrayNode();
+                                                for (String s : existingSet) newArr.add(s);
+                                                ((ObjectNode) curAttr).set(setType, newArr);
+                                            }
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Reject any attempt to modify a key attribute
+            validateKeyNotModified(table, key, item);
+            requireItemNestingWithinLimit(item);
+
+            // AWS validates index key values against the item the update produces.
+            validateIndexKeyTypes(table, item, true);
+
+            if (sizeRule == UpdateSizeRule.UPDATE_ITEM) {
+                requireUpdateItemWithinSizeLimit(item,
+                        writtenAttributes(touchedPaths, updateExpression, expressionAttrNames),
+                        updateExpression != null
+                                ? DynamoDbItemSize.updateExpressionCost(updateExpression)
+                                : DynamoDbItemSize.attributeUpdatesCost(attributeUpdates));
+            } else {
+                requireUpdatedItemWithinSizeLimit(item);
+            }
+
+            items.put(itemKey, item);
+            if (shouldPersist) {
+                persistItems(storageKey);
+            }
+            LOG.tracev("Updated item in {0}: key={1} updateExpression={2} item={3}",
+                    canonicalTableName, itemKey, updateExpression, item);
+
+            // Captured in request scope on purpose: this event may be deferred to the batch drain,
+            // and resolving the account inside the lambda would fall back to the default account,
+            // which is the ambient-account bug this commit exists to remove.
+            String ownerAccountId = regionResolver.getAccountId();
+            Runnable streamEvent = () -> {
+                if (streamService != null) {
+                    streamService.captureEvent(canonicalTableName, "MODIFY", existing, item, table, region);
+                }
+                if (kinesisForwarder != null) {
+                    kinesisForwarder.forward("MODIFY", existing, item, table, region, ownerAccountId);
+                }
+            };
+            if (deferredStreamEvents != null) {
+                deferredStreamEvents.accept(streamEvent);
+            } else {
+                streamEvent.run();
+            }
+
+            List<TouchedPath> touched = new ArrayList<>();
+            for (String path : touchedPaths) {
+                List<Object> tokens = pathTokens(path, updateExpression, expressionAttrNames);
+                touched.add(new TouchedPath(tokens,
+                        existing == null ? null : valueAtTokens(existing, tokens), valueAtTokens(item, tokens)));
+            }
+            return new UpdateResult(item, existing, touched);
+        });
+    }
+
     private Set<String> writtenAttributes(List<String> touchedPaths, String updateExpression,
                                            JsonNode expressionAttrNames) {
         Set<String> names = new LinkedHashSet<>();
@@ -5696,6 +5987,147 @@ public class DynamoDbService {
         }
         return new TransactionCanceledException.CancellationReason("ValidationError", null,
                 "Nesting Levels have exceeded supported limits");
+    }
+
+    private static void requireUpdateItemWithinSizeLimit(JsonNode item, Set<String> writtenAttributes,
+                                                          int actionCost) {
+        if (!DynamoDbItemSize.updateItemWithinLimit(item, writtenAttributes, actionCost)) {
+            throw new UpdatedItemTooLargeException();
+        }
+    }
+
+    /**
+     * @param hasOtherUpdates true when the UpdateTable request also carries a
+     *                       non-throughput field (billing mode, streams, GSIs,
+     *                       SSE, table class, …). Real AWS only rejects an
+     *                       unchanged ProvisionedThroughput when that is the
+     *                       sole thing in the update.
+     */
+    public TableDefinition updateTable(String tableName, Long readCapacity, Long writeCapacity,
+                                        List<GlobalSecondaryIndex> gsiCreates, List<String> gsiDeletes,
+                                        List<AttributeDefinition> newAttrDefs, String region,
+                                        boolean hasOtherUpdates) {
+        String canonicalTableName = canonicalTableName(region, tableName);
+        String storageKey = regionKey(region, canonicalTableName);
+        TableDefinition table = tableStore.get(storageKey)
+                .orElseThrow(() -> resourceNotFoundException(canonicalTableName));
+        requireNotCreating(table);
+
+        if (readCapacity != null && readCapacity <= 0) {
+            throw new AwsException("ValidationException",
+                    "The parameter 'ProvisionedThroughput.ReadCapacityUnits' must be greater than 0", 400);
+        }
+        if (writeCapacity != null && writeCapacity <= 0) {
+            throw new AwsException("ValidationException",
+                    "The parameter 'ProvisionedThroughput.WriteCapacityUnits' must be greater than 0", 400);
+        }
+        boolean otherUpdates = hasOtherUpdates
+                || (gsiCreates != null && !gsiCreates.isEmpty())
+                || (gsiDeletes != null && !gsiDeletes.isEmpty())
+                || (newAttrDefs != null && !newAttrDefs.isEmpty());
+        if (!otherUpdates
+                && readCapacity != null && writeCapacity != null
+                && "PROVISIONED".equals(table.getBillingMode())
+                && readCapacity.equals(table.getProvisionedThroughput().getReadCapacityUnits())
+                && writeCapacity.equals(table.getProvisionedThroughput().getWriteCapacityUnits())) {
+            throw new AwsException("ValidationException",
+                    "The provisioned throughput for the table will not change. "
+                    + "The requested value equals the current value.", 400);
+        }
+
+        for (GlobalSecondaryIndex newGsi : gsiCreates) {
+            if (table.findGsi(newGsi.getIndexName()).isPresent()) {
+                throw new AwsException("ValidationException",
+                        "GSI " + newGsi.getIndexName() + " already exists", 400);
+            }
+        }
+
+        // A new index's key attributes must all appear in the request's own AttributeDefinitions.
+        // The definitions already stored on the table do not satisfy this, even for an attribute
+        // the table key uses.
+        Set<String> requestAttrs = new HashSet<>();
+        if (newAttrDefs != null) {
+            newAttrDefs.forEach(ad -> requestAttrs.add(ad.getAttributeName()));
+        }
+        for (GlobalSecondaryIndex newGsi : gsiCreates) {
+            for (KeySchemaElement k : newGsi.getKeySchema()) {
+                if (!requestAttrs.contains(k.getAttributeName())) {
+                    throw new AwsException("ValidationException",
+                            "Attribute: " + k.getAttributeName() + " is not defined in AttributeDefinitions", 400);
+                }
+            }
+            validateGsiKeySchemaArity(newGsi);
+        }
+
+        for (String gsiName : gsiDeletes) {
+            if (table.findGsi(gsiName).isEmpty()) {
+                throw new AwsException("ResourceNotFoundException",
+                        "Global secondary index " + gsiName + " does not exist on the table", 400);
+            }
+        }
+
+        if (readCapacity != null) {
+            table.getProvisionedThroughput().setReadCapacityUnits(readCapacity);
+        }
+        if (writeCapacity != null) {
+            table.getProvisionedThroughput().setWriteCapacityUnits(writeCapacity);
+        }
+
+        for (String indexName : gsiDeletes) {
+            table.getGlobalSecondaryIndexes().removeIf(g -> indexName.equals(g.getIndexName()));
+        }
+
+        for (GlobalSecondaryIndex gsi : gsiCreates) {
+            gsi.setIndexArn(table.getTableArn() + "/index/" + gsi.getIndexName());
+            table.getGlobalSecondaryIndexes().add(gsi);
+        }
+
+        if (newAttrDefs != null && !newAttrDefs.isEmpty()) {
+            List<AttributeDefinition> existing = table.getAttributeDefinitions();
+            for (AttributeDefinition newDef : newAttrDefs) {
+                boolean found = existing.stream()
+                        .anyMatch(e -> e.getAttributeName().equals(newDef.getAttributeName()));
+                if (!found) {
+                    existing.add(newDef);
+                }
+            }
+        }
+        pruneUnusedAttributeDefinitions(table);
+
+        tableStore.put(storageKey, table);
+        LOG.infov("Updated table: {0} in region {1}", canonicalTableName, region);
+        return table;
+    }
+
+    public TableBackup describeBackup(String backupArn) {
+        return requireBackup(backupArn);
+    }
+
+    public TableBackup deleteBackup(String backupArn) {
+        TableBackup backup = requireBackup(backupArn);
+        backups.remove(backupArn);
+        backup.setBackupStatus("DELETED");
+        LOG.infov("Deleted backup {0}", backupArn);
+        return backup;
+    }
+
+    public List<TableBackup> listBackups(
+            String tableName, String region) {
+        String filterName = null;
+        if (tableName != null && !tableName.isBlank()) {
+            filterName = canonicalTableName(region, tableName);
+        }
+        String expectedName = filterName;
+        return backups.values().stream()
+                .filter(b -> !"DELETED".equals(b.getBackupStatus()))
+                .filter(b -> {
+                    AwsArnUtils.Arn arn = AwsArnUtils.parse(b.getBackupArn());
+                    return regionResolver.getAccountId().equals(arn.accountId()) && region.equals(arn.region());
+                })
+                .filter(b -> expectedName == null || expectedName.equals(b.getTableName()))
+                .sorted(Comparator.comparing(TableBackup::getBackupArn)
+                        .reversed())
+                .toList();
     }
 
 
@@ -5732,18 +6164,19 @@ public class DynamoDbService {
         return restored;
     }
 
-
-    public String updateContributorInsights(String tableName, String indexName, String action, String region) {
-        TableDefinition table = describeTable(tableName, region);
-        if (!"ENABLE".equals(action) && !"DISABLE".equals(action)) {
-            throw new AwsException("ValidationException",
-                    "ContributorInsightsAction must be ENABLE or DISABLE", 400);
+    private TableBackup requireBackup(String backupArn) {
+        if (backupArn == null || backupArn.isBlank()) {
+            throw new AwsException("ValidationException", "BackupArn must not be empty", 400);
         }
-        String status = "ENABLE".equals(action) ? "ENABLED" : "DISABLED";
-        table.setContributorInsightsStatusFor(indexName, status);
-        persistTable(table.getTableName(), table, region);
-        return status;
+        TableBackup backup = backups.get(backupArn);
+        if (backup == null || "DELETED".equals(backup.getBackupStatus())
+                || !regionResolver.getAccountId().equals(AwsArnUtils.parse(backupArn).accountId())) {
+            throw new AwsException("BackupNotFoundException",
+                    "Backup not found: " + backupArn, 400);
+        }
+        return backup;
     }
+
 
     public String describeContributorInsights(String tableName, String indexName, String region) {
         TableDefinition table = describeTable(tableName, region);
@@ -5755,6 +6188,84 @@ public class DynamoDbService {
         return tableStore.scan(k -> k.startsWith(prefix)).stream()
                 .sorted(Comparator.comparing(TableDefinition::getTableName))
                 .toList();
+    }
+
+    /** Item calls treat a CREATING table as absent. AWS answers them without the table name. */
+    private TableDefinition requireActiveTable(String storageKey, String canonicalTableName) {
+        var table = tableStore.get(storageKey)
+                .orElseThrow(() -> resourceNotFoundException(canonicalTableName));
+        if ("CREATING".equals(table.getTableStatus())) {
+            throw new AwsException("ResourceNotFoundException", "Requested resource not found", 400);
+        }
+        return table;
+    }
+
+    public ExportDescription exportTable(Map<String, Object> request, String region) {
+        String tableArn = (String) request.get("TableArn");
+        String s3Bucket = (String) request.get("S3Bucket");
+        String s3Prefix = request.containsKey("S3Prefix") ? (String) request.get("S3Prefix") : null;
+        String exportFormat = request.containsKey("ExportFormat") ? (String) request.get("ExportFormat") : "DYNAMODB_JSON";
+        String exportType = request.containsKey("ExportType") ? (String) request.get("ExportType") : "FULL_EXPORT";
+        String clientToken = request.containsKey("ClientToken") ? (String) request.get("ClientToken") : null;
+        String s3SseAlgorithm = request.containsKey("S3SseAlgorithm") ? (String) request.get("S3SseAlgorithm") : null;
+        String s3BucketOwner = request.containsKey("S3BucketOwner") ? (String) request.get("S3BucketOwner") : null;
+
+        if ("INCREMENTAL_EXPORT".equals(exportType)) {
+            throw new AwsException("ValidationException",
+                    "ExportType INCREMENTAL_EXPORT is not supported", 400);
+        }
+        if ("ION".equals(exportFormat)) {
+            throw new AwsException("ValidationException",
+                    "ExportFormat ION is not supported", 400);
+        }
+
+        DynamoDbTableNames.ResolvedTableRef ref = DynamoDbTableNames.resolveWithRegion(tableArn, region);
+        String tableName = ref.name();
+        String tableRegion = ref.region() != null ? ref.region() : region;
+        String storageKey = regionKey(tableRegion, tableName);
+
+        TableDefinition table = tableStore.get(storageKey)
+                .orElseThrow(() -> resourceNotFoundException(tableName));
+        if (!table.isPointInTimeRecoveryEnabled()) {
+            throw new AwsException("PointInTimeRecoveryUnavailableException",
+                    "Point in time recovery is not enabled for table " + tableName, 400);
+        }
+
+        long now = Instant.now().getEpochSecond();
+        var exportId = newJobId();
+        String exportArn = AwsArnUtils.Arn.of("dynamodb", tableRegion, regionResolver.getAccountId(), "table/" + table.getTableName() + "/export/" + exportId).toString();
+
+        ExportDescription desc = new ExportDescription();
+        desc.setExportArn(exportArn);
+        desc.setExportStatus("IN_PROGRESS");
+        desc.setTableArn(table.getTableArn());
+        desc.setTableId(table.getTableName());
+        desc.setS3Bucket(s3Bucket);
+        desc.setS3Prefix(s3Prefix);
+        desc.setExportFormat(exportFormat);
+        desc.setExportType("FULL_EXPORT");
+        desc.setExportTime(now);
+        desc.setStartTime(now);
+        desc.setClientToken(clientToken);
+        desc.setS3SseAlgorithm(s3SseAlgorithm);
+        desc.setS3BucketOwner(s3BucketOwner);
+
+        if (exportStore != null) {
+            exportStore.put(exportArn, desc);
+        }
+
+        ConcurrentSkipListMap<String, JsonNode> tableItems = itemsByTable.get(scopedItemsKey(storageKey));
+        List<JsonNode> snapshot = tableItems != null
+                ? List.copyOf(tableItems.values())
+                : List.of();
+
+        // The worker gets its own copy so the object serialized into this response never
+        // changes underneath the handler, and the request account so its writes land there.
+        var accountId = regionResolver.getAccountId();
+        var worker = objectMapper.convertValue(desc, ExportDescription.class);
+        Thread.ofVirtual().start(() -> RequestScopes.runAs(accountId, () -> runExport(worker, snapshot, exportArn)));
+
+        return desc;
     }
 
     /**

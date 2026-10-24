@@ -2697,6 +2697,8 @@ public class CloudFrontController {
             boolean inOrigin = false;
             boolean inS3OriginConfig = false;
             boolean inCustomOriginConfig = false;
+            boolean inVpcOriginConfig = false;
+            Map<String, String> vpcConfig = null;
             boolean inOriginSslProtocols = false;
             Origin current = null;
             Map<String, String> s3Config = null;
@@ -2741,6 +2743,7 @@ public class CloudFrontController {
                             if (inOrigins) {
                                 inOrigin = true;
                                 current = new Origin();
+                                customHeaders = new ArrayList<>();
                             }
                         }
                         case "S3OriginConfig" -> {
@@ -2754,13 +2757,6 @@ public class CloudFrontController {
                                 inCustomOriginConfig = true;
                                 customConfig = new LinkedHashMap<>();
                             }
-                        }
-                        case "VpcOriginConfig" -> {
-                            if (inVpcOriginConfig && current != null) {
-                                current.setVpcOriginConfig(vpcConfig);
-                            }
-                            inVpcOriginConfig = false;
-                            vpcConfig = null;
                         }
                         case "VpcOriginConfig" -> {
                             if (inOrigin) {
@@ -2780,35 +2776,47 @@ public class CloudFrontController {
                             }
                         }
                         case "Id" -> {
-                            if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig && current != null) {
+                            if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig
+                                    && !inVpcOriginConfig && current != null) {
                                 current.setId(r.getElementText());
                             }
                         }
                         case "DomainName" -> {
-                            if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig && current != null) {
+                            if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig
+                                    && !inVpcOriginConfig && current != null) {
                                 current.setDomainName(r.getElementText());
                             }
                         }
                         case "OriginPath" -> {
-                            if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig && current != null) {
+                            if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig
+                                    && !inVpcOriginConfig && current != null) {
                                 current.setOriginPath(r.getElementText());
                             }
                         }
                         case "OriginAccessControlId" -> {
-                            if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig && current != null) {
+                            if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig
+                                    && !inVpcOriginConfig && current != null) {
                                 current.setOriginAccessControlId(r.getElementText());
                             }
                         }
                         case "ConnectionAttempts" -> {
-                            if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig && current != null) {
-                                current.setConnectionAttempts(parseNonNegativeTimeout(
-                                        "ConnectionAttempts", r.getElementText()));
+                            if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig
+                                    && !inVpcOriginConfig && current != null) {
+                                try {
+                                    current.setConnectionAttempts(Integer.parseInt(r.getElementText()));
+                                } catch (NumberFormatException e) {
+                                    LOG.debugv("Ignoring malformed ConnectionAttempts during parse: {0}", e.getMessage());
+                                }
                             }
                         }
                         case "ConnectionTimeout" -> {
-                            if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig && current != null) {
-                                current.setConnectionTimeout(parseNonNegativeTimeout(
-                                        "ConnectionTimeout", r.getElementText()));
+                            if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig
+                                    && !inVpcOriginConfig && current != null) {
+                                try {
+                                    current.setConnectionTimeout(Integer.parseInt(r.getElementText()));
+                                } catch (NumberFormatException e) {
+                                    LOG.debugv("Ignoring malformed ConnectionTimeout during parse: {0}", e.getMessage());
+                                }
                             }
                         }
                         case "VpcOriginId" -> {
@@ -2843,17 +2851,27 @@ public class CloudFrontController {
                             }
                         }
                         case "OriginKeepaliveTimeout" -> {
+                            if (inVpcOriginConfig && vpcConfig != null) {
+                                vpcConfig.put(local, r.getElementText());
+                                continue;
+                            }
                             if (inCustomOriginConfig && customConfig != null) {
-                                customConfig.put("OriginKeepaliveTimeout", parseNonNegativeTimeout(
+                                customConfig.put("OriginKeepaliveTimeout", parseBoundedTimeout(
                                         "InvalidOriginKeepaliveTimeout", "OriginKeepaliveTimeout",
-                                        r.getElementText()));
+                                        r.getElementText(), MIN_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS,
+                                        MAX_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS));
                             }
                         }
                         case "OriginReadTimeout" -> {
+                            if (inVpcOriginConfig && vpcConfig != null) {
+                                vpcConfig.put(local, r.getElementText());
+                                continue;
+                            }
                             if (inCustomOriginConfig && customConfig != null) {
-                                originReadTimeoutSeconds = parseNonNegativeTimeout(
+                                originReadTimeoutSeconds = parseBoundedTimeout(
                                         "InvalidOriginReadTimeout", "OriginReadTimeout",
-                                        r.getElementText());
+                                        r.getElementText(), MIN_ORIGIN_READ_TIMEOUT_SECONDS,
+                                        MAX_ORIGIN_READ_TIMEOUT_SECONDS);
                                 customConfig.put("OriginReadTimeout", originReadTimeoutSeconds);
                             }
                         }
@@ -2932,6 +2950,13 @@ public class CloudFrontController {
                             inCustomOriginConfig = false;
                             customConfig = null;
                         }
+                        case "VpcOriginConfig" -> {
+                            if (inVpcOriginConfig && current != null) {
+                                current.setVpcOriginConfig(vpcConfig);
+                            }
+                            inVpcOriginConfig = false;
+                            vpcConfig = null;
+                        }
                         case "OriginCustomHeader" -> {
                             if (inCustomHeaders && currentHeader != null && customHeaders != null) {
                                 customHeaders.add(currentHeader);
@@ -2968,7 +2993,7 @@ public class CloudFrontController {
                                 Integer completionTimeout = current.getResponseCompletionTimeout();
                                 int effectiveReadTimeout = originReadTimeoutSeconds != null
                                         ? originReadTimeoutSeconds
-                                        : CloudFrontOriginTimeouts.DEFAULT_ORIGIN_READ_TIMEOUT_SECONDS;
+                                        : DEFAULT_ORIGIN_READ_TIMEOUT_SECONDS;
                                 if (completionTimeout != null && completionTimeout > 0
                                         && completionTimeout < effectiveReadTimeout) {
                                     throw new AwsException(
@@ -3872,6 +3897,15 @@ public class CloudFrontController {
     private final CloudFrontFunctionRuntime functionRuntime;
 
     private final ObjectMapper mapper;
+
+    @Inject
+    public CloudFrontController(CloudFrontService service,
+                                CloudFrontFunctionRuntime functionRuntime,
+                                ObjectMapper mapper) {
+        this.service = service;
+        this.functionRuntime = functionRuntime;
+        this.mapper = mapper;
+    }
 
     /**
      * Runs a function against a caller-supplied event object and returns the

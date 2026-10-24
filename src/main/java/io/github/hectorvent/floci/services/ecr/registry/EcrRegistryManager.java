@@ -721,6 +721,26 @@ public class EcrRegistryManager {
 
     private volatile String registryInternalHost;
 
+    /**
+     * AWS-shaped registry login URL. Hostname style is
+     * {@code http(s)://<account>.dkr.ecr.<region>.localhost:<port>} so the
+     * host matches {@link #getRepositoryUri} and Alchemy's token binding
+     * (which asserts the endpoint contains {@code .ecr.}).
+     */
+    public String getProxyEndpoint(String accountId, String region) {
+        String scheme = config.services().ecr().tlsEnabled() ? "https" : "http";
+        int port = config.port();
+        String style = config.services().ecr().uriStyle();
+        if ("path".equalsIgnoreCase(style)) {
+            return scheme + "://localhost:" + port;
+        }
+        String account = accountId == null || accountId.isBlank()
+                ? regionResolver.getAccountId() : accountId;
+        String resolvedRegion = region == null || region.isBlank()
+                ? regionResolver.getDefaultRegion() : region;
+        return scheme + "://" + account + ".dkr.ecr." + resolvedRegion + ".localhost:" + port;
+    }
+
     private void rememberInternalHost(ContainerInfo info) {
         if (info == null) {
             return;

@@ -322,6 +322,28 @@ public class ApsService implements TagHandler {
 
     private final Object[] workspaceLocks = IntStream.range(0, 64).mapToObj(i -> new Object()).toArray();
 
+    public ApsService(StorageFactory storageFactory, RegionResolver regionResolver,
+                      EmulatorConfig config, ApsPrometheusBackend backend) {
+        this(storageFactory, regionResolver, config, backend, null);
+    }
+
+    @Inject
+    public ApsService(StorageFactory storageFactory, RegionResolver regionResolver,
+                      EmulatorConfig config, ApsPrometheusBackend backend, ApsScraperSources scraperSources) {
+        this.storage = storageFactory.create("aps", "aps-workspaces.json",
+                new TypeReference<Map<String, PrometheusWorkspace>>() {});
+        this.namespaceStorage = storageFactory.create("aps", "aps-rule-groups-namespaces.json",
+                new TypeReference<Map<String, RuleGroupsNamespace>>() {});
+        this.scraperStorage = storageFactory.create("aps", "aps-scrapers.json",
+                new TypeReference<Map<String, ObjectNode>>() {});
+        this.scraperLoggingStorage = storageFactory.create("aps", "aps-scraper-logging.json",
+                new TypeReference<Map<String, ObjectNode>>() {});
+        this.regionResolver = regionResolver;
+        this.backend = backend;
+        this.scraperSources = scraperSources;
+        this.endpointBase = URI.create(config.effectiveBaseUrl());
+    }
+
     public ApsPrometheusBackend.BackendResponse forward(String region, String workspaceId, String method,
                                                         String path, String rawQuery,
                                                         Map<String, String> headers, byte[] body) {

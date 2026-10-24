@@ -482,4 +482,33 @@ public class AppIntegrationsService implements TagHandler {
             throw new AwsException("InvalidRequestException", "Invalid application URL: " + value, 400);
         }
     }
+
+    /**
+     * Both the bare identifier and the resource's own ARN are accepted, as AWS does.
+     * An ARN naming a different AppIntegrations resource type is rejected rather than
+     * silently resolving against the wrong store.
+     */
+    private String resolveIdentifier(String identifier, String expectedResourceType, String region) {
+        if (identifier == null || identifier.isBlank()) {
+            throw new AwsException("InvalidRequestException", "Identifier is required", 400);
+        }
+        if (!identifier.startsWith("arn:")) {
+            return identifier;
+        }
+        String resource;
+        try {
+            resource = AwsArnUtils.parse(identifier).resource();
+        } catch (IllegalArgumentException e) {
+            throw new AwsException("InvalidRequestException", "Invalid ARN: " + identifier, 400);
+        }
+        int slash = resource.indexOf('/');
+        if (slash < 0 || slash == resource.length() - 1
+                || !expectedResourceType.equals(resource.substring(0, slash))) {
+            throw new AwsException("InvalidRequestException", "Invalid ARN: " + identifier, 400);
+        }
+        if (!identifier.equals(regionResolver.buildArn(SERVICE, region, resource))) {
+            throw new AwsException("ResourceNotFoundException", "Resource " + identifier + " does not exist.", 404);
+        }
+        return resource.substring(slash + 1);
+    }
 }

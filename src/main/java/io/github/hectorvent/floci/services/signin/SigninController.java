@@ -311,4 +311,33 @@ public class SigninController {
                 .replace("'", "&#39;");
     }
 
+    @GET
+    @Path("/v1/authorize")
+    public Response authorize(@QueryParam("client_id") String clientId,
+                              @QueryParam("code_challenge") String codeChallenge,
+                              @QueryParam("code_challenge_method") String codeChallengeMethod,
+                              @QueryParam("redirect_uri") String redirectUri,
+                              @QueryParam("response_type") String responseType,
+                              @QueryParam("scope") String scope,
+                              @QueryParam("state") String state,
+                              @QueryParam("resource") String resource) {
+        String requestId = signinService.beginAuthorization(clientId, codeChallenge, codeChallengeMethod,
+                redirectUri, responseType, scope, state, resource);
+        String location = UriBuilder.fromPath("/_floci/signin/consent")
+                .queryParam("request_id", requestId)
+                .build()
+                .toString();
+        return redirect(location);
+    }
+
+    private static Response.ResponseBuilder secureHtml(Response.ResponseBuilder response, String redirectUri) {
+        // Browsers apply form-action to redirects too; this URI was validated before storing the request.
+        String formAction = "'self'" + (redirectUri == null ? "" : " " + redirectUri);
+        return response.type(MediaType.TEXT_HTML)
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .header("Referrer-Policy", "no-referrer")
+                .header("X-Content-Type-Options", "nosniff")
+                .header("Content-Security-Policy", "default-src 'none'; img-src 'self'; style-src 'self'; "
+                        + "form-action " + formAction + "; base-uri 'none'; frame-ancestors 'none'");
+    }
 }

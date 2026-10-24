@@ -1528,5 +1528,39 @@ public class FirehoseService implements ResourceProvider {
                         "ENABLED"));
     }
 
+    public List<String> listDeliveryStreams() {
+        return listDeliveryStreams(null, Integer.MAX_VALUE, null).names();
+    }
+
+    /**
+     * AWS-shaped list: names are alphabetical and {@code ExclusiveStartDeliveryStreamName}
+     * is exclusive. When {@code Limit} is set, the page is capped (AWS max 10000).
+     * When omitted, every matching name is returned — AWS defaults to 10, but
+     * callers that do not paginate (SDK compat + Alchemy bindings) expect a
+     * complete list on a shared emulator.
+     */
+    public DeliveryStreamList listDeliveryStreams(String exclusiveStart, Integer limit, String type) {
+        List<String> names = streamStore.scan(k -> k.startsWith(currentRegion() + "/")).stream()
+                .filter(s -> type == null || type.isBlank() || type.equals(s.getDeliveryStreamType()))
+                .map(DeliveryStreamDescription::getDeliveryStreamName)
+                .sorted()
+                .toList();
+        int start = 0;
+        if (exclusiveStart != null && !exclusiveStart.isEmpty()) {
+            while (start < names.size() && names.get(start).compareTo(exclusiveStart) <= 0) {
+                start++;
+            }
+        }
+        int effectiveLimit = (limit == null || limit < 1) ? Integer.MAX_VALUE : Math.min(limit, 10_000);
+        int end = (int) Math.min((long) start + effectiveLimit, names.size());
+        return new DeliveryStreamList(new ArrayList<>(names.subList(start, end)), end < names.size());
+    }
+
     public record DeliveryStreamList(List<String> names, boolean hasMore) {}
+
+    private void ensureBucket(String bucket) {
+        try {
+            s3Service.createBucket(bucket, regionResolver.getDefaultRegion());
+        } catch (Exception ignored) {}
+    }
 }

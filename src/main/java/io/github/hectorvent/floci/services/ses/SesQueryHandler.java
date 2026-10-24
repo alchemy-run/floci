@@ -1618,6 +1618,80 @@ public class SesQueryHandler {
                 || (cp >= 0x10000 && cp <= 0x10FFFF);
     }
 
+    @Inject
+    public SesQueryHandler(SesService sesService, SesReceiptRuleService receiptRuleService,
+                           SesIdentityService identityService, SesTemplateService templateService,
+                           SesCvetService cvetService, SesAccountService accountService,
+                           SesConfigurationSetService configSetService,
+                           SesPolicyService policyService,
+                           SesSentEmailService sentEmailService, ObjectMapper objectMapper) {
+        this.sesService = sesService;
+        this.receiptRuleService = receiptRuleService;
+        this.identityService = identityService;
+        this.templateService = templateService;
+        this.cvetService = cvetService;
+        this.accountService = accountService;
+        this.configSetService = configSetService;
+        this.policyService = policyService;
+        this.sentEmailService = sentEmailService;
+        this.objectMapper = objectMapper;
+    }
+
+    private Response handleListTemplates(String region) {
+        List<EmailTemplate> templates = templateService.listTemplates(region);
+        var xml = new XmlBuilder().start("TemplatesMetadata");
+        for (EmailTemplate t : templates) {
+            xml.start("member")
+                    .elem("Name", t.getTemplateName());
+            if (t.getCreatedTimestamp() != null) {
+                xml.elem("CreatedTimestamp", t.getCreatedTimestamp().toString());
+            }
+            xml.end("member");
+        }
+        xml.end("TemplatesMetadata");
+        return Response.ok(AwsQueryResponse.envelope("ListTemplates", AwsNamespaces.SES, xml.build())).build();
+    }
+
+    private Response handleListCustomVerificationEmailTemplates(String region) {
+        XmlBuilder xml = new XmlBuilder().start("CustomVerificationEmailTemplates");
+        List<CustomVerificationEmailTemplate> templates =
+                cvetService.listCustomVerificationEmailTemplates(region);
+        for (CustomVerificationEmailTemplate t : templates) {
+            xml.start("member")
+                    .elem("TemplateName", t.getTemplateName())
+                    .elem("FromEmailAddress", t.getFromEmailAddress())
+                    .elem("TemplateSubject", t.getTemplateSubject())
+                    .elem("SuccessRedirectionURL", t.getSuccessRedirectionURL())
+                    .elem("FailureRedirectionURL", t.getFailureRedirectionURL())
+                    .end("member");
+        }
+        xml.end("CustomVerificationEmailTemplates");
+        return Response.ok(AwsQueryResponse.envelope(
+                "ListCustomVerificationEmailTemplates", AwsNamespaces.SES, xml.build())).build();
+    }
+
+    private Response handleListConfigurationSets(String region) {
+        List<ConfigurationSet> all = configSetService.list(region);
+        XmlBuilder xml = new XmlBuilder().start("ConfigurationSets");
+        for (ConfigurationSet cs : all) {
+            xml.start("member").elem("Name", cs.getName()).end("member");
+        }
+        xml.end("ConfigurationSets");
+        return Response.ok(AwsQueryResponse.envelope("ListConfigurationSets", AwsNamespaces.SES, xml.build())).build();
+    }
+
+    private Response handleListReceiptRuleSets(String region) {
+        XmlBuilder xml = new XmlBuilder().start("RuleSets");
+        for (ReceiptRuleSet rs : receiptRuleService.listReceiptRuleSets(region)) {
+            xml.start("member");
+            writeReceiptRuleSetMetadataFields(xml, rs);
+            xml.end("member");
+        }
+        xml.end("RuleSets");
+        return Response.ok(AwsQueryResponse.envelope(
+                "ListReceiptRuleSets", AwsNamespaces.SES, xml.build())).build();
+    }
+
     private Response handleSendBounce(MultivaluedMap<String, String> params, String region) {
         String bounceId = sesService.sendBounce(
                 getParam(params, "BounceSender"),

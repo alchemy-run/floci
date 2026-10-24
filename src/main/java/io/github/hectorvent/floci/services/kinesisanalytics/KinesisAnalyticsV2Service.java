@@ -770,6 +770,82 @@ public class KinesisAnalyticsV2Service {
         return region + "/" + applicationName;
     }
 
+    public synchronized FlinkApplication createApplication(String applicationName, String runtimeEnvironment,
+                                              String serviceExecutionRole, String applicationDescription,
+                                              String applicationMode, String codeS3Bucket, String codeS3Key,
+                                              String codeS3ObjectVersion, int parallelism, Map<String, String> tags,
+                                              Map<String, Map<String, String>> environmentProperties,
+                                              Boolean snapshotsEnabled, JsonNode flinkConfiguration,
+                                              List<String> loggingStreams) {
+        ObjectNode configuration = mergeFlinkConfiguration(null, flinkConfiguration, false);
+        validateLoggingStreams(loggingStreams);
+        if (applicationMode != null && !"STREAMING".equals(applicationMode)) {
+            throw new AwsException("InvalidArgumentException", "Only STREAMING applications are supported", 400);
+        }
+        if (applicationName == null || applicationName.isBlank()) {
+            throw new AwsException("InvalidArgumentException", "ApplicationName is required", 400);
+        }
+        if (!APPLICATION_NAME.matcher(applicationName).matches()) {
+            throw new AwsException("InvalidArgumentException",
+                    "ApplicationName '" + applicationName
+                            + "' does not match the required pattern [a-zA-Z0-9_.-]{1,128}", 400);
+        }
+        if (runtimeEnvironment == null || runtimeEnvironment.isBlank()) {
+            throw new AwsException("InvalidArgumentException", "RuntimeEnvironment is required", 400);
+        }
+        // Reject a runtime we cannot back with a Flink image up front (AWS-faithful
+        // InvalidArgumentException), rather than failing later at StartApplication.
+        KinesisAnalyticsRuntimes.validate(runtimeEnvironment);
+        if (serviceExecutionRole == null || serviceExecutionRole.isBlank()) {
+            throw new AwsException("InvalidArgumentException", "ServiceExecutionRole is required", 400);
+        }
+        if (findApplication(applicationName).isPresent()) {
+            throw new AwsException("ResourceInUseException",
+                    "Application already exists: " + applicationName, 400);
+        }
+        if (tags != null && tags.size() > MAX_USER_TAGS) {
+            throw new AwsException("TooManyTagsException",
+                    "The maximum number of user-defined application tags is " + MAX_USER_TAGS, 400);
+        }
+
+        String accountId = regionResolver.getAccountId();
+        String arn = AwsArnUtils.Arn.of("kinesisanalytics", regionResolver.getRegion(), accountId,
+                "application/" + applicationName).toString();
+        String mode = (applicationMode == null || applicationMode.isBlank()) ? "STREAMING" : applicationMode;
+
+        FlinkApplication app = new FlinkApplication(applicationName, arn, runtimeEnvironment,
+                serviceExecutionRole, mode);
+        app.setAccountId(accountId);
+        app.setApplicationDescription(applicationDescription);
+        // AWS-faithful: a freshly created application is READY (not RUNNING); no container yet.
+        app.setApplicationStatus(ApplicationStatus.READY);
+        app.setCodeS3Bucket(codeS3Bucket);
+        app.setCodeS3Key(codeS3Key);
+        app.setCodeS3ObjectVersion(codeS3ObjectVersion);
+        if (parallelism < 1) {
+            throw new AwsException("InvalidArgumentException", "Parallelism must be positive", 400);
+        }
+        app.setParallelism("DEFAULT".equals(configuration.path("ParallelismConfiguration")
+                .path("ConfigurationType").asText()) ? 1 : parallelism);
+        if (tags != null) {
+            app.setTags(new LinkedHashMap<>(tags));
+        }
+        if (environmentProperties != null) {
+            app.setEnvironmentProperties(new LinkedHashMap<>(environmentProperties));
+        }
+        if (snapshotsEnabled != null) {
+            app.setSnapshotsEnabled(snapshotsEnabled);
+        }
+
+        app.setFlinkConfiguration(configuration);
+        loggingStreams.forEach(stream -> app.getCloudWatchLoggingOptions().put(UUID.randomUUID().toString(), stream));
+        app.setConditionalToken(UUID.randomUUID().toString());
+        rememberVersion(app);
+        putApplication(app);
+        LOG.infov("Created Kinesis Analytics V2 application {0}", applicationName);
+        return app;
+    }
+
     private Optional<FlinkApplication> findApplication(String name) {
         String arn = regionResolver.buildArn("kinesisanalytics", regionResolver.getRegion(), "application/" + name);
         if (storage instanceof AccountAwareStorageBackend<FlinkApplication> aware) {
@@ -785,6 +861,99 @@ public class KinesisAnalyticsV2Service {
             });
         }
         return found;
+    }
+
+    public synchronized FlinkApplication updateApplication(String applicationName, Long currentApplicationVersionId,
+                                              String serviceExecutionRole, String codeS3Bucket,
+                                              String codeS3Key, String codeS3ObjectVersion,
+                                              Integer parallelism, Boolean snapshotsEnabled,
+                                              Map<String, Map<String, String>> environmentProperties,
+                                              JsonNode flinkConfiguration, String runtimeEnvironment,
+                                              String conditionalToken, Map<String, String> loggingUpdates) {
+        FlinkApplication app = describeApplication(applicationName).mutableCopy();
+        checkVersion(app, currentApplicationVersionId, conditionalToken);
+        ensureConfigurable(app);
+        if (app.getApplicationStatus() == ApplicationStatus.RUNNING
+                && (environmentProperties != null || runtimeEnvironment != null || parallelism != null
+                    || (flinkConfiguration != null && !flinkConfiguration.isMissingNode()))) {
+            throw new AwsException("InvalidRequestException",
+                    "Stop the application before changing runtime, environment or Flink configuration", 400);
+        }
+        rememberVersion(app);
+        if (runtimeEnvironment != null) {
+            KinesisAnalyticsRuntimes.validate(runtimeEnvironment);
+            app.setRuntimeEnvironment(runtimeEnvironment);
+        }
+        ObjectNode configuration = mergeFlinkConfiguration(app.getFlinkConfiguration(), flinkConfiguration, true);
+        validateLoggingStreams(new ArrayList<>(loggingUpdates.values()));
+        loggingUpdates.forEach((id, stream) -> {
+            if (!app.getCloudWatchLoggingOptions().containsKey(id)) {
+                throw new AwsException("ResourceNotFoundException", "Logging option not found: " + id, 400);
+            }
+            app.getCloudWatchLoggingOptions().put(id, stream);
+        });
+        if (environmentProperties != null) {
+            app.setEnvironmentProperties(environmentProperties);
+        }
+        app.setFlinkConfiguration(configuration);
+        if (serviceExecutionRole != null && !serviceExecutionRole.isBlank()) {
+            app.setServiceExecutionRole(serviceExecutionRole);
+        }
+        boolean codeChanged = codeS3Bucket != null || codeS3Key != null || codeS3ObjectVersion != null;
+        if (codeChanged) {
+            if (codeS3Bucket != null) {
+                app.setCodeS3Bucket(codeS3Bucket);
+            }
+            if (codeS3Key != null) {
+                app.setCodeS3Key(codeS3Key);
+            }
+            app.setCodeS3ObjectVersion(codeS3ObjectVersion);
+            if (!app.hasCode()) {
+                throw new AwsException("InvalidArgumentException", "Code requires an S3 bucket and file key", 400);
+            }
+        }
+        if (parallelism != null) {
+            if (parallelism < 1) {
+                throw new AwsException("InvalidArgumentException", "Parallelism must be positive", 400);
+            }
+            app.setParallelism(parallelism);
+        }
+        if ("DEFAULT".equals(configuration.path("ParallelismConfiguration").path("ConfigurationType").asText())) {
+            app.setParallelism(1);
+        }
+        if (snapshotsEnabled != null) {
+            app.setSnapshotsEnabled(snapshotsEnabled);
+        }
+
+        if (codeChanged && app.getApplicationStatus() == ApplicationStatus.RUNNING
+                && !config.services().kinesisAnalytics().mock()) {
+            if (app.getTaskManagerContainerId() == null) {
+                // The application is running as a bare cluster (no code yet); attaching code to an
+                // already-running cluster for the first time is not yet emulated.
+                throw new AwsException("InvalidRequestException",
+                        "Adding code to a running bare-cluster application is not supported; "
+                                + "stop and start " + applicationName + " instead", 400);
+            }
+            try {
+                // In-place redeploy: cancel the current job and swap in the new JAR without tearing
+                // down the JobManager/TaskManager containers. The readiness poller resubmits it, the
+                // same way it submits a fresh job on StartApplication.
+                containerManager.redeployCode(app);
+                app.setApplicationStatus(ApplicationStatus.STARTING);
+            } catch (AwsException e) {
+                throw e;
+            } catch (RuntimeException e) {
+                // Same AWS-wide "InternalFailure" generic 500 as startApplication's catch above.
+                LOG.errorv(e, "Failed to redeploy code for application {0}", applicationName);
+                throw new AwsException("InternalFailure",
+                        "Failed to redeploy application code for " + applicationName, 500);
+            }
+        }
+
+        completeConfigurationChange(app, "UpdateApplication");
+        LOG.infov("Updated Kinesis Analytics V2 application {0} to version {1}",
+                applicationName, app.getApplicationVersionId());
+        return app;
     }
 
     public synchronized FlinkApplication updateMaintenance(String name, String startTime) {

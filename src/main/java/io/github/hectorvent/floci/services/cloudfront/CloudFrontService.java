@@ -2319,6 +2319,10 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
     /** Null in unit tests: a distribution without a local port is still Host-addressable. */
     private final CloudFrontEdgePorts edgePorts;
 
+    public CloudFrontService(StorageFactory factory, EmulatorConfig config) {
+        this(factory, config, null, null);
+    }
+
     /**
      * Serve this distribution's emulated edge on its own local port, so it is
      * reachable at {@code http://localhost:<port>} without a hosts entry. Never

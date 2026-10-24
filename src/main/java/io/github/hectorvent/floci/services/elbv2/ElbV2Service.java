@@ -2040,21 +2040,6 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
         return count;
     }
 
-    /**
-     * Data-plane bind is best-effort. A local HTTP proxy failure (null port,
-     * NLB/TCP/TLS, port conflict, NPE) must not fail CreateListener — that
-     * leaked as {@code InternalFailure: Unexpected error: null}.
-     */
-    private void startDataPlane(Listener listener, String region) {
-        if (dataPlane == null || listener == null) {
-            return;
-        }
-        try {
-            dataPlane.startListener(listener, region, getListenerRules(region, listener.getListenerArn()));
-        } catch (RuntimeException ignored) {
-            // already logged inside ElbV2DataPlane when the real impl is used
-        }
-    }
 
     private void restartDataPlane(Listener listener, String region) {
         if (dataPlane == null || listener == null) {

@@ -303,6 +303,12 @@ public class AppConfigController {
                 .build();
     }
 
+    @Inject
+    public AppConfigController(AppConfigService service, ObjectMapper objectMapper) {
+        this.service = service;
+        this.objectMapper = objectMapper;
+    }
+
     @PATCH
     @Path("/applications/{id}")
     public Response updateApplication(@PathParam("id") String id, String body) throws IOException {
@@ -336,6 +342,20 @@ public class AppConfigController {
                                           @QueryParam("configuration_version") String configurationVersion) {
         service.validateConfiguration(appId, profileId, configurationVersion);
         return Response.ok().build();
+    }
+
+    @POST
+    @Path("/applications/{appId}/configurationprofiles/{profileId}/hostedconfigurationversions")
+    @Consumes(MediaType.WILDCARD)
+    public Response createHostedConfigurationVersion(@PathParam("appId") String appId,
+                                                     @PathParam("profileId") String profileId,
+                                                     @HeaderParam("Content-Type") String contentType,
+                                                     @HeaderParam("Description") String description,
+                                                     @HeaderParam("VersionLabel") String versionLabel,
+                                                     byte[] content) {
+        HostedConfigurationVersion version = service.createHostedConfigurationVersion(
+                appId, profileId, content, contentType, description, versionLabel);
+        return versionResponse(version, 201);
     }
 
     @PATCH

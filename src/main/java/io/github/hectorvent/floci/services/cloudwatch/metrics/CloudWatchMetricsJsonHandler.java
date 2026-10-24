@@ -744,4 +744,59 @@ public class CloudWatchMetricsJsonHandler {
         throw new io.github.hectorvent.floci.core.common.AwsException("ValidationException",
                 "Contributor data is available only for contributor-enabled Metrics Insights alarms", 400);
     }
+
+    private List<MetricDatum> parseMetricDataJson(JsonNode node) {
+        List<MetricDatum> datums = new ArrayList<>();
+        if (!node.isArray()) return datums;
+        for (JsonNode item : node) {
+            MetricDatum datum = new MetricDatum();
+            datum.setMetricName(item.path("MetricName").asText());
+            datum.setValue(item.path("Value").asDouble(0));
+            datum.setUnit(item.path("Unit").asText(null));
+            JsonNode ts = item.path("Timestamp");
+            if (!ts.isMissingNode()) {
+                Instant parsed = parseInstantNode(ts);
+                if (parsed != null) datum.setTimestamp(parsed.getEpochSecond());
+            }
+            datum.setDimensions(parseDimensionsJson(item.path("Dimensions")));
+
+            JsonNode statsValues = item.path("StatisticValues");
+            if (!statsValues.isMissingNode()) {
+                if (item.has("Values") || item.has("Value")) throw CloudWatchMetadataService.invalid("Specify one metric value representation");
+                datum.setSampleCount(statsValues.path("SampleCount").asDouble(0));
+                datum.setSum(statsValues.path("Sum").asDouble(0));
+                datum.setMinimum(statsValues.path("Minimum").asDouble(0));
+                datum.setMaximum(statsValues.path("Maximum").asDouble(0));
+                if (datum.getSampleCount() <= 0 || datum.getMinimum() > datum.getMaximum()) {
+                    throw CloudWatchMetadataService.invalid("Invalid StatisticValues");
+                }
+            } else if (item.has("Values")) {
+                JsonNode values = item.get("Values"), counts = item.path("Counts");
+                if (item.has("Value") || !values.isArray() || values.isEmpty() || values.size() > 150
+                        || (!counts.isMissingNode() && counts.size() != values.size())) {
+                    throw CloudWatchMetadataService.invalid("Invalid Values/Counts");
+                }
+                double count = 0, sum = 0, min = Double.POSITIVE_INFINITY, max = Double.NEGATIVE_INFINITY;
+                for (int i = 0; i < values.size(); i++) {
+                    double value = values.get(i).asDouble(), weight = counts.isMissingNode() ? 1 : counts.get(i).asDouble();
+                    if (!Double.isFinite(value) || !Double.isFinite(weight) || weight <= 0) {
+                        throw CloudWatchMetadataService.invalid("Metric values must be finite and counts positive");
+                    }
+                    count += weight;
+                    sum += value * weight;
+                    min = Math.min(min, value);
+                    max = Math.max(max, value);
+                }
+                datum.setSampleCount(count);
+                datum.setSum(sum);
+                datum.setMinimum(min);
+                datum.setMaximum(max);
+            } else if (!item.has("Value")) {
+                throw CloudWatchMetadataService.invalid("A metric value is required");
+            }
+
+            datums.add(datum);
+        }
+        return datums;
+    }
 }

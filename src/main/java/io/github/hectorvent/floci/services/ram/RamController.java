@@ -759,4 +759,36 @@ public class RamController {
             response.put("clientToken", request.path("clientToken").asText());
         }
     }
+
+    /** One row per associated/disassociated resourceArn, principal, and source, per the real RAM shape. */
+    private ArrayNode associationArray(ResourceShare share, List<String> resourceArns,
+                                       List<String> principals, List<String> sources, String status) {
+        ArrayNode array = objectMapper.createArrayNode();
+        double now = share.getLastUpdatedTime().toEpochMilli() / 1000.0;
+        for (String resourceArn : resourceArns) {
+            array.add(associationNode(share, resourceArn, "RESOURCE", status, now, false));
+        }
+        for (String principal : principals) {
+            array.add(associationNode(share, principal, "PRINCIPAL", status, now,
+                    service.isExternalPrincipal(share.getOwningAccountId(), principal)));
+        }
+        for (String source : sources) {
+            array.add(associationNode(share, source, "SOURCE", status, now, false));
+        }
+        return array;
+    }
+
+    private ObjectNode associationNode(ResourceShare share, String associatedEntity,
+                                       String associationType, String status, double time, boolean external) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("resourceShareArn", share.getResourceShareArn());
+        node.put("resourceShareName", share.getName());
+        node.put("associatedEntity", associatedEntity);
+        node.put("associationType", associationType);
+        node.put("status", status);
+        node.put("creationTime", time);
+        node.put("lastUpdatedTime", time);
+        node.put("external", external);
+        return node;
+    }
 }
