@@ -323,8 +323,12 @@ public class CloudWatchMetricsJsonHandler {
             }
             if (page.has("NextToken")) response.set("NextToken", page.get("NextToken"));
         }
-        response.putArray("CompositeAlarms");
-        response.putArray("LogAlarms");
+        if (!response.has("CompositeAlarms")) {
+            response.putArray("CompositeAlarms");
+        }
+        if (!response.has("LogAlarms")) {
+            response.putArray("LogAlarms");
+        }
         return Response.ok(response).build();
     }
 
