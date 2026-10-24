@@ -55,7 +55,9 @@ public class ListTasksRequest {
      * accepts {@code list-tasks --cluster X --started-by Y}.
      */
     public boolean hasOtherFilters() {
-        return containerInstance != null || desiredStatus != null
+        // desiredStatus narrows a startedBy listing on AWS (ListTasks with startedBy and
+        // desiredStatus=STOPPED answers the stopped tasks that tag started), so it does not count.
+        return containerInstance != null
                 || family != null || launchType != null || serviceName != null;
     }
 }
