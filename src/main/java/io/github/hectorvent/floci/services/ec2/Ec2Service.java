@@ -5838,6 +5838,11 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         // unsupported filter matches every VPC instead of narrowing anything. Real EC2 rejects the
         // name outright, which is the difference between a wrong result and an error.
         requireSupportedFilters(filterNames(filters), VPC_FILTERS);
+        if (vpcIds != null && !vpcIds.isEmpty()) {
+            for (String vpcId : vpcIds) {
+                getRequiredVpc(region, vpcId);
+            }
+        }
         return vpcs.scan(k -> true).stream()
                 .filter(v -> v.getRegion().equals(region))
                 .filter(v -> vpcIds.isEmpty() || vpcIds.contains(v.getVpcId()))
@@ -7200,6 +7205,11 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
 
     List<Subnet> describeSubnets(String region, List<String> subnetIds, List<Map.Entry<String, List<String>>> filters) {
         ensureDefaultResources(region);
+        if (subnetIds != null && !subnetIds.isEmpty()) {
+            for (String subnetId : subnetIds) {
+                requireSubnet(region, subnetId);
+            }
+        }
         List<Subnet> result = subnets.scan(k -> true).stream()
                 .filter(s -> s.getRegion().equals(region))
                 .filter(s -> subnetIds.isEmpty() || subnetIds.contains(s.getSubnetId()))
