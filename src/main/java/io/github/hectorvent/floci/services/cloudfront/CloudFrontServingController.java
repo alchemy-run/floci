@@ -1487,21 +1487,6 @@ public class CloudFrontServingController {
                 response.headers().map()), includeBody, null);
     }
 
-    public Response serveEdgeS3Origin(Distribution distribution, CloudFrontResolvedOrigin resolved, String rawPath,
-                                      String method, Map<String, String> headers) {
-        Origin origin = resolved.origin();
-        OriginResponse response;
-        if ("OPTIONS".equals(method)) {
-            response = fetchS3Preflight(origin, headers.get("origin"),
-                    headers.get("access-control-request-method"), headers.get("access-control-request-headers"));
-        } else {
-            String key = CloudFrontRequestRouter.resolveOriginKey(origin.getOriginPath(),
-                    decodedViewerPath(rawPath), distribution.getConfig().getDefaultRootObject());
-            response = fetchFromS3(distribution, origin, key, headers.get("authorization"), !"HEAD".equals(method),
-                    resolved.accessControl());
-        }
-        return toResponse(response, !"HEAD".equals(method), null);
-    }
 
     public Response applyEdgeResponse(Distribution distribution, String rawViewerPath, String method,
                                        HttpHeaders viewerHeaders, String viewerScheme, Response response,

@@ -484,30 +484,8 @@ public class S3VectorsService {
         public double getDistance() { return distance; }
     }
 
-    public void putVectorBucketPolicy(String bucketName, String vectorBucketArn, String policy, String region) {
-        VectorBucket bucket = getVectorBucket(bucketName, vectorBucketArn, region);
-        bucket.setPolicy(policy);
-        store.put(buildStorageKey(region, bucket.getVectorBucketName()), bucket);
-    }
 
-    public String getVectorBucketPolicy(String bucketName, String vectorBucketArn, String region) {
-        VectorBucket bucket = getVectorBucket(bucketName, vectorBucketArn, region);
-        if (bucket.getPolicy() == null) {
-            throw new AwsException("NotFoundException",
-                    "The vector bucket " + bucket.getVectorBucketName() + " does not have a policy.", 404);
-        }
-        return bucket.getPolicy();
-    }
 
-    public void deleteVectorBucketPolicy(String bucketName, String vectorBucketArn, String region) {
-        VectorBucket bucket = getVectorBucket(bucketName, vectorBucketArn, region);
-        if (bucket.getPolicy() == null) {
-            throw new AwsException("NotFoundException",
-                    "The vector bucket " + bucket.getVectorBucketName() + " does not have a policy.", 404);
-        }
-        bucket.setPolicy(null);
-        store.put(buildStorageKey(region, bucket.getVectorBucketName()), bucket);
-    }
 
     public Map<String, String> listTags(String resourceArn, String region) {
         TaggedResource resource = resolveTaggedResource(resourceArn, region);

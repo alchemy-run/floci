@@ -285,21 +285,4 @@ public class CloudTrailLogWriter {
         return sb.toString();
     }
 
-    private void flushForAccount(CloudTrailService.TrailKey key) {
-        ManagedContext context = Arc.container().requestContext();
-        boolean active = context.isActive();
-        if (!active) context.activate();
-        RequestContext request = Arc.container().instance(RequestContext.class).get();
-        String previousAccount = request.getAccountId();
-        String previousRegion = request.getRegion();
-        try {
-            request.setAccountId(key.accountId() == null ? regionResolver.getDefaultAccountId() : key.accountId());
-            request.setRegion(key.region());
-            flushTrailBatches(key);
-        } finally {
-            request.setAccountId(previousAccount);
-            request.setRegion(previousRegion);
-            if (!active) context.terminate();
-        }
-    }
 }

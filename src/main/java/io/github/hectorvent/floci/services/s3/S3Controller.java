@@ -4809,12 +4809,6 @@ public class S3Controller {
         return data;
     }
 
-    private S3Service.RequestAuthorization bucketAuthorization(String bucket, HttpHeaders headers, UriInfo uriInfo) {
-        S3Service.RequestAuthorization authorization = S3RequestAuthorizationParser.parseIfRequired(
-                s3Service.isAuthEnforced(), headers, uriInfo);
-        s3Service.validateExpectedBucketOwner(bucket, headers.getHeaderString("x-amz-expected-bucket-owner"));
-        return authorization;
-    }
 
     private static int resolveMaxUploads(String maxUploads) {
         if (maxUploads == null) {
@@ -4839,10 +4833,6 @@ public class S3Controller {
                 UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8));
     }
 
-    private Response handleDeleteObjectTagging(String bucket, String key, String versionId) {
-        S3Object untagged = s3Service.deleteObjectTagging(bucket, key, versionId);
-        return withVersionHeader(Response.noContent(), untagged).build();
-    }
 
     /** Reports the version an object subresource request acted on, as S3 does in {@code x-amz-version-id}. */
     private static Response.ResponseBuilder withVersionHeader(Response.ResponseBuilder response, S3Object object) {

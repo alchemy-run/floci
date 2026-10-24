@@ -1211,42 +1211,4 @@ public class AwsConfigService {
         return regionResolver.getAccountId() + "|" + region;
     }
 
-    private void validateRecordingConfiguration(ConfigurationRecorder recorder) {
-        RecordingGroup group = recorder.recordingGroup();
-        if (group != null) {
-            boolean includes = group.resourceTypes() != null && !group.resourceTypes().isEmpty();
-            boolean excludes = group.exclusionByResourceTypes() != null
-                    && group.exclusionByResourceTypes().get("resourceTypes") != null
-                    && !group.exclusionByResourceTypes().get("resourceTypes").isEmpty();
-            String strategy = group.recordingStrategy() == null ? null : group.recordingStrategy().get("useOnly");
-            if ((Boolean.TRUE.equals(group.allSupported()) && (includes || excludes)) || (includes && excludes)
-                    || (strategy != null && !Set.of("ALL_SUPPORTED_RESOURCE_TYPES", "INCLUSION_BY_RESOURCE_TYPES",
-                        "EXCLUSION_BY_RESOURCE_TYPES").contains(strategy))
-                    || ("INCLUSION_BY_RESOURCE_TYPES".equals(strategy) && !includes)
-                    || ("EXCLUSION_BY_RESOURCE_TYPES".equals(strategy) && !excludes)
-                    || ("ALL_SUPPORTED_RESOURCE_TYPES".equals(strategy) && !Boolean.TRUE.equals(group.allSupported()))
-                    || (excludes && !"EXCLUSION_BY_RESOURCE_TYPES".equals(strategy))) {
-                throw new AwsException("InvalidRecordingGroupException", "Invalid resource recording strategy.", 400);
-            }
-        }
-        Map<String, Object> mode = recorder.recordingMode();
-        if (mode != null) {
-            if (!Set.of("CONTINUOUS", "DAILY").contains(String.valueOf(mode.get("recordingFrequency")))) {
-                throw new AwsException("ValidationException", "Invalid recording frequency.", 400);
-            }
-            Object overrides = mode.get("recordingModeOverrides");
-            if (overrides != null) {
-                if (!(overrides instanceof List<?> entries)) {
-                    throw new AwsException("ValidationException", "recordingModeOverrides must be a list.", 400);
-                }
-                for (Object entry : entries) {
-                    if (!(entry instanceof Map<?, ?> override)
-                            || !Set.of("CONTINUOUS", "DAILY").contains(String.valueOf(override.get("recordingFrequency")))
-                            || !(override.get("resourceTypes") instanceof List<?> types) || types.isEmpty()) {
-                        throw new AwsException("ValidationException", "Invalid recording mode override.", 400);
-                    }
-                }
-            }
-        }
-    }
 }

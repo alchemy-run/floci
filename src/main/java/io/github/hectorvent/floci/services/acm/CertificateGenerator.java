@@ -544,19 +544,6 @@ public class CertificateGenerator {
         return verifier.verify(signature);
     }
 
-    public X509Certificate parseCertificate(String certPem) {
-        try (PEMParser parser = new PEMParser(new StringReader(certPem))) {
-            Object obj = parser.readObject();
-            if (obj instanceof X509CertificateHolder holder) {
-                return new JcaX509CertificateConverter()
-                    .getCertificate(holder);
-            }
-            throw new IllegalArgumentException("Invalid certificate PEM format");
-        } catch (Exception e) {
-            LOG.error("Failed to parse certificate", e);
-            throw new CertificateGenerationException("Certificate parsing failed: " + e.getMessage(), e);
-        }
-    }
 
     public PrivateKey parsePrivateKey(String keyPem) {
         try (PEMParser parser = new PEMParser(new StringReader(keyPem))) {

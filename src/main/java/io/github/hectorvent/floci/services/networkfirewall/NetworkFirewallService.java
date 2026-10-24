@@ -889,48 +889,8 @@ public class NetworkFirewallService {
 
     private static final int MAX_TAGS = 200;
 
-    public synchronized ObjectNode tagResource(JsonNode request) {
-        requireObject(request);
-        String arn = requiredText(request, "ResourceArn");
-        ArrayNode requested = validatedTags(request.get("Tags"), true);
-        TagTarget target = requireTagTarget(arn);
-        ArrayNode tags = target.tags();
-        for (JsonNode tag : requested) {
-            String key = tag.path("Key").asText();
-            removeTag(tags, key);
-            tags.add(tag.deepCopy());
-        }
-        if (tags.size() > MAX_TAGS) {
-            throw new AwsException("InvalidRequestException",
-                    "A resource can have at most " + MAX_TAGS + " tags.", 400);
-        }
-        target.holder().set("Tags", tags);
-        target.store().put(arn, target.stored());
-        return objectMapper.createObjectNode();
-    }
 
-    public synchronized ObjectNode untagResource(JsonNode request) {
-        requireObject(request);
-        String arn = requiredText(request, "ResourceArn");
-        ArrayNode keys = requiredArray(request, "TagKeys");
-        TagTarget target = requireTagTarget(arn);
-        ArrayNode tags = target.tags();
-        for (JsonNode key : keys) {
-            removeTag(tags, key.asText());
-        }
-        target.holder().set("Tags", tags);
-        target.store().put(arn, target.stored());
-        return objectMapper.createObjectNode();
-    }
 
-    public ObjectNode listTagsForResource(JsonNode request) {
-        requireObject(request);
-        String arn = requiredText(request, "ResourceArn");
-        TagTarget target = requireTagTarget(arn);
-        List<ObjectNode> tags = new ArrayList<>();
-        target.tags().forEach(tag -> tags.add((ObjectNode) tag));
-        return paginate(tags, request, "Tags");
-    }
 
     private static final int MAX_FLOW_FILTERS = 20;
 
@@ -987,66 +947,8 @@ public class NetworkFirewallService {
         return response;
     }
 
-    public ObjectNode describeFlowOperation(JsonNode request) {
-        requireObject(request);
-        ObjectNode operation = requireFlowOperation(request);
-        ObjectNode response = objectMapper.createObjectNode();
-        for (String field : List.of("FirewallArn", "AvailabilityZone", "VpcEndpointAssociationArn",
-                "VpcEndpointId", "FlowOperationId", "FlowOperationType", "FlowOperationStatus",
-                "StatusMessage", "FlowRequestTimestamp", "FlowOperation")) {
-            copyIfPresent(operation, response, field);
-        }
-        return response;
-    }
 
-    public ObjectNode listFlowOperations(JsonNode request) {
-        requireObject(request);
-        ObjectNode firewall = requireFirewallByArn(request);
-        String firewallArn = firewall.path("FirewallArn").asText();
-        String type = textOrNull(request, "FlowOperationType");
-        if (type != null) {
-            requireEnum(type, FLOW_OPERATION_TYPES, "FlowOperationType");
-        }
-        String availabilityZone = textOrNull(request, "AvailabilityZone");
-        String vpcEndpointId = textOrNull(request, "VpcEndpointId");
-        String vpcEndpointAssociationArn = textOrNull(request, "VpcEndpointAssociationArn");
-        List<ObjectNode> items = new ArrayList<>();
-        flowOperations.scan(key -> true).stream()
-                .filter(operation -> firewallArn.equals(operation.path("FirewallArn").asText()))
-                .filter(operation -> type == null || type.equals(operation.path("FlowOperationType").asText()))
-                .filter(operation -> availabilityZone == null
-                        || availabilityZone.equals(operation.path("AvailabilityZone").asText(null)))
-                .filter(operation -> vpcEndpointId == null
-                        || vpcEndpointId.equals(operation.path("VpcEndpointId").asText(null)))
-                .filter(operation -> vpcEndpointAssociationArn == null
-                        || vpcEndpointAssociationArn.equals(operation.path("VpcEndpointAssociationArn").asText(null)))
-                .sorted(Comparator.comparingLong((ObjectNode operation) ->
-                                operation.path("FlowRequestTimestamp").asLong()).reversed()
-                        .thenComparing(operation -> operation.path("FlowOperationId").asText()))
-                .forEach(operation -> {
-                    ObjectNode metadata = objectMapper.createObjectNode();
-                    metadata.put("FlowOperationId", operation.path("FlowOperationId").asText());
-                    metadata.put("FlowOperationType", operation.path("FlowOperationType").asText());
-                    metadata.set("FlowRequestTimestamp", operation.path("FlowRequestTimestamp").deepCopy());
-                    metadata.put("FlowOperationStatus", operation.path("FlowOperationStatus").asText());
-                    items.add(metadata);
-                });
-        return paginate(items, request, "FlowOperations");
-    }
 
-    public ObjectNode listFlowOperationResults(JsonNode request) {
-        requireObject(request);
-        ObjectNode operation = requireFlowOperation(request);
-        List<ObjectNode> flows = new ArrayList<>();
-        operation.path("Flows").forEach(flow -> flows.add((ObjectNode) flow));
-        ObjectNode response = paginate(flows, request, "Flows");
-        for (String field : List.of("FirewallArn", "AvailabilityZone", "VpcEndpointAssociationArn",
-                "VpcEndpointId", "FlowOperationId", "FlowOperationStatus", "StatusMessage",
-                "FlowRequestTimestamp")) {
-            copyIfPresent(operation, response, field);
-        }
-        return response;
-    }
 
     private ObjectNode requireFirewallByArn(JsonNode request) {
         String firewallArn = requiredText(request, "FirewallArn");
@@ -1159,76 +1061,8 @@ public class NetworkFirewallService {
         return true;
     }
 
-    /**
-     * A report can only be generated for an analysis type enabled on the firewall through
-     * UpdateFirewallAnalysisSettings. Floci carries no traffic through a firewall, so a report
-     * completes immediately with no findings.
-     */
-    public synchronized ObjectNode startAnalysisReport(JsonNode request) {
-        requireObject(request);
-        ObjectNode firewall = require(firewalls, textOrNull(request, "FirewallArn"),
-                textOrNull(request, "FirewallName"), "Firewall", "FirewallArn", "FirewallName");
-        String analysisType = requiredText(request, "AnalysisType");
-        requireEnum(analysisType, ANALYSIS_TYPES, "AnalysisType");
-        if (!containsText(firewall.path("EnabledAnalysisTypes"), analysisType)) {
-            throw new AwsException("InvalidRequestException",
-                    "Analysis type " + analysisType + " is not enabled for firewall "
-                            + firewall.path("FirewallArn").asText() + ".", 400);
-        }
-        long now = nowEpochSeconds();
-        String reportId = UUID.randomUUID().toString();
-        ObjectNode report = objectMapper.createObjectNode();
-        report.put("AnalysisReportId", reportId);
-        report.put("FirewallArn", firewall.path("FirewallArn").asText());
-        report.put("AnalysisType", analysisType);
-        report.put("Status", "COMPLETED");
-        report.put("ReportTime", now);
-        report.put("StartTime", now - Duration.ofDays(30).toSeconds());
-        report.put("EndTime", now);
-        report.putArray("AnalysisReportResults");
-        analysisReports.put(reportId, report);
-        return objectMapper.createObjectNode().put("AnalysisReportId", reportId);
-    }
 
-    public ObjectNode listAnalysisReports(JsonNode request) {
-        requireObject(request);
-        ObjectNode firewall = require(firewalls, textOrNull(request, "FirewallArn"),
-                textOrNull(request, "FirewallName"), "Firewall", "FirewallArn", "FirewallName");
-        String firewallArn = firewall.path("FirewallArn").asText();
-        List<ObjectNode> items = new ArrayList<>();
-        analysisReports.scan(key -> true).stream()
-                .filter(report -> firewallArn.equals(report.path("FirewallArn").asText()))
-                .sorted(Comparator.comparingLong((ObjectNode report) -> report.path("ReportTime").asLong())
-                        .reversed()
-                        .thenComparing(report -> report.path("AnalysisReportId").asText()))
-                .forEach(report -> {
-                    ObjectNode summary = objectMapper.createObjectNode();
-                    for (String field : List.of("AnalysisReportId", "AnalysisType", "ReportTime", "Status")) {
-                        copyIfPresent(report, summary, field);
-                    }
-                    items.add(summary);
-                });
-        return paginate(items, request, "AnalysisReports");
-    }
 
-    public ObjectNode getAnalysisReportResults(JsonNode request) {
-        requireObject(request);
-        ObjectNode firewall = require(firewalls, textOrNull(request, "FirewallArn"),
-                textOrNull(request, "FirewallName"), "Firewall", "FirewallArn", "FirewallName");
-        String reportId = requiredText(request, "AnalysisReportId");
-        ObjectNode report = analysisReports.get(reportId).orElse(null);
-        if (report == null
-                || !firewall.path("FirewallArn").asText().equals(report.path("FirewallArn").asText())) {
-            throw notFound("Analysis report", reportId);
-        }
-        List<ObjectNode> results = new ArrayList<>();
-        report.path("AnalysisReportResults").forEach(result -> results.add((ObjectNode) result));
-        ObjectNode response = paginate(results, request, "AnalysisReportResults");
-        for (String field : List.of("Status", "StartTime", "EndTime", "ReportTime", "AnalysisType")) {
-            copyIfPresent(report, response, field);
-        }
-        return response;
-    }
 
     private static boolean containsText(JsonNode array, String expected) {
         for (JsonNode value : array) {

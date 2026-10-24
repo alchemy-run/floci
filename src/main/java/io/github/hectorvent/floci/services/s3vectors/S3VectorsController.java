@@ -502,19 +502,6 @@ public class S3VectorsController {
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
-    private IndexRepresentation toIndexRepresentation(VectorIndex index) {
-        return new IndexRepresentation(
-                index.getVectorBucketName(),
-                index.getIndexName(),
-                index.getIndexArn(),
-                index.getCreationTime(),
-                index.getDataType(),
-                index.getDimension(),
-                index.getDistanceMetric(),
-                index.getMetadataConfiguration(),
-                null
-        );
-    }
 
     @RegisterForReflection
     public record PutVectorBucketPolicyRequest(

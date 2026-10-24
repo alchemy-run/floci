@@ -503,25 +503,6 @@ public class EmrServerlessService {
                 maxResults, nextToken, 50, "ValidationException").items();
     }
 
-    public synchronized ObjectNode startJobRun(String applicationId, JsonNode request, String authorization) {
-        Application app = getApplication(applicationId);
-        requireExecutionRequest(request);
-        if (!List.of("CREATED", "STOPPED", "STARTED").contains(app.getState())) {
-            throw new AwsException("ValidationException", "Application is not available for job submission", 400);
-        }
-        if (!"STARTED".equals(app.getState()) && app.getAutoStartConfiguration() != null
-                && Boolean.FALSE.equals(app.getAutoStartConfiguration().getEnabled())) {
-            throw new AwsException("ValidationException", "Start the application before submitting a job when auto-start is disabled", 400);
-        }
-        ObjectNode result = jobs.start(app, request, accountId(), region(), authorization);
-        if (!EmrServerlessJobService.terminal(jobs.get(accountId(), region(), applicationId,
-                result.path("jobRunId").asText(), null)) && !"STARTED".equals(app.getState())) {
-            app.setState("STARTED");
-            app.setUpdatedAt(System.currentTimeMillis());
-            storage.putForAccount(accountId(), storageKey(applicationId), app);
-        }
-        return result;
-    }
 
     public ObjectNode getJobRun(String applicationId, String jobRunId, String attempt) {
         getApplication(applicationId);

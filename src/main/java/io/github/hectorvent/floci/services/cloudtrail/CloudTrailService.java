@@ -1073,33 +1073,4 @@ public class CloudTrailService {
         });
     }
 
-    public boolean recordManagementEvent(String region, ObjectNode record) {
-        boolean selected = false;
-        for (CloudTrailEntry entry : store.scan(k -> true)) {
-            Trail trail = entry.trail();
-            if (!entry.logging() || (!trail.homeRegion().equals(region) && !trail.isMultiRegionTrail())) continue;
-            String source = record.path("eventSource").asText();
-            if (!trail.includeGlobalServiceEvents()
-                    && List.of("iam.amazonaws.com", "organizations.amazonaws.com").contains(source)) continue;
-            boolean matches;
-            if (entry.advancedSelectors() != null && !entry.advancedSelectors().isEmpty()) {
-                matches = CloudTrailLakeService.matchesSelectors(mapper.valueToTree(entry.advancedSelectors()), record);
-            } else {
-                List<EventSelector> selectors = entry.selectors() == null ? List.of() : entry.selectors();
-                boolean readOnly = record.path("readOnly").asBoolean();
-                matches = selectors.isEmpty() || selectors.stream().anyMatch(selector ->
-                        !Boolean.FALSE.equals(selector.includeManagementEvents())
-                                && !("ReadOnly".equals(selector.readWriteType()) && !readOnly)
-                                && !("WriteOnly".equals(selector.readWriteType()) && readOnly)
-                                && (selector.excludeManagementEventSources() == null
-                                    || !selector.excludeManagementEventSources().contains(source)));
-            }
-            if (matches) {
-                selected = true;
-                append(new TrailKey(trail.homeRegion(), trail.name(), region, regionResolver.getAccountId()),
-                        record.deepCopy());
-            }
-        }
-        return selected;
-    }
 }

@@ -4204,15 +4204,7 @@ public class LambdaService implements ResourceProvider {
      */
     private final ConcurrentHashMap<String, Object> concurrencyOpLocks = new ConcurrentHashMap<>();
 
-    /**
-     * Optional: durable-execution purge on function delete. Injected lazily so
-     * LambdaDurableService can depend on LambdaService without a CDI cycle.
-     * Unit tests assign it via {@link #setDurableService}.
-     */
-    @Inject
-    Instance<LambdaDurableService> durableServiceInstance;
 
-    private LambdaDurableService durableService;
 
     /** Optional ECR digest resolution for image functions; unit tests assign it via {@link #setImageDigestResolver}. */
     @Inject
@@ -4220,10 +4212,6 @@ public class LambdaService implements ResourceProvider {
 
     private LambdaImageDigestResolver imageDigestResolver;
 
-    /** Test hook: wire the durable service without CDI. */
-    void setDurableService(LambdaDurableService durableService) {
-        this.durableService = durableService;
-    }
 
     /** Test hook: wire the image digest resolver without CDI. */
     void setImageDigestResolver(LambdaImageDigestResolver imageDigestResolver) {
@@ -4248,15 +4236,6 @@ public class LambdaService implements ResourceProvider {
         }
     }
 
-    private void purgeDurableExecutions(String region, String functionName) {
-        LambdaDurableService durable = durableService;
-        if (durable == null && durableServiceInstance != null && durableServiceInstance.isResolvable()) {
-            durable = durableServiceInstance.get();
-        }
-        if (durable != null) {
-            durable.purgeExecutionsForFunction(region, functionName);
-        }
-    }
 
     private LambdaFunction resolveInvokeTarget(String region, String name, String qualifier) {
         return resolveTarget(region, name, qualifier, this::pickAliasVersion);
@@ -4461,31 +4440,6 @@ public class LambdaService implements ResourceProvider {
         return condition;
     }
 
-    private void syncVpcEnis(String region, LambdaFunction fn) {
-        releaseVpcEnis(region, fn);
-        Map<String, Object> vpc = fn.getVpcConfig();
-        if (ec2Service == null || vpc == null) {
-            return;
-        }
-        List<String> subnetIds = asStringList(vpc.get("SubnetIds"));
-        List<String> groupIds = asStringList(vpc.get("SecurityGroupIds"));
-        if (subnetIds.isEmpty()) {
-            return;
-        }
-        List<String> eniIds = new ArrayList<>();
-        for (String subnetId : subnetIds) {
-            try {
-                String description = "AWS Lambda VPC ENI-" + fn.getFunctionName()
-                        + "-" + UUID.randomUUID().toString().substring(0, 8);
-                NetworkInterface ni = ec2Service.createNetworkInterface(
-                        region, subnetId, description, null, null, groupIds, null, "lambda");
-                eniIds.add(ni.getNetworkInterfaceId());
-            } catch (Exception e) {
-                LOG.warnv("Could not create Lambda VPC ENI in subnet {0}: {1}", subnetId, e.getMessage());
-            }
-        }
-        fn.setVpcEniIds(eniIds);
-    }
 
     private void releaseVpcEnis(String region, LambdaFunction fn) {
         if (ec2Service == null || fn.getVpcEniIds() == null || fn.getVpcEniIds().isEmpty()) {

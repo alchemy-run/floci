@@ -837,39 +837,6 @@ public class CloudControlService {
 
     private final Map<String, ReentrantLock> operationLocks = new ConcurrentHashMap<>();
 
-    public ProgressEvent updateResource(String region, String accountId, String typeName,
-                                        String identifier, String patchDocument) {
-        if (!"AWS::SSM::Parameter".equals(typeName) && !SsmDocumentResource.TYPE.equals(typeName)) {
-            throw new AwsException("UnsupportedActionException", "UpdateResource is not supported for " + typeName, 400);
-        }
-        JsonNode patch;
-        JsonNode observed;
-        try {
-            patch = mapper.readTree(patchDocument);
-            observed = mapper.readTree(getResource(region, accountId, typeName, identifier).properties());
-        } catch (JsonProcessingException | IllegalArgumentException e) {
-            throw new AwsException("InvalidRequestException", "PatchDocument is not valid JSON.", 400);
-        }
-        JsonNode desired = ResourcePatch.apply(observed, patch);
-        String token = UUID.randomUUID().toString();
-        ProgressEvent pending = new ProgressEvent(typeName, identifier, token, "UPDATE", "IN_PROGRESS", null, null, accountId);
-        persistRequest(new PersistedRequest(pending, region, desired.toString(), System.currentTimeMillis()));
-        record(pending);
-        try {
-            String actual;
-            if (SsmDocumentResource.TYPE.equals(typeName)) {
-                RequestScopes.runAs(accountId, () -> ssmDocuments.update(identifier, observed, desired, region));
-                actual = getResource(region, accountId, typeName, identifier).properties();
-            } else {
-                actual = RequestScopes.callAs(accountId, () -> ssmBackend.write(identifier, desired, true, region))
-                        .toString();
-            }
-            return record(new ProgressEvent(typeName, identifier, token, "UPDATE", "SUCCESS", null,
-                    actual, accountId));
-        } catch (AwsException e) {
-            return record(pending.failed(e));
-        }
-    }
 
     public List<ProgressEvent> listRequests(String region, String accountId, List<String> operations,
                                            List<String> statuses) {
@@ -881,23 +848,6 @@ public class CloudControlService {
                 .sorted(Comparator.comparing(ProgressEvent::requestToken)).toList();
     }
 
-    public ProgressEvent cancelRequest(String region, String accountId, String token) {
-        requestStatus(region, accountId, token);
-        ReentrantLock lock = operationLocks.get(token);
-        if (lock != null && lock.tryLock()) {
-            try {
-                ProgressEvent current = requestStatus(region, accountId, token);
-                if ("IN_PROGRESS".equals(current.operationStatus())) {
-                    return record(new ProgressEvent(current.typeName(), current.identifier(), token,
-                            current.operation(), "CANCEL_COMPLETE", "Cancelled before provisioning started.",
-                            null, accountId));
-                }
-            } finally {
-                lock.unlock();
-            }
-        }
-        throw new AwsException("ConcurrentModificationException", "The resource operation cannot be cancelled in its current state.", 400);
-    }
 
     public Double eventTime(ProgressEvent event) {
         return requestStore.getForAccount(event.accountId(), event.requestToken())

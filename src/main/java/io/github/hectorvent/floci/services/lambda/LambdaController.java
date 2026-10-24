@@ -911,5 +911,4 @@ public class LambdaController {
         return values.stream().filter(java.util.Objects::nonNull).map(Object::toString).toList();
     }
 
-    private final LambdaDurableService durableService;
 }

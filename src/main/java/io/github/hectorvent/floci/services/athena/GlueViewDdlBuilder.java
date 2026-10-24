@@ -145,33 +145,6 @@ public class GlueViewDdlBuilder {
 
     private final S3Service s3Service;
 
-    private List<String> dataPaths(Table table, String location) {
-        if (!location.startsWith("s3://")) {
-            return List.of(AthenaGlueDdl.globForPrefix(location));
-        }
-        int slash = location.indexOf('/', 5);
-        String bucket = slash < 0 ? location.substring(5) : location.substring(5, slash);
-        try {
-            s3Service.headBucket(bucket);
-        } catch (AwsException e) {
-            if ("NoSuchBucket".equals(e.getErrorCode()) || e.getHttpStatus() == 404) {
-                return List.of();
-            }
-            throw e;
-        }
-        if (!PartitionProjection.enabled(table)) {
-            String prefix = slash < 0 ? "" : location.substring(slash + 1) + "/";
-            List<String> files = s3Service.listObjects(bucket, prefix, null, 1000).stream()
-                    .map(S3Object::getKey)
-                    .filter(key -> key != null && !key.endsWith("/"))
-                    .map(key -> "s3://" + bucket + "/" + key)
-                    .toList();
-            if (!files.isEmpty()) {
-                return files;
-            }
-        }
-        return List.of(AthenaGlueDdl.globForPrefix(location));
-    }
 
     /**
      * Projects the columns the catalog declares, rather than whatever the underlying files spell.

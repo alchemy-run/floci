@@ -6716,57 +6716,6 @@ public class Ec2QueryHandler {
 
     private final Ec2ClientVpnService clientVpnService;
 
-    /**
-     * Alchemy (and the AWS SDKs) send the primary ENI as
-     * {@code NetworkInterface.1.*} instead of top-level {@code SubnetId} /
-     * {@code SecurityGroupId} / {@code AssociatePublicIpAddress}.
-     */
-    static PrimaryNetworkInterface parsePrimaryNetworkInterface(MultivaluedMap<String, String> p) {
-        PrimaryNetworkInterface first = null;
-        for (int i = 1; ; i++) {
-            String prefix = "NetworkInterface." + i + ".";
-            String deviceIndex = p.getFirst(prefix + "DeviceIndex");
-            String subnetId = p.getFirst(prefix + "SubnetId");
-            Boolean associate = parseOptionalBoolean(p.getFirst(prefix + "AssociatePublicIpAddress"));
-            String privateIp = p.getFirst(prefix + "PrivateIpAddress");
-            for (int j = 1; p.getFirst(prefix + "PrivateIpAddresses." + j + ".PrivateIpAddress") != null; j++) {
-                if (Boolean.TRUE.equals(parseOptionalBoolean(p.getFirst(prefix + "PrivateIpAddresses." + j + ".Primary")))) {
-                    String primary = p.getFirst(prefix + "PrivateIpAddresses." + j + ".PrivateIpAddress");
-                    if (privateIp != null && !privateIp.equals(primary)) {
-                        throw new AwsException("InvalidParameterCombination", "Conflicting primary private addresses", 400);
-                    }
-                    privateIp = primary;
-                }
-            }
-            String interfaceId = p.getFirst(prefix + "NetworkInterfaceId");
-            List<String> groups = new ArrayList<>();
-            groups.addAll(getStaticList(p, prefix + "SecurityGroupId"));
-            groups.addAll(getStaticList(p, prefix + "GroupId"));
-            groups.addAll(getStaticList(p, prefix + "Groups"));
-            if (deviceIndex == null && subnetId == null && associate == null && groups.isEmpty()
-                    && privateIp == null && interfaceId == null) {
-                break;
-            }
-            int index;
-            try {
-                index = deviceIndex == null ? 0 : Integer.parseInt(deviceIndex);
-                if (index < 0) {
-                    throw new NumberFormatException("negative device index");
-                }
-            } catch (NumberFormatException e) {
-                throw new AwsException("InvalidParameterValue", "Invalid network interface DeviceIndex", 400);
-            }
-            PrimaryNetworkInterface parsed = new PrimaryNetworkInterface(subnetId, groups, associate,
-                    privateIp, interfaceId, index);
-            if (first == null) {
-                first = parsed;
-            }
-            if ("0".equals(deviceIndex)) {
-                return parsed;
-            }
-        }
-        return first != null ? first : PrimaryNetworkInterface.empty();
-    }
 
     private static List<String> getStaticList(MultivaluedMap<String, String> p, String prefix) {
         List<String> result = new ArrayList<>();

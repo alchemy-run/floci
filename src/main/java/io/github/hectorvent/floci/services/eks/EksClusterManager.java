@@ -3212,24 +3212,6 @@ public class EksClusterManager
 
     private static final int CONTROL_PLANE_READY_TIMEOUT_SECONDS = 10;
 
-    private boolean isControlPlaneBootstrapped(String containerId) {
-        try {
-            ContainerExecResult result = execInContainerForResult(containerId,
-                    CONTROL_PLANE_READY_COMMAND, CONTROL_PLANE_READY_TIMEOUT_SECONDS);
-            if (result.exitCode() != 0) {
-                LOG.debugv("k3s control plane in container {0} is not ready yet: {1}",
-                        containerId, result.summary());
-                return false;
-            }
-            return true;
-        } catch (Exception e) {
-            if (e instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
-            }
-            LOG.debugv("Could not check the k3s control plane in container {0}: {1}", containerId, e.getMessage());
-            return false;
-        }
-    }
 
     private boolean isApiServerListening(Cluster cluster) {
         // Prefer internalEndpoint (IP-based) for connectivity — works on both user-defined
@@ -3259,45 +3241,7 @@ public class EksClusterManager
         }
     }
 
-    /**
-     * Returns the {@code apiserver_requested_deprecated_apis} samples from the cluster's k3s API
-     * server metrics, or empty when the cluster has no running API server or the scrape fails.
-     * Only the matching lines are returned, so the multi-megabyte metrics page never leaves the
-     * container; a failed {@code kubectl} exits non-zero and is reported as unavailable rather than
-     * as "no deprecated API usage".
-     */
-    public Optional<String> readDeprecatedApiMetrics(Cluster cluster) {
-        String containerId = cluster.getContainerId();
-        if (containerId == null) {
-            return Optional.empty();
-        }
-        String script = "metrics=$(kubectl get --raw /metrics) || exit 3; "
-                + "printf '%s\\n' \"$metrics\" | grep '^apiserver_requested_deprecated_apis{'; exit 0";
-        try {
-            ContainerExecResult result = execInContainerForResult(containerId,
-                    new String[]{"sh", "-c", script}, 20);
-            if (result.exitCode() != 0) {
-                LOG.debugv("Could not read API server metrics for EKS cluster {0}: {1}",
-                        cluster.getName(), result.summary());
-                return Optional.empty();
-            }
-            return Optional.of(result.output());
-        } catch (Exception e) {
-            if (e instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
-            }
-            LOG.debugv("Could not read API server metrics for EKS cluster {0}: {1}",
-                    cluster.getName(), e.getMessage());
-            return Optional.empty();
-        }
-    }
 
-    private void copyMetadataFile(String containerId, String name, String content, int mode) {
-        lifecycleManager.getDockerClient().copyArchiveToContainerCmd(containerId)
-                .withTarInputStream(new ByteArrayInputStream(tarSingleFile(name, content, mode)))
-                .withRemotePath("/var/lib")
-                .exec();
-    }
 
     record ContainerExecResult(long exitCode, String output) {
         String summary() {

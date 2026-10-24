@@ -894,11 +894,6 @@ public class EcrJsonHandler {
         return tags;
     }
 
-    private Response handlePutRegistryPolicy(JsonNode request, String region) {
-        String text = request.path("policyText").asText(null);
-        EcrService.RegistryPolicyResult result = service.putRegistryPolicy(text, region);
-        return registryPolicyResponse(result);
-    }
 
     private Response handleGetRegistryPolicy(JsonNode request, String region) {
         return registryPolicyResponse(service.getRegistryPolicy(region));

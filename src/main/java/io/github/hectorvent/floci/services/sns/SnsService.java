@@ -3118,22 +3118,6 @@ public class SnsService implements Resettable, ResourceProvider {
         return List.of();
     }
 
-    private ObjectNode parseTopicPolicy(String raw, String topicArn) {
-        String source = (raw == null || raw.isBlank()) ? defaultTopicPolicy(topicArn) : raw;
-        try {
-            JsonNode parsed = objectMapper.readTree(source);
-            if (parsed instanceof ObjectNode obj) {
-                return obj;
-            }
-        } catch (Exception e) {
-            LOG.debugv(e, "Failed to parse topic policy; resetting to default");
-        }
-        try {
-            return (ObjectNode) objectMapper.readTree(defaultTopicPolicy(topicArn));
-        } catch (Exception e) {
-            throw new AwsException("InvalidParameter", "Invalid parameter: Policy", 400);
-        }
-    }
 
     private static ArrayNode ensureStatementArray(ObjectNode policy) {
         JsonNode existing = policy.get("Statement");

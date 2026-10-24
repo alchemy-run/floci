@@ -4866,68 +4866,6 @@ public class ApiGatewayService implements ResourceProvider {
         }
     }
 
-    /** These v2 settings are control-plane metadata; routing remains shared with v1. */
-    private static void applyV2DomainSettings(CustomDomain domain, Map<String, Object> request) {
-        if (request.containsKey("routingMode") || domain.getRoutingMode() == null) {
-            domain.setRoutingMode(request.get("routingMode") == null
-                    ? "API_MAPPING_ONLY" : (String) request.get("routingMode"));
-        }
-        if (request.containsKey("apiMappingSelectionExpression") || domain.getApiMappingSelectionExpression() == null) {
-            domain.setApiMappingSelectionExpression(request.get("apiMappingSelectionExpression") == null
-                    ? "$request.basepath" : (String) request.get("apiMappingSelectionExpression"));
-        }
-        if (request.containsKey("mutualTlsAuthentication")) {
-            Map<String, Object> settings = null;
-            if (request.get("mutualTlsAuthentication") instanceof Map<?, ?> values) {
-                settings = new LinkedHashMap<>();
-                for (Map.Entry<?, ?> entry : values.entrySet()) {
-                    settings.put(String.valueOf(entry.getKey()), entry.getValue());
-                }
-            }
-            domain.setMutualTlsAuthentication(settings);
-        }
-        if (request.containsKey("domainNameConfigurations")) {
-            List<Map<String, Object>> configurations = domainConfigurations(request, false);
-            if (!configurations.isEmpty()) {
-                Map<String, Object> primary = configurations.getFirst();
-                if (primary.containsKey("certificateArn")) {
-                    domain.setCertificateArn((String) primary.get("certificateArn"));
-                }
-                if (primary.containsKey("certificateName")) {
-                    domain.setCertificateName((String) primary.get("certificateName"));
-                }
-                if (primary.get("securityPolicy") != null) {
-                    domain.setSecurityPolicy((String) primary.get("securityPolicy"));
-                }
-                if (primary.get("apiGatewayDomainName") != null) {
-                    domain.setRegionalDomainName((String) primary.get("apiGatewayDomainName"));
-                }
-                if (primary.get("hostedZoneId") != null) {
-                    domain.setRegionalHostedZoneId((String) primary.get("hostedZoneId"));
-                }
-                if (primary.get("domainNameStatus") != null) {
-                    domain.setDomainNameStatus((String) primary.get("domainNameStatus"));
-                }
-                if (primary.get("endpointType") != null) {
-                    applyEndpointType(domain, (String) primary.get("endpointType"));
-                }
-                if ("REGIONAL".equals(domain.getEndpointConfigurationType())) {
-                    domain.setRegionalCertificateArn(domain.getCertificateArn());
-                    domain.setRegionalCertificateName(domain.getCertificateName());
-                }
-            }
-            for (Map<String, Object> configuration : configurations) {
-                configuration.putIfAbsent("endpointType", "REGIONAL");
-                configuration.putIfAbsent("securityPolicy", "TLS_1_2");
-                configuration.putIfAbsent("domainNameStatus", "AVAILABLE");
-                configuration.putIfAbsent("ipAddressType", "ipv4");
-                configuration.putIfAbsent("apiGatewayDomainName", domain.getRegionalDomainName());
-                configuration.putIfAbsent("hostedZoneId", domain.getRegionalHostedZoneId());
-            }
-            domain.setDomainNameConfigurations(configurations);
-        }
-        domain.synchronizePrimaryConfiguration();
-    }
 
     private static V2DomainName toV2DomainName(String region, CustomDomain source) {
         V2DomainName domain = new V2DomainName();

@@ -5887,9 +5887,6 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
     /** DescribeServices reports at most the 100 most recent service events. */
     private static final int MAX_SERVICE_EVENTS = 100;
 
-    void setClock(Clock clock) {
-        this.clock = clock;
-    }
 
     /** The highest revision number held for a family in any status, or 0 when it holds none. */
     private int highestHeldRevision(String family) {

@@ -1588,37 +1588,6 @@ public class GuardDutyService {
         return response;
     }
 
-    public synchronized ObjectNode inviteMembers(String region, String detectorId, JsonNode request) {
-        Detector detector = getDetector(region, detectorId);
-        List<String> accountIds = stringList(request, "accountIds", 1, 50);
-        if (!request.has("disableEmailNotification") || !requireBoolean(request, "disableEmailNotification")) {
-            throw badRequest("Floci cannot send GuardDuty invitation emails; disableEmailNotification must be true.");
-        }
-        if (!"ENABLED".equals(detector.getStatus())) {
-            throw badRequest("Inviting members requires an enabled detector.");
-        }
-        for (String accountId : accountIds) {
-            if (!ACCOUNT_ID_PATTERN.matcher(accountId).matches()) {
-                throw badRequest("accountIds must contain 12-digit account IDs.");
-            }
-        }
-        ObjectNode response = object();
-        ArrayNode unprocessed = response.putArray("unprocessedAccounts");
-        for (String accountId : accountIds) {
-            String key = region + "::" + detectorId + "::" + accountId;
-            MemberAccount member = memberStore.get(key).orElse(null);
-            if (member == null || "Enabled".equals(member.relationshipStatus())
-                    || accountId.equals(accountIdFromServiceRole(detector.getServiceRole()))) {
-                unprocessed.addObject().put("accountId", accountId)
-                        .put("result", "The account is not an eligible, created member of this detector.");
-                continue;
-            }
-            String now = isoTimestamp();
-            memberStore.put(key, new MemberAccount(member.accountId(), member.email(), "Invited",
-                    member.administratorId(), detectorId, now, now, UUID.randomUUID().toString().replace("-", "")));
-        }
-        return response;
-    }
 
     public Page<MemberAccount> listInvitations(String region, String accountId, String maxResults, String nextToken) {
         return page(invitations(region, accountId), maxResults, nextToken);
@@ -1967,17 +1936,4 @@ public class GuardDutyService {
         return JsonNodeFactory.instance.objectNode();
     }
 
-    private void saveTags(String arn, Map<String, String> tags) {
-        DetectorRef ref = parseDetectorArn(arn);
-        Detector detector = detectorFromArn(arn);
-        if (ref.resourceKey() == null) {
-            detector.setTags(tags);
-            detectorStore.put(ref.key(), detector);
-        } else {
-            ObjectNode resource = (ObjectNode) detector.getResources().get(ref.resourceKey()).deepCopy();
-            ObjectNode tagNode = resource.putObject("tags");
-            tags.forEach(tagNode::put);
-            saveResource(ref.region(), detector, ref.resourceKey(), resource);
-        }
-    }
 }

@@ -1948,66 +1948,6 @@ public class SesService {
                 configurationSetName, emailTags, additionalHeaders, listManagement, region);
     }
 
-    public List<BulkEmailEntryResult> sendBulkTemplatedEmail(String source,
-                                                              List<String> replyToAddresses,
-                                                              String returnPath,
-                                                              String subject, String textPart, String htmlPart,
-                                                              JsonNode defaultTemplateData,
-                                                              List<BulkEmailEntry> entries,
-                                                              String configurationSetName,
-                                                              List<MessageTag> defaultEmailTags,
-                                                              List<MessageHeader> defaultHeaders,
-                                                              String region) {
-        if (source == null || source.isBlank()) {
-            throw new AwsException("InvalidParameterValue", "Source email is required.", 400);
-        }
-        requireInlineTemplateContent(subject, textPart, htmlPart);
-        if (entries == null || entries.isEmpty()) {
-            throw new AwsException("InvalidParameterValue",
-                    "At least one destination entry is required.", 400);
-        }
-        configSetService.validateForSending(configurationSetName, region);
-        if (entries.size() > MAX_BULK_DESTINATIONS) {
-            throw new AwsException("MessageRejected",
-                    "Number of destinations (" + entries.size() + ") exceeds the maximum of "
-                            + MAX_BULK_DESTINATIONS + ".", 400);
-        }
-        for (BulkEmailEntry entry : entries) {
-            int recipientCount = sizeOf(entry.toAddresses())
-                    + sizeOf(entry.ccAddresses())
-                    + sizeOf(entry.bccAddresses());
-            if (recipientCount > MAX_RECIPIENTS_PER_DESTINATION) {
-                throw new AwsException("MessageRejected",
-                        "Recipient count (" + recipientCount + ") in a destination exceeds the maximum of "
-                                + MAX_RECIPIENTS_PER_DESTINATION + ".", 400);
-            }
-        }
-
-        List<BulkEmailEntryResult> results = new ArrayList<>(entries.size());
-        for (BulkEmailEntry entry : entries) {
-            try {
-                JsonNode merged = mergeTemplateData(defaultTemplateData, entry.replacementTemplateData());
-                List<MessageTag> mergedTags = mergeEmailTags(defaultEmailTags, entry.replacementEmailTags());
-                List<MessageHeader> mergedHeaders = mergeHeaders(defaultHeaders, entry.replacementHeaders());
-                // SendBulkEmail has no ListManagementOptions field, so list-managed suppression
-                // does not apply to bulk sends.
-                String messageId = sendEmail(source,
-                        entry.toAddresses(), entry.ccAddresses(), entry.bccAddresses(),
-                        replyToAddresses, returnPath,
-                        SesTemplateService.applyTemplateData(subject, merged),
-                        SesTemplateService.applyTemplateData(textPart, merged),
-                        SesTemplateService.applyTemplateData(htmlPart, merged),
-                        configurationSetName, mergedTags, mergedHeaders, null, region);
-                results.add(BulkEmailEntryResult.success(messageId));
-            } catch (AwsException e) {
-                results.add(BulkEmailEntryResult.failure(
-                        mapErrorCodeToBulkStatus(e.getErrorCode()), e.getMessage()));
-            } catch (Exception e) {
-                results.add(BulkEmailEntryResult.failure(BulkEmailEntryResult.Status.FAILED, e.getMessage()));
-            }
-        }
-        return results;
-    }
 
     public MultiRegionEndpoint createMultiRegionEndpoint(String name, List<String> regions,
                                                          List<Tag> tags, String region) {

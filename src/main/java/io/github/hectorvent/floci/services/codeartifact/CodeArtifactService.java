@@ -3044,23 +3044,6 @@ public class CodeArtifactService implements Resettable {
 
     private final CodeArtifactEventPublisher eventPublisher;
 
-    /**
-     * {@code mavenRepositoryId} is assigned at {@link #createRepository}, but a repository
-     * persisted before that field existed has none; backfills it lazily on first Maven-format use
-     * rather than leaving every caller of {@link CodeArtifactRepository#getMavenRepositoryId()} to
-     * handle a null it can otherwise never see.
-     */
-    public synchronized String ensureMavenRepositoryId(String region, String domain, String domainOwner,
-                                                         String repository) {
-        String owner = effectiveOwner(domainOwner);
-        String key = repositoryKey(region, domain, repository);
-        CodeArtifactRepository r = requireRepository(owner, key, repository);
-        if (r.getMavenRepositoryId() == null) {
-            r.setMavenRepositoryId(newRevision());
-            repositories.putForAccount(owner, key, r);
-        }
-        return r.getMavenRepositoryId();
-    }
 
     public record PackageCoordinate(String region, String domain, String owner, String repository,
                                     String format, String namespace, String name) {}
@@ -3076,35 +3059,6 @@ public class CodeArtifactService implements Resettable {
                 .getOrDefault(sha256(token.getBytes(StandardCharsets.UTF_8)), 0L) > Instant.now().getEpochSecond();
     }
 
-    public synchronized Map<String, Object> listPackages(PackageCoordinate coordinate, String prefix,
-                                                         String publish, String upstream,
-                                                         Integer maxResults, String nextToken) {
-        validateDomainName(coordinate.domain());
-        validateRepositoryName(coordinate.repository());
-        if (coordinate.format() != null && !PACKAGE_FORMATS.contains(coordinate.format())) {
-            throw validation("Invalid package format.");
-        }
-        if ((publish != null && !Set.of("ALLOW", "BLOCK").contains(publish))
-                || (upstream != null && !Set.of("ALLOW", "BLOCK").contains(upstream))) {
-            throw validation("publish and upstream must be ALLOW or BLOCK.");
-        }
-        CodeArtifactRepository repository = describeRepository(coordinate.region(), coordinate.domain(),
-                coordinate.owner(), coordinate.repository());
-        List<CodeArtifactPackage> matching = readPackages(repository).values().stream()
-                .filter(pkg -> coordinate.format() == null || coordinate.format().equals(pkg.format()))
-                .filter(pkg -> coordinate.namespace() == null || coordinate.namespace().equals(pkg.namespace()))
-                .filter(pkg -> prefix == null || pkg.name().startsWith(prefix))
-                .filter(pkg -> publish == null || publish.equals(pkg.restrictions().get("publish")))
-                .filter(pkg -> upstream == null || upstream.equals(pkg.restrictions().get("upstream")))
-                .toList();
-        PaginatedResult<CodeArtifactPackage> page = Pagination.paginate(matching,
-                pkg -> packageKey(pkg.format(), pkg.namespace(), pkg.name()), maxResults, nextToken,
-                100, 1000, "ValidationException");
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("packages", page.items().stream().map(pkg -> packageDescription(pkg, true)).toList());
-        addNextToken(result, page.nextToken());
-        return result;
-    }
 
     public synchronized Map<String, Object> listPackageVersionDependencies(PackageCoordinate coordinate,
                                                                            String version) {
@@ -3184,27 +3138,6 @@ public class CodeArtifactService implements Resettable {
                 .allMatch(entry -> Arrays.equals(entry.getValue(), right.assets().get(entry.getKey())));
     }
 
-    private Version findCopyVersion(PackageCoordinate coordinate, CodeArtifactRepository repository, String version,
-                                    boolean includeUpstream, Set<String> visited) {
-        if (!visited.add(repository.getName())) {
-            return null;
-        }
-        CodeArtifactPackage pkg = readPackages(repository).get(packageKey(coordinate));
-        if (pkg != null && pkg.versions().containsKey(version)) {
-            return pkg.versions().get(version);
-        }
-        if (includeUpstream) {
-            for (String upstream : repository.getUpstreams()) {
-                CodeArtifactRepository upstreamRepository = describeRepository(coordinate.region(), coordinate.domain(),
-                        coordinate.owner(), upstream);
-                Version found = findCopyVersion(coordinate, upstreamRepository, version, true, visited);
-                if (found != null) {
-                    return found;
-                }
-            }
-        }
-        return null;
-    }
 
     private static void validateVersionSelection(VersionMutation request, boolean copy) {
         List<String> selection = request.versions();
@@ -3383,12 +3316,6 @@ public class CodeArtifactService implements Resettable {
         }
     }
 
-    private void migrateLegacyPackages(PackageCoordinate coordinate, CodeArtifactRepository repository) {
-        migrateStoredVersionKeys(repository);
-        if (repository.getPackages().values().stream().anyMatch(pkg -> !pkg.versions().isEmpty())) {
-            savePackages(coordinate, repository, readPackages(repository));
-        }
-    }
 
     private static CodeArtifactPackage emptyPackage(PackageCoordinate coordinate) {
         return new CodeArtifactPackage(coordinate.format(), coordinate.namespace(), coordinate.name(),

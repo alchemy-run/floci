@@ -928,19 +928,6 @@ public class PipesPoller implements Resettable {
 
     private final ConcurrentHashMap<String, String> dynamoDbIterators = new ConcurrentHashMap<>();
 
-    /**
-     * Opens an iterator on the stream's first shard, under the same single-shard limit as
-     * {@link #initKinesisIterator}.
-     */
-    private String initDynamoDbIterator(String streamArn) {
-        try {
-            return dynamoDbStreamService.getShardIterator(
-                    streamArn, DynamoDbStreamService.SHARD_ID, "TRIM_HORIZON", null);
-        } catch (Exception e) {
-            LOG.warnv("Failed to get DynamoDB stream iterator for {0}: {1}", streamArn, e.getMessage());
-            return null;
-        }
-    }
 
     static String wrapPipeBatch(ObjectMapper mapper, List<JsonNode> records) {
         try {

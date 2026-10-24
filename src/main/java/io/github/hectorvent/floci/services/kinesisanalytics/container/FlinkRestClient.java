@@ -227,12 +227,4 @@ public class FlinkRestClient {
         return true;
     }
 
-    static SavepointStatus parseSavepointStatus(JsonNode root) {
-        String statusId = root.path("status").path("id").asText(null);
-        JsonNode operation = root.path("operation");
-        boolean failed = operation.has("failure-cause");
-        String location = operation.path("location").asText(null);
-        String failureCause = failed ? operation.path("failure-cause").path("stack-trace").asText("") : null;
-        return new SavepointStatus(statusId, location, failed, failureCause);
-    }
 }

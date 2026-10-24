@@ -1716,13 +1716,4 @@ public class ServiceCatalogService {
         return artifacts;
     }
 
-    public ObjectNode describeProvisioningArtifact(JsonNode request) {
-        String productId = text(request, "ProductId");
-        ObjectNode product = productId != null ? describeProduct(productId)
-                : describeProduct(objectMapper.createObjectNode().put("Name", text(request, "ProductName")));
-        String artifactId = resolveArtifactId(product, request);
-        return provisioningArtifacts(product).stream()
-                .filter(artifact -> artifactId.equals(text(artifact, "Id")))
-                .findFirst().orElseThrow(() -> notFound("provisioning artifact", artifactId));
-    }
 }

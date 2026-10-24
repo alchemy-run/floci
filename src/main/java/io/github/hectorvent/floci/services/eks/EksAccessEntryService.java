@@ -216,79 +216,9 @@ public class EksAccessEntryService {
         return new AwsException("InvalidParameterException", message, 400);
     }
 
-    /**
-     * UpdateAccessEntry: an omitted username or kubernetesGroups keeps its current value, a
-     * supplied kubernetesGroups replaces the list. Node entries have neither to change.
-     */
-    public synchronized AccessEntry update(Cluster cluster, String principal, UpdateAccessEntryRequest request) {
-        requireApiAccess(cluster);
-        StoredEntry stored = stored(cluster, principal);
-        AccessEntry current = stored.entry();
-        String username = request == null ? null : request.username();
-        List<String> groups = request == null ? null : request.kubernetesGroups();
-        if (!"STANDARD".equals(current.type()) && (username != null || groups != null)) {
-            throw invalid(current.type() + " entries cannot specify username or kubernetesGroups");
-        }
-        if (username != null) {
-            validateStandardUsername(username);
-        }
-        if (groups != null) {
-            validateGroups(groups);
-        }
-        AccessEntry updated = new AccessEntry(current.accessEntryArn(), current.clusterName(), current.principalArn(),
-                current.type(), username != null ? username : current.username(),
-                groups != null ? List.copyOf(groups) : current.kubernetesGroups(), current.tags(),
-                current.createdAt(), Instant.now().toEpochMilli() / 1000.0);
-        entries.put(prefix(cluster) + principal, new StoredEntry(updated, stored.principalId(),
-                stored.clientRequestToken(), stored.policies()));
-        return updated;
-    }
 
-    /** Associating a policy that is already associated replaces its access scope. */
-    public synchronized AssociatedAccessPolicy associateAccessPolicy(Cluster cluster, String principal,
-                                                                     AssociateAccessPolicyRequest request) {
-        requireApiAccess(cluster);
-        StoredEntry stored = stored(cluster, principal);
-        if (!"STANDARD".equals(stored.entry().type())) {
-            throw invalid("Access policies can only be associated with STANDARD access entries");
-        }
-        String policyArn = request == null ? null : request.policyArn();
-        validatePolicyArn(cluster, policyArn);
-        AccessScope scope = normalizeScope(request.accessScope());
-        double now = Instant.now().toEpochMilli() / 1000.0;
-        List<AssociatedAccessPolicy> policies = new ArrayList<>();
-        double associatedAt = now;
-        for (AssociatedAccessPolicy existing : stored.policies()) {
-            if (existing.policyArn().equals(policyArn)) {
-                associatedAt = existing.associatedAt();
-            } else {
-                policies.add(existing);
-            }
-        }
-        AssociatedAccessPolicy association = new AssociatedAccessPolicy(policyArn, scope, associatedAt, now);
-        policies.add(association);
-        policies.sort(Comparator.comparing(AssociatedAccessPolicy::policyArn));
-        entries.put(prefix(cluster) + principal, new StoredEntry(stored.entry(), stored.principalId(),
-                stored.clientRequestToken(), List.copyOf(policies)));
-        return association;
-    }
 
-    public synchronized void disassociateAccessPolicy(Cluster cluster, String principal, String policyArn) {
-        requireApiAccess(cluster);
-        StoredEntry stored = stored(cluster, principal);
-        List<AssociatedAccessPolicy> remaining = stored.policies().stream()
-                .filter(policy -> !policy.policyArn().equals(policyArn)).toList();
-        if (remaining.size() == stored.policies().size()) {
-            throw new AwsException("ResourceNotFoundException",
-                    "The access policy " + policyArn + " is not associated with " + principal, 404);
-        }
-        entries.put(prefix(cluster) + principal, new StoredEntry(stored.entry(), stored.principalId(),
-                stored.clientRequestToken(), remaining));
-    }
 
-    public synchronized List<AssociatedAccessPolicy> listAssociatedAccessPolicies(Cluster cluster, String principal) {
-        return stored(cluster, principal).policies();
-    }
 
     private StoredEntry stored(Cluster cluster, String principal) {
         requireApiAuthenticationMode(cluster);

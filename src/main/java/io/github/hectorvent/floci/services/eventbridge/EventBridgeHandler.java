@@ -1068,34 +1068,5 @@ public class EventBridgeHandler {
         }
     }
 
-    /**
-     * EventBridge never returns secret values from DescribeConnection — only
-     * the non-secret halves (header name, username, client id, endpoints).
-     */
 
-    private ObjectNode buildDestinationMutationNode(ApiDestination destination) {
-        ObjectNode node = objectMapper.createObjectNode();
-        node.put("ApiDestinationArn", destination.getApiDestinationArn());
-        node.put("ApiDestinationState", destination.getApiDestinationState());
-        putEpoch(node, "CreationTime", destination.getCreationTime());
-        putEpoch(node, "LastModifiedTime", destination.getLastModifiedTime());
-        return node;
-    }
-
-    private ObjectNode buildDestinationDescribeNode(ApiDestination destination) {
-        ObjectNode node = objectMapper.createObjectNode();
-        node.put("ApiDestinationArn", destination.getApiDestinationArn());
-        node.put("Name", destination.getName());
-        if (destination.getDescription() != null) {
-            node.put("Description", destination.getDescription());
-        }
-        node.put("ApiDestinationState", destination.getApiDestinationState());
-        node.put("ConnectionArn", destination.getConnectionArn());
-        node.put("InvocationEndpoint", destination.getInvocationEndpoint());
-        node.put("HttpMethod", destination.getHttpMethod());
-        node.put("InvocationRateLimitPerSecond", destination.getInvocationRateLimitPerSecond());
-        putEpoch(node, "CreationTime", destination.getCreationTime());
-        putEpoch(node, "LastModifiedTime", destination.getLastModifiedTime());
-        return node;
-    }
 }

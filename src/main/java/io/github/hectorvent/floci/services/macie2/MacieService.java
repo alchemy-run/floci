@@ -280,7 +280,7 @@ public class MacieService implements Resettable {
         }
     }
 
-    private static AwsException validation(String message) {
+    static AwsException validation(String message) {
         return new AwsException("ValidationException", message, 400);
     }
 
