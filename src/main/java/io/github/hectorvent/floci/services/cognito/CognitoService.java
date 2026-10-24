@@ -456,6 +456,13 @@ public class CognitoService implements ResourceProvider {
             updatedPool.setName(poolName);
         }
 
+        // AWS UpdateUserPool resets omitted mutable fields to their defaults:
+        // a request without LambdaConfig clears the pool's triggers and
+        // custom senders rather than keeping the previously stored value.
+        if (!request.containsKey("LambdaConfig")) {
+            updatedPool.setLambdaConfig(null);
+        }
+
         updatedPool.setLastModifiedDate(System.currentTimeMillis() / 1000L);
         poolStore.put(id, updatedPool);
         LOG.infov("Updated User Pool: {0}", id);
@@ -761,9 +768,10 @@ public class CognitoService implements ResourceProvider {
     public UserPool describeUserPool(String id) {
         UserPool pool = poolStore.get(id)
                 .orElseThrow(() -> userPoolNotFound(id));
+        boolean migrated = migrateEmbeddedPoolResources(pool);
         boolean generatedKeys = ensureJwtSigningKeys(pool);
         boolean generatedSecret = ensureRefreshTokenSecret(pool);
-        if (generatedKeys || generatedSecret) {
+        if (migrated || generatedKeys || generatedSecret) {
             poolStore.put(id, pool);
         }
         return pool;
@@ -1597,7 +1605,12 @@ public class CognitoService implements ResourceProvider {
         if (providerName == null || providerName.isBlank()) {
             throw new AwsException("InvalidParameterException", "ProviderName is required", 400);
         }
+        validateProviderName(providerName);
         validateProviderType(providerType);
+        if (NAMED_PROVIDER_TYPES.contains(providerType) && !providerType.equals(providerName)) {
+            throw new AwsException("InvalidParameterException",
+                    "ProviderName must match ProviderType for social providers", 400);
+        }
 
         String key = identityProviderKey(userPoolId, providerName);
         synchronized (identityProviderLock) {
@@ -3041,6 +3054,7 @@ public class CognitoService implements ResourceProvider {
         ManagedLoginBranding branding = new ManagedLoginBranding();
         branding.setManagedLoginBrandingId(UUID.randomUUID().toString());
         branding.setUserPoolId(userPoolId);
+        branding.setClientId(clientId);
         branding.setUseCognitoProvidedValues(Boolean.TRUE.equals(useCognitoProvidedValues));
         branding.setSettings(settings);
         branding.setAssets(assets);
@@ -4369,8 +4383,13 @@ public class CognitoService implements ResourceProvider {
         return response;
     }
 
+    /**
+     * AWS-shaped issuer so local JWTs satisfy clients that assert
+     * {@code iss} contains {@code cognito-idp.} and {@code /{userPoolId}}.
+     * JWKS stays on the emulator base URL (see {@link #getJwksUri(String)}).
+     */
     public String getIssuer(String poolId) {
-        return baseUrl + "/" + poolId;
+        return "https://cognito-idp." + regionFromPoolId(poolId) + ".amazonaws.com/" + poolId;
     }
 
     private String resolveUserPoolId(String region, Map<String, String> tags) {
@@ -4382,7 +4401,7 @@ public class CognitoService implements ResourceProvider {
     }
 
     public String getJwksUri(String poolId) {
-        return getIssuer(poolId) + "/.well-known/jwks.json";
+        return baseUrl + "/" + poolId + "/.well-known/jwks.json";
     }
 
     /**
@@ -7154,6 +7173,45 @@ public class CognitoService implements ResourceProvider {
         return details;
     }
 
+    private boolean migrateEmbeddedPoolResources(UserPool pool) {
+        boolean migrated = false;
+        synchronized (identityProviderLock) {
+            for (IdentityProvider provider : pool.getIdentityProviders()) {
+                String key = identityProviderKey(pool.getId(), provider.getProviderName());
+                if (identityProviderStore.get(key).isEmpty()) {
+                    identityProviderStore.put(key, provider);
+                }
+                migrated = true;
+            }
+            pool.setIdentityProviders(List.of());
+        }
+        synchronized (domainLock) {
+            for (UserPoolDomain domain : pool.getDomains()) {
+                if (domainStore.get(domain.getDomain()).isEmpty()) {
+                    domainStore.put(domain.getDomain(), domain);
+                }
+                migrated = true;
+            }
+            pool.setDomains(List.of());
+        }
+        return migrated;
+    }
 
+    private String regionFromPoolId(String poolId) {
+        if (poolId != null) {
+            int underscore = poolId.indexOf('_');
+            if (underscore > 0) {
+                return poolId.substring(0, underscore);
+            }
+        }
+        return regionResolver.getDefaultRegion();
+    }
 
+    private void validateProviderName(String providerName) {
+        if (providerName == null || providerName.isBlank() || providerName.length() > 32
+                || providerName.contains(" ")) {
+            throw new AwsException("InvalidParameterException",
+                    "ProviderName must be 1-32 characters with no spaces", 400);
+        }
+    }
 }

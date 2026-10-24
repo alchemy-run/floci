@@ -161,8 +161,9 @@ public class MwaaEnvironmentManager {
         lifecycleManager.ensureVolume(logsVolume);
 
         String image = "apache/airflow:%s-%s".formatted(airflowVersion, pythonTagFor(airflowVersion));
-        String adminUser = "admin";
+        String adminUser = AIRFLOW_ADMIN_USER;
         String adminPassword = generateSecret(24);
+        environment.setAirflowAdminPassword(adminPassword);
         String sqlAlchemyConn = "postgresql+psycopg2://airflow:" + dbPassword + "@" + dbIp + ":" + POSTGRES_PORT + "/airflow";
 
         // Points DAG code's own AWS SDK calls (boto3, botocore) at Floci itself, the same way
@@ -176,6 +177,9 @@ public class MwaaEnvironmentManager {
                 "AIRFLOW__CORE__FERNET_KEY=" + generateFernetKey(),
                 "AIRFLOW__WEBSERVER__SECRET_KEY=" + generateSecret(32),
                 "AIRFLOW__CORE__LOAD_EXAMPLES=false",
+                // Basic auth lets InvokeRestApi call the Airflow 2.x REST API as the admin user;
+                // session auth keeps the web UI working.
+                "AIRFLOW__API__AUTH_BACKENDS=" + API_AUTH_BACKENDS,
                 "_AIRFLOW_WWW_USER_USERNAME=" + adminUser,
                 "_AIRFLOW_WWW_USER_PASSWORD=" + adminPassword));
         env.addAll(airflowConfigurationOptionsEnv(environment.getAirflowConfigurationOptions()));
@@ -587,6 +591,7 @@ public class MwaaEnvironmentManager {
             "AIRFLOW__CORE__FERNET_KEY",
             "AIRFLOW__WEBSERVER__SECRET_KEY",
             "AIRFLOW__CORE__LOAD_EXAMPLES",
+            "AIRFLOW__API__AUTH_BACKENDS",
             "AIRFLOW_HOME",
             "AWS_DEFAULT_REGION",
             "AWS_REGION",
@@ -739,4 +744,7 @@ public class MwaaEnvironmentManager {
 
 
     public record ExecResult(long exitCode, String stdout, String stderr) {}
+
+    private static final String API_AUTH_BACKENDS =
+            "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session";
 }

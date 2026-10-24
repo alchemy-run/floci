@@ -68,56 +68,8 @@ public class PipesService implements TagHandler, ResourceProvider {
                            JsonNode sourceParameters, JsonNode targetParameters,
                            JsonNode enrichmentParameters, Map<String, String> tags,
                            String region) {
-        if (name == null || name.isBlank()) {
-            throw new AwsException("ValidationException", "Name is required", 400);
-        }
-        if (source == null || source.isBlank()) {
-            throw new AwsException("ValidationException", "Source is required", 400);
-        }
-        if (target == null || target.isBlank()) {
-            throw new AwsException("ValidationException", "Target is required", 400);
-        }
-        if (roleArn == null || roleArn.isBlank()) {
-            throw new AwsException("ValidationException", "RoleArn is required", 400);
-        }
-
-        validateSourceConfiguration(source, sourceParameters);
-
-        String key = region + "::" + name;
-        if (storage.get(key).isPresent()) {
-            throw new AwsException("ConflictException",
-                    "Pipe " + name + " already exists.", 409);
-        }
-
-        String arn = regionResolver.buildArn("pipes", region, "pipe/" + name);
-        Instant now = Instant.now();
-
-        Pipe pipe = new Pipe();
-        pipe.setName(name);
-        pipe.setArn(arn);
-        pipe.setSource(source);
-        pipe.setTarget(target);
-        pipe.setRoleArn(roleArn);
-        pipe.setDescription(description);
-        DesiredState effectiveDesiredState = desiredState != null ? desiredState : DesiredState.RUNNING;
-        pipe.setDesiredState(effectiveDesiredState);
-        pipe.setCurrentState(effectiveDesiredState == DesiredState.RUNNING ? PipeState.RUNNING : PipeState.STOPPED);
-        pipe.setEnrichment(enrichment);
-        pipe.setSourceParameters(sourceParameters);
-        pipe.setTargetParameters(targetParameters);
-        pipe.setEnrichmentParameters(enrichmentParameters);
-        pipe.setTags(tags != null ? new HashMap<>(tags) : new HashMap<>());
-        pipe.setCreationTime(now);
-        pipe.setLastModifiedTime(now);
-        pipe.setAccountId(regionResolver.getAccountId());
-
-        storage.put(key, pipe);
-        LOG.infov("Created pipe: {0}", name);
-
-        if (pipe.getCurrentState() == PipeState.RUNNING) {
-            poller.startPolling(pipe);
-        }
-        return pipe;
+        return createPipe(name, source, target, roleArn, description, desiredState, enrichment,
+                sourceParameters, targetParameters, enrichmentParameters, tags, null, null, region);
     }
 
     public Pipe describePipe(String name, String region) {
@@ -135,7 +87,7 @@ public class PipesService implements TagHandler, ResourceProvider {
                            JsonNode sourceParameters, JsonNode targetParameters,
                            JsonNode enrichmentParameters, String region) {
         return writePipeConfiguration(name, target, roleArn, description, desiredState, enrichment,
-                sourceParameters, targetParameters, enrichmentParameters, region, false);
+                sourceParameters, targetParameters, enrichmentParameters, null, null, region, false);
     }
 
     /**
@@ -151,7 +103,7 @@ public class PipesService implements TagHandler, ResourceProvider {
                             JsonNode sourceParameters, JsonNode targetParameters,
                             JsonNode enrichmentParameters, String region) {
         return writePipeConfiguration(name, target, roleArn, description, desiredState, enrichment,
-                sourceParameters, targetParameters, enrichmentParameters, region, true);
+                sourceParameters, targetParameters, enrichmentParameters, null, null, region, true);
     }
 
     /**

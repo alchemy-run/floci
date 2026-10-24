@@ -23,6 +23,13 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import java.util.zip.CRC32;
+import io.github.hectorvent.floci.core.common.Resettable;
+import io.github.hectorvent.floci.services.servicequotas.ServiceQuotasCatalog.QuotaDefinition;
+import io.github.hectorvent.floci.services.servicequotas.ServiceQuotasCatalog.ServiceDefinition;
+import java.util.LinkedHashMap;
+import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Service Quotas emulation backed by a generated in-memory catalog.
@@ -219,9 +226,10 @@ public class ServiceQuotasService {
         if (start < 0 || start > items.size()) {
             throw new AwsException("InvalidPaginationTokenException", "Invalid NextToken.", 400);
         }
-        int end = (maxResults == null) ? items.size() : Math.min(items.size(), start + maxResults);
+        int pageSize = maxResults == null ? 100 : maxResults;
+        int end = Math.min(items.size(), start + pageSize);
         String next = (end < items.size()) ? encodeToken(end) : null;
-        return new Page(items.subList(start, end), next);
+        return new Page<>(items.subList(start, end), next);
     }
 
     private static String encodeToken(int offset) {
@@ -363,5 +371,23 @@ public class ServiceQuotasService {
         ObjectNode response = objectMapper.createObjectNode();
         response.set("RequestedQuota", requestedQuota.deepCopy());
         return response;
+    }
+
+    /**
+     * The model constrains ServiceCode to at most 63 characters matching
+     * {@code [a-zA-Z][a-zA-Z0-9-]{1,63}}; a well-formed code outside the catalog is an unknown service.
+     */
+    private static ServiceDefinition requireService(String serviceCode) {
+        if (serviceCode == null || serviceCode.isEmpty()) {
+            throw new AwsException("IllegalArgumentException",
+                    "Invalid input: ServiceCode must not be empty.", 400);
+        }
+        if (serviceCode.length() > 63 || !SERVICE_CODE_PATTERN.matcher(serviceCode).matches()) {
+            throw new AwsException("IllegalArgumentException",
+                    "Invalid input: ServiceCode must match [a-zA-Z][a-zA-Z0-9-]{1,63} "
+                            + "and be at most 63 characters.", 400);
+        }
+        return ServiceQuotasCatalog.service(serviceCode).orElseThrow(() -> new AwsException(
+                "NoSuchResourceException", "The request failed because the specified service does not exist.", 400));
     }
 }

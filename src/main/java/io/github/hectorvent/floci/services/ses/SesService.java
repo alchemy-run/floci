@@ -237,10 +237,7 @@ public class SesService {
      */
     public Identity createEmailIdentity(String emailIdentity, String configurationSetName,
                                         List<Tag> tags, String region) {
-        Runnable configurationSetExistsCheck = configurationSetName == null ? null
-                : () -> configSetService.get(configurationSetName, region);
-        return identityService.createEmailIdentity(emailIdentity, configurationSetName, tags, region,
-                configurationSetExistsCheck);
+        return createEmailIdentity(emailIdentity, configurationSetName, tags, region, null);
     }
 
     public void deleteIdentity(String identityValue, String region) {
@@ -1775,6 +1772,13 @@ public class SesService {
     }
 
     static BulkEmailEntryResult.Status mapErrorCodeToBulkStatus(String errorCode) {
+        if ("MessageRejected".equals(errorCode)) {
+            return BulkEmailEntryResult.Status.MESSAGE_REJECTED;
+        }
+        if ("MailFromDomainNotVerified".equals(errorCode)
+                || "MailFromDomainNotVerifiedException".equals(errorCode)) {
+            return BulkEmailEntryResult.Status.MAIL_FROM_DOMAIN_NOT_VERIFIED;
+        }
         if ("InvalidParameterValue".equals(errorCode)
                 || "MissingRenderingAttribute".equals(errorCode)
                 || "InvalidRenderingParameter".equals(errorCode)) {

@@ -734,7 +734,7 @@ public class IamService implements SessionAccountLookup, ResourceProvider {
             return;
         }
         validateAccountAlias(seededAccountAlias);
-        Optional<String> stored = accountAliases.get(ACCOUNT_ALIAS_KEY);
+        Optional<String> stored = getAccountAlias();
         if (stored.isEmpty()) {
             accountAliases.put(ACCOUNT_ALIAS_KEY, seededAccountAlias);
             LOG.infov("Seeded IAM account alias: {0}", seededAccountAlias);
@@ -2558,7 +2558,18 @@ public class IamService implements SessionAccountLookup, ResourceProvider {
     // Account Aliases
     // ==================================================================
     public Optional<String> getAccountAlias() {
-        return accountAliases.get(ACCOUNT_ALIAS_KEY);
+        synchronized (accountAliasLock) {
+            Optional<String> alias = accountAliases.get(ACCOUNT_ALIAS_KEY);
+            Optional<String> legacy = accountAliases.get("current");
+            if (legacy.isPresent()) {
+                if (alias.isEmpty()) {
+                    alias = legacy;
+                    accountAliases.put(ACCOUNT_ALIAS_KEY, legacy.get());
+                }
+                accountAliases.delete("current");
+            }
+            return alias;
+        }
     }
 
     /**
@@ -2571,7 +2582,7 @@ public class IamService implements SessionAccountLookup, ResourceProvider {
     public void createAccountAlias(String alias) {
         validateAccountAlias(alias);
         synchronized (accountAliasLock) {
-            Optional<String> existing = accountAliases.get(ACCOUNT_ALIAS_KEY);
+            Optional<String> existing = getAccountAlias();
             if (existing.isPresent() && existing.get().equals(alias)) {
                 throw new AwsException("EntityAlreadyExists",
                         "The account alias " + alias + " already exists.", 409);
@@ -2590,7 +2601,7 @@ public class IamService implements SessionAccountLookup, ResourceProvider {
         // a ValidationError rather than a miss.
         validateAccountAlias(alias);
         synchronized (accountAliasLock) {
-            String existing = accountAliases.get(ACCOUNT_ALIAS_KEY)
+            String existing = getAccountAlias()
                     .orElseThrow(() -> new AwsException("NoSuchEntity",
                             "The account alias " + alias + " cannot be found.", 404));
             if (!existing.equals(alias)) {

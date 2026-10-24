@@ -304,7 +304,17 @@ public class VpcNetworkManager {
         }
 
         int desiredPrefix = declared.map(Cidr4::prefix).orElse(24);
-        Cidr4 slice = allocateSubBlock(vpc.effective, desiredPrefix, siblings);
+        Cidr4 slice = null;
+        if (declared.isPresent() && vpc.declared != null && vpc.declared.contains(declared.get())) {
+            Cidr4 translated = new Cidr4(vpc.effective.network()
+                    + declared.get().network() - vpc.declared.network(), desiredPrefix);
+            if (vpc.effective.contains(translated) && siblings.stream().noneMatch(s -> s.overlaps(translated))) {
+                slice = translated;
+            }
+        }
+        if (slice == null) {
+            slice = allocateSubBlock(vpc.effective, desiredPrefix, siblings);
+        }
         if (slice == null) {
             LOG.warnv("Subnet {0} in VPC {1}: no free /{2} slice remains inside {3}; instances in this "
                             + "subnet fall back to synthesised private addresses.",
@@ -312,7 +322,7 @@ public class VpcNetworkManager {
             return new SubnetBinding(subnetId, declared.orElse(null), null, true);
         }
         LOG.warnv("Subnet {0} in VPC {1}: declared CIDR {2} cannot be used ({3}). Substituting {4}: "
-                        + "reported private IPs for this subnet will NOT match the declared CIDR.",
+                        + "only Docker transport addresses use the substituted CIDR.",
                 subnetId, vpc.vpcId, String.valueOf(declaredCidr),
                 vpc.substituted ? "its VPC's CIDR was itself substituted for " + vpc.effective
                         : "it does not sit inside the VPC range " + vpc.effective + " or collides with a sibling subnet",
@@ -529,7 +539,11 @@ public class VpcNetworkManager {
         VpcBinding vpc = vpcKey == null ? null : bindings.get(vpcKey);
         SubnetBinding subnet = vpc == null ? null : vpc.subnets.get(subnetId);
         if (subnet != null && address != null) {
-            subnet.leased.remove(address);
+            synchronized (subnet) {
+                if (subnet.transportLeases.values().stream().noneMatch(lease -> lease.transportAddress().equals(address))) {
+                    subnet.leased.remove(address);
+                }
+            }
         }
     }
 
@@ -1063,6 +1077,7 @@ public class VpcNetworkManager {
         final Cidr4 effective;
         final boolean substituted;
         final Set<String> leased = ConcurrentHashMap.newKeySet();
+        final Map<String, TransportLease> transportLeases = new LinkedHashMap<>();
         /** Scaled to the block: a /29 cannot spare the ten addresses a /24 hands over freely. */
         final long firstOffset;
         long nextOffset;
@@ -1074,6 +1089,42 @@ public class VpcNetworkManager {
             this.substituted = substituted;
             this.firstOffset = effective == null ? FIRST_HOST_OFFSET : firstHostOffset(effective);
             this.nextOffset = this.firstOffset;
+        }
+    }
+
+    private record TransportLease(String logicalAddress, String transportAddress) {}
+
+    /** Restores the exact transport retained by a running or stopped container. */
+    public boolean reserveTransportPrivateIp(String region, String subnetId, String logicalAddress,
+                                           String transportAddress, String ownerId) {
+        SubnetBinding subnet = subnetBinding(region, subnetId);
+        if (!enabled() || subnet == null || ownerId == null || logicalAddress == null || transportAddress == null) {
+            return false;
+        }
+        synchronized (subnet) {
+            TransportLease lease = new TransportLease(logicalAddress, transportAddress);
+            if (subnet.transportLeases.containsKey(ownerId)) {
+                return lease.equals(subnet.transportLeases.get(ownerId));
+            }
+            if (subnet.transportLeases.values().stream().anyMatch(existing -> existing.logicalAddress().equals(logicalAddress))
+                    || !reservePrivateIp(region, subnetId, transportAddress)) {
+                return false;
+            }
+            subnet.transportLeases.put(ownerId, lease);
+            return true;
+        }
+    }
+
+    /** A delayed cleanup from an old instance cannot free its successor's transport. */
+    public void releaseTransportPrivateIp(String region, String subnetId, String ownerId) {
+        SubnetBinding subnet = subnetBinding(region, subnetId);
+        if (subnet != null && ownerId != null) {
+            synchronized (subnet) {
+                TransportLease removed = subnet.transportLeases.remove(ownerId);
+                if (removed != null) {
+                    subnet.leased.remove(removed.transportAddress());
+                }
+            }
         }
     }
 }

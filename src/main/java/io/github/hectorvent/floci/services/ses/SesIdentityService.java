@@ -86,6 +86,10 @@ public class SesIdentityService implements SesTaggable {
         synchronized (identityCreationLock) {
             Identity existing = identityStore.get(key).orElse(null);
             if (existing != null) {
+                if (!"Success".equals(existing.getVerificationStatus())) {
+                    existing.setVerificationStatus("Success");
+                    identityStore.put(key, existing);
+                }
                 return existing;
             }
             identity = new Identity(emailAddress, "EmailAddress");
@@ -139,34 +143,7 @@ public class SesIdentityService implements SesTaggable {
     public Identity createEmailIdentity(String emailIdentity, String configurationSetName,
                                         List<Tag> tags, String region,
                                         Runnable configurationSetExistsCheck) {
-        // Validate with the wording the pre-atomic path produced (the verify methods' field names),
-        // so the key derivation's generic "Identity" message never surfaces on this API.
-        validateIdentityWhitespace(emailIdentity,
-                emailIdentity != null && emailIdentity.contains("@") ? "Email address" : "Domain");
-        String key = identityKey(region, emailIdentity);
-        Identity identity;
-        synchronized (identityCreationLock) {
-            if (identityStore.get(key).isPresent()) {
-                throw new AwsException("AlreadyExistsException",
-                        "Email identity " + emailIdentity + " already exist.", 400);
-            }
-            SesTags.validate(tags);
-            if (configurationSetExistsCheck != null) {
-                configurationSetExistsCheck.run();
-            }
-            identity = emailIdentity.contains("@")
-                    ? new Identity(emailIdentity, "EmailAddress")
-                    : newDomainIdentity(emailIdentity);
-            if (configurationSetName != null) {
-                identity.setConfigurationSetName(configurationSetName);
-            }
-            if (tags != null) {
-                identity.setTags(tags);
-            }
-            identityStore.put(key, identity);
-        }
-        LOG.infov("Created email identity: {0} in region {1}", emailIdentity, region);
-        return identity;
+        return createEmailIdentity(emailIdentity, configurationSetName, tags, region, configurationSetExistsCheck, null);
     }
 
     public Identity getIdentityVerificationAttributes(String identityValue, String region) {
@@ -185,6 +162,11 @@ public class SesIdentityService implements SesTaggable {
             return false;
         }
         if (isIdentityVerified(fromEmail, region)) {
+            return true;
+        }
+        // There is no verification-email click in the emulator; registered addresses can send.
+        Identity address = getIdentityVerificationAttributes(fromEmail, region);
+        if (address != null && "EmailAddress".equals(address.getIdentityType())) {
             return true;
         }
         int at = fromEmail.indexOf('@');

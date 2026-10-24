@@ -16,10 +16,10 @@ public class RestApi {
     private String name;
     private String description;
     private long createdDate;
+    /** ID of the root "/" resource, included in AWS RestApi responses. */
     private String rootResourceId;
     private Map<String, String> tags = new HashMap<>();
     private EndpointConfiguration endpointConfiguration;
-    /** Content types treated as binary when applying integration contentHandling. */
     private List<String> binaryMediaTypes = new ArrayList<>();
     /** Resource policy document, stored exactly as the caller sent it. */
     private String policy;

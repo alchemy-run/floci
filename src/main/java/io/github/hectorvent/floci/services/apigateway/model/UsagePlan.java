@@ -29,7 +29,7 @@ public class UsagePlan {
     public void setDescription(String description) { this.description = description; }
 
     public List<ApiStage> getApiStages() { return apiStages; }
-    public void setApiStages(List<ApiStage> apiStages) { this.apiStages = apiStages; }
+    public void setApiStages(List<ApiStage> apiStages) { this.apiStages = apiStages != null ? apiStages : new ArrayList<>(); }
 
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags != null ? tags : new HashMap<>(); }

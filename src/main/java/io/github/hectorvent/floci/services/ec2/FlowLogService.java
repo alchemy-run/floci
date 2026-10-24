@@ -157,47 +157,12 @@ public class FlowLogService {
                                  String trafficType, String logDestinationType,
                                  String logDestination, String deliverLogsPermissionArn,
                                  String logFormat, int maxAggregationInterval) {
-        FlowLog fl = new FlowLog();
-        fl.setFlowLogId("fl-" + randomHex(17));
-        fl.setResourceId(resourceId);
-        fl.setResourceType(resourceType != null ? resourceType : "VPC");
-        fl.setTrafficType(trafficType != null ? trafficType : "ALL");
-        fl.setLogDestinationType(logDestinationType != null ? logDestinationType : "s3");
-        fl.setLogDestination(logDestination);
-        fl.setDeliverLogsPermissionArn(deliverLogsPermissionArn);
-        fl.setBucketName(bucketFromArn(logDestination));
-        fl.setLogFormat(logFormat);
-        fl.setMaxAggregationInterval(maxAggregationInterval);
-        fl.setRegion(region);
-        fl.setAccountId(ec2Service.callerAccountId());
-        flowLogs.put(fl.getFlowLogId(), fl);
-        LOG.infov("Created flow log {0} for {1} {2} -> {3}",
-                fl.getFlowLogId(), fl.getResourceType(), resourceId, fl.getBucketName());
-
-        // Deliver an initial batch right away so flows are visible without
-        // waiting for the first scheduled tick.
-        if ("s3".equals(fl.getLogDestinationType()) && fl.getBucketName() != null) {
-            try {
-                generateAndDeliver(fl);
-            } catch (Exception e) {
-                LOG.warnv("Initial flow-log delivery failed for {0}: {1}", fl.getFlowLogId(), e.getMessage());
-            }
-        }
-        return fl;
+        return createFlowLog(region, resourceId, resourceType, trafficType, logDestinationType,
+                logDestination, logFormat, maxAggregationInterval, null, deliverLogsPermissionArn, List.of());
     }
 
     public List<FlowLog> describeFlowLogs(String region, List<String> flowLogIds) {
-        List<FlowLog> result = new ArrayList<>();
-        for (FlowLog fl : flowLogs.scan(k -> true)) {
-            if (region != null && fl.getRegion() != null && !region.equals(fl.getRegion())) {
-                continue;
-            }
-            if (flowLogIds != null && !flowLogIds.isEmpty() && !flowLogIds.contains(fl.getFlowLogId())) {
-                continue;
-            }
-            result.add(fl);
-        }
-        return result;
+        return describeFlowLogs(region, flowLogIds, Map.of(), 0, null).logs();
     }
 
     public List<String> deleteFlowLogs(String region, List<String> flowLogIds) {

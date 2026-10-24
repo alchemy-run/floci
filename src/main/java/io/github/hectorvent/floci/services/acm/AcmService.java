@@ -54,6 +54,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import io.github.hectorvent.floci.services.route53.Route53Service;
+import io.github.hectorvent.floci.services.route53.model.HostedZone;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
+import java.util.function.Predicate;
 
 /**
  * ACM (AWS Certificate Manager) service implementation for the local emulator.
@@ -174,6 +180,8 @@ public class AcmService implements ResourceProvider {
         String certId = UUID.randomUUID().toString();
         String arn = buildCertificateArn(region, certId);
 
+        ValidationMethod method = validationMethod != null ? validationMethod : ValidationMethod.DNS;
+
         // Determine certificate type and initial status
         CertificateType type;
         CertificateStatus status;
@@ -182,10 +190,10 @@ public class AcmService implements ResourceProvider {
             status = CertificateStatus.ISSUED;
         } else {
             type = CertificateType.AMAZON_ISSUED;
-            status = validationWaitSeconds > 0 ? CertificateStatus.PENDING_VALIDATION : CertificateStatus.ISSUED;
+            // DNS requires proof of ownership; the configured wait only simulates email approval.
+            status = method == ValidationMethod.EMAIL && validationWaitSeconds == 0
+                ? CertificateStatus.ISSUED : CertificateStatus.PENDING_VALIDATION;
         }
-
-        ValidationMethod method = validationMethod != null ? validationMethod : ValidationMethod.DNS;
 
         // A server leaf signed by the local CA, so Certificate plus CertificateChain from
         // GetCertificate validate the way an ACM certificate and its chain do on AWS.
@@ -221,7 +229,7 @@ public class AcmService implements ResourceProvider {
         cert.setCertificateBody(generated.certificatePem());
         cert.setPrivateKey(generated.privateKeyPem());
         cert.setCertificateChain(certificateAuthority.caPem());
-        cert.setCertOptions(options != null ? options : CertificateOptions.defaultOptions());
+        cert.setCertOptions(resolveRequestOptions(options));
         cert.setCertAuthorityArn(certAuthorityArn);
         cert.setIdempotencyToken(idempotencyToken);
         cert.setTags(tags != null ? new HashMap<>(tags) : new HashMap<>());
@@ -264,7 +272,12 @@ public class AcmService implements ResourceProvider {
     // ============ GetCertificate ============
 
     public Certificate getCertificate(String certificateArn, String region) {
-        return getCertificateByArn(certificateArn, region);
+        Certificate cert = getCertificateByArn(certificateArn, region);
+        if (cert.getStatus() == CertificateStatus.PENDING_VALIDATION) {
+            throw new AwsException("RequestInProgressException",
+                "The certificate request is in progress. The certificate body is not yet available.", 400);
+        }
+        return cert;
     }
 
     // ============ ListCertificates ============
@@ -283,12 +296,15 @@ public class AcmService implements ResourceProvider {
                                        String region, int maxItems, String nextToken) {
         int limit = maxItems > 0 ? Math.min(maxItems, 1000) : 100;
         String lastArn = decodeToken(nextToken);
+        // AWS ListCertificates defaults to RSA_1024 + RSA_2048 when Includes.keyTypes is omitted.
+        List<KeyAlgorithm> effectiveKeyTypes = (keyTypes == null || keyTypes.isEmpty())
+            ? List.of(KeyAlgorithm.RSA_1024, KeyAlgorithm.RSA_2048)
+            : keyTypes;
 
-        List<Certificate> allCerts = store.scan(k -> true).stream()
-            .filter(c -> c.getArn().contains(":acm:" + region + ":"))
+        List<Certificate> allCerts = store.scan(k -> k.startsWith(region + "::")).stream()
             .map(c -> settleValidation(c, region))
             .filter(c -> statuses == null || statuses.isEmpty() || statuses.contains(c.getStatus()))
-            .filter(c -> keyTypes == null || keyTypes.isEmpty() || keyTypes.contains(c.getKeyAlgorithm()))
+            .filter(c -> effectiveKeyTypes.contains(c.getKeyAlgorithm()))
             .sorted(Comparator.comparing(Certificate::getArn))
             .collect(Collectors.toList());
 
@@ -533,6 +549,9 @@ public class AcmService implements ResourceProvider {
 
         // Encrypt the private key
         String encryptedKey = certificateGenerator.encryptPrivateKey(cert.getPrivateKey(), passphrase);
+
+        cert.setExported(true);
+        store.put(regionKey(region, cert.extractCertificateId()), cert);
 
         // Return certificate with encrypted private key
         Certificate exportCert = new Certificate();
@@ -943,5 +962,87 @@ public class AcmService implements ResourceProvider {
             .findFirst()
             .map(s -> s.substring(3))
             .orElse(dn);
+    }
+
+    public void resendValidationEmail(String certificateArn, String domain,
+                                      String validationDomain, String region) {
+        Certificate cert = getCertificateByArn(certificateArn, region);
+        if (cert.getValidationMethod() != ValidationMethod.EMAIL) {
+            throw new AwsException("InvalidStateException",
+                "Email validation cannot be resent for a certificate that uses "
+                    + (cert.getValidationMethod() != null ? cert.getValidationMethod().name() : "DNS")
+                    + " validation.",
+                400);
+        }
+        boolean knownDomain = domain != null && (
+            domain.equalsIgnoreCase(cert.getDomainName())
+                || (cert.getSubjectAlternativeNames() != null
+                    && cert.getSubjectAlternativeNames().stream()
+                        .anyMatch(san -> san.equalsIgnoreCase(domain)))
+        );
+        if (!knownDomain) {
+            throw new AwsException("InvalidDomainValidationOptionsException",
+                "Domain is not associated with the certificate.", 400);
+        }
+        if (validationDomain == null || validationDomain.isBlank()
+                || !isValidationDomainOf(domain, validationDomain)) {
+            throw new AwsException("InvalidDomainValidationOptionsException",
+                "ValidationDomain must not be empty.", 400);
+        }
+        // Emulator: no email is sent. Success is enough for the control plane.
+    }
+
+    private static CertificateOptions resolveRequestOptions(CertificateOptions options) {
+        if (options == null) {
+            return CertificateOptions.defaultOptions();
+        }
+        return new CertificateOptions(
+            options.certificateTransparencyLoggingPreference() != null
+                ? options.certificateTransparencyLoggingPreference()
+                : "ENABLED",
+            options.export() != null ? options.export() : "DISABLED"
+        );
+    }
+
+    /**
+     * Lists certificates matching an optional predicate, with the same
+     * cursor pagination as {@link #listCertificates}.
+     */
+    public ListResult searchCertificates(Predicate<Certificate> filter,
+                                         String region, int maxItems, String nextToken) {
+        Predicate<Certificate> predicate = filter != null ? filter : c -> true;
+        int limit = maxItems > 0 ? Math.min(maxItems, 1000) : 100;
+        String lastArn = decodeToken(nextToken);
+
+        List<Certificate> allCerts = store.scan(k -> k.startsWith(region + "::")).stream()
+            .map(c -> settleValidation(c, region))
+            .filter(predicate)
+            .sorted(Comparator.comparing(Certificate::getArn))
+            .collect(Collectors.toList());
+
+        int startIndex = 0;
+        if (lastArn != null) {
+            for (int i = 0; i < allCerts.size(); i++) {
+                if (allCerts.get(i).getArn().compareTo(lastArn) > 0) {
+                    startIndex = i;
+                    break;
+                }
+                if (i == allCerts.size() - 1) {
+                    startIndex = allCerts.size();
+                }
+            }
+        }
+
+        List<Certificate> page = allCerts.stream()
+            .skip(startIndex)
+            .limit(limit)
+            .collect(Collectors.toList());
+
+        String newNextToken = null;
+        if (startIndex + limit < allCerts.size() && !page.isEmpty()) {
+            newNextToken = encodeToken(page.get(page.size() - 1).getArn());
+        }
+
+        return new ListResult(page, newNextToken);
     }
 }

@@ -399,7 +399,7 @@ public class StepFunctionsJsonHandler {
      * PascalCase, so this is the one place the response is described.
      *
      * <p>The tolerances are the ones the Map state declared, and default to zero.
-     * {@code redriveCount} is zero because Floci does not implement redrive, and
+     * {@code redriveCount} is zero because Map runs are not individually redriven, and
      * {@code redriveDate} is absent until a run is redriven, which no run here ever is.
      */
     static ObjectNode describeMapRunResponse(ObjectMapper objectMapper, MapRun mapRun) {
@@ -408,15 +408,17 @@ public class StepFunctionsJsonHandler {
         response.put("executionArn", mapRun.getExecutionArn());
         response.put("status", mapRun.getStatus());
         response.put("startDate", mapRun.getStartDate());
-        response.put("stopDate", mapRun.getStopDate());
+        if (mapRun.getStopDate() > 0) {
+            response.put("stopDate", mapRun.getStopDate());
+        }
         response.put("maxConcurrency", mapRun.getMaxConcurrency());
         response.put("toleratedFailurePercentage", mapRun.getToleratedFailurePercentage());
         response.put("toleratedFailureCount", mapRun.getToleratedFailureCount());
         putMapRunCounts(response.putObject("itemCounts"), mapRun.getItemCount(),
-                mapRun.getSucceededCount(), mapRun.getFailedCount());
+                mapRun.getSucceededCount(), mapRun.getFailedCount(), "RUNNING".equals(mapRun.getStatus()));
         // An ItemBatcher run has one execution per batch, so the two blocks differ there.
         putMapRunCounts(response.putObject("executionCounts"), mapRun.getExecutionCount(),
-                mapRun.getSucceededExecutionCount(), mapRun.getFailedExecutionCount());
+                mapRun.getSucceededExecutionCount(), mapRun.getFailedExecutionCount(), "RUNNING".equals(mapRun.getStatus()));
         response.put("redriveCount", 0);
         return response;
     }

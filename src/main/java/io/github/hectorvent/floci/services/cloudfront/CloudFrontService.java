@@ -427,6 +427,9 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
         distStore.delete(id);
         invalidationStore.delete(id);
         tagStore.delete("distribution/" + id);
+        if (edgePorts != null) {
+            edgePorts.release(id);
+        }
     }
 
     /**
@@ -1533,14 +1536,7 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
     }
 
     public CloudFrontFunction describeFunction(String name, String stage) {
-        String effectiveStage = normalizeFunctionStage(stage);
-        Optional<CloudFrontFunction> function = functionStore.get(functionKey(name, effectiveStage));
-        if (function.isEmpty() && "LIVE".equals(effectiveStage)) {
-            // Releases before stage-aware keys stored a published LIVE function under
-            // the bare name. Keep that state readable without exposing it as DEVELOPMENT.
-            function = functionStore.get(name).filter(fn -> "LIVE".equals(fn.getStage()));
-        }
-        return function.filter(fn -> effectiveStage.equals(fn.getStage())).orElseThrow(() ->
+        return findFunction(name, normalizeFunctionStage(stage)).orElseThrow(() ->
                 new AwsException("NoSuchFunctionExists",
                         "The specified function does not exist.", 404));
     }
@@ -1564,31 +1560,40 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
     }
 
     public synchronized CloudFrontFunction publishFunction(String name, String ifMatch) {
-        CloudFrontFunction development = describeFunction(name, "DEVELOPMENT");
+        CloudFrontFunction development = describeFunction(name, FUNCTION_STAGE_DEVELOPMENT);
         if (!development.getEtag().equals(ifMatch)) {
             throw new AwsException("InvalidIfMatchVersion",
                     "The If-Match version is missing or not valid for the resource.", 400);
         }
-        CloudFrontFunction live = copyFunction(development);
-        live.setStage("LIVE");
+        CloudFrontFunction live = development.copy();
+        live.setStage(FUNCTION_STAGE_LIVE);
         live.setStatus("DEPLOYED");
         live.setEtag(UUID.randomUUID().toString());
         live.setLastModifiedTime(Instant.now());
-        functionStore.put(functionKey(name, "LIVE"), live);
+        functionStore.put(functionKey(name, FUNCTION_STAGE_LIVE), live);
+        functionStore.delete(name + ":" + FUNCTION_STAGE_LIVE);
         return live;
     }
 
     public synchronized void deleteFunction(String name, String ifMatch) {
-        CloudFrontFunction existing = functionStore.get(name)
-                .or(() -> functionStore.get(functionKey(name, "LIVE")))
-                .orElseThrow(() -> new AwsException("NoSuchFunctionExists",
-                        "The specified function does not exist.", 404));
-        if (!existing.getEtag().equals(ifMatch)) {
+        Optional<CloudFrontFunction> development = findFunction(name, FUNCTION_STAGE_DEVELOPMENT);
+        Optional<CloudFrontFunction> live = findFunction(name, FUNCTION_STAGE_LIVE);
+        Optional<CloudFrontFunction> legacy = functionStore.get(name);
+        if (development.isEmpty() && live.isEmpty() && legacy.isEmpty()) {
+            throw new AwsException("NoSuchFunctionExists",
+                    "The specified function does not exist.", 404);
+        }
+        boolean match = development.map(CloudFrontFunction::getEtag).filter(ifMatch::equals).isPresent()
+                || live.map(CloudFrontFunction::getEtag).filter(ifMatch::equals).isPresent()
+                || legacy.map(CloudFrontFunction::getEtag).filter(ifMatch::equals).isPresent();
+        if (!match) {
             throw new AwsException("InvalidIfMatchVersion",
                     "The If-Match version is missing or not valid for the resource.", 400);
         }
-        functionStore.delete(name);
-        functionStore.delete(functionKey(name, "LIVE"));
+        functionStore.delete(functionKey(name, FUNCTION_STAGE_DEVELOPMENT));
+        functionStore.delete(functionKey(name, FUNCTION_STAGE_LIVE));
+        functionStore.delete(name + ":" + FUNCTION_STAGE_DEVELOPMENT);
+        functionStore.delete(name + ":" + FUNCTION_STAGE_LIVE);
     }
 
     public List<CloudFrontFunction> listFunctions(String stage, String marker, int maxItems) {
@@ -1606,8 +1611,8 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
 
     private static String functionKey(String name, String stage) {
         return switch (stage) {
-            case "DEVELOPMENT" -> name;
-            case "LIVE" -> name + "::LIVE";
+            case FUNCTION_STAGE_DEVELOPMENT -> name;
+            case FUNCTION_STAGE_LIVE -> name + "::LIVE";
             default -> throw invalidFunctionStage(stage);
         };
     }
@@ -1633,17 +1638,7 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
     }
 
     private static CloudFrontFunction copyFunction(CloudFrontFunction source) {
-        CloudFrontFunction copy = new CloudFrontFunction();
-        copy.setName(source.getName());
-        copy.setStage(source.getStage());
-        copy.setStatus(source.getStatus());
-        copy.setFunctionCode(source.getFunctionCode());
-        copy.setRuntime(source.getRuntime());
-        copy.setComment(source.getComment());
-        copy.setEtag(source.getEtag());
-        copy.setCreatedTime(source.getCreatedTime());
-        copy.setLastModifiedTime(source.getLastModifiedTime());
-        return copy;
+        return source.copy();
     }
 
     // ── Tags ──────────────────────────────────────────────────────────────────
@@ -2630,5 +2625,20 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
             return;
         }
         throw new AwsException("InvalidArgument", "The specified origin ARN is not valid.", 400);
+    }
+
+    private static final String FUNCTION_STAGE_DEVELOPMENT = "DEVELOPMENT";
+
+    private static final String FUNCTION_STAGE_LIVE = "LIVE";
+
+    private Optional<CloudFrontFunction> findFunction(String name, String stage) {
+        if (stage == null || stage.isEmpty()) {
+            return findFunction(name, FUNCTION_STAGE_DEVELOPMENT)
+                    .or(() -> findFunction(name, FUNCTION_STAGE_LIVE));
+        }
+        return functionStore.get(functionKey(name, stage))
+                .filter(fn -> stage.equals(fn.getStage()))
+                .or(() -> functionStore.get(name + ":" + stage).filter(fn -> stage.equals(fn.getStage())))
+                .or(() -> functionStore.get(name).filter(fn -> stage.equals(fn.getStage())));
     }
 }

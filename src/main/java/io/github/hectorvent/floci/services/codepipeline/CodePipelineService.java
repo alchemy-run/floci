@@ -534,6 +534,12 @@ public class CodePipelineService {
                 }
             }
             deleteSourcePollingBaselines(account, region, name);
+            for (String key : itemStore.keysForAccount(account)) {
+                if (key.startsWith(itemKey(region, "action-revision", name + "::"))
+                        || key.startsWith(itemKey(region, "artifact", name + "::"))) {
+                    itemStore.deleteForAccount(account, key);
+                }
+            }
         });
         return mapper.createObjectNode();
     }
@@ -1359,11 +1365,24 @@ public class CodePipelineService {
                     thirdParty ? "PollForThirdPartyJobs requires owner ThirdParty"
                             : "PollForJobs requires owner Custom", 400);
         }
-        String requested = actionTypeId(actionTypeId.path("category").asText(),
-                owner, actionTypeId.path("provider").asText(),
-                actionTypeId.path("version").asText());
+        String requested = actionTypeId(text(actionTypeId, "category"),
+                owner, text(actionTypeId, "provider"), text(actionTypeId, "version"));
+        requireItem(account, region, "action", requested, "ActionTypeNotFoundException");
+        if (request.hasNonNull("maxBatchSize") && (!request.path("maxBatchSize").isIntegralNumber()
+                || !request.path("maxBatchSize").canConvertToInt() || request.path("maxBatchSize").asInt() < 1)) {
+            throw new AwsException("ValidationException", "maxBatchSize must be a positive integer", 400);
+        }
+        JsonNode query = request.path("queryParam");
+        if (!query.isMissingNode() && !query.isObject()) {
+            throw new AwsException("ValidationException", "queryParam must be an object", 400);
+        }
+        for (JsonNode value : query) {
+            if (!value.isTextual()) {
+                throw new AwsException("ValidationException", "queryParam values must be strings", 400);
+            }
+        }
         ArrayNode jobs = mapper.createArrayNode();
-        int maximum = Math.max(1, request.path("maxBatchSize").asInt(1));
+        int maximum = request.path("maxBatchSize").asInt(1);
         for (CodePipelineStoredItem item : items(account, region, "job")) {
             if (jobs.size() >= maximum) {
                 break;
@@ -1373,7 +1392,9 @@ public class CodePipelineService {
             }
             JsonNode data = item.getData();
             if (requested.equals(data.path("actionTypeKey").asText())
-                    && thirdParty == data.path("thirdParty").asBoolean(false)) {
+                    && thirdParty == data.path("thirdParty").asBoolean(false)
+                    && matchesJobQuery(data.path("job").path("data").path("actionConfiguration")
+                            .path("configuration"), query)) {
                 jobs.add(data.path("job"));
             }
         }
@@ -1390,7 +1411,7 @@ public class CodePipelineService {
             throw new AwsException("InvalidNonceException", "Invalid job nonce", 400);
         }
         if (!"Created".equals(job.getStatus())) {
-            throw new AwsException("InvalidJobStateException", "Job has already been acknowledged", 400);
+            return mapper.createObjectNode().put("status", job.getStatus());
         }
         job.setStatus("InProgress");
         job.setUpdated(now());
@@ -1401,7 +1422,9 @@ public class CodePipelineService {
     private ObjectNode getJobDetails(JsonNode request, String region, String account) {
         CodePipelineStoredItem job = requireItem(
                 account, region, "job", text(request, "jobId"), "JobNotFoundException");
-        return mapper.createObjectNode().set("jobDetails", job.getData().path("job"));
+        ObjectNode details = job.getData().path("job").deepCopy();
+        details.remove("nonce");
+        return mapper.createObjectNode().set("jobDetails", details);
     }
 
     private ObjectNode completeJob(JsonNode request, String region, String account, boolean success) {
@@ -2023,7 +2046,11 @@ public class CodePipelineService {
                     execution, state.getActionName(), "S3_OBJECT_VERSION_ID");
             S3Object object = s3Service.getObject(bucket, key, versionId);
             for (JsonNode artifact : action.path("outputArtifacts")) {
-                runtimeArtifacts.put(artifactKey(execution, artifact.path("name").asText()), object.getData());
+                String artifactName = artifact.path("name").asText();
+                runtimeArtifacts.put(artifactKey(execution, artifactName), object.getData());
+                storeItem(execution.getAccountId(), execution.getRegion(), "artifact",
+                        storedArtifactId(execution, artifactName), "AVAILABLE",
+                        mapper.createObjectNode().put("bytes", Base64.getEncoder().encodeToString(object.getData())));
             }
             String revisionId = object.getVersionId() != null
                     ? object.getVersionId() : unquoteETag(object.getETag());
@@ -2045,7 +2072,14 @@ public class CodePipelineService {
         String bucket = config.path("BucketName").asText(config.path("S3Bucket").asText(null));
         String objectKey = config.path("ObjectKey").asText(state.getActionName() + ".zip");
         JsonNode input = action.path("inputArtifacts").path(0);
-        byte[] data = runtimeArtifacts.get(artifactKey(execution, input.path("name").asText()));
+        String artifactName = input.path("name").asText();
+        byte[] data = runtimeArtifacts.get(artifactKey(execution, artifactName));
+        if (data == null) {
+            data = itemStore.getForAccount(execution.getAccountId(),
+                            itemKey(execution.getRegion(), "artifact", storedArtifactId(execution, artifactName)))
+                    .map(item -> Base64.getDecoder().decode(item.getData().path("bytes").asText()))
+                    .orElse(null);
+        }
         if (data == null) {
             throw new AwsException("InvalidJobStateException", "Input artifact is not available", 400);
         }
@@ -2473,13 +2507,17 @@ public class CodePipelineService {
         ObjectNode job = mapper.createObjectNode();
         job.put("id", jobId);
         job.put("nonce", nonce);
+        job.put("accountId", execution.getAccountId());
         ObjectNode data = job.putObject("data");
+        data.set("actionTypeId", action.path("actionTypeId").deepCopy());
         data.set("actionConfiguration", mapper.createObjectNode().set("configuration", action.path("configuration")));
-        data.set("pipelineContext", mapper.createObjectNode()
-                .put("pipelineName", pipeline.getName())
-                .put("pipelineExecutionId", execution.getPipelineExecutionId())
-                .put("stageName", state.getStageName())
-                .put("actionName", state.getActionName()));
+        ObjectNode context = data.putObject("pipelineContext");
+        context.put("pipelineName", pipeline.getName());
+        context.put("pipelineArn", pipeline.getArn());
+        context.put("pipelineExecutionId", execution.getPipelineExecutionId());
+        context.putObject("stage").put("name", state.getStageName());
+        context.putObject("action").put("name", state.getActionName())
+                .put("actionExecutionId", state.getActionExecutionId());
         ObjectNode stored = mapper.createObjectNode();
         stored.put("actionTypeKey", actionTypeId(
                 state.getCategory(), state.getOwner(), state.getProvider(),
@@ -2793,12 +2831,12 @@ public class CodePipelineService {
         stageByName(pipeline, stageName);
     }
 
-    private void requireAction(CodePipelinePipeline pipeline, String stageName, String actionName) {
+    private JsonNode requireAction(CodePipelinePipeline pipeline, String stageName, String actionName) {
         for (JsonNode stage : pipeline.getDeclaration().path("stages")) {
             if (stageName.equals(stage.path("name").asText())) {
                 for (JsonNode action : stage.path("actions")) {
                     if (actionName.equals(action.path("name").asText())) {
-                        return;
+                        return action;
                     }
                 }
                 throw new AwsException("ActionNotFoundException", "Action not found: " + actionName, 400);
@@ -2897,9 +2935,13 @@ public class CodePipelineService {
     }
 
     private List<ActionExecution> actionExecutionsForStage(CodePipelineExecution execution, String stage) {
-        return execution.getActionExecutions().stream()
-                .filter(a -> stage.equals(a.getStageName()))
-                .toList();
+        Map<String, ActionExecution> latest = new LinkedHashMap<>();
+        for (ActionExecution action : execution.getActionExecutions()) {
+            if (stage.equals(action.getStageName())) {
+                latest.put(action.getActionName(), action);
+            }
+        }
+        return new ArrayList<>(latest.values());
     }
 
     private boolean hasStageExecution(CodePipelineExecution execution, String stage) {
@@ -3317,5 +3359,32 @@ public class CodePipelineService {
         return result;
     }
 
+    private ObjectNode listDeployActionExecutionTargets(JsonNode request, String region, String account) {
+        String pipelineName = text(request, "pipelineName");
+        requirePipeline(account, region, pipelineName);
+        String actionExecutionId = text(request, "actionExecutionId");
+        ActionExecution action = executions(account, region, pipelineName).stream()
+                .flatMap(execution -> execution.getActionExecutions().stream())
+                .filter(candidate -> actionExecutionId.equals(candidate.getActionExecutionId()))
+                .findFirst().orElseThrow(() -> new AwsException("ActionExecutionNotFoundException",
+                        "Action execution not found: " + actionExecutionId, 400));
+        if (!"Deploy".equals(action.getCategory())) {
+            throw new AwsException("ValidationException", "The action execution is not a deploy action", 400);
+        }
+        page(request, 0, 100);
+        return emptyPage("targets");
+    }
 
+    private boolean matchesJobQuery(JsonNode configuration, JsonNode query) {
+        for (Map.Entry<String, JsonNode> entry : query.properties()) {
+            if (!entry.getValue().equals(configuration.path(entry.getKey()))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static String storedArtifactId(CodePipelineExecution execution, String artifactName) {
+        return execution.getPipelineName() + "::" + execution.getPipelineExecutionId() + "::" + artifactName;
+    }
 }

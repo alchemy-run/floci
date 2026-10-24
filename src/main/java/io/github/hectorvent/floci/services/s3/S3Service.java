@@ -100,6 +100,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.util.TreeSet;
 
 @ApplicationScoped
 public class S3Service implements Resettable, ResourceProvider {
@@ -3119,7 +3120,9 @@ public class S3Service implements Resettable, ResourceProvider {
 
             if (versionIdMarker != null && !versionIdMarker.isEmpty()) {
                 List<S3Object> remaining = new ArrayList<>();
-                boolean afterMarker = false;
+                // A cleanup may delete the previous page, including its marker, before continuing.
+                boolean afterMarker = versions.stream().noneMatch(version ->
+                        km.equals(version.getKey()) && versionIdMarker.equals(reportedVersionId(version)));
                 for (S3Object v : versions) {
                     int keyCompare = v.getKey().compareTo(km);
                     if (keyCompare < 0) {
@@ -3768,10 +3771,11 @@ public class S3Service implements Resettable, ResourceProvider {
     }
 
     public Map<String, String> getBucketTagging(String bucketName) {
-        Bucket bucket = bucketStore.get(bucketName)
-                .orElseThrow(() -> new AwsException("NoSuchBucket",
-                        "The specified bucket does not exist.", 404));
-        return bucket.getTags() != null ? bucket.getTags() : Map.of();
+        Map<String, String> tags = listBucketTags(bucketName);
+        if (tags.isEmpty()) {
+            throw new AwsException("NoSuchTagSet", "The TagSet does not exist", 404);
+        }
+        return tags;
     }
 
     public void putBucketWebsite(String bucketName, WebsiteConfiguration config) {
@@ -6045,35 +6049,16 @@ public class S3Service implements Resettable, ResourceProvider {
      * every bucket and never returns 404 for {@code GetBucketEncryption}.
      */
     public String getBucketEncryption(String bucketName) {
-        Bucket bucket = bucketStore.get(bucketName)
-                .orElseThrow(() -> new AwsException("NoSuchBucket", "The specified bucket does not exist.", 404));
-        if (bucket.getEncryptionConfiguration() == null) {
-            return new XmlBuilder()
-                    .start("ServerSideEncryptionConfiguration", AwsNamespaces.S3)
-                      .start("Rule")
-                        .start("ApplyServerSideEncryptionByDefault")
-                          .elem("SSEAlgorithm", "AES256")
-                        .end("ApplyServerSideEncryptionByDefault")
-                        .elem("BucketKeyEnabled", "false")
-                      .end("Rule")
-                    .end("ServerSideEncryptionConfiguration")
-                    .build();
-        }
-        return bucket.getEncryptionConfiguration();
+        return bucketEncryption(bucketName).toXml();
     }
 
     public void putBucketEncryption(String bucketName, String encryptionXml) {
-        Bucket bucket = bucketStore.get(bucketName)
-                .orElseThrow(() -> new AwsException("NoSuchBucket", "The specified bucket does not exist.", 404));
-        bucket.setEncryptionConfiguration(encryptionXml);
-        bucketStore.put(bucketName, bucket);
+        mutateBucket(bucketName, bucket -> bucket.setEncryptionConfiguration(
+                S3EncryptionConfiguration.parse(encryptionXml).toXml()));
     }
 
     public void deleteBucketEncryption(String bucketName) {
-        Bucket bucket = bucketStore.get(bucketName)
-                .orElseThrow(() -> new AwsException("NoSuchBucket", "The specified bucket does not exist.", 404));
-        bucket.setEncryptionConfiguration(null);
-        bucketStore.put(bucketName, bucket);
+        mutateBucket(bucketName, bucket -> bucket.setEncryptionConfiguration(null));
     }
 
     /**
@@ -6404,19 +6389,16 @@ public class S3Service implements Resettable, ResourceProvider {
         bucketStore.put(bucketName, bucket);
     }
 
-    /**
-     * Returns the bucket Transfer Acceleration state as XML. A bucket that has never
-     * been configured returns an {@code AccelerateConfiguration} with no Status element
-     * rather than an error, matching real S3.
-     */
     public String getBucketAccelerateConfiguration(String bucketName) {
         Bucket bucket = bucketStore.get(bucketName)
                 .orElseThrow(() -> new AwsException("NoSuchBucket", "The specified bucket does not exist.", 404));
-        return new XmlBuilder()
-                .start("AccelerateConfiguration", AwsNamespaces.S3)
-                .elem("Status", bucket.getAccelerateStatus())
-                .end("AccelerateConfiguration")
-                .build();
+        XmlBuilder xml = new XmlBuilder()
+                .raw("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+                .start("AccelerateConfiguration", AwsNamespaces.S3);
+        if (bucket.getAccelerateStatus() != null) {
+            xml.elem("Status", bucket.getAccelerateStatus());
+        }
+        return xml.end("AccelerateConfiguration").build();
     }
 
     public void restoreObject(String bucketName, String key, String versionId, String restoreXml) {
@@ -7081,6 +7063,7 @@ public class S3Service implements Resettable, ResourceProvider {
         copy.setRetainUntilDate(source.getRetainUntilDate());
         copy.setLegalHoldStatus(source.getLegalHoldStatus());
         copy.setAcl(source.getAcl());
+        copy.setRestoreExpiryDate(source.getRestoreExpiryDate());
         copy.setDataGeneration(source.getDataGeneration());
         copy.setEventSequencer(source.getEventSequencer());
         return copy;
@@ -7854,8 +7837,8 @@ public class S3Service implements Resettable, ResourceProvider {
             metadata.putAll(effectiveOptions.getReplacementMetadata());
         }
 
-        String effectiveContentType = replaceMetadata && effectiveOptions.getContentType() != null
-                ? effectiveOptions.getContentType()
+        String effectiveContentType = replaceMetadata
+                ? normalizeReplaceContentType(effectiveOptions.getContentType())
                 : source.getContentType();
         String effectiveStorageClass = effectiveOptions.getStorageClass() != null
                 ? effectiveOptions.getStorageClass()
@@ -8080,5 +8063,95 @@ public class S3Service implements Resettable, ResourceProvider {
     @Override
     public Set<SupportedResourceType> getSupportedResourceTypes() {
         return Set.of(new SupportedResourceType("s3:bucket", "s3", true));
+    }
+
+    private S3EncryptionConfiguration bucketEncryption(String bucketName) {
+        Bucket bucket = resolveBucket(bucketName)
+                .orElseThrow(() -> new AwsException("NoSuchBucket", "The specified bucket does not exist.", 404));
+        return S3EncryptionConfiguration.fromStored(bucket.getEncryptionConfiguration());
+    }
+
+    private static boolean isRestorableStorageClass(String storageClass) {
+        if (storageClass == null || storageClass.isBlank()) {
+            return false;
+        }
+        return switch (storageClass.toUpperCase(java.util.Locale.ROOT)) {
+            case "GLACIER", "GLACIER_IR", "DEEP_ARCHIVE",
+                    "FLEXIBLE_RETRIEVAL", "GLACIER_FLEXIBLE_RETRIEVAL" -> true;
+            default -> false;
+        };
+    }
+
+    /**
+     * Tags as stored, including the empty set. S3 Control {@code ListTagsForResource}
+     * returns an empty list for an untagged bucket; {@link #getBucketTagging} matches
+     * real S3 and raises {@code NoSuchTagSet} instead.
+     */
+    public Map<String, String> listBucketTags(String bucketName) {
+        Bucket bucket = bucketStore.get(bucketName)
+                .orElseThrow(() -> new AwsException("NoSuchBucket",
+                        "The specified bucket does not exist.", 404));
+        return bucket.getTags() != null ? bucket.getTags() : Map.of();
+    }
+
+    /**
+     * AWS CopyObject with {@code x-amz-metadata-directive: REPLACE} stores
+     * {@code binary/octet-stream} when Content-Type is omitted; an explicit
+     * Content-Type, {@code application/octet-stream} included, is stored as given.
+     */
+    static String normalizeReplaceContentType(String contentType) {
+        if (contentType == null || contentType.isBlank()) {
+            return "binary/octet-stream";
+        }
+        String base = contentType.split(";", 2)[0].trim();
+        return base.isEmpty() ? "binary/octet-stream" : base;
+    }
+
+
+    /**
+     * A detached copy of a stored version as a response reports it: a null version selected with
+     * {@code versionId=null} is reported under that id even while it still lives at the plain key.
+     */
+    private static S3Object reportedCopy(S3Object object, String requestedVersionId) {
+        S3Object copy = copyObject(object);
+        if (copy.getVersionId() == null && NULL_VERSION_ID.equals(requestedVersionId)) {
+            copy.setVersionId(NULL_VERSION_ID);
+        }
+        return copy;
+    }
+
+
+    /** S3 rounds a restore's expiry up to the next midnight UTC after {@code Days} days. */
+    private static Instant restoreExpiry(Instant now, String restoreXml) {
+        String daysText = restoreXml == null || restoreXml.isBlank()
+                ? null
+                : XmlParser.extractFirst(restoreXml, "Days", null);
+        long days = 1;
+        if (daysText != null) {
+            try {
+                days = Long.parseLong(daysText.trim());
+            } catch (NumberFormatException e) {
+                throw new AwsException("MalformedXML",
+                        "The XML you provided was not well-formed or did not validate against our published schema", 400);
+            }
+            if (days < 1) {
+                throw new AwsException("InvalidArgument", "Days must be a positive integer.", 400);
+            }
+        }
+        return now.plus(days + 1, ChronoUnit.DAYS).truncatedTo(ChronoUnit.DAYS);
+    }
+
+
+    static final String NULL_VERSION_ID = "null";
+
+    public void validateExpectedBucketOwner(String bucketName, String expectedOwner) {
+        if (expectedOwner == null) {
+            return;
+        }
+        AccountAwareStorageBackend.OwnedEntry<Bucket> bucket = resolveBucketEntry(bucketName)
+                .orElseThrow(() -> new AwsException("NoSuchBucket", "The specified bucket does not exist.", 404));
+        if (!expectedOwner.equals(bucket.account())) {
+            throw new AwsException("AccessDenied", "Access Denied", 403);
+        }
     }
 }

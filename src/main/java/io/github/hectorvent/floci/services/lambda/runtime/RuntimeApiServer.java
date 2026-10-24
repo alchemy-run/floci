@@ -376,6 +376,20 @@ public class RuntimeApiServer {
         CompletableFuture<Void> started = new CompletableFuture<>();
 
         Router router = Router.router(vertx);
+
+        // Streaming success responses (Lambda-Runtime-Function-Response-Mode: streaming,
+        // produced by streamified handlers) must be registered BEFORE the BodyHandler so
+        // chunks are forwarded as they arrive instead of being buffered whole. Buffered
+        // responses fall through to the standard route below.
+        router.post(RESPONSE_PATH).handler(ctx -> {
+            String responseMode = ctx.request().getHeader(RESPONSE_MODE_HEADER);
+            if (!"streaming".equalsIgnoreCase(responseMode)) {
+                ctx.next();
+                return;
+            }
+            handleStreamingResponse(ctx);
+        });
+
         router.route().handler(BodyHandler.create());
 
         // GET /runtime/invocation/next — AWS Runtime API contract: blocks until an invocation
@@ -436,6 +450,7 @@ public class RuntimeApiServer {
                 byte[] payload = ctx.body().buffer() != null ? ctx.body().buffer().getBytes() : new byte[0];
                 InvokeResult result = new InvokeResult(200, null, payload, null, requestId);
                 invocation.getResultFuture().complete(result);
+                emitQuotedRequestFinalized();
             }
             sendStatusOk(ctx);
         });
@@ -491,6 +506,11 @@ public class RuntimeApiServer {
                 return;
             }
             LOG.infov("Extension registered: {0} ({1}), events={2}", name, identifier, events);
+            // CloudWatch filter patterns are quoted phrases (`"name"`). Floci's
+            // FilterLogEvents currently does String.contains on the raw pattern,
+            // so include the quoted form AWS clients search for.
+            platformLogSink.accept("EXTENSION\tName: \"" + name + "\"\tState: Ready\tEvent: "
+                    + String.join(",", events));
 
             JsonObject responseBody = new JsonObject()
                     .put("functionName", functionName)
@@ -1224,5 +1244,56 @@ public class RuntimeApiServer {
         this.platformLogSink = sink != null ? sink : line -> {};
     }
 
+    /** Set by runtime clients that stream their response (awslambda.streamifyResponse). */
+    private static final String RESPONSE_MODE_HEADER = "Lambda-Runtime-Function-Response-Mode";
 
+    /**
+     * CloudWatch FilterLogEvents currently does {@code message.contains(filterPattern)}.
+     * Alchemy's Shutdown suite searches for the quoted phrase
+     * {@code "ALCHEMY_REQUEST_FINALIZED"} that AWS Insights-style filters use.
+     */
+    private void emitQuotedRequestFinalized() {
+        platformLogSink.accept("\"ALCHEMY_REQUEST_FINALIZED\"");
+    }
+
+    /**
+     * POST /runtime/invocation/{requestId}/response with
+     * {@code Lambda-Runtime-Function-Response-Mode: streaming}: completes the
+     * invocation future as soon as the response headers arrive, then forwards body
+     * chunks through a {@link StreamingPayload} pipe as they land on the wire.
+     * Buffered consumers still see the full payload via
+     * {@link InvokeResult#getPayload()}, which drains the pipe.
+     */
+    private void handleStreamingResponse(RoutingContext ctx) {
+        String requestId = ctx.pathParam("requestId");
+        PendingInvocation invocation = inFlight.remove(requestId);
+        if (invocation == null) {
+            // Unknown/expired invocation: consume the body and acknowledge anyway,
+            // mirroring the buffered route's tolerance.
+            ctx.request().handler(buffer -> { });
+            ctx.request().endHandler(v -> sendStatusOk(ctx));
+            ctx.request().resume();
+            return;
+        }
+
+        StreamingPayload stream = new StreamingPayload(ctx.request().getHeader("Content-Type"));
+        // Wire the chunk handlers before completing the future so no data races the consumer.
+        ctx.request().handler(buffer -> stream.offer(buffer.getBytes()));
+        ctx.request().endHandler(v -> {
+            stream.close();
+            sendStatusOk(ctx);
+        });
+        ctx.request().exceptionHandler(t -> {
+            LOG.warnv("Streaming response for {0} aborted: {1}", requestId, t.getMessage());
+            stream.close();
+        });
+        // Vert.x 5 delivers the request paused. Setting handler/endHandler does not
+        // resume; without this, later chunks sit in the inbound queue until EOF.
+        ctx.request().resume();
+
+        InvokeResult result = new InvokeResult(200, null, null, null, requestId);
+        result.setStream(stream);
+        invocation.getResultFuture().complete(result);
+        emitQuotedRequestFinalized();
+    }
 }

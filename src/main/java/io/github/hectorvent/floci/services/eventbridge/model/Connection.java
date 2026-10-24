@@ -15,6 +15,7 @@ public class Connection {
     private ConnectionState connectionState;
     private String stateReason;
     // Raw request JSON, including secret values; responses must sanitize before returning.
+    @JsonAlias("authParametersJson")
     private String authParameters;
     private String invocationConnectivityParameters;
     private String secretArn;

@@ -109,7 +109,8 @@ public class LambdaController {
         if ("Image".equals(fn.getPackageType()) && fn.getImageUri() != null) {
             code.put("RepositoryType", "ECR");
             code.put("ImageUri", fn.getImageUri());
-            code.put("ResolvedImageUri", fn.getImageUri());
+            code.put("ResolvedImageUri", fn.getResolvedImageUri() != null
+                    ? fn.getResolvedImageUri() : fn.getImageUri());
         } else {
             String base = uriInfo.getBaseUri().toString();
             if (base.endsWith("/")) {
@@ -695,11 +696,14 @@ public class LambdaController {
 
     @SuppressWarnings("unchecked")
     private Map<String, Double> extractRoutingConfig(Map<String, Object> rc) {
+        // AWS UpdateAlias REPLACES routing when RoutingConfig is present:
+        // an empty object (or empty AdditionalVersionWeights) CLEARS it.
+        // Return null only when the key is absent ("leave unchanged"); an
+        // empty map signals the service to clear.
         if (rc == null) return null;
         Object weights = rc.get("AdditionalVersionWeights");
-        if (!(weights instanceof Map)) return null;
+        if (!(weights instanceof Map)) return new java.util.HashMap<>();
         Map<String, Object> raw = (Map<String, Object>) weights;
-        if (raw.isEmpty()) return null;
         java.util.Map<String, Double> result = new java.util.HashMap<>();
         raw.forEach((k, v) -> result.put(k, ((Number) v).doubleValue()));
         return result;

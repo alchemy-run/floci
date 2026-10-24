@@ -28,8 +28,8 @@ public class AccountPasswordPolicy {
     public AccountPasswordPolicy() {}
 
     public int getMinimumPasswordLength() { return minimumPasswordLength; }
-    public void setMinimumPasswordLength(int minimumPasswordLength) {
-        this.minimumPasswordLength = minimumPasswordLength;
+    public void setMinimumPasswordLength(Integer minimumPasswordLength) {
+        this.minimumPasswordLength = minimumPasswordLength == null ? 6 : minimumPasswordLength;
     }
 
     public boolean isRequireSymbols() { return requireSymbols; }

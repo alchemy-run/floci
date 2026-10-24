@@ -81,11 +81,7 @@ public class CloudControlService {
     /** Token insertion order, so the map can be bounded without losing in-flight requests. */
     private final ConcurrentLinkedQueue<String> requestOrder =
             new ConcurrentLinkedQueue<>();
-    /**
-     * What CreateResource provisioned, keyed by region/type/identifier. Carries the attributes the
-     * delete path needs and the model the read path returns for types outside {@link #listResources}.
-     * Entries are dropped when the resource is deleted.
-     */
+    /** Create-time deletion metadata; reads always observe the backend. */
     private final Map<String, CreatedResource> created = new ConcurrentHashMap<>();
     /** For the constructors that take no {@link EmulatorConfig}; match its cloudcontrol defaults. */
     private static final int DEFAULT_WORKER_COUNT = 4;
@@ -273,13 +269,6 @@ public class CloudControlService {
         restorePersistedState();
     }
 
-    /**
-     * Cloud Control {@code CreateResource}. Cloud Control is asynchronous: the call returns an
-     * IN_PROGRESS ProgressEvent + a request token immediately, and provisioning runs in the
-     * background. Clients poll {@link #requestStatus} until SUCCESS/FAILED. This matters because
-     * some resources (e.g. an EC2 instance, which launches a container) take longer than a client's
-     * synchronous-call deadline — a synchronous create would time out on the caller.
-     */
     private boolean hasCreatedResourceForAnotherAccount(String region, String typeName,
                                                          String identifier, String accountId) {
         String suffix = "|" + region + "|" + typeName + "|" + identifier;
@@ -305,8 +294,14 @@ public class CloudControlService {
         } catch (Exception e) {
             throw new AwsException("InvalidRequestException", "DesiredState is not valid JSON.", 400);
         }
+        if (props == null || !props.isObject()) {
+            throw new AwsException("InvalidRequestException", "DesiredState must be a JSON object.", 400);
+        }
+        listResources(region, accountId, typeName);
         String token = UUID.randomUUID().toString();
         ProgressEvent pending = new ProgressEvent(typeName, null, token, "CREATE", "IN_PROGRESS", null, null, accountId);
+        operationLocks.put(token, new ReentrantLock());
+        persistRequest(new PersistedRequest(pending, region, desiredStateJson, System.currentTimeMillis()));
         record(pending);
         submitCreate(region, accountId, typeName, desiredStateJson, token, pending, props);
         return pending;
@@ -553,21 +548,13 @@ public class CloudControlService {
                 }
             }
         }
-        // CreateResource provisions the whole CFN type set while the read side lists six types, so
-        // fall back to what the create recorded — otherwise a successful create is unreadable.
-        CreatedResource state = created.get(createdKey(accountId, region, typeName, identifier));
-        if (state != null) {
-            return new ResourceDescription(identifier, state.model());
+        if (listed == null) {
+            throw new AwsException("UnsupportedActionException", "GetResource is not supported for " + typeName, 400);
         }
         throw new AwsException("ResourceNotFoundException",
                 "Resource " + identifier + " of type " + typeName + " was not found.", 404);
     }
 
-    /**
-     * Stores a request's latest state, evicting the oldest finished tokens once the map grows past
-     * {@link #MAX_RETAINED_REQUESTS}. In-flight tokens are never evicted — a client still polling
-     * must not get RequestTokenNotFound.
-     */
     private ProgressEvent record(ProgressEvent event) {
         if (requests.put(event.requestToken(), event) == null) {
             requestOrder.add(event.requestToken());
@@ -620,15 +607,7 @@ public class CloudControlService {
         }
     }
 
-    /**
-     * Cloud Control {@code ListResources}. A type this read side does not enumerate reports
-     * {@code UnsupportedActionException} rather than an empty list: an empty {@code
-     * ResourceDescriptions} is indistinguishable from "supported type, zero resources", which
-     * defeats a caller sweeping type names to discover inventory. Floci provisions many more types
-     * than {@link #resourcesForType} lists (see {@link #getResource} and {@link #createResource}),
-     * so this is a statement about read-side enumeration support, not about the type existing in
-     * AWS at all.
-     */
+    /** Unsupported backends are errors, not empty inventories. */
     public List<ResourceDescription> listResources(String region, String typeName) {
         return listResources(region, DEFAULT_ACCOUNT, typeName);
     }
@@ -646,7 +625,18 @@ public class CloudControlService {
     /** The types {@link #listResources} and {@link #getResource} can enumerate, or {@code null}. */
     private List<ResourceDescription> resourcesForType(String region, String typeName) {
         return switch (typeName) {
+            case "AWS::SSM::Parameter" -> ssmBackend.list(region).stream()
+                    .map(model -> new ResourceDescription(model.path("Name").asText(), model.toString())).toList();
+            case SsmDocumentResource.TYPE -> ssmDocuments.list(region).stream()
+                    .map(model -> new ResourceDescription(model.path("Name").asText(), model.toString())).toList();
             case "AWS::S3::Bucket" -> s3Buckets();
+            case "AWS::EC2::InternetGateway" -> ec2Service.describeInternetGateways(region, List.of(), Map.of()).stream()
+                    .map(gateway -> {
+                        ObjectNode model = mapper.createObjectNode();
+                        model.put("InternetGatewayId", gateway.getInternetGatewayId());
+                        addTags(model, gateway.getTags());
+                        return new ResourceDescription(gateway.getInternetGatewayId(), model.toString());
+                    }).toList();
             case "AWS::EC2::VPC" -> vpcs(region);
             case "AWS::EC2::Subnet" -> subnets(region);
             case "AWS::EC2::SecurityGroup" -> securityGroups(region);

@@ -91,13 +91,13 @@ public class AlarmEvaluator {
     }
 
     /**
-     * Queries the <em>evaluation range</em> — more periods than {@code evaluationPeriods} — and
+     * Queries the <em>evaluation range</em>, more periods than {@code evaluationPeriods}, and
      * resolves the state with CloudWatch's documented precedence ("How alarm state is evaluated
      * when data is missing"): real datapoints reaching further back are preferred, and {@code
      * TreatMissingData} only fills what real data cannot cover.
      *
      * <p>Once the range holds at least {@code evaluationPeriods} real datapoints, the most recent
-     * of those decide the state and {@code TreatMissingData} is not consulted at all — AWS: "the
+     * of those decide the state and {@code TreatMissingData} is not consulted at all, AWS: "the
      * value you set for how to treat missing data is not needed and is ignored". Reaching further
      * back is precisely what makes that branch reachable, so widening the query narrows how often
      * the fallback applies without changing what any of its modes mean.</p>
@@ -111,6 +111,9 @@ public class AlarmEvaluator {
             return;
         }
         String region = alarm.getRegion();
+        if (metricsService.isManualAlarmStateHeld(alarm.getAlarmName(), region)) {
+            return;
+        }
         int period = alarm.getPeriod();
         int evaluationPeriods = alarm.getEvaluationPeriods();
         int range = evaluationRange(evaluationPeriods);
@@ -180,11 +183,19 @@ public class AlarmEvaluator {
             }
         }
 
-        if (!newState.equals(alarm.getStateValue())) {
+        // Re-checked: a SetAlarmState may have landed while this tick was evaluating.
+        if (!newState.equals(alarm.getStateValue())
+                && !metricsService.isManualAlarmStateHeld(alarm.getAlarmName(), region)) {
             metricsService.setAlarmState(alarm.getAlarmName(), newState, reason, null, region);
+            if (metadataService != null) {
+                metadataService.history(alarm.getAlarmName(), "MetricAlarm", "StateUpdate", reason,
+                        com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode()
+                                .put("StateValue", newState).put("StateReason", reason), region);
+            }
         }
 
-        if ("ALARM".equals(newState) && alarm.isActionsEnabled()) {
+        if ("ALARM".equals(newState) && alarm.isActionsEnabled()
+                && (metadataService == null || !metadataService.muted(alarm.getAlarmName(), region))) {
             dispatch(alarm, latestValue, region);
         }
     }
@@ -205,7 +216,7 @@ public class AlarmEvaluator {
      * breaching datapoint during the Evaluation Periods number of data points is at least as old
      * as the value of Datapoints to Alarm" and every more recent datapoint is breaching or
      * missing. A lone breach at the very end of the window ({@code - - - - X}) deliberately does
-     * not qualify — the next datapoint may be non-breaching — while one that has already aged past
+     * not qualify, the next datapoint may be non-breaching, while one that has already aged past
      * {@code DatapointsToAlarm} ({@code - - X - -}) does, even with fewer real datapoints than M.
      *
      * <p>"All other" spans the whole evaluation range, not just the most recent {@code

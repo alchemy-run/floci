@@ -1572,6 +1572,12 @@ public class EventBridgeService implements ResourceProvider {
         Connection connection = connectionStore.get(key)
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException",
                         "Connection " + name + " does not exist.", 400));
+        boolean inUse = apiDestinationStore.scan(k -> k.startsWith("api-destination:" + region + ":")).stream()
+                .anyMatch(destination -> connection.getConnectionArn().equals(destination.getConnectionArn()));
+        if (inUse) {
+            throw new AwsException("ConcurrentModificationException",
+                    "Connection is in use by one or more API destinations: " + name, 400);
+        }
         connectionStore.delete(key);
         LOG.infov("Deleted connection: {0}", name);
         return connection;
@@ -2044,8 +2050,8 @@ public class EventBridgeService implements ResourceProvider {
         return "replay:" + region + ":" + replayName;
     }
 
-    private static String connectionKey(String region, String connectionName) {
-        return "connection:" + region + ":" + connectionName;
+    private static String connectionKey(String region, String name) {
+        return "connection:" + region + ":" + name;
     }
 
     private static String archiveNameFromArn(String arn) {
@@ -2159,7 +2165,5 @@ public class EventBridgeService implements ResourceProvider {
         names.sort(String::compareTo);
         return names;
     }
-
-
 
 }

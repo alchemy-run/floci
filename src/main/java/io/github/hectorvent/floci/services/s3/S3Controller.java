@@ -279,8 +279,7 @@ public class S3Controller {
                                @Context UriInfo uriInfo,
                                @Context HttpHeaders httpHeaders) {
         try {
-            S3Service.RequestAuthorization authorization = S3RequestAuthorizationParser.parseIfRequired(
-                    s3Service.isAuthEnforced(), httpHeaders, uriInfo);
+            S3Service.RequestAuthorization authorization = bucketAuthorization(bucket, httpHeaders, uriInfo);
             if (isWebsiteRequest(httpHeaders, uriInfo)) {
                 Response websiteResponse = serveWebsiteObject(bucket, "", authorization, false);
                 if (websiteResponse != null) {
@@ -500,8 +499,7 @@ public class S3Controller {
                                   @Context HttpHeaders httpHeaders) {
         try {
             validateRawUri();
-            S3Service.RequestAuthorization authorization = S3RequestAuthorizationParser.parseIfRequired(
-                    s3Service.isAuthEnforced(), httpHeaders, uriInfo);
+            S3Service.RequestAuthorization authorization = bucketAuthorization(bucket, httpHeaders, uriInfo);
             if (hasQueryParam(uriInfo, "tagging")) {
                 s3Service.authorizeBucketWrite(bucket, "s3:PutBucketTagging", authorization);
                 s3Service.deleteBucketTagging(bucket);
@@ -1753,8 +1751,7 @@ public class S3Controller {
         boolean bypass = "true".equalsIgnoreCase(
                 httpHeaders.getHeaderString("x-amz-bypass-governance-retention"));
 
-        S3Service.RequestAuthorization authorization = S3RequestAuthorizationParser.parseIfRequired(
-                s3Service.isAuthEnforced(), httpHeaders, uriInfo);
+        S3Service.RequestAuthorization authorization = bucketAuthorization(bucket, httpHeaders, uriInfo);
         s3Service.authorizeSignedRequest(authorization);
         String iamCredential = iamCredential(httpHeaders, uriInfo);
         List<XmlParser.KeyVersion> authorizedEntries = new ArrayList<>();
@@ -2122,7 +2119,7 @@ public class S3Controller {
             if (obj.isDeleteMarker()) {
                 xml.start("DeleteMarker")
                    .elem("Key", maybeEncode(obj.getKey(), encodingType))
-                   .elem("VersionId", obj.getVersionId())
+                   .elem("VersionId", obj.getVersionId() != null ? obj.getVersionId() : "null")
                    .elem("IsLatest", obj.isLatest())
                    .elem("LastModified", ISO_FORMAT.format(obj.getLastModified()))
                    .end("DeleteMarker");
@@ -3967,7 +3964,13 @@ public class S3Controller {
         }
 
         S3Object obj = s3Service.postObject(bucket, key, fileData, objectContentType,
-                metadata.isEmpty() ? null : metadata);
+                metadata.isEmpty() ? null : metadata,
+                new PutObjectOptions()
+                        .withServerSideEncryption(lcFields.get("x-amz-server-side-encryption"))
+                        .withSseKmsKeyId(lcFields.get("x-amz-server-side-encryption-aws-kms-key-id"))
+                        .withSseCustomerAlgorithm(lcFields.get("x-amz-server-side-encryption-customer-algorithm"))
+                        .withSseCustomerKey(lcFields.get("x-amz-server-side-encryption-customer-key"))
+                        .withSseCustomerKeyMd5(lcFields.get("x-amz-server-side-encryption-customer-key-md5")));
         LOG.infov("Presigned POST upload: {0}/{1} ({2} bytes)", bucket, key, fileData.length);
 
         String xml = new XmlBuilder()
@@ -4979,5 +4982,13 @@ public class S3Controller {
                 && !rewritten.equals(rawPath)
                 && rewritten.equals("/" + bucket + rawPath);
     }
+
+    private S3Service.RequestAuthorization bucketAuthorization(String bucket, HttpHeaders headers, UriInfo uriInfo) {
+        S3Service.RequestAuthorization authorization = S3RequestAuthorizationParser.parseIfRequired(
+                s3Service.isAuthEnforced(), headers, uriInfo);
+        s3Service.validateExpectedBucketOwner(bucket, headers.getHeaderString("x-amz-expected-bucket-owner"));
+        return authorization;
+    }
+
 
 }

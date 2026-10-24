@@ -472,7 +472,11 @@ public class WarmPool implements ContainerTeardown, Resettable {
         activeLeases.remove(handle);
         LOG.debugv("Destroying timed-out container {0} for function {1}",
                 handle.getContainerId(), handle.getFunctionName());
-        stopQuietly(handle);
+        try {
+            stopQuietly(handle);
+        } finally {
+            releaseLease(handle.getFunctionName(), handle);
+        }
     }
 
     ContainerHandle acquireProvisioned(LambdaFunction fn, String qualifier) {
@@ -715,4 +719,18 @@ public class WarmPool implements ContainerTeardown, Resettable {
             drainFunction(functionName);
         }
     }
+
+    private void releaseLease(String functionName, ContainerHandle handle) {
+        if (handle != null && !leased.remove(handle)) {
+            return;
+        }
+        Semaphore sem = inFlight.get(functionName);
+        if (sem != null) {
+            sem.release();
+        }
+    }
+
+    private final ConcurrentHashMap<String, Semaphore> inFlight = new ConcurrentHashMap<>();
+
+    private final Set<ContainerHandle> leased = ConcurrentHashMap.newKeySet();
 }

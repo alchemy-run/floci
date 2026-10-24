@@ -33,6 +33,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import com.github.dockerjava.api.command.BuildImageResultCallback;
+import java.io.IOException;
+import java.io.InputStream;
 
 /** Owns the protected namespace and the Floci-only nftables table for each managed ENI. */
 @ApplicationScoped
@@ -63,7 +66,7 @@ public class SecurityGroupFirewallManager {
 
     @PostConstruct
     void quarantineSurvivingNamespaces() {
-        if (!enabled()) {
+        if (!enabled() && config.services().ec2().mock()) {
             return;
         }
         try {
@@ -352,4 +355,5 @@ public class SecurityGroupFirewallManager {
     public record Namespace(String helperId, String transportAddress) {}
     private record ProtectedEndpoint(SecurityGroupNftCompiler.Endpoint endpoint, String helperId,
                                      Map<String, List<String>> prefixLists) {}
+
 }

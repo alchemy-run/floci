@@ -297,7 +297,9 @@ public class CognitoJsonHandler {
     }
 
     private Response handleDeleteUserPool(JsonNode request) {
-        service.deleteUserPool(request.path("UserPoolId").asText());
+        String userPoolId = request.path("UserPoolId").asText();
+        service.deleteUserPool(userPoolId);
+        brandingService.deleteAllForUserPool(userPoolId);
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
@@ -363,10 +365,10 @@ public class CognitoJsonHandler {
     }
 
     private Response handleDeleteUserPoolClient(JsonNode request) {
-        service.deleteUserPoolClient(
-                request.path("UserPoolId").asText(),
-                request.path("ClientId").asText()
-        );
+        String userPoolId = request.path("UserPoolId").asText();
+        String clientId = request.path("ClientId").asText();
+        service.deleteUserPoolClient(userPoolId, clientId);
+        brandingService.deleteAllForClient(userPoolId, clientId);
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
@@ -564,9 +566,16 @@ public class CognitoJsonHandler {
     }
 
     private Response handleDescribeUserPoolDomain(JsonNode request) {
-        UserPoolDomain domain = service.describeUserPoolDomain(request.path("Domain").asText());
         ObjectNode response = objectMapper.createObjectNode();
-        response.set("DomainDescription", userPoolDomainToNode(domain));
+        try {
+            UserPoolDomain domain = service.describeUserPoolDomain(request.path("Domain").asText());
+            response.set("DomainDescription", userPoolDomainToNode(domain));
+        } catch (AwsException e) {
+            if (!"ResourceNotFoundException".equals(e.getErrorCode())) {
+                throw e;
+            }
+            response.set("DomainDescription", objectMapper.createObjectNode());
+        }
         return Response.ok(response).build();
     }
 
@@ -788,7 +797,7 @@ public class CognitoJsonHandler {
     }
 
     private Response handleCreateManagedLoginBranding(JsonNode request) {
-        ManagedLoginBranding branding = service.createManagedLoginBranding(
+        ManagedLoginBranding branding = brandingService.create(
                 request.path("UserPoolId").asText(),
                 request.path("ClientId").asText(),
                 readUseCognitoProvidedValues(request),
@@ -799,19 +808,19 @@ public class CognitoJsonHandler {
     }
 
     private Response handleDescribeManagedLoginBranding(JsonNode request) {
-        return brandingResponse(service.describeManagedLoginBranding(
-                request.path("UserPoolId").asText(),
-                request.path("ManagedLoginBrandingId").asText(null)));
+        ManagedLoginBranding branding = brandingService.describe(
+                request.path("UserPoolId").asText(), request.path("ManagedLoginBrandingId").asText(null));
+        return brandingResponse(branding, request.path("ReturnMergedResources").asBoolean(false));
     }
 
     private Response handleDescribeManagedLoginBrandingByClient(JsonNode request) {
-        return brandingResponse(service.describeManagedLoginBrandingByClient(
-                request.path("UserPoolId").asText(),
-                request.path("ClientId").asText()));
+        ManagedLoginBranding branding = brandingService.describeByClient(
+                request.path("UserPoolId").asText(), request.path("ClientId").asText());
+        return brandingResponse(branding, request.path("ReturnMergedResources").asBoolean(false));
     }
 
     private Response handleUpdateManagedLoginBranding(JsonNode request) {
-        return brandingResponse(service.updateManagedLoginBranding(
+        return brandingResponse(brandingService.update(
                 request.path("UserPoolId").asText(),
                 request.path("ManagedLoginBrandingId").asText(null),
                 readUseCognitoProvidedValues(request),
@@ -820,16 +829,14 @@ public class CognitoJsonHandler {
     }
 
     private Response handleDeleteManagedLoginBranding(JsonNode request) {
-        service.deleteManagedLoginBranding(
+        brandingService.delete(
                 request.path("UserPoolId").asText(),
                 request.path("ManagedLoginBrandingId").asText(null));
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
     private Response brandingResponse(ManagedLoginBranding branding) {
-        ObjectNode response = objectMapper.createObjectNode();
-        response.set("ManagedLoginBranding", managedLoginBrandingToNode(branding));
-        return Response.ok(response).build();
+        return brandingResponse(branding, false);
     }
 
     /** AWS omits Settings entirely when none was supplied, but always returns Assets. */
@@ -1232,6 +1239,13 @@ public class CognitoJsonHandler {
             node.set("UserAttributeUpdateSettings", objectMapper.valueToTree(p.getUserAttributeUpdateSettings()));
         }
         node.put("UserPoolTier", p.getUserPoolTier() != null ? p.getUserPoolTier() : "ESSENTIALS");
+        for (UserPoolDomain domain : service.listUserPoolDomains(p.getId())) {
+            if (domain.isCustomDomain()) {
+                node.put("CustomDomain", domain.getDomain());
+            } else {
+                node.put("Domain", domain.getDomain());
+            }
+        }
 
         return node;
     }

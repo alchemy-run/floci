@@ -56,6 +56,7 @@ public class LambdaUrlConfig {
     @RegisterForReflection
     public static class Cors {
         @JsonProperty("AllowCredentials")
+        @JsonInclude(JsonInclude.Include.NON_DEFAULT)
         private boolean allowCredentials;
 
         @JsonProperty("AllowHeaders")

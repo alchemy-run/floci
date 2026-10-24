@@ -441,6 +441,16 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
                         task.getTaskArn(), e.getMessage());
             }
         }
+        // Task state is memory-only, so an ENI left behind here would outlive every task that
+        // could claim it and reload from EC2's store as an orphan on the next start.
+        for (EcsTask task : tasks.values()) {
+            try {
+                containerManager.releaseTaskNetwork(task, taskRegion(task));
+            } catch (Exception e) {
+                LOG.warnv("Failed to release the ENI of ECS task {0} on shutdown: {1}",
+                        task.getTaskArn(), e.getMessage());
+            }
+        }
     }
 
     @Override
@@ -2500,29 +2510,12 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
     public List<ProtectedTask> updateTaskProtection(String clusterRef, List<String> taskRefs,
                                                      boolean protectionEnabled, Integer expiresInMinutes,
                                                      String region) {
-        List<ProtectedTask> result = new ArrayList<>();
-        for (String ref : taskRefs) {
-            EcsTask task = resolveTaskOrThrow(ref, region);
-            task.setProtectionEnabled(protectionEnabled);
-            Instant expiration = null;
-            if (protectionEnabled && expiresInMinutes != null) {
-                expiration = Instant.now().plusSeconds(expiresInMinutes * 60L);
-                task.setProtectedUntil(expiration);
-            } else {
-                task.setProtectedUntil(null);
-            }
-            result.add(new ProtectedTask(task.getTaskArn(), protectionEnabled, expiration));
-        }
-        return result;
+        return updateTaskProtectionDetailed(clusterRef, taskRefs, protectionEnabled, expiresInMinutes, region)
+                .protectedTasks();
     }
 
     public List<ProtectedTask> getTaskProtection(String clusterRef, List<String> taskRefs, String region) {
-        List<ProtectedTask> result = new ArrayList<>();
-        for (String ref : taskRefs) {
-            EcsTask task = resolveTaskOrThrow(ref, region);
-            result.add(new ProtectedTask(task.getTaskArn(), task.isProtectionEnabled(), task.getProtectedUntil()));
-        }
-        return result;
+        return getTaskProtectionDetailed(clusterRef, taskRefs, region).protectedTasks();
     }
 
     // ── Services ──────────────────────────────────────────────────────────────

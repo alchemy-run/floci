@@ -605,25 +605,8 @@ public class FirehoseService implements ResourceProvider {
 
     public void startDeliveryStreamEncryption(String name, String keyType, String keyArn) {
         DeliveryStreamDescription stream = describeDeliveryStream(name);
-        String effectiveKeyType = keyType == null ? "AWS_OWNED_CMK" : keyType;
-        if (!effectiveKeyType.equals("AWS_OWNED_CMK") && !effectiveKeyType.equals("CUSTOMER_MANAGED_CMK")) {
-            throw new AwsException("InvalidArgumentException",
-                    "KeyType must be AWS_OWNED_CMK or CUSTOMER_MANAGED_CMK.", 400);
-        }
-        if (effectiveKeyType.equals("CUSTOMER_MANAGED_CMK") && (keyArn == null || keyArn.isBlank())) {
-            throw new AwsException("InvalidArgumentException",
-                    "KeyARN is required for CUSTOMER_MANAGED_CMK.", 400);
-        }
-        if (keyArn != null && !keyArn.isBlank()
-                && (keyArn.length() > SSE_KEY_ARN_MAX_LENGTH || !SSE_KEY_ARN_PATTERN.matcher(keyArn).matches())) {
-            throw new AwsException("InvalidArgumentException",
-                    "KeyARN is not a valid KMS key ARN: " + keyArn, 400);
-        }
-        stream.setDeliveryStreamEncryptionConfiguration(
-                new DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration(
-                        effectiveKeyType,
-                        effectiveKeyType.equals("CUSTOMER_MANAGED_CMK") ? keyArn : null,
-                        "ENABLED"));
+        applyEncryption(stream, keyType, keyArn);
+        stream.setLastUpdateTimestamp(clock.instant());
         streamPut(scopedKey(name), stream);
     }
 
@@ -639,6 +622,7 @@ public class FirehoseService implements ResourceProvider {
         stream.setDeliveryStreamEncryptionConfiguration(
                 new DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration(
                         keyType, keyArn, "DISABLED"));
+        stream.setLastUpdateTimestamp(clock.instant());
         streamPut(scopedKey(name), stream);
     }
 
@@ -1530,5 +1514,31 @@ public class FirehoseService implements ResourceProvider {
         try {
             s3Service.createBucket(bucket, regionResolver.getDefaultRegion());
         } catch (Exception ignored) {}
+    }
+
+    private static void applyEncryption(DeliveryStreamDescription stream, String keyType, String keyArn) {
+        if ("KinesisStreamAsSource".equals(stream.getDeliveryStreamType())) {
+            throw new AwsException("InvalidArgumentException",
+                    "Server-side encryption is not supported for delivery streams with a Kinesis stream as source.", 400);
+        }
+        String effectiveKeyType = keyType == null ? "AWS_OWNED_CMK" : keyType;
+        if (!effectiveKeyType.equals("AWS_OWNED_CMK") && !effectiveKeyType.equals("CUSTOMER_MANAGED_CMK")) {
+            throw new AwsException("InvalidArgumentException",
+                    "KeyType must be AWS_OWNED_CMK or CUSTOMER_MANAGED_CMK.", 400);
+        }
+        if (effectiveKeyType.equals("CUSTOMER_MANAGED_CMK") && (keyArn == null || keyArn.isBlank())) {
+            throw new AwsException("InvalidArgumentException",
+                    "KeyARN is required for CUSTOMER_MANAGED_CMK.", 400);
+        }
+        if (keyArn != null && !keyArn.isBlank()
+                && (keyArn.length() > SSE_KEY_ARN_MAX_LENGTH || !SSE_KEY_ARN_PATTERN.matcher(keyArn).matches())) {
+            throw new AwsException("InvalidArgumentException",
+                    "KeyARN is not a valid KMS key ARN: " + keyArn, 400);
+        }
+        stream.setDeliveryStreamEncryptionConfiguration(
+                new DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration(
+                        effectiveKeyType,
+                        effectiveKeyType.equals("CUSTOMER_MANAGED_CMK") ? keyArn : null,
+                        "ENABLED"));
     }
 }

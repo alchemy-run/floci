@@ -260,11 +260,11 @@ public class Route53ResolverService {
     }
 
     public ObjectNode getResolverEndpoint(String id) {
-        return require(endpointStore, id, "resolver endpoint").deepCopy();
+        return resourceView(require(endpointStore, id, "resolver endpoint"));
     }
 
     public List<ObjectNode> listResolverEndpoints() {
-        return endpointStore.scan(key -> true).stream().map(ObjectNode::deepCopy).toList();
+        return endpointStore.scan(key -> true).stream().map(this::resourceView).toList();
     }
 
     /**
@@ -300,16 +300,22 @@ public class Route53ResolverService {
         return addresses;
     }
 
-    public ObjectNode updateResolverEndpoint(String id, JsonNode request) {
-        ObjectNode endpoint = require(endpointStore, id, "resolver endpoint");
-        String endpointType = text(request, "ResolverEndpointType");
-        if (endpointType != null) {
-            requireEnum(endpointType, "ResolverEndpointType", ENDPOINT_TYPES, INVALID_PARAMETER);
+    public synchronized ObjectNode updateResolverEndpoint(String id, JsonNode request) {
+        ObjectNode endpoint = require(endpointStore, id, "resolver endpoint").deepCopy();
+        validateEndpointOptions(request);
+        if (request.hasNonNull("ResolverEndpointType")
+                && !"IPV4".equals(text(request, "ResolverEndpointType"))) {
+            throw new AwsException(INVALID_PARAMETER,
+                    "IPv6 resolver network interfaces are not supported by this emulator", 400);
         }
-        copyIfPresent(request, endpoint, "Name", "ResolverEndpointType");
+        if (request.has("UpdateIpAddresses")) {
+            throw new AwsException(INVALID_PARAMETER,
+                    "IPv6 resolver IP address updates are not supported by this emulator", 400);
+        }
+        copyIfPresent(request, endpoint, "Name", "ResolverEndpointType", "Protocols");
         endpoint.put("ModificationTime", Instant.now().toString());
         endpointStore.put(id, endpoint);
-        return endpoint.deepCopy();
+        return resourceView(endpoint);
     }
 
     // ---------- Resolver rules ----------
@@ -362,27 +368,41 @@ public class Route53ResolverService {
     }
 
     public ObjectNode getResolverRule(String id) {
-        return require(ruleStore, id, "resolver rule").deepCopy();
+        return resourceView(require(ruleStore, id, "resolver rule"));
     }
 
     public List<ObjectNode> listResolverRules() {
-        return ruleStore.scan(key -> true).stream().map(ObjectNode::deepCopy).toList();
+        return ruleStore.scan(key -> true).stream().map(this::resourceView).toList();
     }
 
-    public ObjectNode updateResolverRule(String id, JsonNode config) {
-        ObjectNode rule = require(ruleStore, id, "resolver rule");
+    public synchronized ObjectNode updateResolverRule(String id, JsonNode config) {
+        ObjectNode rule = require(ruleStore, id, "resolver rule").deepCopy();
+        if (!config.isObject()) {
+            throw new AwsException(INVALID_PARAMETER, "Config is required", 400);
+        }
+        if (config.has("TargetIps") && (!config.path("TargetIps").isArray()
+                || config.path("TargetIps").isEmpty())) {
+            throw new AwsException(INVALID_PARAMETER, "TargetIps must contain at least one target address", 400);
+        }
+        if (config.hasNonNull("ResolverEndpointId")) {
+            validateRuleEndpoint(text(config, "ResolverEndpointId"), regionOf(rule));
+        }
         copyIfPresent(config, rule, "Name", "TargetIps", "ResolverEndpointId");
         rule.put("ModificationTime", Instant.now().toString());
         ruleStore.put(id, rule);
-        return rule.deepCopy();
+        return resourceView(rule);
     }
 
     // ---------- Resolver rule associations ----------
 
-    public ObjectNode associateResolverRule(JsonNode request) {
+    public synchronized ObjectNode associateResolverRule(JsonNode request) {
         String ruleId = requireText(request, "ResolverRuleId", INVALID_PARAMETER);
         String vpcId = requireText(request, "VPCId", INVALID_PARAMETER);
         require(ruleStore, ruleId, "resolver rule");
+        if (ruleAssociationStore.scan(key -> true).stream().anyMatch(association ->
+                ruleId.equals(text(association, "ResolverRuleId")) && vpcId.equals(text(association, "VPCId")))) {
+            throw new AwsException("ResourceExistsException", "Resolver rule is already associated with this VPC", 400);
+        }
         String id = id("rslvr-rrassoc");
         ObjectNode association = objectMapper.createObjectNode();
         association.put("Id", id);
@@ -394,7 +414,7 @@ public class Route53ResolverService {
         return association.deepCopy();
     }
 
-    public ObjectNode disassociateResolverRule(JsonNode request) {
+    public synchronized ObjectNode disassociateResolverRule(JsonNode request) {
         String ruleId = requireText(request, "ResolverRuleId", INVALID_PARAMETER);
         String vpcId = requireText(request, "VPCId", INVALID_PARAMETER);
         ObjectNode association = ruleAssociationStore.scan(key -> true).stream()
@@ -674,17 +694,17 @@ public class Route53ResolverService {
      * Route 53 Resolver creates are idempotent on {@code CreatorRequestId}: replaying a
      * token returns the resource it originally created rather than allocating a second
      * one. Called after the request's own validation so a replayed token never excuses a
-     * malformed body. A blank/absent token opts out — those creates always allocate.
+     * malformed body. A blank/absent token opts out, those creates always allocate.
      *
      * <p>The scan-then-put pair is only atomic because every create method is
-     * {@code synchronized} — two overlapping retries with the same token would otherwise
+     * {@code synchronized}, two overlapping retries with the same token would otherwise
      * both miss the scan and persist twice.</p>
      *
      * <p>Idempotency is scoped to one region, as in AWS: Route 53 Resolver is regional, so
      * the same token in {@code us-east-1} and {@code us-west-2} identifies two independent
      * resources. The stores are account-partitioned by {@code AccountAwareStorageBackend}
      * but carry no region in their keys, so the candidate's region comes from the ARN this
-     * service built for it — keeping the region off the wire response, which the modeled
+     * service built for it, keeping the region off the wire response, which the modeled
      * shapes have no field for. Same intent as {@code FisService.idempotencyKey} and
      * {@code BedrockAgentCoreControlService.tokenKey}, which fold the region into the key.</p>
      */
@@ -702,7 +722,7 @@ public class Route53ResolverService {
                     return arn != null && arn.startsWith(regionPrefix);
                 })
                 .findFirst()
-                .map(ObjectNode::deepCopy);
+                .map(this::resourceView);
     }
 
     /**
@@ -728,6 +748,10 @@ public class Route53ResolverService {
                 continue;
             }
             JsonNode stored = existing.get(field);
+            if ("DomainName".equals(field) && stored != null
+                    && normalizeDomain(stored.asText()).equals(normalizeDomain(requested.asText()))) {
+                continue;
+            }
             if (stored == null || !stored.equals(requested)) {
                 throw replayConflict(request, existing, field);
             }
@@ -740,17 +764,17 @@ public class Route53ResolverService {
      * addresses recorded at create time, since the stored resource keeps only
      * {@code IpAddressCount}.
      *
-     * <p>Order is not significant — the request list is a set of addresses, and a retry that
-     * merely reorders it is the same request — so both sides are normalised before comparing.</p>
+     * <p>Order is not significant, the request list is a set of addresses, and a retry that
+     * merely reorders it is the same request, so both sides are normalised before comparing.</p>
      *
      * <p>A stored endpoint with no recorded addresses is reported as a conflict rather than
      * waved through. Falling back to comparing {@code IpAddressCount} would accept a retry
-     * that kept the count but changed a subnet or address — the precise case this check
-     * exists to catch — so the weaker comparison is not a lenient version of this check, it
+     * that kept the count but changed a subnet or address, the precise case this check
+     * exists to catch, so the weaker comparison is not a lenient version of this check, it
      * is a silently wrong one. With nothing to compare against, the honest answer is that
      * sameness cannot be established: a spurious {@code ResourceExistsException} is loud and
-     * recoverable, a wrong success is neither. No released build can reach this state — the
-     * endpoint store itself is new in the same change as this record — so the only ways in
+     * recoverable, a wrong success is neither. No released build can reach this state, the
+     * endpoint store itself is new in the same change as this record, so the only ways in
      * are a write interrupted between the two stores, or state left by an intermediate build
      * of this branch.</p>
      */
@@ -788,7 +812,7 @@ public class Route53ResolverService {
      *
      * <p>Ordered by {@link #canonicalKey}, not by {@code toString}: a node serialises its
      * members in insertion order, so two requests carrying the same addresses written with
-     * their members in a different order sort differently and compare unequal — an
+     * their members in a different order sort differently and compare unequal, an
      * equivalent retry rejected as a conflict. JSON member order is not significant, so the
      * key must not depend on it.</p>
      */
@@ -828,17 +852,20 @@ public class Route53ResolverService {
     }
 
     private ObjectNode require(StorageBackend<String, ObjectNode> store, String id, String type) {
+        if (id == null || id.isBlank()) {
+            throw new AwsException(INVALID_PARAMETER, "Missing " + type + " identifier", 400);
+        }
         return store.get(id).orElseThrow(() -> new AwsException("ResourceNotFoundException",
                 "Unknown " + type + ": " + id, 400));
     }
 
     /**
      * Rejects a value the botocore model does not list in the member's enum. Accepting one
-     * stores a resource AWS would never have created — a rule whose {@code RuleType} is not
+     * stores a resource AWS would never have created, a rule whose {@code RuleType} is not
      * a {@code RuleTypeOption} is then handed back by Get/List as though it were real.
      *
      * <p>The caller passes the error code its own operation models, because the two families
-     * in this service do not share one — see {@link #INVALID_PARAMETER} and
+     * in this service do not share one, see {@link #INVALID_PARAMETER} and
      * {@link #VALIDATION}.</p>
      */
     private static void requireEnum(String value, String field, List<String> allowed, String errorCode) {
@@ -1152,5 +1179,29 @@ public class Route53ResolverService {
     private String normalizeDomain(String domain) {
         String normalized = domain.toLowerCase(Locale.ROOT);
         return normalized.endsWith(".") ? normalized : normalized + ".";
+    }
+
+    private void validateEndpointOptions(JsonNode request) {
+        String endpointType = text(request, "ResolverEndpointType");
+        if (endpointType != null) {
+            requireEnum(endpointType, "ResolverEndpointType", ENDPOINT_TYPES, INVALID_PARAMETER);
+        }
+        if (request.has("Protocols")) {
+            JsonNode protocols = request.path("Protocols");
+            if (!protocols.isArray() || protocols.isEmpty()) {
+                throw new AwsException(INVALID_PARAMETER, "Protocols must not be empty", 400);
+            }
+            for (JsonNode protocol : protocols) {
+                requireEnum(protocol.asText(), "Protocols", List.of("Do53", "DoH", "DoH-FIPS"), INVALID_PARAMETER);
+            }
+        }
+    }
+
+    private void validateRuleEndpoint(String id, String region) {
+        ObjectNode endpoint = require(endpointStore, id, "resolver endpoint");
+        requireRegion(endpoint, region);
+        if (!"OUTBOUND".equals(text(endpoint, "Direction"))) {
+            throw new AwsException(INVALID_PARAMETER, "Resolver rules require an OUTBOUND endpoint", 400);
+        }
     }
 }

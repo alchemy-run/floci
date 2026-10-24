@@ -119,8 +119,10 @@ public class SesIdentityController {
             // The service builds the complete identity (default configuration set and tags included)
             // and persists it with a single write, so any failure (AlreadyExists, invalid tags, a
             // missing configuration set) fails the whole call and creates nothing, matching AWS.
+            JsonNode dkimSigning = requireObjectOrAbsent(request, "DkimSigningAttributes");
+            String nextSigningKeyLength = dkimSigning.path("NextSigningKeyLength").asText(null);
             Identity identity = sesService.createEmailIdentity(emailIdentity,
-                    hasConfigSet ? configurationSetName : null, parsedTags, region);
+                    hasConfigSet ? configurationSetName : null, parsedTags, region, nextSigningKeyLength);
 
             ObjectNode result = objectMapper.createObjectNode();
             result.put("IdentityType", toV2IdentityType(identity.getIdentityType()));

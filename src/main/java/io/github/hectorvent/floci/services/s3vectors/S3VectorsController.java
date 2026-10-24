@@ -312,7 +312,7 @@ public class S3VectorsController {
     @Path("/DeleteVectorBucket")
     public Response deleteVectorBucket(@Context HttpHeaders headers, DeleteVectorBucketRequest request) {
         String region = regionResolver.resolveRegion(headers);
-        service.deleteVectorBucket(request.vectorBucketName(), region);
+        service.deleteVectorBucket(request.vectorBucketName(), request.vectorBucketArn(), region);
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
@@ -375,7 +375,7 @@ public class S3VectorsController {
     @Path("/DeleteIndex")
     public Response deleteIndex(@Context HttpHeaders headers, DeleteIndexRequest request) {
         String region = regionResolver.resolveRegion(headers);
-        service.deleteIndex(request.vectorBucketName(), request.indexName(), region);
+        service.deleteIndex(request.vectorBucketName(), request.indexName(), request.indexArn(), region);
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
@@ -393,7 +393,7 @@ public class S3VectorsController {
                 vectors.add(new VectorData(vRep.key(), floatList, metadata));
             }
         }
-        service.putVectors(request.vectorBucketName(), request.indexName(), vectors, region);
+        service.putVectors(request.vectorBucketName(), request.indexName(), request.indexArn(), vectors, region);
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
@@ -401,7 +401,8 @@ public class S3VectorsController {
     @Path("/GetVectors")
     public Response getVectors(@Context HttpHeaders headers, GetVectorsRequest request) {
         String region = regionResolver.resolveRegion(headers);
-        List<VectorData> vectors = service.getVectors(request.vectorBucketName(), request.indexName(), request.keys(), region);
+        List<VectorData> vectors = service.getVectors(
+                request.vectorBucketName(), request.indexName(), request.indexArn(), request.keys(), region);
 
         boolean returnData = request.returnData() != null && request.returnData();
         boolean returnMetadata = request.returnMetadata() != null && request.returnMetadata();
@@ -443,7 +444,7 @@ public class S3VectorsController {
     @Path("/DeleteVectors")
     public Response deleteVectors(@Context HttpHeaders headers, DeleteVectorsRequest request) {
         String region = regionResolver.resolveRegion(headers);
-        service.deleteVectors(request.vectorBucketName(), request.indexName(), request.keys(), region);
+        service.deleteVectors(request.vectorBucketName(), request.indexName(), request.indexArn(), request.keys(), region);
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
@@ -457,6 +458,7 @@ public class S3VectorsController {
         List<S3VectorsService.QueryResult> results = service.queryVectors(
                 request.vectorBucketName(),
                 request.indexName(),
+                request.indexArn(),
                 queryVector,
                 request.filter(),
                 request.topK() > 0 ? request.topK() : 10,
@@ -474,7 +476,8 @@ public class S3VectorsController {
                 })
                 .toList();
 
-        VectorIndex index = service.getIndex(request.vectorBucketName(), request.indexName(), region);
+        VectorIndex index = service.getIndex(
+                request.vectorBucketName(), request.indexName(), request.indexArn(), region);
         return Response.ok(new QueryVectorsResponse(reps, index.getDistanceMetric())).build();
     }
 

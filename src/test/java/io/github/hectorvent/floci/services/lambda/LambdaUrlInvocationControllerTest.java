@@ -92,7 +92,7 @@ class LambdaUrlInvocationControllerTest {
         when(uriInfo.getRequestUri()).thenReturn(URI.create("http://localhost/lambda-url/url-id/"));
         when(uriInfo.getQueryParameters()).thenReturn(new MultivaluedHashMap<>());
 
-        Response response = controller.handleGet("url-id", "", headers, uriInfo);
+        Response response = controller.handleGet("url-id", "", headers, uriInfo).toCompletableFuture().join();
 
         assertEquals(200, response.getStatus());
         assertEquals(accountId, requestContext.getAccountId());
@@ -269,7 +269,7 @@ class LambdaUrlInvocationControllerTest {
         LambdaUrlInvocationController controller = newController(lambdaService);
 
         Response response = controller.handleGet("url-id", "", headersWith(null),
-                uriInfoFor("http://localhost/lambda-url/url-id/"));
+                uriInfoFor("http://localhost/lambda-url/url-id/")).toCompletableFuture().join();
 
         List<Object> setCookieHeaders = response.getHeaders().get("Set-Cookie");
         assertEquals(2, setCookieHeaders.size());
@@ -295,7 +295,7 @@ class LambdaUrlInvocationControllerTest {
         LambdaUrlInvocationController controller = newController(lambdaService);
 
         Response response = controller.handleGet("url-id", "", headersWith(null),
-                uriInfoFor("http://localhost/lambda-url/url-id/"));
+                uriInfoFor("http://localhost/lambda-url/url-id/")).toCompletableFuture().join();
 
         assertEquals(502, response.getStatus());
         assertNull(response.getEntity());

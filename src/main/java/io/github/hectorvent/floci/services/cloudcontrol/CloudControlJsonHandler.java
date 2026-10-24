@@ -56,18 +56,7 @@ public class CloudControlJsonHandler {
 
     private Response progressResponse(CloudControlService.ProgressEvent event) {
         ObjectNode response = mapper.createObjectNode();
-        ObjectNode pe = response.putObject("ProgressEvent");
-        pe.put("TypeName", event.typeName());
-        pe.put("Identifier", event.identifier());
-        pe.put("RequestToken", event.requestToken());
-        pe.put("Operation", event.operation());
-        pe.put("OperationStatus", event.operationStatus());
-        if (event.statusMessage() != null) {
-            pe.put("StatusMessage", event.statusMessage());
-        }
-        if (event.resourceModel() != null) {
-            pe.put("ResourceModel", event.resourceModel());
-        }
+        response.set("ProgressEvent", progressNode(event));
         return Response.ok(response).build();
     }
 
@@ -107,7 +96,12 @@ public class CloudControlJsonHandler {
         ObjectNode response = mapper.createObjectNode();
         response.put("TypeName", typeName);
         ArrayNode resources = response.putArray("ResourceDescriptions");
-        for (CloudControlService.ResourceDescription resource : service.listResources(region, accountId, typeName)) {
+        var listed = service.listResources(region, accountId, typeName).stream()
+                .sorted(java.util.Comparator.comparing(CloudControlService.ResourceDescription::identifier)).toList();
+        int start = offset(request, listed.size());
+        int end = Math.min(listed.size(), start + pageSize(request));
+        if (end < listed.size()) response.put("NextToken", Integer.toString(end));
+        for (CloudControlService.ResourceDescription resource : listed.subList(start, end)) {
             ObjectNode node = mapper.createObjectNode();
             node.put("Identifier", resource.identifier());
             node.put("Properties", resource.properties());

@@ -234,6 +234,7 @@ public class GlueService {
         this.kmsService = kmsService;
         this.jobRunStore = storageFactory.create("glue", "job_runs.json", new TypeReference<>() {});
         this.jobBookmarkStore = storageFactory.create("glue", "job_bookmarks.json", new TypeReference<>() {});
+        this.resourceTagStore = storageFactory.create("glue", "resource_tags.json", new TypeReference<>() {});
     }
 
     GlueService(StorageBackend<String, Database> databaseStore,
@@ -280,6 +281,7 @@ public class GlueService {
         this.kmsService = kmsService;
         this.jobRunStore = new io.github.hectorvent.floci.core.storage.InMemoryStorage<>();
         this.jobBookmarkStore = new io.github.hectorvent.floci.core.storage.InMemoryStorage<>();
+        this.resourceTagStore = new io.github.hectorvent.floci.core.storage.InMemoryStorage<>();
     }
 
     public SecurityConfiguration createSecurityConfiguration(String name, JsonNode encryptionConfiguration,
@@ -338,7 +340,7 @@ public class GlueService {
     }
 
     public void createDatabase(Database database) {
-        createDatabase(database, null, regionResolver.getDefaultRegion());
+        createDatabase(database, null, regionResolver.getRegion());
     }
 
     public void createDatabase(Database database, Map<String, String> tags, String region) {
@@ -397,7 +399,7 @@ public class GlueService {
     }
 
     public void deleteDatabase(String name) {
-        deleteDatabase(name, regionResolver.getDefaultRegion());
+        deleteDatabase(name, regionResolver.getRegion());
     }
 
     public void deleteDatabase(String name, String region) {
@@ -407,6 +409,9 @@ public class GlueService {
                 .map(Table::getName)
                 .toList();
         tableNames.forEach(tableName -> deleteTable(name, tableName));
+        functionStore.keys().stream()
+                .filter(key -> key.startsWith(databaseName + ":"))
+                .forEach(functionStore::delete);
         databaseStore.delete(databaseName);
         resourceGroupsTaggingService.deleteResources(List.of(databaseArn(region, databaseName)), region);
         LOG.infov("Deleted Glue Database: {0}", name);
@@ -826,6 +831,9 @@ public class GlueService {
     public void createPartition(String databaseName, String tableName, Partition partition) {
         Table table = getTable(databaseName, tableName);
         String key = partitionKey(databaseName, tableName, partition.getValues());
+        if (partitionStore.get(key).isPresent()) {
+            throw new AwsException("AlreadyExistsException", "Partition already exists.", 400);
+        }
         partition.setDatabaseName(table.getDatabaseName());
         partition.setTableName(table.getName());
         if (partition.getCreationTime() == null) {
@@ -1084,6 +1092,7 @@ public class GlueService {
     public List<BatchCreatePartitionError> batchDeletePartitions(
             String databaseName, String tableName, List<List<String>> partitionsToDelete) {
         getTable(databaseName, tableName);
+        partitionsToDelete = partitionsToDelete == null ? List.of() : partitionsToDelete;
         if (partitionsToDelete.size() > 25) {
             throw new AwsException("InvalidInputException",
                     "PartitionsToDelete must contain at most 25 partitions.", 400);
@@ -1252,7 +1261,7 @@ public class GlueService {
         boolean latest = ref.getSchemaVersionId() == null && ref.getSchemaVersionNumber() == null;
         return schemaRegistryService.getSchemaVersion(
                 ref.getSchemaId(), ref.getSchemaVersionId(),
-                ref.getSchemaVersionNumber(), latest, regionResolver.getDefaultRegion());
+                ref.getSchemaVersionNumber(), latest, regionResolver.getRegion());
     }
 
     private static SchemaReference schemaReferenceOf(Table table) {
@@ -1897,7 +1906,12 @@ public class GlueService {
         // Jobs and crawlers skip normalizeName because AWS preserves their case
         String normalizedName = name;
         jobStore.delete(normalizedName);
-        resourceGroupsTaggingService.deleteResources(List.of(jobArn(region, normalizedName)), region);
+        jobRunStore.scan(k -> true).stream()
+                .filter(run -> name.equals(run.getJobName()))
+                .map(JobRun::getId)
+                .forEach(jobRunStore::delete);
+        jobBookmarkStore.delete(name);
+        deleteResourceTags(jobArn(region, normalizedName), region);
         LOG.infov("Deleted Glue Job: {0}", name);
     }
 
@@ -2533,11 +2547,16 @@ public class GlueService {
         Crawler existing = crawlerStore.get(name)
                 .orElseThrow(() -> new AwsException("EntityNotFoundException", "Crawler " + update.getName() + " not found.", 400));
 
+        if (crawlerActive(existing)) {
+            throw new AwsException("CrawlerRunningException", "Crawler is running: " + name, 400);
+        }
         Crawler updated = new Crawler();
         updated.setName(existing.getName());
         updated.setCreationTime(existing.getCreationTime());
         updated.setLastUpdated(Instant.now());
         updated.setState(existing.getState());
+        updated.setLastCrawl(existing.getLastCrawl());
+        updated.setCrawlElapsedTime(existing.getCrawlElapsedTime());
         updated.setVersion((existing.getVersion() == null ? 1L : existing.getVersion()) + 1L);
 
         updated.setClassifiers(update.getClassifiers() != null ? update.getClassifiers() : existing.getClassifiers());
@@ -2565,8 +2584,11 @@ public class GlueService {
         if (crawlerStore.get(normalizedName).isEmpty()) {
             throw new AwsException("EntityNotFoundException", "Crawler " + name + " not found.", 400);
         }
+        if (crawlerActive(getCrawler(name))) {
+            throw new AwsException("CrawlerRunningException", "Crawler is running: " + name, 400);
+        }
         crawlerStore.delete(normalizedName);
-        resourceGroupsTaggingService.deleteResources(List.of(crawlerArn(region, normalizedName)), region);
+        deleteResourceTags(crawlerArn(region, normalizedName), region);
         LOG.infov("Deleted Glue Crawler: {0}", name);
     }
 
@@ -2941,6 +2963,11 @@ public class GlueService {
             schemaRegistryService.tagResource(arn, tags);
         } else {
             validateResourceExists(arn);
+            Map<String, String> merged = new LinkedHashMap<>(getTags(arn, region));
+            if (tags != null) {
+                merged.putAll(tags);
+            }
+            resourceTagStore.put(arn, merged);
             resourceGroupsTaggingService.tagResources(List.of(arn), tags, region);
         }
     }
@@ -2951,6 +2978,11 @@ public class GlueService {
             schemaRegistryService.untagResource(arn, tagKeys);
         } else {
             validateResourceExists(arn);
+            Map<String, String> remaining = new LinkedHashMap<>(getTags(arn, region));
+            if (tagKeys != null) {
+                tagKeys.forEach(remaining::remove);
+            }
+            resourceTagStore.put(arn, remaining);
             resourceGroupsTaggingService.untagResources(List.of(arn), tagKeys, region);
         }
     }
@@ -2961,7 +2993,9 @@ public class GlueService {
             return schemaRegistryService.getTags(arn);
         } else {
             validateResourceExists(arn);
-            return resourceGroupsTaggingService.getTagsForResource(region, arn);
+            Map<String, String> tags = new LinkedHashMap<>(resourceTagStore.get(arn).orElse(Map.of()));
+            tags.putAll(resourceGroupsTaggingService.getTagsForResource(region, arn));
+            return tags;
         }
     }
 
@@ -3255,4 +3289,11 @@ public class GlueService {
         bookmark.put("Version", 0);
         return bookmark;
     }
+
+    private void deleteResourceTags(String arn, String region) {
+        resourceTagStore.delete(arn);
+        resourceGroupsTaggingService.deleteResources(List.of(arn), region);
+    }
+
+    private final StorageBackend<String, Map<String, String>> resourceTagStore;
 }

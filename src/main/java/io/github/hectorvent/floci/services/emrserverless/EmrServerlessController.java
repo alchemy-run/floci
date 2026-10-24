@@ -102,9 +102,7 @@ public class EmrServerlessController {
                                                      UpdateApplicationRequest request) {
         Application app = service.updateApplication(applicationId, request);
         UpdateApplicationResponse response = new UpdateApplicationResponse();
-        response.setApplicationId(app.getApplicationId());
-        response.setArn(app.getArn());
-        response.setName(app.getName());
+        response.setApplication(app);
         return response;
     }
 

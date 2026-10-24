@@ -165,6 +165,7 @@ public class OpenSearchService implements ResourceProvider {
         }
 
         domainStore.put(domainName, domain);
+        ensureEndpointCertificate(region);
         LOG.infov("Created OpenSearch domain: {0}", domainName);
         return domain;
     }
@@ -195,9 +196,8 @@ public class OpenSearchService implements ResourceProvider {
 
     public List<Domain> describeDomains(List<String> domainNames) {
         return domainNames.stream()
-                .map(name -> domainStore.get(name)
-                        .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                                "Domain not found: " + name, 409)))
+                .distinct()
+                .flatMap(name -> domainStore.get(name).stream())
                 .toList();
     }
 
@@ -585,4 +585,14 @@ public class OpenSearchService implements ResourceProvider {
         }
         return nodes;
     }
+
+    /** Makes the HTTPS listener's certificate cover every domain endpoint host in the region. */
+    private void ensureEndpointCertificate(String region) {
+        if (certificateManager != null) {
+            certificateManager.ensureHost(OpenSearchDataPlaneEndpoint.certificateWildcard(region, baseUrl()));
+        }
+    }
+
+    @Inject
+    TlsCertificateManager certificateManager;
 }

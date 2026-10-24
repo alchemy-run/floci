@@ -585,8 +585,11 @@ public class SsmJsonHandler {
         String name = requireDocumentName(request);
         String content = requireDocumentContent(request);
         String documentType = requireDocumentType(request);
+        Map<String, String> tags = new LinkedHashMap<>();
+        request.path("Tags").forEach(t -> tags.put(t.path("Key").asText(), t.path("Value").asText()));
 
-        SsmDocument document = ssmService.createDocument(name, content, documentType, region);
+        SsmDocument document = ssmService.createDocument(name, content, documentType,
+                request.path("DocumentFormat").asText(null), request.path("TargetType").asText(null), tags, region);
         return Response.ok(documentDescriptionResponse(document)).build();
     }
 
@@ -1135,13 +1138,19 @@ public class SsmJsonHandler {
         request.path("Tags").forEach(t ->
                 tags.put(t.path("Key").asText(), t.path("Value").asText()));
 
+        if ("Document".equals(request.path("ResourceType").asText())) {
+            ssmService.tagDocument(resourceId, tags, List.of(), region);
+            return Response.ok(objectMapper.createObjectNode()).build();
+        }
         ssmService.addTagsToResource(resourceId, tags, region);
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
     private Response handleListTagsForResource(JsonNode request, String region) {
         String resourceId = request.path("ResourceId").asText();
-        Map<String, String> tags = ssmService.listTagsForResource(resourceId, region);
+        Map<String, String> tags = "Document".equals(request.path("ResourceType").asText())
+                ? documentTags(resourceId, region)
+                : ssmService.listTagsForResource(resourceId, region);
 
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode tagsArray = objectMapper.createArrayNode();
@@ -1160,6 +1169,10 @@ public class SsmJsonHandler {
         List<String> tagKeys = new ArrayList<>();
         request.path("TagKeys").forEach(k -> tagKeys.add(k.asText()));
 
+        if ("Document".equals(request.path("ResourceType").asText())) {
+            ssmService.tagDocument(resourceId, Map.of(), tagKeys, region);
+            return Response.ok(objectMapper.createObjectNode()).build();
+        }
         ssmService.removeTagsFromResource(resourceId, tagKeys, region);
         return Response.ok(objectMapper.createObjectNode()).build();
     }
@@ -1480,4 +1493,14 @@ public class SsmJsonHandler {
         return Response.ok(response).build();
     }
 
+    private Map<String, String> documentTags(String name, String region) {
+        try {
+            return ssmService.getDocument(name, region).getTags();
+        } catch (AwsException e) {
+            if ("InvalidDocument".equals(e.getErrorCode())) {
+                throw new AwsException("InvalidResourceId", "Resource " + name + " not found.", 400);
+            }
+            throw e;
+        }
+    }
 }

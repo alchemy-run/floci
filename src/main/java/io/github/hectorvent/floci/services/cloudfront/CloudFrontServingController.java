@@ -1032,7 +1032,7 @@ public class CloudFrontServingController {
      *       on success, returned with {@code ResponseCode} (the single-page-app 403/404 -&gt; 200
      *       {@code /index.html} fallback);</li>
      *   <li>if the custom error page is itself unavailable, CloudFront returns the status code it
-     *       received from the origin that holds the error pages — not the original status — and does
+     *       received from the origin that holds the error pages, not the original status, and does
      *       not recurse (no loop).</li>
      * </ul>
      */
@@ -1287,7 +1287,7 @@ public class CloudFrontServingController {
         Map<String, List<String>> headers = new LinkedHashMap<>(response.headers());
         s3Service.evaluateCors(bucket, configuredOrigin, method, List.of()).ifPresent(cors -> {
             // A rule whose AllowedOrigin is "*" echoes "*" rather than the request origin, and the
-            // CORS spec forbids pairing that with Access-Control-Allow-Credentials: true — browsers
+            // CORS spec forbids pairing that with Access-Control-Allow-Credentials: true, browsers
             // reject the combination outright for credentialed requests. Verified against real S3:
             // with AllowedOrigins ["*"] it returns only Allow-Origin/Allow-Methods/Max-Age, while a
             // concrete AllowedOrigin additionally returns Allow-Credentials: true and Vary.

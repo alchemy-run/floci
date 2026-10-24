@@ -34,6 +34,8 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.security.SecureRandom;
+import java.util.List;
 
 /**
  * IMDS-compatible HTTP server bound to port 9169 on the Floci host.
@@ -61,7 +63,7 @@ public class Ec2MetadataServer {
 
     /** IMDSv2: token value → Instance */
     private final Map<String, SessionToken> tokens = new ConcurrentHashMap<>();
-    /** IMDSv1 fallback: container bridge IP → Instance */
+    /** Source-address authentication is retained for the existing EKS relay. */
     private final Map<String, Instance> containerIpToInstance = new ConcurrentHashMap<>();
     /** Cluster nodes whose instance-profile identity their registrar synthesizes rather than IAM holding it. */
     private final Set<Instance> synthesizedProfiles = ConcurrentHashMap.newKeySet();
@@ -81,8 +83,10 @@ public class Ec2MetadataServer {
     }
 
     /** Called by Ec2ContainerManager after a container starts to register its IP. */
-    public void registerContainer(String containerIp, String instanceId, Instance instance) {
+    public synchronized void registerContainer(String containerIp, String instanceId, Instance instance) {
         if (containerIp != null && !containerIp.isBlank()) {
+            identities.computeIfAbsent(instance, key ->
+                    new GuestIdentity(instance, accountId(instance), instance.getDockerContainerId(), null));
             credentials.register(instance);
             containerIpToInstance.put(containerIp, instance);
             LOG.debugv("IMDS: registered container {0} → instance {1}", containerIp, instanceId);
@@ -129,10 +133,17 @@ public class Ec2MetadataServer {
     }
 
     public synchronized CompletableFuture<Void> start() {
+        if (!stopping.isDone()) {
+            return stopping.thenCompose(ignored -> start());
+        }
+        if (stopping.isCompletedExceptionally()) {
+            return stopping;
+        }
         if (httpServer != null) {
-            return CompletableFuture.completedFuture(null);
+            return starting;
         }
         CompletableFuture<Void> future = new CompletableFuture<>();
+        starting = future;
         int port = config.services().ec2().imdsPort();
 
         Router router = Router.router(vertx);
@@ -331,12 +342,12 @@ public class Ec2MetadataServer {
                         .put("InstanceProfileId", profileId).encode());
     }
 
-    private void handleCredentialsList(RoutingContext ctx) {
+    private synchronized void handleCredentialsList(RoutingContext ctx) {
         Instance inst = resolveInstance(ctx);
         if (inst == null) {
             return;
         }
-        Optional<IamRole> role = credentials.role(inst);
+        Optional<IamRole> role = profileBelongsToGuest(inst) ? credentials.role(inst) : Optional.empty();
         if (role.isEmpty()) {
             ctx.response().setStatusCode(404).end();
             return;
@@ -344,12 +355,13 @@ public class Ec2MetadataServer {
         ctx.response().putHeader("content-type", "text/plain").end(role.get().getRoleName());
     }
 
-    private void handleCredentials(RoutingContext ctx) {
+    private synchronized void handleCredentials(RoutingContext ctx) {
         Instance inst = resolveInstance(ctx);
         if (inst == null) {
             return;
         }
-        Optional<SessionCredential> result = credentials.get(inst, ctx.pathParam("role"), Instant.now());
+        Optional<SessionCredential> result = profileBelongsToGuest(inst)
+                ? credentials.get(inst, ctx.pathParam("role"), clock.instant()) : Optional.empty();
         if (result.isEmpty()) {
             ctx.response().setStatusCode(404).end();
             return;
@@ -609,5 +621,44 @@ public class Ec2MetadataServer {
             }
         }
         return Optional.empty();
+    }
+
+    private record GuestIdentity(Instance instance, String accountId, String containerId, String capability) {}
+
+    private String accountId(Instance instance) {
+        return instanceAccountId(instance, config == null ? null : config.defaultAccountId());
+    }
+
+    private final Map<Instance, GuestIdentity> identities = new ConcurrentHashMap<>();
+
+    private boolean profileBelongsToGuest(Instance instance) {
+        GuestIdentity identity = identities.get(instance);
+        String arn = instance.getIamInstanceProfileArn();
+        String[] parts = arn == null ? new String[0] : arn.split(":", 6);
+        if (identity == null || parts.length != 6 || !Objects.equals(identity.accountId(), parts[4])) {
+            credentials.unregister(instance);
+            return false;
+        }
+        credentials.register(instance);
+        return true;
+    }
+
+    private CompletableFuture<Void> starting = CompletableFuture.completedFuture(null);
+
+    private CompletableFuture<Void> stopping = CompletableFuture.completedFuture(null);
+
+    static String instanceAccountId(Instance instance, String defaultAccountId) {
+        if (!instance.getNetworkInterfaces().isEmpty()
+                && instance.getNetworkInterfaces().getFirst().getOwnerId() != null) {
+            return instance.getNetworkInterfaces().getFirst().getOwnerId();
+        }
+        String profile = instance.getIamInstanceProfileArn();
+        if (profile != null) {
+            String[] parts = profile.split(":", 6);
+            if (parts.length == 6 && parts[4].matches("[0-9]{12}")) {
+                return parts[4];
+            }
+        }
+        return defaultAccountId;
     }
 }

@@ -1427,22 +1427,14 @@ public class SecretsManagerService implements ResourceProvider {
         }
 
         try {
-            if (!isExistingVersion) {
-                synchronized (lockFor(secretArn)) {
-                    Secret secret = resolveSecret(secretArn, region);
-                    if (secret.getVersions() != null && secret.getVersions().containsKey(clientRequestToken)) {
-                        isExistingVersion = true;
-                    } else {
-                        SecretVersion pendingVersion = new SecretVersion();
-                        pendingVersion.setVersionId(clientRequestToken);
-                        pendingVersion.setVersionStages(List.of("AWSPENDING"));
-                        pendingVersion.setCreatedDate(Instant.now());
-                        if (secret.getVersions() == null) {
-                            secret.setVersions(new HashMap<>());
-                        }
-                        secret.getVersions().put(clientRequestToken, pendingVersion);
-                        persist(secret, region);
-                    }
+            // Do NOT persist an empty AWSPENDING row before createSecret.
+            // AWS leaves VersionId reservation to the rotation function's
+            // PutSecretValue; official templates (and Alchemy's fixture) skip
+            // the put when ListSecretVersionIds already reports the token.
+            synchronized (lockFor(secretArn)) {
+                Secret secret = resolveSecret(secretArn, region);
+                if (secret.getVersions() != null && secret.getVersions().containsKey(clientRequestToken)) {
+                    isExistingVersion = true;
                 }
             }
             if (!isExistingVersion) {

@@ -480,7 +480,7 @@ public class EventBridgeHandler {
         String archiveName = request.path("ArchiveName").asText(null);
         String eventSourceArn = request.path("EventSourceArn").asText(null);
         String description = request.path("Description").asText(null);
-        String eventPattern = request.path("EventPattern").asText(null);
+        String eventPattern = textOrJson(request.path("EventPattern"));
         int retentionDays = request.path("RetentionDays").asInt(0);
         Archive archive = eventBridgeService.createArchive(
                 archiveName, eventSourceArn, description, eventPattern, retentionDays, region);
@@ -1041,8 +1041,17 @@ public class EventBridgeHandler {
         return Response.ok(response).build();
     }
 
-
-
-
-
+    private String textOrJson(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        if (node.isTextual()) {
+            String text = node.asText();
+            return text.isEmpty() ? null : text;
+        }
+        if (node.isObject() || node.isArray()) {
+            return node.toString();
+        }
+        return null;
+    }
 }

@@ -31,7 +31,7 @@ public class LambdaUrlRoutingFilter implements ContainerRequestFilter {
         if (host == null) return;
 
         // Pattern: <urlId>.lambda-url.<region>.<anything>
-        if (host.contains(".lambda-url.")) {
+        if (isFunctionUrlHost(host)) {
             String[] parts = host.split("\\.");
             if (parts.length >= 3) {
                 String urlId = parts[0];

@@ -437,13 +437,13 @@ public class EmrService {
 
     public SecurityConfiguration describeSecurityConfiguration(String name) {
         return secConfigStore.get(name).orElseThrow(() -> new AwsException(
-                "InvalidRequestException", "Security configuration does not exist: " + name, 400));
+                "InvalidRequestException", "Security configuration with name " + name + " does not exist", 400));
     }
 
     public void deleteSecurityConfiguration(String name) {
         if (secConfigStore.get(name).isEmpty()) {
             throw new AwsException("InvalidRequestException",
-                    "Security configuration does not exist: " + name, 400);
+                    "Security configuration with name " + name + " does not exist", 400);
         }
         secConfigStore.delete(name);
     }
@@ -952,6 +952,14 @@ public class EmrService {
             throw new AwsException("ValidationException",
                     "1 validation error detected: Value null at 'managedScalingPolicy.computeLimits."
                             + member + "' failed to satisfy constraint: Member must not be null", 400);
+        }
+    }
+
+    private void validateIdleTimeout(long idleTimeout) {
+        if (idleTimeout < MIN_IDLE_TIMEOUT_SECONDS || idleTimeout > MAX_IDLE_TIMEOUT_SECONDS) {
+            throw new AwsException("ValidationException",
+                    "The idle timeout must be between " + MIN_IDLE_TIMEOUT_SECONDS + " and "
+                            + MAX_IDLE_TIMEOUT_SECONDS + " seconds.", 400);
         }
     }
 }

@@ -2146,14 +2146,14 @@ class KmsServiceTest {
     @Test
     void getKeyRotationStatusDefaultFalse() {
         KmsKey key = kmsService.createKey(null, REGION);
-        assertFalse(kmsService.getKeyRotationStatus(key.getKeyId(), REGION));
+        assertFalse(kmsService.getKeyRotationStatus(key.getKeyId(), REGION).keyRotationEnabled());
     }
 
     @Test
     void enableAndGetKeyRotationStatus() {
         KmsKey key = kmsService.createKey(null, REGION);
         kmsService.enableKeyRotation(key.getKeyId(), REGION);
-        assertTrue(kmsService.getKeyRotationStatus(key.getKeyId(), REGION));
+        assertTrue(kmsService.getKeyRotationStatus(key.getKeyId(), REGION).keyRotationEnabled());
     }
 
     @Test
@@ -2161,7 +2161,7 @@ class KmsServiceTest {
         KmsKey key = kmsService.createKey(null, REGION);
         kmsService.enableKeyRotation(key.getKeyId(), REGION);
         kmsService.disableKeyRotation(key.getKeyId(), REGION);
-        assertFalse(kmsService.getKeyRotationStatus(key.getKeyId(), REGION));
+        assertFalse(kmsService.getKeyRotationStatus(key.getKeyId(), REGION).keyRotationEnabled());
     }
 
     @Test
@@ -2184,7 +2184,7 @@ class KmsServiceTest {
         KmsKey key = kmsService.createKey(null, REGION);
         key.setKeySpec(KmsKeySpec.ECC_NIST_P256);
         key.setKeyUsage(KmsKeyUsage.SIGN_VERIFY);
-        assertFalse(kmsService.getKeyRotationStatus(key.getKeyId(), REGION));
+        assertFalse(kmsService.getKeyRotationStatus(key.getKeyId(), REGION).keyRotationEnabled());
     }
 
     @Test
@@ -2192,7 +2192,7 @@ class KmsServiceTest {
         KmsKey key = kmsService.createKey(null, REGION);
         key.setKeySpec(KmsKeySpec.HMAC_256);
         key.setKeyUsage(KmsKeyUsage.GENERATE_VERIFY_MAC);
-        assertFalse(kmsService.getKeyRotationStatus(key.getKeyId(), REGION));
+        assertFalse(kmsService.getKeyRotationStatus(key.getKeyId(), REGION).keyRotationEnabled());
     }
 
     // ── Issue #911 — RotateKeyOnDemand ──────────────────────────────────────
@@ -3737,7 +3737,7 @@ class KmsServiceTest {
             assertEquals("Enabled", key.getKeyState());
             assertTrue(key.isEnabled());
             // AWS rotates its own keys and the customer cannot turn that off.
-            assertTrue(kmsService.getKeyRotationStatus("alias/aws/s3", REGION));
+            assertTrue(kmsService.getKeyRotationStatus("alias/aws/s3", REGION).keyRotationEnabled());
             assertTrue(key.getArn().contains(REGION), "key ARN " + key.getArn() + " is not in " + REGION);
         }
 

@@ -1708,6 +1708,7 @@ public class Ec2QueryHandler {
     }
 
     private Response handleDeleteVpc(MultivaluedMap<String, String> p, String region) {
+        requireNoClientVpnDependents(region, p.getFirst("VpcId"), "vpc");
         service.deleteVpc(region, p.getFirst("VpcId"));
         return booleanResponse("DeleteVpc");
     }
@@ -1830,12 +1831,17 @@ public class Ec2QueryHandler {
         if (logDestination == null) {
             logDestination = p.getFirst("LogDestinationArn");
         }
-        String deliverLogsPermissionArn = p.getFirst("DeliverLogsPermissionArn");
         String logFormat = p.getFirst("LogFormat");
+        String logGroupName = p.getFirst("LogGroupName");
+        String deliverLogsPermissionArn = p.getFirst("DeliverLogsPermissionArn");
         int maxAgg = parseIntParam(p, "MaxAggregationInterval", 600);
+        List<Tag> flowLogTags = parseTagsForResource(p, "vpc-flow-log");
 
         if (resourceIds.isEmpty()) {
-            // Some SDKs send ResourceIds.member.N — fall back to that prefix.
+            // Some SDKs send ResourceIds.N or ResourceIds.member.N — fall back.
+            resourceIds = getList(p, "ResourceIds");
+        }
+        if (resourceIds.isEmpty()) {
             resourceIds = getList(p, "ResourceIds.member");
         }
         if (resourceIds.isEmpty()) {
@@ -1848,7 +1854,11 @@ public class Ec2QueryHandler {
                 .start("flowLogIdSet");
         for (String resourceId : resourceIds) {
             FlowLog fl = flowLogService.createFlowLog(region, resourceId, resourceType, trafficType,
-                    logDestinationType, logDestination, deliverLogsPermissionArn, logFormat, maxAgg);
+                    logDestinationType, logDestination, logFormat, maxAgg,
+                    logGroupName, deliverLogsPermissionArn, flowLogTags);
+            if (!flowLogTags.isEmpty()) {
+                service.createTags(region, List.of(fl.getFlowLogId()), flowLogTags);
+            }
             xml.elem("item", fl.getFlowLogId());
         }
         xml.end("flowLogIdSet")
@@ -1889,6 +1899,9 @@ public class Ec2QueryHandler {
 
     private Response handleDeleteFlowLogs(MultivaluedMap<String, String> p, String region) {
         List<String> ids = getList(p, "FlowLogId");
+        if (ids.isEmpty()) {
+            ids = getList(p, "FlowLogIds");
+        }
         if (ids.isEmpty()) {
             ids = getList(p, "FlowLogIds.member");
         }
@@ -3246,6 +3259,7 @@ public class Ec2QueryHandler {
     }
 
     private Response handleDeleteSubnet(MultivaluedMap<String, String> p, String region) {
+        requireNoClientVpnDependents(region, p.getFirst("SubnetId"), "subnet");
         service.deleteSubnet(region, p.getFirst("SubnetId"));
         return booleanResponse("DeleteSubnet");
     }
@@ -3256,7 +3270,9 @@ public class Ec2QueryHandler {
                 "MapPublicIpOnLaunch",
                 "AssignIpv6AddressOnCreation",
                 "EnableDns64",
-                "MapCustomerOwnedIpOnLaunch")) {
+                "MapCustomerOwnedIpOnLaunch",
+                "EnableResourceNameDnsARecordOnLaunch",
+                "EnableResourceNameDnsAAAARecordOnLaunch")) {
             String val = p.getFirst(attr + ".Value");
             if (val != null) {
                 String camel = Character.toLowerCase(attr.charAt(0)) + attr.substring(1);
@@ -3337,6 +3353,7 @@ public class Ec2QueryHandler {
     private Response handleDeleteSecurityGroup(MultivaluedMap<String, String> p, String region) {
         String groupId = p.getFirst("GroupId");
         if (groupId == null) groupId = p.getFirst("GroupName");
+        requireNoClientVpnDependents(region, groupId, "security group");
         service.deleteSecurityGroup(region, groupId);
         return booleanResponse("DeleteSecurityGroup");
     }
@@ -3432,12 +3449,28 @@ public class Ec2QueryHandler {
         String groupId = p.getFirst("GroupId");
         List<Map<String, String>> updates = new ArrayList<>();
         for (int i = 1; ; i++) {
-            String ruleId = p.getFirst("SecurityGroupRule." + i + ".SecurityGroupRuleId");
-            if (ruleId == null) break;
+            String prefix = "SecurityGroupRule." + i + ".";
+            String ruleId = p.getFirst(prefix + "SecurityGroupRuleId");
+            if (ruleId == null) {
+                if (p.keySet().stream().anyMatch(name -> name.startsWith(prefix))) {
+                    throw new AwsException("MissingParameter", "SecurityGroupRuleId is required", 400);
+                }
+                break;
+            }
             Map<String, String> update = new LinkedHashMap<>();
             update.put("SecurityGroupRuleId", ruleId);
-            String desc = p.getFirst("SecurityGroupRule." + i + ".SecurityGroupRuleRequest.Description");
-            if (desc != null) update.put("Description", desc);
+            // AWS wire name: SecurityGroupRuleUpdate.SecurityGroupRule (a SecurityGroupRuleRequest);
+            // older clients send SecurityGroupRuleRequest.
+            for (String field : List.of("Description", "IpProtocol", "FromPort", "ToPort",
+                    "CidrIpv4", "CidrIpv6", "PrefixListId", "ReferencedGroupId")) {
+                String value = p.getFirst("SecurityGroupRule." + i + ".SecurityGroupRule." + field);
+                if (value == null) {
+                    value = p.getFirst("SecurityGroupRule." + i + ".SecurityGroupRuleRequest." + field);
+                }
+                if (value != null) {
+                    update.put(field, value);
+                }
+            }
             updates.add(update);
         }
         service.modifySecurityGroupRules(region, groupId, updates);
@@ -3574,6 +3607,7 @@ public class Ec2QueryHandler {
             throw new AwsException("InvalidKey.Format", "Key is not in valid OpenSSH public key format", 400);
         }
         KeyPair kp = service.importKeyPair(region, keyName, publicKeyMaterial);
+        applyResourceTags(p, region, "key-pair", kp.getKeyPairId());
         XmlBuilder xml = new XmlBuilder()
                 .start("ImportKeyPairResponse", AwsNamespaces.EC2)
                 .elem("requestId", UUID.randomUUID().toString())
@@ -3869,6 +3903,7 @@ public class Ec2QueryHandler {
             String v = p.getFirst("Tag." + i + ".Value");
             tagList.add(creationTag(k, v));
         }
+        requireKnownClientVpnEndpoints(region, resourceIds);
         service.createTags(region, resourceIds, tagList);
         return booleanResponse("CreateTags");
     }
@@ -3882,6 +3917,7 @@ public class Ec2QueryHandler {
             String v = p.getFirst("Tag." + i + ".Value");
             tagList.add(new Tag(k, v));
         }
+        requireKnownClientVpnEndpoints(region, resourceIds);
         service.deleteTags(region, resourceIds, tagList);
         return booleanResponse("DeleteTags");
     }
@@ -5194,6 +5230,10 @@ public class Ec2QueryHandler {
                 .elem("assignIpv6AddressOnCreation", String.valueOf(s.isAssignIpv6AddressOnCreation()))
                 .elem("enableDns64", String.valueOf(s.isEnableDns64()))
                 .elem("mapCustomerOwnedIpOnLaunch", String.valueOf(s.isMapCustomerOwnedIpOnLaunch()))
+                .start("privateDnsNameOptionsOnLaunch")
+                .elem("enableResourceNameDnsARecord", String.valueOf(s.isEnableResourceNameDnsARecordOnLaunch()))
+                .elem("enableResourceNameDnsAAAARecord", String.valueOf(s.isEnableResourceNameDnsAAAARecordOnLaunch()))
+                .end("privateDnsNameOptionsOnLaunch")
                 .start("ipv6CidrBlockAssociationSet");
         for (VpcIpv6CidrBlockAssociation assoc : s.getIpv6CidrBlockAssociationSet()) {
             xml.start("item").raw(subnetIpv6AssociationXml(assoc)).end("item");
@@ -5305,6 +5345,9 @@ public class Ec2QueryHandler {
                     .elem("networkInterfaceId", r.getNetworkInterfaceId())
                     .elem("egressOnlyInternetGatewayId", r.getEgressOnlyInternetGatewayId())
                     .elem("vpcPeeringConnectionId", r.getVpcPeeringConnectionId())
+                    .elem("networkInterfaceId", r.getNetworkInterfaceId())
+                    .elem("instanceId", r.getInstanceId())
+                    .elem("vpcEndpointId", r.getVpcEndpointId())
                     .elem("state", r.getState())
                     .elem("origin", r.getOrigin())
                     .end("item");
@@ -5315,6 +5358,7 @@ public class Ec2QueryHandler {
                     .elem("routeTableAssociationId", assoc.getRouteTableAssociationId())
                     .elem("routeTableId", assoc.getRouteTableId())
                     .elem("subnetId", assoc.getSubnetId())
+                    .elem("gatewayId", assoc.getGatewayId())
                     .elem("main", String.valueOf(assoc.isMain()))
                     .start("associationState").elem("state", assoc.getAssociationState()).end("associationState")
                     .end("item");
@@ -6168,6 +6212,8 @@ public class Ec2QueryHandler {
                 .elem("associationId", addr.getAssociationId())
                 .elem("networkInterfaceId", addr.getNetworkInterfaceId())
                 .elem("privateIpAddress", addr.getPrivateIpAddress())
+                .elem("publicIpv4Pool", addr.getPublicIpv4Pool())
+                .elem("networkBorderGroup", addr.getNetworkBorderGroup())
                 .raw(tagSetXml(addr.getTags()));
         return xml.build();
     }
@@ -7511,5 +7557,27 @@ public class Ec2QueryHandler {
                 sourceDestCheck,
                 getList(p, "GroupId", "SecurityGroupId").isEmpty() ? null : getList(p, "GroupId", "SecurityGroupId"));
         return booleanResponse("ModifyNetworkInterfaceAttribute");
+    }
+
+    private void requireKnownClientVpnEndpoints(String region, List<String> resourceIds) {
+        if (clientVpnService == null) {
+            return;
+        }
+        for (String resourceId : resourceIds) {
+            if (resourceId != null && resourceId.startsWith(Ec2ClientVpnService.ENDPOINT_PREFIX)) {
+                clientVpnService.requireEndpoint(region, resourceId);
+            }
+        }
+    }
+
+    /** AWS refuses to delete a subnet, security group or VPC a Client VPN endpoint still uses. */
+    private void requireNoClientVpnDependents(String region, String resourceId, String kind) {
+        if (clientVpnService == null) {
+            return;
+        }
+        clientVpnService.dependentEndpoint(region, resourceId).ifPresent(endpointId -> {
+            throw new AwsException("DependencyViolation", "The " + kind + " '" + resourceId
+                    + "' has dependencies and cannot be deleted: it is used by Client VPN endpoint " + endpointId, 400);
+        });
     }
 }

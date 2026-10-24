@@ -24,7 +24,9 @@ public class OpenIDConnectProvider {
 
     private String arn;
     private String url;
+    @JsonAlias("clientIds")
     private List<String> clientIdList = new ArrayList<>();
+    @JsonAlias("thumbprints")
     private List<String> thumbprintList = new ArrayList<>();
     private Instant createDate = Instant.now();
     private Map<String, String> tags = new ConcurrentHashMap<>();

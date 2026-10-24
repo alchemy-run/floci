@@ -706,6 +706,7 @@ public class BackupService {
     }
 
     public List<BackupSelection> listBackupSelections(String planId) {
+        getBackupPlan(planId);
         return selectionStore.scan(k -> true).stream()
                 .filter(s -> planId.equals(s.getBackupPlanId()))
                 .toList();
@@ -777,17 +778,20 @@ public class BackupService {
     // ── Recovery Point ─────────────────────────────────────────────────────────
 
     public RecoveryPoint describeRecoveryPoint(String vaultName, String recoveryPointArn, String region) {
-        describeBackupVault(vaultName, region);
+        BackupVault vault = describeBackupVault(vaultName, region);
+        if (recoveryPointArn == null || recoveryPointArn.isBlank()) {
+            throw new AwsException("MissingParameterValueException", "RecoveryPointArn is required", 400);
+        }
         return recoveryStore.get(recoveryPointArn)
-                .filter(rp -> vaultName.equals(rp.getBackupVaultName()))
+                .filter(rp -> vault.getBackupVaultArn().equals(rp.getBackupVaultArn()))
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException",
                         "Recovery point not found: " + recoveryPointArn, 400));
     }
 
     public List<RecoveryPoint> listRecoveryPointsByBackupVault(String vaultName, String region) {
-        describeBackupVault(vaultName, region);
+        BackupVault vault = describeBackupVault(vaultName, region);
         return recoveryStore.scan(k -> true).stream()
-                .filter(rp -> vaultName.equals(rp.getBackupVaultName()))
+                .filter(rp -> vault.getBackupVaultArn().equals(rp.getBackupVaultArn()))
                 .toList();
     }
 
@@ -993,7 +997,7 @@ public class BackupService {
                 .filter(p -> arn.equals(p.getBackupPlanArn()))
                 .findFirst();
         if (plan.isPresent()) {
-            return new HashMap<>();
+            return plan.get().getTags();
         }
         throw new AwsException("ResourceNotFoundException", "Resource not found: " + arn, 400);
     }

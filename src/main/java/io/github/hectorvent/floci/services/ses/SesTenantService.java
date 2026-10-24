@@ -202,7 +202,7 @@ public class SesTenantService implements SesTaggable {
     /**
      * Deletes the tenant. {@code dependentCascade} runs inside the lock with the resolved tenant so
      * the facade can cascade state held by other domains (the tenant suppression list); like the
-     * associations, it runs before the tenant record is removed — persistent/wal backends apply each
+     * associations, it runs before the tenant record is removed, persistent/wal backends apply each
      * deletion durably, so a crash mid-cascade must leave the tenant record (a retryable
      * DeleteTenant) rather than orphans no API call can remove.
      */
@@ -216,9 +216,9 @@ public class SesTenantService implements SesTaggable {
             // (probe-confirmed 2026-08-28). Keys carry the TenantId, so a recreated same-name tenant
             // never sees the old associations.
             String assocPrefix = associationKeyPrefix(region, tenant.tenantId());
-            for (String assocKey : associationStore.keys().stream()
+            for (String assocKey : associations(region).keys().stream()
                     .filter(k -> k.startsWith(assocPrefix)).toList()) {
-                associationStore.delete(assocKey);
+                associations(region).delete(assocKey);
             }
             tenantStore.delete(key);
         }
@@ -288,7 +288,7 @@ public class SesTenantService implements SesTaggable {
     /** Resolves a tenant from a tag ARN's resource remainder; package-private for the unit tests. */
     Tenant tenantForTagArn(String resourceRemainder, String region) {
         TenantTagArn arn = TenantTagArn.parse(resourceRemainder);
-        return findByTenantId(arn.tenantId(), region)
+        return findTagTenant(arn, resourceRemainder, region)
                 .orElseThrow(() -> tagArnTenantNotFound(arn));
     }
 
@@ -301,7 +301,7 @@ public class SesTenantService implements SesTaggable {
     void mutateTags(String resourceRemainder, String region, UnaryOperator<List<Tag>> mutation) {
         TenantTagArn arn = TenantTagArn.parse(resourceRemainder);
         synchronized (tenantMutationLock) {
-            Tenant current = findByTenantId(arn.tenantId(), region)
+            Tenant current = findTagTenant(arn, resourceRemainder, region)
                     .orElseThrow(() -> tagArnTenantNotFound(arn));
             // The record's list may be a mutable one (Jackson-built); hand the callback an immutable
             // copy so an in-place mutation can't reach the stored record, and store an immutable copy
@@ -327,7 +327,7 @@ public class SesTenantService implements SesTaggable {
      * service-level message instead of the Smithy one.
      */
     public Tenant tenantForAssociation(String tenantName, String region) {
-        // Absent and empty both get the service-level message here (probe-confirmed 2026-08-30) —
+        // Absent and empty both get the service-level message here (probe-confirmed 2026-08-30) -
         // the Smithy not-null variant exists only on CreateTenant.
         if (tenantName == null || tenantName.isBlank()) {
             throw new AwsException("BadRequestException", "TenantName cannot be empty", 400);
@@ -345,7 +345,7 @@ public class SesTenantService implements SesTaggable {
      */
     public Tenant tenantForSending(String tenantName, String region, String accountId) {
         // Unreachable through the facade (which treats a null TenantName as a non-tenant send), but
-        // a public helper should fail the AWS way — same guard as runWithTenant.
+        // a public helper should fail the AWS way, same guard as runWithTenant.
         if (tenantName == null || tenantName.isBlank()) {
             throw new AwsException("BadRequestException", "TenantName cannot be empty", 400);
         }
@@ -358,12 +358,12 @@ public class SesTenantService implements SesTaggable {
      * The send gate: every resource a tenant send uses (From identity, configuration set, template)
      * must be associated with the tenant, or AWS refuses the send with a 403. The bracket list
      * carries every missing ARN (the plural is AWS's own wording even for a single resource; on the
-     * wire AWS spells the body key "Message" — Floci renders its usual error shape instead).
+     * wire AWS spells the body key "Message", Floci renders its usual error shape instead).
      */
     public void requireResourcesAssociated(Tenant tenant, List<AssociationResource> resources,
                                            String region) {
         List<String> missing = resources.stream()
-                .filter(ref -> associationStore
+                .filter(ref -> associations(region)
                         .get(associationKey(region, tenant.tenantId(), ref)).isEmpty())
                 .map(AssociationResource::arn)
                 .toList();
@@ -419,7 +419,7 @@ public class SesTenantService implements SesTaggable {
     /**
      * Creates the association under the shared lock. The tenant is revalidated (a concurrent
      * {@code DeleteTenant} may have cascaded since the caller resolved it) and
-     * {@code resourceExistenceCheck} — the facade's throwing existence check — runs inside the lock
+     * {@code resourceExistenceCheck}, the facade's throwing existence check, runs inside the lock
      * too, so a backing resource cannot slip through {@link #deleteBackingResource} concurrently and
      * leave an association pointing at a deleted resource.
      */
@@ -432,13 +432,13 @@ public class SesTenantService implements SesTaggable {
                 throw tenantNotFound(tenant.tenantName());
             }
             resourceExistenceCheck.run();
-            if (associationStore.get(key).isPresent()) {
+            if (associations(region).get(key).isPresent()) {
                 // "Resources" is AWS's own grammar for this message.
                 throw new AwsException("AlreadyExistsException",
                         "Resources " + ref.arn() + " has already been associated with tenant "
                                 + tenant.tenantName(), 400);
             }
-            associationStore.put(key, new TenantResourceAssociation(tenant.tenantName(),
+            associations(region).put(key, new TenantResourceAssociation(tenant.tenantName(),
                     tenant.tenantId(), ref.arn(), ref.type(), Instant.now(clock)));
         }
         LOG.infov("Associated SES resource {0} with tenant {1} in region {2}",
@@ -464,7 +464,7 @@ public class SesTenantService implements SesTaggable {
 
     /** Removing an association that does not exist is a silent success on AWS. */
     public void disassociate(Tenant tenant, AssociationResource ref, String region) {
-        associationStore.delete(associationKey(region, tenant.tenantId(), ref));
+        associations(region).delete(associationKey(region, tenant.tenantId(), ref));
         LOG.infov("Disassociated SES resource {0} from tenant {1} in region {2}",
                 ref.arn(), tenant.tenantName(), region);
     }
@@ -485,7 +485,7 @@ public class SesTenantService implements SesTaggable {
     public List<TenantResourceAssociation> listTenantResources(Tenant tenant, String typeFilter,
                                                                String region) {
         String prefix = associationKeyPrefix(region, tenant.tenantId());
-        return associationStore.scan(k -> k.startsWith(prefix)).stream()
+        return associations(region).scan(k -> k.startsWith(prefix)).stream()
                 .filter(a -> typeFilter == null || typeFilter.equals(a.resourceType()))
                 .sorted(Comparator.comparing(TenantResourceAssociation::resourceArn,
                         Comparator.nullsLast(Comparator.naturalOrder())))
@@ -506,7 +506,7 @@ public class SesTenantService implements SesTaggable {
     /** AWS returns a resource's tenants ordered by association time; the paged list resumes on the same order. */
     public List<TenantResourceAssociation> listResourceTenants(AssociationResource ref, String region) {
         String regionPrefix = "tenantAssoc::" + region + "::";
-        return associationStore.scan(k -> k.startsWith(regionPrefix)).stream()
+        return associations(region).scan(k -> k.startsWith(regionPrefix)).stream()
                 .filter(a -> ref.arn().equals(a.resourceArn()))
                 .sorted(Comparator.comparing(TenantResourceAssociation::associatedTimestamp,
                                 Comparator.nullsLast(Comparator.naturalOrder()))
@@ -527,7 +527,7 @@ public class SesTenantService implements SesTaggable {
                                                                           String resourceName,
                                                                           String region) {
         String regionPrefix = "tenantAssoc::" + region + "::";
-        return associationStore.scan(k -> k.startsWith(regionPrefix)).stream()
+        return associations(region).scan(k -> k.startsWith(regionPrefix)).stream()
                 .filter(a -> resourceType.equals(a.resourceType())
                         && resourceName.equals(resourceNameFromArn(a.resourceArn())))
                 .findFirst();
@@ -560,13 +560,13 @@ public class SesTenantService implements SesTaggable {
     /**
      * {@code PutTenantSuppressionAttributes}: both members set the block (an empty reason list is a
      * valid state), neither member clears it. Observed precedence: empty TenantName, then the Smithy
-     * enum checks, then duplicates, then the pair rules, then tenant existence — a put on a missing
+     * enum checks, then duplicates, then the pair rules, then tenant existence, a put on a missing
      * tenant still gets its request validated first.
      */
     public void putSuppressionAttributes(String tenantName, List<String> suppressedReasons,
                                          String suppressionScope, String region) {
         // Unlike CreateTenant, an absent TenantName gets the same service-level message as an empty
-        // one here (probe-confirmed 2026-08-30) — no Smithy not-null variant on this operation.
+        // one here (probe-confirmed 2026-08-30), no Smithy not-null variant on this operation.
         if (tenantName == null || tenantName.isBlank()) {
             throw new AwsException("BadRequestException", "TenantName cannot be empty", 400);
         }
@@ -582,7 +582,7 @@ public class SesTenantService implements SesTaggable {
     }
 
     /**
-     * Resolves the tenant and runs {@code action} under the shared lock — the tenant-scoped
+     * Resolves the tenant and runs {@code action} under the shared lock, the tenant-scoped
      * suppression-list operations go through this so a concurrent {@code DeleteTenant} cascade
      * cannot interleave and leave entries for a deleted tenant.
      */
@@ -602,7 +602,7 @@ public class SesTenantService implements SesTaggable {
 
     /**
      * Validates the SuppressedReasons/SuppressionScope pair (shared by CreateTenant and
-     * PutTenantSuppressionAttributes) and returns the block to store — {@code null} when neither
+     * PutTenantSuppressionAttributes) and returns the block to store, {@code null} when neither
      * member was given. AWS rejects half a pair with member-specific messages, and an empty reason
      * list without a scope gets its own third wording.
      */
@@ -720,6 +720,20 @@ public class SesTenantService implements SesTaggable {
         if (nextToken != null) {
             throw new AwsException("BadRequestException", "Invalid Next Token", 400);
         }
+    }
+
+    private StorageBackend<String, TenantResourceAssociation> associations(String region) {
+        return associationStore;
+    }
+
+    private Optional<Tenant> findTagTenant(TenantTagArn arn, String resourceRemainder, String region) {
+        return findByTenantId(arn.tenantId(), region).or(() -> {
+            if (arn.name() != null) {
+                return Optional.empty();
+            }
+            return find(resourceRemainder, region).filter(tenant -> tenant.tenantArn() != null
+                    && tenant.tenantArn().endsWith(":tenant/" + resourceRemainder));
+        });
     }
 
 }

@@ -227,6 +227,7 @@ public class ElbV2DataPlane {
         ruleChains.clear();
         rrCounters.clear();
         listenerRegions.clear();
+        sharedAddressAffinity.clear();
     }
 
     boolean publishListener(Listener listener, String region, Integer previousPort,
@@ -881,7 +882,7 @@ public class ElbV2DataPlane {
                 return;
             }
             String functionArn = targets.get(0).getId();
-            invokeLambdaTarget(req, functionArn, region);
+            invokeLambdaTarget(req, tg, functionArn, region);
             return;
         }
 

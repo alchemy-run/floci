@@ -235,11 +235,11 @@ public class IotService {
 
     public String describeEndpoint(String endpointType) {
         String effectiveType = endpointType == null || endpointType.isBlank() ? DEFAULT_ENDPOINT_TYPE : endpointType;
-        if (!Set.of(DEFAULT_ENDPOINT_TYPE, "iot:Data", "iot:Jobs", "iot:CredentialProvider").contains(effectiveType)) {
+        if (!IotEndpoints.TYPES.contains(effectiveType)) {
             throw new AwsException("InvalidRequestException", "Unsupported endpoint type: " + effectiveType, 400);
         }
         startMqttIfEnabled();
-        return config.iotEndpointAddress();
+        return IotEndpoints.address(config, effectiveType, regionResolver.getAccountId(), regionResolver.getRegion());
     }
 
     public Thing createThing(String thingName, Map<String, String> attributes, String region) {
@@ -249,8 +249,10 @@ public class IotService {
     public Thing createThing(String thingName, Map<String, String> attributes, String thingTypeName, String region) {
         startMqttIfEnabled();
         validateThingName(thingName);
-        if (thingTypeName != null && !thingTypeName.isBlank()) {
-            describeThingType(thingTypeName, region);
+        if (thingTypeName != null && !thingTypeName.isBlank()
+                && describeThingType(thingTypeName, region).isDeprecated()) {
+            throw new AwsException("InvalidRequestException",
+                    "Can not create a new thing with deprecated thing type " + thingTypeName + ".", 400);
         }
         String key = thingKey(region, thingName);
         Thing existing = thingStore.get(key).orElse(null);
@@ -1247,14 +1249,24 @@ public class IotService {
     }
 
     public void deprecateThingType(String thingTypeName, String region) {
-        IotThingType type = describeThingType(thingTypeName, region);
-        type.setDeprecated(true);
-        type.setDeprecatedDate(Instant.now());
-        thingTypeStore.put(thingTypeKey(region, thingTypeName), type);
+        deprecateThingType(thingTypeName, false, region);
     }
 
+    /**
+     * Deletes a thing type. AWS only deletes a type that has been deprecated for at least
+     * {@link #THING_TYPE_DELETION_DELAY} and that no thing is associated with.
+     */
     public void deleteThingType(String thingTypeName, String region) {
-        describeThingType(thingTypeName, region);
+        IotThingType type = describeThingType(thingTypeName, region);
+        if (!type.isDeprecated()) {
+            throw new AwsException("InvalidRequestException",
+                    "Thing type " + thingTypeName + " must be deprecated before it can be deleted.", 400);
+        }
+        Instant deprecatedAt = type.getDeprecatedDate() != null ? type.getDeprecatedDate() : type.getCreationDate();
+        if (deprecatedAt != null && clock.instant().isBefore(deprecatedAt.plus(THING_TYPE_DELETION_DELAY))) {
+            throw new AwsException("InvalidRequestException",
+                    "Thing type " + thingTypeName + " cannot be deleted until 5 minutes after it was deprecated.", 400);
+        }
         boolean inUse = listThings(region).stream().anyMatch(thing -> thingTypeName.equals(thing.getThingTypeName()));
         if (inUse) {
             throw new AwsException("InvalidRequestException", "Cannot delete thing type with associated things", 400);
@@ -1529,7 +1541,8 @@ public class IotService {
 
     public IotTopicRule getTopicRule(String ruleName, String region) {
         return topicRuleStore.get(topicRuleKey(region, ruleName))
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Topic rule not found: " + ruleName, 404));
+                .orElseThrow(() -> new AwsException("UnauthorizedException",
+                        "Access to topic rule '" + ruleName + "' was denied", 401));
     }
 
     public List<IotTopicRule> listTopicRules(String region) {
@@ -2146,8 +2159,13 @@ public class IotService {
     }
 
     private TaggableResource taggableForArn(String resourceArn) {
-        String resource = resourceFromArn(resourceArn);
-        String region = regionFromArn(resourceArn);
+        AwsArnUtils.Arn arn = parseIotArn(resourceArn);
+        if (!regionResolver.getAccountId().equals(arn.accountId())
+                || !regionResolver.getRegion().equals(arn.region())) {
+            throw new AwsException("ResourceNotFoundException", "Resource not found: " + resourceArn, 404);
+        }
+        String resource = arn.resource();
+        String region = arn.region();
         if (resource.startsWith("thing/")) {
             String thingName = resource.substring("thing/".length());
             Thing thing = thingStore.get(thingKey(region, thingName))
@@ -2175,10 +2193,29 @@ public class IotService {
         }
         if (resource.startsWith("rule/")) {
             String ruleName = resource.substring("rule/".length());
-            IotTopicRule rule = getTopicRule(ruleName, region);
+            IotTopicRule rule = topicRuleStore.get(topicRuleKey(region, ruleName))
+                    .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Resource not found: " + resourceArn, 404));
             return new TaggableResource(rule.getTags(), tags -> {
                 rule.setTags(tags);
                 topicRuleStore.put(topicRuleKey(region, ruleName), rule);
+            });
+        }
+        if (resource.startsWith("thingtype/")) {
+            String thingTypeName = resource.substring("thingtype/".length());
+            IotThingType type = thingTypeStore.get(thingTypeKey(region, thingTypeName))
+                    .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Resource not found: " + resourceArn, 404));
+            return new TaggableResource(type.getTags(), tags -> {
+                type.setTags(tags);
+                thingTypeStore.put(thingTypeKey(region, thingTypeName), type);
+            });
+        }
+        if (resource.startsWith("thinggroup/")) {
+            String thingGroupName = resource.substring("thinggroup/".length());
+            IotThingGroup group = thingGroupStore.get(thingGroupKey(region, thingGroupName))
+                    .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Resource not found: " + resourceArn, 404));
+            return new TaggableResource(group.getTags(), tags -> {
+                group.setTags(tags);
+                thingGroupStore.put(thingGroupKey(region, thingGroupName), group);
             });
         }
         throw new AwsException("InvalidRequestException", "Invalid resource ARN: " + resourceArn, 400);

@@ -85,60 +85,64 @@ public class LambdaUrlInvocationController {
 
     @GET
     @Path("/{proxy: .*}")
-    public Response handleGet(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
+    public CompletionStage<Response> handleGet(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
                               @Context HttpHeaders headers, @Context UriInfo uriInfo) {
         return invoke("GET", urlId, proxy, headers, uriInfo, null);
     }
 
     @POST
     @Path("/{proxy: .*}")
-    public Response handlePost(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
+    public CompletionStage<Response> handlePost(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
                                @Context HttpHeaders headers, @Context UriInfo uriInfo, byte[] body) {
         return invoke("POST", urlId, proxy, headers, uriInfo, body);
     }
 
     @PUT
     @Path("/{proxy: .*}")
-    public Response handlePut(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
+    public CompletionStage<Response> handlePut(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
                               @Context HttpHeaders headers, @Context UriInfo uriInfo, byte[] body) {
         return invoke("PUT", urlId, proxy, headers, uriInfo, body);
     }
 
     @DELETE
     @Path("/{proxy: .*}")
-    public Response handleDelete(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
+    public CompletionStage<Response> handleDelete(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
                                  @Context HttpHeaders headers, @Context UriInfo uriInfo) {
         return invoke("DELETE", urlId, proxy, headers, uriInfo, null);
     }
 
     @PATCH
     @Path("/{proxy: .*}")
-    public Response handlePatch(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
+    public CompletionStage<Response> handlePatch(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
                                 @Context HttpHeaders headers, @Context UriInfo uriInfo, byte[] body) {
         return invoke("PATCH", urlId, proxy, headers, uriInfo, body);
     }
 
-    private Response invoke(String method, String urlId, String proxy, HttpHeaders headers, UriInfo uriInfo, byte[] body) {
+    private CompletionStage<Response> invoke(String method, String urlId, String proxy, HttpHeaders headers, UriInfo uriInfo, byte[] body) {
         Object target = lambdaService.getTargetByUrlId(urlId);
         String functionName;
         String functionArn;
         String region;
         String accountId;
+        LambdaUrlConfig urlConfig;
 
         if (target instanceof LambdaAlias alias) {
             functionName = alias.getFunctionName();
             functionArn = alias.getAliasArn();
+            urlConfig = alias.getUrlConfig();
             AwsArnUtils.Arn arn = AwsArnUtils.parse(functionArn);
             region = arn.region();
             accountId = arn.accountId();
         } else if (target instanceof LambdaFunction fn) {
             functionName = fn.getFunctionName();
             functionArn = fn.getFunctionArn();
+            urlConfig = fn.getUrlConfig();
             AwsArnUtils.Arn arn = AwsArnUtils.parse(functionArn);
             region = arn.region();
             accountId = fn.getAccountId() != null ? fn.getAccountId() : arn.accountId();
         } else {
-            return Response.status(404).entity(jsonMessage("Function URL not found")).type(MediaType.APPLICATION_JSON).build();
+            return CompletableFuture.completedFuture(
+                    Response.status(404).entity(jsonMessage("Function URL not found")).type(MediaType.APPLICATION_JSON).build());
         }
 
         requestContext.setAccountId(accountId);
@@ -149,22 +153,41 @@ public class LambdaUrlInvocationController {
 
         LOG.infov("Lambda URL invocation: {0} {1} -> {2} (region: {3})", method, urlId, functionName, region);
 
-        try {
-            InvokeResult result = lambdaService.invokeArn(
-                    functionArn, event.getBytes(), InvocationType.RequestResponse);
-            return buildResponse(result);
-        } catch (AwsException e) {
-            return Response.status(e.getHttpStatus()).entity(e.getMessage()).build();
+        // AWS_IAM Function URLs reject unsigned requests at the URL edge
+        // (HTTP 403) without invoking the function. Unsigned GET against a
+        // RESPONSE_STREAM URL would otherwise hang the caller on a container.
+        if (urlConfig != null && "AWS_IAM".equals(urlConfig.getAuthType())
+                && !hasSigV4(headers, uriInfo)) {
+            return CompletableFuture.completedFuture(
+                    Response.status(403)
+                            .entity("{\"Message\":\"Forbidden\"}")
+                            .type(MediaType.APPLICATION_JSON)
+                            .build());
         }
+
+        boolean responseStream = urlConfig != null && "RESPONSE_STREAM".equals(urlConfig.getInvokeMode());
+        byte[] eventBytes = event.getBytes(StandardCharsets.UTF_8);
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                InvokeResult result = lambdaService.invokeArn(functionArn, eventBytes, InvocationType.RequestResponse);
+                if (result.isStreaming()) {
+                    return buildStreamedResponse(result, responseStream);
+                }
+                return buildResponse(result);
+            } catch (AwsException e) {
+                return Response.status(e.getHttpStatus()).entity(e.getMessage()).build();
+            }
+        }, INVOKE_POOL);
     }
 
     private String buildEvent(String method, String urlId, String proxy, HttpHeaders headers, UriInfo uriInfo, byte[] body, String requestId, String region) {
         ObjectNode root = objectMapper.createObjectNode();
         root.put("version", "2.0");
         root.put("routeKey", "$default");
-        String rawPath = "/" + (proxy != null ? proxy : "");
+        RawTarget target = rawTarget(urlId, headers, uriInfo);
+        String rawPath = target.path();
         root.put("rawPath", rawPath);
-        root.put("rawQueryString", uriInfo.getRequestUri().getRawQuery() != null ? uriInfo.getRequestUri().getRawQuery() : "");
+        root.put("rawQueryString", target.query());
 
         List<String> cookies = CookieHeaders.cookiePairs(headers.getRequestHeaders());
         if (!cookies.isEmpty()) {
@@ -176,7 +199,7 @@ public class LambdaUrlInvocationController {
         headers.getRequestHeaders().forEach((k, v) -> headersNode.put(k.toLowerCase(), String.join(",", v)));
 
         ObjectNode queryParams = root.putObject("queryStringParameters");
-        uriInfo.getQueryParameters().forEach((k, v) -> queryParams.put(k, String.join(",", v)));
+        decodeQueryParameters(target.query()).forEach((k, v) -> queryParams.put(k, String.join(",", v)));
 
         ObjectNode ctx = root.putObject("requestContext");
         ctx.put("accountId", regionResolver.getAccountId());
@@ -231,7 +254,8 @@ public class LambdaUrlInvocationController {
             return buildFunctionErrorResponse(result);
         }
         if (result.getPayload() == null || result.getPayload().length == 0) {
-            return Response.status(result.getStatusCode()).build();
+            int status = result.getFunctionError() != null ? 502 : result.getStatusCode();
+            return Response.status(status).build();
         }
         try {
             JsonNode node = objectMapper.readTree(result.getPayload());
@@ -251,11 +275,16 @@ public class LambdaUrlInvocationController {
                     builder.entity(bytes);
                 }
                 return builder.build();
-            } else {
-                return Response.ok(result.getPayload()).type(MediaType.APPLICATION_JSON).build();
             }
+            // AWS Function URLs return 502 when the runtime reports a function
+            // error (timeout, unhandled) and the payload is not an HTTP result.
+            if (result.getFunctionError() != null) {
+                return Response.status(502).entity(result.getPayload()).type(MediaType.APPLICATION_JSON).build();
+            }
+            return Response.ok(result.getPayload()).type(MediaType.APPLICATION_JSON).build();
         } catch (Exception e) {
-            return Response.ok(result.getPayload()).build();
+            int status = result.getFunctionError() != null ? 502 : 200;
+            return Response.status(status).entity(result.getPayload()).build();
         }
     }
 
@@ -386,4 +415,137 @@ public class LambdaUrlInvocationController {
         }
         return -1;
     }
+
+    /**
+     * Function URL waits for the container off the JAX-RS worker pool so a
+     * nested emulator call (the Lambda talking back to Floci) can still be
+     * served. Holding the request thread across {@code invoke()} deadlocks
+     * under parallel Function URL traffic — Alchemy bindings suites burst
+     * ~8 routes at the default 3s timeout and get 502s.
+     */
+    private static final ExecutorService INVOKE_POOL = Executors.newCachedThreadPool(r -> {
+        Thread t = new Thread(r, "lambda-url-invoke");
+        t.setDaemon(true);
+        return t;
+    });
+
+    /**
+     * Builds the HTTP response for a streaming invocation result
+     * (awslambda.streamifyResponse). With {@code InvokeMode=RESPONSE_STREAM} body
+     * chunks pass through unbuffered (flushed as they arrive); with the default
+     * BUFFERED mode the stream is drained and returned whole. Either way the
+     * {@code application/vnd.awslambda.http-integration-response} prelude
+     * (JSON metadata, an 8-NUL delimiter, then the raw body) is parsed off the
+     * front when present.
+     */
+    private Response buildStreamedResponse(InvokeResult result, boolean passThrough) {
+        StreamingPayload stream = result.getStream();
+        boolean framed = stream.getContentType() != null
+                && stream.getContentType().startsWith("application/vnd.awslambda.http-integration-response");
+
+        int status = 200;
+        ObjectNode prelude = null;
+        byte[] initialBody = new byte[0];
+        try {
+            if (framed) {
+                Prelude parsed = readPrelude(stream);
+                prelude = parsed.metadata();
+                initialBody = parsed.remainder();
+                if (prelude.has("statusCode")) {
+                    status = prelude.get("statusCode").asInt();
+                }
+            }
+        } catch (Exception e) {
+            LOG.warnv("Failed to parse streaming response prelude: {0}", e.getMessage());
+            return Response.status(500).entity(jsonMessage("Malformed streaming response"))
+                    .type(MediaType.APPLICATION_JSON).build();
+        }
+
+        Response.ResponseBuilder builder = Response.status(status);
+        if (prelude != null) {
+            if (prelude.has("headers")) {
+                prelude.get("headers").fields()
+                        .forEachRemaining(e -> builder.header(e.getKey(), e.getValue().asText()));
+            }
+            if (prelude.has("cookies") && prelude.get("cookies").isArray()) {
+                prelude.get("cookies").forEach(c -> builder.header("Set-Cookie", c.asText()));
+            }
+        } else if (stream.getContentType() != null) {
+            builder.header("Content-Type", stream.getContentType());
+        }
+
+        if (passThrough) {
+            byte[] head = initialBody;
+            StreamingOutput out = output -> {
+                try {
+                    if (head.length > 0) {
+                        output.write(head);
+                        output.flush();
+                    }
+                    byte[] chunk;
+                    while ((chunk = stream.next()) != null) {
+                        output.write(chunk);
+                        output.flush();
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } catch (TimeoutException e) {
+                    LOG.warnv("Streaming response stalled: {0}", e.getMessage());
+                }
+            };
+            return builder.entity(out).build();
+        }
+
+        try {
+            byte[] rest = stream.drain();
+            byte[] full = new byte[initialBody.length + rest.length];
+            System.arraycopy(initialBody, 0, full, 0, initialBody.length);
+            System.arraycopy(rest, 0, full, initialBody.length, rest.length);
+            return builder.entity(full).build();
+        } catch (Exception e) {
+            LOG.warnv("Failed to drain streaming response: {0}", e.getMessage());
+            return Response.status(500).entity(jsonMessage("Truncated streaming response"))
+                    .type(MediaType.APPLICATION_JSON).build();
+        }
+    }
+
+    /**
+     * Reads the path and query from the request line. A pre-matching filter that rewrites the
+     * request URI (host-style routing) leaves JAX-RS holding a decoded copy that re-encodes
+     * differently, so a literal {@code +} sent as {@code %2B} would reach the function as a
+     * space. The Vert.x request is never rewritten, so it is the authoritative source.
+     */
+    private RawTarget rawTarget(String urlId, HttpHeaders headers, UriInfo uriInfo) {
+        io.vertx.core.http.HttpServerRequest vertxRequest = currentRequest();
+        String rawPath;
+        String rawQuery;
+        String host;
+        if (vertxRequest != null) {
+            rawPath = vertxRequest.path();
+            rawQuery = vertxRequest.query();
+            host = RequestHost.of(vertxRequest);
+        } else {
+            URI requestUri = uriInfo.getRequestUri();
+            rawPath = requestUri.getRawPath();
+            rawQuery = requestUri.getRawQuery();
+            host = RequestHost.of(headers != null ? headers.getHeaderString("Host") : null, requestUri);
+        }
+        return new RawTarget(functionPath(urlId, rawPath, LambdaUrlRoutingFilter.isFunctionUrlHost(host)),
+                rawQuery != null ? rawQuery : "");
+    }
+
+    private io.vertx.core.http.HttpServerRequest currentRequest() {
+        if (currentVertxRequest == null) {
+            return null;
+        }
+        try {
+            RoutingContext current = currentVertxRequest.getCurrent();
+            return current != null ? current.request() : null;
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    @Inject
+    CurrentVertxRequest currentVertxRequest;
 }

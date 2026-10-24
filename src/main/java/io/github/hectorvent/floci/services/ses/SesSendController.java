@@ -345,7 +345,7 @@ public class SesSendController {
             }
 
             // The tenant gate runs only after every part of the request has been parsed and
-            // validated — AWS reports malformed content before a missing tenant (probe-confirmed).
+            // validated, AWS reports malformed content before a missing tenant (probe-confirmed).
             sesService.checkTenantSendAccess(tenantName, fromEmailAddress, configurationSetName,
                     gateTemplateName, regionResolver.getAccountId(), region);
 

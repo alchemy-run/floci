@@ -184,10 +184,8 @@ public class KinesisService implements ResourceProvider {
     }
 
     public List<String> listStreams(String region) {
-        String prefix = region + "::";
-        return store.scan(key -> key.startsWith(prefix)).stream()
+        return listStreamObjects(region).stream()
                 .map(KinesisStream::getStreamName)
-                .sorted()
                 .toList();
     }
 
@@ -207,11 +205,7 @@ public class KinesisService implements ResourceProvider {
     }
 
     public KinesisConsumer registerStreamConsumer(String streamArn, String consumerName, String region) {
-        String consumerArn = streamArn + "/consumer/" + consumerName + ":" + System.currentTimeMillis();
-        KinesisConsumer consumer = new KinesisConsumer(consumerName, consumerArn, streamArn);
-        consumerStore.put(region + "::" + consumerArn, consumer);
-        LOG.infov("Registered Kinesis consumer: {0} for stream {1}", consumerName, streamArn);
-        return consumer;
+        return registerStreamConsumer(streamArn, consumerName, Map.of(), region);
     }
 
     public void deregisterStreamConsumer(String streamArn, String consumerName, String consumerArn, String region) {
@@ -239,20 +233,15 @@ public class KinesisService implements ResourceProvider {
     }
 
     public List<KinesisConsumer> listStreamConsumers(String streamArn, String region) {
+        String streamName = streamNameFromArn(streamArn);
+        resolveStream(streamName, region);
         return consumerStore.scan(k -> true).stream()
-                .filter(c -> c.getStreamArn().equals(streamArn))
+                .filter(c -> streamArn.equals(c.getStreamArn()))
                 .toList();
     }
 
     public void deleteStream(String streamName, String region) {
-        String storageKey = regionKey(region, streamName);
-        // Delete under the per-stream monitor every writer takes, so the delete is serialized with
-        // any in-flight append, split, merge or metadata write on this stream. See lockFor for why
-        // the monitor is deliberately left in the map.
-        synchronized (lockFor(storageKey)) {
-            store.delete(storageKey);
-        }
-        LOG.infov("Deleted Kinesis stream: {0}", streamName);
+        deleteStream(streamName, false, region);
     }
 
     public void addTagsToStream(String streamName, Map<String, String> tags, String region) {
@@ -457,6 +446,10 @@ public class KinesisService implements ResourceProvider {
                 throw new AwsException("InvalidArgumentException", "One or both shards are already closed", 400);
             }
 
+            if (!areAdjacent(shard1, shard2)) {
+                throw new AwsException("InvalidArgumentException",
+                        "Shards " + shardId + " and " + adjacentShardId + " are not adjacent", 400);
+            }
             shard1.setClosed(true);
             shard2.setClosed(true);
             String seq = String.valueOf(sequenceGenerator.get());
@@ -483,7 +476,7 @@ public class KinesisService implements ResourceProvider {
     }
 
     private String nextShardId(KinesisStream stream) {
-        return String.format("shardId-%012d", stream.getShards().size());
+        return formatShardId(stream.getShards().size());
     }
 
     private String subtractOne(String val) {
@@ -1528,5 +1521,15 @@ public class KinesisService implements ResourceProvider {
         return name;
     }
 
+    private boolean areAdjacent(KinesisShard a, KinesisShard b) {
+        BigInteger aStart = new BigInteger(a.getHashKeyRange().startingHashKey());
+        BigInteger aEnd = new BigInteger(a.getHashKeyRange().endingHashKey());
+        BigInteger bStart = new BigInteger(b.getHashKeyRange().startingHashKey());
+        BigInteger bEnd = new BigInteger(b.getHashKeyRange().endingHashKey());
+        return aEnd.add(BigInteger.ONE).equals(bStart) || bEnd.add(BigInteger.ONE).equals(aStart);
+    }
 
+    private String formatShardId(int index) {
+        return String.format("shardId-%012d", index);
+    }
 }

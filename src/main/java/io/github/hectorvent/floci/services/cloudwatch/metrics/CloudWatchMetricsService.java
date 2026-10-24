@@ -212,6 +212,7 @@ public class CloudWatchMetricsService {
                                                 int periodSeconds,
                                                 List<String> statistics,
                                                 String unit, String region) {
+        if (periodSeconds < 1) throw CloudWatchMetadataService.invalid("Period must be positive");
         String dimKey = dimensions != null ? buildDimKey(dimensions) : "";
         String prefix = region + "::" + namespace + "::" + metricName + "::" + dimKey + "::";
 
@@ -321,6 +322,13 @@ public class CloudWatchMetricsService {
         if (alarm.getAlarmArn() == null) {
             alarm.setAlarmArn(regionResolver.buildArn("cloudwatch", region, "alarm:" + alarm.getAlarmName()));
         }
+        alarmStore.get(region + "::" + alarm.getAlarmName()).ifPresent(existing -> {
+            alarm.setTags(new LinkedHashMap<>(existing.getTags()));
+            alarm.setStateValue(existing.getStateValue());
+            alarm.setStateReason(existing.getStateReason());
+            alarm.setStateReasonData(existing.getStateReasonData());
+            alarm.setStateUpdatedTimestamp(existing.getStateUpdatedTimestamp());
+        });
         alarm.setRegion(region);
         alarm.setAlarmConfigurationUpdatedTimestamp(Instant.now().getEpochSecond());
         alarmStore.put(region + "::" + alarm.getAlarmName(), alarm);

@@ -663,7 +663,13 @@ public class OrganizationsService implements ScpProvider, RootAccessOrganization
                             String destinationParentId) {
         Organization organization = requireManagementAccount(callerAccountId);
         OrganizationAccount account = requireAccount(organization, accountId);
-        requireParent(organization, sourceParentId);
+        if (sourceParentId == null || sourceParentId.isEmpty()) {
+            throw invalidInput("SourceParentId is required.");
+        }
+        if (!accountParentExists(organization, sourceParentId)) {
+            throw new AwsException("SourceParentNotFoundException",
+                    "We can't find the source parent " + sourceParentId + ".", 400);
+        }
         if (!accountParentExists(organization, destinationParentId)) {
             throw new AwsException("DestinationParentNotFoundException",
                     "We can't find the destination parent " + destinationParentId + ".", 400);
@@ -719,8 +725,9 @@ public class OrganizationsService implements ScpProvider, RootAccessOrganization
     public OrganizationPolicy createPolicy(String callerAccountId, String content, String description,
                                            String name, String type, Map<String, String> tags) {
         Organization organization = requireManagementAccount(callerAccountId);
+        // AWS lets a policy of any type be created before the type is enabled on the root;
+        // only AttachPolicy requires it to be enabled.
         validatePolicyType(type);
-        requirePolicyTypeEnabled(organization, type);
         validateName(name, "Name", MAX_POLICY_NAME_LENGTH);
         if (content == null || content.isBlank()) {
             throw invalidInput("Content must not be empty.");
@@ -983,7 +990,13 @@ public class OrganizationsService implements ScpProvider, RootAccessOrganization
         } catch (AwsException e) {
             return;
         }
-        Set<String> targetIds = new java.util.LinkedHashSet<>(registeredOuIds);
+        // Baselines can outlive their OU (Organizations lets the OU be deleted underneath Control
+        // Tower), so only OUs that still exist are reconciled.
+        Set<String> existingOuIds = organizationalUnitsIn(organization).stream()
+                .map(OrganizationalUnit::getId)
+                .collect(java.util.stream.Collectors.toSet());
+        Set<String> targetIds = new java.util.LinkedHashSet<>();
+        registeredOuIds.stream().filter(existingOuIds::contains).forEach(targetIds::add);
         organizationalUnitsIn(organization).stream()
                 .filter(ou -> "Security".equals(ou.getName()))
                 .map(OrganizationalUnit::getId)
@@ -991,7 +1004,6 @@ public class OrganizationsService implements ScpProvider, RootAccessOrganization
         if (targetIds.isEmpty()) {
             return;
         }
-        targetIds.forEach(targetId -> requireOrganizationalUnit(organization, targetId));
 
         OrganizationPolicy guardrail = policiesIn(organization).stream()
                 .filter(policy -> SERVICE_CONTROL_POLICY.equals(policy.getType()))
@@ -1609,12 +1621,13 @@ public class OrganizationsService implements ScpProvider, RootAccessOrganization
         if (parentId == null || parentId.isEmpty()) {
             throw invalidInput("ParentId is required.");
         }
-        if (ROOT_ID_PATTERN.matcher(parentId).matches()) {
-            requireRoot(organization, parentId);
+        // A well-formed but unknown root or OU is still reported as a missing *parent*.
+        if (ROOT_ID_PATTERN.matcher(parentId).matches()
+                && organization.getRoot().getId().equals(parentId)) {
             return;
         }
-        if (OU_ID_PATTERN.matcher(parentId).matches()) {
-            requireOrganizationalUnit(organization, parentId);
+        if (OU_ID_PATTERN.matcher(parentId).matches()
+                && organizationalUnitsIn(organization).stream().anyMatch(ou -> parentId.equals(ou.getId()))) {
             return;
         }
         throw new AwsException("ParentNotFoundException",

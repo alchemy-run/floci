@@ -218,6 +218,7 @@ public class SesReceiptRuleService {
         collectRuleShapeViolations(rule, violations);
         throwViolations(violations);
         requireValidRuleName(rule.getName());
+        requireValidRecipients(rule);
         synchronized (receiptRuleSetLock) {
             ReceiptRuleSet ruleSet = requireRuleSet(ruleSetName, region);
             List<ReceiptRule> rules = new ArrayList<>(ruleSet.getRules());
@@ -254,6 +255,7 @@ public class SesReceiptRuleService {
         collectRuleShapeViolations(rule, violations);
         throwViolations(violations);
         requireValidRuleName(rule.getName());
+        requireValidRecipients(rule);
         synchronized (receiptRuleSetLock) {
             ReceiptRuleSet ruleSet = requireRuleSet(ruleSetName, region);
             List<ReceiptRule> rules = new ArrayList<>(ruleSet.getRules());
@@ -1050,5 +1052,13 @@ public class SesReceiptRuleService {
             }
         }
         return true;
+    }
+
+    private static void requireValidRecipients(ReceiptRule rule) {
+        for (String recipient : rule.getRecipients()) {
+            if (!isValidRecipient(recipient)) {
+                throw new AwsException("InvalidParameterValue", "Invalid recipient: " + recipient, 400);
+            }
+        }
     }
 }

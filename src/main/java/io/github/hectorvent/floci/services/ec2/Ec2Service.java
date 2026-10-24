@@ -1057,11 +1057,17 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
                     || "terminated".equals(instance.getState().getName())) {
                 continue;
             }
-            if (vpcNetworkManager.reservePrivateIp(instance.getRegion(), instance.getSubnetId(),
-                    instance.getPrivateIpAddress())) {
-                reserved++;
+            boolean restored;
+            if (instance.getLogicalPrivateIpAddress() == null) {
+                restored = vpcNetworkManager.reservePrivateIp(instance.getRegion(), instance.getSubnetId(),
+                        instance.getPrivateIpAddress());
+            } else {
+                restored = vpcNetworkManager.reserveTransportPrivateIp(instance.getRegion(), instance.getSubnetId(),
+                        instance.getLogicalPrivateIpAddress(), instance.getContainerBridgeIp(), instance.getInstanceId());
             }
-            else {
+            if (restored) {
+                reserved++;
+            } else {
                 skipped++;
             }
         }
@@ -1396,14 +1402,24 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         defaultSg.setOwnerId(callerAccountId());
         defaultSg.setRegion(region);
 
+        // AWS seeds every default group with all-traffic ingress from its own members.
+        IpPermission ingressSelf = new IpPermission();
+        ingressSelf.setIpProtocol("-1");
+        UserIdGroupPair self = new UserIdGroupPair();
+        self.setGroupId(securityGroupId);
+        self.setUserId(defaultSg.getOwnerId());
+        ingressSelf.getUserIdGroupPairs().add(self);
+        defaultSg.getIpPermissions().add(ingressSelf);
+
         // Default egress: all traffic
         IpPermission egressAll = new IpPermission();
         egressAll.setIpProtocol("-1");
         egressAll.getIpRanges().add(new IpRange("0.0.0.0/0"));
         defaultSg.getIpPermissionsEgress().add(egressAll);
         securityGroups.put(key(region, securityGroupId), defaultSg);
-        // Persist the default egress rule as a SecurityGroupRule so that
-        // DescribeSecurityGroupRules can find it immediately (#1093).
+        // Persist the default rules as SecurityGroupRules so that
+        // DescribeSecurityGroupRules can find them immediately (#1093).
+        createRules(region, securityGroupId, ingressSelf, false);
         createRules(region, securityGroupId, egressAll, true);
     }
 
@@ -1468,7 +1484,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     // A brand-new custom NACL starts closed: only the implicit deny rules, no allows.
     public NetworkAcl createNetworkAcl(String region, String vpcId) {
         ensureDefaultResources(region);
-        getRequiredVpc(region, vpcId);
+        resolveVpcForCreate(region, vpcId);
         String networkAclId = "acl-" + randomHex(17);
         NetworkAcl acl = new NetworkAcl();
         acl.setNetworkAclId(networkAclId);
@@ -4135,7 +4151,10 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         long deadline = System.nanoTime() + timeout.toNanos();
         while (true) {
             String state = instance.getState() != null ? instance.getState().getName() : null;
-            if ("running".equals(state)) {
+            if (instance.isContainerLaunchFailed()) {
+                throw launchFailure(instance, "its backing container failed during launch");
+            }
+            if ("running".equals(state) && !instance.isContainerLaunchPending()) {
                 return;
             }
             if ("terminated".equals(state)) {
@@ -4218,7 +4237,8 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     }
 
     private void restoreInstanceFirewall(Instance instance) {
-        if (!securityGroupEnforcementEnabled()) {
+        if (!securityGroupEnforcementEnabled() && instance.getLogicalPrivateIpAddress() == null
+                && (vpcNetworkManager == null || !vpcNetworkManager.enabled())) {
             return;
         }
         String region = instance.getRegion();
@@ -4853,7 +4873,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
                 ? "Windows" : "Linux/UNIX";
     }
 
-    public List<Map<String, String>> terminateInstances(String region, List<String> instanceIds) {
+    public synchronized List<Map<String, String>> terminateInstances(String region, List<String> instanceIds) {
         ensureDefaultResources(region);
         List<Map<String, String>> result = new ArrayList<>();
         // Every instance named here is going away, so none of them counts as a live dependant of
@@ -4931,12 +4951,6 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         return result;
     }
 
-    /**
-     * Stops the Docker containers of running instances on emulator shutdown. Without this
-     * they outlive the process as orphans. Instances flip to {@code stopped} — the container
-     * really is stopped, and the id is kept so StartInstances can revive it after a restart.
-     * Runs during the ShutdownEvent phase, so the state change is captured by the final flush.
-     */
     @Override
     public void stopManagedContainers() {
         if (config.services().ec2().mock()) {
@@ -6153,8 +6167,10 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     }
 
     public Vpc createDefaultVpc(String region) {
+        // Recreate the seed even if this process already ran ensure once and a
+        // later delete/nuke removed vpc-default.
+        seededAccountRegions.remove(callerAccountId() + "::" + region);
         ensureDefaultResources(region);
-        // Return existing default or create one
         return vpcs.scan(k -> true).stream()
                 .filter(v -> v.getRegion().equals(region) && v.isDefault())
                 .findFirst()
@@ -6368,7 +6384,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
      * <p>The add/remove parameters are set operations. AWS accepts an id that is already
      * associated, or a removal of one that is not, without complaint, so this is
      * idempotent on both sides. {@code resetPolicy} returns the endpoint to the default
-     * full-access policy, modelled here as carrying no document at all.
+     * full-access policy document, which DescribeVpcEndpoints then reports.
      */
     public VpcEndpoint modifyVpcEndpoint(String region, String endpointId,
                                          List<String> addRouteTableIds, List<String> removeRouteTableIds,
@@ -7271,6 +7287,10 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
             case "assignIpv6AddressOnCreation"   -> subnet.setAssignIpv6AddressOnCreation(Boolean.parseBoolean(value));
             case "enableDns64"                   -> subnet.setEnableDns64(Boolean.parseBoolean(value));
             case "mapCustomerOwnedIpOnLaunch"    -> subnet.setMapCustomerOwnedIpOnLaunch(Boolean.parseBoolean(value));
+            case "enableResourceNameDnsARecordOnLaunch" ->
+                    subnet.setEnableResourceNameDnsARecordOnLaunch(Boolean.parseBoolean(value));
+            case "enableResourceNameDnsAAAARecordOnLaunch" ->
+                    subnet.setEnableResourceNameDnsAAAARecordOnLaunch(Boolean.parseBoolean(value));
         }
         subnets.put(key(region, subnetId), subnet);
     }
@@ -7280,7 +7300,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     public SecurityGroup createSecurityGroup(String region, String groupName, String description, String vpcId) {
         ensureDefaultResources(region);
         if (vpcId != null && !vpcId.isEmpty()) {
-            getRequiredVpc(region, vpcId);
+            resolveVpcForCreate(region, vpcId);
         } else {
             vpcId = resolveDefaultVpcId(region);
         }
@@ -7349,10 +7369,18 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
 
     public void deleteSecurityGroup(String region, String groupId) {
         ensureDefaultResources(region);
-        if (securityGroups.get(key(region, groupId)).isEmpty()) {
-            throw new AwsException("InvalidGroup.NotFound", "The security group '" + groupId + "' does not exist", 400);
+        synchronized (lockFor(key(region, groupId))) {
+            SecurityGroup group = securityGroups.get(key(region, groupId)).orElse(null);
+            if (group == null) {
+                throw new AwsException("InvalidGroup.NotFound", "The security group '" + groupId + "' does not exist", 400);
+            }
+            // A VPC's default group lives exactly as long as its VPC; DeleteVpc removes it.
+            if ("default".equals(group.getGroupName()) && group.getVpcId() != null) {
+                throw new AwsException("CannotDelete", "the specified group: \"" + groupId
+                        + "\" name: \"default\" cannot be deleted by a user", 400);
+            }
+            deleteSecurityGroupRecords(region, groupId);
         }
-        securityGroups.delete(key(region, groupId));
     }
 
     public List<SecurityGroupRule> authorizeSecurityGroupIngress(String region, String groupId, List<IpPermission> permissions) {
@@ -7361,6 +7389,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         synchronized (lockFor(key(region, groupId))) {
             SecurityGroup sg = getRequiredSecurityGroup(region, groupId);
             requireKnownPrefixLists(region, permissions);
+            permissions.forEach(permission -> normalizeSecurityGroupPermission(permission, false));
             List<IpPermission> next = new ArrayList<>(sg.getIpPermissions());
             for (IpPermission perm : permissions) {
                 resolveGroupReferences(region, sg.getVpcId(), perm);
@@ -7380,6 +7409,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         synchronized (lockFor(key(region, groupId))) {
             SecurityGroup sg = getRequiredSecurityGroup(region, groupId);
             requireKnownPrefixLists(region, permissions);
+            permissions.forEach(permission -> normalizeSecurityGroupPermission(permission, false));
             List<IpPermission> next = new ArrayList<>(sg.getIpPermissionsEgress());
             for (IpPermission perm : permissions) {
                 resolveGroupReferences(region, sg.getVpcId(), perm);
@@ -7429,6 +7459,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
                 ref.setGroupId(pair.getGroupId());
                 ref.setUserId(pair.getUserId());
                 rule.setReferencedGroupInfo(ref);
+                rule.setReferencedGroupName(pair.getGroupName());
                 rule.setDescription(pair.getDescription());
                 rules.add(rule);
             }
@@ -7725,12 +7756,15 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
                 List<String> cidrsV6 = removal.getIpv6Ranges().stream().map(Ipv6Range::getCidrIpv6).toList();
                 List<String> lists = removal.getPrefixListIds().stream()
                         .map(PrefixListId::getPrefixListId).toList();
-                List<String> groups = removal.getUserIdGroupPairs().stream()
-                        .map(UserIdGroupPair::getGroupId).toList();
+                List<UserIdGroupPair> groups = new ArrayList<>(removal.getUserIdGroupPairs());
                 perm.getIpRanges().removeIf(e -> cidrs.contains(e.getCidrIp()));
                 perm.getIpv6Ranges().removeIf(e -> cidrsV6.contains(e.getCidrIpv6()));
                 perm.getPrefixListIds().removeIf(e -> lists.contains(e.getPrefixListId()));
-                perm.getUserIdGroupPairs().removeIf(e -> groups.contains(e.getGroupId()));
+                perm.getUserIdGroupPairs().removeIf(source -> groups.stream().anyMatch(group ->
+                        Objects.equals(group.getGroupId(), source.getGroupId())
+                                && Objects.equals(group.getUserId(), source.getUserId())
+                                && (group.getGroupId() != null
+                                || Objects.equals(group.getGroupName(), source.getGroupName()))));
             }
             // A permission that had sources and has lost them all is gone; one that never had any
             // survives unless a sourceless revoke named it.
@@ -7747,7 +7781,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
                 && Objects.equals(a.getToPort(), b.getToPort());
     }
 
-    private boolean hasSources(IpPermission perm) {
+    private static boolean hasSources(IpPermission perm) {
         return !perm.getIpRanges().isEmpty() || !perm.getIpv6Ranges().isEmpty()
                 || !perm.getPrefixListIds().isEmpty() || !perm.getUserIdGroupPairs().isEmpty();
     }
@@ -7763,18 +7797,51 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
 
     public void modifySecurityGroupRules(String region, String groupId, List<Map<String, String>> ruleUpdates) {
         ensureDefaultResources(region);
-        // Update description on matching rules
-        for (Map<String, String> update : ruleUpdates) {
-            String ruleId = update.get("SecurityGroupRuleId");
-            String desc = update.get("Description");
-            if (ruleId != null) {
-                SecurityGroupRule rule = securityGroupRules.get(key(region, ruleId)).orElse(null);
-                if (rule != null && desc != null) {
-                    rule.setDescription(desc);
-                    securityGroupRules.put(key(region, ruleId), rule);
+        synchronized (lockFor(key(region, groupId))) {
+            SecurityGroup group = getRequiredSecurityGroup(region, groupId);
+            Map<String, SecurityGroupRule> originals = new LinkedHashMap<>();
+            Map<String, SecurityGroupRule> replacements = new LinkedHashMap<>();
+            for (Map<String, String> update : ruleUpdates) {
+                String ruleId = update.get("SecurityGroupRuleId");
+                if (ruleId == null || ruleId.isBlank()) {
+                    throw new AwsException("MissingParameter", "SecurityGroupRuleId is required", 400);
+                }
+                if (originals.containsKey(ruleId)) {
+                    throw new AwsException("InvalidParameterValue", "Duplicate security group rule ID " + ruleId, 400);
+                }
+                SecurityGroupRule rule = requireSecurityGroupRule(region, groupId, ruleId);
+                originals.put(ruleId, rule);
+                replacements.put(ruleId, modifiedSecurityGroupRule(region, rule, update));
+            }
+            for (SecurityGroupRule replacement : replacements.values()) {
+                SecurityGroupRule original = originals.get(replacement.getSecurityGroupRuleId());
+                IpPermission permission = permissionForRule(replacement);
+                if (ruleMatchesPermission(original, permission)) {
+                    updateRecordedRuleDescription(group, original, replacement.getDescription());
+                } else {
+                    List<IpPermission> permissions = new ArrayList<>(original.isEgress()
+                            ? group.getIpPermissionsEgress() : group.getIpPermissions());
+                    removeRecordedPermission(permissions, original);
+                    if (original.isEgress()) {
+                        group.setIpPermissionsEgress(permissions);
+                    } else {
+                        group.setIpPermissions(permissions);
+                    }
                 }
             }
+            for (SecurityGroupRule replacement : replacements.values()) {
+                SecurityGroupRule original = originals.get(replacement.getSecurityGroupRuleId());
+                IpPermission permission = permissionForRule(replacement);
+                if (!ruleMatchesPermission(original, permission)) {
+                    List<IpPermission> permissions = replacement.isEgress()
+                            ? group.getIpPermissionsEgress() : group.getIpPermissions();
+                    permissions.add(permission);
+                }
+                securityGroupRules.put(key(region, replacement.getSecurityGroupRuleId()), replacement);
+            }
+            securityGroups.put(key(region, groupId), group);
         }
+        reconcilePublishedPortsForGroup(region, groupId);
     }
 
     public void updateSecurityGroupRuleDescriptionsIngress(String region, String groupId, List<IpPermission> permissions) {
@@ -10566,7 +10633,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
 
     public RouteTable createRouteTable(String region, String vpcId) {
         ensureDefaultResources(region);
-        Vpc vpc = getRequiredVpc(region, vpcId);
+        Vpc vpc = resolveVpcForCreate(region, vpcId);
 
         String rtId = "rtb-" + randomHex(8);
         RouteTable rt = new RouteTable();
@@ -10584,10 +10651,10 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
 
     private Vpc getRequiredVpc(String region, String vpcId) {
         Vpc vpc = vpcs.get(key(region, vpcId)).orElse(null);
-        if (vpc == null)
-            throw new AwsException("InvalidVpcID.NotFound", "The vpc ID '" + vpcId + "' does not exist", 400);
-
-        return vpc;
+        if (vpc != null) {
+            return vpc;
+        }
+        throw new AwsException("InvalidVpcID.NotFound", "The vpc ID '" + vpcId + "' does not exist", 400);
     }
 
     public List<RouteTable> describeRouteTables(String region, List<String> routeTableIds, Map<String, List<String>> filters) {
@@ -11419,7 +11486,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
 
     // ─── NAT Gateways ─────────────────────────────────────────────────────────
 
-    public NatGateway createNatGateway(String region, String subnetId, String allocationId,
+    public synchronized NatGateway createNatGateway(String region, String subnetId, String allocationId,
                                        String connectivityType, List<Tag> natGatewayTags) {
         ensureDefaultResources(region);
         Subnet subnet = requireSubnet(region, subnetId);
@@ -13579,7 +13646,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
      * the attach-eni example's runtime pattern (its user-data script calls this via the AWS CLI
      * after boot, rather than through the Terraform provider itself). floci-kt9.
      */
-    public NetworkInterfaceAttachment attachNetworkInterface(String region, String networkInterfaceId,
+    public synchronized NetworkInterfaceAttachment attachNetworkInterface(String region, String networkInterfaceId,
                                                               String instanceId, int deviceIndex) {
         NetworkInterface ni = requireStandaloneNetworkInterface(region, networkInterfaceId);
         if (ni.getAttachment() != null) {
@@ -13634,7 +13701,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     }
 
     /** Detaches a standalone ENI by attachment id, floci-kt9. */
-    public NetworkInterfaceAttachment detachNetworkInterface(String region, String attachmentId, boolean force) {
+    public synchronized NetworkInterfaceAttachment detachNetworkInterface(String region, String attachmentId, boolean force) {
         if (attachmentId == null || attachmentId.isBlank()) {
             throw new AwsException("MissingParameter", "The request must contain the parameter AttachmentId", 400);
         }
@@ -13684,6 +13751,9 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
      * dies with its instance.
      */
     private void releaseStandaloneInterfacesOnTermination(String region, Instance inst) {
+        if (inst.getState() == null || !"terminated".equals(inst.getState().getName())) {
+            return;
+        }
         for (InstanceNetworkInterface e : List.copyOf(inst.getNetworkInterfaces())) {
             NetworkInterface ni = networkInterfaces.get(key(region, e.getNetworkInterfaceId())).orElse(null);
             NetworkInterfaceAttachment att = ni != null ? ni.getAttachment() : null;
@@ -14417,5 +14487,285 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
             defaults.getConfigurations().put("domain-name-servers", List.of("AmazonProvidedDNS"));
             return defaults;
         });
+    }
+
+    private void deleteSecurityGroupRecords(String region, String groupId) {
+        for (SecurityGroupRule rule : securityGroupRules.scan(k -> k.startsWith(region + "::"))) {
+            if (groupId.equals(rule.getGroupId())) {
+                deleteRecordedRule(region, rule);
+            }
+        }
+        tags.delete(groupId);
+        securityGroups.delete(key(region, groupId));
+    }
+
+    private SecurityGroupRule modifiedSecurityGroupRule(String region, SecurityGroupRule original,
+                                                         Map<String, String> update) {
+        IpPermission permission = permissionForRule(original);
+        if (update.containsKey("IpProtocol")) {
+            permission.setIpProtocol(update.get("IpProtocol"));
+        }
+        if (update.containsKey("FromPort")) {
+            permission.setFromPort(securityGroupPort(update.get("FromPort")));
+        }
+        if (update.containsKey("ToPort")) {
+            permission.setToPort(securityGroupPort(update.get("ToPort")));
+        }
+        List<String> sources = List.of("CidrIpv4", "CidrIpv6", "PrefixListId", "ReferencedGroupId").stream()
+                .filter(update::containsKey).toList();
+        if (sources.size() > 1) {
+            throw new AwsException("InvalidParameterValue", "A security group rule must have exactly one source", 400);
+        }
+        if (!sources.isEmpty()) {
+            permission.getIpRanges().clear();
+            permission.getIpv6Ranges().clear();
+            permission.getPrefixListIds().clear();
+            permission.getUserIdGroupPairs().clear();
+            String source = sources.getFirst();
+            String value = update.get(source);
+            if (value == null || value.isBlank()) {
+                throw new AwsException("InvalidParameterValue", "The security group rule source cannot be empty", 400);
+            }
+            switch (source) {
+                case "CidrIpv4" -> permission.getIpRanges().add(new IpRange(value));
+                case "CidrIpv6" -> permission.getIpv6Ranges().add(new Ipv6Range(value));
+                case "PrefixListId" -> permission.getPrefixListIds().add(new PrefixListId(value, null));
+                case "ReferencedGroupId" -> {
+                    UserIdGroupPair pair = new UserIdGroupPair();
+                    pair.setGroupId(value);
+                    pair.setUserId(original.getReferencedGroupInfo() != null
+                            && value.equals(original.getReferencedGroupInfo().getGroupId())
+                            ? original.getReferencedGroupInfo().getUserId() : callerAccountId());
+                    permission.getUserIdGroupPairs().add(pair);
+                }
+            }
+        }
+        normalizeSecurityGroupPermission(permission, true);
+        requireKnownPrefixLists(region, List.of(permission));
+        SecurityGroupRule rule = new SecurityGroupRule();
+        rule.setSecurityGroupRuleId(original.getSecurityGroupRuleId());
+        rule.setGroupId(original.getGroupId());
+        rule.setGroupOwnerId(original.getGroupOwnerId());
+        rule.setEgress(original.isEgress());
+        rule.setTags(new ArrayList<>(original.getTags()));
+        rule.setDescription(update.containsKey("Description") ? update.get("Description") : original.getDescription());
+        rule.setIpProtocol(permission.getIpProtocol());
+        rule.setFromPort(permission.getFromPort());
+        rule.setToPort(permission.getToPort());
+        if (!permission.getIpRanges().isEmpty()) {
+            rule.setCidrIpv4(permission.getIpRanges().getFirst().getCidrIp());
+        }
+        if (!permission.getIpv6Ranges().isEmpty()) {
+            rule.setCidrIpv6(permission.getIpv6Ranges().getFirst().getCidrIpv6());
+        }
+        if (!permission.getPrefixListIds().isEmpty()) {
+            rule.setPrefixListId(permission.getPrefixListIds().getFirst().getPrefixListId());
+        }
+        if (!permission.getUserIdGroupPairs().isEmpty()) {
+            UserIdGroupPair pair = permission.getUserIdGroupPairs().getFirst();
+            ReferencedSecurityGroup reference = new ReferencedSecurityGroup();
+            reference.setGroupId(pair.getGroupId());
+            reference.setUserId(pair.getUserId());
+            rule.setReferencedGroupInfo(reference);
+            rule.setReferencedGroupName(pair.getGroupName());
+        }
+        return rule;
+    }
+
+    private static void normalizeSecurityGroupPermission(IpPermission permission, boolean requireCanonical) {
+        String protocol = permission.getIpProtocol();
+        if (protocol == null) {
+            throw new AwsException("MissingParameter", "IpProtocol is required", 400);
+        }
+        protocol = switch (protocol) {
+            case "6" -> "tcp";
+            case "17" -> "udp";
+            case "1" -> "icmp";
+            case "58" -> "icmpv6";
+            default -> protocol;
+        };
+        if (!List.of("tcp", "udp", "icmp", "icmpv6", "-1").contains(protocol)) {
+            try {
+                int number = Integer.parseInt(protocol);
+                if (number < 0 || number > 255) {
+                    throw new NumberFormatException();
+                }
+                protocol = Integer.toString(number);
+            } catch (NumberFormatException exception) {
+                throw new AwsException("InvalidParameterValue", "Invalid IP protocol " + protocol, 400);
+            }
+        }
+        permission.setIpProtocol(protocol);
+        if ("tcp".equals(protocol) || "udp".equals(protocol)) {
+            Integer from = permission.getFromPort();
+            Integer to = permission.getToPort();
+            if (from == null || to == null || from < 0 || to > 65535 || from > to) {
+                throw new AwsException("InvalidParameterValue", "Invalid TCP/UDP port range", 400);
+            }
+        } else if ("icmp".equals(protocol) || "icmpv6".equals(protocol)) {
+            int from = permission.getFromPort() == null ? -1 : permission.getFromPort();
+            int to = permission.getToPort() == null ? -1 : permission.getToPort();
+            if (from < -1 || from > 255 || to < -1 || to > 255 || (from == -1 && to != -1)) {
+                throw new AwsException("InvalidParameterValue", "Invalid ICMP type or code", 400);
+            }
+            permission.setFromPort(from);
+            permission.setToPort(to);
+        } else {
+            permission.setFromPort(null);
+            permission.setToPort(null);
+        }
+        for (IpRange range : permission.getIpRanges()) {
+            range.setCidrIp(securityGroupCidr(range.getCidrIp(), false, requireCanonical));
+        }
+        for (Ipv6Range range : permission.getIpv6Ranges()) {
+            range.setCidrIpv6(securityGroupCidr(range.getCidrIpv6(), true, requireCanonical));
+        }
+    }
+
+    private IpPermission permissionForRule(SecurityGroupRule rule) {
+        IpPermission permission = new IpPermission();
+        permission.setIpProtocol(rule.getIpProtocol());
+        permission.setFromPort(rule.getFromPort());
+        permission.setToPort(rule.getToPort());
+        if (rule.getCidrIpv4() != null) {
+            permission.getIpRanges().add(new IpRange(rule.getCidrIpv4(), rule.getDescription()));
+        }
+        if (rule.getCidrIpv6() != null) {
+            permission.getIpv6Ranges().add(new Ipv6Range(rule.getCidrIpv6(), rule.getDescription()));
+        }
+        if (rule.getPrefixListId() != null) {
+            permission.getPrefixListIds().add(new PrefixListId(rule.getPrefixListId(), rule.getDescription()));
+        }
+        if (rule.getReferencedGroupInfo() != null) {
+            UserIdGroupPair pair = new UserIdGroupPair();
+            pair.setGroupId(rule.getReferencedGroupInfo().getGroupId());
+            pair.setGroupName(rule.getReferencedGroupName());
+            pair.setUserId(rule.getReferencedGroupInfo().getUserId());
+            pair.setDescription(rule.getDescription());
+            permission.getUserIdGroupPairs().add(pair);
+        }
+        return permission;
+    }
+
+    private SecurityGroupRule requireSecurityGroupRule(String region, String groupId, String ruleId) {
+        SecurityGroupRule rule = securityGroupRules.get(key(region, ruleId)).orElse(null);
+        if (rule == null || (groupId != null && !groupId.equals(rule.getGroupId()))) {
+            throw new AwsException("InvalidSecurityGroupRuleId.NotFound",
+                    "The security group rule '" + ruleId + "' does not exist", 400);
+        }
+        return rule;
+    }
+
+    /**
+     * Create-path lookup. Alchemy Bindings sometimes resolve the default VPC via
+     * a live-AWS DescribeVpcs and then CreateSubnet / CreateSecurityGroup against
+     * us with that foreign id. AWS would reject it; Alchemy retries
+     * {@code InvalidVpcID.NotFound} unbounded. Substitute the emulator default
+     * for those creates only — describe/delete-by-id must still NotFound a
+     * missing id (otherwise {@code assertVpcGone} after DeleteVpc never
+     * completes: DescribeVpcs succeeds with an empty set).
+     */
+    private Vpc resolveVpcForCreate(String region, String vpcId) {
+        Vpc vpc = vpcs.get(key(region, vpcId)).orElse(null);
+        if (vpc != null) {
+            return vpc;
+        }
+        if (deletedVpcKeys.contains(key(region, vpcId))) {
+            throw new AwsException("InvalidVpcID.NotFound", "The vpc ID '" + vpcId + "' does not exist", 400);
+        }
+        Vpc defaultVpc = vpcs.scan(k -> true).stream()
+                .filter(v -> region.equals(v.getRegion()) && v.isDefault())
+                .findFirst()
+                .orElse(null);
+        if (defaultVpc != null) {
+            LOG.warnv("VPC {0} not found in {1}; substituting default VPC {2}",
+                    vpcId, region, defaultVpc.getVpcId());
+            return defaultVpc;
+        }
+        throw new AwsException("InvalidVpcID.NotFound", "The vpc ID '" + vpcId + "' does not exist", 400);
+    }
+
+    private boolean ruleMatchesPermission(SecurityGroupRule rule, IpPermission permission) {
+        if (!sameProtocolAndPorts(permissionForRule(rule), permission)) {
+            return false;
+        }
+        if (!hasSources(permission)) {
+            return true;
+        }
+        return (rule.getCidrIpv4() != null && permission.getIpRanges().stream()
+                .anyMatch(source -> rule.getCidrIpv4().equals(source.getCidrIp())))
+                || (rule.getCidrIpv6() != null && permission.getIpv6Ranges().stream()
+                .anyMatch(source -> rule.getCidrIpv6().equals(source.getCidrIpv6())))
+                || (rule.getPrefixListId() != null && permission.getPrefixListIds().stream()
+                .anyMatch(source -> rule.getPrefixListId().equals(source.getPrefixListId())))
+                || (rule.getReferencedGroupInfo() != null && permission.getUserIdGroupPairs().stream()
+                .anyMatch(source -> sameReferencedGroup(rule, source)));
+    }
+
+    private void updateRecordedRuleDescription(SecurityGroup group, SecurityGroupRule rule, String description) {
+        List<IpPermission> permissions = rule.isEgress() ? group.getIpPermissionsEgress() : group.getIpPermissions();
+        for (IpPermission permission : permissions) {
+            if (!Objects.equals(permission.getIpProtocol(), rule.getIpProtocol())
+                    || !Objects.equals(permission.getFromPort(), rule.getFromPort())
+                    || !Objects.equals(permission.getToPort(), rule.getToPort())) {
+                continue;
+            }
+            if (rule.getCidrIpv4() != null) {
+                permission.getIpRanges().stream()
+                        .filter(range -> rule.getCidrIpv4().equals(range.getCidrIp()))
+                        .forEach(range -> range.setDescription(description));
+            }
+            if (rule.getCidrIpv6() != null) {
+                permission.getIpv6Ranges().stream()
+                        .filter(range -> rule.getCidrIpv6().equals(range.getCidrIpv6()))
+                        .forEach(range -> range.setDescription(description));
+            }
+            if (rule.getPrefixListId() != null) {
+                permission.getPrefixListIds().stream()
+                        .filter(source -> rule.getPrefixListId().equals(source.getPrefixListId()))
+                        .forEach(source -> source.setDescription(description));
+            }
+            if (rule.getReferencedGroupInfo() != null) {
+                permission.getUserIdGroupPairs().stream()
+                        .filter(source -> sameReferencedGroup(rule, source))
+                        .forEach(source -> source.setDescription(description));
+            }
+        }
+    }
+
+    private void deleteRecordedRule(String region, SecurityGroupRule rule) {
+        securityGroupRules.delete(key(region, rule.getSecurityGroupRuleId()));
+        tags.delete(rule.getSecurityGroupRuleId());
+    }
+
+    /** VPC keys this emulator deleted; a create naming one must NotFound, never substitute. */
+    private final Set<String> deletedVpcKeys = ConcurrentHashMap.newKeySet();
+
+    private static boolean sameReferencedGroup(SecurityGroupRule rule, UserIdGroupPair source) {
+        ReferencedSecurityGroup reference = rule.getReferencedGroupInfo();
+        return reference != null && Objects.equals(reference.getGroupId(), source.getGroupId())
+                && Objects.equals(reference.getUserId(), source.getUserId())
+                && (reference.getGroupId() != null
+                || Objects.equals(rule.getReferencedGroupName(), source.getGroupName()));
+    }
+
+    private static String securityGroupCidr(String cidr, boolean ipv6, boolean requireCanonical) {
+        String canonical = CidrCanonicalizer.canonicalize(cidr).orElseThrow(() ->
+                new AwsException("InvalidParameterValue", "Invalid CIDR block " + cidr, 400));
+        if (canonical.contains(":") != ipv6) {
+            throw new AwsException("InvalidParameterValue", "Invalid CIDR address family " + cidr, 400);
+        }
+        if (requireCanonical && !canonical.equals(cidr)) {
+            throw new AwsException("InvalidParameterValue", "CIDR block " + cidr + " is not in canonical form", 400);
+        }
+        return canonical;
+    }
+
+    private static Integer securityGroupPort(String value) {
+        try {
+            return Integer.valueOf(value);
+        } catch (NumberFormatException exception) {
+            throw new AwsException("InvalidParameterValue", "Invalid security group port " + value, 400);
+        }
     }
 }

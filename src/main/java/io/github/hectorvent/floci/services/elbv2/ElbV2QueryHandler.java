@@ -791,7 +791,10 @@ public class ElbV2QueryHandler {
                 .start("AddListenerCertificatesResult")
                   .start("Certificates");
         for (String c : certs) {
-            xml.start("member").elem("CertificateArn", c).end("member");
+            xml.start("member")
+               .elem("CertificateArn", c)
+               .elem("IsDefault", false)
+               .end("member");
         }
         xml.end("Certificates")
            .end("AddListenerCertificatesResult")
@@ -815,8 +818,11 @@ public class ElbV2QueryHandler {
                 .start("DescribeListenerCertificatesResponse", AwsNamespaces.ELB_V2)
                 .start("DescribeListenerCertificatesResult")
                   .start("Certificates");
-        for (String c : certs) {
-            xml.start("member").elem("CertificateArn", c).end("member");
+        for (int i = 0; i < certs.size(); i++) {
+            xml.start("member")
+               .elem("CertificateArn", certs.get(i))
+               .elem("IsDefault", i == 0)
+               .end("member");
         }
         xml.end("Certificates")
            .elem("NextMarker", "")
@@ -893,18 +899,32 @@ public class ElbV2QueryHandler {
         xml.elem("Protocol", safe(l.getProtocol()));
         xml.elem("SslPolicy", safe(l.getSslPolicy()));
         xml.start("Certificates");
-        for (String c : l.getCertificates()) {
-            xml.start("member").elem("CertificateArn", c).end("member");
+        // DescribeListeners returns only the default certificate. SNI extras
+        // are listed by DescribeListenerCertificates.
+        List<String> listenerCerts = l.getCertificates();
+        if (listenerCerts != null && !listenerCerts.isEmpty()) {
+            xml.start("member")
+               .elem("CertificateArn", listenerCerts.getFirst())
+               .elem("IsDefault", true)
+               .end("member");
         }
         xml.end("Certificates");
         xml.start("DefaultActions");
-        for (Action a : l.getDefaultActions()) {
-            xml.start("member").raw(actionXml(a)).end("member");
+        List<Action> defaultActions = l.getDefaultActions();
+        if (defaultActions != null) {
+            for (Action a : defaultActions) {
+                if (a != null) {
+                    xml.start("member").raw(actionXml(a)).end("member");
+                }
+            }
         }
         xml.end("DefaultActions");
         xml.start("AlpnPolicy");
-        for (String ap : l.getAlpnPolicy()) {
-            xml.start("member").raw(ap).end("member");
+        List<String> alpn = l.getAlpnPolicy();
+        if (alpn != null) {
+            for (String ap : alpn) {
+                xml.start("member").raw(ap).end("member");
+            }
         }
         xml.end("AlpnPolicy");
         return xml.build();
@@ -933,10 +953,17 @@ public class ElbV2QueryHandler {
         xml.elem("Type", safe(a.getType()));
         if (a.getOrder() != null) xml.elem("Order", String.valueOf(a.getOrder()));
         if (a.getTargetGroupArn() != null) xml.elem("TargetGroupArn", a.getTargetGroupArn());
-        if (!a.getTargetGroups().isEmpty() || a.getTargetGroupArn() == null && "forward".equals(a.getType())) {
+        List<Action.TargetGroupTuple> tuples = a.getTargetGroups();
+        if (tuples == null) {
+            tuples = List.of();
+        }
+        if (!tuples.isEmpty() || a.getTargetGroupArn() == null && "forward".equals(a.getType())) {
             xml.start("ForwardConfig");
             xml.start("TargetGroups");
-            for (Action.TargetGroupTuple t : a.getTargetGroups()) {
+            for (Action.TargetGroupTuple t : tuples) {
+                if (t == null) {
+                    continue;
+                }
                 xml.start("member");
                 xml.elem("TargetGroupArn", safe(t.getTargetGroupArn()));
                 if (t.getWeight() != null) xml.elem("Weight", String.valueOf(t.getWeight()));
@@ -1312,14 +1339,17 @@ public class ElbV2QueryHandler {
     // <base>.AuthenticationRequestExtraParams.entry.N.key / .value.
     private Map<String, String> parseAuthExtraParams(MultivaluedMap<String, String> p, String base) {
         Map<String, String> params = new LinkedHashMap<>();
-        int n = 1;
-        while (true) {
-            String key = p.getFirst(base + "AuthenticationRequestExtraParams.entry." + n + ".key");
-            if (key == null) {
-                break;
+        for (String element : List.of("entry", "member")) {
+            int n = 1;
+            while (true) {
+                String prefix = base + "AuthenticationRequestExtraParams." + element + "." + n;
+                String key = p.getFirst(prefix + ".key");
+                if (key == null) {
+                    break;
+                }
+                params.put(key, safe(p.getFirst(prefix + ".value")));
+                n++;
             }
-            params.put(key, safe(p.getFirst(base + "AuthenticationRequestExtraParams.entry." + n + ".value")));
-            n++;
         }
         return params;
     }

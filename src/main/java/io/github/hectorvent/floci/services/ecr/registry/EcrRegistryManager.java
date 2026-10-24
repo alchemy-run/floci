@@ -666,6 +666,7 @@ public class EcrRegistryManager {
                 LOG.warnv("Adopted ECR registry container {0} has no published binding for port {1}; keeping configured port {2}",
                         containerId, String.valueOf(CONTAINER_INTERNAL_PORT), String.valueOf(hostPort));
             }
+            rememberInternalHost(info);
             this.started = true;
             LOG.infov("Adopted existing ECR registry container {0} on host port {1}",
                     containerId, String.valueOf(hostPort));
@@ -740,5 +741,15 @@ public class EcrRegistryManager {
         return scheme + "://" + account + ".dkr.ecr." + resolvedRegion + ".localhost:" + port;
     }
 
+    private void rememberInternalHost(ContainerInfo info) {
+        if (info == null) {
+            return;
+        }
+        ContainerLifecycleManager.EndpointInfo endpoint = info.getEndpoint(CONTAINER_INTERNAL_PORT);
+        if (endpoint != null && endpoint.host() != null && !endpoint.host().isBlank()) {
+            this.registryInternalHost = endpoint.host();
+        }
+    }
 
+    private volatile String registryInternalHost;
 }

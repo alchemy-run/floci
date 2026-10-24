@@ -229,7 +229,12 @@ public class CloudWatchMetricsJsonHandler {
             alarm.setTags(tags);
         }
 
+        if (metadataService != null && metadataService.isComposite(alarm.getAlarmName(), region)) {
+            throw CloudWatchMetadataService.invalid("An alarm of a different type already has this name");
+        }
         metricsService.putMetricAlarm(alarm, region);
+        if (metadataService != null) metadataService.history(alarm.getAlarmName(), "MetricAlarm", "ConfigurationUpdate",
+                "Alarm configuration updated", request, region);
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
@@ -293,6 +298,30 @@ public class CloudWatchMetricsJsonHandler {
             if (a.getStateReason() != null) node.put("StateReason", a.getStateReason());
             if (a.getStateReasonData() != null) node.put("StateReasonData", a.getStateReasonData());
             node.put("StateUpdatedTimestamp", a.getStateUpdatedTimestamp());
+            node.put("AlarmConfigurationUpdatedTimestamp", a.getAlarmConfigurationUpdatedTimestamp());
+        }
+        for (int i = arr.size() - 1; i >= 0; i--) {
+            if (!CloudWatchMetadataService.alarmMatches(arr.get(i), request)) arr.remove(i);
+        }
+        if (request.has("AlarmTypes") && !CloudWatchMetadataService.contains(request.get("AlarmTypes"), "MetricAlarm")) {
+            arr.removeAll();
+        }
+        if (metadataService != null && request.has("AlarmTypes")
+                && CloudWatchMetadataService.contains(request.get("AlarmTypes"), "CompositeAlarm")) {
+            response.set("CompositeAlarms", objectMapper.valueToTree(metadataService.compositeAlarms(request, region)));
+        }
+        if (metadataService != null && (request.has("MaxRecords") || request.has("NextToken"))) {
+            List<ObjectNode> combined = new ArrayList<>();
+            response.path("MetricAlarms").forEach(alarm -> combined.add((ObjectNode) alarm));
+            response.path("CompositeAlarms").forEach(alarm -> combined.add((ObjectNode) alarm));
+            combined.sort(java.util.Comparator.comparing(alarm -> alarm.path("AlarmName").asText()));
+            ObjectNode page = metadataService.page("Alarms", combined, request);
+            arr.removeAll();
+            if (response.has("CompositeAlarms")) ((ArrayNode) response.get("CompositeAlarms")).removeAll();
+            for (JsonNode alarm : page.path("Alarms")) {
+                ((ArrayNode) response.get(alarm.has("AlarmRule") ? "CompositeAlarms" : "MetricAlarms")).add(alarm);
+            }
+            if (page.has("NextToken")) response.set("NextToken", page.get("NextToken"));
         }
         response.putArray("CompositeAlarms");
         response.putArray("LogAlarms");
@@ -305,6 +334,14 @@ public class CloudWatchMetricsJsonHandler {
         if (namesNode.isArray()) {
             namesNode.forEach(n -> alarmNames.add(n.asText()));
         }
+        if (metadataService != null) {
+            for (String name : alarmNames) {
+                metadataService.deleteComposite(name, region);
+                if (!metricsService.describeAlarms(List.of(name), null, region).isEmpty()) {
+                    metadataService.history(name, "MetricAlarm", "ConfigurationUpdate", "Alarm deleted", request, region);
+                }
+            }
+        }
         metricsService.deleteAlarms(alarmNames, region);
         return Response.ok(objectMapper.createObjectNode()).build();
     }
@@ -314,7 +351,14 @@ public class CloudWatchMetricsJsonHandler {
         String state = request.path("StateValue").asText();
         String reason = request.path("StateReason").asText(null);
         String reasonData = request.path("StateReasonData").asText(null);
-        metricsService.setAlarmState(name, state, reason, reasonData, region);
+        if (!List.of("OK", "ALARM", "INSUFFICIENT_DATA").contains(state)) throw CloudWatchMetadataService.invalid("Invalid StateValue");
+        if (metadataService != null && metadataService.isComposite(name, region)) {
+            metadataService.setCompositeState(request, region);
+        } else {
+            metricsService.setAlarmState(name, state, reason, reasonData, region);
+            metricsService.holdManualAlarmState(name, region);
+            if (metadataService != null) metadataService.history(name, "MetricAlarm", "StateUpdate", reason, request, region);
+        }
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 

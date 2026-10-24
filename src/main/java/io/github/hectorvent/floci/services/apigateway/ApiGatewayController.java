@@ -1656,7 +1656,7 @@ public class ApiGatewayController {
         String region = regionResolver.resolveRegion(headers);
         ObjectNode root = objectMapper.createObjectNode();
         ArrayNode items = root.putArray("items");
-        service.getDomainNames(region).forEach(d -> items.add(toV2DomainNode(region, d)));
+        service.getV2DomainNames(region).forEach(d -> items.add(toV2DomainNode(d)));
         return Response.ok(root.toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
@@ -1664,8 +1664,8 @@ public class ApiGatewayController {
     @Path("/v2/domainnames/{domainName}")
     public Response getV2DomainName(@Context HttpHeaders headers, @PathParam("domainName") String domainName) {
         String region = regionResolver.resolveRegion(headers);
-        CustomDomain domain = service.getDomainName(region, domainName);
-        return Response.ok(toV2DomainNode(region, domain).toString()).type(MediaType.APPLICATION_JSON).build();
+        return Response.ok(toV2DomainNode(service.getV2DomainName(region, domainName)).toString())
+                .type(MediaType.APPLICATION_JSON).build();
     }
 
     /**
@@ -2425,6 +2425,15 @@ public class ApiGatewayController {
         node.put("name", a.getName());
         node.put("type", a.getType());
         if (a.getAuthorizerUri() != null) node.put("authorizerUri", a.getAuthorizerUri());
+        if (a.getAuthType() != null) {
+            node.put("authType", a.getAuthType());
+        }
+        if (a.getAuthorizerCredentials() != null) {
+            node.put("authorizerCredentials", a.getAuthorizerCredentials());
+        }
+        if (a.getIdentityValidationExpression() != null) {
+            node.put("identityValidationExpression", a.getIdentityValidationExpression());
+        }
         if (a.getIdentitySource() != null) node.put("identitySource", a.getIdentitySource());
         node.put("authorizerResultTtlInSeconds", Integer.parseInt(a.getAuthorizerResultTtlInSeconds()));
         if (a.getProviderARNs() != null && !a.getProviderARNs().isEmpty()) {
@@ -2463,8 +2472,27 @@ public class ApiGatewayController {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("id", p.getId());
         node.put("name", p.getName());
-        if (p.getDescription() != null) {
-            node.put("description", p.getDescription());
+        if (p.getDescription() != null) node.put("description", p.getDescription());
+        if (p.getApiStages() != null && !p.getApiStages().isEmpty()) {
+            ArrayNode stages = node.putArray("apiStages");
+            p.getApiStages().forEach(stage -> {
+                ObjectNode item = stages.addObject();
+                if (stage.apiId() != null) item.put("apiId", stage.apiId());
+                if (stage.stage() != null) item.put("stage", stage.stage());
+            });
+        }
+        ThrottleSettings throttle = p.getThrottle();
+        if (throttle != null && (throttle.getBurstLimit() != null || throttle.getRateLimit() != null)) {
+            ObjectNode throttleNode = node.putObject("throttle");
+            if (throttle.getBurstLimit() != null) throttleNode.put("burstLimit", throttle.getBurstLimit());
+            if (throttle.getRateLimit() != null) throttleNode.put("rateLimit", throttle.getRateLimit());
+        }
+        QuotaSettings quota = p.getQuota();
+        if (quota != null) {
+            ObjectNode quotaNode = node.putObject("quota");
+            if (quota.getLimit() != null) quotaNode.put("limit", quota.getLimit());
+            if (quota.getOffset() != null) quotaNode.put("offset", quota.getOffset());
+            if (quota.getPeriod() != null) quotaNode.put("period", quota.getPeriod());
         }
         if (p.getTags() != null && !p.getTags().isEmpty()) {
             ObjectNode tags = node.putObject("tags");
@@ -2768,6 +2796,7 @@ public class ApiGatewayController {
         node.put("stageName", s.getStageName());
         if (s.getDeploymentId() != null) node.put("deploymentId", s.getDeploymentId());
         node.put("autoDeploy", s.isAutoDeploy());
+        if (s.getDescription() != null) node.put("description", s.getDescription());
         node.put("createdDate", java.time.Instant.ofEpochMilli(s.getCreatedDate()).toString());
         node.put("lastUpdatedDate", java.time.Instant.ofEpochMilli(s.getLastUpdatedDate()).toString());
         if (s.getStageVariables() != null) {

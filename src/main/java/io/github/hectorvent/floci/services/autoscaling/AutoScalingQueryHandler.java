@@ -309,9 +309,10 @@ public class AutoScalingQueryHandler {
            .elem("MaxSize", String.valueOf(asg.getMaxSize()))
            .elem("DesiredCapacity", String.valueOf(asg.getDesiredCapacity()))
            .elem("DefaultCooldown", String.valueOf(asg.getDefaultCooldown()))
-           .elem("HealthCheckType", asg.getHealthCheckType())
+           .elem("HealthCheckType", asg.getHealthCheckType() != null ? asg.getHealthCheckType() : "EC2")
            .elem("HealthCheckGracePeriod", String.valueOf(asg.getHealthCheckGracePeriod()))
-           .elem("CreatedTime", ISO_FMT.format(asg.getCreatedTime()));
+           .elem("CreatedTime", ISO_FMT.format(
+                   asg.getCreatedTime() != null ? asg.getCreatedTime() : Instant.EPOCH));
 
         if (asg.getDesiredCapacityType() != null) {
             xml.elem("DesiredCapacityType", asg.getDesiredCapacityType());
@@ -353,7 +354,7 @@ public class AutoScalingQueryHandler {
         // DescribeAutoScalingGroups' response, not only reachable via DescribeWarmPool -
         // terraform-aws-autoscaling's warm_pool example reads the group's warm pool state this
         // way. Shared with handleDescribeWarmPool so the two never drift.
-        appendWarmPoolConfigurationXml(xml, service.describeWarmPool(asg.getRegion(), asg.getAutoScalingGroupName()));
+        appendWarmPoolConfigurationXml(xml, service.warmPoolForSnapshot(asg.getRegion(), asg.getAutoScalingGroupName()));
 
         xml.start("AvailabilityZones");
         for (String az : asg.getAvailabilityZones()) { xml.elem("member", az); }
@@ -1372,17 +1373,7 @@ public class AutoScalingQueryHandler {
                   .start("DescribeScalingActivitiesResult")
                     .start("Activities");
         for (ScalingActivity a : activities) {
-            xml.start("member")
-               .elem("ActivityId", a.getActivityId())
-               .elem("AutoScalingGroupName", a.getAutoScalingGroupName())
-               .elem("StatusCode", a.getStatusCode())
-               .elem("Progress", String.valueOf(a.getProgress()))
-               .elem("StartTime", ISO_FMT.format(a.getStartTime()));
-            if (a.getDescription() != null) { xml.elem("Description", a.getDescription()); }
-            if (a.getCause() != null) { xml.elem("Cause", a.getCause()); }
-            if (a.getEndTime() != null) { xml.elem("EndTime", ISO_FMT.format(a.getEndTime())); }
-            if (a.getStatusMessage() != null) { xml.elem("StatusMessage", a.getStatusMessage()); }
-            xml.end("member");
+            appendActivityMember(xml, a);
         }
         xml.end("Activities")
            .end("DescribeScalingActivitiesResult")

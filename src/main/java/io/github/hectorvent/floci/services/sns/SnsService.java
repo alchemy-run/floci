@@ -352,6 +352,9 @@ public class SnsService implements Resettable, ResourceProvider {
     public void clear() {
         pushCapture.clear();
         fifoDeduplicationCache.clear();
+        smsAttributesByRegion.clear();
+        optedOutNumbers.clear();
+        sandboxNumbers.clear();
     }
 
     public synchronized void setSmsAttributes(Map<String, String> attributes, String region) {
@@ -1139,6 +1142,14 @@ public class SnsService implements Resettable, ResourceProvider {
             throw new AwsException("InvalidParameter",
                     "Invalid parameter: Platform Reason: Floci mocks only APNS, APNS_SANDBOX, GCM, and FCM.",
                     400);
+        }
+        if ("GCM".equals(platform) || "FCM".equals(platform)) {
+            String credential = attributes != null ? attributes.get("PlatformCredential") : null;
+            if (!isPlausibleGcmCredential(credential)) {
+                throw new AwsException("InvalidParameter",
+                        "Invalid parameter: Attributes Reason: Platform credentials are invalid",
+                        400);
+            }
         }
         String arn = platformApplicationArn(region, platform, name);
         String key = platformAppKey(region, arn);

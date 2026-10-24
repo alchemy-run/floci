@@ -761,7 +761,7 @@ public class LambdaService implements ResourceProvider {
             fn.setS3Key(null);
         }
         if (imageUri != null) {
-            fn.setImageUri(imageUri);
+            applyImageUri(fn, imageUri);
         }
         if (s3Bucket != null && s3Key != null) {
             if ("hot-reload".equals(s3Bucket)) {
@@ -2191,6 +2191,15 @@ public class LambdaService implements ResourceProvider {
             changes.add(m -> m.setTopics(validatedTopics));
         }
 
+        if (request.get("AmazonManagedKafkaEventSourceConfig") != null) {
+            if (!isMskClusterArn(esm.getEventSourceArn())) {
+                throw new AwsException("InvalidParameterValueException",
+                        "AmazonManagedKafkaEventSourceConfig is only supported for Amazon MSK event sources", 400);
+            }
+            esm.setAmazonManagedKafkaEventSourceConfig(
+                    structureMember(request, "AmazonManagedKafkaEventSourceConfig"));
+        }
+
         if (request.containsKey("SourceAccessConfigurations")) {
             Object rawAccess = request.get("SourceAccessConfigurations");
             if (rawAccess != null) {
@@ -2439,6 +2448,7 @@ public class LambdaService implements ResourceProvider {
             snapshot.setS3Key(fn.getS3Key());
             snapshot.setHotReloadHostPath(fn.getHotReloadHostPath());
             snapshot.setImageUri(fn.getImageUri());
+            snapshot.setResolvedImageUri(fn.getResolvedImageUri());
             snapshot.setImageConfigCommand(fn.getImageConfigCommand());
             snapshot.setImageConfigEntryPoint(fn.getImageConfigEntryPoint());
             snapshot.setImageConfigWorkingDirectory(fn.getImageConfigWorkingDirectory());
@@ -2605,6 +2615,7 @@ public class LambdaService implements ResourceProvider {
 
     private static void validateEventSourceMappingStructures(Map<String, Object> request) {
         structureMember(request, "ScalingConfig");
+        structureMember(request, "AmazonManagedKafkaEventSourceConfig");
         Map<String, Object> destinationConfig = structureMember(request, "DestinationConfig");
         if (destinationConfig != null) {
             structureValue(destinationConfig.get("OnFailure"), "DestinationConfig.OnFailure");
@@ -3236,7 +3247,8 @@ public class LambdaService implements ResourceProvider {
                 cors.setAllowMethods(toStringArray(corsMap.get("AllowMethods")));
                 cors.setAllowOrigins(toStringArray(corsMap.get("AllowOrigins")));
                 cors.setExposeHeaders(toStringArray(corsMap.get("ExposeHeaders")));
-                cors.setMaxAge(toInt(corsMap.get("MaxAge"), cors.getMaxAge()));
+                cors.setMaxAge(toInt(corsMap.get("MaxAge"),
+                        cors.getMaxAge() != null ? cors.getMaxAge() : 0));
                 urlConfig.setCors(cors);
             } else {
                 urlConfig.setCors(null);
@@ -3426,7 +3438,7 @@ public class LambdaService implements ResourceProvider {
             if (!encoded.isEmpty()) {
                 encoded.append('/');
             }
-            encoded.append(java.net.URLEncoder.encode(segment, java.nio.charset.StandardCharsets.UTF_8)
+            encoded.append(java.net.URLEncoder.encode(segment, StandardCharsets.UTF_8)
                     .replace("+", "%20"));
         }
         return encoded.toString();
@@ -4377,6 +4389,51 @@ public class LambdaService implements ResourceProvider {
         return condition;
     }
 
+    private static final String TAG_TYPE_FUNCTION = "function";
+
+    /**
+     * Records the image a container-image function deploys. Lambda resolves the tag to its
+     * manifest digest at deploy time and reports that digest as {@code ResolvedImageUri} and
+     * {@code CodeSha256}; a reference that cannot be resolved is kept as given.
+     */
+    private void applyImageUri(LambdaFunction fn, String imageUri) {
+        fn.setImageUri(imageUri);
+        LambdaImageDigestResolver resolver = imageDigestResolver;
+        if (resolver == null && imageDigestResolverInstance != null && imageDigestResolverInstance.isResolvable()) {
+            resolver = imageDigestResolverInstance.get();
+        }
+        String resolved = resolver != null ? resolver.resolve(imageUri) : null;
+        fn.setResolvedImageUri(resolved);
+        if (resolved != null) {
+            fn.setCodeSha256(resolved.substring(resolved.lastIndexOf("@sha256:") + "@sha256:".length()));
+        }
+    }
 
 
+    private static List<String> asStringList(Object raw) {
+        if (!(raw instanceof List<?> list)) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>();
+        for (Object item : list) {
+            if (item != null) {
+                out.add(item.toString());
+            }
+        }
+        return out;
+    }
+
+    private void releaseVpcEnis(String region, LambdaFunction fn) {
+        if (ec2Service == null || fn.getVpcEniIds() == null || fn.getVpcEniIds().isEmpty()) {
+            return;
+        }
+        for (String eniId : new ArrayList<>(fn.getVpcEniIds())) {
+            try {
+                ec2Service.deleteNetworkInterface(region, eniId);
+            } catch (Exception e) {
+                LOG.warnv("Could not delete Lambda VPC ENI {0}: {1}", eniId, e.getMessage());
+            }
+        }
+        fn.setVpcEniIds(new ArrayList<>());
+    }
 }

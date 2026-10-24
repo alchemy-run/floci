@@ -415,8 +415,8 @@ public class KmsService implements ResourceProvider {
             "GenerateMac", "VerifyMac", "DeriveSharedSecret"));
 
     /** GrantNameType pattern/length from the KMS model (kms/2014-11-01/service-2.json). */
-    private static final java.util.regex.Pattern GRANT_NAME_PATTERN =
-            java.util.regex.Pattern.compile("^[a-zA-Z0-9:/_-]+$");
+    private static final Pattern GRANT_NAME_PATTERN =
+            Pattern.compile("^[a-zA-Z0-9:/_-]+$");
 
     /**
      * GrantConstraintSourceArnType pattern from the KMS model (kms/2014-11-01/service-2.json),
@@ -854,13 +854,17 @@ public class KmsService implements ResourceProvider {
 
     // ──────────────────────────── Key Rotation ────────────────────────────
 
-    public boolean getKeyRotationStatus(String keyId, String region) {
+    public KeyRotationStatus getKeyRotationStatus(String keyId, String region) {
         KmsKey key = resolveKey(keyId, region);
         if (KmsKeyUsage.ENCRYPT_DECRYPT != key.getKeyUsage()
                 || KmsKeySpec.SYMMETRIC_DEFAULT != key.getKeySpec()) {
-            return false;
+            return new KeyRotationStatus(false, null);
         }
-        return key.isKeyRotationEnabled();
+        if (!key.isKeyRotationEnabled()) {
+            return new KeyRotationStatus(false, null);
+        }
+        int period = key.getRotationPeriodInDays() > 0 ? key.getRotationPeriodInDays() : DEFAULT_ROTATION_PERIOD_DAYS;
+        return new KeyRotationStatus(true, period);
     }
 
     public void enableKeyRotation(String keyId, String region) {

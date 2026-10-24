@@ -805,6 +805,7 @@ public class ApiGatewayV2Service {
         stage.setStageName((String) request.getOrDefault("stageName", "$default"));
         stage.setDeploymentId((String) request.get("deploymentId"));
         stage.setAutoDeploy(Boolean.parseBoolean(String.valueOf(request.getOrDefault("autoDeploy", "false"))));
+        stage.setDescription((String) request.get("description"));
         stage.setCreatedDate(System.currentTimeMillis());
         stage.setLastUpdatedDate(System.currentTimeMillis());
 
@@ -818,7 +819,6 @@ public class ApiGatewayV2Service {
             stage.setTags(ReservedTags.stripApiGatewayReservedTags(tags));
         }
 
-        stage.setDescription((String) request.get("description"));
         stage.setAccessLogSettings(toAccessLogSettings(request.get("accessLogSettings")));
         stage.setDefaultRouteSettings(toRouteSettings(request.get("defaultRouteSettings")));
         stage.setRouteSettings(toRouteSettingsMap(request.get("routeSettings")));
@@ -865,8 +865,14 @@ public class ApiGatewayV2Service {
             Map<String, String> stageVariables = (Map<String, String>) request.get("stageVariables");
             stage.setStageVariables(stageVariables);
         }
-        if (request.containsKey("description") && request.get("description") != null) {
-            stage.setDescription((String) request.get("description"));
+        if (request.containsKey("description")) {
+            Object description = request.get("description");
+            stage.setDescription(description != null ? String.valueOf(description) : null);
+        }
+        if (request.containsKey("tags") && request.get("tags") != null) {
+            @SuppressWarnings("unchecked")
+            Map<String, String> tags = (Map<String, String>) request.get("tags");
+            stage.setTags(new java.util.HashMap<>(ReservedTags.stripApiGatewayReservedTags(tags)));
         }
         if (request.containsKey("accessLogSettings") && request.get("accessLogSettings") != null) {
             stage.setAccessLogSettings(toAccessLogSettings(request.get("accessLogSettings")));

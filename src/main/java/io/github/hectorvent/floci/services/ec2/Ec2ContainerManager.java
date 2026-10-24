@@ -67,6 +67,15 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.zip.GZIPInputStream;
+import io.github.hectorvent.floci.services.lambda.launcher.ImageCacheService;
+import io.vertx.core.json.JsonObject;
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
+import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
+import java.io.ByteArrayInputStream;
+import java.util.Collections;
+import java.util.Locale;
+import java.util.WeakHashMap;
+import java.util.concurrent.CountDownLatch;
 
 /**
  * Manages Docker container lifecycle for EC2 instances.
@@ -390,9 +399,8 @@ public class Ec2ContainerManager {
 
     /**
      * Launches a Docker container for the given EC2 instance.
-     * The instance starts in pending state; an async thread transitions it to running
-     * and handles SSH key injection and UserData execution. With no Docker daemon
-     * reachable the instance goes straight to running as metadata only.
+     * Guest startup is asynchronous and preserves an already-running control-plane record.
+     * With no Docker daemon reachable, the instance runs as metadata only.
      *
      * @param instance    the EC2 instance model (mutated in-place as state transitions occur)
      * @param dockerImage Docker image URI resolved from the instance's AMI ID
@@ -792,23 +800,17 @@ public class Ec2ContainerManager {
         }
     }
 
-    /**
-     * Cancels a pending asynchronous launch. Returns {@code false} only when the instance reached
-     * running state while the caller was waiting, in which case it must not be torn down as a timeout.
-     *
-     * <p>The terminal state is established atomically before cleanup. The launch worker checks that
-     * state between phases, and {@link #recordCreatedContainer(Instance, String, int)} rejects and
-     * removes a container whose blocking Docker create call returns after cancellation. A timed-out
-     * CloudFormation waiter therefore cannot leave a late worker able to transition the instance to
-     * running.</p>
-     */
+    /** Cancels an unfinished guest launch, preventing a late Docker create from publishing a container. */
     boolean cancelLaunch(Instance instance) {
         synchronized (instance) {
             String state = instance.getState() != null ? instance.getState().getName() : null;
-            if ("running".equals(state)) {
+            if ("running".equals(state) && !instance.isContainerLaunchPending()) {
                 return false;
             }
-            instance.setState(InstanceState.terminated());
+            instance.setContainerLaunchFailed(true);
+            if (!"running".equals(state)) {
+                instance.setState(needsPrivateNamespace(instance) ? InstanceState.shuttingDown() : InstanceState.terminated());
+            }
         }
         failLaunch(instance);
         return true;
@@ -826,6 +828,7 @@ public class Ec2ContainerManager {
                 return false;
             }
             instance.setState(InstanceState.running());
+            instance.setContainerLaunchPending(false);
             return true;
         }
     }
@@ -855,7 +858,7 @@ public class Ec2ContainerManager {
 
     private static boolean isLaunchCancelledState(Instance instance) {
         String state = instance.getState() != null ? instance.getState().getName() : null;
-        return "shutting-down".equals(state) || "terminated".equals(state);
+        return instance.isContainerLaunchFailed() || "shutting-down".equals(state) || "terminated".equals(state);
     }
 
     private record StartedContainer(String containerId, int sshHostPort, String vpcAddress,
@@ -901,9 +904,13 @@ public class Ec2ContainerManager {
      * Synchronous stop for emulator shutdown: tears down the port-forward sidecars and
      * stops the container with a short timeout so N instances cannot exhaust the SIGTERM
      * grace window. Unlike {@link #stop}, runs on the caller's thread (the async executor
-     * would be abandoned mid-flight during shutdown) and leaves state handling to the caller.
+     * would be abandoned mid-flight during shutdown) and leaves the final stopped state to the caller.
      */
     public void stopForShutdown(Instance instance) {
+        synchronized (instance) {
+            instance.setState(InstanceState.stopping());
+            metadataServer.unregisterInstance(instance);
+        }
         String containerId = instance.getDockerContainerId();
         if (containerId == null) {
             return;
@@ -1270,6 +1277,10 @@ public class Ec2ContainerManager {
      * and callers that prefer PublicDnsName over PublicIpAddress would be handed a dead name.
      */
     void exposeReachablePublicAddress(Instance instance) {
+        if (instance != null
+                && (instance.getInstanceId() + ".localhost.floci.io").equals(instance.getPublicIpAddress())) {
+            return;
+        }
         String publicAddress = reachablePublicAddress(instance);
         if (publicAddress == null) {
             return;
@@ -1293,7 +1304,7 @@ public class Ec2ContainerManager {
         if (instance == null || privateIp == null || privateIp.isBlank()) {
             return;
         }
-        if (awsFaithful) {
+        if (awsFaithful || instance.getLogicalPrivateIpAddress() != null) {
             return;
         }
 
@@ -1775,5 +1786,115 @@ public class Ec2ContainerManager {
 
     static Optional<String> preferredMetadataSourceIp(Map<String, ContainerNetwork> networks) {
         return Ec2MetadataProxy.preferredMetadataSourceIp(networks);
+    }
+
+    private static final class Backing {
+        String containerId;
+        String helperId;
+        String eniId;
+        int sshHostPort;
+        boolean creating;
+        boolean collidedPort;
+    }
+
+    private final Map<Instance, Backing> backings = new ConcurrentHashMap<>();
+
+
+    private boolean needsPrivateNamespace(Instance instance) {
+        return instance.getLogicalPrivateIpAddress() != null
+                || (firewallManager != null && firewallManager.enabled())
+                || (vpcNetworkManager != null && vpcNetworkManager.enabled());
+    }
+
+
+
+    private Backing restoredBacking(Instance instance) {
+        Backing existing = backings.get(instance);
+        if (existing != null) {
+            return existing;
+        }
+        Backing restored = new Backing();
+        restored.containerId = instance.getDockerContainerId();
+        restored.sshHostPort = instance.getSshHostPort();
+        restored.eniId = primaryInterface(instance).getNetworkInterfaceId();
+        try {
+            ProtectedNamespace namespace = protectedNamespace(instance);
+            if (namespace != null) {
+                restored.helperId = namespace.helperId();
+            }
+        } catch (NotFoundException missingWorker) {
+            // The namespace can survive a workload removed before an emulator restart.
+        }
+        if (restored.helperId == null) {
+            String name = ContainerStorageHelper.resourceName(config, "sg", null,
+                    instance.getInstanceId().replaceAll("[^a-zA-Z0-9_.-]", "-"));
+            try {
+                InspectContainerResponse helper = dockerClient.inspectContainerCmd(name).exec();
+                Map<String, String> labels = helper.getConfig().getLabels();
+                if (!ownerIdentity().equals(labels.get(LABEL_OWNER_PORT))
+                        || !instance.getInstanceId().equals(labels.get(LABEL_RESOURCE_ID))
+                        || !"true".equals(labels.get("floci.security-group-helper"))) {
+                    throw new IllegalStateException("Cannot clean an EC2 namespace owned by another instance");
+                }
+                restored.helperId = helper.getId();
+            } catch (NotFoundException missingHelper) {
+                // Both resources may already have been removed on the previous attempt.
+            }
+        }
+        backings.put(instance, restored);
+        return restored;
+    }
+
+    /**
+     * Label identifying the Floci process that created an EC2 instance container, by its API
+     * port. {@link #reconcileOrphanedContainers} lists on the existing {@code io.floci.service=ec2}
+     * identity label (see {@link ContainerStorageHelper#resourceIdentityLabels}) and then keeps
+     * only containers carrying <em>this</em> process's owner port: several emulators can share one
+     * Docker daemon, and an unscoped sweep would reap a sibling's live instances.
+     * {@code floci_namespace} is the documented scoping mechanism for that, but it is absent
+     * unless a resource namespace is configured, so it cannot scope the default configuration.
+     * Containers created before this label existed carry no owner and are therefore never swept.
+     */
+    static final String LABEL_OWNER_PORT = "floci_owner_port";
+
+
+    private static InstanceNetworkInterface primaryInterface(Instance instance) {
+        return instance.getNetworkInterfaces().stream().filter(eni -> eni.getDeviceIndex() == 0)
+                .findFirst().orElseThrow(() -> new IllegalStateException("EC2 instance has no primary ENI"));
+    }
+
+
+    private boolean removeConfirmed(String containerId) {
+        if (containerId == null) {
+            return true;
+        }
+        lifecycleManager.removeIfExists(containerId);
+        try {
+            dockerClient.inspectContainerCmd(containerId).exec();
+            return false;
+        } catch (NotFoundException removed) {
+            return true;
+        }
+    }
+
+    private void requireOwnedHelper(Instance instance, String helperId) {
+        if (helperId == null) {
+            return;
+        }
+        try {
+            InspectContainerResponse helper = dockerClient.inspectContainerCmd(helperId).exec();
+            Map<String, String> labels = helper.getConfig().getLabels();
+            if (!"true".equals(labels.get("floci.security-group-helper"))
+                    || !SERVICE_VALUE.equals(labels.get(LABEL_SERVICE))
+                    || !ownerIdentity().equals(labels.get(LABEL_OWNER_PORT))
+                    || !instance.getInstanceId().equals(labels.get(LABEL_RESOURCE_ID))
+                    || !Objects.equals(instance.getRegion(), labels.get(LABEL_REGION))
+                    || !Objects.equals(Ec2MetadataServer.instanceAccountId(instance, regionResolver.getAccountId()),
+                            labels.get("io.floci.account"))) {
+                throw new IllegalStateException("EC2 cleanup target is not this instance's namespace");
+            }
+        } catch (NotFoundException removed) {
+            // An already removed helper cannot own a Docker endpoint.
+        }
     }
 }

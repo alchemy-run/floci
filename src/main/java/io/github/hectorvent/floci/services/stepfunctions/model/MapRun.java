@@ -27,7 +27,7 @@ public class MapRun {
     private int succeededExecutionCount;
     private int failedExecutionCount;
 
-    private int toleratedFailureCount;
+    private long toleratedFailureCount;
     private double toleratedFailurePercentage;
 
     private int maxConcurrency;
@@ -54,8 +54,8 @@ public class MapRun {
     public int getFailedCount() { return failedCount; }
     public void setFailedCount(int failedCount) { this.failedCount = failedCount; }
 
-    public int getToleratedFailureCount() { return toleratedFailureCount; }
-    public void setToleratedFailureCount(int count) { this.toleratedFailureCount = count; }
+    public long getToleratedFailureCount() { return toleratedFailureCount; }
+    public void setToleratedFailureCount(long count) { this.toleratedFailureCount = count; }
     public double getToleratedFailurePercentage() { return toleratedFailurePercentage; }
     public void setToleratedFailurePercentage(double percentage) { this.toleratedFailurePercentage = percentage; }
 

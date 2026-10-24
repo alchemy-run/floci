@@ -958,6 +958,7 @@ public class CloudFrontController {
                         .start("FunctionConfig")
                         .elem("Comment", fn.getComment() != null ? fn.getComment() : "")
                         .elem("Runtime", fn.getRuntime() != null ? fn.getRuntime() : "cloudfront-js-2.0")
+                        .raw(xmlKeyValueStoreAssociations(fn.getKeyValueStoreArns()))
                         .end("FunctionConfig")
                         .start("FunctionMetadata")
                         .elem("FunctionARN", service.arn("function/" + fn.getName()))
@@ -1951,7 +1952,7 @@ public class CloudFrontController {
             xml.start("S3OriginConfig")
                     .elem("OriginAccessIdentity", s3Config.getOrDefault("OriginAccessIdentity", ""))
                     .end("S3OriginConfig");
-        } else if (o.getCustomOriginConfig() == null) {
+        } else if (o.getCustomOriginConfig() == null && o.getVpcOriginConfig() == null) {
             xml.start("S3OriginConfig").elem("OriginAccessIdentity", "").end("S3OriginConfig");
         }
 
@@ -1972,6 +1973,18 @@ public class CloudFrontController {
                     .end("CustomOriginConfig");
         }
 
+        if (o.getVpcOriginConfig() != null) {
+            Map<String, String> voc = o.getVpcOriginConfig();
+            xml.start("VpcOriginConfig")
+                    .elem("VpcOriginId", voc.getOrDefault("VpcOriginId", ""));
+            if (voc.containsKey("OriginReadTimeout")) {
+                xml.elem("OriginReadTimeout", voc.get("OriginReadTimeout"));
+            }
+            if (voc.containsKey("OriginKeepaliveTimeout")) {
+                xml.elem("OriginKeepaliveTimeout", voc.get("OriginKeepaliveTimeout"));
+            }
+            xml.end("VpcOriginConfig");
+        }
         List<Map<String, String>> customHeaders = o.getCustomHeaders();
         int customHeaderCount = customHeaders == null ? 0 : customHeaders.size();
         xml.start("CustomHeaders")
@@ -2407,6 +2420,7 @@ public class CloudFrontController {
                 .start("FunctionConfig")
                 .elem("Comment", fn.getComment() != null ? fn.getComment() : "")
                 .elem("Runtime", fn.getRuntime() != null ? fn.getRuntime() : "cloudfront-js-2.0")
+                .raw(xmlKeyValueStoreAssociations(fn.getKeyValueStoreArns()))
                 .end("FunctionConfig")
                 .start("FunctionMetadata")
                 .elem("FunctionARN", service.arn("function/" + fn.getName()))
@@ -3580,6 +3594,7 @@ public class CloudFrontController {
         ResponseHeadersPolicy policy = new ResponseHeadersPolicy();
         policy.setName(XmlParser.extractFirst(body, "Name", null));
         policy.setComment(XmlParser.extractFirst(body, "Comment", null));
+        policy.setConfigXml(extractXmlElement(body, "ResponseHeadersPolicyConfig"));
         policy.setConfig(ResponseHeadersPolicyConfigCodec.parse(body));
         return policy;
     }
@@ -3607,7 +3622,8 @@ public class CloudFrontController {
         fn.setName(XmlParser.extractFirst(body, "Name", null));
         fn.setComment(XmlParser.extractFirst(body, "Comment", null));
         fn.setRuntime(XmlParser.extractFirst(body, "Runtime", "cloudfront-js-2.0"));
-        fn.setFunctionCode(XmlParser.extractFirst(body, "FunctionCode", null));
+        fn.setFunctionCode(decodeFunctionCode(XmlParser.extractFirst(body, "FunctionCode", null)));
+        fn.setKeyValueStoreArns(XmlParser.extractAll(body, "KeyValueStoreARN"));
         return fn;
     }
 
@@ -3682,23 +3698,29 @@ public class CloudFrontController {
 
     private String xmlRealtimeLogConfigBody(RealtimeLogConfig cfg) {
         List<String> fields = cfg.getFields() != null ? cfg.getFields() : List.of();
+        List<Map<String, Object>> endpoints = cfg.getEndPoints() != null ? cfg.getEndPoints() : List.of();
         XmlBuilder xml = new XmlBuilder()
                 .start("RealtimeLogConfig")
                 .elem("ARN", cfg.getArn() != null ? cfg.getArn() : "")
                 .elem("Name", cfg.getName() != null ? cfg.getName() : "")
                 .elem("SamplingRate", cfg.getSamplingRate())
-                .start("Fields")
-                .elem("Quantity", fields.size());
-        if (!fields.isEmpty()) {
-            xml.start("Items");
-            for (String f : fields) {
-                xml.elem("Field", f);
-            }
-            xml.end("Items");
+                .start("Fields");
+        for (String f : fields) {
+            xml.elem("Field", f);
         }
         xml.end("Fields");
-        xml.start("EndPoints").elem("Quantity", 0).end("EndPoints");
-        xml.end("RealtimeLogConfig");
+        xml.start("EndPoints");
+        for (Map<String, Object> ep : endpoints) {
+            xml.start("EndPoint")
+                    .elem("StreamType", String.valueOf(ep.getOrDefault("StreamType", "Kinesis")))
+                    .start("KinesisStreamConfig")
+                    .elem("RoleARN", ep.get("RoleARN") != null ? String.valueOf(ep.get("RoleARN")) : "")
+                    .elem("StreamARN", ep.get("StreamARN") != null ? String.valueOf(ep.get("StreamARN")) : "")
+                    .end("KinesisStreamConfig")
+                    .end("EndPoint");
+        }
+        xml.end("EndPoints")
+                .end("RealtimeLogConfig");
         return xml.build();
     }
 
@@ -3826,6 +3848,15 @@ public class CloudFrontController {
             cfg.setSamplingRate(100);
         }
         cfg.setFields(XmlParser.extractAll(body, "Field"));
+        List<Map<String, Object>> endpoints = new ArrayList<>();
+        for (Map<String, String> stream : XmlParser.extractGroups(body, "KinesisStreamConfig")) {
+            Map<String, Object> endpoint = new LinkedHashMap<>();
+            endpoint.put("StreamType", "Kinesis");
+            endpoint.put("RoleARN", stream.get("RoleARN"));
+            endpoint.put("StreamARN", stream.get("StreamARN"));
+            endpoints.add(endpoint);
+        }
+        cfg.setEndPoints(endpoints);
         return cfg;
     }
 
@@ -4257,4 +4288,48 @@ public class CloudFrontController {
         return store;
     }
 
+    /**
+     * {@code FunctionCode} is a blob, so the REST-XML wire format carries it
+     * base64-encoded. Store the source itself — that is what the runtime runs
+     * and what the size limit applies to. Hand-written XML that carries plain
+     * source is accepted as-is.
+     */
+    private String decodeFunctionCode(String value) {
+        if (value == null || value.isBlank()) {
+            return value;
+        }
+        try {
+            byte[] decoded = Base64.getDecoder().decode(value.replaceAll("\\s", ""));
+            return new String(decoded, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException notBase64) {
+            return value;
+        }
+    }
+
+    private static String extractXmlElement(String body, String localName) {
+        if (body == null || body.isEmpty()) {
+            return null;
+        }
+        String pattern = "(?is)<(?:[\\w.-]+:)?" + localName + "\\b[^>]*>.*?</(?:[\\w.-]+:)?" + localName + ">";
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile(pattern).matcher(body);
+        return matcher.find() ? matcher.group() : null;
+    }
+
+    private String xmlKeyValueStoreAssociations(List<String> arns) {
+        List<String> items = arns != null ? arns : List.of();
+        XmlBuilder xml = new XmlBuilder()
+                .start("KeyValueStoreAssociations")
+                .elem("Quantity", items.size());
+        if (!items.isEmpty()) {
+            xml.start("Items");
+            for (String arn : items) {
+                xml.start("KeyValueStoreAssociation")
+                        .elem("KeyValueStoreARN", arn)
+                        .end("KeyValueStoreAssociation");
+            }
+            xml.end("Items");
+        }
+        xml.end("KeyValueStoreAssociations");
+        return xml.build();
+    }
 }

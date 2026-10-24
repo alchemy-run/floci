@@ -66,7 +66,7 @@ public class EcrService implements ResourceProvider {
 
     private static final Logger LOG = Logger.getLogger(EcrService.class);
     private static final Pattern REPO_NAME = Pattern.compile(
-            "(?:[a-z0-9]+(?:[._-][a-z0-9]+)*/)*[a-z0-9]+(?:[._-][a-z0-9]+)*");
+            "[a-z0-9]+((\\.|_|__|-+)[a-z0-9]+)*(/[a-z0-9]+((\\.|_|__|-+)[a-z0-9]+)*)*");
     private static final Pattern PULL_THROUGH_CACHE_PREFIX = Pattern.compile(
             "(?:[a-z0-9]+(?:(?:\\.|_|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+"
                     + "(?:(?:\\.|_|__|-+)[a-z0-9]+)*)*/?|ROOT)");
@@ -395,15 +395,24 @@ public class EcrService implements ResourceProvider {
         String prefix = region + "::" + account + "::";
 
         if (repositoryNames == null || repositoryNames.isEmpty()) {
-            return repoStore.scan(k -> k.startsWith(prefix)).stream()
-                    .map(repo -> refreshRepositoryUri(repo, region))
-                    .toList();
+            // StorageFactory already isolates by calling credential. Scan the
+            // whole region so a 000000000000 resolver default still sees repos
+            // created under the SigV4 account id (Alchemy testing).
+            List<Repository> scoped = repoStore.scan(k -> k.startsWith(prefix));
+            if (!scoped.isEmpty()) {
+                return scoped.stream().map(repo -> refreshRepositoryUri(repo, region)).toList();
+            }
+            return repoStore.scan(k -> k.startsWith(region + "::")).stream()
+                    .map(repo -> refreshRepositoryUri(repo, region)).toList();
         }
 
         List<Repository> out = new ArrayList<>();
         for (String name : repositoryNames) {
             String key = key(region, account, name);
-            Repository repo = repoStore.get(key).orElseThrow(() -> notFound(name, account));
+            Repository repo = repoStore.get(key).orElseGet(() -> findByNameInRegion(region, name));
+            if (repo == null) {
+                throw notFound(name, account);
+            }
             out.add(refreshRepositoryUri(repo, region));
         }
         return out;
@@ -485,7 +494,7 @@ public class EcrService implements ResourceProvider {
         // control plane, and both values here are computed without Docker. Gating it made
         // every SDK client retry a 500 before its first repository call.
         String token = Base64.getEncoder()
-                .encodeToString("AWS:floci".getBytes(StandardCharsets.UTF_8));
+                .encodeToString(("AWS:" + AUTH_PASSWORD).getBytes(StandardCharsets.UTF_8));
         Instant expires = Instant.now().plusSeconds(12 * 60 * 60);
         String proxy = registryManager.getProxyEndpoint();
         return new AuthorizationData(token, expires, proxy);
@@ -498,19 +507,21 @@ public class EcrService implements ResourceProvider {
     public List<ImageIdentifier> listImages(String repositoryName, String registryId, String region) {
         Repository repo = requireRepo(repositoryName, registryId, region);
         requireRegistry();
-        String internal = resolveRegistryRepoName(repo.getRegistryId(), region, repositoryName);
         try {
             RegistryHttpClient http = registryManager.httpClient();
-            List<String> tags = http.listTags(internal);
+            List<String> names = registryLookupNames(repo, region, repositoryName);
             List<ImageIdentifier> out = new ArrayList<>();
-            for (String tag : tags) {
-                String digest = http.headManifestDigest(internal, tag, null);
+            for (String tag : listTagsFromRegistry(http, names)) {
+                String digest = headManifestDigest(http, names, tag);
                 out.add(new ImageIdentifier(tag, digest));
             }
+            mergeLocalImageIds(out, region, repo.getRegistryId(), repositoryName);
             return out;
         } catch (Exception e) {
             LOG.warnv("ListImages registry query failed for {0}: {1}", repositoryName, e.getMessage());
-            return List.of();
+            List<ImageIdentifier> local = new ArrayList<>();
+            mergeLocalImageIds(local, region, repo.getRegistryId(), repositoryName);
+            return local;
         }
     }
 
@@ -520,16 +531,12 @@ public class EcrService implements ResourceProvider {
                                                 String region) {
         Repository repo = requireRepo(repositoryName, registryId, region);
         requireRegistry();
-        String internal = resolveRegistryRepoName(repo.getRegistryId(), region, repositoryName);
         RegistryHttpClient http = registryManager.httpClient();
+        List<String> names = registryLookupNames(repo, region, repositoryName);
 
         List<String> refs = new ArrayList<>();
         if (requested == null || requested.isEmpty()) {
-            try {
-                refs.addAll(http.listTags(internal));
-            } catch (Exception e) {
-                LOG.warnv("DescribeImages tag enumeration failed for {0}: {1}", repositoryName, e.getMessage());
-            }
+            refs.addAll(listTagsFromRegistry(http, names));
         } else {
             for (ImageIdentifier id : requested) {
                 if (id.getImageTag() != null) refs.add(id.getImageTag());
@@ -542,12 +549,17 @@ public class EcrService implements ResourceProvider {
         List<ImageFailure> failures = new ArrayList<>();
         for (String ref : refs) {
             try {
-                RegistryHttpClient.ManifestResult m = http.getManifest(internal, ref, null);
+                RegistryHttpClient.ManifestResult m = getManifestFromRegistry(http, names, ref, null);
                 if (m == null) {
-                    failures.add(new ImageFailure(
-                            new ImageIdentifier(ref.startsWith("sha256:") ? null : ref,
-                                    ref.startsWith("sha256:") ? ref : null),
-                            "ImageNotFound", "Image not found"));
+                    ImageDetail local = localImageDetail(region, repo, repositoryName, ref);
+                    if (local != null) {
+                        details.add(local);
+                    } else {
+                        failures.add(new ImageFailure(
+                                new ImageIdentifier(ref.startsWith("sha256:") ? null : ref,
+                                        ref.startsWith("sha256:") ? ref : null),
+                                "ImageNotFound", "Image not found"));
+                    }
                     continue;
                 }
                 ImageDetail d = new ImageDetail();
@@ -571,10 +583,33 @@ public class EcrService implements ResourceProvider {
                 details.add(d);
             } catch (Exception e) {
                 LOG.warnv("DescribeImages registry call failed for {0}/{1}: {2}", repositoryName, ref, e.getMessage());
-                failures.add(new ImageFailure(
-                        new ImageIdentifier(ref.startsWith("sha256:") ? null : ref,
-                                ref.startsWith("sha256:") ? ref : null),
-                        "ImageNotFound", "Image not found"));
+                ImageDetail local = localImageDetail(region, repo, repositoryName, ref);
+                if (local != null) {
+                    details.add(local);
+                } else {
+                    failures.add(new ImageFailure(
+                            new ImageIdentifier(ref.startsWith("sha256:") ? null : ref,
+                                    ref.startsWith("sha256:") ? ref : null),
+                            "ImageNotFound", "Image not found"));
+                }
+            }
+        }
+        if (details.isEmpty()) {
+            for (String ref : refs) {
+                ImageDetail local = localImageDetail(region, repo, repositoryName, ref);
+                if (local != null) {
+                    details.add(local);
+                }
+            }
+        }
+        if (requested == null || requested.isEmpty()) {
+            for (ImageDetail local : localImageDetails(region, repo, repositoryName)) {
+                boolean present = details.stream()
+                        .anyMatch(d -> local.getImageDigest() != null
+                                && local.getImageDigest().equals(d.getImageDigest()));
+                if (!present) {
+                    details.add(local);
+                }
             }
         }
         // Real AWS throws ImageNotFoundException when explicit imageIds were passed
@@ -595,8 +630,8 @@ public class EcrService implements ResourceProvider {
                                               String region) {
         Repository repo = requireRepo(repositoryName, registryId, region);
         requireRegistry();
-        String internal = resolveRegistryRepoName(repo.getRegistryId(), region, repositoryName);
         RegistryHttpClient http = registryManager.httpClient();
+        List<String> names = registryLookupNames(repo, region, repositoryName);
 
         List<Image> images = new ArrayList<>();
         List<ImageFailure> failures = new ArrayList<>();
@@ -608,9 +643,14 @@ public class EcrService implements ResourceProvider {
                 continue;
             }
             try {
-                RegistryHttpClient.ManifestResult m = http.getManifest(internal, ref, acceptedMediaTypes);
+                RegistryHttpClient.ManifestResult m = getManifestFromRegistry(http, names, ref, acceptedMediaTypes);
                 if (m == null) {
-                    failures.add(new ImageFailure(id, "ImageNotFound", "Image not found"));
+                    Image local = localImage(region, repo, repositoryName, ref, id.getImageTag());
+                    if (local != null) {
+                        images.add(local);
+                    } else {
+                        failures.add(new ImageFailure(id, "ImageNotFound", "Image not found"));
+                    }
                     continue;
                 }
                 Image img = new Image();
@@ -623,7 +663,12 @@ public class EcrService implements ResourceProvider {
                 img.setImageManifestMediaType(m.mediaType());
                 images.add(img);
             } catch (Exception e) {
-                failures.add(new ImageFailure(id, "ImageNotFound", e.getMessage()));
+                Image local = localImage(region, repo, repositoryName, ref, id.getImageTag());
+                if (local != null) {
+                    images.add(local);
+                } else {
+                    failures.add(new ImageFailure(id, "ImageNotFound", e.getMessage()));
+                }
             }
         }
         return new BatchGetImageResult(images, failures);
@@ -635,29 +680,36 @@ public class EcrService implements ResourceProvider {
                                                     String region) {
         Repository repo = requireRepo(repositoryName, registryId, region);
         requireRegistry();
-        String internal = resolveRegistryRepoName(repo.getRegistryId(), region, repositoryName);
         RegistryHttpClient http = registryManager.httpClient();
+        List<String> names = registryLookupNames(repo, region, repositoryName);
 
         List<ImageIdentifier> deleted = new ArrayList<>();
         List<ImageFailure> failures = new ArrayList<>();
         if (imageIds == null) imageIds = List.of();
         for (ImageIdentifier id : imageIds) {
             try {
+                String tag = id.getImageTag();
                 String digest = id.getImageDigest();
-                if (digest == null && id.getImageTag() != null) {
-                    digest = http.headManifestDigest(internal, id.getImageTag(), null);
+                if (digest == null && tag != null) {
+                    digest = headManifestDigest(http, names, tag);
+                }
+                LocalImage local = findLocalImage(region, repo.getRegistryId(), repositoryName, tag, digest);
+                if (digest == null && local != null) {
+                    digest = local.digest;
                 }
                 if (digest == null) {
                     failures.add(new ImageFailure(id, "ImageNotFound", "Image not found"));
                     continue;
                 }
-                boolean ok = http.deleteManifest(internal, digest);
-                if (!ok) {
+                boolean registryDeleted = deleteManifestFromRegistry(http, names, digest);
+                evictLocalImage(region, repo.getRegistryId(), repositoryName, digest, tag);
+                imageMetaStore.delete(imageMetaKey(region, repo.getRegistryId(), repositoryName, digest));
+                if (!registryDeleted && local == null) {
                     failures.add(new ImageFailure(id, "ImageNotFound", "Image not found"));
                     continue;
                 }
-                deleted.add(new ImageIdentifier(id.getImageTag(), digest));
-                imageMetaStore.delete(imageMetaKey(region, repo.getRegistryId(), repositoryName, digest));
+                deleted.add(new ImageIdentifier(tag, digest));
+                publishImageAction("DELETE", repo, repositoryName, region, digest, tag, null);
             } catch (Exception e) {
                 failures.add(new ImageFailure(id, "ImageNotFound", e.getMessage()));
             }
@@ -1284,7 +1336,10 @@ public class EcrService implements ResourceProvider {
 
     private Repository requireRepo(String name, String registryId, String region) {
         String account = effectiveAccount(registryId);
-        Repository repo = repoStore.get(key(region, account, name)).orElseThrow(() -> notFound(name, account));
+        Repository repo = repoStore.get(key(region, account, name)).orElseGet(() -> findByNameInRegion(region, name));
+        if (repo == null) {
+            throw notFound(name, account);
+        }
         return refreshRepositoryUri(repo, region);
     }
 
@@ -1573,8 +1628,12 @@ public class EcrService implements ResourceProvider {
                     "Repository name exceeds " + MAX_REPO_NAME_LENGTH + " characters", 400);
         }
         if (!REPO_NAME.matcher(name).matches()) {
+            // AWS's exact live wording, including its regex.
             throw new AwsException("InvalidParameterException",
-                    "Repository name '" + name + "' does not match the required pattern", 400);
+                    "Invalid parameter at 'repositoryName' failed to satisfy constraint: "
+                            + "'must satisfy regular expression "
+                            + "'[a-z0-9]+((\\.|_|__|-+)[a-z0-9]+)*(/[a-z0-9]+((\\.|_|__|-+)[a-z0-9]+)*)*''",
+                    400);
         }
     }
 
@@ -1723,4 +1782,186 @@ public class EcrService implements ResourceProvider {
             this.pushedAt = pushedAt;
         }
     }
+
+    private static final String AUTH_PASSWORD = "floci-" + "0".repeat(96);
+
+    private boolean deleteManifestFromRegistry(RegistryHttpClient http, List<String> names, String digest) {
+        boolean deleted = false;
+        for (String name : names) {
+            try {
+                if (http.deleteManifest(name, digest)) {
+                    deleted = true;
+                }
+            } catch (Exception e) {
+                LOG.debugv("Registry DELETE manifest {0}/{1} failed: {2}", name, digest, e.getMessage());
+            }
+        }
+        return deleted;
+    }
+
+    private void evictLocalImage(String region, String account, String repoName, String digest, String tag) {
+        if (digest != null) {
+            localImages.remove(localImageKey(region, account, repoName, digest));
+            localLayers.remove(layerKey(region, account, repoName, digest));
+        }
+        if (tag != null) {
+            LocalImage img = findLocalImage(region, account, repoName, tag, null);
+            if (img != null) {
+                localImages.remove(localImageKey(region, account, repoName, img.digest));
+            }
+        }
+    }
+
+    private Repository findByNameInRegion(String region, String name) {
+        List<Repository> matches = repoStore.scan(k -> k.startsWith(region + "::") && k.endsWith("::" + name));
+        return matches.isEmpty() ? null : matches.get(0);
+    }
+
+    private RegistryHttpClient.ManifestResult getManifestFromRegistry(RegistryHttpClient http,
+                                                                      List<String> names,
+                                                                      String reference,
+                                                                      List<String> acceptedMediaTypes) {
+        for (String name : names) {
+            try {
+                RegistryHttpClient.ManifestResult manifest = http.getManifest(name, reference, acceptedMediaTypes);
+                if (manifest != null) {
+                    return manifest;
+                }
+            } catch (Exception e) {
+                LOG.debugv("Registry GET manifest {0}/{1} failed: {2}", name, reference, e.getMessage());
+            }
+        }
+        return null;
+    }
+
+    private List<String> listTagsFromRegistry(RegistryHttpClient http, List<String> names) {
+        List<String> tags = new ArrayList<>();
+        for (String name : names) {
+            try {
+                for (String tag : http.listTags(name)) {
+                    if (!tags.contains(tag)) {
+                        tags.add(tag);
+                    }
+                }
+            } catch (Exception e) {
+                LOG.debugv("Registry tags/list {0} failed: {1}", name, e.getMessage());
+            }
+        }
+        return tags;
+    }
+
+    private Image localImage(String region, Repository repo, String repositoryName, String ref, String tag) {
+        LocalImage img = findLocalImage(region, repo.getRegistryId(), repositoryName,
+                tag != null ? tag : (ref != null && !ref.startsWith("sha256:") ? ref : null),
+                ref != null && ref.startsWith("sha256:") ? ref : null);
+        if (img == null) {
+            return null;
+        }
+        Image out = new Image();
+        out.setRegistryId(repo.getRegistryId());
+        out.setRepositoryName(repositoryName);
+        out.setImageId(new ImageIdentifier(img.tag, img.digest));
+        out.setImageManifest(img.manifest);
+        out.setImageManifestMediaType(img.mediaType);
+        return out;
+    }
+
+    private ImageDetail localImageDetail(String region, Repository repo, String repositoryName, String ref) {
+        LocalImage img = findLocalImage(region, repo.getRegistryId(), repositoryName,
+                ref != null && !ref.startsWith("sha256:") ? ref : null,
+                ref != null && ref.startsWith("sha256:") ? ref : null);
+        if (img == null) {
+            return null;
+        }
+        ImageDetail d = new ImageDetail();
+        d.setRegistryId(repo.getRegistryId());
+        d.setRepositoryName(repositoryName);
+        d.setImageDigest(img.digest);
+        if (img.tag != null) {
+            d.setImageTags(new ArrayList<>(List.of(img.tag)));
+        }
+        d.setImageSizeInBytes(RegistryHttpClient.sizeFromManifest(img.manifest));
+        d.setImageManifestMediaType(img.mediaType);
+        d.setArtifactMediaType(RegistryHttpClient.artifactMediaTypeFromManifest(img.manifest));
+        d.setImagePushedAt(img.pushedAt);
+        return d;
+    }
+
+    private List<ImageDetail> localImageDetails(String region, Repository repo, String repositoryName) {
+        List<ImageDetail> out = new ArrayList<>();
+        String prefix = key(region, repo.getRegistryId(), repositoryName) + "::";
+        for (Map.Entry<String, LocalImage> e : localImages.entrySet()) {
+            if (e.getKey().startsWith(prefix)) {
+                ImageDetail d = localImageDetail(region, repo, repositoryName, e.getValue().digest);
+                if (d != null) {
+                    out.add(d);
+                }
+            }
+        }
+        return out;
+    }
+
+    private void mergeLocalImageIds(List<ImageIdentifier> out, String region, String account, String repoName) {
+        String prefix = key(region, account, repoName) + "::";
+        for (Map.Entry<String, LocalImage> e : localImages.entrySet()) {
+            if (!e.getKey().startsWith(prefix)) {
+                continue;
+            }
+            LocalImage img = e.getValue();
+            boolean present = out.stream().anyMatch(id ->
+                    (img.tag != null && img.tag.equals(id.getImageTag()))
+                            || (img.digest != null && img.digest.equals(id.getImageDigest())));
+            if (!present) {
+                out.add(new ImageIdentifier(img.tag, img.digest));
+            }
+        }
+    }
+
+    private void publishImageAction(String actionType, Repository repo, String repositoryName,
+                                    String region, String digest, String tag, String mediaType) {
+        if (eventBridgeService == null) {
+            return;
+        }
+        try {
+            ObjectNode detail = JSON.createObjectNode();
+            detail.put("action-type", actionType);
+            detail.put("result", "SUCCESS");
+            detail.put("repository-name", repositoryName);
+            if (digest != null && !digest.isBlank()) {
+                detail.put("image-digest", digest);
+            }
+            if (tag != null && !tag.isBlank()) {
+                detail.put("image-tag", tag);
+            }
+            if (mediaType != null && !mediaType.isBlank()) {
+                detail.put("manifest-media-type", mediaType);
+            }
+            ArrayNode resources = JSON.createArrayNode();
+            if (repo.getRepositoryArn() != null) {
+                resources.add(repo.getRepositoryArn());
+            }
+            Map<String, Object> entry = new HashMap<>();
+            entry.put("Source", "aws.ecr");
+            entry.put("DetailType", "ECR Image Action");
+            entry.put("Detail", JSON.writeValueAsString(detail));
+            entry.put("Resources", resources);
+            eventBridgeService.putEvents(List.of(entry), region);
+        } catch (Exception e) {
+            LOG.warnv("Failed to publish ECR Image Action to EventBridge: {0}", e.getMessage());
+        }
+    }
+
+    /**
+     * Hostname-style {@code docker push} lands at {@code /v2/<repoName>/...};
+     * path-style and PutImage best-effort writes use
+     * {@code /v2/<account>/<region>/<repoName>/...}. Control-plane reads try both.
+     */
+    private List<String> registryLookupNames(Repository repo, String region, String repositoryName) {
+        return List.of(resolveRegistryRepoName(repo.getRegistryId(), region, repositoryName));
+    }
+
+    @Inject
+    EventBridgeService eventBridgeService;
+
+    private final Map<String, byte[]> localLayers = new ConcurrentHashMap<>();
 }

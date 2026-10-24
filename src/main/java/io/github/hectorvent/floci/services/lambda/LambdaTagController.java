@@ -33,7 +33,7 @@ import io.github.hectorvent.floci.services.lambdamicrovms.LambdaMicrovmsService;
 public class LambdaTagController {
 
     private final LambdaService lambdaService;
-    private final io.github.hectorvent.floci.services.lambdamicrovms.LambdaMicrovmsService microvmsService;
+    private final LambdaMicrovmsService microvmsService;
     private final ObjectMapper objectMapper;
 
     @Inject
@@ -56,15 +56,17 @@ public class LambdaTagController {
     }
 
     @GET
-    @Path("/tags/{arn}")
+    @Path("/tags/{arn: .+}")
     public Response listTags(@PathParam("arn") String arn) {
-        if (io.github.hectorvent.floci.services.lambdamicrovms.LambdaMicrovmsService.ownsArn(arn)) {
+        if (LambdaMicrovmsService.ownsArn(arn)) {
             ObjectNode mvRoot = objectMapper.createObjectNode();
             ObjectNode mvTags = mvRoot.putObject("Tags");
             microvmsService.listTags(arnRegion(arn), arn).forEach(mvTags::put);
             return Response.ok(mvRoot).build();
         }
-        Map<String, String> tags = lambdaService.listTags(arn);
+        Map<String, String> tags = microvmImageService.isMicrovmImageArn(arn)
+                ? microvmImageService.listTags(regionFromArn(arn), arn)
+                : lambdaService.listTags(arn);
         ObjectNode root = objectMapper.createObjectNode();
         ObjectNode tagsNode = root.putObject("Tags");
         tags.forEach(tagsNode::put);
@@ -72,7 +74,7 @@ public class LambdaTagController {
     }
 
     @POST
-    @Path("/tags/{arn}")
+    @Path("/tags/{arn: .+}")
     public Response tagResource(@PathParam("arn") String arn, String body) {
         try {
             @SuppressWarnings("unchecked")
@@ -81,7 +83,9 @@ public class LambdaTagController {
             if (tags == null) {
                 throw new AwsException("InvalidParameterValueException", "Tags is required", 400);
             }
-            if (io.github.hectorvent.floci.services.lambdamicrovms.LambdaMicrovmsService.ownsArn(arn)) {
+            if (microvmImageService.isMicrovmImageArn(arn)) {
+                microvmImageService.tagResource(regionFromArn(arn), arn, tags);
+            } else if (LambdaMicrovmsService.ownsArn(arn)) {
                 microvmsService.tagResource(arnRegion(arn), arn, tags);
             } else {
                 lambdaService.tagResource(arn, tags);
@@ -95,10 +99,12 @@ public class LambdaTagController {
     }
 
     @DELETE
-    @Path("/tags/{arn}")
+    @Path("/tags/{arn: .+}")
     public Response untagResource(@PathParam("arn") String arn,
                                   @QueryParam("tagKeys") List<String> tagKeys) {
-        if (io.github.hectorvent.floci.services.lambdamicrovms.LambdaMicrovmsService.ownsArn(arn)) {
+        if (microvmImageService.isMicrovmImageArn(arn)) {
+            microvmImageService.untagResource(regionFromArn(arn), arn, tagKeys);
+        } else if (LambdaMicrovmsService.ownsArn(arn)) {
             microvmsService.untagResource(arnRegion(arn), arn, tagKeys);
         } else {
             lambdaService.untagResource(arn, tagKeys);
@@ -106,5 +112,15 @@ public class LambdaTagController {
         return Response.noContent().build();
     }
 
+    @Inject
+    MicrovmImageService microvmImageService;
 
+    /** {@code arn:aws:lambda:us-east-1:...} → {@code us-east-1}. */
+    private static String regionFromArn(String arn) {
+        String[] parts = arn.split(":");
+        if (parts.length < 4 || parts[3].isBlank()) {
+            throw new AwsException("InvalidParameterValueException", "Invalid ARN: " + arn, 400);
+        }
+        return parts[3];
+    }
 }

@@ -214,10 +214,7 @@ public class S3VectorsService {
     }
 
     public List<VectorIndex> listIndexes(String bucketName, String region) {
-        VectorBucket bucket = getVectorBucket(bucketName, region);
-        return bucket.getIndexes().values().stream()
-                .sorted(Comparator.comparing(VectorIndex::getIndexName))
-                .collect(Collectors.toList());
+        return listIndexes(bucketName, null, region);
     }
 
     public void deleteIndex(String bucketName, String indexName, String region) {

@@ -272,6 +272,7 @@ public class BackupController {
         String creatorRequestId = textOrNull(req, "CreatorRequestId");
 
         BackupPlan plan = service.createBackupPlan(planName, rules, creatorRequestId, region);
+        service.tagResource(plan.getBackupPlanArn(), readStringMap(req, "BackupPlanTags"));
 
         ObjectNode out = objectMapper.createObjectNode();
         out.put("BackupPlanId", plan.getBackupPlanId());
@@ -354,6 +355,10 @@ public class BackupController {
 
         BackupSelection sel = service.createBackupSelection(planId, selectionName, iamRoleArn,
                 resources, notResources, creatorRequestId);
+        BackupSelection input = objectMapper.treeToValue(selNode, BackupSelection.class);
+        sel.setListOfTags(input.getListOfTags());
+        sel.setConditions(input.getConditions());
+        service.saveSelection(sel);
 
         ObjectNode out = objectMapper.createObjectNode();
         out.put("SelectionId", sel.getSelectionId());
@@ -376,6 +381,10 @@ public class BackupController {
         selBody.put("IamRoleArn", sel.getIamRoleArn());
         selBody.set("Resources", objectMapper.valueToTree(sel.getResources()));
         selBody.set("NotResources", objectMapper.valueToTree(sel.getNotResources()));
+        selBody.set("ListOfTags", objectMapper.valueToTree(sel.getListOfTags()));
+        if (sel.getConditions() != null) {
+            selBody.set("Conditions", objectMapper.valueToTree(sel.getConditions()));
+        }
         return Response.ok(out).build();
     }
 
@@ -425,7 +434,6 @@ public class BackupController {
         out.put("BackupJobId", job.getBackupJobId());
         out.put("BackupVaultArn", job.getBackupVaultArn());
         out.put("CreationDate", job.getCreationDate());
-        out.put("RecoveryPointArn", "");
         return Response.status(200).entity(out).build();
     }
 
@@ -464,12 +472,14 @@ public class BackupController {
     // ── Recovery Point ─────────────────────────────────────────────────────────
 
     @GET
-    @Path("/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn}")
+    @Path("/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn: .+}")
     public Response describeRecoveryPoint(@Context HttpHeaders headers,
                                            @PathParam("backupVaultName") String vaultName,
                                            @PathParam("recoveryPointArn") String recoveryPointArn) {
         String region = regionResolver.resolveRegion(headers);
-        return Response.ok(service.describeRecoveryPoint(vaultName, recoveryPointArn, region)).build();
+        ObjectNode point = objectMapper.valueToTree(service.describeRecoveryPoint(vaultName, recoveryPointArn, region));
+        point.remove("RestoreMetadata");
+        return Response.ok(point).build();
     }
 
     @GET
@@ -485,7 +495,7 @@ public class BackupController {
     }
 
     @DELETE
-    @Path("/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn}")
+    @Path("/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn: .+}")
     public Response deleteRecoveryPoint(@Context HttpHeaders headers,
                                          @PathParam("backupVaultName") String vaultName,
                                          @PathParam("recoveryPointArn") String recoveryPointArn) {
@@ -583,7 +593,7 @@ public class BackupController {
     private Map<String, String> readStringMap(JsonNode node, String field) {
         JsonNode mapNode = node.path(field);
         if (mapNode.isMissingNode() || mapNode.isNull()) {
-            return new java.util.HashMap<>();
+            return new HashMap<>();
         }
         return objectMapper.convertValue(mapNode, Map.class);
     }

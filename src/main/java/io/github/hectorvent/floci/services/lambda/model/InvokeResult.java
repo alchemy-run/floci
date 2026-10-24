@@ -40,7 +40,19 @@ public class InvokeResult {
         this.functionError = functionError;
     }
 
-    public byte[] getPayload() {
+    /**
+     * Full response payload. For a streaming result this drains the remaining
+     * chunks first (blocking) and caches the assembled bytes, so buffered
+     * consumers behave exactly as they did before streaming support existed.
+     */
+    public synchronized byte[] getPayload() {
+        if (payload == null && stream != null) {
+            try {
+                payload = stream.drain();
+            } catch (Exception e) {
+                throw new IllegalStateException("Failed to drain streaming response payload", e);
+            }
+        }
         return payload;
     }
 

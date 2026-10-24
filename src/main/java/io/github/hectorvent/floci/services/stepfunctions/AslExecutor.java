@@ -535,7 +535,15 @@ public class AslExecutor {
         } catch (java.util.concurrent.TimeoutException e) {
             answerTimedOutUnlessEnded(exec, history, onUpdate);
         } catch (Exception e) {
-            LOG.warnv("Sync execution wait failed for {0}: {1}", exec.getExecutionArn(), e.getMessage());
+            FailStateException fail = unwrapFail(e);
+            if (fail != null && "RUNNING".equals(exec.getStatus())) {
+                HistoryChain chain = HistoryChain.of(history);
+                chain.continueFrom(history.size());
+                failExecution(exec, chain, fail);
+                onUpdate.accept(exec, history);
+            } else {
+                LOG.warnv("Sync execution wait failed for {0}: {1}", exec.getExecutionArn(), e.getMessage());
+            }
         }
     }
 
@@ -3187,6 +3195,8 @@ public class AslExecutor {
             mapRunRecord = newMapRun(mapRun, context, itemCount, childCount, requestedConcurrency);
             mapRunRecord.setToleratedFailureCount(tolerated.declaredCount());
             mapRunRecord.setToleratedFailurePercentage(tolerated.declaredPercentage());
+            mapRunRecord.setStatus("RUNNING");
+            sfnService.get().recordMapRun(mapRunRecord);
             chain.publish("MapRunStarted", Map.of("mapRunArn", mapRun.arn()));
         }
         AtomicInteger succeededItems = new AtomicInteger();
@@ -6674,6 +6684,14 @@ public class AslExecutor {
         return resolvePath(path, input);
     }
 
-
-
+    private static FailStateException unwrapFail(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof FailStateException fail) {
+                return fail;
+            }
+            current = current.getCause();
+        }
+        return null;
+    }
 }

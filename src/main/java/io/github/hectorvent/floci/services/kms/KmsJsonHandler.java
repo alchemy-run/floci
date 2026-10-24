@@ -617,9 +617,12 @@ public class KmsJsonHandler {
 
     private Response handleGetKeyRotationStatus(JsonNode request, String region) {
         String keyId = request.path("KeyId").asText();
-        boolean enabled = service.getKeyRotationStatus(keyId, region);
+        KmsService.KeyRotationStatus status = service.getKeyRotationStatus(keyId, region);
         ObjectNode response = objectMapper.createObjectNode();
-        response.put("KeyRotationEnabled", enabled);
+        response.put("KeyRotationEnabled", status.keyRotationEnabled());
+        if (status.rotationPeriodInDays() != null) {
+            response.put("RotationPeriodInDays", status.rotationPeriodInDays());
+        }
         return Response.ok(response).build();
     }
 
@@ -906,7 +909,9 @@ public class KmsJsonHandler {
         } else if (KmsKeyUsage.GENERATE_VERIFY_MAC == key.getKeyUsage()
                 && key.getKeySpec().getKeyType() == KmsKeySpec.KeyType.HMAC) {
                     response.putArray("MacAlgorithms").add(key.getKeySpec().getAlgorithm().getFirst().getAlgName());
-            }
+        } else if (KmsKeyUsage.KEY_AGREEMENT == key.getKeyUsage()) {
+            response.putArray("KeyAgreementAlgorithms").add("ECDH");
+        }
     }
 
     private Response handleGenerateDataKeyPair(JsonNode request, String region) {

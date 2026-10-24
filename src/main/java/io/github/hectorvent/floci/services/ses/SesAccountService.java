@@ -78,7 +78,8 @@ public class SesAccountService {
     // region was never configured. The whole tuple is stored under one region key so GetAccount never
     // observes a partially updated state.
     public Optional<AccountVdmAttributes> findAccountVdmAttributes(String region) {
-        return accountVdmStore.get(accountVdmKey(region));
+        return accountVdmStore.get(accountVdmKey(region))
+                .or(() -> accountVdmStore.get("accountVdm::" + region));
     }
 
     public void putAccountVdmAttributes(String region, AccountVdmAttributes vdm) {

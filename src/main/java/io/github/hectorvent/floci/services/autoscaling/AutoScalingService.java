@@ -1279,12 +1279,19 @@ public class AutoScalingService implements PassedRoleLookup {
                                                            String timeZone, Integer minSize, Integer maxSize,
                                                            Integer desiredCapacity) {
         requireGroup(region, asgName);
+        if (isBlank(actionName)) {
+            throw new AwsException("ValidationError", "ScheduledActionName is required.", 400);
+        }
         String key = scheduledActionKey(region, asgName, actionName);
         ScheduledAction action = scheduledActions.computeIfAbsent(key, k -> new ScheduledAction());
         action.setScheduledActionName(actionName);
         action.setAutoScalingGroupName(asgName);
-        action.setScheduledActionArn(AwsArnUtils.Arn.of("autoscaling", region, regionResolver.getAccountId(),
-                "scheduledUpdateGroupAction:" + asgName + ":" + actionName).toString());
+        if (action.getScheduledActionArn() == null) {
+            action.setScheduledActionArn(AwsArnUtils.Arn.of("autoscaling", region, regionResolver.getAccountId(),
+                    "scheduledUpdateGroupAction:" + UUID.randomUUID()
+                            + ":autoScalingGroupName/" + asgName
+                            + ":scheduledActionName/" + actionName).toString());
+        }
         action.setStartTime(startTime);
         action.setEndTime(endTime);
         action.setRecurrence(recurrence);
@@ -1302,10 +1309,14 @@ public class AutoScalingService implements PassedRoleLookup {
     }
 
     public List<ScheduledAction> describeScheduledActions(String region, String asgName, List<String> actionNames) {
+        if (notBlank(asgName) && actionNames != null && !actionNames.isEmpty()) {
+            requireGroup(region, asgName);
+        }
         return scheduledActions.values().stream()
                 .filter(a -> region.equals(a.getRegion()))
                 .filter(a -> asgName == null || asgName.equals(a.getAutoScalingGroupName()))
                 .filter(a -> actionNames == null || actionNames.isEmpty() || actionNames.contains(a.getScheduledActionName()))
+                .sorted(Comparator.comparing(ScheduledAction::getScheduledActionName))
                 .collect(Collectors.toList());
     }
 

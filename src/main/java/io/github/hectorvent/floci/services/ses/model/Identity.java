@@ -36,12 +36,15 @@ public class Identity {
     @JsonProperty("DkimTokens")
     private List<String> dkimTokens;
 
+    @JsonAlias("SigningAttributesOrigin")
     @JsonProperty("DkimSigningAttributesOrigin")
     private String dkimSigningAttributesOrigin = "AWS_SES"; // "AWS_SES" (Easy DKIM) or "EXTERNAL" (BYODKIM)
 
+    @JsonAlias("NextSigningKeyLength")
     @JsonProperty("DkimNextSigningKeyLength")
     private String dkimNextSigningKeyLength = "RSA_2048_BIT";
 
+    @JsonAlias("CurrentSigningKeyLength")
     @JsonProperty("DkimCurrentSigningKeyLength")
     private String dkimCurrentSigningKeyLength = "RSA_2048_BIT";
 

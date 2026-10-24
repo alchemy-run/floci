@@ -376,6 +376,7 @@ public class OpenSearchController {
     @GET
     @Path("/opensearch/domain/{domainName}/progress")
     public Response describeDomainChangeProgress(@PathParam("domainName") String domainName) {
+        service.describeDomainOrBaseException(domainName);
         ObjectNode response = objectMapper.createObjectNode();
         response.putObject("ChangeProgressStatus");
         return Response.ok(response).build();
@@ -384,6 +385,7 @@ public class OpenSearchController {
     @GET
     @Path("/opensearch/domain/{domainName}/autoTunes")
     public Response describeDomainAutoTunes(@PathParam("domainName") String domainName) {
+        service.describeDomain(domainName);
         ObjectNode response = objectMapper.createObjectNode();
         response.putArray("AutoTunes");
         return Response.ok(response).build();
@@ -392,6 +394,7 @@ public class OpenSearchController {
     @GET
     @Path("/opensearch/domain/{domainName}/dryRun")
     public Response describeDryRunProgress(@PathParam("domainName") String domainName) {
+        service.describeDomain(domainName);
         ObjectNode response = objectMapper.createObjectNode();
         response.putObject("DryRunProgressStatus");
         return Response.ok(response).build();
@@ -400,14 +403,27 @@ public class OpenSearchController {
     @GET
     @Path("/opensearch/domain/{domainName}/health")
     public Response describeDomainHealth(@PathParam("domainName") String domainName) {
+        Domain domain = service.describeDomainOrBaseException(domainName);
+        ClusterConfig cc = domain.getClusterConfig() != null ? domain.getClusterConfig() : new ClusterConfig();
+        boolean active = !domain.isProcessing();
+        String zones = cc.isZoneAwarenessEnabled() ? "2" : "1";
+
         ObjectNode response = objectMapper.createObjectNode();
-        response.put("ClusterHealth", "Green");
+        response.put("DomainState", active ? "Active" : "Processing");
+        response.put("ClusterHealth", active ? "Green" : "NotAvailable");
+        response.put("AvailabilityZoneCount", zones);
+        response.put("ActiveAvailabilityZoneCount", active ? zones : "0");
+        response.put("StandByAvailabilityZoneCount", "0");
+        response.put("DataNodeCount", String.valueOf(Math.max(cc.getInstanceCount(), 1)));
+        response.put("DedicatedMaster", cc.isDedicatedMasterEnabled());
+        response.put("MasterNode", active ? "Available" : "UnAvailable");
         return Response.ok(response).build();
     }
 
     @GET
     @Path("/opensearch/upgradeDomain/{domainName}/history")
     public Response getUpgradeHistory(@PathParam("domainName") String domainName) {
+        service.describeDomain(domainName);
         ObjectNode response = objectMapper.createObjectNode();
         response.putArray("UpgradeHistories");
         return Response.ok(response).build();
@@ -416,6 +432,7 @@ public class OpenSearchController {
     @GET
     @Path("/opensearch/upgradeDomain/{domainName}/status")
     public Response getUpgradeStatus(@PathParam("domainName") String domainName) {
+        service.describeDomain(domainName);
         ObjectNode response = objectMapper.createObjectNode();
         response.put("UpgradeStep", "UPGRADE");
         response.put("StepStatus", "SUCCEEDED");
@@ -448,6 +465,7 @@ public class OpenSearchController {
     @POST
     @Path("/opensearch/domain/{domainName}/config/cancel")
     public Response cancelDomainConfigChange(@PathParam("domainName") String domainName) {
+        service.describeDomain(domainName);
         ObjectNode response = objectMapper.createObjectNode();
         response.put("DryRun", false);
         response.putArray("CancelledChangeIds");
@@ -457,6 +475,7 @@ public class OpenSearchController {
     @POST
     @Path("/opensearch/serviceSoftwareUpdate/start")
     public Response startServiceSoftwareUpdate(String body) {
+        requireDomainFromBody(body);
         ObjectNode response = objectMapper.createObjectNode();
         ObjectNode options = response.putObject("ServiceSoftwareOptions");
         options.put("UpdateAvailable", false);
@@ -471,6 +490,7 @@ public class OpenSearchController {
     @POST
     @Path("/opensearch/serviceSoftwareUpdate/cancel")
     public Response cancelServiceSoftwareUpdate(String body) {
+        requireDomainFromBody(body);
         ObjectNode response = objectMapper.createObjectNode();
         ObjectNode options = response.putObject("ServiceSoftwareOptions");
         options.put("UpdateAvailable", false);
@@ -493,7 +513,7 @@ public class OpenSearchController {
         node.put("Created", !domain.isProcessing());
         node.put("Processing", domain.isProcessing());
         node.put("Deleted", domain.isDeleted());
-        node.put("Endpoint", domain.getEndpoint() != null ? domain.getEndpoint() : "");
+        node.put("Endpoint", service.publicEndpoint(domain));
         if (domain.getAccessPolicies() != null) {
             node.put("AccessPolicies", domain.getAccessPolicies());
         }
@@ -927,5 +947,13 @@ public class OpenSearchController {
             // fall through to the validation error
         }
         throw new AwsException("ValidationException", "Invalid NextToken: " + nextToken, 400);
+    }
+
+    private Domain requireDomainFromBody(String body) {
+        String domainName = readBody(body).path("DomainName").asText(null);
+        if (domainName == null || domainName.isBlank()) {
+            throw new AwsException("ValidationException", "DomainName is required.", 400);
+        }
+        return service.describeDomain(domainName);
     }
 }

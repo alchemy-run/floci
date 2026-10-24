@@ -115,7 +115,7 @@ public class Route53ResolverJsonHandler {
             node.put("ManagedOwnerName", list.managedOwnerName());
             node.put("Name", list.name());
         }
-        for (ObjectNode custom : service.listCustomFirewallDomainLists()) {
+        for (ObjectNode custom : service.listCustomFirewallDomainLists(region)) {
             lists.add(custom);
         }
         return Response.ok(result).build();

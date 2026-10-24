@@ -148,6 +148,9 @@ public class KinesisJsonHandler {
         if (!tags.isEmpty()) {
             service.addTagsToStream(streamName, tags, region);
         }
+        if (request.has("WarmThroughputMiBps") && request.path("WarmThroughputMiBps").isNumber()) {
+            service.applyWarmThroughput(streamName, request.path("WarmThroughputMiBps").asInt(), region);
+        }
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
@@ -167,6 +170,9 @@ public class KinesisJsonHandler {
         }
         String streamName = extractStreamNameFromArn(streamArn);
         service.updateStreamMode(streamName, streamMode, region);
+        if (request.has("WarmThroughputMiBps") && request.path("WarmThroughputMiBps").isNumber()) {
+            service.applyWarmThroughput(streamName, request.path("WarmThroughputMiBps").asInt(), region);
+        }
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
@@ -229,7 +235,8 @@ public class KinesisJsonHandler {
 
     private Response handleDeleteStream(JsonNode request, String region) {
         String streamName = resolveStreamName(request);
-        service.deleteStream(streamName, region);
+        boolean enforce = request.path("EnforceConsumerDeletion").asBoolean(false);
+        service.deleteStream(streamName, enforce, region);
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
@@ -343,8 +350,15 @@ public class KinesisJsonHandler {
             summary.put("KeyId", stream.getKeyId());
         }
         addStreamModeDetailsNode(summary, stream);
-
         addEnhancedMonitoringNode(summary, stream);
+        summary.put("ConsumerCount", service.listStreamConsumers(stream.getStreamArn(), region).size());
+        if (stream.getWarmThroughputTargetMiBps() != null) {
+            ObjectNode warm = summary.putObject("WarmThroughput");
+            warm.put("TargetMiBps", stream.getWarmThroughputTargetMiBps());
+            warm.put("CurrentMiBps", stream.getWarmThroughputCurrentMiBps() != null
+                    ? stream.getWarmThroughputCurrentMiBps()
+                    : stream.getWarmThroughputTargetMiBps());
+        }
 
         return Response.ok(response).build();
     }

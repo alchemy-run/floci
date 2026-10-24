@@ -1118,15 +1118,7 @@ public class SsmService implements ResourceProvider {
     }
 
     public synchronized SsmDocument createDocument(String name, String content, String documentType, String region) {
-        String storageKey = regionKey(region, name);
-        if (documentStore.get(storageKey).isPresent()) {
-            throw new AwsException("DocumentAlreadyExists",
-                    "Document " + name + " already exists.", 400);
-        }
-        SsmDocument document = new SsmDocument(name, content, documentType);
-        document.setOwner(regionResolver.getAccountId());
-        documentStore.put(storageKey, document);
-        return document;
+        return createDocument(name, content, documentType, null, null, Map.of(), region);
     }
 
     public SsmDocument updateDocument(String name, String content, String region) {

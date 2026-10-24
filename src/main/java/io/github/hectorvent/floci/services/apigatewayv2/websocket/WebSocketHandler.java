@@ -135,16 +135,13 @@ public class WebSocketHandler {
     }
 
     /**
-     * Resolve the request authority: the {@code Host} header (HTTP/1.1), falling back to the
-     * URI authority ({@code :authority}) for HTTP/2.
+     * Resolve the AWS region from the Vert.x request headers.
+     * Extracts the Authorization header and delegates to RegionResolver's parsing logic.
+     * Falls back to the default region if no Authorization header is present.
      */
     private static String resolveRequestHost(RoutingContext ctx) {
-        String host = ctx.request().getHeader("Host");
-        if (host != null) {
-            return host;
-        }
-        io.vertx.core.net.HostAndPort authority = ctx.request().authority();
-        return authority != null ? authority.host() : null;
+        return ApiGatewayExecuteApiRoutingFilter.resolveHost(
+                ctx.request().getHeader("Host"), URI.create(ctx.request().absoluteURI()));
     }
 
     /**
@@ -184,7 +181,7 @@ public class WebSocketHandler {
         try {
             api = apiGatewayV2Service.getApi(region, apiId);
         } catch (AwsException e) {
-            LOG.debugv("WebSocket upgrade rejected: API {0} not found in region {1}", apiId, region);
+            LOG.infov("WebSocket upgrade rejected: API {0} not found in region {1}", apiId, region);
             ctx.response().setStatusCode(403).end();
             return;
         }
@@ -201,7 +198,7 @@ public class WebSocketHandler {
         try {
             stage = apiGatewayV2Service.getStage(region, apiId, stageName);
         } catch (AwsException e) {
-            LOG.debugv("WebSocket upgrade rejected: stage {0} not found on API {1}", stageName, apiId);
+            LOG.infov("WebSocket upgrade rejected: stage {0} not found on API {1}", stageName, apiId);
             ctx.response().setStatusCode(403).end();
             return;
         }
@@ -355,7 +352,7 @@ public class WebSocketHandler {
                     connectedAt, connectedAt, sourceIp, userAgent);
             connectionManager.register(connectionId, connectionInfo, ws);
 
-            LOG.debugv("WebSocket connection {0} established for API {1}/{2}",
+            LOG.infov("WebSocket connection {0} established for API {1}/{2}",
                     connectionId, apiId, stageName);
 
             // Attach text message handler
@@ -751,11 +748,6 @@ public class WebSocketHandler {
         return params;
     }
 
-    /**
-     * Resolve the AWS region from the Vert.x request headers.
-     * Extracts the Authorization header and delegates to RegionResolver's parsing logic.
-     * Falls back to the default region if no Authorization header is present.
-     */
     private String resolveRegionFromVertxRequest(RoutingContext ctx) {
         String authHeader = ctx.request().getHeader("Authorization");
         if (authHeader != null && !authHeader.isEmpty()) {

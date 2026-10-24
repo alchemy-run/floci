@@ -65,11 +65,12 @@ public class AcmJsonHandler {
             case "GetAccountConfiguration" -> handleGetAccountConfiguration(request, region);
             case "PutAccountConfiguration" -> handlePutAccountConfiguration(request, region);
             case "UpdateCertificateOptions" -> handleUpdateCertificateOptions(request, region);
-            case "RevokeCertificate" -> handleRevokeCertificate(request, region);
+            case "SearchCertificates" -> handleSearchCertificates(request, region);
             case "RenewCertificate" -> handleRenewCertificate(request, region);
             case "ResendValidationEmail" -> handleResendValidationEmail(request, region);
+            case "RevokeCertificate" -> handleRevokeCertificate(request, region);
             default -> Response.status(400)
-                .entity(new AwsErrorResponse("UnsupportedOperation", "Operation " + action + " is not supported."))
+                .entity(new AwsErrorResponse("UnknownOperationException", "Operation " + action + " is not supported."))
                 .build();
         };
     }
@@ -81,15 +82,7 @@ public class AcmJsonHandler {
         if (certificateArn == null || certificateArn.isBlank() || domain == null || domain.isBlank() || validationDomain == null || validationDomain.isBlank()) {
             return Response.status(400).entity(new AwsErrorResponse("ValidationException", "Required parameter is missing")).build();
         }
-        Certificate cert = service.describeCertificate(certificateArn, region);
-        boolean domainMatchesCertificate = domain.equalsIgnoreCase(cert.getDomainName())
-            || cert.getSubjectAlternativeNames().stream().anyMatch(domain::equalsIgnoreCase);
-        if (!domainMatchesCertificate || !AcmService.isValidationDomainOf(domain, validationDomain)) {
-            return Response.status(400)
-                .entity(new AwsErrorResponse("InvalidDomainValidationOptionsException",
-                    "One or more values in the DomainValidationOption structure is incorrect."))
-                .build();
-        }
+        service.resendValidationEmail(certificateArn, domain, validationDomain, region);
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
@@ -399,6 +392,9 @@ public class AcmJsonHandler {
         if (cert.getNotAfter() != null) {
             node.put("NotAfter", cert.getNotAfter().toEpochMilli() / 1000.0);
         }
+        if (cert.getRevokedAt() != null) {
+            node.put("RevokedAt", cert.getRevokedAt().toEpochMilli() / 1000.0);
+        }
 
         ArrayNode inUseBy = objectMapper.createArrayNode();
         service.certificateInUseBy(cert).forEach(inUseBy::add);
@@ -451,13 +447,18 @@ public class AcmJsonHandler {
         extKeyUsages.add(eku2);
         node.set("ExtendedKeyUsages", extKeyUsages);
 
-        if (cert.getCertOptions() != null) {
-            ObjectNode opts = objectMapper.createObjectNode();
+        ObjectNode opts = objectMapper.createObjectNode();
+        CertificateOptions certOptions = cert.getCertOptions() != null
+            ? cert.getCertOptions()
+            : CertificateOptions.defaultOptions();
+        if (certOptions.certificateTransparencyLoggingPreference() != null) {
             opts.put("CertificateTransparencyLoggingPreference",
-                cert.getCertOptions().certificateTransparencyLoggingPreference());
-            opts.put("Export", cert.getCertOptions().export());
-            node.set("Options", opts);
+                certOptions.certificateTransparencyLoggingPreference());
         }
+        if (certOptions.export() != null) {
+            opts.put("Export", certOptions.export());
+        }
+        node.set("Options", opts);
 
         return node;
     }
@@ -568,9 +569,19 @@ public class AcmJsonHandler {
     }
 
     private CertificateOptions parseOptions(JsonNode optionsNode) {
-        if (optionsNode.isMissingNode()) return null;
-        String ctPref = optionsNode.path("CertificateTransparencyLoggingPreference").asText("ENABLED");
-        return new CertificateOptions(ctPref, "DISABLED");
+        if (optionsNode == null || optionsNode.isMissingNode() || optionsNode.isNull()) {
+            return null;
+        }
+        String ctPref = optionsNode.hasNonNull("CertificateTransparencyLoggingPreference")
+            ? optionsNode.get("CertificateTransparencyLoggingPreference").asText()
+            : null;
+        String export = optionsNode.hasNonNull("Export")
+            ? optionsNode.get("Export").asText()
+            : null;
+        if (ctPref == null && export == null) {
+            return null;
+        }
+        return new CertificateOptions(ctPref, export);
     }
 
     private List<CertificateStatus> parseCertificateStatuses(JsonNode node) {
@@ -804,5 +815,26 @@ public class AcmJsonHandler {
             return true;
         }
         return true;
+    }
+
+    private Response handleSearchCertificates(JsonNode request, String region) {
+        int maxItems = request.path("MaxResults").asInt(100);
+        String nextToken = request.path("NextToken").asText(null);
+        JsonNode filterStatement = request.get("FilterStatement");
+
+        ListResult result = service.searchCertificates(
+            cert -> matchesFilterStatement(cert, filterStatement),
+            region, maxItems, nextToken);
+
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode results = objectMapper.createArrayNode();
+        for (Certificate cert : result.certificates()) {
+            results.add(buildSearchResult(cert));
+        }
+        response.set("Results", results);
+        if (result.nextToken() != null) {
+            response.put("NextToken", result.nextToken());
+        }
+        return Response.ok(response).build();
     }
 }

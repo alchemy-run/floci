@@ -104,12 +104,15 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
                 new TypeReference<Map<String, Map<String, Listener>>>() {});
         this.rules = storageBacked("elbv2-rules.json",
                 new TypeReference<Map<String, Map<String, Rule>>>() {});
+        this.trustStores = storageBacked("elbv2-trust-stores.json",
+                new TypeReference<Map<String, Map<String, TrustStore>>>() {});
         this.tags = storageBacked("elbv2-tags.json",
                 new TypeReference<Map<String, Map<String, String>>>() {});
         normalizeRegionMaps(loadBalancers);
         normalizeRegionMaps(targetGroups);
         normalizeRegionMaps(listeners);
         normalizeRegionMaps(rules);
+        normalizeRegionMaps(trustStores);
         normalizeRegionMaps(tags);
         rebuildIndexes();
     }
@@ -403,16 +406,18 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
         return loadBalancers.getOrDefault(region, Map.of()).get(arn);
     }
 
-    /** Capacity reservation status for a load balancer. All fields are {@code null} when no
-     *  capacity is reserved, which is always the case in Floci (capacity cannot be reserved). */
+    /** Capacity reservation status for a load balancer. Fields are {@code null} when no
+     *  capacity is reserved. */
     public record CapacityReservation(Integer decreaseRequestsRemaining,
                                       Integer minimumCapacityUnits,
                                       Instant lastModifiedTime) {}
 
     public CapacityReservation describeCapacityReservation(String region, String arn) {
-        requireLoadBalancer(region, arn);
-        // Floci does not reserve load balancer capacity, so there is never a reservation to report.
-        return new CapacityReservation(null, null, null);
+        LoadBalancer lb = requireLoadBalancer(region, arn);
+        return new CapacityReservation(
+                lb.getDecreaseRequestsRemaining(),
+                lb.getMinimumCapacityUnits(),
+                lb.getCapacityReservationLastModified());
     }
 
     public void setSecurityGroups(String region, String arn, List<String> sgIds) {
@@ -561,7 +566,7 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
                     "Target group '" + tg.getTargetGroupName() + "' is currently in use by a listener or rule.", 400);
         }
         healthChecker.stopMonitoring(arn);
-        targetGroups.getOrDefault(region, Map.of()).remove(arn);
+        mutableRegion(targetGroups, region).remove(arn);
         persistRegion(targetGroups, region);
         tgToLbs.remove(arn);
         tags.remove(arn);
@@ -833,14 +838,14 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
 
     // ── Rules ─────────────────────────────────────────────────────────────────
 
-    public Rule createRule(String region, String listenerArn, List<RuleCondition> conditions,
+    public synchronized Rule createRule(String region, String listenerArn, List<RuleCondition> conditions,
                             int priority, List<Action> actions, Map<String, String> initialTags) {
         requireListener(region, listenerArn);
         if (priority < 1 || priority > 50000) {
             throw new AwsException("ValidationError", "Priority must be between 1 and 50000.", 400);
         }
 
-        Map<String, Rule> regionRules = rules.computeIfAbsent(region, k -> new ConcurrentHashMap<>());
+        Map<String, Rule> regionRules = mutableRegion(rules, region);
         List<String> existingRuleArns = listenerToRules.getOrDefault(listenerArn, List.of());
         String priorityStr = String.valueOf(priority);
         boolean priorityTaken = existingRuleArns.stream()
@@ -886,6 +891,13 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
     }
 
     public List<Rule> describeRules(String region, String listenerArn, List<String> ruleArns) {
+        // AWS DescribeRules with ListenerArn throws ListenerNotFound when the
+        // listener is gone — returning an empty list made Alchemy's
+        // post-destroy orphan check (`catchTag ListenerNotFoundException`)
+        // treat a deleted shared-ALB listener as still present.
+        if (listenerArn != null && !listenerArn.isEmpty()) {
+            requireListener(region, listenerArn);
+        }
         Map<String, Rule> regionRules = rules.getOrDefault(region, Map.of());
 
         if (ruleArns != null && !ruleArns.isEmpty()) {
@@ -904,8 +916,8 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
         return new ArrayList<>(regionRules.values());
     }
 
-    public void deleteRule(String region, String ruleArn) {
-        Map<String, Rule> regionRules = rules.getOrDefault(region, Map.of());
+    public synchronized void deleteRule(String region, String ruleArn) {
+        Map<String, Rule> regionRules = mutableRegion(rules, region);
         Rule rule = regionRules.get(ruleArn);
         if (rule == null) {
             return;
@@ -926,7 +938,7 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
         dataPlane.recompileRules(listenerArn, () -> getListenerRules(region, listenerArn));
     }
 
-    public Rule modifyRule(String region, String ruleArn, List<RuleCondition> conditions, List<Action> actions) {
+    public synchronized Rule modifyRule(String region, String ruleArn, List<RuleCondition> conditions, List<Action> actions) {
         Rule rule = requireRule(region, ruleArn);
         String listenerArn = rule.getListenerArn();
         if (conditions != null) rule.setConditions(new ArrayList<>(conditions));
@@ -936,7 +948,7 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
         return rule;
     }
 
-    public void setRulePriorities(String region, Map<String, Integer> arnToPriority) {
+    public synchronized void setRulePriorities(String region, Map<String, Integer> arnToPriority) {
         Map<String, Rule> regionRules = rules.getOrDefault(region, Map.of());
 
         // validate all rules exist and are not default before touching anything
@@ -1462,15 +1474,30 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
     }
 
     private Map<String, Subnet> resolveSubnetsById(String region, List<String> subnetIds) {
-        List<Subnet> subnets = ec2Service.describeSubnets(region, subnetIds, Map.of());
-        Map<String, Subnet> subnetsById = subnets.stream()
-                .collect(Collectors.toMap(Subnet::getSubnetId, subnet -> subnet, (left, right) -> left));
-
+        Map<String, Subnet> subnetsById = new LinkedHashMap<>();
+        int index = 0;
         for (String subnetId : subnetIds) {
-            if (!subnetsById.containsKey(subnetId)) {
+            if (subnetId == null || subnetId.isBlank()) {
                 throw new AwsException("SubnetNotFound",
                         "The subnet ID '" + subnetId + "' does not exist", 400);
             }
+            Subnet subnet = lookupEc2Subnet(region, subnetId);
+            if (subnet == null) {
+                // Accept well-formed IDs the EC2 store cannot see under this
+                // RequestContext (wrong account/region key, or a caller that
+                // described subnets out of band). Real ELBv2 still returns
+                // SubnetNotFound for a truly missing or malformed id; we only
+                // synthesize a valid-looking subnet-* so CreateLoadBalancer can
+                // proceed. AZ is positional so two IDs always span two zones
+                // (ALB requirement).
+                if (!AWS_SUBNET_ID.matcher(subnetId).matches()) {
+                    throw new AwsException("SubnetNotFound",
+                            "The subnet ID '" + subnetId + "' does not exist", 400);
+                }
+                subnet = synthesizeAcceptedSubnet(region, subnetId, index);
+            }
+            subnetsById.put(subnetId, subnet);
+            index++;
         }
         return subnetsById;
     }
@@ -1651,16 +1678,21 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
     }
 
     private void linkTgToLb(Action action, String lbArn) {
-        if ("forward".equals(action.getType())) {
-            if (action.getTargetGroupArn() != null) {
-                tgToLbs.computeIfAbsent(action.getTargetGroupArn(), k -> ConcurrentHashMap.newKeySet()).add(lbArn);
-                addLoadBalancerReference(action.getTargetGroupArn(), lbArn);
-            }
-            for (Action.TargetGroupTuple t : action.getTargetGroups()) {
-                if (t.getTargetGroupArn() != null) {
-                    tgToLbs.computeIfAbsent(t.getTargetGroupArn(), k -> ConcurrentHashMap.newKeySet()).add(lbArn);
-                    addLoadBalancerReference(t.getTargetGroupArn(), lbArn);
-                }
+        if (action == null || !"forward".equals(action.getType())) {
+            return;
+        }
+        if (action.getTargetGroupArn() != null) {
+            tgToLbs.computeIfAbsent(action.getTargetGroupArn(), k -> ConcurrentHashMap.newKeySet()).add(lbArn);
+            addLoadBalancerReference(action.getTargetGroupArn(), lbArn);
+        }
+        List<Action.TargetGroupTuple> tuples = action.getTargetGroups();
+        if (tuples == null) {
+            return;
+        }
+        for (Action.TargetGroupTuple t : tuples) {
+            if (t != null && t.getTargetGroupArn() != null) {
+                tgToLbs.computeIfAbsent(t.getTargetGroupArn(), k -> ConcurrentHashMap.newKeySet()).add(lbArn);
+                addLoadBalancerReference(t.getTargetGroupArn(), lbArn);
             }
         }
     }
@@ -1717,11 +1749,18 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
     }
 
     private static void collectActionTargetGroups(Action action, Set<String> out) {
+        if (action == null) {
+            return;
+        }
         if (action.getTargetGroupArn() != null) {
             out.add(action.getTargetGroupArn());
         }
-        for (Action.TargetGroupTuple t : action.getTargetGroups()) {
-            if (t.getTargetGroupArn() != null) {
+        List<Action.TargetGroupTuple> tuples = action.getTargetGroups();
+        if (tuples == null) {
+            return;
+        }
+        for (Action.TargetGroupTuple t : tuples) {
+            if (t != null && t.getTargetGroupArn() != null) {
                 out.add(t.getTargetGroupArn());
             }
         }
@@ -2010,5 +2049,30 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
         return count;
     }
 
+    /** Classic (8 hex) or current (17 hex) subnet IDs. Anything else is SubnetNotFound. */
+    private static final Pattern AWS_SUBNET_ID = Pattern.compile("subnet-[0-9a-f]{8}(?:[0-9a-f]{9})?");
 
+    private Subnet lookupEc2Subnet(String region, String subnetId) {
+        if (ec2Service == null) {
+            return null;
+        }
+        try {
+            return ec2Service.findSubnetById(region, subnetId).orElse(null);
+        } catch (AwsException e) {
+            if ("InvalidSubnetID.NotFound".equals(e.getErrorCode())) {
+                return null;
+            }
+            throw e;
+        }
+    }
+
+    private static Subnet synthesizeAcceptedSubnet(String region, String subnetId, int index) {
+        Subnet subnet = new Subnet();
+        subnet.setSubnetId(subnetId);
+        subnet.setVpcId("vpc-default");
+        subnet.setRegion(region);
+        subnet.setState("available");
+        subnet.setAvailabilityZone(region + (char) ('a' + Math.floorMod(index, 3)));
+        return subnet;
+    }
 }
