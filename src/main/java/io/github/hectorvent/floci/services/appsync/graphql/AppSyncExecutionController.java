@@ -52,6 +52,10 @@ import java.util.UUID;
 @Produces(MediaType.APPLICATION_JSON)
 public class AppSyncExecutionController {
 
+    // The path a SigV4 client signed: the original one, before virtual-host routing rewrites it.
+    @jakarta.inject.Inject
+    io.quarkus.vertx.http.runtime.CurrentVertxRequest currentVertxRequest;
+
     private static final Logger LOG = Logger.getLogger(AppSyncExecutionController.class);
     private static final String HEADER_ERROR_TYPE = "x-amzn-errortype";
     /** Matches the sidecar's own default; one execution level rarely has more fields than this. */
@@ -361,7 +365,9 @@ public class AppSyncExecutionController {
                 accountId,
                 region,
                 headerMap(headers),
-                rawBody);
+                rawBody,
+                currentVertxRequest != null && currentVertxRequest.getCurrent() != null
+                        ? currentVertxRequest.getCurrent().request().path() : null);
     }
 
     private static List<String> sourceIp(HttpHeaders headers) {
