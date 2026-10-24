@@ -82,6 +82,15 @@ public class EmrServerlessService {
         if (request.getType() == null || request.getType().isBlank()) {
             throw new AwsException("ValidationException", "type is required", 400);
         }
+        // EMR Serverless reports the engine as it names it, whatever case the request used.
+        String type;
+        if ("SPARK".equalsIgnoreCase(request.getType())) {
+            type = "Spark";
+        } else if ("HIVE".equalsIgnoreCase(request.getType())) {
+            type = "Hive";
+        } else {
+            throw new AwsException("ValidationException", "type must be SPARK or HIVE", 400);
+        }
         if (request.getClientToken() == null || request.getClientToken().isBlank()) {
             throw new AwsException("ValidationException", "clientToken is required", 400);
         }
@@ -105,7 +114,7 @@ public class EmrServerlessService {
         app.setArn(arn);
         app.setName(request.getName());
         app.setReleaseLabel(request.getReleaseLabel());
-        app.setType(request.getType());
+        app.setType(type);
         app.setState("CREATED");
         app.setStateDetails("");
         app.setCreatedAt(createdAt);
