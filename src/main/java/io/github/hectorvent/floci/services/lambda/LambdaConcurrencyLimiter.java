@@ -83,36 +83,13 @@ public class LambdaConcurrencyLimiter implements Resettable {
         this(1000, 100);
     }
 
-    /**
-     * Reserved concurrency is a function-level setting shared by {@code $LATEST}, every published
-     * version and every alias, so a version snapshot (whose own record carries no reservation) is
-     * counted against the reservation registered for its unqualified function ARN.
-     */
     public Permit acquire(LambdaFunction fn) {
-        String functionArn = unqualifiedArn(fn.getFunctionArn());
-        String region = regionOf(functionArn);
-        Integer r = functionArn != null ? reservedOf(region).get(functionArn) : null;
-        if (r == null) {
-            r = fn.getReservedConcurrentExecutions();
-        }
+        Integer r = fn.getReservedConcurrentExecutions();
+        String region = regionOf(fn.getFunctionArn());
         if (r == null) {
             return acquireUnreserved(region);
         }
-        return acquireReserved(functionArn, r);
-    }
-
-    /** Strips a trailing version or alias qualifier: {@code arn:...:function:name[:qualifier]}. */
-    private static String unqualifiedArn(String arn) {
-        if (arn == null) {
-            return null;
-        }
-        int delimiters = 0;
-        for (int i = 0; i < arn.length(); i++) {
-            if (arn.charAt(i) == ':' && ++delimiters == 7) {
-                return arn.substring(0, i);
-            }
-        }
-        return arn;
+        return acquireReserved(fn.getFunctionArn(), r);
     }
 
     private Permit acquireReserved(String key, int limit) {
@@ -364,5 +341,19 @@ public class LambdaConcurrencyLimiter implements Resettable {
     public interface Permit extends AutoCloseable {
         @Override
         void close();
+    }
+
+    /** Strips a trailing version or alias qualifier: {@code arn:...:function:name[:qualifier]}. */
+    private static String unqualifiedArn(String arn) {
+        if (arn == null) {
+            return null;
+        }
+        int delimiters = 0;
+        for (int i = 0; i < arn.length(); i++) {
+            if (arn.charAt(i) == ':' && ++delimiters == 7) {
+                return arn.substring(0, i);
+            }
+        }
+        return arn;
     }
 }

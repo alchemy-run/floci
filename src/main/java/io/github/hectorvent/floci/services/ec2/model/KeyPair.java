@@ -15,7 +15,6 @@ public class KeyPair {
     private String keyPairId;
     private String keyFingerprint;
     private String keyMaterial;
-    private String keyType = "rsa";
     private String publicKey;
     private String keyType;
     private Instant createTime;
@@ -35,9 +34,6 @@ public class KeyPair {
 
     public String getKeyMaterial() { return keyMaterial; }
     public void setKeyMaterial(String keyMaterial) { this.keyMaterial = keyMaterial; }
-
-    public String getKeyType() { return keyType; }
-    public void setKeyType(String keyType) { this.keyType = keyType; }
 
     public String getPublicKey() { return publicKey; }
     public void setPublicKey(String publicKey) { this.publicKey = publicKey; }

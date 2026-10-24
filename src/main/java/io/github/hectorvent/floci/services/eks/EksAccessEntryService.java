@@ -7,13 +7,9 @@ import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.eks.model.AccessEntry;
-import io.github.hectorvent.floci.services.eks.model.AccessScope;
-import io.github.hectorvent.floci.services.eks.model.AssociateAccessPolicyRequest;
-import io.github.hectorvent.floci.services.eks.model.AssociatedAccessPolicy;
 import io.github.hectorvent.floci.services.eks.model.Cluster;
 import io.github.hectorvent.floci.services.eks.model.ClusterStatus;
 import io.github.hectorvent.floci.services.eks.model.CreateAccessEntryRequest;
-import io.github.hectorvent.floci.services.eks.model.UpdateAccessEntryRequest;
 import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.iam.model.IamRole;
 import io.github.hectorvent.floci.services.iam.model.IamUser;
@@ -23,7 +19,6 @@ import jakarta.inject.Inject;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
@@ -31,6 +26,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import io.github.hectorvent.floci.services.eks.model.AccessScope;
+import io.github.hectorvent.floci.services.eks.model.AssociateAccessPolicyRequest;
+import io.github.hectorvent.floci.services.eks.model.AssociatedAccessPolicy;
+import io.github.hectorvent.floci.services.eks.model.UpdateAccessEntryRequest;
+import java.util.ArrayList;
 
 /** Access-entry management metadata; Kubernetes authorization is handled separately. */
 @ApplicationScoped
@@ -49,16 +49,7 @@ public class EksAccessEntryService {
     }
 
     @RegisterForReflection
-    public record StoredEntry(AccessEntry entry, String principalId, String clientRequestToken,
-                              List<AssociatedAccessPolicy> accessPolicies) {
-        StoredEntry(AccessEntry entry, String principalId, String clientRequestToken) {
-            this(entry, principalId, clientRequestToken, List.of());
-        }
-
-        List<AssociatedAccessPolicy> policies() {
-            return accessPolicies == null ? List.of() : accessPolicies;
-        }
-    }
+    public record StoredEntry(AccessEntry entry, String principalId, String clientRequestToken) {}
 
     @RegisterForReflection
     public record Page(List<String> accessEntries, String nextToken) {}
@@ -94,8 +85,17 @@ public class EksAccessEntryService {
                 : iam.findUser(arn[4], name).filter(value -> principal.equals(value.getArn()))
                         .map(IamUser::getUserId).orElseThrow(() -> invalid("IAM user does not exist"));
         String username = node ? "system:node:{{EC2PrivateDNSName}}" : request.username();
+        if (username != null && !node && (username.isBlank()
+                || username.matches("^(system|eks|aws|amazon|iam):.*"))) {
+            throw invalid("Invalid username");
+        }
         if (username != null && !node) {
-            validateStandardUsername(username);
+            for (String placeholder : List.of("{{SessionName}}", "{{SessionNameRaw}}")) {
+                int position = username.indexOf(placeholder);
+                if (position >= 0 && !username.substring(0, position).contains(":")) {
+                    throw invalid("A session-name placeholder must be preceded by a colon");
+                }
+            }
         }
         if (username == null) {
             username = role ? "arn:" + arn[1] + ":sts::" + arn[4] + ":assumed-role/" + name + "/{{SessionName}}"
@@ -103,7 +103,9 @@ public class EksAccessEntryService {
         }
         List<String> groups = node ? List.of("system:nodes")
                 : request.kubernetesGroups() == null ? List.of() : request.kubernetesGroups();
-        validateGroups(groups);
+        if (groups.stream().anyMatch(group -> group == null || group.isBlank())) {
+            throw invalid("kubernetesGroups must contain nonempty strings");
+        }
         Map<String, String> tags = request.tags() == null ? Map.of() : request.tags();
         if (tags.size() > 50 || tags.entrySet().stream().anyMatch(tag -> tag.getKey() == null
                 || tag.getKey().isEmpty() || tag.getKey().length() > 128 || tag.getValue() == null
@@ -148,7 +150,70 @@ public class EksAccessEntryService {
     }
 
     public synchronized AccessEntry describe(Cluster cluster, String principal) {
-        return stored(cluster, principal).entry();
+        requireApiAccess(cluster);
+        return entries.get(prefix(cluster) + principal).map(StoredEntry::entry)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Access entry not found", 404));
+    }
+
+    public synchronized void delete(Cluster cluster, String principal) {
+        describe(cluster, principal);
+        entries.delete(prefix(cluster) + principal);
+    }
+
+    public synchronized Page list(Cluster cluster, Integer maxResults, String nextToken) {
+        requireApiAccess(cluster);
+        int limit = maxResults == null ? 100 : maxResults;
+        if (limit < 1 || limit > 100) {
+            throw invalid("maxResults must be between 1 and 100");
+        }
+        String prefix = prefix(cluster);
+        String after = "";
+        if (nextToken != null) {
+            try {
+                String decoded = new String(Base64.getUrlDecoder().decode(nextToken), StandardCharsets.UTF_8);
+                if (!decoded.startsWith(prefix + "\n")) {
+                    throw invalid("nextToken does not belong to this cluster");
+                }
+                after = decoded.substring(prefix.length() + 1);
+                if (after.isBlank()) {
+                    throw invalid("Invalid nextToken");
+                }
+            } catch (IllegalArgumentException exception) {
+                throw invalid("Invalid nextToken");
+            }
+        }
+        String cursor = after;
+        List<String> remaining = entries.scan(key -> key.startsWith(prefix)).stream()
+                .map(stored -> stored.entry().principalArn()).filter(principal -> principal.compareTo(cursor) > 0)
+                .sorted(Comparator.naturalOrder()).toList();
+        List<String> page = remaining.stream().limit(limit).toList();
+        String token = remaining.size() > limit ? Base64Url.encode(prefix + "\n" + page.getLast()) : null;
+        return new Page(page, token);
+    }
+
+    public synchronized void deleteClusterEntries(Cluster cluster) {
+        String prefix = prefix(cluster);
+        for (StoredEntry stored : entries.scan(key -> key.startsWith(prefix))) {
+            entries.delete(prefix + stored.entry().principalArn());
+        }
+    }
+
+    private static String prefix(Cluster cluster) {
+        // A recreated cluster must not inherit access entries or pagination tokens from its predecessor.
+        return cluster.getArn() + "/" + Objects.toString(cluster.getCreatedAt()) + "/";
+    }
+
+    private static void requireApiAccess(Cluster cluster) {
+        if (cluster.getAccessConfig() == null || "CONFIG_MAP".equals(cluster.getAccessConfig().authenticationMode())) {
+            throw new AwsException("InvalidRequestException", "Cluster authentication mode must be API or API_AND_CONFIG_MAP", 400);
+        }
+        if (cluster.getStatus() != ClusterStatus.ACTIVE) {
+            throw new AwsException("InvalidRequestException", "Cluster must be ACTIVE", 400);
+        }
+    }
+
+    private static AwsException invalid(String message) {
+        return new AwsException("InvalidParameterException", message, 400);
     }
 
     /**
@@ -225,55 +290,6 @@ public class EksAccessEntryService {
         return stored(cluster, principal).policies();
     }
 
-    public synchronized void delete(Cluster cluster, String principal) {
-        requireApiAccess(cluster);
-        stored(cluster, principal);
-        entries.delete(prefix(cluster) + principal);
-    }
-
-    public synchronized Page list(Cluster cluster, Integer maxResults, String nextToken) {
-        requireApiAuthenticationMode(cluster);
-        int limit = maxResults == null ? 100 : maxResults;
-        if (limit < 1 || limit > 100) {
-            throw invalid("maxResults must be between 1 and 100");
-        }
-        String prefix = prefix(cluster);
-        String after = "";
-        if (nextToken != null) {
-            try {
-                String decoded = new String(Base64.getUrlDecoder().decode(nextToken), StandardCharsets.UTF_8);
-                if (!decoded.startsWith(prefix + "\n")) {
-                    throw invalid("nextToken does not belong to this cluster");
-                }
-                after = decoded.substring(prefix.length() + 1);
-                if (after.isBlank()) {
-                    throw invalid("Invalid nextToken");
-                }
-            } catch (IllegalArgumentException exception) {
-                throw invalid("Invalid nextToken");
-            }
-        }
-        String cursor = after;
-        List<String> remaining = entries.scan(key -> key.startsWith(prefix)).stream()
-                .map(stored -> stored.entry().principalArn()).filter(principal -> principal.compareTo(cursor) > 0)
-                .sorted(Comparator.naturalOrder()).toList();
-        List<String> page = remaining.stream().limit(limit).toList();
-        String token = remaining.size() > limit ? Base64Url.encode(prefix + "\n" + page.getLast()) : null;
-        return new Page(page, token);
-    }
-
-    public synchronized void deleteClusterEntries(Cluster cluster) {
-        String prefix = prefix(cluster);
-        for (StoredEntry stored : entries.scan(key -> key.startsWith(prefix))) {
-            entries.delete(prefix + stored.entry().principalArn());
-        }
-    }
-
-    private static String prefix(Cluster cluster) {
-        // A recreated cluster must not inherit access entries or pagination tokens from its predecessor.
-        return cluster.getArn() + "/" + Objects.toString(cluster.getCreatedAt()) + "/";
-    }
-
     private StoredEntry stored(Cluster cluster, String principal) {
         requireApiAuthenticationMode(cluster);
         return entries.get(prefix(cluster) + principal)
@@ -333,16 +349,5 @@ public class EksAccessEntryService {
         if (cluster.getAccessConfig() == null || "CONFIG_MAP".equals(cluster.getAccessConfig().authenticationMode())) {
             throw new AwsException("InvalidRequestException", "Cluster authentication mode must be API or API_AND_CONFIG_MAP", 400);
         }
-    }
-
-    private static void requireApiAccess(Cluster cluster) {
-        requireApiAuthenticationMode(cluster);
-        if (cluster.getStatus() != ClusterStatus.ACTIVE) {
-            throw new AwsException("InvalidRequestException", "Cluster must be ACTIVE", 400);
-        }
-    }
-
-    private static AwsException invalid(String message) {
-        return new AwsException("InvalidParameterException", message, 400);
     }
 }

@@ -5,7 +5,6 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -32,6 +31,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
+import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 
 @ApplicationScoped
 public class NeptuneService {
@@ -104,14 +104,14 @@ public class NeptuneService {
             String identity = resourceIdentity(accountId, region, id);
             // graph database needs the container.
             handle = containerManager.tryStart(id, image, dbType, accountId, region);
-            String endpointHost = NeptuneEndpoints.cluster(id, accountId, region, dnsSuffix());
+            String endpointHost = resolveEndpointHost();
 
             NeptuneCluster cluster = new NeptuneCluster();
             cluster.setDbClusterIdentifier(id);
             cluster.setStatus("available");
             cluster.setEngineVersion(engineVersion != null ? engineVersion : ENGINE_VERSION_DEFAULT);
             cluster.setEndpoint(endpointHost);
-            cluster.setReaderEndpoint(NeptuneEndpoints.reader(id, accountId, region, dnsSuffix()));
+            cluster.setReaderEndpoint(endpointHost);
             cluster.setPort(proxyPort);
             cluster.setIamDatabaseAuthenticationEnabled(iamEnabled);
             cluster.setDbClusterArn(regionResolver.buildArn("neptune", region, "cluster:" + id));
@@ -356,7 +356,7 @@ public class NeptuneService {
         instance.setDbInstanceClass(dbInstanceClass != null ? dbInstanceClass : "db.r5.large");
         instance.setEngineVersion(engineVersion != null ? engineVersion : cluster.getEngineVersion());
         instance.setStatus("available");
-        instance.setEndpoint(NeptuneEndpoints.instance(id, currentAccount(), region, dnsSuffix()));
+        instance.setEndpoint(cluster.getEndpoint());
         instance.setPort(cluster.getPort());
         instance.setIamDatabaseAuthenticationEnabled(iamEnabled);
         instance.setDbInstanceArn(regionResolver.buildArn("neptune", region, "db:" + id));
@@ -693,9 +693,8 @@ public class NeptuneService {
                 cluster.getDbClusterIdentifier());
     }
 
-    /** The DNS suffix endpoint hostnames are built under, as ELB and the other data planes do. */
-    private String dnsSuffix() {
-        return config.hostname().orElse(EmbeddedDnsServer.DEFAULT_SUFFIX);
+    private String resolveEndpointHost() {
+        return config.hostname().orElse("localhost");
     }
 
     private int allocateProxyPort(Integer requested) {
@@ -723,5 +722,10 @@ public class NeptuneService {
 
     private void releaseProxyPort(int port) {
         usedPorts.remove(port);
+    }
+
+    /** The DNS suffix endpoint hostnames are built under, as ELB and the other data planes do. */
+    private String dnsSuffix() {
+        return config.hostname().orElse(EmbeddedDnsServer.DEFAULT_SUFFIX);
     }
 }

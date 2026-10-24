@@ -7,17 +7,14 @@ import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.dns.ContainerEndpoints;
 import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
-import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.elasticache.container.ElastiCacheContainerHandle;
 import io.github.hectorvent.floci.services.elasticache.container.ElastiCacheMemcachedContainerManager;
 import io.github.hectorvent.floci.services.elasticache.model.CacheCluster;
 import io.github.hectorvent.floci.services.elasticache.model.CacheClusterStatus;
-import io.github.hectorvent.floci.services.elasticache.model.CacheSubnetGroup;
 import io.github.hectorvent.floci.services.elasticache.model.Endpoint;
 import io.github.hectorvent.floci.services.elasticache.proxy.ElastiCacheMemcachedProxyManager;
-import io.github.hectorvent.floci.services.elasticache.model.ReplicationGroup;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -39,16 +36,7 @@ public class ElastiCacheMemcachedService {
     /** AWS's default Port for Memcached cache clusters. */
     static final int DEFAULT_ENGINE_PORT = 11211;
 
-    private final AccountAwareStorageBackend<CacheCluster> clusters;
-    /**
-     * The two stores {@link ElastiCacheService} writes, read here for the id check alone.
-     * {@link StorageFactory#create} keys backends by file path and hands back the instance that
-     * service already holds, so these are those stores rather than copies: a cache cluster id is
-     * one namespace whatever engine claims it.
-     */
-    private final StorageBackend<String, CacheCluster> redisClusters;
-    private final StorageBackend<String, ReplicationGroup> groups;
-    private final StorageBackend<String, CacheSubnetGroup> subnetGroups;
+    private final StorageBackend<String, CacheCluster> clusters;
     private final ElastiCacheMemcachedContainerManager containerManager;
     private final ElastiCacheMemcachedProxyManager proxyManager;
     private final ElastiCacheService elasticacheService;
@@ -60,10 +48,6 @@ public class ElastiCacheMemcachedService {
     private final ConcurrentHashMap<String, Object> clusterLocks = new ConcurrentHashMap<>();
     /** Proxy ports published to containers, by cache cluster. */
     private final Map<String, Integer> publishedProxyPorts = new ConcurrentHashMap<>();
-    /** Shared with {@link ElastiCacheService}: one namespace, one set of in-flight claims. */
-    private final ElastiCacheProvisioningIds provisioningIds;
-    private final RegionResolver regionResolver;
-    private final ConcurrentHashMap<String, Object> clusterLocks = new ConcurrentHashMap<>();
 
     @Inject
     public ElastiCacheMemcachedService(ElastiCacheMemcachedContainerManager containerManager,
@@ -80,19 +64,11 @@ public class ElastiCacheMemcachedService {
         this.containerManager = containerManager;
         this.proxyManager = proxyManager;
         this.elasticacheService = elasticacheService;
-        this.regionResolver = regionResolver;
         this.config = config;
         this.dockerHostResolver = dockerHostResolver;
         this.containerDetector = containerDetector;
-        this.provisioningIds = provisioningIds;
         this.clusters = storageFactory.create("elasticache", "elasticache-cache-clusters.json",
                 new TypeReference<Map<String, CacheCluster>>() {});
-        this.redisClusters = storageFactory.create("elasticache", "elasticache-redis-clusters.json",
-                new TypeReference<Map<String, CacheCluster>>() {});
-        this.groups = storageFactory.create("elasticache", "elasticache-groups.json",
-                new TypeReference<Map<String, ReplicationGroup>>() {});
-        this.subnetGroups = storageFactory.create("elasticache", "elasticache-subnet-groups.json",
-                new TypeReference<Map<String, CacheSubnetGroup>>() {});
     }
 
     public ElastiCacheMemcachedService(ElastiCacheMemcachedContainerManager containerManager,
@@ -459,28 +435,29 @@ public class ElastiCacheMemcachedService {
     }
 
     public CacheCluster getCacheCluster(String clusterId) {
-        return clusters.get(clusterId).filter(cluster -> cluster.getServerlessCacheName() == null).orElseThrow(() ->
+        return clusters.get(clusterId).orElseThrow(() ->
                 new AwsException("CacheClusterNotFoundFault",
                         "Cache cluster " + clusterId + " not found.", 404));
     }
 
     public Collection<CacheCluster> listCacheClusters(String filterClusterId) {
         if (filterClusterId != null && !filterClusterId.isBlank()) {
-            return clusters.get(filterClusterId).filter(cluster -> cluster.getServerlessCacheName() == null)
+            return clusters.get(filterClusterId)
                     .map(List::of)
                     .orElseThrow(() -> new AwsException("CacheClusterNotFoundFault",
                             "Cache cluster " + filterClusterId + " not found.", 404));
         }
-        return clusters.scan(k -> true).stream().filter(cluster -> cluster.getServerlessCacheName() == null).toList();
+        return clusters.scan(k -> true);
     }
 
     public CacheCluster deleteCacheCluster(String clusterId) {
-        return deleteCacheCluster(clusterId, false);
-    }
+        // one monitor per cluster for delete and restore: a restore's read-modify-write could
+        // otherwise write the cluster back after this removed it
+        synchronized (lockFor(clusterId)) {
+            CacheCluster cluster = getCacheCluster(clusterId);
 
-    CacheCluster deleteServerlessBacking(String clusterId) {
-        return deleteCacheCluster(clusterId, true);
-    }
+            cluster.setCacheClusterStatus(CacheClusterStatus.DELETING);
+            clusters.put(clusterId, cluster);
 
             unrouteEndpoint(cluster);
             proxyManager.stopProxy(clusterId);
@@ -501,22 +478,5 @@ public class ElastiCacheMemcachedService {
     public CacheCluster saveCacheCluster(CacheCluster cluster) {
         clusters.put(cluster.getCacheClusterId(), cluster);
         return cluster;
-    }
-
-    private String resolveEndpointHost(ElastiCacheContainerHandle handle) {
-        return config.hostname().orElse(handle != null ? handle.getHost() : "localhost");
-    }
-
-    CacheCluster getServerlessBacking(String id, String accountId) {
-        return clusters.getForAccount(accountId, id).filter(cluster -> cluster.getServerlessCacheName() != null)
-                .orElseThrow(() -> new AwsException("CacheClusterNotFound", "Serverless backing cache not found.", 404));
-    }
-
-    private void putRuntimeCluster(CacheCluster cluster) {
-        if (cluster.getOwnerAccountId() == null) {
-            clusters.put(cluster.getCacheClusterId(), cluster);
-        } else {
-            clusters.putForAccount(cluster.getOwnerAccountId(), cluster.getCacheClusterId(), cluster);
-        }
     }
 }

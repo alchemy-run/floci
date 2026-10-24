@@ -303,41 +303,6 @@ class EcrRegistryDataPlaneTest {
 
         HttpServer dataPlane = null;
         try {
-            EcrRegistryManager registryManager = Mockito.mock(EcrRegistryManager.class);
-            EcrService ecrService = Mockito.mock(EcrService.class);
-            EmulatorConfig config = Mockito.mock(EmulatorConfig.class, Mockito.RETURNS_DEEP_STUBS);
-            when(config.services().ecr().enabled()).thenReturn(true);
-            when(config.services().ecr().uriStyle()).thenReturn("hostname");
-            when(registryManager.httpClient())
-                    .thenReturn(new RegistryHttpClient("http://127.0.0.1:" + registry.actualPort()));
-            when(ecrService.isImageTagImmutable("platform/api", "000000000000", "us-east-1"))
-                    .thenReturn(true);
-            when(ecrService.registryRepositoryName("platform/api", "000000000000", "us-east-1"))
-                    .thenReturn("legacy/platform-api");
-
-            Router router = Router.router(vertx);
-            new EcrRegistryDataPlane(registryManager, ecrService, config, vertx).register(router);
-            dataPlane = vertx.createHttpServer().requestHandler(router)
-                    .listen(0, "127.0.0.1")
-                    .toCompletionStage().toCompletableFuture().get(2, TimeUnit.SECONDS);
-
-            String tlsHost = "000000000000.dkr.ecr.us-east-1.localhost.floci.io:4566";
-            assertEquals(201, putManifest(dataPlane.actualPort(), tlsHost).statusCode());
-
-            ManifestResponse rejected = putManifest(dataPlane.actualPort(), tlsHost);
-            assertEquals(400, rejected.statusCode());
-            JsonObject json = new JsonObject(rejected.body());
-            JsonArray errors = json.getJsonArray("errors");
-            assertNotNull(errors);
-            assertEquals(1, errors.size());
-            JsonObject error = errors.getJsonObject(0);
-            assertEquals("TAG_INVALID", error.getString("code"));
-        } finally {
-            if (dataPlane != null) {
-                dataPlane.close().toCompletionStage().toCompletableFuture().get(2, TimeUnit.SECONDS);
-            }
-            registry.close().toCompletionStage().toCompletableFuture().get(2, TimeUnit.SECONDS);
-        }
             dataPlane = dataPlane(registry, true);
 
             String tlsHost = "000000000000.dkr.ecr.us-east-1.localhost.floci.io:4566";

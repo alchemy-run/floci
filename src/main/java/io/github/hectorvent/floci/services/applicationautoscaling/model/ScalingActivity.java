@@ -17,10 +17,9 @@ public class ScalingActivity {
     private String description;
     private String cause;
     private double startTime;
-    private Double endTime;
+    private double endTime;
     private String statusCode;
     private String statusMessage;
-    private String details;
 
     public String getActivityId() { return activityId; }
     public void setActivityId(String v) { this.activityId = v; }
@@ -43,8 +42,8 @@ public class ScalingActivity {
     public double getStartTime() { return startTime; }
     public void setStartTime(double v) { this.startTime = v; }
 
-    public Double getEndTime() { return endTime; }
-    public void setEndTime(Double v) { this.endTime = v; }
+    public double getEndTime() { return endTime; }
+    public void setEndTime(double v) { this.endTime = v; }
 
     public String getStatusCode() { return statusCode; }
     public void setStatusCode(String v) { this.statusCode = v; }
@@ -52,6 +51,9 @@ public class ScalingActivity {
     public String getStatusMessage() { return statusMessage; }
     public void setStatusMessage(String v) { this.statusMessage = v; }
 
+    private String details;
+
     public String getDetails() { return details; }
+
     public void setDetails(String v) { this.details = v; }
 }

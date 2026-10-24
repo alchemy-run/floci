@@ -457,37 +457,6 @@ public class OrganizationsJsonHandler {
         return Response.ok(response).build();
     }
 
-    private Response listEffectivePolicyValidationErrors(JsonNode request, String caller) {
-        if (request.hasNonNull("MaxResults")) {
-            int maxResults = request.get("MaxResults").asInt();
-            if (maxResults < 1 || maxResults > 20) {
-                throw new AwsException("InvalidInputException", "MaxResults must be between 1 and 20.", 400);
-            }
-        }
-        OrganizationsService.EffectivePolicyValidation validation = service.listEffectivePolicyValidationErrors(
-                caller, text(request, "AccountId"), text(request, "PolicyType"));
-        List<OrganizationsService.EffectivePolicyValidationError> errors = validation.errors();
-        List<Integer> indexes = java.util.stream.IntStream.range(0, errors.size()).boxed().toList();
-        PaginatedResult<Integer> page = page(indexes, index -> String.format("%08d", index), request);
-        ObjectNode response = objectMapper.createObjectNode();
-        response.put("AccountId", validation.accountId());
-        response.put("PolicyType", validation.policyType());
-        response.put("Path", validation.path());
-        putTimestamp(response, "EvaluationTimestamp", validation.evaluationTimestamp());
-        ArrayNode errorsNode = response.putArray("EffectivePolicyValidationErrors");
-        for (int index : page.items()) {
-            OrganizationsService.EffectivePolicyValidationError error = errors.get(index);
-            ObjectNode node = errorsNode.addObject();
-            node.put("ErrorCode", error.errorCode());
-            node.put("ErrorMessage", error.errorMessage());
-            node.put("PathToError", error.pathToError());
-            ArrayNode contributing = node.putArray("ContributingPolicies");
-            error.contributingPolicies().forEach(contributing::add);
-        }
-        putNextToken(response, page.nextToken());
-        return Response.ok(response).build();
-    }
-
     // ──────────────────────────── Tags ────────────────────────────
 
     private Response tagResource(JsonNode request, String caller) {
@@ -844,5 +813,36 @@ public class OrganizationsJsonHandler {
         List<String> values = new ArrayList<>();
         node.forEach(entry -> values.add(entry.asText()));
         return values;
+    }
+
+    private Response listEffectivePolicyValidationErrors(JsonNode request, String caller) {
+        if (request.hasNonNull("MaxResults")) {
+            int maxResults = request.get("MaxResults").asInt();
+            if (maxResults < 1 || maxResults > 20) {
+                throw new AwsException("InvalidInputException", "MaxResults must be between 1 and 20.", 400);
+            }
+        }
+        OrganizationsService.EffectivePolicyValidation validation = service.listEffectivePolicyValidationErrors(
+                caller, text(request, "AccountId"), text(request, "PolicyType"));
+        List<OrganizationsService.EffectivePolicyValidationError> errors = validation.errors();
+        List<Integer> indexes = java.util.stream.IntStream.range(0, errors.size()).boxed().toList();
+        PaginatedResult<Integer> page = page(indexes, index -> String.format("%08d", index), request);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("AccountId", validation.accountId());
+        response.put("PolicyType", validation.policyType());
+        response.put("Path", validation.path());
+        putTimestamp(response, "EvaluationTimestamp", validation.evaluationTimestamp());
+        ArrayNode errorsNode = response.putArray("EffectivePolicyValidationErrors");
+        for (int index : page.items()) {
+            OrganizationsService.EffectivePolicyValidationError error = errors.get(index);
+            ObjectNode node = errorsNode.addObject();
+            node.put("ErrorCode", error.errorCode());
+            node.put("ErrorMessage", error.errorMessage());
+            node.put("PathToError", error.pathToError());
+            ArrayNode contributing = node.putArray("ContributingPolicies");
+            error.contributingPolicies().forEach(contributing::add);
+        }
+        putNextToken(response, page.nextToken());
+        return Response.ok(response).build();
     }
 }

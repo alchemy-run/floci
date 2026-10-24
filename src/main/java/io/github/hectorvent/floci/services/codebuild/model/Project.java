@@ -31,7 +31,6 @@ public class Project {
     private Map<String, Object> vpcConfig;
     private Integer concurrentBuildLimit;
     private String projectVisibility;
-    private Map<String, Object> buildBatchConfig;
 
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
@@ -90,9 +89,12 @@ public class Project {
     public Integer getConcurrentBuildLimit() { return concurrentBuildLimit; }
     public void setConcurrentBuildLimit(Integer concurrentBuildLimit) { this.concurrentBuildLimit = concurrentBuildLimit; }
 
-    public Map<String, Object> getBuildBatchConfig() { return buildBatchConfig; }
-    public void setBuildBatchConfig(Map<String, Object> buildBatchConfig) { this.buildBatchConfig = buildBatchConfig; }
-
     public String getProjectVisibility() { return projectVisibility; }
     public void setProjectVisibility(String projectVisibility) { this.projectVisibility = projectVisibility; }
+
+    private Map<String, Object> buildBatchConfig;
+
+    public Map<String, Object> getBuildBatchConfig() { return buildBatchConfig; }
+
+    public void setBuildBatchConfig(Map<String, Object> buildBatchConfig) { this.buildBatchConfig = buildBatchConfig; }
 }

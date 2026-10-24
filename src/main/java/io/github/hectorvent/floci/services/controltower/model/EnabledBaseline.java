@@ -3,7 +3,6 @@ package io.github.hectorvent.floci.services.controltower.model;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.quarkus.runtime.annotations.RegisterForReflection;
-
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -23,7 +22,6 @@ public class EnabledBaseline {
     private String parentIdentifier;
     private String driftStatus;
     private String lastOperationIdentifier;
-    private Map<String, String> tags;
 
     public EnabledBaseline() {
     }
@@ -115,15 +113,17 @@ public class EnabledBaseline {
         this.lastOperationIdentifier = lastOperationIdentifier;
     }
 
+    private static JsonNode copy(JsonNode value) {
+        return value == null ? null : value.deepCopy();
+    }
+
+    private Map<String, String> tags;
+
     public Map<String, String> getTags() {
         return tags;
     }
 
     public void setTags(Map<String, String> tags) {
         this.tags = tags == null ? null : new LinkedHashMap<>(tags);
-    }
-
-    private static JsonNode copy(JsonNode value) {
-        return value == null ? null : value.deepCopy();
     }
 }

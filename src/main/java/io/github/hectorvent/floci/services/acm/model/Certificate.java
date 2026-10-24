@@ -44,8 +44,6 @@ public class Certificate {
     private String certAuthorityArn;
     private List<DomainValidation> domainValidationOptions;
     private String idempotencyToken;
-    private boolean exported;
-    private Instant revokedAt;
 
     public Certificate() {
         this.subjectAlternativeNames = new ArrayList<>();
@@ -255,22 +253,6 @@ public class Certificate {
         this.idempotencyToken = idempotencyToken;
     }
 
-    public boolean isExported() {
-        return exported;
-    }
-
-    public void setExported(boolean exported) {
-        this.exported = exported;
-    }
-
-    public Instant getRevokedAt() {
-        return revokedAt;
-    }
-
-    public void setRevokedAt(Instant revokedAt) {
-        this.revokedAt = revokedAt;
-    }
-
     @JsonIgnore
     public boolean isExpired() {
         return notAfter != null && Instant.now().isAfter(notAfter);
@@ -287,5 +269,25 @@ public class Certificate {
         if (arn == null) return null;
         int lastSlash = arn.lastIndexOf('/');
         return lastSlash >= 0 ? arn.substring(lastSlash + 1) : arn;
+    }
+
+    private boolean exported;
+
+    private Instant revokedAt;
+
+    public boolean isExported() {
+        return exported;
+    }
+
+    public void setExported(boolean exported) {
+        this.exported = exported;
+    }
+
+    public Instant getRevokedAt() {
+        return revokedAt;
+    }
+
+    public void setRevokedAt(Instant revokedAt) {
+        this.revokedAt = revokedAt;
     }
 }

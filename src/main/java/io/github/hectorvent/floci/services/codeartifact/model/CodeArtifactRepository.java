@@ -25,21 +25,6 @@ public class CodeArtifactRepository {
     private Map<String, String> tags = new LinkedHashMap<>();
     private String policyDocument;
     private String policyRevision;
-    private Map<String, CodeArtifactPackage> packages = new LinkedHashMap<>();
-
-    public Map<String, CodeArtifactPackage> getPackages() {
-        return Collections.unmodifiableMap(packages);
-    }
-
-    public void setPackages(Map<String, CodeArtifactPackage> packages) {
-        this.packages = packages;
-    }
-    /**
-     * The Reposilite repository backing this repository's {@code maven} format, unique per
-     * creation so a deleted-and-recreated repository of the same name never inherits a previous
-     * repository's leftover artifacts. Internal; never surfaced in the public API response.
-     */
-    private String mavenRepositoryId;
     /**
      * The sidecar-backed id for each package format this repository has been used through (keyed
      * by format name, e.g. {@code "maven"}), unique per creation so a deleted-and-recreated
@@ -154,12 +139,6 @@ public class CodeArtifactRepository {
         this.policyRevision = policyRevision;
     }
 
-    public String getMavenRepositoryId() {
-        return mavenRepositoryId;
-    }
-
-    public void setMavenRepositoryId(String mavenRepositoryId) {
-        this.mavenRepositoryId = mavenRepositoryId;
     public Map<String, String> getSidecarContainerIds() {
         return Collections.unmodifiableMap(sidecarContainerIds);
     }

@@ -6,7 +6,6 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.Base64Url;
 import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.services.apigateway.ApiGatewayExecuteApiRoutingFilter;
 import io.github.hectorvent.floci.services.apigateway.ApiGatewayExecuteApiHostFilter;
 import io.github.hectorvent.floci.services.apigatewayv2.ApiGatewayV2Service;
 import io.github.hectorvent.floci.services.apigatewayv2.model.Api;
@@ -22,13 +21,14 @@ import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
-import java.net.URI;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import io.github.hectorvent.floci.services.apigateway.ApiGatewayExecuteApiRoutingFilter;
+import java.net.URI;
 
 /**
  * Vert.x-based WebSocket handler for API Gateway v2 WebSocket APIs.
@@ -83,88 +83,93 @@ public class WebSocketHandler {
      * This runs before JAX-RS routing and intercepts WebSocket upgrade requests.
      */
     void init(@Observes Router router) {
-        router.route("/ws/*").handler(this::handlePathStyleWebSocketUpgrade);
-        // AWS invoke URLs are virtual-hosted: wss://{apiId}.execute-api.{region}.amazonaws.com/{stage}.
-        // Alchemy's test harness rewrites the URL onto the gateway and keeps the Host.
-        router.route().order(-50).handler(this::handleVirtualHostWebSocketUpgrade);
-        LOG.debug("Registered WebSocket handler on /ws/* and execute-api virtual hosts");
+        // Path form: ws://localhost:4566/ws/{apiId}/{stage}
+        router.route("/ws/*").handler(this::handleWebSocketUpgrade);
+        // AWS-style subdomain host form: ws://{apiId}.execute-api.{region}.localhost:4566/{stage}
+        // The connect URL is a single stage segment; a host+Upgrade check inside the handler
+        // keeps this route transparent to every other request (issue #1871).
+        router.route("/:stage").handler(this::handleSubdomainWebSocketUpgrade);
+        LOG.debug("Registered WebSocket handler on /ws/* and execute-api subdomain hosts");
     }
 
     /**
-     * Path-style upgrades at {@code /ws/{apiId}/{stageName}}.
+     * Handle a WebSocket upgrade addressed with the AWS-style execute-api subdomain host,
+     * {@code ws://{apiId}.execute-api.{region}.localhost:4566/{stage}} (also the regionless
+     * built-in suffixes, e.g. {@code …execute-api.localhost.floci.io}). The apiId comes from the
+     * host and the stage from the single path segment. The region is taken from the host when it
+     * carries one, else the default; a cross-region apiId lookup then resolves an API created
+     * outside that region (issue #1871). Host parsing is shared with
+     * {@link io.github.hectorvent.floci.services.apigateway.ApiGatewayExecuteApiHostFilter} so the
+     * filter and this handler agree on the host grammar. Any request that is not a WebSocket
+     * upgrade on an execute-api host is passed through untouched so JAX-RS (and that filter, which
+     * routes {@code @connections}) handle it.
      */
-    private void handlePathStyleWebSocketUpgrade(RoutingContext ctx) {
-        String path = ctx.request().path();
-        String[] parsed = parsePathStyle(path);
-        if (parsed == null) {
-            ctx.response().setStatusCode(403).end();
-            return;
-        }
-        beginUpgrade(ctx, parsed[0], parsed[1]);
-    }
-
-    /**
-     * Virtual-host upgrades: {@code Host: {apiId}.execute-api.{region}.amazonaws.com}
-     * and path {@code /{stageName}}. Non-upgrade or non-execute-api traffic
-     * falls through to JAX-RS (HTTP APIs, @connections).
-     */
-    private void handleVirtualHostWebSocketUpgrade(RoutingContext ctx) {
-        if (!isWebSocketUpgrade(ctx)) {
-            ctx.next();
-            return;
-        }
-        String host = ApiGatewayExecuteApiRoutingFilter.resolveHost(
-                ctx.request().getHeader("Host"), URI.create(ctx.request().absoluteURI()));
+    private void handleSubdomainWebSocketUpgrade(RoutingContext ctx) {
+        String host = resolveRequestHost(ctx);
         String apiId = ApiGatewayExecuteApiHostFilter.extractApiId(host, baseHostname);
         if (apiId == null) {
             ctx.next();
             return;
         }
-        String path = ctx.request().path();
-        if (path != null && ApiGatewayExecuteApiRoutingFilter.alreadyPathStyle(path)) {
+
+        String upgrade = ctx.request().getHeader("Upgrade");
+        if (upgrade == null || !"websocket".equalsIgnoreCase(upgrade)) {
+            // Non-WebSocket traffic on the execute-api host (e.g. @connections) — defer to JAX-RS.
             ctx.next();
             return;
         }
-        String stageName = ApiGatewayExecuteApiRoutingFilter.firstSegment(path);
+
+        String stageName = ctx.pathParam("stage");
         if (stageName == null || stageName.isEmpty()) {
             ctx.response().setStatusCode(403).end();
             return;
         }
-        beginUpgrade(ctx, apiId, stageName);
-    }
 
-    static boolean isWebSocketUpgrade(RoutingContext ctx) {
-        String upgrade = ctx.request().getHeader("Upgrade");
-        if (upgrade == null || !"websocket".equalsIgnoreCase(upgrade.trim())) {
-            return false;
-        }
-        String connection = ctx.request().getHeader("Connection");
-        return connection != null && connection.toLowerCase().contains("upgrade");
+        String hostRegion = regionResolver.resolveRegionFromHost(host);
+        String preferredRegion = hostRegion != null ? hostRegion : regionResolver.getDefaultRegion();
+        // Cross-region apiId scan: resolves an API created outside the preferred region, and is
+        // the fallback for the regionless built-in suffixes that carry no region label.
+        String region = apiGatewayV2Service.resolveApiRegion(preferredRegion, apiId);
+
+        processUpgrade(ctx, apiId, stageName, region);
     }
 
     /**
-     * @return {@code [apiId, stageName]} or {@code null} when the path is not {@code /ws/{apiId}/{stage}}
+     * Resolve the request authority: the {@code Host} header (HTTP/1.1), falling back to the
+     * URI authority ({@code :authority}) for HTTP/2.
      */
-    static String[] parsePathStyle(String path) {
-        if (path == null || !path.startsWith("/ws/")) {
-            return null;
+    private static String resolveRequestHost(RoutingContext ctx) {
+        String host = ctx.request().getHeader("Host");
+        if (host != null) {
+            return host;
         }
+        io.vertx.core.net.HostAndPort authority = ctx.request().authority();
+        return authority != null ? authority.host() : null;
+    }
+
+    /**
+     * Handle a WebSocket upgrade request.
+     * Parses apiId and stageName from the path, validates the API and stage,
+     * generates a unique connectionId, and proceeds with the $connect lifecycle.
+     */
+    private void handleWebSocketUpgrade(RoutingContext ctx) {
+        String path = ctx.request().path();
+
+        // Strip the /ws/ prefix and parse apiId/stageName
         String pathAfterPrefix = path.substring("/ws/".length());
         String[] segments = pathAfterPrefix.split("/", 2);
-        if (segments.length < 2 || segments[0].isEmpty() || segments[1].isEmpty()) {
-            return null;
-        }
-        String apiId = segments[0];
-        String stageName = segments[1].contains("/") ? segments[1].split("/")[0] : segments[1];
-        return new String[] { apiId, stageName };
-    }
 
-    /**
-     * Validate the API and stage, generate a connectionId, and run the $connect lifecycle.
-     */
-    private void beginUpgrade(RoutingContext ctx, String apiId, String stageName) {
-        // Resolve region from the request Authorization header
-        String region = apiGatewayV2Service.resolveApiRegion(resolveRegionFromVertxRequest(ctx), apiId);
+        if (segments.length < 2 || segments[0].isEmpty() || segments[1].isEmpty()) {
+            ctx.response().setStatusCode(403).end();
+            return;
+        }
+
+        String apiId = segments[0];
+        // stageName may contain additional path segments — take only the first segment
+        String stageName = segments[1].contains("/") ? segments[1].split("/")[0] : segments[1];
+
+        // Resolve region from the request Authorization header, or the execute-api host.
+        String region = resolveRegionFromVertxRequest(ctx);
         processUpgrade(ctx, apiId, stageName, region);
     }
 
@@ -179,7 +184,7 @@ public class WebSocketHandler {
         try {
             api = apiGatewayV2Service.getApi(region, apiId);
         } catch (AwsException e) {
-            LOG.infov("WebSocket upgrade rejected: API {0} not found in region {1}", apiId, region);
+            LOG.debugv("WebSocket upgrade rejected: API {0} not found in region {1}", apiId, region);
             ctx.response().setStatusCode(403).end();
             return;
         }
@@ -196,7 +201,7 @@ public class WebSocketHandler {
         try {
             stage = apiGatewayV2Service.getStage(region, apiId, stageName);
         } catch (AwsException e) {
-            LOG.infov("WebSocket upgrade rejected: stage {0} not found on API {1}", stageName, apiId);
+            LOG.debugv("WebSocket upgrade rejected: stage {0} not found on API {1}", stageName, apiId);
             ctx.response().setStatusCode(403).end();
             return;
         }
@@ -350,7 +355,7 @@ public class WebSocketHandler {
                     connectedAt, connectedAt, sourceIp, userAgent);
             connectionManager.register(connectionId, connectionInfo, ws);
 
-            LOG.infov("WebSocket connection {0} established for API {1}/{2}",
+            LOG.debugv("WebSocket connection {0} established for API {1}/{2}",
                     connectionId, apiId, stageName);
 
             // Attach text message handler
@@ -751,11 +756,6 @@ public class WebSocketHandler {
      * Extracts the Authorization header and delegates to RegionResolver's parsing logic.
      * Falls back to the default region if no Authorization header is present.
      */
-    private static String resolveRequestHost(RoutingContext ctx) {
-        return ApiGatewayExecuteApiRoutingFilter.resolveHost(
-                ctx.request().getHeader("Host"), URI.create(ctx.request().absoluteURI()));
-    }
-
     private String resolveRegionFromVertxRequest(RoutingContext ctx) {
         String authHeader = ctx.request().getHeader("Authorization");
         if (authHeader != null && !authHeader.isEmpty()) {
@@ -835,5 +835,83 @@ public class WebSocketHandler {
         public int getLength() {
             return -1;
         }
+    }
+
+    /**
+     * Path-style upgrades at {@code /ws/{apiId}/{stageName}}.
+     */
+    private void handlePathStyleWebSocketUpgrade(RoutingContext ctx) {
+        String path = ctx.request().path();
+        String[] parsed = parsePathStyle(path);
+        if (parsed == null) {
+            ctx.response().setStatusCode(403).end();
+            return;
+        }
+        beginUpgrade(ctx, parsed[0], parsed[1]);
+    }
+
+    /**
+     * Virtual-host upgrades: {@code Host: {apiId}.execute-api.{region}.amazonaws.com}
+     * and path {@code /{stageName}}. Non-upgrade or non-execute-api traffic
+     * falls through to JAX-RS (HTTP APIs, @connections).
+     */
+    private void handleVirtualHostWebSocketUpgrade(RoutingContext ctx) {
+        if (!isWebSocketUpgrade(ctx)) {
+            ctx.next();
+            return;
+        }
+        String host = ApiGatewayExecuteApiRoutingFilter.resolveHost(
+                ctx.request().getHeader("Host"), URI.create(ctx.request().absoluteURI()));
+        String apiId = ApiGatewayExecuteApiHostFilter.extractApiId(host, baseHostname);
+        if (apiId == null) {
+            ctx.next();
+            return;
+        }
+        String path = ctx.request().path();
+        if (path != null && ApiGatewayExecuteApiRoutingFilter.alreadyPathStyle(path)) {
+            ctx.next();
+            return;
+        }
+        String stageName = ApiGatewayExecuteApiRoutingFilter.firstSegment(path);
+        if (stageName == null || stageName.isEmpty()) {
+            ctx.response().setStatusCode(403).end();
+            return;
+        }
+        beginUpgrade(ctx, apiId, stageName);
+    }
+
+    static boolean isWebSocketUpgrade(RoutingContext ctx) {
+        String upgrade = ctx.request().getHeader("Upgrade");
+        if (upgrade == null || !"websocket".equalsIgnoreCase(upgrade.trim())) {
+            return false;
+        }
+        String connection = ctx.request().getHeader("Connection");
+        return connection != null && connection.toLowerCase().contains("upgrade");
+    }
+
+    /**
+     * @return {@code [apiId, stageName]} or {@code null} when the path is not {@code /ws/{apiId}/{stage}}
+     */
+    static String[] parsePathStyle(String path) {
+        if (path == null || !path.startsWith("/ws/")) {
+            return null;
+        }
+        String pathAfterPrefix = path.substring("/ws/".length());
+        String[] segments = pathAfterPrefix.split("/", 2);
+        if (segments.length < 2 || segments[0].isEmpty() || segments[1].isEmpty()) {
+            return null;
+        }
+        String apiId = segments[0];
+        String stageName = segments[1].contains("/") ? segments[1].split("/")[0] : segments[1];
+        return new String[] { apiId, stageName };
+    }
+
+    /**
+     * Validate the API and stage, generate a connectionId, and run the $connect lifecycle.
+     */
+    private void beginUpgrade(RoutingContext ctx, String apiId, String stageName) {
+        // Resolve region from the request Authorization header
+        String region = apiGatewayV2Service.resolveApiRegion(resolveRegionFromVertxRequest(ctx), apiId);
+        processUpgrade(ctx, apiId, stageName, region);
     }
 }

@@ -7,13 +7,13 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.JsonErrorResponseUtils;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
+import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.accessanalyzer.model.Analyzer;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
-import jakarta.ws.rs.POST;
 import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
@@ -24,7 +24,7 @@ import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
-
+import jakarta.ws.rs.POST;
 import java.util.Set;
 
 @Path("/")
@@ -51,7 +51,7 @@ public class AccessAnalyzerController {
                                   @QueryParam("nextToken") String nextToken) {
         String region = regionResolver.resolveRegion(headers);
         PaginatedResult<Analyzer> page = accessAnalyzerService.listAnalyzers(
-                region, type, AccessAnalyzerService.parseMaxResults(maxResults), nextToken);
+                region, type, Pagination.parseMaxResults(maxResults, "ValidationException"), nextToken);
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode items = response.putArray("analyzers");
         page.items().forEach(analyzer -> items.add(analyzerSummary(analyzer)));
@@ -79,9 +79,36 @@ public class AccessAnalyzerController {
 
     @GET
     @Path("/analyzer/{analyzerName}")
-    public Response getAnalyzer(@Context HttpHeaders headers, @PathParam("analyzerName") String name) {
-        Analyzer analyzer = accessAnalyzerService.getAnalyzer(regionResolver.resolveRegion(headers), name);
-        return Response.ok(objectMapper.createObjectNode().set("analyzer", analyzerSummary(analyzer))).build();
+    public Response getAnalyzer(@Context HttpHeaders headers, @PathParam("analyzerName") String analyzerName) {
+        String region = regionResolver.resolveRegion(headers);
+        Analyzer analyzer = accessAnalyzerService.getAnalyzer(region, analyzerName);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("analyzer", analyzerSummary(analyzer));
+        return Response.ok(response).build();
+    }
+
+    private ObjectNode analyzerSummary(Analyzer analyzer) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("arn", analyzer.getArn());
+        node.put("name", analyzer.getName());
+        node.put("type", analyzer.getType());
+        node.put("status", analyzer.getStatus());
+        node.put("createdAt", analyzer.getCreatedAt());
+        if (analyzer.getConfiguration() != null) {
+            node.set("configuration", analyzer.getConfiguration());
+        }
+        node.set("tags", objectMapper.valueToTree(analyzer.getTags()));
+        return node;
+    }
+
+    private JsonNode readTree(String body) {
+        try {
+            return objectMapper.reader()
+                    .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                    .readTree(body == null || body.isBlank() ? "{}" : body);
+        } catch (Exception e) {
+            throw new WebApplicationException(JsonErrorResponseUtils.createSerializationErrorResponse());
+        }
     }
 
     @PUT
@@ -363,40 +390,5 @@ public class AccessAnalyzerController {
 
     private Response empty() {
         return Response.ok(objectMapper.createObjectNode()).build();
-    public Response getAnalyzer(@Context HttpHeaders headers, @PathParam("analyzerName") String analyzerName) {
-        String region = regionResolver.resolveRegion(headers);
-        Analyzer analyzer = accessAnalyzerService.getAnalyzer(region, analyzerName);
-        ObjectNode response = objectMapper.createObjectNode();
-        response.set("analyzer", analyzerSummary(analyzer));
-        return Response.ok(response).build();
-    }
-
-    private ObjectNode analyzerSummary(Analyzer analyzer) {
-        ObjectNode node = objectMapper.createObjectNode();
-        node.put("arn", analyzer.getArn());
-        node.put("name", analyzer.getName());
-        node.put("type", analyzer.getType());
-        node.put("status", analyzer.getStatus());
-        node.put("createdAt", analyzer.getCreatedAt());
-        if (analyzer.getConfiguration() != null) {
-            node.set("configuration", analyzer.getConfiguration());
-        }
-        node.set("tags", objectMapper.valueToTree(analyzer.getTags()));
-        return node;
-    }
-
-    private JsonNode readTree(String body) {
-        JsonNode request;
-        try {
-            request = objectMapper.reader()
-                    .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-                    .readTree(body == null || body.isBlank() ? "{}" : body);
-        } catch (Exception e) {
-            throw new WebApplicationException(JsonErrorResponseUtils.createSerializationErrorResponse());
-        }
-        if (request == null || !request.isObject()) {
-            throw AccessAnalyzerService.validation("Request payload must be a JSON object.");
-        }
-        return request;
     }
 }

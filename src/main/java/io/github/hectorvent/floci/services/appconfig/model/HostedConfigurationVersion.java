@@ -19,8 +19,6 @@ public class HostedConfigurationVersion {
     private byte[] content;
     @JsonProperty("ContentType")
     private String contentType;
-    @JsonProperty("VersionLabel")
-    private String versionLabel;
 
     public HostedConfigurationVersion() {}
 
@@ -42,6 +40,10 @@ public class HostedConfigurationVersion {
     public String getContentType() { return contentType; }
     public void setContentType(String contentType) { this.contentType = contentType; }
 
+    @JsonProperty("VersionLabel")
+    private String versionLabel;
+
     public String getVersionLabel() { return versionLabel; }
+
     public void setVersionLabel(String versionLabel) { this.versionLabel = versionLabel; }
 }

@@ -84,10 +84,6 @@ public class EventBridgeHandler {
                 case "UpdateArchive" -> handleUpdateArchive(request, region);
                 case "DeleteArchive" -> handleDeleteArchive(request, region);
                 case "ListArchives" -> handleListArchives(request, region);
-                case "StartReplay" -> handleStartReplay(request, region);
-                case "DescribeReplay" -> handleDescribeReplay(request, region);
-                case "CancelReplay" -> handleCancelReplay(request, region);
-                case "ListReplays" -> handleListReplays(request, region);
                 case "CreateConnection" -> handleCreateConnection(request, region);
                 case "DescribeConnection" -> handleDescribeConnection(request, region);
                 case "UpdateConnection" -> handleUpdateConnection(request, region);
@@ -98,6 +94,10 @@ public class EventBridgeHandler {
                 case "UpdateApiDestination" -> handleUpdateApiDestination(request, region);
                 case "DeleteApiDestination" -> handleDeleteApiDestination(request, region);
                 case "ListApiDestinations" -> handleListApiDestinations(request, region);
+                case "StartReplay" -> handleStartReplay(request, region);
+                case "DescribeReplay" -> handleDescribeReplay(request, region);
+                case "CancelReplay" -> handleCancelReplay(request, region);
+                case "ListReplays" -> handleListReplays(request, region);
                 default -> Response.status(400)
                         .entity(new AwsErrorResponse("UnsupportedOperation", "Operation " + action + " is not supported."))
                         .build();
@@ -369,16 +369,6 @@ public class EventBridgeHandler {
         return Response.ok(response).build();
     }
 
-    private Response handleListRuleNamesByTarget(JsonNode request, String region) {
-        String targetArn = request.path("TargetArn").asText(null);
-        String busName = request.path("EventBusName").asText(null);
-        List<String> names = eventBridgeService.listRuleNamesByTarget(targetArn, busName, region);
-        ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode namesArray = response.putArray("RuleNames");
-        names.forEach(namesArray::add);
-        return Response.ok(response).build();
-    }
-
     private Response handlePutEvents(JsonNode request, String region) {
         List<Map<String, Object>> entries = new ArrayList<>();
         JsonNode entriesNode = request.path("Entries");
@@ -490,7 +480,7 @@ public class EventBridgeHandler {
         String archiveName = request.path("ArchiveName").asText(null);
         String eventSourceArn = request.path("EventSourceArn").asText(null);
         String description = request.path("Description").asText(null);
-        String eventPattern = textOrJson(request.path("EventPattern"));
+        String eventPattern = request.path("EventPattern").asText(null);
         int retentionDays = request.path("RetentionDays").asInt(0);
         Archive archive = eventBridgeService.createArchive(
                 archiveName, eventSourceArn, description, eventPattern, retentionDays, region);
@@ -510,7 +500,7 @@ public class EventBridgeHandler {
     private Response handleUpdateArchive(JsonNode request, String region) {
         String archiveName = request.path("ArchiveName").asText(null);
         String description = request.path("Description").asText(null);
-        String eventPattern = textOrJson(request.path("EventPattern"));
+        String eventPattern = request.path("EventPattern").asText(null);
         Integer retentionDays = request.hasNonNull("RetentionDays")
                 ? request.get("RetentionDays").asInt() : null;
         Archive archive = eventBridgeService.updateArchive(
@@ -754,72 +744,6 @@ public class EventBridgeHandler {
         ArrayNode replaysArray = response.putArray("Replays");
         for (Replay replay : replays) {
             replaysArray.add(buildReplayNode(replay, false));
-        }
-        return Response.ok(response).build();
-    }
-
-    // ──────────────────────────── Connections ────────────────────────────
-
-    // ──────────────────────────── API Destinations ────────────────────────────
-
-    private Response handleCreateApiDestination(JsonNode request, String region) {
-        ApiDestination destination = eventBridgeService.createApiDestination(
-                request.path("Name").asText(null),
-                request.path("Description").asText(null),
-                request.path("ConnectionArn").asText(null),
-                request.path("InvocationEndpoint").asText(null),
-                request.path("HttpMethod").asText(null),
-                request.has("InvocationRateLimitPerSecond")
-                        ? request.path("InvocationRateLimitPerSecond").asInt() : null,
-                region);
-        return Response.ok(buildDestinationMutationNode(destination)).build();
-    }
-
-    private Response handleDescribeApiDestination(JsonNode request, String region) {
-        String name = request.path("Name").asText(null);
-        ApiDestination destination = eventBridgeService.describeApiDestination(name, region);
-        return Response.ok(buildDestinationDescribeNode(destination)).build();
-    }
-
-    private Response handleUpdateApiDestination(JsonNode request, String region) {
-        Integer rate = request.has("InvocationRateLimitPerSecond")
-                ? request.path("InvocationRateLimitPerSecond").asInt() : null;
-        ApiDestination destination = eventBridgeService.updateApiDestination(
-                request.path("Name").asText(null),
-                request.has("Description") ? request.path("Description").asText(null) : null,
-                request.path("ConnectionArn").asText(null),
-                request.path("InvocationEndpoint").asText(null),
-                request.path("HttpMethod").asText(null),
-                rate,
-                region);
-        return Response.ok(buildDestinationMutationNode(destination)).build();
-    }
-
-    private Response handleDeleteApiDestination(JsonNode request, String region) {
-        String name = request.path("Name").asText(null);
-        eventBridgeService.deleteApiDestination(name, region);
-        return Response.ok(objectMapper.createObjectNode()).build();
-    }
-
-    private Response handleListApiDestinations(JsonNode request, String region) {
-        String namePrefix = request.path("NamePrefix").asText(null);
-        String connectionArn = request.path("ConnectionArn").asText(null);
-        List<ApiDestination> destinations =
-                eventBridgeService.listApiDestinations(namePrefix, connectionArn, region);
-        ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode array = response.putArray("ApiDestinations");
-        for (ApiDestination destination : destinations) {
-            ObjectNode node = objectMapper.createObjectNode();
-            node.put("ApiDestinationArn", destination.getApiDestinationArn());
-            node.put("Name", destination.getName());
-            node.put("ApiDestinationState", destination.getApiDestinationState());
-            node.put("ConnectionArn", destination.getConnectionArn());
-            node.put("InvocationEndpoint", destination.getInvocationEndpoint());
-            node.put("HttpMethod", destination.getHttpMethod());
-            node.put("InvocationRateLimitPerSecond", destination.getInvocationRateLimitPerSecond());
-            putEpoch(node, "CreationTime", destination.getCreationTime());
-            putEpoch(node, "LastModifiedTime", destination.getLastModifiedTime());
-            array.add(node);
         }
         return Response.ok(response).build();
     }
@@ -1105,6 +1029,16 @@ public class EventBridgeHandler {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private Response handleListRuleNamesByTarget(JsonNode request, String region) {
+        String targetArn = request.path("TargetArn").asText(null);
+        String busName = request.path("EventBusName").asText(null);
+        List<String> names = eventBridgeService.listRuleNamesByTarget(targetArn, busName, region);
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode namesArray = response.putArray("RuleNames");
+        names.forEach(namesArray::add);
+        return Response.ok(response).build();
     }
 
     private String textOrJson(JsonNode node) {

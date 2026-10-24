@@ -1,18 +1,14 @@
 package io.github.hectorvent.floci.services.lambda.launcher;
 
 import com.github.dockerjava.api.DockerClient;
-import com.github.dockerjava.api.exception.NotFoundException;
-import com.github.dockerjava.api.model.WaitResponse;
-import com.github.dockerjava.core.command.WaitContainerResultCallback;
 import com.github.dockerjava.api.command.ExecCreateCmd;
+import com.github.dockerjava.api.exception.NotFoundException;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.Digests;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
-import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
-import io.github.hectorvent.floci.core.common.docker.ContainerReachableUrls;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.core.common.docker.ContainerStorageHelper;
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
@@ -58,6 +54,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
+import com.github.dockerjava.api.model.WaitResponse;
+import com.github.dockerjava.core.command.WaitContainerResultCallback;
+import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
+import io.github.hectorvent.floci.core.common.docker.ContainerReachableUrls;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 
 /**
  * Starts and stops Docker containers for Lambda function execution.
@@ -113,7 +116,6 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
     private final ImageResolver imageResolver;
     private final RuntimeApiServerFactory runtimeApiServerFactory;
     private final DockerHostResolver dockerHostResolver;
-    private final ContainerDetector containerDetector;
     private final EmulatorConfig config;
     private final EcrRegistryManager ecrRegistryManager;
     private final LambdaLayerService layerService;
@@ -127,7 +129,6 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
                              ImageResolver imageResolver,
                              RuntimeApiServerFactory runtimeApiServerFactory,
                              DockerHostResolver dockerHostResolver,
-                             ContainerDetector containerDetector,
                              EmulatorConfig config,
                              EcrRegistryManager ecrRegistryManager,
                              LambdaLayerService layerService,
@@ -139,7 +140,6 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
         this.imageResolver = imageResolver;
         this.runtimeApiServerFactory = runtimeApiServerFactory;
         this.dockerHostResolver = dockerHostResolver;
-        this.containerDetector = containerDetector;
         this.config = config;
         this.ecrRegistryManager = ecrRegistryManager;
         this.layerService = layerService;
@@ -218,14 +218,10 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
         Optional<SessionCreds> roleCredentials = Optional.empty();
         try {
 
-        // Resolve image. A container-image function runs the digest pinned at deploy time, so a
-        // tag moved afterwards (or a stale local copy of that tag) cannot change its code.
-        String image;
-        if ("Image".equals(fn.getPackageType()) && fn.getImageUri() != null) {
-            image = fn.getResolvedImageUri() != null ? fn.getResolvedImageUri() : fn.getImageUri();
-        } else {
-            image = imageResolver.resolve(fn.getRuntime());
-        }
+        // Resolve image
+        String image = "Image".equals(fn.getPackageType()) && fn.getImageUri() != null
+                ? fn.getImageUri()
+                : imageResolver.resolve(fn.getRuntime());
 
         // If this is an AWS-shaped ECR URI, rewrite it to Floci's loopback registry
         image = ecrRegistryManager.rewriteImageUri(image);
@@ -244,13 +240,6 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
         String cwLogStream = LOG_STREAM_DATE_FMT.format(LocalDate.now()) + "/"
                 + LambdaLogDestinations.logStreamSuffix(fn, shortId);
         String lambdaRegion = extractRegionFromArn(fn.getFunctionArn(), config.defaultRegion());
-        // Internal extensions register as soon as the runtime boots (container start
-        // below). Create the stream and attach the platform-log sink first so the
-        // EXTENSION Name: … line is not dropped.
-        logStreamer.ensureLogGroupAndStream(cwLogGroup, cwLogStream, lambdaRegion);
-        runtimeApiServer.setPlatformLogSink(line ->
-                logStreamer.streamToCloudWatchLogs(cwLogGroup, cwLogStream, lambdaRegion, line));
-
         String lambdaAccountId = AwsArnUtils.accountOrDefault(fn.getFunctionArn(), config.defaultAccountId());
         LambdaDockerFlags dockerFlags = configuredDockerFlags();
 
@@ -265,14 +254,15 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
         if (fn.getHandler() != null && !fn.getHandler().isBlank()) {
             env.add("_HANDLER=" + fn.getHandler());
         }
-        // Execution-role sessions take precedence over mounted AWS configuration.
-        // Without a session, the SDK uses the mount or owner-account fallback credentials.
+        // Region, credentials and the Floci endpoint the SDK should target: the same baseline
+        // Floci gives every launched container. When the host ~/.aws is mounted (awsConfigPath),
+        // the SDK discovers credentials from /opt/aws-config instead of injected credentials.
         Optional<String> awsConfigPath = config.services().lambda().awsConfigPath()
                 .filter(s -> !s.isBlank());
-        if (awsConfigPath.isEmpty() || (fn.getRole() != null && !fn.getRole().isBlank())) {
+        if (awsConfigPath.isEmpty()) {
             roleCredentials = executionRoleCredentials.forFunction(fn);
         }
-        env.addAll(awsEnv.sdkExecutionRoleEnv(lambdaRegion,
+        env.addAll(awsEnv.sdkBaselineEnv(lambdaRegion,
                 awsConfigPath.isPresent() ? Optional.of("/opt/aws-config") : Optional.empty(),
                 awsEnv.flociEndpoint(dockerFlags.dnsServers().isEmpty()), roleCredentials, lambdaAccountId));
         if (fn.getEnvironment() != null) {
@@ -290,8 +280,7 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
                         env.add(k + "=" + v);
                     }
                 } else {
-                    env.add(k + "=" + ContainerReachableUrls.rewriteFunctionEnv(
-                            v, hostGatewayPort(), containerDetector.isRunningInContainer(), hostAddress));
+                    env.add(k + "=" + v);
                 }
             });
         }
@@ -328,9 +317,6 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
             }
             specBuilder.withExtraHost(entry.substring(0, sep), entry.substring(sep + 1));
         }));
-        if (!containerDetector.isRunningInContainer()) {
-            specBuilder.withDefaultExtraHost(ContainerReachableUrls.FLOCI_DNS_HOST, "host-gateway");
-        }
 
         // Whether /var/task is served from a shared read-only volume (large code) or copied
         // directly into this container (small code). Decided once here so both the spec (below)
@@ -1528,11 +1514,6 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
         }
     }
 
-    private int hostGatewayPort() {
-        int port = config.port();
-        return port > 0 ? port : ContainerReachableUrls.DEFAULT_HOST_GATEWAY_PORT;
-    }
-
     private static String extractRegionFromArn(String arn, String defaultRegion) {
         return AwsArnUtils.regionOrDefault(arn, defaultRegion);
     }
@@ -1560,5 +1541,85 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
                 tar.closeArchiveEntry();
             }
         }
+    }
+
+    private final ContainerDetector containerDetector;
+
+    private static String sha256Hex(String value) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is required but not available", e);
+        }
+    }
+
+    /**
+     * Buffer for the tar-streaming pipe. The default {@link java.io.PipedInputStream} buffer is
+     * only 1KB, which forces a writer/reader thread hand-off (wait/notify) every 1KB. Streaming a
+     * ~90MB node_modules through that ran at ~0.5MB/s (≈3 min per cold start) — pure synchronization
+     * thrash, not I/O. A large buffer lets the tar writer stream ahead so throughput is bound by the
+     * Docker daemon, not the pipe.
+     */
+    private static final int TAR_PIPE_BUFFER_BYTES = 16 * 1024 * 1024;
+
+    private void copyFileToContainer(DockerClient dockerClient, String containerId,
+                                     Path sourceFile, String remotePath, String entryName, String functionName) {
+        try (java.io.PipedOutputStream pos = new java.io.PipedOutputStream();
+             java.io.PipedInputStream pis = new java.io.PipedInputStream(pos, TAR_PIPE_BUFFER_BYTES)) {
+
+            new Thread(() -> {
+                try (TarArchiveOutputStream tar = newTarStream(pos)) {
+                    TarArchiveEntry entry = new TarArchiveEntry(entryName);
+                    entry.setSize(Files.size(sourceFile));
+                    entry.setMode(0755);
+                    tar.putArchiveEntry(entry);
+                    try (var fis = Files.newInputStream(sourceFile)) {
+                        fis.transferTo(tar);
+                    }
+                    tar.closeArchiveEntry();
+                } catch (IOException e) {
+                    LOG.errorv("Failed to stream file tar for function {0}: {1}", functionName, e.getMessage());
+                }
+            }, "tar-streamer-file-" + functionName).start();
+
+            dockerClient.copyArchiveToContainerCmd(containerId)
+                    .withRemotePath(remotePath)
+                    .withTarInputStream(pis)
+                    .exec();
+            LOG.debugv("Copied file {0} as {1} into container {2} at {3}", sourceFile, entryName, containerId, remotePath);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to copy file " + sourceFile + " into container "
+                    + containerId + " for function " + functionName + ": " + e.getMessage(), e);
+        }
+    }
+
+    private static void waitForTarStreamer(Thread tarStreamer, AtomicReference<IOException> tarFailure,
+                                           String functionName, Path sourcePath) throws IOException {
+        try {
+            tarStreamer.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while streaming tar for function " + functionName
+                    + " from " + sourcePath, e);
+        }
+        IOException failure = tarFailure.get();
+        if (failure != null) {
+            throw new IOException("Failed to stream tar for function " + functionName
+                    + " from " + sourcePath, failure);
+        }
+    }
+
+    private int hostGatewayPort() {
+        int port = config.port();
+        return port > 0 ? port : ContainerReachableUrls.DEFAULT_HOST_GATEWAY_PORT;
+    }
+
+    private static TarArchiveOutputStream newTarStream(OutputStream out) {
+        TarArchiveOutputStream tar = new TarArchiveOutputStream(out);
+        tar.setLongFileMode(TarArchiveOutputStream.LONGFILE_GNU);
+        tar.setBigNumberMode(TarArchiveOutputStream.BIGNUMBER_STAR);
+        return tar;
     }
 }

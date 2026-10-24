@@ -86,10 +86,6 @@ public class SesIdentityService implements SesTaggable {
         synchronized (identityCreationLock) {
             Identity existing = identityStore.get(key).orElse(null);
             if (existing != null) {
-                if (!"Success".equals(existing.getVerificationStatus())) {
-                    existing.setVerificationStatus("Success");
-                    identityStore.put(key, existing);
-                }
                 return existing;
             }
             identity = new Identity(emailAddress, "EmailAddress");
@@ -143,12 +139,6 @@ public class SesIdentityService implements SesTaggable {
     public Identity createEmailIdentity(String emailIdentity, String configurationSetName,
                                         List<Tag> tags, String region,
                                         Runnable configurationSetExistsCheck) {
-        return createEmailIdentity(emailIdentity, configurationSetName, tags, region, configurationSetExistsCheck, null);
-    }
-
-    public Identity createEmailIdentity(String emailIdentity, String configurationSetName,
-                                        List<Tag> tags, String region,
-                                        Runnable configurationSetExistsCheck, String nextSigningKeyLength) {
         // Validate with the wording the pre-atomic path produced (the verify methods' field names),
         // so the key derivation's generic "Identity" message never surfaces on this API.
         validateIdentityWhitespace(emailIdentity,
@@ -164,18 +154,9 @@ public class SesIdentityService implements SesTaggable {
             if (configurationSetExistsCheck != null) {
                 configurationSetExistsCheck.run();
             }
-            if (nextSigningKeyLength != null
-                    && !Set.of("RSA_1024_BIT", "RSA_2048_BIT").contains(nextSigningKeyLength)) {
-                throw new AwsException("BadRequestException", "Invalid NextSigningKeyLength.", 400);
-            }
             identity = emailIdentity.contains("@")
                     ? new Identity(emailIdentity, "EmailAddress")
                     : newDomainIdentity(emailIdentity);
-            identity.setVerificationStatus("Pending");
-            if (nextSigningKeyLength != null) {
-                identity.setDkimNextSigningKeyLength(nextSigningKeyLength);
-                identity.setDkimCurrentSigningKeyLength(nextSigningKeyLength);
-            }
             if (configurationSetName != null) {
                 identity.setConfigurationSetName(configurationSetName);
             }
@@ -204,11 +185,6 @@ public class SesIdentityService implements SesTaggable {
             return false;
         }
         if (isIdentityVerified(fromEmail, region)) {
-            return true;
-        }
-        // There is no verification-email click in the emulator; registered addresses can send.
-        Identity address = getIdentityVerificationAttributes(fromEmail, region);
-        if (address != null && "EmailAddress".equals(address.getIdentityType())) {
             return true;
         }
         int at = fromEmail.indexOf('@');

@@ -1,8 +1,6 @@
 package io.github.hectorvent.floci.services.emrserverless;
 
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
@@ -35,6 +33,8 @@ import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 @ApplicationScoped
 public class EmrServerlessService {
@@ -59,7 +59,6 @@ public class EmrServerlessService {
 
     private final EmulatorConfig config;
     private final AccountAwareStorageBackend<Application> storage;
-    private final EmrServerlessJobService jobs;
     private final RegionResolver regionResolver;
     private final Clock clock;
     
@@ -70,7 +69,6 @@ public class EmrServerlessService {
     public EmrServerlessService(EmulatorConfig config, StorageFactory storageFactory,
                                 RegionResolver regionResolver, Clock clock) {
         this.config = config;
-        this.jobs = jobs;
         this.regionResolver = regionResolver;
         this.clock = clock;
         this.storage = storageFactory.create("emrserverless", "emr-serverless-applications.json",
@@ -84,21 +82,13 @@ public class EmrServerlessService {
         if (request.getType() == null || request.getType().isBlank()) {
             throw new AwsException("ValidationException", "type is required", 400);
         }
-        String type;
-        if ("SPARK".equalsIgnoreCase(request.getType())) {
-            type = "Spark";
-        } else if ("HIVE".equalsIgnoreCase(request.getType())) {
-            type = "Hive";
-        } else {
-            throw new AwsException("ValidationException", "type must be SPARK or HIVE", 400);
-        }
         if (request.getClientToken() == null || request.getClientToken().isBlank()) {
             throw new AwsException("ValidationException", "clientToken is required", 400);
         }
 
         String region = regionResolver.getRegion();
         if (request.getClientToken() != null) {
-            for (Application existing : applicationsInRegion()) {
+            for (Application existing : storage.scan(k -> true)) {
                 if (inRegion(existing, region) && request.getClientToken().equals(existing.getClientToken())) {
                     return existing;
                 }
@@ -115,7 +105,7 @@ public class EmrServerlessService {
         app.setArn(arn);
         app.setName(request.getName());
         app.setReleaseLabel(request.getReleaseLabel());
-        app.setType(type);
+        app.setType(request.getType());
         app.setState("CREATED");
         app.setStateDetails("");
         app.setCreatedAt(createdAt);
@@ -131,7 +121,6 @@ public class EmrServerlessService {
         app.setAutoStopConfiguration(request.getAutoStopConfiguration());
         app.setNetworkConfiguration(request.getNetworkConfiguration());
         app.setImageConfiguration(request.getImageConfiguration());
-        app.setInteractiveConfiguration(request.getInteractiveConfiguration());
         app.setWorkerTypeSpecifications(request.getWorkerTypeSpecifications());
         app.setMonitoringConfiguration(request.getMonitoringConfiguration());
         app.setRuntimeConfiguration(request.getRuntimeConfiguration());
@@ -141,7 +130,7 @@ public class EmrServerlessService {
         app.setIdentityCenterConfiguration(request.getIdentityCenterConfiguration());
         app.setJobLevelCostAllocationConfiguration(request.getJobLevelCostAllocationConfiguration());
 
-        storage.putForAccount(accountId(), storageKey(id), app);
+        storage.put(id, app);
         return app;
     }
 
@@ -239,7 +228,7 @@ public class EmrServerlessService {
         }
 
         app.setUpdatedAt(now());
-        storage.putForAccount(accountId(), storageKey(applicationId), app);
+        storage.put(applicationId, app);
         return app;
     }
 
@@ -265,12 +254,11 @@ public class EmrServerlessService {
         }
         app.setState("STARTED");
         app.setUpdatedAt(now());
-        storage.putForAccount(accountId(), storageKey(applicationId), app);
+        storage.put(applicationId, app);
     }
 
     public synchronized void stopApplication(String applicationId) {
         Application app = getApplication(applicationId);
-        jobs.requireIdle(accountId(), region(), applicationId);
         String state = app.getState();
         if ("STOPPED".equals(state) || "STOPPING".equals(state)) {
             return;
@@ -280,120 +268,7 @@ public class EmrServerlessService {
         }
         app.setState("STOPPED");
         app.setUpdatedAt(now());
-        storage.putForAccount(accountId(), storageKey(applicationId), app);
-    }
-
-    public PaginatedResult<ObjectNode> listJobRuns(String applicationId, Integer maxResults, String nextToken,
-                                                   List<String> states, Double after, Double before, String mode) {
-        getApplication(applicationId);
-        return jobs.list(accountId(), region(), applicationId, maxResults, nextToken, states, after, before, mode);
-    }
-
-    public List<Map<String, Object>> listSessions(String applicationId, Integer maxResults, String nextToken) {
-        getApplication(applicationId);
-        // Session submission remains unsupported; batch job runs are a separate collection.
-        return Pagination.paginate(List.<Map<String, Object>>of(), item -> "",
-                maxResults, nextToken, 50, "ValidationException").items();
-    }
-
-    public synchronized ObjectNode startJobRun(String applicationId, JsonNode request, String authorization) {
-        Application app = getApplication(applicationId);
-        requireExecutionRequest(request);
-        if (!List.of("CREATED", "STOPPED", "STARTED").contains(app.getState())) {
-            throw new AwsException("ValidationException", "Application is not available for job submission", 400);
-        }
-        if (!"STARTED".equals(app.getState()) && app.getAutoStartConfiguration() != null
-                && Boolean.FALSE.equals(app.getAutoStartConfiguration().getEnabled())) {
-            throw new AwsException("ValidationException", "Start the application before submitting a job when auto-start is disabled", 400);
-        }
-        ObjectNode result = jobs.start(app, request, accountId(), region(), authorization);
-        if (!EmrServerlessJobService.terminal(jobs.get(accountId(), region(), applicationId,
-                result.path("jobRunId").asText(), null)) && !"STARTED".equals(app.getState())) {
-            app.setState("STARTED");
-            app.setUpdatedAt(System.currentTimeMillis());
-            storage.putForAccount(accountId(), storageKey(applicationId), app);
-        }
-        return result;
-    }
-
-    public ObjectNode getJobRun(String applicationId, String jobRunId, String attempt) {
-        getApplication(applicationId);
-        return jobs.get(accountId(), region(), applicationId, jobRunId, attempt);
-    }
-
-    public ObjectNode cancelJobRun(String applicationId, String jobRunId) {
-        getApplication(applicationId);
-        return jobs.cancel(accountId(), region(), applicationId, jobRunId);
-    }
-
-    public PaginatedResult<ObjectNode> listJobRunAttempts(String applicationId, String jobRunId,
-                                                         Integer maxResults, String nextToken) {
-        getApplication(applicationId);
-        return jobs.attempts(accountId(), region(), applicationId, jobRunId, maxResults, nextToken);
-    }
-
-    public void getDashboardForJobRun(String applicationId, String jobRunId) {
-        getJobRun(applicationId, jobRunId, null);
-        throw new AwsException("UnsupportedOperationException", "Spark dashboards are not implemented", 501);
-    }
-
-    public void startSession(String applicationId, JsonNode request) {
-        Application app = getApplication(applicationId);
-        requireExecutionRequest(request);
-        if (app.getInteractiveConfiguration() == null
-                || !Boolean.TRUE.equals(app.getInteractiveConfiguration().getProperties().get("sessionEnabled"))) {
-            throw new AwsException("ValidationException",
-                    "Sessions must be enabled in the application's interactiveConfiguration.", 400);
-        }
-        throw new AwsException("UnsupportedOperationException",
-                "EMR Serverless session execution is not implemented.", 501);
-    }
-
-    /**
-     * AWS denies GetResourceDashboard for every caller, including {@code Action: "*"}
-     * administrators, before any resource lookup; the message carries no resource.
-     */
-    public void getResourceDashboard(String applicationId, String resourceId, String resourceType,
-                                     String authorization) {
-        if (resourceId == null || resourceId.isBlank() || resourceType == null || resourceType.isBlank()) {
-            throw new AwsException("ValidationException", "resourceId and resourceType are required", 400);
-        }
-        throw new AwsException("AccessDeniedException", "User: " + jobs.creator(accountId(), authorization)
-                + " is not authorized to perform: emr-serverless:GetResourceDashboard", 403);
-    }
-
-    private void requireExecutionRequest(JsonNode request) {
-        if (request == null || !request.isObject()) {
-            throw new AwsException("ValidationException", "A request body is required", 400);
-        }
-        for (String field : List.of("clientToken", "executionRoleArn")) {
-            if (!request.path(field).isTextual() || request.path(field).textValue().isBlank()) {
-                throw new AwsException("ValidationException", field + " is required", 400);
-            }
-        }
-    }
-
-    private List<Application> applicationsInRegion() {
-        storage.migrateLegacyEntries(accountId(), key -> !key.contains("/"),
-                app -> storageKey(app.getApplicationId()),
-                app -> buildArn(app.getApplicationId()).equals(app.getArn()));
-        return storage.scanForAccount(accountId(), key -> key.startsWith(region() + "/")).stream()
-                .filter(app -> buildArn(app.getApplicationId()).equals(app.getArn()))
-                .toList();
-    }
-
-    private String storageKey(String applicationId) {
-        return region() + "/" + applicationId;
-    }
-
-    private String region() {
-        return requestContext != null && requestContext.getRegion() != null
-                ? requestContext.getRegion() : config.defaultRegion();
-    }
-
-    private String accountId() {
-        return requestContext != null && requestContext.getAccountId() != null
-                ? requestContext.getAccountId() : config.defaultAccountId();
+        storage.put(applicationId, app);
     }
 
     /**
@@ -611,5 +486,124 @@ public class EmrServerlessService {
         summary.setUpdatedAt(app.getUpdatedAt());
         summary.setArchitecture(app.getArchitecture());
         return summary;
+    }
+
+    private final EmrServerlessJobService jobs;
+
+    public PaginatedResult<ObjectNode> listJobRuns(String applicationId, Integer maxResults, String nextToken,
+                                                   List<String> states, Double after, Double before, String mode) {
+        getApplication(applicationId);
+        return jobs.list(accountId(), region(), applicationId, maxResults, nextToken, states, after, before, mode);
+    }
+
+    public List<Map<String, Object>> listSessions(String applicationId, Integer maxResults, String nextToken) {
+        getApplication(applicationId);
+        // Session submission remains unsupported; batch job runs are a separate collection.
+        return Pagination.paginate(List.<Map<String, Object>>of(), item -> "",
+                maxResults, nextToken, 50, "ValidationException").items();
+    }
+
+    public synchronized ObjectNode startJobRun(String applicationId, JsonNode request, String authorization) {
+        Application app = getApplication(applicationId);
+        requireExecutionRequest(request);
+        if (!List.of("CREATED", "STOPPED", "STARTED").contains(app.getState())) {
+            throw new AwsException("ValidationException", "Application is not available for job submission", 400);
+        }
+        if (!"STARTED".equals(app.getState()) && app.getAutoStartConfiguration() != null
+                && Boolean.FALSE.equals(app.getAutoStartConfiguration().getEnabled())) {
+            throw new AwsException("ValidationException", "Start the application before submitting a job when auto-start is disabled", 400);
+        }
+        ObjectNode result = jobs.start(app, request, accountId(), region(), authorization);
+        if (!EmrServerlessJobService.terminal(jobs.get(accountId(), region(), applicationId,
+                result.path("jobRunId").asText(), null)) && !"STARTED".equals(app.getState())) {
+            app.setState("STARTED");
+            app.setUpdatedAt(System.currentTimeMillis());
+            storage.putForAccount(accountId(), storageKey(applicationId), app);
+        }
+        return result;
+    }
+
+    public ObjectNode getJobRun(String applicationId, String jobRunId, String attempt) {
+        getApplication(applicationId);
+        return jobs.get(accountId(), region(), applicationId, jobRunId, attempt);
+    }
+
+    public ObjectNode cancelJobRun(String applicationId, String jobRunId) {
+        getApplication(applicationId);
+        return jobs.cancel(accountId(), region(), applicationId, jobRunId);
+    }
+
+    public PaginatedResult<ObjectNode> listJobRunAttempts(String applicationId, String jobRunId,
+                                                         Integer maxResults, String nextToken) {
+        getApplication(applicationId);
+        return jobs.attempts(accountId(), region(), applicationId, jobRunId, maxResults, nextToken);
+    }
+
+    public void getDashboardForJobRun(String applicationId, String jobRunId) {
+        getJobRun(applicationId, jobRunId, null);
+        throw new AwsException("UnsupportedOperationException", "Spark dashboards are not implemented", 501);
+    }
+
+    public void startSession(String applicationId, JsonNode request) {
+        Application app = getApplication(applicationId);
+        requireExecutionRequest(request);
+        if (app.getInteractiveConfiguration() == null
+                || !Boolean.TRUE.equals(app.getInteractiveConfiguration().getProperties().get("sessionEnabled"))) {
+            throw new AwsException("ValidationException",
+                    "Sessions must be enabled in the application's interactiveConfiguration.", 400);
+        }
+        throw new AwsException("UnsupportedOperationException",
+                "EMR Serverless session execution is not implemented.", 501);
+    }
+
+    /**
+     * AWS denies GetResourceDashboard for every caller, including {@code Action: "*"}
+     * administrators, before any resource lookup; the message carries no resource.
+     */
+    public void getResourceDashboard(String applicationId, String resourceId, String resourceType,
+                                     String authorization) {
+        if (resourceId == null || resourceId.isBlank() || resourceType == null || resourceType.isBlank()) {
+            throw new AwsException("ValidationException", "resourceId and resourceType are required", 400);
+        }
+        throw new AwsException("AccessDeniedException", "User: " + jobs.creator(accountId(), authorization)
+                + " is not authorized to perform: emr-serverless:GetResourceDashboard", 403);
+    }
+
+    private void requireExecutionRequest(JsonNode request) {
+        if (request == null || !request.isObject()) {
+            throw new AwsException("ValidationException", "A request body is required", 400);
+        }
+        for (String field : List.of("clientToken", "executionRoleArn")) {
+            if (!request.path(field).isTextual() || request.path(field).textValue().isBlank()) {
+                throw new AwsException("ValidationException", field + " is required", 400);
+            }
+        }
+    }
+
+    private List<Application> applicationsInRegion() {
+        storage.migrateLegacyEntries(accountId(), key -> !key.contains("/"),
+                app -> storageKey(app.getApplicationId()),
+                app -> buildArn(app.getApplicationId()).equals(app.getArn()));
+        return storage.scanForAccount(accountId(), key -> key.startsWith(region() + "/")).stream()
+                .filter(app -> buildArn(app.getApplicationId()).equals(app.getArn()))
+                .toList();
+    }
+
+    private String storageKey(String applicationId) {
+        return region() + "/" + applicationId;
+    }
+
+    private String region() {
+        return requestContext != null && requestContext.getRegion() != null
+                ? requestContext.getRegion() : config.defaultRegion();
+    }
+
+    private String accountId() {
+        return requestContext != null && requestContext.getAccountId() != null
+                ? requestContext.getAccountId() : config.defaultAccountId();
+    }
+
+    private String generateId() {
+        return UUID.randomUUID().toString().replace("-", "").substring(0, 16);
     }
 }

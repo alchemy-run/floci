@@ -15,8 +15,6 @@ public class UsagePlan {
     private String name;
     private String description;
     private List<ApiStage> apiStages = new ArrayList<>();
-    private ThrottleSettings throttle;
-    private QuotaSettings quota;
     private Map<String, String> tags = new HashMap<>();
 
     public UsagePlan() {}
@@ -31,18 +29,23 @@ public class UsagePlan {
     public void setDescription(String description) { this.description = description; }
 
     public List<ApiStage> getApiStages() { return apiStages; }
-    public void setApiStages(List<ApiStage> apiStages) { this.apiStages = apiStages != null ? apiStages : new ArrayList<>(); }
-
-    public ThrottleSettings getThrottle() { return throttle; }
-    public void setThrottle(ThrottleSettings throttle) { this.throttle = throttle; }
-
-    public QuotaSettings getQuota() { return quota; }
-    public void setQuota(QuotaSettings quota) { this.quota = quota; }
-
+    public void setApiStages(List<ApiStage> apiStages) { this.apiStages = apiStages; }
 
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags != null ? tags : new HashMap<>(); }
 
     @RegisterForReflection
     public record ApiStage(String apiId, String stage) {}
+
+    private ThrottleSettings throttle;
+
+    private QuotaSettings quota;
+
+    public ThrottleSettings getThrottle() { return throttle; }
+
+    public void setThrottle(ThrottleSettings throttle) { this.throttle = throttle; }
+
+    public QuotaSettings getQuota() { return quota; }
+
+    public void setQuota(QuotaSettings quota) { this.quota = quota; }
 }

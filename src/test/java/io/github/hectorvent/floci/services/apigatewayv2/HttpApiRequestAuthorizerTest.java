@@ -773,17 +773,6 @@ class HttpApiRequestAuthorizerTest {
     }
 
     private static void deleteFunctions(String... functionNames) throws Exception {
-        ExecutorService executor = Executors.newFixedThreadPool(functionNames.length);
-        try {
-            List<Future<?>> deletions = new ArrayList<>();
-            for (String functionName : functionNames) {
-                deletions.add(executor.submit(() -> deleteFunction(functionName)));
-            }
-            for (Future<?> deletion : deletions) {
-                deletion.get();
-            }
-        } finally {
-            executor.shutdown();
         try (ExecutorService executor = Executors.newFixedThreadPool(functionNames.length)) {
             List<Future<?>> deletions = new ArrayList<>();
             for (String functionName : functionNames) {

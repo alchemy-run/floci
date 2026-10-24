@@ -20,9 +20,7 @@ import io.github.hectorvent.floci.core.resource.SupportedResourceType;
 import io.github.hectorvent.floci.core.storage.StorageBackedMap;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
-import io.github.hectorvent.floci.services.ec2.model.NetworkInterface;
 import io.github.hectorvent.floci.services.ec2.model.Subnet;
-import io.github.hectorvent.floci.services.lambda.durable.LambdaDurableService;
 import io.github.hectorvent.floci.services.lambda.durable.DurableExecutionService;
 import io.github.hectorvent.floci.services.lambda.durable.DurableWire;
 import io.github.hectorvent.floci.services.lambda.durable.model.DurableErrorObject;
@@ -46,7 +44,6 @@ import io.github.hectorvent.floci.services.sqs.SqsService;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
-import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
@@ -55,8 +52,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -76,6 +71,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
+import io.github.hectorvent.floci.services.ec2.model.NetworkInterface;
+import io.github.hectorvent.floci.services.lambda.durable.LambdaDurableService;
+import io.github.hectorvent.floci.services.s3.model.S3Object;
+import jakarta.enterprise.inject.Instance;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 /**
  * Business logic for Lambda function management and invocation.
@@ -197,20 +198,6 @@ public class LambdaService implements ResourceProvider {
     private Map<String, FunctionEventInvokeConfig> eventInvokeConfigs = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Object> policyMutationLocks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Object> versionCounterLocks = new ConcurrentHashMap<>();
-
-    /**
-     * Optional: durable-execution purge on function delete. Injected lazily so
-     * LambdaDurableService can depend on LambdaService without a CDI cycle.
-     * Unit tests assign it via {@link #setDurableService}.
-     */
-    @Inject
-    Instance<LambdaDurableService> durableServiceInstance;
-    private LambdaDurableService durableService;
-
-    /** Optional ECR digest resolution for image functions; unit tests assign it via {@link #setImageDigestResolver}. */
-    @Inject
-    Instance<LambdaImageDigestResolver> imageDigestResolverInstance;
-    private LambdaImageDigestResolver imageDigestResolver;
 
     /**
      * Package-private constructor for testing without CDI. Config defaults
@@ -566,7 +553,6 @@ public class LambdaService implements ResourceProvider {
         if (vpcConfig != null) {
             fn.setVpcConfig(vpcConfig);
             fn.setVpcId(resolveVpcId(region, vpcConfig));
-            syncVpcEnis(region, fn);
         }
 
         applySnapStart(fn, snapStart);
@@ -595,7 +581,7 @@ public class LambdaService implements ResourceProvider {
         if (code != null) {
             String imageUri = (String) code.get("ImageUri");
             if (imageUri != null) {
-                applyImageUri(fn, imageUri);
+                fn.setImageUri(imageUri);
             }
             String zipFileBase64 = (String) code.get("ZipFile");
             if (zipFileBase64 != null) {
@@ -776,7 +762,7 @@ public class LambdaService implements ResourceProvider {
             fn.setS3Key(null);
         }
         if (imageUri != null) {
-            applyImageUri(fn, imageUri);
+            fn.setImageUri(imageUri);
         }
         if (s3Bucket != null && s3Key != null) {
             if ("hot-reload".equals(s3Bucket)) {
@@ -971,7 +957,6 @@ public class LambdaService implements ResourceProvider {
             if (requestedVpcConfigUpdate != null) {
                 fn.setVpcConfig(requestedVpcConfig);
                 fn.setVpcId(resolveVpcId(region, requestedVpcConfig));
-                syncVpcEnis(region, fn);
             }
         }
 
@@ -991,16 +976,23 @@ public class LambdaService implements ResourceProvider {
             fn.setFileSystemConfigs(requestedFileSystemConfigs);
         }
 
-        // ImageConfig is replaced as a whole, as on AWS: a member left out of a supplied ImageConfig
-        // clears that override, so `"ImageConfig": {}` drops every override. Omitting ImageConfig
-        // from the request leaves the current overrides in place.
-        if (imageConfig != null) {
-            fn.setImageConfigCommand(imageConfig.get("Command") instanceof List<?> cmd
-                    ? cmd.stream().map(Object::toString).toList() : null);
-            fn.setImageConfigEntryPoint(imageConfig.get("EntryPoint") instanceof List<?> ep
-                    ? ep.stream().map(Object::toString).toList() : null);
-            fn.setImageConfigWorkingDirectory(
-                    imageConfig.get("WorkingDirectory") instanceof String wd ? wd : null);
+        if (request.containsKey("ImageConfig")) {
+            if (imageConfig != null) {
+                if (imageConfig.containsKey("Command")) {
+                    List<String> cmd = imageConfig.get("Command") instanceof List<?>
+                            ? ((List<?>) imageConfig.get("Command")).stream().map(Object::toString).toList() : null;
+                    fn.setImageConfigCommand(cmd);
+                }
+                if (imageConfig.containsKey("EntryPoint")) {
+                    List<String> ep = imageConfig.get("EntryPoint") instanceof List<?>
+                            ? ((List<?>) imageConfig.get("EntryPoint")).stream().map(Object::toString).toList() : null;
+                    fn.setImageConfigEntryPoint(ep);
+                }
+                if (imageConfig.containsKey("WorkingDirectory")) {
+                    fn.setImageConfigWorkingDirectory(
+                            imageConfig.get("WorkingDirectory") instanceof String wd ? wd : null);
+                }
+            }
         }
 
         fn.setLastModified(System.currentTimeMillis());
@@ -1103,7 +1095,6 @@ public class LambdaService implements ResourceProvider {
         LambdaFunction fn = getFunction(region, functionName); // throws 404 if not found
         functionName = fn.getFunctionName();
         String arn = fn.getFunctionArn();
-        releaseVpcEnis(region, fn);
         // Before the drain and anything is deleted, so no queued or running event starts a container for,
         // or reports on, a function being removed.
         if (executorService != null) {
@@ -1147,45 +1138,6 @@ public class LambdaService implements ResourceProvider {
             }
         }
         LOG.infov("Deleted Lambda function: {0}", functionName);
-        purgeDurableExecutions(region, functionName);
-    }
-
-    /** Test hook: wire the durable service without CDI. */
-    void setDurableService(LambdaDurableService durableService) {
-        this.durableService = durableService;
-    }
-
-    /** Test hook: wire the image digest resolver without CDI. */
-    void setImageDigestResolver(LambdaImageDigestResolver imageDigestResolver) {
-        this.imageDigestResolver = imageDigestResolver;
-    }
-
-    /**
-     * Records the image a container-image function deploys. Lambda resolves the tag to its
-     * manifest digest at deploy time and reports that digest as {@code ResolvedImageUri} and
-     * {@code CodeSha256}; a reference that cannot be resolved is kept as given.
-     */
-    private void applyImageUri(LambdaFunction fn, String imageUri) {
-        fn.setImageUri(imageUri);
-        LambdaImageDigestResolver resolver = imageDigestResolver;
-        if (resolver == null && imageDigestResolverInstance != null && imageDigestResolverInstance.isResolvable()) {
-            resolver = imageDigestResolverInstance.get();
-        }
-        String resolved = resolver != null ? resolver.resolve(imageUri) : null;
-        fn.setResolvedImageUri(resolved);
-        if (resolved != null) {
-            fn.setCodeSha256(resolved.substring(resolved.lastIndexOf("@sha256:") + "@sha256:".length()));
-        }
-    }
-
-    private void purgeDurableExecutions(String region, String functionName) {
-        LambdaDurableService durable = durableService;
-        if (durable == null && durableServiceInstance != null && durableServiceInstance.isResolvable()) {
-            durable = durableServiceInstance.get();
-        }
-        if (durable != null) {
-            durable.purgeExecutionsForFunction(region, functionName);
-        }
     }
 
     /**
@@ -1444,9 +1396,7 @@ public class LambdaService implements ResourceProvider {
         boolean hasKafkaSource = request.containsKey("SelfManagedEventSource") && request.get("SelfManagedEventSource") != null;
         boolean hasTopics = request.containsKey("Topics") && request.get("Topics") != null;
         boolean hasEventSourceArn = request.containsKey("EventSourceArn") && request.get("EventSourceArn") != null;
-        // An Amazon MSK source names its cluster in EventSourceArn and its topic in Topics.
-        boolean isMskKafka = hasEventSourceArn && isMskClusterArn(request.get("EventSourceArn"));
-        boolean isSelfManagedKafka = !isMskKafka && (hasKafkaSource || hasTopics);
+        boolean isSelfManagedKafka = hasKafkaSource || hasTopics;
 
         // The SourceAccessConfigurations cap applies to every source type, not only self-managed Kafka
         if (request.get("SourceAccessConfigurations") instanceof List<?> accessToCap) {
@@ -1458,22 +1408,8 @@ public class LambdaService implements ResourceProvider {
         Map<String, Object> selfManagedEventSource = null;
         List<String> topics = null;
         List<Map<String, Object>> sourceAccessConfigurations = null;
-        Map<String, Object> amazonManagedKafkaEventSourceConfig = null;
 
-        if (isMskKafka) {
-            if (hasKafkaSource) {
-                throw new AwsException("InvalidParameterValueException",
-                        "Cannot specify both EventSourceArn and SelfManagedEventSource", 400);
-            }
-            eventSourceArn = (String) request.get("EventSourceArn");
-            topics = parseMskTopics(request.get("Topics"));
-            amazonManagedKafkaEventSourceConfig = structureMember(request, "AmazonManagedKafkaEventSourceConfig");
-            resolvedRegion = AwsArnUtils.regionOrDefault(eventSourceArn, region);
-            if (fnRef.region() != null && !fnRef.region().equals(resolvedRegion)) {
-                throw new AwsException("InvalidParameterValueException",
-                        "Function ARN region '" + fnRef.region() + "' does not match event source region '" + resolvedRegion + "'", 400);
-            }
-        } else if (isSelfManagedKafka) {
+        if (isSelfManagedKafka) {
             if (hasEventSourceArn) {
                 throw new AwsException("InvalidParameterValueException",
                         "Cannot specify both EventSourceArn and SelfManagedEventSource/Topics", 400);
@@ -1603,15 +1539,9 @@ public class LambdaService implements ResourceProvider {
 
         EventSourceMapping.DestinationConfig destinationConfig = parseDestinationConfig(request);
 
-        Map<String, String> tags = new java.util.HashMap<>();
-        if (request.get("Tags") instanceof Map<?, ?> rawTags) {
-            rawTags.forEach((k, v) -> tags.put(String.valueOf(k), String.valueOf(v)));
-        }
-
         EventSourceMapping.FilterCriteria filterCriteria = parseFilterCriteria(request, objectMapper);
 
-        StartingPositionSpec startingPosition = parseStartingPosition(request, eventSourceArn,
-                isSelfManagedKafka || isMskKafka);
+        StartingPositionSpec startingPosition = parseStartingPosition(request, eventSourceArn, isSelfManagedKafka);
 
         String queueUrl = (eventSourceArn != null && eventSourceArn.contains(":sqs:"))
                 ? AwsArnUtils.arnToQueueUrl(eventSourceArn, config != null ? config.effectiveBaseUrl() : null)
@@ -1635,14 +1565,12 @@ public class LambdaService implements ResourceProvider {
         esm.setMaximumRetryAttempts(maximumRetryAttempts);
         esm.setMaximumRecordAgeInSeconds(maximumRecordAgeInSeconds);
         esm.setDestinationConfig(destinationConfig);
-        esm.setTags(tags);
         esm.setFilterCriteria(filterCriteria);
         esm.setStartingPosition(startingPosition.position());
         esm.setStartingPositionTimestamp(startingPosition.timestampMillis());
         esm.setSelfManagedEventSource(selfManagedEventSource);
         esm.setTopics(topics);
         esm.setSourceAccessConfigurations(sourceAccessConfigurations);
-        esm.setAmazonManagedKafkaEventSourceConfig(amazonManagedKafkaEventSourceConfig);
         esm.setTags(requestTags(request));
         esm.setLastModified(System.currentTimeMillis());
 
@@ -2264,15 +2192,6 @@ public class LambdaService implements ResourceProvider {
             changes.add(m -> m.setTopics(validatedTopics));
         }
 
-        if (request.get("AmazonManagedKafkaEventSourceConfig") != null) {
-            if (!isMskClusterArn(esm.getEventSourceArn())) {
-                throw new AwsException("InvalidParameterValueException",
-                        "AmazonManagedKafkaEventSourceConfig is only supported for Amazon MSK event sources", 400);
-            }
-            esm.setAmazonManagedKafkaEventSourceConfig(
-                    structureMember(request, "AmazonManagedKafkaEventSourceConfig"));
-        }
-
         if (request.containsKey("SourceAccessConfigurations")) {
             Object rawAccess = request.get("SourceAccessConfigurations");
             if (rawAccess != null) {
@@ -2521,7 +2440,6 @@ public class LambdaService implements ResourceProvider {
             snapshot.setS3Key(fn.getS3Key());
             snapshot.setHotReloadHostPath(fn.getHotReloadHostPath());
             snapshot.setImageUri(fn.getImageUri());
-            snapshot.setResolvedImageUri(fn.getResolvedImageUri());
             snapshot.setImageConfigCommand(fn.getImageConfigCommand());
             snapshot.setImageConfigEntryPoint(fn.getImageConfigEntryPoint());
             snapshot.setImageConfigWorkingDirectory(fn.getImageConfigWorkingDirectory());
@@ -2667,23 +2585,6 @@ public class LambdaService implements ResourceProvider {
                 environment.get("Variables"), "Environment.Variables");
     }
 
-    /** Whether an EventSourceArn names an Amazon MSK cluster ({@code arn:aws:kafka:...:cluster/...}). */
-    static boolean isMskClusterArn(Object eventSourceArn) {
-        return eventSourceArn instanceof String arn && arn.contains(":kafka:") && arn.contains(":cluster/");
-    }
-
-    /** An Amazon MSK event source reads exactly one topic. */
-    private static List<String> parseMskTopics(Object rawTopics) {
-        if (rawTopics == null) {
-            throw new AwsException("InvalidParameterValueException",
-                    "Topics is required for Amazon MSK event sources", 400);
-        }
-        if (!(rawTopics instanceof List<?> topicList) || topicList.size() != 1
-                || !(topicList.getFirst() instanceof String topic) || topic.isBlank()) {
-            throw new AwsException("InvalidParameterValueException",
-                    "Topics must contain exactly one non-blank topic name for Amazon MSK event sources", 400);
-        }
-        return new ArrayList<>(List.of(topic));
     /**
      * The request's {@code Tags} member as a string-to-string map, or {@code null} when it is
      * absent. A non-object member or a non-string tag value is a {@code SerializationException}.
@@ -2705,7 +2606,6 @@ public class LambdaService implements ResourceProvider {
 
     private static void validateEventSourceMappingStructures(Map<String, Object> request) {
         structureMember(request, "ScalingConfig");
-        structureMember(request, "AmazonManagedKafkaEventSourceConfig");
         Map<String, Object> destinationConfig = structureMember(request, "DestinationConfig");
         if (destinationConfig != null) {
             structureValue(destinationConfig.get("OnFailure"), "DestinationConfig.OnFailure");
@@ -3337,8 +3237,7 @@ public class LambdaService implements ResourceProvider {
                 cors.setAllowMethods(toStringArray(corsMap.get("AllowMethods")));
                 cors.setAllowOrigins(toStringArray(corsMap.get("AllowOrigins")));
                 cors.setExposeHeaders(toStringArray(corsMap.get("ExposeHeaders")));
-                cors.setMaxAge(toInt(corsMap.get("MaxAge"),
-                        cors.getMaxAge() != null ? cors.getMaxAge() : 0));
+                cors.setMaxAge(toInt(corsMap.get("MaxAge"), cors.getMaxAge()));
                 urlConfig.setCors(cors);
             } else {
                 urlConfig.setCors(null);
@@ -3528,7 +3427,7 @@ public class LambdaService implements ResourceProvider {
             if (!encoded.isEmpty()) {
                 encoded.append('/');
             }
-            encoded.append(java.net.URLEncoder.encode(segment, StandardCharsets.UTF_8)
+            encoded.append(java.net.URLEncoder.encode(segment, java.nio.charset.StandardCharsets.UTF_8)
                     .replace("+", "%20"));
         }
         return encoded.toString();
@@ -3706,12 +3605,12 @@ public class LambdaService implements ResourceProvider {
         fn.setCodeSizeBytes(0);
         // Bind-mounted code has no artifact; hash its normalized path for version publication.
         try {
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(resolvedHostPath.getBytes(StandardCharsets.UTF_8));
-            fn.setCodeSha256(Base64.getEncoder().encodeToString(digest));
-        } catch (NoSuchAlgorithmException e) {
-            fn.setCodeSha256(Base64.getEncoder().encodeToString(resolvedHostPath.getBytes(
-                    StandardCharsets.UTF_8)));
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(resolvedHostPath.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            fn.setCodeSha256(java.util.Base64.getEncoder().encodeToString(digest));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            fn.setCodeSha256(java.util.Base64.getEncoder().encodeToString(resolvedHostPath.getBytes(
+                    java.nio.charset.StandardCharsets.UTF_8)));
         }
         LOG.infov("Hot-reload configured for function {0}: bind-mounting {1}", fn.getFunctionName(), resolvedHostPath);
     }
@@ -3774,10 +3673,6 @@ public class LambdaService implements ResourceProvider {
         return resourceArn.equals(statement.get("Resource"));
     }
 
-    public Map<String, Object> addPermission(String region, String functionName, Map<String, Object> request) {
-        return addPermission(region, functionName, null, request);
-    }
-
     public Map<String, Object> addPermission(String region, String functionName, String qualifier, Map<String, Object> request) {
         validatePermissionConditions(request);
         LambdaArnUtils.ResolvedFunctionRef ref = resolveWithRegion(region, functionName, qualifier);
@@ -3819,8 +3714,6 @@ public class LambdaService implements ResourceProvider {
         }
     }
 
-    public Map<String, Object> getPolicy(String region, String functionName) {
-        return getPolicy(region, functionName, null);
     /** The model constraints on the AddPermission members that become conditions. */
     private static void validatePermissionConditions(Map<String, Object> request) {
         validatePattern(request.get("SourceAccount"), "sourceAccount", ACCOUNT_ID_PATTERN);
@@ -3972,10 +3865,6 @@ public class LambdaService implements ResourceProvider {
         }
     }
 
-    public void removePermission(String region, String functionName, String statementId) {
-        removePermission(region, functionName, null, statementId);
-    }
-
     public void removePermission(String region, String functionName, String qualifier, String statementId) {
         LambdaArnUtils.ResolvedFunctionRef ref = resolveWithRegion(region, functionName, qualifier);
         LambdaFunction observed = getFunction(region, ref.name());
@@ -4060,14 +3949,7 @@ public class LambdaService implements ResourceProvider {
         functionStore.save(target.region, fn);
     }
 
-    private static final String TAG_TYPE_FUNCTION = "function";
-    private static final String TAG_TYPE_EVENT_SOURCE_MAPPING = "event-source-mapping";
-
-    private record TagTarget(String type, String region, String id) {
-        boolean isEventSourceMapping() {
-            return TAG_TYPE_EVENT_SOURCE_MAPPING.equals(type);
-        }
-    }
+    private record TagTarget(String region, String name) {}
 
     /**
      * The mapping named by an {@code event-source-mapping:} tag-endpoint ARN, or {@code null}
@@ -4101,40 +3983,20 @@ public class LambdaService implements ResourceProvider {
      * tag APIs only accept an unqualified full function ARN; reject partial
      * ARNs, bare names, and qualified ARNs.
      */
-    private TagTarget resolveTagTarget(String resourceArn) {
-        if (resourceArn == null || resourceArn.isBlank()) {
+    private TagTarget resolveTagTarget(String functionArn) {
+        if (functionArn == null || functionArn.isBlank()) {
             throw new AwsException("InvalidParameterValueException", "Resource ARN is required", 400);
         }
-        if (!resourceArn.startsWith("arn:")) {
+        if (!functionArn.startsWith("arn:")) {
             throw new AwsException("InvalidParameterValueException",
-                    "Resource ARN must be a full Lambda ARN: " + resourceArn, 400);
+                    "Resource ARN must be a full Lambda function ARN: " + functionArn, 400);
         }
-        AwsArnUtils.Arn arn;
-        try {
-            arn = AwsArnUtils.parse(resourceArn);
-        } catch (IllegalArgumentException e) {
-            throw new AwsException("InvalidParameterValueException", "Invalid ARN: " + resourceArn, 400);
+        LambdaArnUtils.ResolvedFunctionRef ref = LambdaArnUtils.resolve(functionArn);
+        if (ref.qualifier() != null) {
+            throw new AwsException("InvalidParameterValueException",
+                    "Tag operations require an unqualified function ARN: " + functionArn, 400);
         }
-        String[] resourceParts = arn.resource().split(":", -1);
-        return switch (resourceParts[0]) {
-            case TAG_TYPE_FUNCTION -> {
-                LambdaArnUtils.ResolvedFunctionRef ref = LambdaArnUtils.resolve(resourceArn);
-                if (ref.qualifier() != null) {
-                    throw new AwsException("InvalidParameterValueException",
-                            "Tag operations require an unqualified function ARN: " + resourceArn, 400);
-                }
-                yield new TagTarget(TAG_TYPE_FUNCTION, ref.region(), ref.name());
-            }
-            case TAG_TYPE_EVENT_SOURCE_MAPPING -> {
-                if (resourceParts.length != 2 || resourceParts[1].isBlank()) {
-                    throw new AwsException("InvalidParameterValueException",
-                            "Invalid ARN: " + resourceArn, 400);
-                }
-                yield new TagTarget(TAG_TYPE_EVENT_SOURCE_MAPPING, arn.region(), resourceParts[1]);
-            }
-            default -> throw new AwsException("InvalidParameterValueException",
-                    "ARN resource type must be 'function' or 'event-source-mapping': " + resourceArn, 400);
-        };
+        return new TagTarget(ref.region(), ref.name());
     }
 
     private int toInt(Object value, int defaultValue) {
@@ -4286,6 +4148,284 @@ public class LambdaService implements ResourceProvider {
     }
 
     /**
+     * Observes S3 object updates and triggers reactive sync for any Lambda
+     * functions linked to the updated object.
+     */
+    public void onS3ObjectUpdated(@Observes S3ObjectUpdatedEvent event) {
+        LOG.debugv("Observing S3 update: {0}/{1}", event.bucketName(), event.key());
+        // For simplicity, we scan all functions in the default region
+        // Most local dev setups use a single region.
+        // This runs on the CDI event thread with no RequestContext, so an ambient scan
+        // would only ever see the default account's partition — a function owned by any
+        // other account would silently never hot-reload from S3.
+        String region = regionResolver.getDefaultRegion();
+        List<LambdaFunction> functions = functionStore.listAllAccounts(region);
+        for (LambdaFunction fn : functions) {
+            if (!event.bucketName().equals(fn.getS3Bucket()) || !event.key().equals(fn.getS3Key())) {
+                continue;
+            }
+            synchronized (lockForConcurrencyOp(fn.getFunctionArn())) {
+                if (fn.isHotReload()) {
+                    continue;
+                }
+                if (event.bucketName().equals(fn.getS3Bucket()) && event.key().equals(fn.getS3Key())) {
+                    LOG.infov("Reactive S3 Sync: updating function {0} from s3://{1}/{2}",
+                            fn.getFunctionName(), event.bucketName(), event.key());
+                    try {
+                        try (DeploymentPackage zip = readS3Package(fn, event.bucketName(), event.key(), region)) {
+                            extractZipCodePackage(fn, zip, region);
+                        }
+                        fn.setLastModified(Instant.now().toEpochMilli());
+                        fn.setRevisionId(UUID.randomUUID().toString());
+                        functionStore.saveForAccount(ownerAccount(fn), region, fn);
+
+                        // Push to warm workers
+                        warmPool.pushCodeUpdate(fn);
+                    } catch (Exception e) {
+                        LOG.warnv("Failed reactive sync for function {0}: {1}", fn.getFunctionName(), e.getMessage());
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Per-function locks covering PutFunctionConcurrency,
+     * DeleteFunctionConcurrency, and deleteFunction itself. Serializing the
+     * limiter update + persistence pair against itself for a given function
+     * prevents the limiter and store from diverging on interleaved concurrent
+     * requests.
+     *
+     * <p>Entries are intentionally never removed — see {@code deleteFunction}
+     * for the race this avoids. The map therefore grows by one {@code Object}
+     * per distinct function ARN the emulator has ever seen (create/delete
+     * cycles with fresh names included). Acceptable footprint for a local
+     * emulator workload.
+     */
+    private final ConcurrentHashMap<String, Object> concurrencyOpLocks = new ConcurrentHashMap<>();
+
+    /**
+     * Optional: durable-execution purge on function delete. Injected lazily so
+     * LambdaDurableService can depend on LambdaService without a CDI cycle.
+     * Unit tests assign it via {@link #setDurableService}.
+     */
+    @Inject
+    Instance<LambdaDurableService> durableServiceInstance;
+
+    private LambdaDurableService durableService;
+
+    /** Optional ECR digest resolution for image functions; unit tests assign it via {@link #setImageDigestResolver}. */
+    @Inject
+    Instance<LambdaImageDigestResolver> imageDigestResolverInstance;
+
+    private LambdaImageDigestResolver imageDigestResolver;
+
+    /** Test hook: wire the durable service without CDI. */
+    void setDurableService(LambdaDurableService durableService) {
+        this.durableService = durableService;
+    }
+
+    /** Test hook: wire the image digest resolver without CDI. */
+    void setImageDigestResolver(LambdaImageDigestResolver imageDigestResolver) {
+        this.imageDigestResolver = imageDigestResolver;
+    }
+
+    /**
+     * Records the image a container-image function deploys. Lambda resolves the tag to its
+     * manifest digest at deploy time and reports that digest as {@code ResolvedImageUri} and
+     * {@code CodeSha256}; a reference that cannot be resolved is kept as given.
+     */
+    private void applyImageUri(LambdaFunction fn, String imageUri) {
+        fn.setImageUri(imageUri);
+        LambdaImageDigestResolver resolver = imageDigestResolver;
+        if (resolver == null && imageDigestResolverInstance != null && imageDigestResolverInstance.isResolvable()) {
+            resolver = imageDigestResolverInstance.get();
+        }
+        String resolved = resolver != null ? resolver.resolve(imageUri) : null;
+        fn.setResolvedImageUri(resolved);
+        if (resolved != null) {
+            fn.setCodeSha256(resolved.substring(resolved.lastIndexOf("@sha256:") + "@sha256:".length()));
+        }
+    }
+
+    private void purgeDurableExecutions(String region, String functionName) {
+        LambdaDurableService durable = durableService;
+        if (durable == null && durableServiceInstance != null && durableServiceInstance.isResolvable()) {
+            durable = durableServiceInstance.get();
+        }
+        if (durable != null) {
+            durable.purgeExecutionsForFunction(region, functionName);
+        }
+    }
+
+    private LambdaFunction resolveInvokeTarget(String region, String name, String qualifier) {
+        return resolveTarget(region, name, qualifier, this::pickAliasVersion);
+    }
+
+    /**
+     * Resolves a qualifier for a <em>read</em>. Identical to the invoke path except for aliases:
+     * an alias with {@code AdditionalVersionWeights} shifts traffic, so {@link #pickAliasVersion}
+     * chooses randomly among the weighted versions, which is right for running the function and
+     * wrong for describing it. Two reads of one alias must not disagree, so a read follows the
+     * alias's primary {@code FunctionVersion}, which is what AWS reports.
+     */
+    private LambdaFunction resolveReadTarget(String region, String name, String qualifier) {
+        return resolveTarget(region, name, qualifier, LambdaAlias::getFunctionVersion);
+    }
+
+    private LambdaFunction resolveTarget(String region, String name, String qualifier,
+                                         java.util.function.Function<LambdaAlias, String> aliasVersion) {
+        if (qualifier == null || qualifier.equals("$LATEST")) {
+            return functionStore.get(region, name)
+                    .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Function not found: " + name, 404));
+        }
+        if (qualifier.chars().allMatch(Character::isDigit)) {
+            return functionStore.get(region, name, qualifier)
+                    .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                            "Function version not found: " + name + ":" + qualifier, 404));
+        }
+        // qualifier is an alias name
+        LambdaAlias alias = getAlias(region, name, qualifier);
+        String version = aliasVersion.apply(alias);
+        if (version == null || version.equals("$LATEST")) {
+            return functionStore.get(region, name)
+                    .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Function not found: " + name, 404));
+        }
+        return functionStore.get(region, name, version)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Function version not found: " + name + ":" + version, 404));
+    }
+
+    private LambdaFunction resolveInvokeTargetForAccount(
+            String accountId, String region, String name, String qualifier) {
+        return resolveTargetForAccount(accountId, region, name, qualifier, this::pickAliasVersion);
+    }
+
+    /** The read counterpart of {@link #resolveInvokeTargetForAccount}; see {@link #resolveReadTarget}. */
+    private LambdaFunction resolveReadTargetForAccount(
+            String accountId, String region, String name, String qualifier) {
+        return resolveTargetForAccount(accountId, region, name, qualifier, LambdaAlias::getFunctionVersion);
+    }
+
+    private LambdaFunction resolveTargetForAccount(
+            String accountId, String region, String name, String qualifier,
+            java.util.function.Function<LambdaAlias, String> aliasVersion) {
+        if (qualifier == null || qualifier.equals("$LATEST")) {
+            return functionStore.getForAccount(accountId, region, name)
+                    .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                            "Function not found: " + name, 404));
+        }
+        if (qualifier.chars().allMatch(Character::isDigit)) {
+            return functionStore.getForAccount(accountId, region, name, qualifier)
+                    .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                            "Function version not found: " + name + ":" + qualifier, 404));
+        }
+        LambdaAlias alias = aliasStore != null
+                ? aliasStore.getForAccount(accountId, region, name, qualifier)
+                    .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                            "Alias not found: " + qualifier, 404))
+                : null;
+        if (alias == null) {
+            throw new AwsException("ResourceNotFoundException", "Alias not found: " + qualifier, 404);
+        }
+        String version = aliasVersion.apply(alias);
+        if (version == null || version.equals("$LATEST")) {
+            return functionStore.getForAccount(accountId, region, name)
+                    .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                            "Function not found: " + name, 404));
+        }
+        return functionStore.getForAccount(accountId, region, name, version)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Function version not found: " + name + ":" + version, 404));
+    }
+
+    private String pickAliasVersion(LambdaAlias alias) {
+        java.util.Map<String, Double> weights = alias.getRoutingConfig();
+        if (weights == null || weights.isEmpty()) {
+            return alias.getFunctionVersion();
+        }
+        double rand = java.util.concurrent.ThreadLocalRandom.current().nextDouble();
+        double additionalTotal = weights.values().stream().mapToDouble(Double::doubleValue).sum();
+        double primaryWeight = Math.max(0.0, 1.0 - additionalTotal);
+        if (rand < primaryWeight) {
+            return alias.getFunctionVersion();
+        }
+        double cumulative = primaryWeight;
+        for (java.util.Map.Entry<String, Double> entry : weights.entrySet()) {
+            cumulative += entry.getValue();
+            if (rand < cumulative) {
+                return entry.getKey();
+            }
+        }
+        return alias.getFunctionVersion();
+    }
+
+    /** Whether an EventSourceArn names an Amazon MSK cluster ({@code arn:aws:kafka:...:cluster/...}). */
+    static boolean isMskClusterArn(Object eventSourceArn) {
+        return eventSourceArn instanceof String arn && arn.contains(":kafka:") && arn.contains(":cluster/");
+    }
+
+    /** An Amazon MSK event source reads exactly one topic. */
+    private static List<String> parseMskTopics(Object rawTopics) {
+        if (rawTopics == null) {
+            throw new AwsException("InvalidParameterValueException",
+                    "Topics is required for Amazon MSK event sources", 400);
+        }
+        if (!(rawTopics instanceof List<?> topicList) || topicList.size() != 1
+                || !(topicList.getFirst() instanceof String topic) || topic.isBlank()) {
+            throw new AwsException("InvalidParameterValueException",
+                    "Topics must contain exactly one non-blank topic name for Amazon MSK event sources", 400);
+        }
+        return new ArrayList<>(List.of(topic));
+    }
+
+    private void extractZipCodeBytes(LambdaFunction fn, byte[] zipBytes, String region) {
+        Path codePath = codeStore.getCodePath(ownerAccount(fn), region, fn.getFunctionName());
+        try {
+            zipExtractor.extractTo(zipBytes, codePath, configuredZipMaxEntries());
+            // Publish the new code identity under the same per-function lock publishVersion holds.
+            // PublishVersion's CodeSha256 precondition is a check-then-act: it compares the hash and
+            // then snapshots the code. Mutating these fields without the lock lets an overlapping
+            // deploy move $LATEST between those two steps, so a version would carry code whose hash
+            // the caller never authorised even though the check passed. Extraction to disk stays
+            // outside the lock; only the fields that decide what a snapshot copies are inside it.
+            String newSha256 = null;
+            try {
+                byte[] digest = MessageDigest.getInstance("SHA-256").digest(zipBytes);
+                newSha256 = Base64.getEncoder().encodeToString(digest);
+            } catch (NoSuchAlgorithmException ignored) {}
+            synchronized (lockForConcurrencyOp(fn.getFunctionArn())) {
+                fn.setCodeLocalPath(codePath.toAbsolutePath().normalize().toString());
+                fn.setCodeSizeBytes(zipBytes.length);
+                if (newSha256 != null) {
+                    fn.setCodeSha256(newSha256);
+                }
+            }
+
+            // Deploy succeeded: keep the exact package so GetFunction can serve
+            // a real Code.Location.
+            storeDeploymentPackage(fn, zipBytes, region);
+            // Reclaim a directory left behind by a function created before account-scoping;
+            // codePath above is already the new location, so this is a no-op once migrated.
+            // Locked against publishVersion (see its own comment) so a version cannot be
+            // persisted, referencing this legacy path, in the window between the check below
+            // and the actual delete.
+            synchronized (lockForConcurrencyOp(fn.getFunctionArn())) {
+                reclaimLegacyCodeDirectoryIfUnused(fn.getFunctionName());
+            }
+        } catch (AwsException e) {
+            throw e;
+        } catch (IOException e) {
+            throw new AwsException("InvalidParameterValueException",
+                    "Failed to extract deployment package: " + e.getMessage(), 400);
+        }
+    }
+
+    private static final String TAG_TYPE_FUNCTION = "function";
+
+    private static final String TAG_TYPE_EVENT_SOURCE_MAPPING = "event-source-mapping";
+
+    /**
      * Builds the IAM Condition block for AddPermission. AWS stores
      * {@code InvokedViaFunctionUrl} as {@code Bool.lambda:InvokedViaFunctionUrl}
      * and {@code FunctionUrlAuthType} as {@code StringEquals.lambda:FunctionUrlAuthType}.
@@ -4372,47 +4512,5 @@ public class LambdaService implements ResourceProvider {
             }
         }
         return out;
-    }
-
-    /**
-     * Observes S3 object updates and triggers reactive sync for any Lambda
-     * functions linked to the updated object.
-     */
-    public void onS3ObjectUpdated(@Observes S3ObjectUpdatedEvent event) {
-        LOG.debugv("Observing S3 update: {0}/{1}", event.bucketName(), event.key());
-        // For simplicity, we scan all functions in the default region
-        // Most local dev setups use a single region.
-        // This runs on the CDI event thread with no RequestContext, so an ambient scan
-        // would only ever see the default account's partition — a function owned by any
-        // other account would silently never hot-reload from S3.
-        String region = regionResolver.getDefaultRegion();
-        List<LambdaFunction> functions = functionStore.listAllAccounts(region);
-        for (LambdaFunction fn : functions) {
-            if (!event.bucketName().equals(fn.getS3Bucket()) || !event.key().equals(fn.getS3Key())) {
-                continue;
-            }
-            synchronized (lockForConcurrencyOp(fn.getFunctionArn())) {
-                if (fn.isHotReload()) {
-                    continue;
-                }
-                if (event.bucketName().equals(fn.getS3Bucket()) && event.key().equals(fn.getS3Key())) {
-                    LOG.infov("Reactive S3 Sync: updating function {0} from s3://{1}/{2}",
-                            fn.getFunctionName(), event.bucketName(), event.key());
-                    try {
-                        try (DeploymentPackage zip = readS3Package(fn, event.bucketName(), event.key(), region)) {
-                            extractZipCodePackage(fn, zip, region);
-                        }
-                        fn.setLastModified(Instant.now().toEpochMilli());
-                        fn.setRevisionId(UUID.randomUUID().toString());
-                        functionStore.saveForAccount(ownerAccount(fn), region, fn);
-
-                        // Push to warm workers
-                        warmPool.pushCodeUpdate(fn);
-                    } catch (Exception e) {
-                        LOG.warnv("Failed reactive sync for function {0}: {1}", fn.getFunctionName(), e.getMessage());
-                    }
-                }
-            }
-        }
     }
 }

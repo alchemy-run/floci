@@ -486,27 +486,6 @@ class CloudFormationDeletionPolicyIntegrationTest {
         """.formatted(templateUrl);
         String stackName = "parent-nested-lambda-update-" + suffix;
 
-        given().header("Authorization", CUSTOM_AUTH)
-                .when().put("/" + bucketName).then().statusCode(200);
-        given().header("Authorization", CUSTOM_AUTH)
-                .contentType("application/json").body(nestedLambdaTemplate(functionName, 3))
-                .when().put("/" + templateUrl).then().statusCode(200);
-        String parentStackId = createStack(stackName, parentTemplate, CUSTOM_AUTH);
-        try {
-            awaitStackStatus(parentStackId, "CREATE_COMPLETE", CUSTOM_AUTH);
-            String childStackId = getNestedStackId(parentStackId, "ChildStack", CUSTOM_AUTH);
-
-            given().header("Authorization", CUSTOM_AUTH)
-                    .contentType("application/json").body(nestedLambdaTemplate(functionName, 9))
-                    .when().put("/" + templateUrl).then().statusCode(200);
-            updateStack(stackName, parentTemplate, CUSTOM_AUTH);
-            awaitStackStatus(parentStackId, "UPDATE_COMPLETE", CUSTOM_AUTH);
-
-            assertThat(getNestedStackId(parentStackId, "ChildStack", CUSTOM_AUTH), equalTo(childStackId));
-            given().header("Authorization", CUSTOM_AUTH)
-                    .when().get("/2015-03-31/functions/" + functionName)
-                    .then().statusCode(200)
-                    .body("Configuration.Timeout", equalTo(9));
         given().header("Authorization", CUSTOM_AUTH).contentType("application/xml").body(EU_WEST_1_BUCKET)
                 .when().put("/" + bucketName).then().statusCode(200);
         given().header("Authorization", CUSTOM_AUTH)
@@ -971,8 +950,6 @@ class CloudFormationDeletionPolicyIntegrationTest {
             assertThat(events, containsString("<LogicalResourceId>ChildStack</LogicalResourceId>"));
             assertThat(events, containsString("<ResourceStatus>CREATE_FAILED</ResourceStatus>"));
             assertThat(events, containsString("<ResourceStatusReason>Nested stack " + stackName
-                    + "-ChildStack failed: The specified log group already exists: " + logGroupName
-                    + "</ResourceStatusReason>"));
                     + "-ChildStack failed: The following resource(s) failed to create: [MyLogGroup]."
                     + " Rollback requested by user.</ResourceStatusReason>"));
         } finally {

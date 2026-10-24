@@ -133,7 +133,7 @@ public class DocDbContainerManager {
                 .withEntrypoint(List.of("sh", "-c"))
                 .withCmd(List.of(replicaSetScript()))
                 .withLabels(ContainerStorageHelper.resourceIdentityLabels(
-                        "docdb", clusterId, regionResolver.getAccountId(), region));
+                        "docdb", clusterId, regionResolver.getAccountId(), regionResolver.getDefaultRegion()));
 
         if (!containerDetector.isRunningInContainer()) {
             // Clients reach the backend through the cluster proxy, never directly.
@@ -157,6 +157,7 @@ public class DocDbContainerManager {
                 : info.containerId();
         String logGroup = "/aws/docdb/cluster/" + clusterId + "/audit";
         String logStream = logStreamer.generateLogStreamName(shortId);
+        String region = regionResolver.getDefaultRegion();
 
         Closeable logHandle = logStreamer.attach(
                 info.containerId(), logGroup, logStream, region, "docdb:" + clusterId);

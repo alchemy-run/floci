@@ -18,10 +18,6 @@ import io.github.hectorvent.floci.core.resource.SupportedResourceType;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.services.stepfunctions.model.Activity;
 import io.github.hectorvent.floci.services.stepfunctions.model.ActivityTask;
 import io.github.hectorvent.floci.services.stepfunctions.model.Execution;
@@ -474,14 +470,6 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
         stateMachineStore.put(arn, updated);
         LOG.infov("Updated State Machine: {0}", arn);
         return new UpdateStateMachineResult(copyStateMachine(updated), version);
-    }
-
-    public StateMachine updateStateMachine(String arn, String definition, String roleArn,
-                                           JsonNode loggingConfiguration, JsonNode tracingConfiguration) {
-        return updateStateMachine(arn, new UpdateStateMachineRequest(definition, roleArn,
-                loggingConfiguration, loggingConfiguration != null,
-                tracingConfiguration, tracingConfiguration != null,
-                null, false, false, null)).stateMachine();
     }
 
     public StateMachine describeStateMachine(String arn) {
@@ -2853,60 +2841,6 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
     }
 
     /**
-     * Validates one Map numeric field and its mutually-exclusive JSONPath spelling. AWS treats
-     * these fields as JSONPath-only when the effective language is JSONata, while JSONata numeric
-     * expressions are accepted in the literal spelling. The explicit markers preserve the exact
-     * diagnostic location for nested ItemBatcher fields and messages that do not name a field.
-     */
-    private static void validateMapNumberField(String containerPath, JsonNode container,
-                                               boolean jsonata, String languageLocation,
-                                               String literalField,
-                                               String pathField, boolean decimal, Integer maximum,
-                                               List<String> errors) {
-        boolean hasLiteral = container.has(literalField);
-        boolean hasPath = container.has(pathField);
-        if (hasLiteral && hasPath) {
-            errors.add(EXPLICIT_LOCATION_MARKER
-                    + "There should only be one of the following fields: [" + literalField + ", "
-                    + pathField + "]" + MARKER_PAYLOAD_SEPARATOR + containerPath + "/" + literalField);
-        }
-
-        if (jsonata && hasPath) {
-            errors.add(EXPLICIT_LOCATION_MARKER + "The QueryLanguage is set to 'JSONata', but field '"
-                    + pathField + "' is only supported for the 'JSONPath' QueryLanguage"
-                    + MARKER_PAYLOAD_SEPARATOR + languageLocation);
-        }
-
-        if (hasLiteral) {
-            JsonNode value = container.get(literalField);
-            boolean expression = jsonata && value.isTextual()
-                    && JsonataEvaluator.isExpression(value.asText());
-            boolean numeric = decimal ? value.isNumber() : value.isIntegralNumber();
-            if (!numeric && !expression) {
-                errors.add(EXPLICIT_LOCATION_MARKER + "Expected value of type ["
-                        + (decimal ? "NUMBER" : "INTEGER") + "]"
-                        + MARKER_PAYLOAD_SEPARATOR + containerPath + "/" + literalField);
-            } else if (numeric && value.decimalValue().signum() < 0) {
-                errors.add(EXPLICIT_LOCATION_MARKER + "Minimum value is "
-                        + (decimal ? "0.0" : "0") + MARKER_PAYLOAD_SEPARATOR
-                        + containerPath + "/" + literalField);
-            } else if (numeric && maximum != null
-                    && value.decimalValue().compareTo(BigDecimal.valueOf(maximum)) > 0) {
-                errors.add(EXPLICIT_LOCATION_MARKER + "Maximum value is " + maximum
-                        + MARKER_PAYLOAD_SEPARATOR + containerPath + "/" + literalField);
-            }
-        }
-
-        if (!jsonata && hasPath) {
-            JsonNode value = container.get(pathField);
-            if (!value.isTextual() || !isReferencePath(value.asText())) {
-                errors.add(EXPLICIT_LOCATION_MARKER + "Value is not a Reference Path"
-                        + MARKER_PAYLOAD_SEPARATOR + containerPath + "/" + pathField);
-            }
-        }
-    }
-
-    /**
      * A Reference Path selects a single node, so wildcards, filters and slices are rejected. The
      * root is either the state input ({@code $}) or the Context Object ({@code $$}): ASL takes a
      * {@code string_sampler} wherever it takes a Reference Path, and a context path is one of its
@@ -3103,6 +3037,12 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
             }
         }
     }
+
+    private static final Set<String> ITEM_READER_RESOURCES = Set.of(
+            "arn:aws:states:::s3:getObject",
+            "arn:aws:states:::s3:listObjectsV2");
+
+    private static final String RESULT_WRITER_RESOURCE = "arn:aws:states:::s3:putObject";
 
     public double redriveExecution(String executionArn) {
         Execution exec = describeExecution(executionArn);

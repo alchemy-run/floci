@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.services.cognito.model.CognitoFederatedIdentity;
 import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.services.cognitoidentity.model.CognitoIdentityProvider;
 import io.github.hectorvent.floci.services.cognitoidentity.model.IdentityPool;
@@ -18,9 +17,17 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import io.github.hectorvent.floci.services.cognito.model.CognitoFederatedIdentity;
 
 /**
- * Amazon Cognito Identity pool management and local identity credential operations.
+ * Amazon Cognito Identity (federated identity pools) management plane.
+ *
+ * <p>Operations that are not implemented fall through to a clean
+ * {@code UnknownOperationException} rather than a stub success, so callers fail fast
+ * instead of stranding a waiter. The identity and credential-vending operations
+ * ({@code GetId}, {@code GetCredentialsForIdentity}, {@code GetOpenIdToken} and peers) are
+ * deliberately absent: they mint STS session credentials and signed OIDC tokens, which this
+ * management plane has no way to produce.
  */
 @ApplicationScoped
 public class CognitoIdentityJsonHandler {
@@ -34,7 +41,7 @@ public class CognitoIdentityJsonHandler {
         this.objectMapper = objectMapper;
     }
 
-    public Response handle(String action, JsonNode request, String region) {
+    public Response handle(String action, JsonNode request, String region) throws Exception {
         return switch (action) {
             case "CreateIdentityPool" -> Response.ok(
                     identityPoolNode(cognitoIdentityService.createIdentityPool(parsePool(request), region))).build();
@@ -68,7 +75,7 @@ public class CognitoIdentityJsonHandler {
 
             case "SetIdentityPoolRoles" -> {
                 cognitoIdentityService.setIdentityPoolRoles(text(request, "IdentityPoolId"),
-                        roles(request.get("Roles")), request.get("RoleMappings"), region);
+                        stringMap(request.get("Roles")), request.get("RoleMappings"), region);
                 yield Response.ok(objectMapper.createObjectNode()).build();
             }
 
@@ -118,24 +125,12 @@ public class CognitoIdentityJsonHandler {
                         identityPoolId, text(request, "IdentityProviderName"), region);
                 yield Response.ok(principalTagAttributeMapNode(identityPoolId, attributeMap)).build();
             }
-
-            case "GetId" -> {
-                CognitoFederatedIdentity identity = cognitoIdentityService.getId(
-                        text(request, "IdentityPoolId"), stringMap(request.get("Logins")), region);
-                yield Response.ok(objectMapper.createObjectNode()
-                        .put("IdentityId", identity.getIdentityId())).build();
+            case "DeleteIdentities" -> {
+                ObjectNode response = objectMapper.createObjectNode();
+                response.set("UnprocessedIdentityIds", objectMapper.valueToTree(
+                        cognitoIdentityService.deleteIdentities(stringList(request.get("IdentityIdsToDelete")), region)));
+                yield Response.ok(response).build();
             }
-
-            case "GetCredentialsForIdentity" -> Response.ok(objectMapper.valueToTree(
-                    cognitoIdentityService.getCredentialsForIdentity(text(request, "IdentityId"),
-                            stringMap(request.get("Logins")), region))).build();
-
-            case "GetOpenIdToken" -> Response.ok(objectMapper.valueToTree(
-                    cognitoIdentityService.getOpenIdToken(text(request, "IdentityId"), region))).build();
-
-            case "DescribeIdentity" -> Response.ok(identityNode(
-                    cognitoIdentityService.describeIdentity(text(request, "IdentityId"), region))).build();
-
             case "ListIdentities" -> {
                 String poolId = text(request, "IdentityPoolId");
                 ObjectNode response = objectMapper.createObjectNode().put("IdentityPoolId", poolId);
@@ -144,12 +139,18 @@ public class CognitoIdentityJsonHandler {
                         .forEach(identity -> identities.add(identityNode(identity)));
                 yield Response.ok(response).build();
             }
-
-            case "DeleteIdentities" -> {
-                ObjectNode response = objectMapper.createObjectNode();
-                response.set("UnprocessedIdentityIds", objectMapper.valueToTree(
-                        cognitoIdentityService.deleteIdentities(stringList(request.get("IdentityIdsToDelete")), region)));
-                yield Response.ok(response).build();
+            case "DescribeIdentity" -> Response.ok(identityNode(
+                    cognitoIdentityService.describeIdentity(text(request, "IdentityId"), region))).build();
+            case "GetOpenIdToken" -> Response.ok(objectMapper.valueToTree(
+                    cognitoIdentityService.getOpenIdToken(text(request, "IdentityId"), region))).build();
+            case "GetCredentialsForIdentity" -> Response.ok(objectMapper.valueToTree(
+                    cognitoIdentityService.getCredentialsForIdentity(text(request, "IdentityId"),
+                            stringMap(request.get("Logins")), region))).build();
+            case "GetId" -> {
+                CognitoFederatedIdentity identity = cognitoIdentityService.getId(
+                        text(request, "IdentityPoolId"), stringMap(request.get("Logins")), region);
+                yield Response.ok(objectMapper.createObjectNode()
+                        .put("IdentityId", identity.getIdentityId())).build();
             }
 
             default -> throw new AwsException("UnknownOperationException",
@@ -167,8 +168,7 @@ public class CognitoIdentityJsonHandler {
         pool.setDeveloperProviderName(text(request, "DeveloperProviderName"));
         pool.setOpenIdConnectProviderArns(stringList(request.get("OpenIdConnectProviderARNs")));
         pool.setSamlProviderArns(stringList(request.get("SamlProviderARNs")));
-        pool.setIdentityPoolTags(request.has("IdentityPoolTags")
-                ? stringMap(request.get("IdentityPoolTags")) : null);
+        pool.setIdentityPoolTags(stringMap(request.get("IdentityPoolTags")));
 
         List<CognitoIdentityProvider> providers = new ArrayList<>();
         JsonNode providersNode = request.get("CognitoIdentityProviders");
@@ -206,15 +206,6 @@ public class CognitoIdentityJsonHandler {
             providerNode.put("ClientId", provider.getClientId());
             providerNode.put("ServerSideTokenCheck", provider.isServerSideTokenCheck());
         }
-        return node;
-    }
-
-    private ObjectNode identityNode(CognitoFederatedIdentity identity) {
-        ObjectNode node = objectMapper.createObjectNode();
-        node.put("IdentityId", identity.getIdentityId());
-        node.set("Logins", objectMapper.valueToTree(identity.getLogins()));
-        node.put("CreationDate", identity.getCreationDate());
-        node.put("LastModifiedDate", identity.getLastModifiedDate());
         return node;
     }
 
@@ -264,6 +255,31 @@ public class CognitoIdentityJsonHandler {
         return value;
     }
 
+    private Map<String, String> stringMap(JsonNode node) {
+        Map<String, String> values = new LinkedHashMap<>();
+        if (node != null && node.isObject()) {
+            node.fields().forEachRemaining(entry -> values.put(entry.getKey(), entry.getValue().asText()));
+        }
+        return values;
+    }
+
+    private List<String> stringList(JsonNode node) {
+        List<String> values = new ArrayList<>();
+        if (node != null && node.isArray()) {
+            node.forEach(element -> values.add(element.asText()));
+        }
+        return values;
+    }
+
+    private ObjectNode identityNode(CognitoFederatedIdentity identity) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("IdentityId", identity.getIdentityId());
+        node.set("Logins", objectMapper.valueToTree(identity.getLogins()));
+        node.put("CreationDate", identity.getCreationDate());
+        node.put("LastModifiedDate", identity.getLastModifiedDate());
+        return node;
+    }
+
     private Map<String, String> roles(JsonNode node) {
         if (node == null || node.isNull()) {
             return null;
@@ -278,22 +294,6 @@ public class CognitoIdentityJsonHandler {
                 throw new AwsException("SerializationException", "Role ARN must be a string.", 400);
             }
             values.put(entry.getKey(), value.isNull() ? null : value.textValue());
-        }
-        return values;
-    }
-
-    private Map<String, String> stringMap(JsonNode node) {
-        Map<String, String> values = new LinkedHashMap<>();
-        if (node != null && node.isObject()) {
-            node.fields().forEachRemaining(entry -> values.put(entry.getKey(), entry.getValue().asText()));
-        }
-        return values;
-    }
-
-    private List<String> stringList(JsonNode node) {
-        List<String> values = new ArrayList<>();
-        if (node != null && node.isArray()) {
-            node.forEach(element -> values.add(element.asText()));
         }
         return values;
     }

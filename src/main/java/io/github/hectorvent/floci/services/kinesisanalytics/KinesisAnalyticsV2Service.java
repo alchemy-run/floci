@@ -1,9 +1,6 @@
 package io.github.hectorvent.floci.services.kinesisanalytics;
 
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
@@ -25,17 +22,20 @@ import org.jboss.logging.Logger;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.Comparator;
+import java.util.UUID;
 
 /**
  * Control plane for Managed Service for Apache Flink (Kinesis Analytics V2). Holds the
@@ -148,21 +148,6 @@ public class KinesisAnalyticsV2Service {
                                               Boolean snapshotsEnabled) {
         return createApplication(applicationName, runtimeEnvironment, serviceExecutionRole,
                 applicationDescription, applicationMode, codeS3Bucket, codeS3Key, codeS3ObjectVersion,
-                parallelism, tags, environmentProperties, snapshotsEnabled, null, List.of());
-    }
-
-    public synchronized FlinkApplication createApplication(String applicationName, String runtimeEnvironment,
-                                              String serviceExecutionRole, String applicationDescription,
-                                              String applicationMode, String codeS3Bucket, String codeS3Key,
-                                              String codeS3ObjectVersion, int parallelism, Map<String, String> tags,
-                                              Map<String, Map<String, String>> environmentProperties,
-                                              Boolean snapshotsEnabled, JsonNode flinkConfiguration,
-                                              List<String> loggingStreams) {
-        ObjectNode configuration = mergeFlinkConfiguration(null, flinkConfiguration, false);
-        validateLoggingStreams(loggingStreams);
-        if (applicationMode != null && !"STREAMING".equals(applicationMode)) {
-            throw new AwsException("InvalidArgumentException", "Only STREAMING applications are supported", 400);
-        }
                 parallelism, tags, environmentProperties, snapshotsEnabled, config.defaultRegion());
     }
 
@@ -217,11 +202,7 @@ public class KinesisAnalyticsV2Service {
         app.setCodeS3Bucket(codeS3Bucket);
         app.setCodeS3Key(codeS3Key);
         app.setCodeS3ObjectVersion(codeS3ObjectVersion);
-        if (parallelism < 1) {
-            throw new AwsException("InvalidArgumentException", "Parallelism must be positive", 400);
-        }
-        app.setParallelism("DEFAULT".equals(configuration.path("ParallelismConfiguration")
-                .path("ConfigurationType").asText()) ? 1 : parallelism);
+        app.setParallelism(parallelism < 1 ? 1 : parallelism);
         if (tags != null) {
             app.setTags(new LinkedHashMap<>(tags));
         }
@@ -232,10 +213,6 @@ public class KinesisAnalyticsV2Service {
             app.setSnapshotsEnabled(snapshotsEnabled);
         }
 
-        app.setFlinkConfiguration(configuration);
-        loggingStreams.forEach(stream -> app.getCloudWatchLoggingOptions().put(UUID.randomUUID().toString(), stream));
-        app.setConditionalToken(UUID.randomUUID().toString());
-        rememberVersion(app);
         putApplication(app);
         LOG.infov("Created Kinesis Analytics V2 application {0}", applicationName);
         return app;
@@ -273,14 +250,7 @@ public class KinesisAnalyticsV2Service {
         return storage.scan(key -> key.startsWith(prefix));
     }
 
-    public List<FlinkApplication> listApplications() {
-        return storage.scan(k -> true).stream()
-                .filter(app -> app.getApplicationArn().equals(regionResolver.buildArn("kinesisanalytics",
-                        regionResolver.getRegion(), "application/" + app.getApplicationName())))
-                .distinct().sorted(Comparator.comparing(FlinkApplication::getApplicationName)).toList();
-    }
-
-    public synchronized FlinkApplication startApplication(String applicationName) {
+    public FlinkApplication startApplication(String applicationName) {
         return startApplication(applicationName, config.defaultRegion());
     }
 
@@ -339,7 +309,7 @@ public class KinesisAnalyticsV2Service {
         return app;
     }
 
-    public synchronized FlinkApplication stopApplication(String applicationName) {
+    public FlinkApplication stopApplication(String applicationName) {
         return stopApplication(applicationName, config.defaultRegion());
     }
 
@@ -357,12 +327,6 @@ public class KinesisAnalyticsV2Service {
         // Stopping the JobManager is synchronous, so the application returns to READY directly.
         app.setApplicationStatus(ApplicationStatus.READY);
         app.setLastUpdateTimestamp(Instant.now());
-        app.getOperations().values().stream()
-                .filter(info -> "IN_PROGRESS".equals(info.path("OperationStatus").asText()))
-                .forEach(info -> {
-                    info.put("OperationStatus", "CANCELLED");
-                    info.put("EndTime", app.getLastUpdateTimestamp().toEpochMilli() / 1000.0);
-                });
         putApplication(app);
         LOG.infov("Stopped Kinesis Analytics V2 application {0}", applicationName);
         return app;
@@ -402,47 +366,23 @@ public class KinesisAnalyticsV2Service {
             throw new AwsException("InvalidArgumentException",
                     "CurrentApplicationVersionId is required", 400);
         }
-        rememberVersion(app);
-        if (runtimeEnvironment != null) {
-            KinesisAnalyticsRuntimes.validate(runtimeEnvironment);
-            app.setRuntimeEnvironment(runtimeEnvironment);
+        if (currentApplicationVersionId != app.getApplicationVersionId()) {
+            throw new AwsException("ConcurrentModificationException",
+                    "Provided CurrentApplicationVersionId " + currentApplicationVersionId
+                            + " does not match the current version " + app.getApplicationVersionId(), 400);
         }
-        ObjectNode configuration = mergeFlinkConfiguration(app.getFlinkConfiguration(), flinkConfiguration, true);
-        validateLoggingStreams(new ArrayList<>(loggingUpdates.values()));
-        loggingUpdates.forEach((id, stream) -> {
-            if (!app.getCloudWatchLoggingOptions().containsKey(id)) {
-                throw new AwsException("ResourceNotFoundException", "Logging option not found: " + id, 400);
-            }
-            app.getCloudWatchLoggingOptions().put(id, stream);
-        });
-        if (environmentProperties != null) {
-            app.setEnvironmentProperties(environmentProperties);
-        }
-        app.setFlinkConfiguration(configuration);
         if (serviceExecutionRole != null && !serviceExecutionRole.isBlank()) {
             app.setServiceExecutionRole(serviceExecutionRole);
         }
-        boolean codeChanged = codeS3Bucket != null || codeS3Key != null || codeS3ObjectVersion != null;
+        boolean codeChanged = codeS3Bucket != null && !codeS3Bucket.isBlank()
+                && codeS3Key != null && !codeS3Key.isBlank();
         if (codeChanged) {
-            if (codeS3Bucket != null) {
-                app.setCodeS3Bucket(codeS3Bucket);
-            }
-            if (codeS3Key != null) {
-                app.setCodeS3Key(codeS3Key);
-            }
+            app.setCodeS3Bucket(codeS3Bucket);
+            app.setCodeS3Key(codeS3Key);
             app.setCodeS3ObjectVersion(codeS3ObjectVersion);
-            if (!app.hasCode()) {
-                throw new AwsException("InvalidArgumentException", "Code requires an S3 bucket and file key", 400);
-            }
         }
-        if (parallelism != null) {
-            if (parallelism < 1) {
-                throw new AwsException("InvalidArgumentException", "Parallelism must be positive", 400);
-            }
+        if (parallelism != null && parallelism > 0) {
             app.setParallelism(parallelism);
-        }
-        if ("DEFAULT".equals(configuration.path("ParallelismConfiguration").path("ConfigurationType").asText())) {
-            app.setParallelism(1);
         }
         if (snapshotsEnabled != null) {
             app.setSnapshotsEnabled(snapshotsEnabled);
@@ -473,13 +413,15 @@ public class KinesisAnalyticsV2Service {
             }
         }
 
-        completeConfigurationChange(app, "UpdateApplication");
+        app.setApplicationVersionId(app.getApplicationVersionId() + 1);
+        app.setLastUpdateTimestamp(Instant.now());
+        putApplication(app);
         LOG.infov("Updated Kinesis Analytics V2 application {0} to version {1}",
                 applicationName, app.getApplicationVersionId());
         return app;
     }
 
-    public synchronized void deleteApplication(String applicationName, Instant createTimestamp) {
+    public void deleteApplication(String applicationName, Instant createTimestamp) {
         deleteApplication(applicationName, createTimestamp, config.defaultRegion());
     }
 
@@ -495,18 +437,16 @@ public class KinesisAnalyticsV2Service {
             throw new AwsException("InvalidArgumentException",
                     "Provided CreateTimestamp does not match application " + applicationName, 400);
         }
-        // AWS halts a READY/STARTING/RUNNING application's execution and deletes it; only an
-        // application already mid-transition (stopping, updating, deleting) is ResourceInUse.
-        ApplicationStatus status = app.getApplicationStatus();
-        if (status != ApplicationStatus.READY && status != ApplicationStatus.STARTING
-                && status != ApplicationStatus.RUNNING) {
+        // AWS rejects deletion of a non-stopped application (RUNNING/STARTING) with
+        // ResourceInUseException; the caller must StopApplication first.
+        if (app.getApplicationStatus() != ApplicationStatus.READY) {
             throw new AwsException("ResourceInUseException",
-                    "Application " + applicationName + " cannot be deleted while in state " + status, 400);
+                    "Application " + applicationName + " cannot be deleted while in state "
+                            + app.getApplicationStatus() + "; stop the application first", 400);
         }
         if (!config.services().kinesisAnalytics().mock()) {
-            // Force-stops a STARTING/RUNNING cluster without taking a snapshot. A no-op for a READY
-            // app with no container; also clears any stale container left from a previous run
-            // (containerId is not persisted across an emulator restart).
+            // No-op for a READY app with no container; also clears any stale container left from a
+            // previous run (containerId is not persisted across an emulator restart).
             containerManager.stopCluster(app);
             // Only on delete, never on a plain StopApplication (stopCluster above) — the savepoints
             // volume must survive a stop/restart cycle so snapshots remain describable/listable.
@@ -525,7 +465,7 @@ public class KinesisAnalyticsV2Service {
         return findByArn(resourceArn).getTags();
     }
 
-    public synchronized Map<String, String> tagResource(String resourceArn, Map<String, String> tags) {
+    public Map<String, String> tagResource(String resourceArn, Map<String, String> tags) {
         FlinkApplication app = findByArn(resourceArn);
         Map<String, String> merged = new LinkedHashMap<>(app.getTags());
         if (tags != null) {
@@ -540,7 +480,7 @@ public class KinesisAnalyticsV2Service {
         return app.getTags();
     }
 
-    public synchronized Map<String, String> untagResource(String resourceArn, List<String> tagKeys) {
+    public Map<String, String> untagResource(String resourceArn, List<String> tagKeys) {
         FlinkApplication app = findByArn(resourceArn);
         if (tagKeys != null) {
             tagKeys.forEach(app.getTags()::remove);
@@ -682,6 +622,169 @@ public class KinesisAnalyticsV2Service {
                     "Application " + applicationName + " is not available for this operation", 400);
         }
         return app.getRestEndpoint();
+    }
+
+    private FlinkApplication findByArn(String resourceArn) {
+        if (resourceArn == null || resourceArn.isBlank()) {
+            throw new AwsException("InvalidArgumentException", "ResourceARN is required", 400);
+        }
+        AwsArnUtils.Arn arn;
+        try {
+            arn = AwsArnUtils.parse(resourceArn);
+        } catch (IllegalArgumentException e) {
+            throw new AwsException("InvalidArgumentException", "Invalid resource ARN: " + resourceArn, 400);
+        }
+        String accountId = regionResolver.getAccountId();
+        String resourcePrefix = "application/";
+        if (!"kinesisanalytics".equals(arn.service())
+                || !arn.resource().startsWith(resourcePrefix)
+                || arn.resource().length() == resourcePrefix.length()
+                || arn.resource().substring(resourcePrefix.length()).contains("/")) {
+            throw new AwsException("InvalidArgumentException", "Invalid resource ARN: " + resourceArn, 400);
+        }
+        if (!accountId.equals(arn.accountId())) {
+            throw new AwsException("ResourceNotFoundException",
+                    "No application found for ARN: " + resourceArn, 400);
+        }
+        String applicationName = arn.resource().substring(resourcePrefix.length());
+        String region = arn.region().isEmpty() ? config.defaultRegion() : arn.region();
+        return getStoredApplication(accountId, region, applicationName)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "No application found for ARN: " + resourceArn, 400));
+    }
+
+    private void startReadinessPoller() {
+        poller.scheduleAtFixedRate(() -> {
+            try {
+                if (config.services().kinesisAnalytics().mock()) {
+                    return;
+                }
+                for (FlinkApplication app : allApplications()) {
+                    boolean changed = false;
+                    if (app.getApplicationStatus() == ApplicationStatus.STARTING) {
+                        String previousJobId = app.getFlinkJobId();
+                        if (containerManager.advanceToRunning(app)) {
+                            LOG.infov("Kinesis Analytics V2 application {0} is now RUNNING",
+                                    app.getApplicationName());
+                            app.setApplicationStatus(ApplicationStatus.RUNNING);
+                            app.setLastUpdateTimestamp(Instant.now());
+                            changed = true;
+                        } else if (!Objects.equals(previousJobId, app.getFlinkJobId())) {
+                            // The Flink job was just submitted (flinkJobId newly assigned) but hasn't
+                            // reached RUNNING yet. Persist now rather than waiting for that: pendingJars
+                            // (an in-process-only cache) is already cleared at this point, so if the
+                            // emulator restarts before the next RUNNING-triggered persist, an unpersisted
+                            // flinkJobId would leave the application stuck — it could never re-fetch the
+                            // JAR to resubmit, nor know a job was already running to poll instead.
+                            changed = true;
+                        }
+                    }
+                    for (Snapshot snapshot : app.getSnapshots().values()) {
+                        if (snapshot.getSnapshotStatus() == SnapshotStatus.CREATING
+                                && containerManager.advanceSnapshot(app, snapshot)) {
+                            changed = true;
+                        }
+                    }
+                    if (changed) {
+                        putApplication(app);
+                    }
+                }
+            } catch (Exception e) {
+                LOG.error("Error in Kinesis Analytics V2 readiness poller", e);
+            }
+        }, 1, 2, TimeUnit.SECONDS);
+    }
+
+    private List<FlinkApplication> allApplications() {
+        if (storage instanceof AccountAwareStorageBackend<FlinkApplication> aware) {
+            return aware.scanAllAccounts();
+        }
+        return storage.scan(k -> true);
+    }
+
+    private void putApplication(FlinkApplication app) {
+        String region = AwsArnUtils.regionOrDefault(app.getApplicationArn(), config.defaultRegion());
+        String key = applicationKey(region, app.getApplicationName());
+        if (app.getAccountId() != null && storage instanceof AccountAwareStorageBackend<FlinkApplication> aware) {
+            aware.putForAccount(app.getAccountId(), key, app);
+        } else {
+            storage.put(key, app);
+        }
+    }
+
+    private Optional<FlinkApplication> getStoredApplication(String accountId, String region,
+                                                             String applicationName) {
+        String key = applicationKey(region, applicationName);
+        if (storage instanceof AccountAwareStorageBackend<FlinkApplication> aware) {
+            List<String> legacyKeys = region.equals(config.defaultRegion())
+                    ? List.of(applicationName) : List.of();
+            return aware.getForAccountMigratingLegacyKeys(accountId, key, legacyKeys,
+                    application -> belongsTo(application, accountId, region, applicationName),
+                    isDefaultScope(accountId, region));
+        }
+        synchronized (storage) {
+            Optional<FlinkApplication> scoped = storage.get(key);
+            if (scoped.isPresent() || !region.equals(config.defaultRegion())) {
+                return scoped;
+            }
+            Optional<FlinkApplication> legacy = storage.get(applicationName)
+                    .filter(application -> belongsTo(application, accountId, region, applicationName));
+            legacy.ifPresent(application -> {
+                storage.put(key, application);
+                storage.delete(applicationName);
+            });
+            return legacy;
+        }
+    }
+
+    private void migrateLegacyApplications(AccountAwareStorageBackend<FlinkApplication> aware,
+                                           String accountId, String region) {
+        if (!region.equals(config.defaultRegion())) {
+            return;
+        }
+        aware.migrateLegacyEntries(accountId, key -> !key.contains("/"),
+                application -> applicationKey(region, application.getApplicationName()),
+                application -> belongsTo(application, accountId, region, application.getApplicationName()));
+    }
+
+    private boolean isDefaultScope(String accountId, String region) {
+        return accountId.equals(regionResolver.getDefaultAccountId())
+                && region.equals(regionResolver.getDefaultRegion());
+    }
+
+    private static boolean belongsTo(FlinkApplication application, String accountId, String region,
+                                     String applicationName) {
+        if (!Objects.equals(applicationName, application.getApplicationName())) {
+            return false;
+        }
+        try {
+            AwsArnUtils.Arn arn = AwsArnUtils.parse(application.getApplicationArn());
+            return accountId.equals(arn.accountId()) && region.equals(arn.region())
+                    && (application.getAccountId() == null || accountId.equals(application.getAccountId()));
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    private String applicationKey(String region, String applicationName) {
+        return region + "/" + applicationName;
+    }
+
+    private Optional<FlinkApplication> findApplication(String name) {
+        String arn = regionResolver.buildArn("kinesisanalytics", regionResolver.getRegion(), "application/" + name);
+        if (storage instanceof AccountAwareStorageBackend<FlinkApplication> aware) {
+            return aware.getForAccountMigratingLegacyKeys(regionResolver.getAccountId(), arn, List.of(name),
+                    app -> arn.equals(app.getApplicationArn()));
+        }
+        Optional<FlinkApplication> found = storage.get(arn).filter(app -> arn.equals(app.getApplicationArn()));
+        if (found.isEmpty()) {
+            found = storage.get(name).filter(app -> arn.equals(app.getApplicationArn()));
+            found.ifPresent(app -> {
+                storage.put(arn, app);
+                storage.delete(name);
+            });
+        }
+        return found;
     }
 
     public synchronized FlinkApplication updateMaintenance(String name, String startTime) {
@@ -897,90 +1000,6 @@ public class KinesisAnalyticsV2Service {
         return result;
     }
 
-    private FlinkApplication findByArn(String resourceArn) {
-        if (resourceArn == null || resourceArn.isBlank()) {
-            throw new AwsException("InvalidArgumentException", "ResourceARN is required", 400);
-        }
-        AwsArnUtils.Arn arn;
-        try {
-            arn = AwsArnUtils.parse(resourceArn);
-        } catch (IllegalArgumentException e) {
-            throw new AwsException("InvalidArgumentException", "Invalid resource ARN: " + resourceArn, 400);
-        }
-        String accountId = regionResolver.getAccountId();
-        String resourcePrefix = "application/";
-        if (!"kinesisanalytics".equals(arn.service())
-                || !arn.resource().startsWith(resourcePrefix)
-                || arn.resource().length() == resourcePrefix.length()
-                || arn.resource().substring(resourcePrefix.length()).contains("/")) {
-            throw new AwsException("InvalidArgumentException", "Invalid resource ARN: " + resourceArn, 400);
-        }
-        if (!accountId.equals(arn.accountId())) {
-            throw new AwsException("ResourceNotFoundException",
-                    "No application found for ARN: " + resourceArn, 400);
-        }
-        String applicationName = arn.resource().substring(resourcePrefix.length());
-        String region = arn.region().isEmpty() ? config.defaultRegion() : arn.region();
-        return getStoredApplication(accountId, region, applicationName)
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                        "No application found for ARN: " + resourceArn, 400));
-    }
-
-    private void startReadinessPoller() {
-        poller.scheduleAtFixedRate(() -> {
-            try {
-                if (config.services().kinesisAnalytics().mock()) {
-                    return;
-                }
-                for (FlinkApplication app : allApplications()) {
-                    boolean changed = false;
-                    if (app.getApplicationStatus() == ApplicationStatus.STARTING) {
-                        String previousJobId = app.getFlinkJobId();
-                        if (containerManager.advanceToRunning(app)) {
-                            LOG.infov("Kinesis Analytics V2 application {0} is now RUNNING",
-                                    app.getApplicationName());
-                            app.setApplicationStatus(ApplicationStatus.RUNNING);
-                            app.setLastUpdateTimestamp(Instant.now());
-                            app.getOperations().values().stream()
-                                    .filter(info -> "IN_PROGRESS".equals(info.path("OperationStatus").asText()))
-                                    .forEach(info -> {
-                                        info.put("OperationStatus", "SUCCESSFUL");
-                                        info.put("EndTime", app.getLastUpdateTimestamp().toEpochMilli() / 1000.0);
-                                    });
-                            changed = true;
-                        } else if (!Objects.equals(previousJobId, app.getFlinkJobId())) {
-                            // The Flink job was just submitted (flinkJobId newly assigned) but hasn't
-                            // reached RUNNING yet. Persist now rather than waiting for that: pendingJars
-                            // (an in-process-only cache) is already cleared at this point, so if the
-                            // emulator restarts before the next RUNNING-triggered persist, an unpersisted
-                            // flinkJobId would leave the application stuck — it could never re-fetch the
-                            // JAR to resubmit, nor know a job was already running to poll instead.
-                            changed = true;
-                        }
-                    }
-                    for (Snapshot snapshot : app.getSnapshots().values()) {
-                        if (snapshot.getSnapshotStatus() == SnapshotStatus.CREATING
-                                && containerManager.advanceSnapshot(app, snapshot)) {
-                            changed = true;
-                        }
-                    }
-                    if (changed) {
-                        persistPolledApplication(app);
-                    }
-                }
-            } catch (Exception e) {
-                LOG.error("Error in Kinesis Analytics V2 readiness poller", e);
-            }
-        }, 1, 2, TimeUnit.SECONDS);
-    }
-
-    private List<FlinkApplication> allApplications() {
-        if (storage instanceof AccountAwareStorageBackend<FlinkApplication> aware) {
-            return aware.scanAllAccounts();
-        }
-        return storage.scan(k -> true);
-    }
-
     private synchronized void persistPolledApplication(FlinkApplication app) {
         Optional<FlinkApplication> current = app.getAccountId() != null
                 && storage instanceof AccountAwareStorageBackend<FlinkApplication> aware
@@ -990,73 +1009,5 @@ public class KinesisAnalyticsV2Service {
         if (current.orElse(null) == app) {
             putApplication(app);
         }
-    }
-
-    private void putApplication(FlinkApplication app) {
-        String region = AwsArnUtils.regionOrDefault(app.getApplicationArn(), config.defaultRegion());
-        String key = applicationKey(region, app.getApplicationName());
-        if (app.getAccountId() != null && storage instanceof AccountAwareStorageBackend<FlinkApplication> aware) {
-            aware.putForAccount(app.getAccountId(), key, app);
-        } else {
-            storage.put(key, app);
-        }
-    }
-
-    private Optional<FlinkApplication> getStoredApplication(String accountId, String region,
-                                                             String applicationName) {
-        String key = applicationKey(region, applicationName);
-        if (storage instanceof AccountAwareStorageBackend<FlinkApplication> aware) {
-            List<String> legacyKeys = region.equals(config.defaultRegion())
-                    ? List.of(applicationName) : List.of();
-            return aware.getForAccountMigratingLegacyKeys(accountId, key, legacyKeys,
-                    application -> belongsTo(application, accountId, region, applicationName),
-                    isDefaultScope(accountId, region));
-        }
-        synchronized (storage) {
-            Optional<FlinkApplication> scoped = storage.get(key);
-            if (scoped.isPresent() || !region.equals(config.defaultRegion())) {
-                return scoped;
-            }
-            Optional<FlinkApplication> legacy = storage.get(applicationName)
-                    .filter(application -> belongsTo(application, accountId, region, applicationName));
-            legacy.ifPresent(application -> {
-                storage.put(key, application);
-                storage.delete(applicationName);
-            });
-            return legacy;
-        }
-    }
-
-    private void migrateLegacyApplications(AccountAwareStorageBackend<FlinkApplication> aware,
-                                           String accountId, String region) {
-        if (!region.equals(config.defaultRegion())) {
-            return;
-        }
-        aware.migrateLegacyEntries(accountId, key -> !key.contains("/"),
-                application -> applicationKey(region, application.getApplicationName()),
-                application -> belongsTo(application, accountId, region, application.getApplicationName()));
-    }
-
-    private boolean isDefaultScope(String accountId, String region) {
-        return accountId.equals(regionResolver.getDefaultAccountId())
-                && region.equals(regionResolver.getDefaultRegion());
-    }
-
-    private static boolean belongsTo(FlinkApplication application, String accountId, String region,
-                                     String applicationName) {
-        if (!Objects.equals(applicationName, application.getApplicationName())) {
-            return false;
-        }
-        try {
-            AwsArnUtils.Arn arn = AwsArnUtils.parse(application.getApplicationArn());
-            return accountId.equals(arn.accountId()) && region.equals(arn.region())
-                    && (application.getAccountId() == null || accountId.equals(application.getAccountId()));
-        } catch (IllegalArgumentException e) {
-            return false;
-        }
-    }
-
-    private String applicationKey(String region, String applicationName) {
-        return region + "/" + applicationName;
     }
 }

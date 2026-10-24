@@ -28,14 +28,8 @@ public class ElastiCacheProxyManager {
     public void startProxy(String groupId, AuthMode authMode, int proxyPort,
                            String backendHost, int backendPort,
                            ElastiCacheAuthProxy.PasswordValidator passwordValidator) {
-        startProxy(groupId, authMode, proxyPort, backendHost, backendPort, passwordValidator, groupId);
-    }
-
-    public void startProxy(String groupId, AuthMode authMode, int proxyPort,
-                           String backendHost, int backendPort,
-                           ElastiCacheAuthProxy.PasswordValidator passwordValidator, String authIdentity) {
         ElastiCacheAuthProxy proxy = new ElastiCacheAuthProxy(
-                authIdentity, authMode, backendHost, backendPort,
+                groupId, authMode, backendHost, backendPort,
                 passwordValidator, sigV4Validator);
         try {
             proxy.start(proxyPort);

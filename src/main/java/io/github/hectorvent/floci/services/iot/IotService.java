@@ -55,7 +55,6 @@ import java.nio.charset.StandardCharsets;
 import java.security.cert.CertificateEncodingException;
 import java.security.cert.X509Certificate;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -75,6 +74,13 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
+import com.fasterxml.jackson.databind.node.TextNode;
+import io.github.hectorvent.floci.services.dynamodb.DynamoDbService;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
+import java.util.HexFormat;
+import java.util.function.BiConsumer;
 
 @ApplicationScoped
 public class IotService {
@@ -91,8 +97,6 @@ public class IotService {
     /** The {@code FirehoseSeparator} shape of the IoT API model. */
     private static final Pattern FIREHOSE_SEPARATOR = Pattern.compile("([\\n\\t])|(\\r\\n)|(,)");
     public static final int MAX_POLICY_VERSIONS = 5;
-    /** How long a thing type must stay deprecated before DeleteThingType accepts it. */
-    static final Duration THING_TYPE_DELETION_DELAY = Duration.ofMinutes(5);
 
     /** One lock for every policy version write and the policy delete, so a cap check, an append and a delete cannot interleave. */
     private final Object policyWriteLock = new Object();
@@ -134,7 +138,6 @@ public class IotService {
     private final FlociCertificateAuthority certificateAuthority;
     private final IamPolicyEvaluator policyEvaluator;
     private final RuleSqlEvaluator ruleSqlEvaluator;
-    private final Clock clock;
 
     @Inject
     public IotService(StorageFactory storageFactory,
@@ -199,43 +202,6 @@ public class IotService {
                   CloudWatchLogsService cloudWatchLogsService,
                   FlociCertificateAuthority certificateAuthority,
                   IamPolicyEvaluator policyEvaluator) {
-        this(thingStore, certificateStore, policyStore, policyAttachmentStore, thingPrincipalStore, shadowStore,
-                topicRuleStore, retainedMessageStore, jobStore, jobExecutionStore, thingTypeStore, thingGroupStore,
-                thingGroupMembershipStore, config, regionResolver, objectMapper, publishEventRecorder, mqttBrokerService,
-                sqsService, snsService, s3Service, kinesisService, dynamoDbService, lambdaService, firehoseService,
-                cloudWatchLogsService, certificateAuthority, policyEvaluator, Clock.systemUTC());
-    }
-
-    IotService(StorageBackend<String, Thing> thingStore,
-               StorageBackend<String, IotCertificate> certificateStore,
-               StorageBackend<String, IotPolicy> policyStore,
-               StorageBackend<String, Set<String>> policyAttachmentStore,
-               StorageBackend<String, Set<String>> thingPrincipalStore,
-               StorageBackend<String, IotShadow> shadowStore,
-               StorageBackend<String, IotTopicRule> topicRuleStore,
-               StorageBackend<String, IotRetainedMessage> retainedMessageStore,
-               StorageBackend<String, IotJob> jobStore,
-               StorageBackend<String, IotJobExecution> jobExecutionStore,
-               StorageBackend<String, IotThingType> thingTypeStore,
-               StorageBackend<String, IotThingGroup> thingGroupStore,
-               StorageBackend<String, Set<String>> thingGroupMembershipStore,
-               EmulatorConfig config,
-               RegionResolver regionResolver,
-               ObjectMapper objectMapper,
-               IotPublishEventRecorder publishEventRecorder,
-               IotMqttBrokerService mqttBrokerService,
-               SqsService sqsService,
-               SnsService snsService,
-               S3Service s3Service,
-               KinesisService kinesisService,
-               DynamoDbService dynamoDbService,
-               LambdaService lambdaService,
-               FirehoseService firehoseService,
-               CloudWatchLogsService cloudWatchLogsService,
-               FlociCertificateAuthority certificateAuthority,
-               IamPolicyEvaluator policyEvaluator,
-               Clock clock) {
-        this.clock = clock;
         this.thingStore = thingStore;
         this.certificateStore = certificateStore;
         this.policyStore = policyStore;
@@ -269,11 +235,11 @@ public class IotService {
 
     public String describeEndpoint(String endpointType) {
         String effectiveType = endpointType == null || endpointType.isBlank() ? DEFAULT_ENDPOINT_TYPE : endpointType;
-        if (!IotEndpoints.TYPES.contains(effectiveType)) {
+        if (!Set.of(DEFAULT_ENDPOINT_TYPE, "iot:Data", "iot:Jobs", "iot:CredentialProvider").contains(effectiveType)) {
             throw new AwsException("InvalidRequestException", "Unsupported endpoint type: " + effectiveType, 400);
         }
         startMqttIfEnabled();
-        return IotEndpoints.address(config, effectiveType, regionResolver.getAccountId(), regionResolver.getRegion());
+        return config.iotEndpointAddress();
     }
 
     public Thing createThing(String thingName, Map<String, String> attributes, String region) {
@@ -283,10 +249,8 @@ public class IotService {
     public Thing createThing(String thingName, Map<String, String> attributes, String thingTypeName, String region) {
         startMqttIfEnabled();
         validateThingName(thingName);
-        if (thingTypeName != null && !thingTypeName.isBlank()
-                && describeThingType(thingTypeName, region).isDeprecated()) {
-            throw new AwsException("InvalidRequestException",
-                    "Can not create a new thing with deprecated thing type " + thingTypeName + ".", 400);
+        if (thingTypeName != null && !thingTypeName.isBlank()) {
+            describeThingType(thingTypeName, region);
         }
         String key = thingKey(region, thingName);
         Thing existing = thingStore.get(key).orElse(null);
@@ -1283,41 +1247,14 @@ public class IotService {
     }
 
     public void deprecateThingType(String thingTypeName, String region) {
-        deprecateThingType(thingTypeName, false, region);
-    }
-
-    /**
-     * Deprecates a thing type, or with {@code undoDeprecate} reverts it to active. Deprecating an
-     * already deprecated type keeps its original deprecation date, which the deletion window
-     * counts from.
-     */
-    public void deprecateThingType(String thingTypeName, boolean undoDeprecate, String region) {
         IotThingType type = describeThingType(thingTypeName, region);
-        if (undoDeprecate) {
-            type.setDeprecated(false);
-            type.setDeprecatedDate(null);
-        } else if (!type.isDeprecated()) {
-            type.setDeprecated(true);
-            type.setDeprecatedDate(clock.instant());
-        }
+        type.setDeprecated(true);
+        type.setDeprecatedDate(Instant.now());
         thingTypeStore.put(thingTypeKey(region, thingTypeName), type);
     }
 
-    /**
-     * Deletes a thing type. AWS only deletes a type that has been deprecated for at least
-     * {@link #THING_TYPE_DELETION_DELAY} and that no thing is associated with.
-     */
     public void deleteThingType(String thingTypeName, String region) {
-        IotThingType type = describeThingType(thingTypeName, region);
-        if (!type.isDeprecated()) {
-            throw new AwsException("InvalidRequestException",
-                    "Thing type " + thingTypeName + " must be deprecated before it can be deleted.", 400);
-        }
-        Instant deprecatedAt = type.getDeprecatedDate() != null ? type.getDeprecatedDate() : type.getCreationDate();
-        if (deprecatedAt != null && clock.instant().isBefore(deprecatedAt.plus(THING_TYPE_DELETION_DELAY))) {
-            throw new AwsException("InvalidRequestException",
-                    "Thing type " + thingTypeName + " cannot be deleted until 5 minutes after it was deprecated.", 400);
-        }
+        describeThingType(thingTypeName, region);
         boolean inUse = listThings(region).stream().anyMatch(thing -> thingTypeName.equals(thing.getThingTypeName()));
         if (inUse) {
             throw new AwsException("InvalidRequestException", "Cannot delete thing type with associated things", 400);
@@ -1592,8 +1529,7 @@ public class IotService {
 
     public IotTopicRule getTopicRule(String ruleName, String region) {
         return topicRuleStore.get(topicRuleKey(region, ruleName))
-                .orElseThrow(() -> new AwsException("UnauthorizedException",
-                        "Access to topic rule '" + ruleName + "' was denied", 401));
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Topic rule not found: " + ruleName, 404));
     }
 
     public List<IotTopicRule> listTopicRules(String region) {
@@ -2210,13 +2146,8 @@ public class IotService {
     }
 
     private TaggableResource taggableForArn(String resourceArn) {
-        AwsArnUtils.Arn arn = parseIotArn(resourceArn);
-        if (!regionResolver.getAccountId().equals(arn.accountId())
-                || !regionResolver.getRegion().equals(arn.region())) {
-            throw new AwsException("ResourceNotFoundException", "Resource not found: " + resourceArn, 404);
-        }
-        String resource = arn.resource();
-        String region = arn.region();
+        String resource = resourceFromArn(resourceArn);
+        String region = regionFromArn(resourceArn);
         if (resource.startsWith("thing/")) {
             String thingName = resource.substring("thing/".length());
             Thing thing = thingStore.get(thingKey(region, thingName))
@@ -2244,29 +2175,10 @@ public class IotService {
         }
         if (resource.startsWith("rule/")) {
             String ruleName = resource.substring("rule/".length());
-            IotTopicRule rule = topicRuleStore.get(topicRuleKey(region, ruleName))
-                    .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Resource not found: " + resourceArn, 404));
+            IotTopicRule rule = getTopicRule(ruleName, region);
             return new TaggableResource(rule.getTags(), tags -> {
                 rule.setTags(tags);
                 topicRuleStore.put(topicRuleKey(region, ruleName), rule);
-            });
-        }
-        if (resource.startsWith("thingtype/")) {
-            String thingTypeName = resource.substring("thingtype/".length());
-            IotThingType type = thingTypeStore.get(thingTypeKey(region, thingTypeName))
-                    .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Resource not found: " + resourceArn, 404));
-            return new TaggableResource(type.getTags(), tags -> {
-                type.setTags(tags);
-                thingTypeStore.put(thingTypeKey(region, thingTypeName), type);
-            });
-        }
-        if (resource.startsWith("thinggroup/")) {
-            String thingGroupName = resource.substring("thinggroup/".length());
-            IotThingGroup group = thingGroupStore.get(thingGroupKey(region, thingGroupName))
-                    .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Resource not found: " + resourceArn, 404));
-            return new TaggableResource(group.getTags(), tags -> {
-                group.setTags(tags);
-                thingGroupStore.put(thingGroupKey(region, thingGroupName), group);
             });
         }
         throw new AwsException("InvalidRequestException", "Invalid resource ARN: " + resourceArn, 400);
@@ -2337,6 +2249,10 @@ public class IotService {
         }
     }
 
+    private String regionFromArn(String resourceArn) {
+        return parseIotArn(resourceArn).region();
+    }
+
     private String resourceFromArn(String resourceArn) {
         return parseIotArn(resourceArn).resource();
     }
@@ -2393,5 +2309,164 @@ public class IotService {
     }
 
     private record TaggableResource(Map<String, String> tags, java.util.function.Consumer<Map<String, String>> updateTags) {
+    }
+
+    /** An AWS policy variable such as {@code ${iot:ClientId}}. */
+    private static final Pattern POLICY_VARIABLE = Pattern.compile("\\$\\{[^}]*\\}");
+
+    /** How long a thing type must stay deprecated before DeleteThingType accepts it. */
+    static final Duration THING_TYPE_DELETION_DELAY = Duration.ofMinutes(5);
+
+    private final DynamoDbService dynamoDbService;
+
+    private final Clock clock;
+
+    /**
+     * Substitutes the connection's variables into every string of the document on the parsed tree,
+     * so a client id is never read as JSON. A statement still holding a variable Floci cannot
+     * resolve matches nothing, as an unresolvable variable does on AWS, and is dropped. A document
+     * that does not parse is returned as is: the evaluator logs it and skips it.
+     */
+    private String resolvePolicyVariables(String document, Map<String, String> variables) {
+        JsonNode root;
+        try {
+            root = objectMapper.readTree(document);
+        } catch (JsonProcessingException e) {
+            return document;
+        }
+        if (!(root instanceof ObjectNode policy)) {
+            return document;
+        }
+        JsonNode statements = policy.get("Statement");
+        Iterable<JsonNode> each = statements == null ? List.of() : statements.isArray() ? statements : List.of(statements);
+        ArrayNode resolved = objectMapper.createArrayNode();
+        for (JsonNode statement : each) {
+            JsonNode substituted = substituteVariables(statement.deepCopy(), variables);
+            if (!hasUnresolvedVariable(substituted)) {
+                resolved.add(substituted);
+            }
+        }
+        policy.set("Statement", resolved);
+        return policy.toString();
+    }
+
+    private static JsonNode substituteVariables(JsonNode node, Map<String, String> variables) {
+        if (node.isTextual()) {
+            String text = node.asText();
+            for (Map.Entry<String, String> variable : variables.entrySet()) {
+                text = text.replace("${" + variable.getKey() + "}", variable.getValue());
+            }
+            return TextNode.valueOf(text);
+        }
+        if (node instanceof ObjectNode object) {
+            for (Map.Entry<String, JsonNode> property : object.properties()) {
+                property.setValue(substituteVariables(property.getValue(), variables));
+            }
+        } else if (node instanceof ArrayNode array) {
+            for (int i = 0; i < array.size(); i++) {
+                array.set(i, substituteVariables(array.get(i), variables));
+            }
+        }
+        return node;
+    }
+
+    private static boolean hasUnresolvedVariable(JsonNode node) {
+        if (node.isTextual()) {
+            return POLICY_VARIABLE.matcher(node.asText()).find();
+        }
+        for (JsonNode child : node) {
+            if (hasUnresolvedVariable(child)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void publishShadowUpdate(ReservedShadowTopic topic, JsonNode request, String clientToken, String region,
+                                     BiConsumer<String, byte[]> publisher) {
+        JsonNode previous = shadowStore.get(shadowKey(region, topic.thingName(), topic.shadowName()))
+                .map(IotShadow::getDocument)
+                .map(this::readJson)
+                .orElse(null);
+        JsonNode current = updateThingShadow(topic.thingName(), topic.shadowName(), request, region);
+        ObjectNode accepted = withClientToken(current.deepCopy(), clientToken);
+        publishJson(topic.acceptedTopic(), accepted, publisher);
+
+        ObjectNode documents = objectMapper.createObjectNode();
+        if (previous != null) {
+            documents.set("previous", previous);
+        }
+        documents.set("current", current);
+        documents.put("timestamp", Instant.now().getEpochSecond());
+        publishJson(topic.documentsTopic(), documents, publisher);
+
+        ObjectNode deltaState = objectMapper.createObjectNode();
+        JsonNode desired = current.path("state").path("desired");
+        JsonNode reported = current.path("state").path("reported");
+        if (desired.isObject()) {
+            desired.fields().forEachRemaining(entry -> {
+                JsonNode reportedValue = reported.path(entry.getKey());
+                if (reportedValue.isMissingNode() || !reportedValue.equals(entry.getValue())) {
+                    deltaState.set(entry.getKey(), entry.getValue());
+                }
+            });
+        }
+        if (!deltaState.isEmpty()) {
+            ObjectNode delta = objectMapper.createObjectNode();
+            delta.set("state", deltaState);
+            delta.put("version", current.path("version").asLong());
+            delta.put("timestamp", Instant.now().getEpochSecond());
+            publishJson(topic.deltaTopic(), delta, publisher);
+        }
+    }
+
+    private void publishShadowGet(ReservedShadowTopic topic, String clientToken, String region, BiConsumer<String, byte[]> publisher) {
+        ObjectNode accepted = withClientToken(getThingShadow(topic.thingName(), topic.shadowName(), region).deepCopy(), clientToken);
+        publishJson(topic.acceptedTopic(), accepted, publisher);
+    }
+
+    private void publishShadowDelete(ReservedShadowTopic topic, String clientToken, String region, BiConsumer<String, byte[]> publisher) {
+        ObjectNode accepted = withClientToken(deleteThingShadow(topic.thingName(), topic.shadowName(), region).deepCopy(), clientToken);
+        publishJson(topic.acceptedTopic(), accepted, publisher);
+    }
+
+    private void publishRejected(String topic, String code, String message, String clientToken, BiConsumer<String, byte[]> publisher) {
+        ObjectNode rejected = objectMapper.createObjectNode();
+        rejected.put("code", code);
+        rejected.put("message", message == null ? code : message);
+        rejected.put("timestamp", Instant.now().getEpochSecond());
+        if (clientToken != null && !clientToken.isBlank()) {
+            rejected.put("clientToken", clientToken);
+        }
+        publishJson(topic, rejected, publisher);
+    }
+
+    private void publishJson(String topic, JsonNode payload, BiConsumer<String, byte[]> publisher) {
+        try {
+            publisher.accept(topic, objectMapper.writeValueAsBytes(payload));
+        } catch (Exception e) {
+            throw new AwsException("InvalidRequestException", e.getMessage(), 400);
+        }
+    }
+
+    private void mergeObject(ObjectNode parent, String field, JsonNode patch) {
+        if (patch == null || patch.isMissingNode()) {
+            return;
+        }
+        if (patch.isNull()) {
+            parent.remove(field);
+            return;
+        }
+        if (!patch.isObject()) {
+            return;
+        }
+        ObjectNode target = parent.withObject("/" + field);
+        patch.fields().forEachRemaining(entry -> {
+            if (entry.getValue().isNull()) {
+                target.remove(entry.getKey());
+            } else {
+                target.set(entry.getKey(), entry.getValue());
+            }
+        });
     }
 }

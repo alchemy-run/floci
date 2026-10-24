@@ -1,6 +1,5 @@
 package io.github.hectorvent.floci.services.ses;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
@@ -9,10 +8,6 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.AwsRegions;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.core.storage.InMemoryStorage;
-import io.github.hectorvent.floci.core.storage.StorageBackend;
-import io.github.hectorvent.floci.core.storage.StorageFactory;
-import io.github.hectorvent.floci.services.ses.model.ArchivingOptions;
 import io.github.hectorvent.floci.services.ses.address.SesAddressLength;
 import io.github.hectorvent.floci.services.ses.address.SesAddressSyntax;
 import io.github.hectorvent.floci.services.ses.model.BulkEmailEntry;
@@ -21,14 +16,12 @@ import io.github.hectorvent.floci.services.ses.model.ConfigurationSet;
 import io.github.hectorvent.floci.services.ses.model.Contact;
 import io.github.hectorvent.floci.services.ses.model.CustomVerificationEmailTemplate;
 import io.github.hectorvent.floci.services.ses.model.DeliveryOptions;
-import io.github.hectorvent.floci.services.ses.model.EmailTemplate;
 import io.github.hectorvent.floci.services.ses.model.EmailContent;
 import io.github.hectorvent.floci.services.ses.model.Identity;
 import io.github.hectorvent.floci.services.ses.model.ListManagementOptions;
 import io.github.hectorvent.floci.services.ses.model.MessageAttachment;
 import io.github.hectorvent.floci.services.ses.model.MessageHeader;
 import io.github.hectorvent.floci.services.ses.model.MessageTag;
-import io.github.hectorvent.floci.services.ses.model.MultiRegionEndpoint;
 import io.github.hectorvent.floci.services.ses.model.SendBulkEmailRequest;
 import io.github.hectorvent.floci.services.ses.model.SendEmailRequest;
 import io.github.hectorvent.floci.services.ses.model.SentAttachment;
@@ -40,7 +33,6 @@ import io.github.hectorvent.floci.services.ses.model.Tenant;
 import io.github.hectorvent.floci.services.ses.model.TenantResourceAssociation;
 import io.github.hectorvent.floci.services.ses.model.Topic;
 import io.github.hectorvent.floci.services.ses.model.TrackingOptions;
-import io.github.hectorvent.floci.services.ses.model.VdmOptions;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.apache.james.mime4j.dom.Message;
@@ -53,7 +45,6 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -62,6 +53,15 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
+import com.fasterxml.jackson.core.type.TypeReference;
+import io.github.hectorvent.floci.core.storage.InMemoryStorage;
+import io.github.hectorvent.floci.core.storage.StorageBackend;
+import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.ses.model.ArchivingOptions;
+import io.github.hectorvent.floci.services.ses.model.EmailTemplate;
+import io.github.hectorvent.floci.services.ses.model.MultiRegionEndpoint;
+import io.github.hectorvent.floci.services.ses.model.VdmOptions;
+import java.util.Comparator;
 
 /**
  * What is left of the original single SES service after the store-based domain split and the
@@ -137,7 +137,6 @@ public class SesService {
     // the tenant record; the facade keeps the associations, the delete cascade, the send-time tenant
     // gate and the tenant-scoped suppression routing.
     private final SesTenantService tenantService;
-    private final StorageBackend<String, MultiRegionEndpoint> multiRegionEndpointStore;
     // S/MIME certificate associations live in SesIdentityCertificateService, which the v2 controller
     // calls directly; the facade only reaches it for the identity delete-guard.
     private final SesIdentityCertificateService certificateService;
@@ -161,7 +160,7 @@ public class SesService {
                        SesTenantService tenantService, SesConfigurationSetService configSetService,
                        SesIdentityCertificateService certificateService, SmtpRelay smtpRelay,
                        SesEventPublisher eventPublisher, EmulatorConfig config,
-                       RegionResolver regionResolver, StorageFactory storageFactory) {
+                       RegionResolver regionResolver) {
         this.identityService = identityService;
         this.sentEmailService = sentEmailService;
         this.templateService = templateService;
@@ -178,8 +177,6 @@ public class SesService {
         this.defaultAccountId = config.defaultAccountId();
         this.baseUrl = config.effectiveBaseUrl();
         this.regionResolver = regionResolver;
-        this.multiRegionEndpointStore = storageFactory.create("ses", "ses-multi-region-endpoints.json",
-                new TypeReference<Map<String, MultiRegionEndpoint>>() {});
         this.taggableDomains = taggableDomains();
     }
 
@@ -211,11 +208,6 @@ public class SesService {
         this.defaultAccountId = "000000000000";
         this.baseUrl = "http://localhost:4566";
         this.regionResolver = null;
-        this.multiRegionEndpointStore = new InMemoryStorage<>();
-    }
-
-    public Identity verifyEmailIdentity(String emailAddress, String region) {
-        return identityService.verifyEmailIdentity(emailAddress, region);
         this.taggableDomains = taggableDomains();
     }
 
@@ -241,15 +233,10 @@ public class SesService {
      */
     public Identity createEmailIdentity(String emailIdentity, String configurationSetName,
                                         List<Tag> tags, String region) {
-        return createEmailIdentity(emailIdentity, configurationSetName, tags, region, null);
-    }
-
-    public Identity createEmailIdentity(String emailIdentity, String configurationSetName,
-                                        List<Tag> tags, String region, String nextSigningKeyLength) {
         Runnable configurationSetExistsCheck = configurationSetName == null ? null
                 : () -> configSetService.get(configurationSetName, region);
         return identityService.createEmailIdentity(emailIdentity, configurationSetName, tags, region,
-                configurationSetExistsCheck, nextSigningKeyLength);
+                configurationSetExistsCheck);
     }
 
     public void deleteIdentity(String identityValue, String region) {
@@ -487,9 +474,6 @@ public class SesService {
         if (rejected) {
             email.discardContent(SesRecipientEvents.CONTENT_REJECT_REASON);
         }
-        if (rejected) {
-            email.discardContent(SesRecipientEvents.CONTENT_REJECT_REASON);
-        }
         sentEmailService.record(region, messageId, email);
 
         List<String> relayedTo = filterUnsuppressed(request.toAddresses(), suppressedReasons);
@@ -578,7 +562,6 @@ public class SesService {
             // both with this message.
             throw new AwsException("InvalidParameterValue", "Missing required header 'From'.", 400);
         }
-        requireVerifiedSender(effectiveSource, region);
         // FromEmailAddress was omitted, so the configuration set couldn't be resolved from the
         // sender until the MIME "From" was parsed. Re-resolve from the effective sender now so an
         // email identity's default configuration set still applies to a Raw send without an
@@ -1788,13 +1771,6 @@ public class SesService {
     }
 
     static BulkEmailEntryResult.Status mapErrorCodeToBulkStatus(String errorCode) {
-        if ("MessageRejected".equals(errorCode)) {
-            return BulkEmailEntryResult.Status.MESSAGE_REJECTED;
-        }
-        if ("MailFromDomainNotVerified".equals(errorCode)
-                || "MailFromDomainNotVerifiedException".equals(errorCode)) {
-            return BulkEmailEntryResult.Status.MAIL_FROM_DOMAIN_NOT_VERIFIED;
-        }
         if ("InvalidParameterValue".equals(errorCode)
                 || "MissingRenderingAttribute".equals(errorCode)
                 || "InvalidRenderingParameter".equals(errorCode)) {
@@ -1875,6 +1851,162 @@ public class SesService {
         ObjectNode merged = ((ObjectNode) defaults).deepCopy();
         replacement.fields().forEachRemaining(e -> merged.set(e.getKey(), e.getValue()));
         return merged;
+    }
+
+    private final StorageBackend<String, MultiRegionEndpoint> multiRegionEndpointStore;
+
+    public Identity verifyEmailIdentity(String emailAddress, String region) {
+        return identityService.verifyEmailIdentity(emailAddress, region);
+    }
+
+    private static List<String> allRecipients(List<String> to, List<String> cc, List<String> bcc) {
+        List<String> all = new ArrayList<>();
+        if (to != null) {
+            all.addAll(to);
+        }
+        if (cc != null) {
+            all.addAll(cc);
+        }
+        if (bcc != null) {
+            all.addAll(bcc);
+        }
+        return all;
+    }
+
+    public List<TenantResourceAssociation> listTenantResources(String tenantName,
+                                                               String resourceTypeFilter,
+                                                               Integer pageSize, String nextToken,
+                                                               String region) {
+        SesTenantService.validateListPaging(pageSize, nextToken);
+        SesTenantService.validateResourceTypeFilter(resourceTypeFilter);
+        Tenant tenant = tenantService.tenantForAssociation(tenantName, region);
+        return tenantService.listTenantResources(tenant, resourceTypeFilter, region);
+    }
+
+    /**
+     * Resolve the suppression reason that applies to a given recipient in the given region
+     * for sends using {@code configurationSetName}, or {@code null} if the recipient is not
+     * suppressed. The recipient is suppressed only when it appears in the address-level
+     * suppression list AND its stored reason intersects the effective {@code suppressedReasons}
+     * — the configuration set's {@code SuppressionOptions} override if present, else the
+     * account-level reasons. {@code configurationSetName} may be {@code null} or blank to
+     * scope the check to account-level reasons only.
+     *
+     * <p>The returned value is one of {@code "BOUNCE"} / {@code "COMPLAINT"}, allowing
+     * callers (publishSendEvents) to map the recipient to a synthetic Bounce / Complaint
+     * event without consulting the store again. Both the per-address suppression entries
+     * and the account-level / per-CS {@code suppressedReasons} go through reason validation
+     * (in {@link SesSuppressionService} and {@link SesConfigurationSetService} respectively),
+     * which enforces exact case-sensitive equality with the two canonical values, so
+     * {@code entry.getReason()} is guaranteed to be canonical and downstream
+     * {@code .equals("BOUNCE")} / {@code .equals("COMPLAINT")} checks are safe.
+     */
+    String resolveSuppressionReason(String emailAddress, String configurationSetName, String region) {
+        if (emailAddress == null || emailAddress.isBlank()) {
+            return null;
+        }
+        // Read through the suppression service so this shares its normalization and legacy-key
+        // fallback with GET/DELETE (lookups can't drift apart from inserts).
+        SuppressedDestination entry = suppressionService.findSuppressedDestination(region, emailAddress)
+                .orElse(null);
+        if (entry == null || entry.getReason() == null) {
+            return null;
+        }
+        List<String> effective = getEffectiveSuppressedReasons(configurationSetName, region);
+        if (effective == null || effective.isEmpty()) {
+            return null;
+        }
+        return effective.contains(entry.getReason()) ? entry.getReason() : null;
+    }
+
+    public String sendTemplatedEmail(String source, List<String> toAddresses, List<String> ccAddresses,
+                                     List<String> bccAddresses, List<String> replyToAddresses,
+                                     String returnPath, String templateName, JsonNode templateData,
+                                     String configurationSetName, List<MessageTag> emailTags,
+                                     List<MessageHeader> additionalHeaders,
+                                     ListManagementOptions listManagement, String region) {
+        EmailTemplate template = templateService.getTemplate(templateName, region);
+        return sendInlineTemplatedEmail(source, toAddresses, ccAddresses, bccAddresses,
+                replyToAddresses, returnPath, template.getSubject(), template.getTextPart(),
+                template.getHtmlPart(), templateData,
+                configurationSetName, emailTags, additionalHeaders, listManagement, region);
+    }
+
+    public String sendInlineTemplatedEmail(String source, List<String> toAddresses, List<String> ccAddresses,
+                                            List<String> bccAddresses, List<String> replyToAddresses,
+                                            String returnPath,
+                                            String subject, String textPart, String htmlPart,
+                                            JsonNode templateData,
+                                            String configurationSetName, List<MessageTag> emailTags,
+                                            List<MessageHeader> additionalHeaders,
+                                            ListManagementOptions listManagement, String region) {
+        requireInlineTemplateContent(subject, textPart, htmlPart);
+        return sendEmail(source, toAddresses, ccAddresses, bccAddresses, replyToAddresses, returnPath,
+                SesTemplateService.applyTemplateData(subject, templateData),
+                SesTemplateService.applyTemplateData(textPart, templateData),
+                SesTemplateService.applyTemplateData(htmlPart, templateData),
+                configurationSetName, emailTags, additionalHeaders, listManagement, region);
+    }
+
+    public List<BulkEmailEntryResult> sendBulkTemplatedEmail(String source,
+                                                              List<String> replyToAddresses,
+                                                              String returnPath,
+                                                              String subject, String textPart, String htmlPart,
+                                                              JsonNode defaultTemplateData,
+                                                              List<BulkEmailEntry> entries,
+                                                              String configurationSetName,
+                                                              List<MessageTag> defaultEmailTags,
+                                                              List<MessageHeader> defaultHeaders,
+                                                              String region) {
+        if (source == null || source.isBlank()) {
+            throw new AwsException("InvalidParameterValue", "Source email is required.", 400);
+        }
+        requireInlineTemplateContent(subject, textPart, htmlPart);
+        if (entries == null || entries.isEmpty()) {
+            throw new AwsException("InvalidParameterValue",
+                    "At least one destination entry is required.", 400);
+        }
+        configSetService.validateForSending(configurationSetName, region);
+        if (entries.size() > MAX_BULK_DESTINATIONS) {
+            throw new AwsException("MessageRejected",
+                    "Number of destinations (" + entries.size() + ") exceeds the maximum of "
+                            + MAX_BULK_DESTINATIONS + ".", 400);
+        }
+        for (BulkEmailEntry entry : entries) {
+            int recipientCount = sizeOf(entry.toAddresses())
+                    + sizeOf(entry.ccAddresses())
+                    + sizeOf(entry.bccAddresses());
+            if (recipientCount > MAX_RECIPIENTS_PER_DESTINATION) {
+                throw new AwsException("MessageRejected",
+                        "Recipient count (" + recipientCount + ") in a destination exceeds the maximum of "
+                                + MAX_RECIPIENTS_PER_DESTINATION + ".", 400);
+            }
+        }
+
+        List<BulkEmailEntryResult> results = new ArrayList<>(entries.size());
+        for (BulkEmailEntry entry : entries) {
+            try {
+                JsonNode merged = mergeTemplateData(defaultTemplateData, entry.replacementTemplateData());
+                List<MessageTag> mergedTags = mergeEmailTags(defaultEmailTags, entry.replacementEmailTags());
+                List<MessageHeader> mergedHeaders = mergeHeaders(defaultHeaders, entry.replacementHeaders());
+                // SendBulkEmail has no ListManagementOptions field, so list-managed suppression
+                // does not apply to bulk sends.
+                String messageId = sendEmail(source,
+                        entry.toAddresses(), entry.ccAddresses(), entry.bccAddresses(),
+                        replyToAddresses, returnPath,
+                        SesTemplateService.applyTemplateData(subject, merged),
+                        SesTemplateService.applyTemplateData(textPart, merged),
+                        SesTemplateService.applyTemplateData(htmlPart, merged),
+                        configurationSetName, mergedTags, mergedHeaders, null, region);
+                results.add(BulkEmailEntryResult.success(messageId));
+            } catch (AwsException e) {
+                results.add(BulkEmailEntryResult.failure(
+                        mapErrorCodeToBulkStatus(e.getErrorCode()), e.getMessage()));
+            } catch (Exception e) {
+                results.add(BulkEmailEntryResult.failure(BulkEmailEntryResult.Status.FAILED, e.getMessage()));
+            }
+        }
+        return results;
     }
 
     public MultiRegionEndpoint createMultiRegionEndpoint(String name, List<String> regions,
@@ -1976,5 +2108,4 @@ public class SesService {
                     "Email address is not verified: " + address, 400);
         }
     }
-
 }

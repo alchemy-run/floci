@@ -18,16 +18,12 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.container.ContainerRequestContext;
-import org.jboss.logging.Logger;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
 import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -37,6 +33,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
+import org.jboss.logging.Logger;
+import java.util.regex.Pattern;
 
 /**
  * Constructs the target resource ARN for a request so the policy evaluator
@@ -48,11 +46,6 @@ import java.util.regex.Matcher;
 @ApplicationScoped
 public class ResourceArnBuilder {
 
-    private static final Logger LOG = Logger.getLogger(ResourceArnBuilder.class);
-
-    /** SES v2 / v1 From address in a JSON body. */
-    private static final Pattern FROM_EMAIL_JSON =
-            Pattern.compile("\"FromEmailAddress\"\\s*:\\s*\"([^\"]+)\"");
     /** The only scheme IAM accepts on an OIDC provider URL, and the part its ARN drops. */
     private static final String OIDC_URL_SCHEME = "https://";
 
@@ -68,7 +61,6 @@ public class ResourceArnBuilder {
     private static final String UNASSIGNED_SECRET_SUFFIX = "-??????";
 
     private final ObjectMapper objectMapper;
-    private final Instance<ResourceArnResolver> arnResolvers;
     /**
      * Looked up lazily through a provider: this builder is constructed by the enforcement filter,
      * which IamService itself does not depend on, and a direct injection would close that loop.
@@ -87,11 +79,6 @@ public class ResourceArnBuilder {
                               Instance<LambdaMicrovmsService> microvmsService,
                               Instance<EksService> eksService) {
         this.objectMapper = objectMapper;
-        this.arnResolvers = arnResolvers;
-    }
-
-    public ResourceArnBuilder(ObjectMapper objectMapper) {
-        this(objectMapper, null);
         this.iamService = iamService;
         this.secretsManagerService = secretsManagerService;
         this.microvmsService = microvmsService;
@@ -150,12 +137,13 @@ public class ResourceArnBuilder {
             case "sns"            -> List.of(buildSnsArn(ctx, region, accountId));
             case "dynamodb"       -> buildDynamoDbArns(ctx, region, accountId);
             case "kinesis"        -> List.of(buildKinesisArn(ctx, region, accountId));
+            case "secretsmanager" -> List.of(buildSecretsManagerArn(ctx, region, accountId));
             case "ssm"            -> List.of(buildSsmArn(ctx, region, accountId));
             case "kms"            -> List.of(buildKmsArn(path, region, accountId));
-            case "ses"            -> List.of(buildSesIdentityArn(ctx, region, accountId));
-            case "emr-serverless" -> List.of(buildEmrServerlessArn(ctx, path, region, accountId));
-            case "guardduty"      -> List.of(buildGuardDutyArn(ctx, path, region, accountId));
             case "inspector2"     -> List.of(buildInspector2Arn(ctx, path, region, accountId));
+            case "guardduty"      -> List.of(buildGuardDutyArn(ctx, path, region, accountId));
+            case "emr-serverless" -> List.of(buildEmrServerlessArn(ctx, path, region, accountId));
+            case "ses"            -> List.of(buildSesIdentityArn(ctx, region, accountId));
             case "iam"            -> buildIamArns(ctx, region, accountId);
             case "resource-groups" -> List.of(buildResourceGroupArn(ctx, region, accountId));
             case "scheduler"      -> List.of(buildSchedulerArn(path, ctx, region, accountId, partition));
@@ -166,11 +154,6 @@ public class ResourceArnBuilder {
         };
     }
 
-    public String buildExecutionRoleArn(ContainerRequestContext ctx) {
-        JsonNode body = readJsonBody(ctx);
-        JsonNode role = body == null ? null : body.get("executionRoleArn");
-        return role != null && role.isTextual() && !role.textValue().isBlank()
-                ? role.textValue() : null;
     private String buildResourceGroupArn(ContainerRequestContext ctx, String region, String accountId) {
         JsonNode body = readJsonBody(ctx);
         if (body == null) {
@@ -1265,80 +1248,6 @@ public class ResourceArnBuilder {
                 .orElse(null);
     }
 
-    private String buildGuardDutyArn(ContainerRequestContext ctx, String path, String region, String accountId) {
-        path = path.startsWith("/") ? path : "/" + path;
-        if (path.startsWith("/tags/")) {
-            return path.substring("/tags/".length());
-        }
-        String detector = extractSegmentAfter(path, "detector");
-        if (detector == null) {
-            return "*";
-        }
-        String resource = "detector/" + detector;
-        for (String kind : List.of("filter", "ipset", "threatintelset")) {
-            String id = extractSegmentAfter(path, kind);
-            if (id != null) {
-                return AwsArnUtils.Arn.of("guardduty", region, accountId, resource + "/" + kind + "/" + id).toString();
-            }
-            if (path.endsWith("/" + kind)) {
-                if ("filter".equals(kind) && "POST".equals(ctx.getMethod())) {
-                    JsonNode body = readJsonBody(ctx);
-                    JsonNode name = body == null ? null : body.get("name");
-                    if (name != null && name.isTextual() && !name.asText().isBlank()) {
-                        return AwsArnUtils.Arn.of("guardduty", region, accountId,
-                                resource + "/filter/" + name.asText()).toString();
-                    }
-                }
-                // Set creation and collection listing do not support resource-level permissions.
-                return "*";
-            }
-        }
-        return AwsArnUtils.Arn.of("guardduty", region, accountId, resource).toString();
-    }
-
-    private String buildInspector2Arn(ContainerRequestContext ctx, String path, String region, String accountId) {
-        path = path.startsWith("/") ? path : "/" + path;
-        if (path.startsWith("/tags/")) {
-            return path.substring("/tags/".length());
-        }
-        if ("/filters/create".equals(path)) {
-            return AwsArnUtils.Arn.of("inspector2", region, accountId,
-                    "owner/" + accountId + "/filter/*").toString();
-        }
-        if ("/filters/update".equals(path) || "/filters/delete".equals(path)) {
-            JsonNode body = readJsonBody(ctx);
-            JsonNode arn = body == null ? null : body.get("filterArn");
-            if (arn != null && arn.isTextual() && !arn.asText().isBlank()) {
-                return arn.asText();
-            }
-        }
-        return "*";
-    }
-
-    private String buildEmrServerlessArn(ContainerRequestContext ctx, String path, String region, String accountId) {
-        path = path.startsWith("/") ? path : "/" + path;
-        int tags = path.indexOf("/tags/");
-        if (tags >= 0) {
-            return path.substring(tags + "/tags/".length());
-        }
-        String applicationId = extractSegmentAfter(path, "applications");
-        if (applicationId == null) {
-            return "*";
-        }
-        String resource = "/applications/" + applicationId;
-        String jobRunId = extractSegmentAfter(path, "jobruns");
-        String sessionId = extractSegmentAfter(path, "sessions");
-        if (jobRunId == null && sessionId == null && path.endsWith("/dashboard")) {
-            sessionId = ctx.getUriInfo().getQueryParameters().getFirst("resourceId");
-        }
-        if (jobRunId != null) {
-            resource += "/jobruns/" + jobRunId;
-        } else if (sessionId != null) {
-            resource += "/sessions/" + sessionId;
-        }
-        return AwsArnUtils.Arn.of("emr-serverless", region, accountId, resource).toString();
-    }
-
     // ── SQS ─────────────────────────────────────────────────────────────────────
     private String buildSqsArn(ContainerRequestContext ctx, String region, String accountId) {
         String queueUrl = ctx.getUriInfo().getQueryParameters().getFirst("QueueUrl");
@@ -1617,20 +1526,6 @@ public class ResourceArnBuilder {
         return new AwsArnUtils.Arn(partition, "secretsmanager", region, accountId, "secret:" + name).toString();
     }
 
-    /** The stored resource's real ARN when a resolver knows it, otherwise {@code requestArn}. */
-    private String resolveStoredArn(String credentialScope, String requestArn, String region) {
-        if (arnResolvers == null || arnResolvers.isUnsatisfied()) {
-            return requestArn;
-        }
-        for (ResourceArnResolver resolver : arnResolvers) {
-            java.util.Optional<String> resolved = resolver.resolve(credentialScope, requestArn, region);
-            if (resolved.isPresent()) {
-                return resolved.get();
-            }
-        }
-        return requestArn;
-    }
-
     // ── SSM ──────────────────────────────────────────────────────────────────────
     private String buildSsmArn(ContainerRequestContext ctx, String region, String accountId) {
         JsonNode json = readJsonBody(ctx);
@@ -1656,7 +1551,157 @@ public class ResourceArnBuilder {
         return AwsArnUtils.Arn.of("kms", region, accountId, "key/" + keyId).toString();
     }
 
-    // ── SES ──────────────────────────────────────────────────────────────────────
+    // ── Helpers ──────────────────────────────────────────────────────────────────
+
+    /** The request's JSON or CBOR body, buffered so the handler still reads it, or null when it has none. */
+    public JsonNode readJsonBody(ContainerRequestContext ctx) {
+        Object cached = ctx.getProperty("floci.bufferedJsonBody");
+        if (cached instanceof JsonNode node) {
+            return node;
+        }
+        InputStream in = ctx.getEntityStream();
+        if (in == null) {
+            return null;
+        }
+        byte[] body;
+        try {
+            body = in.readAllBytes();
+        } catch (IOException e) {
+            ctx.setEntityStream(new ByteArrayInputStream(new byte[0]));
+            return null;
+        }
+        ctx.setEntityStream(new ByteArrayInputStream(body));
+        if (body.length == 0) {
+            return null;
+        }
+        try {
+            JsonNode node = RequestBodyReader.readTree(body, ctx.getMediaType(), objectMapper);
+            ctx.setProperty("floci.bufferedJsonBody", node);
+            return node;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String extractSegmentAfter(String path, String segment) {
+        String marker = "/" + segment + "/";
+        int idx = path.indexOf(marker);
+        if (idx < 0) return null;
+        String after = path.substring(idx + marker.length());
+        // take only the first segment (stop at next /)
+        int slash = after.indexOf('/');
+        return slash > 0 ? after.substring(0, slash) : after;
+    }
+
+    private String firstFormParam(ContainerRequestContext ctx, String name) {
+        // Form params are typically available as query params in REST-Assured / JAX-RS
+        String v = ctx.getUriInfo().getQueryParameters().getFirst(name);
+        return v;
+    }
+
+    private static final Logger LOG = Logger.getLogger(ResourceArnBuilder.class);
+
+    /** SES v2 / v1 From address in a JSON body. */
+    private static final Pattern FROM_EMAIL_JSON =
+            Pattern.compile("\"FromEmailAddress\"\\s*:\\s*\"([^\"]+)\"");
+
+    private final Instance<ResourceArnResolver> arnResolvers;
+
+    public String buildExecutionRoleArn(ContainerRequestContext ctx) {
+        JsonNode body = readJsonBody(ctx);
+        JsonNode role = body == null ? null : body.get("executionRoleArn");
+        return role != null && role.isTextual() && !role.textValue().isBlank()
+                ? role.textValue() : null;
+    }
+
+    private String buildGuardDutyArn(ContainerRequestContext ctx, String path, String region, String accountId) {
+        path = path.startsWith("/") ? path : "/" + path;
+        if (path.startsWith("/tags/")) {
+            return path.substring("/tags/".length());
+        }
+        String detector = extractSegmentAfter(path, "detector");
+        if (detector == null) {
+            return "*";
+        }
+        String resource = "detector/" + detector;
+        for (String kind : List.of("filter", "ipset", "threatintelset")) {
+            String id = extractSegmentAfter(path, kind);
+            if (id != null) {
+                return AwsArnUtils.Arn.of("guardduty", region, accountId, resource + "/" + kind + "/" + id).toString();
+            }
+            if (path.endsWith("/" + kind)) {
+                if ("filter".equals(kind) && "POST".equals(ctx.getMethod())) {
+                    JsonNode body = readJsonBody(ctx);
+                    JsonNode name = body == null ? null : body.get("name");
+                    if (name != null && name.isTextual() && !name.asText().isBlank()) {
+                        return AwsArnUtils.Arn.of("guardduty", region, accountId,
+                                resource + "/filter/" + name.asText()).toString();
+                    }
+                }
+                // Set creation and collection listing do not support resource-level permissions.
+                return "*";
+            }
+        }
+        return AwsArnUtils.Arn.of("guardduty", region, accountId, resource).toString();
+    }
+
+    private String buildInspector2Arn(ContainerRequestContext ctx, String path, String region, String accountId) {
+        path = path.startsWith("/") ? path : "/" + path;
+        if (path.startsWith("/tags/")) {
+            return path.substring("/tags/".length());
+        }
+        if ("/filters/create".equals(path)) {
+            return AwsArnUtils.Arn.of("inspector2", region, accountId,
+                    "owner/" + accountId + "/filter/*").toString();
+        }
+        if ("/filters/update".equals(path) || "/filters/delete".equals(path)) {
+            JsonNode body = readJsonBody(ctx);
+            JsonNode arn = body == null ? null : body.get("filterArn");
+            if (arn != null && arn.isTextual() && !arn.asText().isBlank()) {
+                return arn.asText();
+            }
+        }
+        return "*";
+    }
+
+    private String buildEmrServerlessArn(ContainerRequestContext ctx, String path, String region, String accountId) {
+        path = path.startsWith("/") ? path : "/" + path;
+        int tags = path.indexOf("/tags/");
+        if (tags >= 0) {
+            return path.substring(tags + "/tags/".length());
+        }
+        String applicationId = extractSegmentAfter(path, "applications");
+        if (applicationId == null) {
+            return "*";
+        }
+        String resource = "/applications/" + applicationId;
+        String jobRunId = extractSegmentAfter(path, "jobruns");
+        String sessionId = extractSegmentAfter(path, "sessions");
+        if (jobRunId == null && sessionId == null && path.endsWith("/dashboard")) {
+            sessionId = ctx.getUriInfo().getQueryParameters().getFirst("resourceId");
+        }
+        if (jobRunId != null) {
+            resource += "/jobruns/" + jobRunId;
+        } else if (sessionId != null) {
+            resource += "/sessions/" + sessionId;
+        }
+        return AwsArnUtils.Arn.of("emr-serverless", region, accountId, resource).toString();
+    }
+
+    /** The stored resource's real ARN when a resolver knows it, otherwise {@code requestArn}. */
+    private String resolveStoredArn(String credentialScope, String requestArn, String region) {
+        if (arnResolvers == null || arnResolvers.isUnsatisfied()) {
+            return requestArn;
+        }
+        for (ResourceArnResolver resolver : arnResolvers) {
+            java.util.Optional<String> resolved = resolver.resolve(credentialScope, requestArn, region);
+            if (resolved.isPresent()) {
+                return resolved.get();
+            }
+        }
+        return requestArn;
+    }
+
     /**
      * SES authorizes send against the identity of the From address
      * ({@code arn:aws:ses:region:account:identity/user@domain}), not the domain
@@ -1710,53 +1755,5 @@ public class ResourceArnBuilder {
             return trimmed.substring(lt + 1, gt).trim();
         }
         return trimmed;
-    }
-
-    // ── Helpers ──────────────────────────────────────────────────────────────────
-
-    /** The request's JSON or CBOR body, buffered so the handler still reads it, or null when it has none. */
-    public JsonNode readJsonBody(ContainerRequestContext ctx) {
-        Object cached = ctx.getProperty("floci.bufferedJsonBody");
-        if (cached instanceof JsonNode node) {
-            return node;
-        }
-        InputStream in = ctx.getEntityStream();
-        if (in == null) {
-            return null;
-        }
-        byte[] body;
-        try {
-            body = in.readAllBytes();
-        } catch (IOException e) {
-            ctx.setEntityStream(new ByteArrayInputStream(new byte[0]));
-            return null;
-        }
-        ctx.setEntityStream(new ByteArrayInputStream(body));
-        if (body.length == 0) {
-            return null;
-        }
-        try {
-            JsonNode node = RequestBodyReader.readTree(body, ctx.getMediaType(), objectMapper);
-            ctx.setProperty("floci.bufferedJsonBody", node);
-            return node;
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private String extractSegmentAfter(String path, String segment) {
-        String marker = "/" + segment + "/";
-        int idx = path.indexOf(marker);
-        if (idx < 0) return null;
-        String after = path.substring(idx + marker.length());
-        // take only the first segment (stop at next /)
-        int slash = after.indexOf('/');
-        return slash > 0 ? after.substring(0, slash) : after;
-    }
-
-    private String firstFormParam(ContainerRequestContext ctx, String name) {
-        // Form params are typically available as query params in REST-Assured / JAX-RS
-        String v = ctx.getUriInfo().getQueryParameters().getFirst(name);
-        return v;
     }
 }

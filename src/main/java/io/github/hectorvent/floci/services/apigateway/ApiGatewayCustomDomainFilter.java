@@ -15,6 +15,7 @@ import jakarta.ws.rs.ext.Provider;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import io.github.hectorvent.floci.services.apigateway.model.CustomDomain;
 
 /**
  * Routes requests based on the Host header for API Gateway custom domains.
@@ -112,9 +113,6 @@ public class ApiGatewayCustomDomainFilter implements ContainerRequestFilter {
                 .build();
 
         LOG.debugv("Custom domain routing: {0}{1} -> {2}", host, path, newUri.getPath());
-        // AWS_IAM dispatch rebuilds the caller's canonical request, which covers the path they
-        // signed: the custom-domain path, not the /execute-api/... form this rewrite produces.
-        routeContext.recordSignedRequestPath(path);
         String mappedRegion = domain.region();
         boolean restApi = "REST".equals(mapping.getApiType())
                 || (mapping.getApiType() == null && RequestScopes.callAs(

@@ -1,37 +1,37 @@
 package io.github.hectorvent.floci.services.macie2;
 
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.core.common.RequestScopes;
 import io.github.hectorvent.floci.core.common.Base64Url;
 import io.github.hectorvent.floci.core.common.Resettable;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.macie2.model.MacieMember;
 import io.github.hectorvent.floci.services.macie2.model.MacieState;
-import io.github.hectorvent.floci.services.s3.S3Service;
-import io.github.hectorvent.floci.services.s3.model.Bucket;
-import io.github.hectorvent.floci.services.s3.model.S3Object;
-import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jboss.logging.Logger;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.core.common.RequestScopes;
+import io.github.hectorvent.floci.services.s3.S3Service;
+import io.github.hectorvent.floci.services.s3.model.Bucket;
+import io.github.hectorvent.floci.services.s3.model.S3Object;
+import jakarta.annotation.PreDestroy;
+import org.jboss.logging.Logger;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executor;
@@ -47,61 +47,21 @@ import java.util.regex.PatternSyntaxException;
 
 @ApplicationScoped
 public class MacieService implements Resettable {
-    private static final Logger LOG = Logger.getLogger(MacieService.class);
-
     private final AccountAwareStorageBackend<MacieState> states;
     private final AccountAwareStorageBackend<MacieMember> members;
 
-    private final S3Service s3Service;
-
-    // Classification job execution. Run bookkeeping is guarded by this service's monitor.
-    private final Executor jobExecutor;
-    private final ExecutorService ownedJobExecutor;
-    private final Map<String, JobRun> runs = new HashMap<>();
-    private ScheduledExecutorService jobScheduler;
-
     @Inject
-    public MacieService(StorageFactory storageFactory, S3Service s3Service) {
+    public MacieService(StorageFactory storageFactory) {
         this(storageFactory.create("macie2", "macie2-state.json",
                         new TypeReference<Map<String, MacieState>>() {}),
                 storageFactory.create("macie2", "macie2-members.json",
-                        new TypeReference<Map<String, MacieMember>>() {}), s3Service, null);
+                        new TypeReference<Map<String, MacieMember>>() {}));
     }
 
     MacieService(AccountAwareStorageBackend<MacieState> states,
                  AccountAwareStorageBackend<MacieMember> members) {
-        this(states, members, null, null);
-    }
-
-    MacieService(AccountAwareStorageBackend<MacieState> states,
-                 AccountAwareStorageBackend<MacieMember> members, S3Service s3Service) {
-        this(states, members, s3Service, null);
-    }
-
-    MacieService(AccountAwareStorageBackend<MacieState> states,
-                 AccountAwareStorageBackend<MacieMember> members, S3Service s3Service, Executor jobExecutor) {
         this.states = states;
         this.members = members;
-        this.s3Service = s3Service;
-        if (jobExecutor == null) {
-            this.ownedJobExecutor = Executors.newFixedThreadPool(JOB_WORKERS,
-                    Thread.ofPlatform().daemon().name("macie2-classification-", 0).factory());
-            this.jobExecutor = ownedJobExecutor;
-        } else {
-            this.ownedJobExecutor = null;
-            this.jobExecutor = jobExecutor;
-        }
-    }
-
-    @PreDestroy
-    synchronized void shutdown() {
-        if (ownedJobExecutor != null) {
-            ownedJobExecutor.shutdownNow();
-        }
-        if (jobScheduler != null) {
-            jobScheduler.shutdownNow();
-            jobScheduler = null;
-        }
     }
 
     public MacieState state(String region) {
@@ -119,25 +79,245 @@ public class MacieService implements Resettable {
 
         MacieState delegated = states.getForAccount(accountId, region).orElseGet(MacieState::new);
         delegated.setAdminAccountId(accountId);
-        if (!delegated.isEnabled()) {
-            initializeSession(delegated, "ENABLED", "SIX_HOURS");
-        }
+        delegated.setEnabled(true);
         states.putForAccount(accountId, region, delegated);
     }
 
-    public void enableMacie(String region) {
-        enableMacie(region, null, null);
-    }
-
-    public synchronized void enableMacie(String region, String status, String frequency) {
-        validateSession(status, frequency);
+    public synchronized void enableMacie(String region) {
         MacieState state = state(region);
         if (state.isEnabled()) {
             throw conflict("Macie is already enabled for this account.");
         }
-        initializeSession(state, status == null ? "ENABLED" : status,
-                frequency == null ? "SIX_HOURS" : frequency);
+        state.setEnabled(true);
         states.put(region, state);
+    }
+
+    public MacieState requireSession(String region) {
+        MacieState state = state(region);
+        if (!state.isEnabled()) {
+            throw notFound("Macie is not enabled for this account.");
+        }
+        return state;
+    }
+
+    public MacieState requireAdministratorSession(String region, String callerAccountId) {
+        MacieState state = states.getForAccount(callerAccountId, region).orElseGet(MacieState::new);
+        if (state.getAdminAccountId() == null && !state.isEnabled()) {
+            throw notFound("Macie is not enabled for this account.");
+        }
+        if (!callerAccountId.equals(state.getAdminAccountId())) {
+            throw accessDenied();
+        }
+        if (!state.isEnabled()) {
+            throw notFound("Macie is not enabled for this account.");
+        }
+        return state;
+    }
+
+    public synchronized void updateOrganizationConfiguration(
+            String region, String callerAccountId, boolean autoEnable) {
+        MacieState state = requireAdministratorSession(region, callerAccountId);
+        state.setAutoEnable(autoEnable);
+        states.putForAccount(callerAccountId, region, state);
+    }
+
+    public synchronized MacieMember createMember(
+            String region, String callerAccountId, String memberAccountId, String email, Map<String, String> tags) {
+        MacieState callerState = requireSessionForAccount(region, callerAccountId);
+        requireAccountId(memberAccountId, "accountId");
+        if (callerAccountId.equals(memberAccountId)) {
+            throw validation("accountId must identify a different AWS account.");
+        }
+        requireEmail(email);
+        Map<String, String> safeTags = validateTags(tags);
+
+        String key = memberKey(region, memberAccountId);
+        if (members.getForAccount(callerAccountId, key).isPresent()) {
+            throw conflict("The account is already associated with this Macie administrator account.");
+        }
+        boolean associatedWithDifferentAdministrator = members.scanAllAccounts().stream()
+                .anyMatch(member -> memberAccountId.equals(member.accountId())
+                        && !callerAccountId.equals(member.administratorAccountId()));
+        if (associatedWithDifferentAdministrator) {
+            throw conflict("The account is already associated with a different Macie administrator account.");
+        }
+
+        boolean organizationAdministrator = callerAccountId.equals(callerState.getAdminAccountId());
+        String now = Instant.now().toString();
+        String arn = AwsArnUtils.Arn.of("macie2", region, callerAccountId, "member/" + memberAccountId).toString();
+        MacieMember member = new MacieMember(
+                memberAccountId,
+                callerAccountId,
+                callerAccountId,
+                arn,
+                organizationAdministrator ? null : email,
+                null,
+                organizationAdministrator ? "Enabled" : "Created",
+                safeTags,
+                now);
+        members.putForAccount(callerAccountId, key, member);
+        return member;
+    }
+
+    public Page<MacieMember> listMembers(
+            String region, String callerAccountId, String maxResultsValue, String nextToken, String onlyAssociated) {
+        requireSessionForAccount(region, callerAccountId);
+        int maxResults = parseMaxResults(maxResultsValue);
+        Boolean associatedOnly = parseOnlyAssociated(onlyAssociated);
+        List<MacieMember> items = new ArrayList<>(members.scanForAccount(
+                callerAccountId, key -> key.startsWith(region + "::")));
+        if (associatedOnly == null || associatedOnly) {
+            items.removeIf(member -> !isCurrentMember(member.relationshipStatus()));
+        }
+        items.sort(Comparator.comparing(MacieMember::accountId));
+        int offset = decodeOffset(nextToken, items.size());
+        int end = Math.min(items.size(), offset + maxResults);
+        return new Page<>(List.copyOf(items.subList(offset, end)),
+                end < items.size() ? encodeOffset(end) : null);
+    }
+
+    private MacieState requireSessionForAccount(String region, String accountId) {
+        MacieState state = states.getForAccount(accountId, region).orElseGet(MacieState::new);
+        if (!state.isEnabled()) {
+            throw notFound("Macie is not enabled for this account.");
+        }
+        return state;
+    }
+
+    private static boolean isCurrentMember(String relationshipStatus) {
+        return "Enabled".equals(relationshipStatus) || "Paused".equals(relationshipStatus);
+    }
+
+    private static Boolean parseOnlyAssociated(String value) {
+        if (value == null) {
+            return null;
+        }
+        if ("true".equalsIgnoreCase(value)) {
+            return true;
+        }
+        if ("false".equalsIgnoreCase(value)) {
+            return false;
+        }
+        throw validation("onlyAssociated must be true or false.");
+    }
+
+    private static int parseMaxResults(String value) {
+        if (value == null) {
+            return 25;
+        }
+        try {
+            int parsed = Integer.parseInt(value);
+            if (parsed < 1 || parsed > 25) {
+                throw validation("maxResults must be between 1 and 25.");
+            }
+            return parsed;
+        } catch (NumberFormatException e) {
+            throw validation("maxResults must be between 1 and 25.");
+        }
+    }
+
+    private static int decodeOffset(String token, int size) {
+        if (token == null) {
+            return 0;
+        }
+        try {
+            int offset = Integer.parseInt(new String(Base64.getUrlDecoder().decode(token), StandardCharsets.UTF_8));
+            if (offset < 0 || offset > size) {
+                throw validation("nextToken is invalid.");
+            }
+            return offset;
+        } catch (IllegalArgumentException e) {
+            throw validation("nextToken is invalid.");
+        }
+    }
+
+    private static String encodeOffset(int offset) {
+        return Base64Url.encode(Integer.toString(offset));
+    }
+
+    private static String memberKey(String region, String accountId) {
+        return region + "::" + accountId;
+    }
+
+    private static void requireEmail(String email) {
+        if (email == null || email.isBlank() || email.length() > 320 || email.indexOf('@') <= 0
+                || email.endsWith("@")) {
+            throw validation("email must be a valid email address.");
+        }
+    }
+
+    private static Map<String, String> validateTags(Map<String, String> tags) {
+        if (tags == null) {
+            return Map.of();
+        }
+        if (tags.size() > 50) {
+            throw validation("A member can have at most 50 tags.");
+        }
+        for (Map.Entry<String, String> tag : tags.entrySet()) {
+            if (tag.getKey() == null || tag.getKey().length() > 128
+                    || tag.getValue() == null || tag.getValue().length() > 256) {
+                throw validation("Tag keys can be at most 128 characters and values at most 256 characters.");
+            }
+        }
+        return Map.copyOf(tags);
+    }
+
+    public record Page<T>(List<T> items, String nextToken) {}
+
+    @Override
+    public void clear() {
+        states.clear();
+        members.clear();
+    }
+
+    private static void requireAccountId(String accountId) {
+        requireAccountId(accountId, "adminAccountId");
+    }
+
+    private static void requireAccountId(String accountId, String fieldName) {
+        if (accountId == null || !accountId.matches("\\d{12}")) {
+            throw validation(fieldName + " must be a 12 digit account ID.");
+        }
+    }
+
+    private static AwsException validation(String message) {
+        return new AwsException("ValidationException", message, 400);
+    }
+
+    private static AwsException conflict(String message) {
+        return new AwsException("ConflictException", message, 409);
+    }
+
+    private static AwsException notFound(String message) {
+        return new AwsException("ResourceNotFoundException", message, 404);
+    }
+
+    private static AwsException accessDenied() {
+        return new AwsException("AccessDeniedException",
+                "Only the delegated Macie administrator account can manage organization configuration.", 403);
+    }
+
+    private static final Logger LOG = Logger.getLogger(MacieService.class);
+
+    private final S3Service s3Service;
+
+    private final Executor jobExecutor;
+
+    private final ExecutorService ownedJobExecutor;
+
+    private final Map<String, JobRun> runs = new HashMap<>();
+
+    private ScheduledExecutorService jobScheduler;
+
+    @PreDestroy
+    synchronized void shutdown() {
+        if (ownedJobExecutor != null) {
+            ownedJobExecutor.shutdownNow();
+        }
+        if (jobScheduler != null) {
+            jobScheduler.shutdownNow();
+            jobScheduler = null;
+        }
     }
 
     public synchronized void updateMacieSession(String region, String status, String frequency) {
@@ -190,14 +370,6 @@ public class MacieService implements Resettable {
         if (frequency != null && !List.of("FIFTEEN_MINUTES", "ONE_HOUR", "SIX_HOURS").contains(frequency)) {
             throw validation("findingPublishingFrequency must be FIFTEEN_MINUTES, ONE_HOUR, or SIX_HOURS.");
         }
-    }
-
-    public MacieState requireSession(String region) {
-        MacieState state = state(region);
-        if (!state.isEnabled()) {
-            throw notEnabled();
-        }
-        return state;
     }
 
     public int testCustomDataIdentifier(String region, String regex, String sampleText,
@@ -308,7 +480,6 @@ public class MacieService implements Resettable {
         }
     }
 
-    // Bound backtracking work on untrusted patterns without starting background threads.
     private static final class RegexInput implements CharSequence {
         private final String text;
         private final int[] remaining;
@@ -344,83 +515,6 @@ public class MacieService implements Resettable {
 
     private static final class RegexLimitException extends RuntimeException {}
 
-    public MacieState requireAdministratorSession(String region, String callerAccountId) {
-        MacieState state = states.getForAccount(callerAccountId, region).orElseGet(MacieState::new);
-        if (state.getAdminAccountId() == null && !state.isEnabled()) {
-            throw notEnabled();
-        }
-        if (!callerAccountId.equals(state.getAdminAccountId())) {
-            throw accessDenied();
-        }
-        if (!state.isEnabled()) {
-            throw notEnabled();
-        }
-        return state;
-    }
-
-    public synchronized void updateOrganizationConfiguration(
-            String region, String callerAccountId, boolean autoEnable) {
-        MacieState state = requireAdministratorSession(region, callerAccountId);
-        state.setAutoEnable(autoEnable);
-        states.putForAccount(callerAccountId, region, state);
-    }
-
-    public synchronized MacieMember createMember(
-            String region, String callerAccountId, String memberAccountId, String email, Map<String, String> tags) {
-        MacieState callerState = requireSessionForAccount(region, callerAccountId);
-        requireAccountId(memberAccountId, "accountId");
-        if (callerAccountId.equals(memberAccountId)) {
-            throw validation("accountId must identify a different AWS account.");
-        }
-        requireEmail(email);
-        Map<String, String> safeTags = validateTags(tags);
-
-        String key = memberKey(region, memberAccountId);
-        if (members.getForAccount(callerAccountId, key).isPresent()) {
-            throw conflict("The account is already associated with this Macie administrator account.");
-        }
-        boolean associatedWithDifferentAdministrator = members.scanAllAccountEntries(
-                        candidate -> candidate.startsWith(region + "::")).stream()
-                .anyMatch(entry -> memberAccountId.equals(entry.value().accountId())
-                        && !callerAccountId.equals(entry.value().administratorAccountId()));
-        if (associatedWithDifferentAdministrator) {
-            throw conflict("The account is already associated with a different Macie administrator account.");
-        }
-
-        boolean organizationAdministrator = callerAccountId.equals(callerState.getAdminAccountId());
-        String now = Instant.now().toString();
-        String arn = AwsArnUtils.Arn.of("macie2", region, callerAccountId, "member/" + memberAccountId).toString();
-        MacieMember member = new MacieMember(
-                memberAccountId,
-                callerAccountId,
-                callerAccountId,
-                arn,
-                organizationAdministrator ? null : email,
-                null,
-                organizationAdministrator ? "Enabled" : "Created",
-                safeTags,
-                now);
-        members.putForAccount(callerAccountId, key, member);
-        return member;
-    }
-
-    public Page<MacieMember> listMembers(
-            String region, String callerAccountId, String maxResultsValue, String nextToken, String onlyAssociated) {
-        requireSessionForAccount(region, callerAccountId);
-        int maxResults = parseMaxResults(maxResultsValue);
-        Boolean associatedOnly = parseOnlyAssociated(onlyAssociated);
-        List<MacieMember> items = new ArrayList<>(members.scanForAccount(
-                callerAccountId, key -> key.startsWith(region + "::")));
-        if (associatedOnly == null || associatedOnly) {
-            items.removeIf(member -> !isCurrentMember(member.relationshipStatus()));
-        }
-        items.sort(Comparator.comparing(MacieMember::accountId));
-        int offset = decodeOffset(nextToken, items.size());
-        int end = Math.min(items.size(), offset + maxResults);
-        return new Page<>(List.copyOf(items.subList(offset, end)),
-                end < items.size() ? encodeOffset(end) : null);
-    }
-
     public java.util.Optional<MacieMember> administrator(String region, String callerAccountId) {
         requireSessionForAccount(region, callerAccountId);
         return membershipRecords(region, callerAccountId).stream()
@@ -454,92 +548,6 @@ public class MacieService implements Resettable {
                         && !callerAccountId.equals(member.administratorAccountId()))
                 .sorted(Comparator.comparing(MacieMember::administratorAccountId))
                 .toList();
-    }
-
-    private MacieState requireSessionForAccount(String region, String accountId) {
-        MacieState state = states.getForAccount(accountId, region).orElseGet(MacieState::new);
-        if (!state.isEnabled()) {
-            throw notEnabled();
-        }
-        return state;
-    }
-
-    private static boolean isCurrentMember(String relationshipStatus) {
-        return "Enabled".equals(relationshipStatus) || "Paused".equals(relationshipStatus);
-    }
-
-    private static Boolean parseOnlyAssociated(String value) {
-        if (value == null) {
-            return null;
-        }
-        if ("true".equalsIgnoreCase(value)) {
-            return true;
-        }
-        if ("false".equalsIgnoreCase(value)) {
-            return false;
-        }
-        throw validation("onlyAssociated must be true or false.");
-    }
-
-    private static int parseMaxResults(String value) {
-        if (value == null) {
-            return 25;
-        }
-        try {
-            int parsed = Integer.parseInt(value);
-            if (parsed < 1 || parsed > 25) {
-                throw validation("maxResults must be between 1 and 25.");
-            }
-            return parsed;
-        } catch (NumberFormatException e) {
-            throw validation("maxResults must be between 1 and 25.");
-        }
-    }
-
-    private static int decodeOffset(String token, int size) {
-        if (token == null) {
-            return 0;
-        }
-        try {
-            int offset = Integer.parseInt(new String(Base64.getUrlDecoder().decode(token), StandardCharsets.UTF_8));
-            if (offset < 0 || offset > size) {
-                throw validation("nextToken is invalid.");
-            }
-            return offset;
-        } catch (IllegalArgumentException e) {
-            throw validation("nextToken is invalid.");
-        }
-    }
-
-    private static String encodeOffset(int offset) {
-        return Base64Url.encode(Integer.toString(offset));
-    }
-
-    private static String memberKey(String region, String accountId) {
-        return region + "::" + accountId;
-    }
-
-    private static void requireEmail(String email) {
-        if (email == null || email.isBlank() || email.length() > 320 || email.indexOf('@') <= 0
-                || email.endsWith("@")) {
-            throw validation("email must be a valid email address.");
-        }
-    }
-
-    private static Map<String, String> validateTags(Map<String, String> tags) {
-        if (tags == null) {
-            return Map.of();
-        }
-        if (tags.size() > 50) {
-            throw validation("A member can have at most 50 tags.");
-        }
-        for (Map.Entry<String, String> tag : tags.entrySet()) {
-            if (tag.getKey() == null || tag.getKey().length() > 128
-                    || tag.getValue() == null || tag.getValue().length() > 256) {
-                throw validation("Tag keys can be at most 128 characters and values at most 256 characters.");
-            }
-        }
-        return Map.copyOf(tags);
     }
 
     public synchronized ObjectNode createResource(String region, String accountId, String kind, JsonNode request) {
@@ -1167,12 +1175,14 @@ public class MacieService implements Resettable {
         return JsonNodeFactory.instance.objectNode();
     }
 
-    // --- Classification jobs ---
-
     private static final String JOB = MacieClassificationJobs.KIND;
+
     private static final int JOB_WORKERS = 2;
+
     private static final long SCHEDULER_PERIOD_SECONDS = 60;
+
     private static final String STOP_CANCELLED = "CANCELLED";
+
     private static final String STOP_PAUSED = "USER_PAUSED";
 
     /** One in-progress (or user-paused) run of a job. Mutable fields are guarded by the service monitor. */
@@ -1777,44 +1787,8 @@ public class MacieService implements Resettable {
         }
     }
 
-    public record Page<T>(List<T> items, String nextToken) {}
-
-    @Override
-    public synchronized void clear() {
-        stopRuns(run -> true);
-        states.clear();
-        members.clear();
-    }
-
-    private static void requireAccountId(String accountId) {
-        requireAccountId(accountId, "adminAccountId");
-    }
-
-    private static void requireAccountId(String accountId, String fieldName) {
-        if (accountId == null || !accountId.matches("\\d{12}")) {
-            throw validation(fieldName + " must be a 12 digit account ID.");
-        }
-    }
-
-    static AwsException validation(String message) {
-        return new AwsException("ValidationException", message, 400);
-    }
-
-    private static AwsException conflict(String message) {
-        return new AwsException("ConflictException", message, 409);
-    }
-
-    static AwsException notFound(String message) {
-        return new AwsException("ResourceNotFoundException", message, 404);
-    }
-
     /** AWS rejects every Macie operation with AccessDeniedException until Macie is enabled. */
     private static AwsException notEnabled() {
         return new AwsException("AccessDeniedException", "Macie is not enabled for this account.", 403);
-    }
-
-    private static AwsException accessDenied() {
-        return new AwsException("AccessDeniedException",
-                "Only the delegated Macie administrator account can manage organization configuration.", 403);
     }
 }

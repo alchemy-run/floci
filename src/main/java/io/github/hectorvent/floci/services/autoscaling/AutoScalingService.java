@@ -807,10 +807,7 @@ public class AutoScalingService implements PassedRoleLookup {
      * applies immediately regardless of the flag.
      */
     public void setInstanceHealth(String region, String instanceId, String healthStatus,
-                                  boolean shouldRespectGracePeriod) {
-        if (isBlank(instanceId)) {
-            throw new AwsException("ValidationError", "InstanceId is required.", 400);
-        }
+                                   boolean shouldRespectGracePeriod) {
         if (!"Healthy".equals(healthStatus) && !"Unhealthy".equals(healthStatus)) {
             throw new AwsException("ValidationError",
                     "HealthStatus must be Healthy or Unhealthy.", 400);
@@ -1282,19 +1279,12 @@ public class AutoScalingService implements PassedRoleLookup {
                                                            String timeZone, Integer minSize, Integer maxSize,
                                                            Integer desiredCapacity) {
         requireGroup(region, asgName);
-        if (isBlank(actionName)) {
-            throw new AwsException("ValidationError", "ScheduledActionName is required.", 400);
-        }
         String key = scheduledActionKey(region, asgName, actionName);
         ScheduledAction action = scheduledActions.computeIfAbsent(key, k -> new ScheduledAction());
         action.setScheduledActionName(actionName);
         action.setAutoScalingGroupName(asgName);
-        if (action.getScheduledActionArn() == null) {
-            action.setScheduledActionArn(AwsArnUtils.Arn.of("autoscaling", region, regionResolver.getAccountId(),
-                    "scheduledUpdateGroupAction:" + UUID.randomUUID()
-                            + ":autoScalingGroupName/" + asgName
-                            + ":scheduledActionName/" + actionName).toString());
-        }
+        action.setScheduledActionArn(AwsArnUtils.Arn.of("autoscaling", region, regionResolver.getAccountId(),
+                "scheduledUpdateGroupAction:" + asgName + ":" + actionName).toString());
         action.setStartTime(startTime);
         action.setEndTime(endTime);
         action.setRecurrence(recurrence);
@@ -1312,15 +1302,15 @@ public class AutoScalingService implements PassedRoleLookup {
     }
 
     public List<ScheduledAction> describeScheduledActions(String region, String asgName, List<String> actionNames) {
-        if (notBlank(asgName) && actionNames != null && !actionNames.isEmpty()) {
-            requireGroup(region, asgName);
-        }
         return scheduledActions.values().stream()
                 .filter(a -> region.equals(a.getRegion()))
                 .filter(a -> asgName == null || asgName.equals(a.getAutoScalingGroupName()))
                 .filter(a -> actionNames == null || actionNames.isEmpty() || actionNames.contains(a.getScheduledActionName()))
-                .sorted(Comparator.comparing(ScheduledAction::getScheduledActionName))
                 .collect(Collectors.toList());
+    }
+
+    private static String scheduledActionKey(String region, String asgName, String actionName) {
+        return region + "::" + asgName + "::" + actionName;
     }
 
     // ── Warm pools ──────────────────────────────────────────────────────────
@@ -1373,15 +1363,6 @@ public class AutoScalingService implements PassedRoleLookup {
         return warmPools.get(warmPoolKey(region, asgName));
     }
 
-    /**
-     * Warm pool for a group already captured in a describe snapshot. Unlike
-     * {@link #describeWarmPool}, a concurrent delete of the group yields null instead of
-     * failing the whole DescribeAutoScalingGroups response.
-     */
-    WarmPoolConfiguration warmPoolForSnapshot(String region, String asgName) {
-        return warmPools.get(warmPoolKey(region, asgName));
-    }
-
     public void deleteWarmPool(String region, String asgName, boolean forceDelete) {
         requireGroup(region, asgName);
         warmPools.remove(warmPoolKey(region, asgName));
@@ -1429,118 +1410,7 @@ public class AutoScalingService implements PassedRoleLookup {
 
     public record InstanceRefreshPage(List<InstanceRefresh> instanceRefreshes, String nextToken) {}
 
-    // ── Scheduled actions ─────────────────────────────────────────────────────
-
-    // ── Instance refresh cancel / rollback ────────────────────────────────────
-
-    public InstanceRefresh cancelInstanceRefresh(String region, String asgName) {
-        InstanceRefresh refresh = requireActiveRefresh(region, asgName);
-        Instant now = Instant.now();
-        refresh.setStatus("Cancelled");
-        refresh.setStatusReason("Instance refresh cancelled.");
-        refresh.setEndTime(now);
-        instanceRefreshes.put(instanceRefreshKey(region, asgName, refresh.getInstanceRefreshId()), refresh);
-        recordActivity(region, asgName,
-                "Cancelled instance refresh " + refresh.getInstanceRefreshId() + ".",
-                "At " + now + " an instance refresh was cancelled.",
-                "Successful");
-        return refresh;
-    }
-
-    public InstanceRefresh rollbackInstanceRefresh(String region, String asgName) {
-        InstanceRefresh refresh = requireActiveRefresh(region, asgName);
-        Instant now = Instant.now();
-        refresh.setStatus("RollbackSuccessful");
-        refresh.setStatusReason("Instance refresh rolled back.");
-        refresh.setEndTime(now);
-        refresh.setPercentageComplete(100);
-        refresh.setInstancesToUpdate(0);
-        instanceRefreshes.put(instanceRefreshKey(region, asgName, refresh.getInstanceRefreshId()), refresh);
-        recordActivity(region, asgName,
-                "Rolled back instance refresh " + refresh.getInstanceRefreshId() + ".",
-                "At " + now + " an instance refresh was rolled back.",
-                "Successful");
-        return refresh;
-    }
-
-    // ── Instance health / protection / standby ────────────────────────────────
-
-    public List<ScalingActivity> enterStandby(String region, String asgName, List<String> instanceIds,
-                                              boolean decrementDesiredCapacity) {
-        AutoScalingGroup asg = requireGroup(region, asgName);
-        List<ScalingActivity> result = new ArrayList<>();
-        for (String instanceId : requireInstanceIds(instanceIds)) {
-            AsgInstance instance = findInstanceInGroup(asg, instanceId)
-                    .orElseThrow(() -> new AwsException("ValidationError",
-                            "Instance '" + instanceId + "' is not part of Auto Scaling group '"
-                                    + asgName + "'.", 400));
-            instance.setLifecycleState("Standby");
-            result.add(recordActivity(region, asgName,
-                    "Moving instance " + instanceId + " to Standby.",
-                    "At " + Instant.now() + " instance " + instanceId + " was placed on standby.",
-                    "Successful"));
-        }
-        if (decrementDesiredCapacity) {
-            asg.setDesiredCapacity(Math.max(asg.getMinSize(), asg.getDesiredCapacity() - instanceIds.size()));
-        }
-        groups.put(asgKey(region, asgName), asg);
-        return result;
-    }
-
-    public List<ScalingActivity> exitStandby(String region, String asgName, List<String> instanceIds) {
-        AutoScalingGroup asg = requireGroup(region, asgName);
-        List<ScalingActivity> result = new ArrayList<>();
-        for (String instanceId : requireInstanceIds(instanceIds)) {
-            AsgInstance instance = findInstanceInGroup(asg, instanceId)
-                    .orElseThrow(() -> new AwsException("ValidationError",
-                            "Instance '" + instanceId + "' is not part of Auto Scaling group '"
-                                    + asgName + "'.", 400));
-            instance.setLifecycleState("InService");
-            result.add(recordActivity(region, asgName,
-                    "Moving instance " + instanceId + " out of Standby.",
-                    "At " + Instant.now() + " instance " + instanceId + " exited standby.",
-                    "Successful"));
-        }
-        groups.put(asgKey(region, asgName), asg);
-        return result;
-    }
-
-    public void executePolicy(String region, String asgName, String policyNameOrArn) {
-        if (isBlank(asgName)) {
-            throw new AwsException("ValidationError", "AutoScalingGroupName is required.", 400);
-        }
-        requireGroup(region, asgName);
-        if (isBlank(policyNameOrArn)) {
-            throw new AwsException("ValidationError", "PolicyName is required.", 400);
-        }
-        ScalingPolicy policy = policies.values().stream()
-                .filter(p -> region.equals(p.getRegion()))
-                .filter(p -> asgName.equals(p.getAutoScalingGroupName()))
-                .filter(p -> policyNameOrArn.equals(p.getPolicyName()) || policyNameOrArn.equals(p.getPolicyArn()))
-                .findFirst()
-                .orElseThrow(() -> new AwsException("ValidationError",
-                        "Scaling policy '" + policyNameOrArn + "' not found.", 400));
-        recordActivity(region, asgName,
-                "Executed scaling policy " + policy.getPolicyName() + ".",
-                "At " + Instant.now() + " policy " + policy.getPolicyName() + " was executed.",
-                "Successful");
-    }
-
     // ── Internal helpers ───────────────────────────────────────────────────────
-
-    /**
-     * Instance-scoped writes ({@code SetInstanceHealth}, {@code TerminateInstanceInAutoScalingGroup})
-     * carry no group name. AWS resolves the instance to its owning group for resource-level
-     * authorization; a well-formed id that belongs to no group is an {@code AccessDenied}
-     * (the caller's group-scoped grant does not match), not a {@code ValidationError}.
-     */
-    private static AwsException instanceNotAuthorized(String action, String instanceId) {
-        return new AwsException("AccessDenied",
-                "User is not authorized to perform: autoscaling:" + action
-                        + " because instance '" + instanceId
-                        + "' is not associated with an Auto Scaling group.",
-                403);
-    }
 
     AutoScalingGroup requireGroup(String region, String name) {
         AutoScalingGroup asg = groups.get(asgKey(region, name));
@@ -1565,34 +1435,6 @@ public class AutoScalingService implements PassedRoleLookup {
 
     private static String policyKey(String region, String asgName, String policyName) {
         return region + "::" + asgName + "::" + policyName;
-    }
-
-    private static String scheduledActionKey(String region, String asgName, String actionName) {
-        return region + "::" + asgName + "::" + actionName;
-    }
-
-    private InstanceRefresh requireActiveRefresh(String region, String asgName) {
-        requireGroup(region, asgName);
-        return instanceRefreshes.values().stream()
-                .filter(r -> region.equals(r.getRegion()))
-                .filter(r -> asgName.equals(r.getAutoScalingGroupName()))
-                .filter(r -> isActiveRefreshStatus(r.getStatus()))
-                .findFirst()
-                .orElseThrow(() -> new AwsException("ActiveInstanceRefreshNotFound",
-                        "No active instance refresh found for Auto Scaling group '" + asgName + "'.", 400));
-    }
-
-    private static Optional<AsgInstance> findInstanceInGroup(AutoScalingGroup asg, String instanceId) {
-        return asg.getInstances().stream()
-                .filter(i -> instanceId.equals(i.getInstanceId()))
-                .findFirst();
-    }
-
-    private static List<String> requireInstanceIds(List<String> instanceIds) {
-        if (instanceIds == null || instanceIds.isEmpty()) {
-            throw new AwsException("ValidationError", "InstanceIds is required.", 400);
-        }
-        return instanceIds;
     }
 
     private static void validateLaunchSource(String launchConfigName,
@@ -2186,5 +2028,143 @@ public class AutoScalingService implements PassedRoleLookup {
 
     private static boolean isDynamicLaunchTemplateVersion(String version) {
         return version == null || version.isBlank() || isLaunchTemplateVersionAlias(version);
+    }
+
+    /**
+     * Warm pool for a group already captured in a describe snapshot. Unlike
+     * {@link #describeWarmPool}, a concurrent delete of the group yields null instead of
+     * failing the whole DescribeAutoScalingGroups response.
+     */
+    WarmPoolConfiguration warmPoolForSnapshot(String region, String asgName) {
+        return warmPools.get(warmPoolKey(region, asgName));
+    }
+
+    public InstanceRefresh cancelInstanceRefresh(String region, String asgName) {
+        InstanceRefresh refresh = requireActiveRefresh(region, asgName);
+        Instant now = Instant.now();
+        refresh.setStatus("Cancelled");
+        refresh.setStatusReason("Instance refresh cancelled.");
+        refresh.setEndTime(now);
+        instanceRefreshes.put(instanceRefreshKey(region, asgName, refresh.getInstanceRefreshId()), refresh);
+        recordActivity(region, asgName,
+                "Cancelled instance refresh " + refresh.getInstanceRefreshId() + ".",
+                "At " + now + " an instance refresh was cancelled.",
+                "Successful");
+        return refresh;
+    }
+
+    public InstanceRefresh rollbackInstanceRefresh(String region, String asgName) {
+        InstanceRefresh refresh = requireActiveRefresh(region, asgName);
+        Instant now = Instant.now();
+        refresh.setStatus("RollbackSuccessful");
+        refresh.setStatusReason("Instance refresh rolled back.");
+        refresh.setEndTime(now);
+        refresh.setPercentageComplete(100);
+        refresh.setInstancesToUpdate(0);
+        instanceRefreshes.put(instanceRefreshKey(region, asgName, refresh.getInstanceRefreshId()), refresh);
+        recordActivity(region, asgName,
+                "Rolled back instance refresh " + refresh.getInstanceRefreshId() + ".",
+                "At " + now + " an instance refresh was rolled back.",
+                "Successful");
+        return refresh;
+    }
+
+    public List<ScalingActivity> enterStandby(String region, String asgName, List<String> instanceIds,
+                                              boolean decrementDesiredCapacity) {
+        AutoScalingGroup asg = requireGroup(region, asgName);
+        List<ScalingActivity> result = new ArrayList<>();
+        for (String instanceId : requireInstanceIds(instanceIds)) {
+            AsgInstance instance = findInstanceInGroup(asg, instanceId)
+                    .orElseThrow(() -> new AwsException("ValidationError",
+                            "Instance '" + instanceId + "' is not part of Auto Scaling group '"
+                                    + asgName + "'.", 400));
+            instance.setLifecycleState("Standby");
+            result.add(recordActivity(region, asgName,
+                    "Moving instance " + instanceId + " to Standby.",
+                    "At " + Instant.now() + " instance " + instanceId + " was placed on standby.",
+                    "Successful"));
+        }
+        if (decrementDesiredCapacity) {
+            asg.setDesiredCapacity(Math.max(asg.getMinSize(), asg.getDesiredCapacity() - instanceIds.size()));
+        }
+        groups.put(asgKey(region, asgName), asg);
+        return result;
+    }
+
+    public List<ScalingActivity> exitStandby(String region, String asgName, List<String> instanceIds) {
+        AutoScalingGroup asg = requireGroup(region, asgName);
+        List<ScalingActivity> result = new ArrayList<>();
+        for (String instanceId : requireInstanceIds(instanceIds)) {
+            AsgInstance instance = findInstanceInGroup(asg, instanceId)
+                    .orElseThrow(() -> new AwsException("ValidationError",
+                            "Instance '" + instanceId + "' is not part of Auto Scaling group '"
+                                    + asgName + "'.", 400));
+            instance.setLifecycleState("InService");
+            result.add(recordActivity(region, asgName,
+                    "Moving instance " + instanceId + " out of Standby.",
+                    "At " + Instant.now() + " instance " + instanceId + " exited standby.",
+                    "Successful"));
+        }
+        groups.put(asgKey(region, asgName), asg);
+        return result;
+    }
+
+    public void executePolicy(String region, String asgName, String policyNameOrArn) {
+        if (isBlank(asgName)) {
+            throw new AwsException("ValidationError", "AutoScalingGroupName is required.", 400);
+        }
+        requireGroup(region, asgName);
+        if (isBlank(policyNameOrArn)) {
+            throw new AwsException("ValidationError", "PolicyName is required.", 400);
+        }
+        ScalingPolicy policy = policies.values().stream()
+                .filter(p -> region.equals(p.getRegion()))
+                .filter(p -> asgName.equals(p.getAutoScalingGroupName()))
+                .filter(p -> policyNameOrArn.equals(p.getPolicyName()) || policyNameOrArn.equals(p.getPolicyArn()))
+                .findFirst()
+                .orElseThrow(() -> new AwsException("ValidationError",
+                        "Scaling policy '" + policyNameOrArn + "' not found.", 400));
+        recordActivity(region, asgName,
+                "Executed scaling policy " + policy.getPolicyName() + ".",
+                "At " + Instant.now() + " policy " + policy.getPolicyName() + " was executed.",
+                "Successful");
+    }
+
+    /**
+     * Instance-scoped writes ({@code SetInstanceHealth}, {@code TerminateInstanceInAutoScalingGroup})
+     * carry no group name. AWS resolves the instance to its owning group for resource-level
+     * authorization; a well-formed id that belongs to no group is an {@code AccessDenied}
+     * (the caller's group-scoped grant does not match), not a {@code ValidationError}.
+     */
+    private static AwsException instanceNotAuthorized(String action, String instanceId) {
+        return new AwsException("AccessDenied",
+                "User is not authorized to perform: autoscaling:" + action
+                        + " because instance '" + instanceId
+                        + "' is not associated with an Auto Scaling group.",
+                403);
+    }
+
+    private InstanceRefresh requireActiveRefresh(String region, String asgName) {
+        requireGroup(region, asgName);
+        return instanceRefreshes.values().stream()
+                .filter(r -> region.equals(r.getRegion()))
+                .filter(r -> asgName.equals(r.getAutoScalingGroupName()))
+                .filter(r -> isActiveRefreshStatus(r.getStatus()))
+                .findFirst()
+                .orElseThrow(() -> new AwsException("ActiveInstanceRefreshNotFound",
+                        "No active instance refresh found for Auto Scaling group '" + asgName + "'.", 400));
+    }
+
+    private static Optional<AsgInstance> findInstanceInGroup(AutoScalingGroup asg, String instanceId) {
+        return asg.getInstances().stream()
+                .filter(i -> instanceId.equals(i.getInstanceId()))
+                .findFirst();
+    }
+
+    private static List<String> requireInstanceIds(List<String> instanceIds) {
+        if (instanceIds == null || instanceIds.isEmpty()) {
+            throw new AwsException("ValidationError", "InstanceIds is required.", 400);
+        }
+        return instanceIds;
     }
 }

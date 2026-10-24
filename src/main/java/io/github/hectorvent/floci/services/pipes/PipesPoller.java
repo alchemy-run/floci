@@ -34,6 +34,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import io.github.hectorvent.floci.services.dynamodb.DynamoDbStreamService;
 
 @ApplicationScoped
 public class PipesPoller implements Resettable {
@@ -690,23 +691,15 @@ public class PipesPoller implements Resettable {
         return DEFAULT_BATCH_SIZE;
     }
 
-    /**
-     * EventBridge Pipes delivers a Lambda target a bare JSON array of source
-     * records — not the {@code { "Records": [...] }} Lambda event-source-mapping
-     * envelope. Enrichment already uses {@link #asEventArray}; the Lambda path
-     * must match so handlers can treat {@code event[0].eventSource} as the batch.
-     */
     private String wrapRecords(List<JsonNode> records) {
-        return wrapPipeBatch(objectMapper, records);
-    }
-
-    static String wrapPipeBatch(ObjectMapper mapper, List<JsonNode> records) {
         try {
             ArrayNode recordsArray = objectMapper.createArrayNode();
             records.forEach(recordsArray::add);
-            return mapper.writeValueAsString(recordsArray);
+            ObjectNode root = objectMapper.createObjectNode();
+            root.set("Records", recordsArray);
+            return objectMapper.writeValueAsString(root);
         } catch (Exception e) {
-            return "[]";
+            return "{\"Records\":[]}";
         }
     }
 
@@ -929,5 +922,45 @@ public class PipesPoller implements Resettable {
         }
         int colonIdx = arn.lastIndexOf(':');
         return colonIdx >= 0 ? arn.substring(colonIdx + 1) : arn;
+    }
+
+    private final DynamoDbStreamService dynamoDbStreamService;
+
+    private final ConcurrentHashMap<String, String> dynamoDbIterators = new ConcurrentHashMap<>();
+
+    /**
+     * Opens an iterator on the stream's first shard, under the same single-shard limit as
+     * {@link #initKinesisIterator}.
+     */
+    private String initDynamoDbIterator(String streamArn) {
+        try {
+            return dynamoDbStreamService.getShardIterator(
+                    streamArn, DynamoDbStreamService.SHARD_ID, "TRIM_HORIZON", null);
+        } catch (Exception e) {
+            LOG.warnv("Failed to get DynamoDB stream iterator for {0}: {1}", streamArn, e.getMessage());
+            return null;
+        }
+    }
+
+    static String wrapPipeBatch(ObjectMapper mapper, List<JsonNode> records) {
+        try {
+            var recordsArray = mapper.createArrayNode();
+            records.forEach(recordsArray::add);
+            return mapper.writeValueAsString(recordsArray);
+        } catch (Exception e) {
+            return "[]";
+        }
+    }
+
+    private List<ObjectNode> buildDynamoDbRecordNodes(List<?> records, Pipe pipe, String region) {
+        List<ObjectNode> nodes = new ArrayList<>();
+        for (Object record : records) {
+            ObjectNode node = objectMapper.valueToTree(record);
+            node.put("eventSource", "aws:dynamodb");
+            node.put("eventSourceARN", pipe.getSource());
+            node.put("awsRegion", region);
+            nodes.add(node);
+        }
+        return nodes;
     }
 }

@@ -60,8 +60,6 @@ public class KinesisService implements ResourceProvider {
     private static final BigInteger MAX_HASH_KEY =
             new BigInteger("340282366920938463463374607431768211455");
     private static final BigInteger HASH_KEY_SPACE_SIZE = MAX_HASH_KEY.add(BigInteger.ONE);
-    private static final int DEFAULT_SHARD_LIMIT = 20_000;
-    private static final int DEFAULT_ON_DEMAND_STREAM_LIMIT = 50;
 
     private final StorageBackend<String, KinesisStream> store;
     private final StorageBackend<String, KinesisConsumer> consumerStore;
@@ -185,56 +183,12 @@ public class KinesisService implements ResourceProvider {
         }
     }
 
-    public void applyWarmThroughput(String streamName, int warmThroughputMiBps, String region) {
-        if (warmThroughputMiBps < 1) {
-            throw new AwsException("InvalidArgumentException",
-                    "WarmThroughputMiBps must be at least 1", 400);
-        }
-        String key = regionKey(region, streamName);
-        synchronized (lockFor(key)) {
-            KinesisStream stream = resolveStream(streamName, region);
-            stream.setWarmThroughputTargetMiBps(warmThroughputMiBps);
-            stream.setWarmThroughputCurrentMiBps(warmThroughputMiBps);
-            store.put(key, stream);
-        }
-    }
-
-    public UpdateStreamWarmThroughputResult updateStreamWarmThroughput(
-            String streamName, int warmThroughputMiBps, String region) {
-        applyWarmThroughput(streamName, warmThroughputMiBps, region);
-        KinesisStream stream = resolveStream(streamName, region);
-        return new UpdateStreamWarmThroughputResult(
-                stream.getStreamArn(),
-                stream.getStreamName(),
-                stream.getWarmThroughputTargetMiBps(),
-                stream.getWarmThroughputCurrentMiBps());
-    }
-
-
     public List<String> listStreams(String region) {
-        return listStreamObjects(region).stream()
-                .map(KinesisStream::getStreamName)
-                .toList();
-    }
-
-    public List<KinesisStream> listStreamObjects(String region) {
         String prefix = region + "::";
         return store.scan(key -> key.startsWith(prefix)).stream()
-                .sorted(Comparator.comparing(KinesisStream::getStreamName))
+                .map(KinesisStream::getStreamName)
+                .sorted()
                 .toList();
-    }
-
-    public record DescribeLimitsResult(
-            int shardLimit, int openShardCount, int onDemandStreamCount, int onDemandStreamCountLimit) {}
-
-    public DescribeLimitsResult describeLimits(String region) {
-        List<KinesisStream> streams = listStreamObjects(region);
-        int openShards = streams.stream()
-                .mapToInt(s -> (int) s.getShards().stream().filter(shard -> !shard.isClosed()).count())
-                .sum();
-        int onDemand = (int) streams.stream().filter(s -> "ON_DEMAND".equals(s.getStreamMode())).count();
-        return new DescribeLimitsResult(
-                DEFAULT_SHARD_LIMIT, openShards, onDemand, DEFAULT_ON_DEMAND_STREAM_LIMIT);
     }
 
     public List<KinesisStream> listStreamDetails(String region) {
@@ -253,24 +207,8 @@ public class KinesisService implements ResourceProvider {
     }
 
     public KinesisConsumer registerStreamConsumer(String streamArn, String consumerName, String region) {
-        return registerStreamConsumer(streamArn, consumerName, Map.of(), region);
-    }
-
-    public KinesisConsumer registerStreamConsumer(String streamArn, String consumerName,
-                                                  Map<String, String> tags, String region) {
-        String streamName = streamNameFromArn(streamArn);
-        resolveStream(streamName, region);
-        boolean exists = listStreamConsumers(streamArn, region).stream()
-                .anyMatch(c -> c.getConsumerName().equals(consumerName));
-        if (exists) {
-            throw new AwsException("ResourceInUseException",
-                    "Consumer " + consumerName + " already exists on stream " + streamName, 400);
-        }
         String consumerArn = streamArn + "/consumer/" + consumerName + ":" + System.currentTimeMillis();
         KinesisConsumer consumer = new KinesisConsumer(consumerName, consumerArn, streamArn);
-        if (tags != null && !tags.isEmpty()) {
-            consumer.getTags().putAll(tags);
-        }
         consumerStore.put(region + "::" + consumerArn, consumer);
         LOG.infov("Registered Kinesis consumer: {0} for stream {1}", consumerName, streamArn);
         return consumer;
@@ -301,33 +239,17 @@ public class KinesisService implements ResourceProvider {
     }
 
     public List<KinesisConsumer> listStreamConsumers(String streamArn, String region) {
-        String streamName = streamNameFromArn(streamArn);
-        resolveStream(streamName, region);
         return consumerStore.scan(k -> true).stream()
-                .filter(c -> streamArn.equals(c.getStreamArn()))
+                .filter(c -> c.getStreamArn().equals(streamArn))
                 .toList();
     }
 
     public void deleteStream(String streamName, String region) {
-        deleteStream(streamName, false, region);
-    }
-
-    public void deleteStream(String streamName, boolean enforceConsumerDeletion, String region) {
         String storageKey = regionKey(region, streamName);
+        // Delete under the per-stream monitor every writer takes, so the delete is serialized with
+        // any in-flight append, split, merge or metadata write on this stream. See lockFor for why
+        // the monitor is deliberately left in the map.
         synchronized (lockFor(storageKey)) {
-            KinesisStream stream = resolveStream(streamName, region);
-            List<KinesisConsumer> consumers = consumerStore.scan(k -> true).stream()
-                    .filter(c -> stream.getStreamArn().equals(c.getStreamArn()))
-                    .toList();
-            if (!consumers.isEmpty()) {
-                if (!enforceConsumerDeletion) {
-                    throw new AwsException("ResourceInUseException",
-                            "Stream " + streamName + " has registered consumers", 400);
-                }
-                for (KinesisConsumer consumer : consumers) {
-                    consumerStore.delete(region + "::" + consumer.getConsumerArn());
-                }
-            }
             store.delete(storageKey);
         }
         LOG.infov("Deleted Kinesis stream: {0}", streamName);
@@ -353,59 +275,6 @@ public class KinesisService implements ResourceProvider {
 
     public Map<String, String> listTagsForStream(String streamName, String region) {
         return resolveStream(streamName, region).getTags();
-    }
-
-    public Map<String, String> listTagsForConsumer(String consumerArn, String region) {
-        return resolveConsumer(consumerArn, region).getTags();
-    }
-
-    public void addTagsToConsumer(String consumerArn, Map<String, String> tags, String region) {
-        KinesisConsumer consumer = resolveConsumer(consumerArn, region);
-        consumer.getTags().putAll(tags);
-        consumerStore.put(region + "::" + consumerArn, consumer);
-    }
-
-    public void removeTagsFromConsumer(String consumerArn, List<String> tagKeys, String region) {
-        KinesisConsumer consumer = resolveConsumer(consumerArn, region);
-        tagKeys.forEach(consumer.getTags()::remove);
-        consumerStore.put(region + "::" + consumerArn, consumer);
-    }
-
-    private KinesisConsumer resolveConsumer(String consumerArn, String region) {
-        return consumerStore.get(region + "::" + consumerArn)
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                        "Consumer not found", 400));
-    }
-
-    public String getResourcePolicy(String streamName, String region) {
-        KinesisStream stream = resolveStream(streamName, region);
-        if (stream.getResourcePolicy() == null || stream.getResourcePolicy().isBlank()) {
-            throw new AwsException("ResourceNotFoundException",
-                    "No resource policy found for stream " + streamName, 400);
-        }
-        return stream.getResourcePolicy();
-    }
-
-    public void putResourcePolicy(String streamName, String policy, String region) {
-        String key = regionKey(region, streamName);
-        synchronized (lockFor(key)) {
-            KinesisStream stream = resolveStream(streamName, region);
-            stream.setResourcePolicy(policy);
-            store.put(key, stream);
-        }
-    }
-
-    public void deleteResourcePolicy(String streamName, String region) {
-        String key = regionKey(region, streamName);
-        synchronized (lockFor(key)) {
-            KinesisStream stream = resolveStream(streamName, region);
-            if (stream.getResourcePolicy() == null || stream.getResourcePolicy().isBlank()) {
-                throw new AwsException("ResourceNotFoundException",
-                        "No resource policy found for stream " + streamName, 400);
-            }
-            stream.setResourcePolicy(null);
-            store.put(key, stream);
-        }
     }
 
     public void startStreamEncryption(String streamName, String encryptionType, String keyId, String region) {
@@ -588,10 +457,6 @@ public class KinesisService implements ResourceProvider {
                 throw new AwsException("InvalidArgumentException", "One or both shards are already closed", 400);
             }
 
-            if (!areAdjacent(shard1, shard2)) {
-                throw new AwsException("InvalidArgumentException",
-                        "Shards " + shardId + " and " + adjacentShardId + " are not adjacent", 400);
-            }
             shard1.setClosed(true);
             shard2.setClosed(true);
             String seq = String.valueOf(sequenceGenerator.get());
@@ -617,42 +482,8 @@ public class KinesisService implements ResourceProvider {
         }
     }
 
-    public record UpdateStreamWarmThroughputResult(
-            String streamArn, String streamName, Integer targetMiBps, Integer currentMiBps) {}
-
-    private boolean areAdjacent(KinesisShard a, KinesisShard b) {
-        BigInteger aStart = new BigInteger(a.getHashKeyRange().startingHashKey());
-        BigInteger aEnd = new BigInteger(a.getHashKeyRange().endingHashKey());
-        BigInteger bStart = new BigInteger(b.getHashKeyRange().startingHashKey());
-        BigInteger bEnd = new BigInteger(b.getHashKeyRange().endingHashKey());
-        return aEnd.add(BigInteger.ONE).equals(bStart) || bEnd.add(BigInteger.ONE).equals(aStart);
-    }
-
-    private String streamNameFromArn(String streamArn) {
-        if (streamArn == null || streamArn.isBlank()) {
-            throw new AwsException("InvalidArgumentException", "StreamARN is required", 400);
-        }
-        int streamIdx = streamArn.indexOf(":stream/");
-        if (streamIdx < 0) {
-            throw new AwsException("InvalidArgumentException",
-                    "StreamARN does not contain a valid stream name: " + streamArn, 400);
-        }
-        String after = streamArn.substring(streamIdx + 8);
-        int slash = after.indexOf('/');
-        String name = slash >= 0 ? after.substring(0, slash) : after;
-        if (name.isBlank()) {
-            throw new AwsException("InvalidArgumentException",
-                    "StreamARN does not contain a valid stream name: " + streamArn, 400);
-        }
-        return name;
-    }
-
     private String nextShardId(KinesisStream stream) {
-        return formatShardId(stream.getShards().size());
-    }
-
-    private String formatShardId(int index) {
-        return String.format("shardId-%012d", index);
+        return String.format("shardId-%012d", stream.getShards().size());
     }
 
     private String subtractOne(String val) {
@@ -1529,5 +1360,151 @@ public class KinesisService implements ResourceProvider {
     @Override
     public Set<SupportedResourceType> getSupportedResourceTypes() {
         return Set.of(new SupportedResourceType("kinesis:stream", "kinesis", true));
+    }
+
+    private static final int DEFAULT_SHARD_LIMIT = 20_000;
+
+    private static final int DEFAULT_ON_DEMAND_STREAM_LIMIT = 50;
+
+    public void applyWarmThroughput(String streamName, int warmThroughputMiBps, String region) {
+        if (warmThroughputMiBps < 1) {
+            throw new AwsException("InvalidArgumentException",
+                    "WarmThroughputMiBps must be at least 1", 400);
+        }
+        String key = regionKey(region, streamName);
+        synchronized (lockFor(key)) {
+            KinesisStream stream = resolveStream(streamName, region);
+            stream.setWarmThroughputTargetMiBps(warmThroughputMiBps);
+            stream.setWarmThroughputCurrentMiBps(warmThroughputMiBps);
+            store.put(key, stream);
+        }
+    }
+
+    public UpdateStreamWarmThroughputResult updateStreamWarmThroughput(
+            String streamName, int warmThroughputMiBps, String region) {
+        applyWarmThroughput(streamName, warmThroughputMiBps, region);
+        KinesisStream stream = resolveStream(streamName, region);
+        return new UpdateStreamWarmThroughputResult(
+                stream.getStreamArn(),
+                stream.getStreamName(),
+                stream.getWarmThroughputTargetMiBps(),
+                stream.getWarmThroughputCurrentMiBps());
+    }
+
+    public List<KinesisStream> listStreamObjects(String region) {
+        String prefix = region + "::";
+        return store.scan(key -> key.startsWith(prefix)).stream()
+                .sorted(Comparator.comparing(KinesisStream::getStreamName))
+                .toList();
+    }
+
+    public record DescribeLimitsResult(
+            int shardLimit, int openShardCount, int onDemandStreamCount, int onDemandStreamCountLimit) {}
+
+    public DescribeLimitsResult describeLimits(String region) {
+        List<KinesisStream> streams = listStreamObjects(region);
+        int openShards = streams.stream()
+                .mapToInt(s -> (int) s.getShards().stream().filter(shard -> !shard.isClosed()).count())
+                .sum();
+        int onDemand = (int) streams.stream().filter(s -> "ON_DEMAND".equals(s.getStreamMode())).count();
+        return new DescribeLimitsResult(
+                DEFAULT_SHARD_LIMIT, openShards, onDemand, DEFAULT_ON_DEMAND_STREAM_LIMIT);
+    }
+
+    public Map<String, String> listTagsForConsumer(String consumerArn, String region) {
+        return resolveConsumer(consumerArn, region).getTags();
+    }
+
+    public void addTagsToConsumer(String consumerArn, Map<String, String> tags, String region) {
+        KinesisConsumer consumer = resolveConsumer(consumerArn, region);
+        consumer.getTags().putAll(tags);
+        consumerStore.put(region + "::" + consumerArn, consumer);
+    }
+
+    public void removeTagsFromConsumer(String consumerArn, List<String> tagKeys, String region) {
+        KinesisConsumer consumer = resolveConsumer(consumerArn, region);
+        tagKeys.forEach(consumer.getTags()::remove);
+        consumerStore.put(region + "::" + consumerArn, consumer);
+    }
+
+    private KinesisConsumer resolveConsumer(String consumerArn, String region) {
+        return consumerStore.get(region + "::" + consumerArn)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Consumer not found", 400));
+    }
+
+    public String getResourcePolicy(String streamName, String region) {
+        KinesisStream stream = resolveStream(streamName, region);
+        if (stream.getResourcePolicy() == null || stream.getResourcePolicy().isBlank()) {
+            throw new AwsException("ResourceNotFoundException",
+                    "No resource policy found for stream " + streamName, 400);
+        }
+        return stream.getResourcePolicy();
+    }
+
+    public void putResourcePolicy(String streamName, String policy, String region) {
+        String key = regionKey(region, streamName);
+        synchronized (lockFor(key)) {
+            KinesisStream stream = resolveStream(streamName, region);
+            stream.setResourcePolicy(policy);
+            store.put(key, stream);
+        }
+    }
+
+    public void deleteResourcePolicy(String streamName, String region) {
+        String key = regionKey(region, streamName);
+        synchronized (lockFor(key)) {
+            KinesisStream stream = resolveStream(streamName, region);
+            if (stream.getResourcePolicy() == null || stream.getResourcePolicy().isBlank()) {
+                throw new AwsException("ResourceNotFoundException",
+                        "No resource policy found for stream " + streamName, 400);
+            }
+            stream.setResourcePolicy(null);
+            store.put(key, stream);
+        }
+    }
+
+    public record UpdateStreamWarmThroughputResult(
+            String streamArn, String streamName, Integer targetMiBps, Integer currentMiBps) {}
+
+    private boolean areAdjacent(KinesisShard a, KinesisShard b) {
+        BigInteger aStart = new BigInteger(a.getHashKeyRange().startingHashKey());
+        BigInteger aEnd = new BigInteger(a.getHashKeyRange().endingHashKey());
+        BigInteger bStart = new BigInteger(b.getHashKeyRange().startingHashKey());
+        BigInteger bEnd = new BigInteger(b.getHashKeyRange().endingHashKey());
+        return aEnd.add(BigInteger.ONE).equals(bStart) || bEnd.add(BigInteger.ONE).equals(aStart);
+    }
+
+    private String streamNameFromArn(String streamArn) {
+        if (streamArn == null || streamArn.isBlank()) {
+            throw new AwsException("InvalidArgumentException", "StreamARN is required", 400);
+        }
+        int streamIdx = streamArn.indexOf(":stream/");
+        if (streamIdx < 0) {
+            throw new AwsException("InvalidArgumentException",
+                    "StreamARN does not contain a valid stream name: " + streamArn, 400);
+        }
+        String after = streamArn.substring(streamIdx + 8);
+        int slash = after.indexOf('/');
+        String name = slash >= 0 ? after.substring(0, slash) : after;
+        if (name.isBlank()) {
+            throw new AwsException("InvalidArgumentException",
+                    "StreamARN does not contain a valid stream name: " + streamArn, 400);
+        }
+        return name;
+    }
+
+    private String formatShardId(int index) {
+        return String.format("shardId-%012d", index);
+    }
+
+    private int iteratorStartIndex(KinesisStream stream, String shardId, String type) {
+        // AWS validates the shard at GetShardIterator time for every iterator type.
+        KinesisShard shard = stream.getShards().stream()
+                .filter(s -> s.getShardId().equals(shardId))
+                .findFirst()
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Shard not found", 400));
+        // LATEST resumes from the tip snapshot taken now; other types resolve in getRecords.
+        return "LATEST".equals(type) ? shard.recordCount() : 0;
     }
 }

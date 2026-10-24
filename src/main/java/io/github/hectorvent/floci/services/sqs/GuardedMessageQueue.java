@@ -7,15 +7,15 @@ import io.github.hectorvent.floci.services.sqs.model.Message;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Optional;
-import java.util.Set;
-import java.util.UUID;
 import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.Iterator;
+import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Thread-safe wrapper around a per-queue message list. All operations acquire a

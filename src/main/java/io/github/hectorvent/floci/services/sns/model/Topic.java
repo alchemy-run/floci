@@ -24,9 +24,6 @@ public class Topic {
     @JsonProperty("Tags")
     private Map<String, String> tags = new HashMap<>();
 
-    @JsonProperty("DataProtectionPolicy")
-    private String dataProtectionPolicy;
-
     @JsonProperty("CreatedAt")
     private Instant createdAt;
 
@@ -55,11 +52,15 @@ public class Topic {
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags; }
 
+    public Instant getCreatedAt() { return createdAt; }
+    public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+
+    @JsonProperty("DataProtectionPolicy")
+    private String dataProtectionPolicy;
+
     public String getDataProtectionPolicy() { return dataProtectionPolicy; }
+
     public void setDataProtectionPolicy(String dataProtectionPolicy) {
         this.dataProtectionPolicy = dataProtectionPolicy;
     }
-
-    public Instant getCreatedAt() { return createdAt; }
-    public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
 }

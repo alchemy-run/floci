@@ -739,7 +739,6 @@ public class SqsService implements Resettable, ResourceProvider {
         }
 
         validateMaximumMessageSize(attributes);
-        attributes = withNormalizedPolicy(attributes);
         attributes = validateMessageRetentionPeriod(attributes);
 
         String accountId = regionResolver.getAccountId();
@@ -779,8 +778,6 @@ public class SqsService implements Resettable, ResourceProvider {
             getOrCreateQueue(storageKey).activity().accessed();
             return withCurrentQueueUrl(existing, region);
         }
-
-        validateRedrivePolicy(attributes, accountId, region);
 
         Queue queue = new Queue(queueName, queueUrl);
         queue.setAccountId(regionResolver.getAccountId());
@@ -825,7 +822,6 @@ public class SqsService implements Resettable, ResourceProvider {
             removed.close();
         }
         deduplicationCache.remove(storageKey);
-        redrivePolicyCache.remove(storageKey);
         deduplicationIdentityCache.remove(storageKey);
         deduplicationLocks.remove(storageKey);
         if (messageStore != null) {
@@ -1227,50 +1223,6 @@ public class SqsService implements Resettable, ResourceProvider {
         }
     }
 
-    /**
-     * AWS rejects a RedrivePolicy whose {@code deadLetterTargetArn} does not name an existing
-     * queue in the source queue's own account and region. Only the policy being written is
-     * checked: deleting the dead-letter queue afterwards leaves the source queue usable.
-     */
-    private void validateRedrivePolicy(Map<String, String> attributes, String sourceAccountId, String region) {
-        if (attributes == null) {
-            return;
-        }
-        String raw = attributes.get("RedrivePolicy");
-        if (raw == null || raw.isEmpty()) {
-            return;
-        }
-        JsonNode policy;
-        try {
-            policy = POLICY_MAPPER.readTree(raw);
-        } catch (Exception e) {
-            LOG.debugv("RedrivePolicy is not JSON, skipping dead-letter target check: {0}", raw);
-            return;
-        }
-        JsonNode target = policy == null ? null : policy.get("deadLetterTargetArn");
-        if (target == null || !target.isTextual()) {
-            return;
-        }
-        if (!deadLetterTargetExists(target.asText(), sourceAccountId, region)) {
-            throw new AwsException("InvalidParameterValue",
-                    "Value " + raw + " for parameter RedrivePolicy is invalid. "
-                            + "Reason: Dead letter target does not exist.", 400);
-        }
-    }
-
-    private boolean deadLetterTargetExists(String targetArn, String sourceAccountId, String region) {
-        if (!AwsArnUtils.isArnFor(targetArn, "sqs")) {
-            return false;
-        }
-        AwsArnUtils.Arn arn = AwsArnUtils.parse(targetArn);
-        if (!arn.region().isEmpty() && !arn.region().equals(region)) {
-            return false;
-        }
-        if (!arn.accountId().equals(sourceAccountId)) {
-            return false;
-        }
-        String dlqUrl = queueUrlFromArn(targetArn, region);
-        return dlqUrl != null && getQueueByUrl(regionKey(region, dlqUrl), dlqUrl).isPresent();
     /** AWS stores a valid value in canonical form, so "060" and "+60" read back as "60". */
     private static Map<String, String> validateMessageRetentionPeriod(Map<String, String> attributes) {
         if (attributes == null || !attributes.containsKey("MessageRetentionPeriod")) {
@@ -1706,10 +1658,6 @@ public class SqsService implements Resettable, ResourceProvider {
                 .orElseThrow(() -> new AwsException("AWS.SimpleQueueService.NonExistentQueue",
                         "The specified queue does not exist.", 400));
         validateMaximumMessageSize(attributes);
-        attributes = withNormalizedPolicy(attributes);
-        String sourceAccountId = accountFromQueueUrl(queue.getQueueUrl());
-        validateRedrivePolicy(attributes,
-                sourceAccountId != null ? sourceAccountId : regionResolver.getAccountId(), region);
         attributes = validateMessageRetentionPeriod(attributes);
         if (attributes != null) {
             for (Map.Entry<String, String> entry : attributes.entrySet()) {
@@ -1718,9 +1666,6 @@ public class SqsService implements Resettable, ResourceProvider {
                 } else {
                     queue.getAttributes().put(entry.getKey(), entry.getValue());
                 }
-            }
-            if (attributes.containsKey("RedrivePolicy")) {
-                redrivePolicyCache.remove(storageKey);
             }
         }
         queue.setLastModifiedTimestamp(Instant.now());
@@ -2045,73 +1990,6 @@ public class SqsService implements Resettable, ResourceProvider {
 
     private static final ObjectMapper POLICY_MAPPER = new ObjectMapper();
 
-    /** Policy statement elements SQS stores a one-element list of as the bare value. */
-    private static final List<String> COLLAPSIBLE_STATEMENT_ELEMENTS =
-            List.of("Action", "NotAction", "Resource", "NotResource");
-
-    /** Copy of {@code attributes} whose Policy is stored the way SQS stores it. */
-    private static Map<String, String> withNormalizedPolicy(Map<String, String> attributes) {
-        if (attributes == null) {
-            return null;
-        }
-        String policy = attributes.get("Policy");
-        if (policy == null || policy.isEmpty()) {
-            return attributes;
-        }
-        Map<String, String> normalized = new HashMap<>(attributes);
-        normalized.put("Policy", normalizePolicyDocument(policy));
-        return normalized;
-    }
-
-    /**
-     * SQS re-serializes a queue policy when it stores it: whitespace is dropped and a one-element
-     * Action, NotAction, Resource, NotResource or principal list comes back as the bare value, so
-     * {@code "Action":["sqs:SendMessage"]} is returned as {@code "Action":"sqs:SendMessage"}. A
-     * document that is not a JSON object is kept verbatim.
-     */
-    static String normalizePolicyDocument(String raw) {
-        JsonNode parsed;
-        try {
-            parsed = POLICY_MAPPER.readTree(raw);
-        } catch (Exception e) {
-            return raw;
-        }
-        if (!(parsed instanceof ObjectNode document)) {
-            return raw;
-        }
-        JsonNode statements = document.get("Statement");
-        if (statements instanceof ArrayNode array) {
-            array.forEach(SqsService::collapseStatement);
-        } else if (statements instanceof ObjectNode statement) {
-            collapseStatement(statement);
-        }
-        return document.toString();
-    }
-
-    private static void collapseStatement(JsonNode node) {
-        if (!(node instanceof ObjectNode statement)) {
-            return;
-        }
-        for (String element : COLLAPSIBLE_STATEMENT_ELEMENTS) {
-            collapseSingleton(statement, element);
-        }
-        for (String element : List.of("Principal", "NotPrincipal")) {
-            if (statement.get(element) instanceof ObjectNode principal) {
-                List<String> types = new ArrayList<>();
-                principal.fieldNames().forEachRemaining(types::add);
-                for (String type : types) {
-                    collapseSingleton(principal, type);
-                }
-            }
-        }
-    }
-
-    private static void collapseSingleton(ObjectNode owner, String field) {
-        if (owner.get(field) instanceof ArrayNode values && values.size() == 1 && values.get(0).isValueNode()) {
-            owner.set(field, values.get(0));
-        }
-    }
-
     public void addPermission(String queueUrl, String label, List<String> awsAccountIds,
                               List<String> actionNames, String region) {
         if (label == null || label.isEmpty()) {
@@ -2300,34 +2178,6 @@ public class SqsService implements Resettable, ResourceProvider {
     }
 
     /**
-     * Re-present a stored queue URL using the scheme/host/port of
-     * {@code incomingQueueUrl}. Lookups already ignore hostname
-     * ({@link #extractQueuePath}); responses must too, otherwise
-     * ListDeadLetterSourceQueues returns {@code https://localhost:4566/...}
-     * while the caller holds the CreateQueue URL rewritten onto another host.
-     */
-    static String presentQueueUrl(String storedUrl, String incomingQueueUrl) {
-        if (storedUrl == null || incomingQueueUrl == null) {
-            return storedUrl;
-        }
-        String incomingOrigin = originOf(incomingQueueUrl);
-        String storedPath = extractQueuePath(storedUrl);
-        if (incomingOrigin == null || storedPath.isEmpty() || !storedPath.startsWith("/")) {
-            return storedUrl;
-        }
-        return incomingOrigin + storedPath;
-    }
-
-    private static String originOf(String url) {
-        int schemeEnd = url.indexOf("://");
-        if (schemeEnd < 0) {
-            return null;
-        }
-        int pathStart = url.indexOf('/', schemeEnd + 3);
-        return pathStart < 0 ? url : url.substring(0, pathStart);
-    }
-
-    /**
      * Extracts the path portion from a queue URL so that lookups work regardless
      * of which hostname the client used (e.g. localhost vs localhost.localstack.cloud).
      */
@@ -2457,5 +2307,146 @@ public class SqsService implements Resettable, ResourceProvider {
         int slash = trimmed.indexOf('/');
         String candidate = slash > 0 ? trimmed.substring(0, slash) : trimmed;
         return candidate.matches("\\d{12}") ? candidate : null;
+    }
+
+    /**
+     * AWS rejects a RedrivePolicy whose {@code deadLetterTargetArn} does not name an existing
+     * queue in the source queue's own account and region. Only the policy being written is
+     * checked: deleting the dead-letter queue afterwards leaves the source queue usable.
+     */
+    private void validateRedrivePolicy(Map<String, String> attributes, String sourceAccountId, String region) {
+        if (attributes == null) {
+            return;
+        }
+        String raw = attributes.get("RedrivePolicy");
+        if (raw == null || raw.isEmpty()) {
+            return;
+        }
+        JsonNode policy;
+        try {
+            policy = POLICY_MAPPER.readTree(raw);
+        } catch (Exception e) {
+            LOG.debugv("RedrivePolicy is not JSON, skipping dead-letter target check: {0}", raw);
+            return;
+        }
+        JsonNode target = policy == null ? null : policy.get("deadLetterTargetArn");
+        if (target == null || !target.isTextual()) {
+            return;
+        }
+        if (!deadLetterTargetExists(target.asText(), sourceAccountId, region)) {
+            throw new AwsException("InvalidParameterValue",
+                    "Value " + raw + " for parameter RedrivePolicy is invalid. "
+                            + "Reason: Dead letter target does not exist.", 400);
+        }
+    }
+
+    private boolean deadLetterTargetExists(String targetArn, String sourceAccountId, String region) {
+        if (!AwsArnUtils.isArnFor(targetArn, "sqs")) {
+            return false;
+        }
+        AwsArnUtils.Arn arn = AwsArnUtils.parse(targetArn);
+        if (!arn.region().isEmpty() && !arn.region().equals(region)) {
+            return false;
+        }
+        if (!arn.accountId().equals(sourceAccountId)) {
+            return false;
+        }
+        String dlqUrl = queueUrlFromArn(targetArn, region);
+        return dlqUrl != null && getQueueByUrl(regionKey(region, dlqUrl), dlqUrl).isPresent();
+    }
+
+    /** Policy statement elements SQS stores a one-element list of as the bare value. */
+    private static final List<String> COLLAPSIBLE_STATEMENT_ELEMENTS =
+            List.of("Action", "NotAction", "Resource", "NotResource");
+
+    /** Copy of {@code attributes} whose Policy is stored the way SQS stores it. */
+    private static Map<String, String> withNormalizedPolicy(Map<String, String> attributes) {
+        if (attributes == null) {
+            return null;
+        }
+        String policy = attributes.get("Policy");
+        if (policy == null || policy.isEmpty()) {
+            return attributes;
+        }
+        Map<String, String> normalized = new HashMap<>(attributes);
+        normalized.put("Policy", normalizePolicyDocument(policy));
+        return normalized;
+    }
+
+    /**
+     * SQS re-serializes a queue policy when it stores it: whitespace is dropped and a one-element
+     * Action, NotAction, Resource, NotResource or principal list comes back as the bare value, so
+     * {@code "Action":["sqs:SendMessage"]} is returned as {@code "Action":"sqs:SendMessage"}. A
+     * document that is not a JSON object is kept verbatim.
+     */
+    static String normalizePolicyDocument(String raw) {
+        JsonNode parsed;
+        try {
+            parsed = POLICY_MAPPER.readTree(raw);
+        } catch (Exception e) {
+            return raw;
+        }
+        if (!(parsed instanceof ObjectNode document)) {
+            return raw;
+        }
+        JsonNode statements = document.get("Statement");
+        if (statements instanceof ArrayNode array) {
+            array.forEach(SqsService::collapseStatement);
+        } else if (statements instanceof ObjectNode statement) {
+            collapseStatement(statement);
+        }
+        return document.toString();
+    }
+
+    private static void collapseStatement(JsonNode node) {
+        if (!(node instanceof ObjectNode statement)) {
+            return;
+        }
+        for (String element : COLLAPSIBLE_STATEMENT_ELEMENTS) {
+            collapseSingleton(statement, element);
+        }
+        for (String element : List.of("Principal", "NotPrincipal")) {
+            if (statement.get(element) instanceof ObjectNode principal) {
+                List<String> types = new ArrayList<>();
+                principal.fieldNames().forEachRemaining(types::add);
+                for (String type : types) {
+                    collapseSingleton(principal, type);
+                }
+            }
+        }
+    }
+
+    private static void collapseSingleton(ObjectNode owner, String field) {
+        if (owner.get(field) instanceof ArrayNode values && values.size() == 1 && values.get(0).isValueNode()) {
+            owner.set(field, values.get(0));
+        }
+    }
+
+    /**
+     * Re-present a stored queue URL using the scheme/host/port of
+     * {@code incomingQueueUrl}. Lookups already ignore hostname
+     * ({@link #extractQueuePath}); responses must too, otherwise
+     * ListDeadLetterSourceQueues returns {@code https://localhost:4566/...}
+     * while the caller holds the CreateQueue URL rewritten onto another host.
+     */
+    static String presentQueueUrl(String storedUrl, String incomingQueueUrl) {
+        if (storedUrl == null || incomingQueueUrl == null) {
+            return storedUrl;
+        }
+        String incomingOrigin = originOf(incomingQueueUrl);
+        String storedPath = extractQueuePath(storedUrl);
+        if (incomingOrigin == null || storedPath.isEmpty() || !storedPath.startsWith("/")) {
+            return storedUrl;
+        }
+        return incomingOrigin + storedPath;
+    }
+
+    private static String originOf(String url) {
+        int schemeEnd = url.indexOf("://");
+        if (schemeEnd < 0) {
+            return null;
+        }
+        int pathStart = url.indexOf('/', schemeEnd + 3);
+        return pathStart < 0 ? url : url.substring(0, pathStart);
     }
 }

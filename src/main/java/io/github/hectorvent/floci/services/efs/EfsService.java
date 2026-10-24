@@ -1,17 +1,11 @@
 package io.github.hectorvent.floci.services.efs;
 
 import com.fasterxml.jackson.core.type.TypeReference;
-import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.AvailabilityZoneIds;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.Resettable;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
-import io.github.hectorvent.floci.services.ec2.Ec2Service;
-import io.github.hectorvent.floci.services.ec2.model.GroupIdentifier;
-import io.github.hectorvent.floci.services.ec2.model.NetworkInterface;
-import io.github.hectorvent.floci.services.ec2.model.SecurityGroup;
-import io.github.hectorvent.floci.services.ec2.model.Subnet;
 import io.github.hectorvent.floci.services.efs.model.AccessPointDescription;
 import io.github.hectorvent.floci.services.efs.model.BackupPolicy;
 import io.github.hectorvent.floci.services.efs.model.CreateAccessPointRequest;
@@ -49,6 +43,12 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
+import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.services.ec2.Ec2Service;
+import io.github.hectorvent.floci.services.ec2.model.GroupIdentifier;
+import io.github.hectorvent.floci.services.ec2.model.NetworkInterface;
+import io.github.hectorvent.floci.services.ec2.model.SecurityGroup;
+import io.github.hectorvent.floci.services.ec2.model.Subnet;
 
 @ApplicationScoped
 public class EfsService implements Resettable {
@@ -63,16 +63,14 @@ public class EfsService implements Resettable {
     private final StorageBackend<String, List<LifecyclePolicy>> lifecycleConfigurationStore;
     private final ConcurrentHashMap<String, Object> syncLocks = new ConcurrentHashMap<>();
     private final RegionResolver regionResolver;
-    private final Ec2Service ec2Service;
 
     private Object lockFor(String key) {
         return syncLocks.computeIfAbsent(key, k -> new Object());
     }
 
     @Inject
-    public EfsService(StorageFactory storageFactory, RegionResolver regionResolver, Ec2Service ec2Service) {
+    public EfsService(StorageFactory storageFactory, RegionResolver regionResolver) {
         this.regionResolver = regionResolver;
-        this.ec2Service = ec2Service;
         this.fileSystemStore = storageFactory.create("efs", "efs-filesystems.json",
                 new TypeReference<Map<String, FileSystem>>() {});
         this.mountTargetStore = storageFactory.create("efs", "efs-mounttargets.json",
@@ -152,8 +150,7 @@ public class EfsService implements Resettable {
         fileSystemStore.put(regionKey, fs);
         
         BackupPolicy bp = new BackupPolicy();
-        boolean backup = request.getBackup() != null ? request.getBackup() : request.getAvailabilityZoneName() != null;
-        bp.setStatus(backup ? "ENABLED" : "DISABLED");
+        bp.setStatus(request.getBackup() != null && !request.getBackup() ? "DISABLED" : "ENABLED");
         backupPolicyStore.put(regionKey, bp);
         
         return fs;
@@ -395,37 +392,22 @@ public class EfsService implements Resettable {
     public MountTarget createMountTarget(CreateMountTargetRequest request, String region) {
         synchronized (lockFor(regionKey(region, request.getFileSystemId()))) {
             FileSystem fs = getFileSystem(region, request.getFileSystemId());
-            Subnet subnet = mountTargetSubnet(region, request.getSubnetId());
-            if (fs.getAvailabilityZoneName() != null
-                    && !fs.getAvailabilityZoneName().equals(subnet.getAvailabilityZone())) {
-                throw EfsException.badRequest("Mount target must be in the file system's Availability Zone");
-            }
+            
             for (MountTarget existing : mountTargetStore.scan(k -> k.startsWith(region + "::"))) {
                 if (existing.getFileSystemId().equals(request.getFileSystemId())) {
-                    if (!existing.getVpcId().equals(subnet.getVpcId())) {
-                        throw EfsException.badRequest("All mount targets for a file system must be in the same VPC");
-                    }
-                    if (existing.getAvailabilityZoneName().equals(subnet.getAvailabilityZone())) {
-                        throw EfsException.mountTargetConflict("Mount target already exists in this Availability Zone");
+                    if (existing.getSubnetId().equals(request.getSubnetId())) {
+                        throw EfsException.mountTargetConflict("Mount target already exists in this subnet");
                     }
                 }
             }
-            validateSecurityGroups(region, subnet.getVpcId(), request.getSecurityGroups());
+            
             String mtId = "fsmt-" + UUID.randomUUID().toString().replace("-", "").substring(0, 17);
-            NetworkInterface networkInterface;
-            try {
-                networkInterface = ec2Service.createNetworkInterface(region, subnet.getSubnetId(),
-                        "EFS mount target " + mtId, request.getIpAddress(), List.of(),
-                        request.getSecurityGroups(), List.of());
-            } catch (AwsException error) {
-                throw mountTargetNetworkError(error);
-            }
-
+        
             MountTarget mt = new MountTarget();
             mt.setMountTargetId(mtId);
-            mt.setFileSystemId(fs.getFileSystemId());
-            mt.setSubnetId(subnet.getSubnetId());
-            mt.setIpAddress(networkInterface.getPrivateIpAddress());
+            mt.setFileSystemId(request.getFileSystemId());
+            mt.setSubnetId(request.getSubnetId());
+            mt.setIpAddress(request.getIpAddress() != null ? request.getIpAddress() : "10.0.0.10");
             mt.setLifeCycleState(LifeCycleState.available);
             mt.setVpcId("vpc-12345678");
             mt.setAvailabilityZoneName(region + "a");
@@ -437,51 +419,12 @@ public class EfsService implements Resettable {
             mt.setSecurityGroups(new ArrayList<>());
         }
 
-            mountTargetStore.put(regionKey(region, mtId), mt);
-            fs.setNumberOfMountTargets(fs.getNumberOfMountTargets() + 1);
-            fileSystemStore.put(regionKey(region, fs.getFileSystemId()), fs);
-            return mt;
+        fs.setNumberOfMountTargets(fs.getNumberOfMountTargets() + 1);
+        fileSystemStore.put(regionKey(region, fs.getFileSystemId()), fs);
+        
+        mountTargetStore.put(regionKey(region, mtId), mt);
+        return mt;
         }
-    }
-
-    private Subnet mountTargetSubnet(String region, String subnetId) {
-        if (subnetId == null || subnetId.isBlank()) {
-            throw EfsException.badRequest("SubnetId is required");
-        }
-        try {
-            return ec2Service.describeSubnets(region, List.of(subnetId), Map.of()).getFirst();
-        } catch (AwsException error) {
-            throw mountTargetNetworkError(error);
-        }
-    }
-
-    private void validateSecurityGroups(String region, String vpcId, List<String> groupIds) {
-        if (groupIds == null || groupIds.isEmpty()) {
-            return;
-        }
-        if (groupIds.size() > 5) {
-            throw EfsException.badRequest("At most five security groups can be assigned to a mount target");
-        }
-        List<SecurityGroup> groups;
-        try {
-            groups = ec2Service.describeSecurityGroups(region, groupIds, List.of(), Map.of());
-        } catch (AwsException error) {
-            throw mountTargetNetworkError(error);
-        }
-        if (groups.stream().anyMatch(group -> !vpcId.equals(group.getVpcId()))) {
-            throw EfsException.networkError("SecurityGroupNotFound", "Security group does not belong to the subnet VPC");
-        }
-    }
-
-    private AwsException mountTargetNetworkError(AwsException error) {
-        return switch (error.getErrorCode()) {
-            case "InvalidSubnetID.NotFound" -> EfsException.networkError("SubnetNotFound", error.getMessage());
-            case "InvalidGroup.NotFound" -> EfsException.networkError("SecurityGroupNotFound", error.getMessage());
-            case "InvalidIPAddress.InUse" -> EfsException.networkError("IpAddressInUse", error.getMessage());
-            case "InsufficientFreeAddressesInSubnet" -> EfsException.networkError("NoFreeAddressesInSubnet", error.getMessage());
-            case "InvalidParameterValue", "MissingParameter" -> EfsException.badRequest(error.getMessage());
-            default -> error;
-        };
     }
 
     public DescribeMountTargetsResponse describeMountTargets(String region, DescribeMountTargetsRequest request) {
@@ -489,18 +432,6 @@ public class EfsService implements Resettable {
             throw EfsException.badRequest("One of FileSystemId, MountTargetId, or AccessPointId must be specified.");
         }
         
-        if (request.getFileSystemId() != null) {
-            getFileSystem(region, request.getFileSystemId());
-        }
-        if (request.getMountTargetId() != null
-                && mountTargetStore.get(regionKey(region, request.getMountTargetId())).isEmpty()) {
-            throw EfsException.mountTargetNotFound(request.getMountTargetId());
-        }
-        if (request.getAccessPointId() != null
-                && accessPointStore.get(regionKey(region, request.getAccessPointId())).isEmpty()) {
-            throw EfsException.accessPointNotFound(request.getAccessPointId());
-        }
-
         List<MountTarget> results = mountTargetStore.scan(k -> k.startsWith(region + "::")).stream()
                 .filter(mt -> request.getFileSystemId() == null || mt.getFileSystemId().equals(request.getFileSystemId()))
                 .filter(mt -> request.getMountTargetId() == null || mt.getMountTargetId().equals(request.getMountTargetId()))
@@ -554,21 +485,16 @@ public class EfsService implements Resettable {
                 throw EfsException.mountTargetNotFound(mountTargetId);
             }
             
-            synchronized (lockFor(regionKey(region, mt.getFileSystemId()))) {
-                try {
-                    ec2Service.deleteNetworkInterface(region, mt.getNetworkInterfaceId());
-                } catch (AwsException error) {
-                    if (!"InvalidNetworkInterfaceID.NotFound".equals(error.getErrorCode())) {
-                        throw error;
-                    }
-                    LOG.debugv("Network interface {0} already absent during mount target deletion", mt.getNetworkInterfaceId());
-                }
-                mountTargetStore.delete(key);
-                FileSystem fs = fileSystemStore.get(regionKey(region, mt.getFileSystemId())).orElse(null);
-                if (fs != null) {
+            try {
+                synchronized (lockFor(regionKey(region, mt.getFileSystemId()))) {
+                    FileSystem fs = getFileSystem(region, mt.getFileSystemId());
                     fs.setNumberOfMountTargets(Math.max(0, fs.getNumberOfMountTargets() - 1));
                     fileSystemStore.put(regionKey(region, fs.getFileSystemId()), fs);
+                    mountTargetStore.delete(key);
                 }
+            } catch (EfsException e) {
+                LOG.debug("File system " + mt.getFileSystemId() + " already deleted, skipping parent count update during mount target deletion");
+                mountTargetStore.delete(key);
             }
         }
     }
@@ -590,13 +516,6 @@ public class EfsService implements Resettable {
                 throw EfsException.mountTargetNotFound(mountTargetId);
             }
             if (request.getSecurityGroups() != null) {
-                validateSecurityGroups(region, mt.getVpcId(), request.getSecurityGroups());
-                try {
-                    ec2Service.modifyNetworkInterfaceAttribute(region, mt.getNetworkInterfaceId(),
-                            null, null, request.getSecurityGroups());
-                } catch (AwsException error) {
-                    throw mountTargetNetworkError(error);
-                }
                 mt.setSecurityGroups(new ArrayList<>(request.getSecurityGroups()));
             }
             mountTargetStore.put(regionKey(region, mountTargetId), mt);
@@ -694,12 +613,7 @@ public class EfsService implements Resettable {
     public void putBackupPolicy(String region, String fileSystemId, BackupPolicy policy) {
         synchronized (lockFor(regionKey(region, fileSystemId))) {
             getFileSystem(region, fileSystemId);
-            if (policy == null || !("ENABLED".equals(policy.getStatus()) || "DISABLED".equals(policy.getStatus()))) {
-                throw EfsException.badRequest("BackupPolicy.Status must be ENABLED or DISABLED");
-            }
-            BackupPolicy stored = new BackupPolicy();
-            stored.setStatus(policy.getStatus());
-            backupPolicyStore.put(regionKey(region, fileSystemId), stored);
+            backupPolicyStore.put(regionKey(region, fileSystemId), policy);
         }
     }
 
@@ -728,6 +642,48 @@ public class EfsService implements Resettable {
 
     private String regionKey(String region, String id) {
         return region + "::" + id;
+    }
+
+    private final Ec2Service ec2Service;
+
+    private Subnet mountTargetSubnet(String region, String subnetId) {
+        if (subnetId == null || subnetId.isBlank()) {
+            throw EfsException.badRequest("SubnetId is required");
+        }
+        try {
+            return ec2Service.describeSubnets(region, List.of(subnetId), Map.of()).getFirst();
+        } catch (AwsException error) {
+            throw mountTargetNetworkError(error);
+        }
+    }
+
+    private void validateSecurityGroups(String region, String vpcId, List<String> groupIds) {
+        if (groupIds == null || groupIds.isEmpty()) {
+            return;
+        }
+        if (groupIds.size() > 5) {
+            throw EfsException.badRequest("At most five security groups can be assigned to a mount target");
+        }
+        List<SecurityGroup> groups;
+        try {
+            groups = ec2Service.describeSecurityGroups(region, groupIds, List.of(), Map.of());
+        } catch (AwsException error) {
+            throw mountTargetNetworkError(error);
+        }
+        if (groups.stream().anyMatch(group -> !vpcId.equals(group.getVpcId()))) {
+            throw EfsException.networkError("SecurityGroupNotFound", "Security group does not belong to the subnet VPC");
+        }
+    }
+
+    private AwsException mountTargetNetworkError(AwsException error) {
+        return switch (error.getErrorCode()) {
+            case "InvalidSubnetID.NotFound" -> EfsException.networkError("SubnetNotFound", error.getMessage());
+            case "InvalidGroup.NotFound" -> EfsException.networkError("SecurityGroupNotFound", error.getMessage());
+            case "InvalidIPAddress.InUse" -> EfsException.networkError("IpAddressInUse", error.getMessage());
+            case "InsufficientFreeAddressesInSubnet" -> EfsException.networkError("NoFreeAddressesInSubnet", error.getMessage());
+            case "InvalidParameterValue", "MissingParameter" -> EfsException.badRequest(error.getMessage());
+            default -> error;
+        };
     }
 
     public Map<String, Object> describeReplicationConfigurations(String region, String fileSystemId) {

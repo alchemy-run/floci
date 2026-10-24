@@ -1,6 +1,5 @@
 package io.github.hectorvent.floci.services.rdsdata;
 
-import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager.EndpointInfo;
 import io.github.hectorvent.floci.services.rds.model.DatabaseEngine;
 import jakarta.enterprise.context.ApplicationScoped;
 
@@ -19,11 +18,10 @@ class RdsDataConnectionFactory {
     }
 
     Connection open(RdsDataResourceResolver.DatabaseTarget target,
-                    EndpointInfo endpoint,
                     String username,
                     String password,
                     String database) throws SQLException {
-        String url = buildUrl(target.engine(), endpoint.host(), endpoint.port(), database);
+        String url = buildUrl(target.engine(), target.host(), target.port(), database);
         Properties props = new Properties();
         props.setProperty("user", username);
         props.setProperty("password", password);

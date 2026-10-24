@@ -36,6 +36,12 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import com.github.dockerjava.api.async.ResultCallback;
+import com.github.dockerjava.api.model.Frame;
+import com.github.dockerjava.api.model.StreamType;
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
+import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
+import java.io.ByteArrayInputStream;
 
 /**
  * Manages the Docker lifecycle of the Postgres + Apache Airflow container pair backing a real-mode
@@ -56,10 +62,6 @@ public class MwaaEnvironmentManager {
 
     private static final int POSTGRES_PORT = 5432;
     private static final int AIRFLOW_WEBSERVER_PORT = 8080;
-    /** Airflow web/API user created at bootstrap; InvokeRestApi authenticates as this user. */
-    public static final String AIRFLOW_ADMIN_USER = "admin";
-    private static final String API_AUTH_BACKENDS =
-            "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session";
     private static final String DAGS_MOUNT = "/opt/airflow/dags";
     private static final String LOGS_MOUNT = "/opt/airflow/logs";
     /** The OS user the stock apache/airflow image runs its process as (uid 50000) — distinct from
@@ -159,9 +161,8 @@ public class MwaaEnvironmentManager {
         lifecycleManager.ensureVolume(logsVolume);
 
         String image = "apache/airflow:%s-%s".formatted(airflowVersion, pythonTagFor(airflowVersion));
-        String adminUser = AIRFLOW_ADMIN_USER;
+        String adminUser = "admin";
         String adminPassword = generateSecret(24);
-        environment.setAirflowAdminPassword(adminPassword);
         String sqlAlchemyConn = "postgresql+psycopg2://airflow:" + dbPassword + "@" + dbIp + ":" + POSTGRES_PORT + "/airflow";
 
         // Points DAG code's own AWS SDK calls (boto3, botocore) at Floci itself, the same way
@@ -175,9 +176,6 @@ public class MwaaEnvironmentManager {
                 "AIRFLOW__CORE__FERNET_KEY=" + generateFernetKey(),
                 "AIRFLOW__WEBSERVER__SECRET_KEY=" + generateSecret(32),
                 "AIRFLOW__CORE__LOAD_EXAMPLES=false",
-                // Basic auth lets InvokeRestApi call the Airflow 2.x REST API as the admin user;
-                // session auth keeps the web UI working.
-                "AIRFLOW__API__AUTH_BACKENDS=" + API_AUTH_BACKENDS,
                 "_AIRFLOW_WWW_USER_USERNAME=" + adminUser,
                 "_AIRFLOW_WWW_USER_PASSWORD=" + adminPassword));
         env.addAll(airflowConfigurationOptionsEnv(environment.getAirflowConfigurationOptions()));
@@ -589,7 +587,6 @@ public class MwaaEnvironmentManager {
             "AIRFLOW__CORE__FERNET_KEY",
             "AIRFLOW__WEBSERVER__SECRET_KEY",
             "AIRFLOW__CORE__LOAD_EXAMPLES",
-            "AIRFLOW__API__AUTH_BACKENDS",
             "AIRFLOW_HOME",
             "AWS_DEFAULT_REGION",
             "AWS_REGION",
@@ -728,4 +725,28 @@ public class MwaaEnvironmentManager {
         return Base64.getUrlEncoder().encodeToString(buf);
     }
 
+    /** Airflow web/API user created at bootstrap; InvokeRestApi authenticates as this user. */
+    public static final String AIRFLOW_ADMIN_USER = "admin";
+
+    private static final String API_AUTH_BACKENDS =
+            "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session";
+
+    private static byte[] tarSingleFile(String entryName, byte[] content) {
+        try {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            try (TarArchiveOutputStream tar = new TarArchiveOutputStream(out)) {
+                TarArchiveEntry entry = new TarArchiveEntry(entryName);
+                entry.setSize(content.length);
+                entry.setMode(0644);
+                tar.putArchiveEntry(entry);
+                tar.write(content);
+                tar.closeArchiveEntry();
+            }
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw new IllegalStateException("Could not build in-memory tar for " + entryName, e);
+        }
+    }
+
+    public record ExecResult(long exitCode, String stdout, String stderr) {}
 }

@@ -1,80 +1,51 @@
 package io.github.hectorvent.floci.services.rds.container;
 
 import com.github.dockerjava.api.async.ResultCallback;
-import com.github.dockerjava.api.command.InspectContainerResponse;
-import com.github.dockerjava.api.exception.NotFoundException;
 import com.github.dockerjava.api.model.Frame;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.core.common.Resettable;
 import io.github.hectorvent.floci.core.common.ServiceConfigAccess;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
 import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
-import io.github.hectorvent.floci.core.common.docker.ContainerExec;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
+import io.github.hectorvent.floci.core.common.docker.ContainerStorageHelper;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager.ContainerInfo;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager.EndpointInfo;
-import io.github.hectorvent.floci.core.common.docker.ContainerLiveness;
 import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
-import io.github.hectorvent.floci.core.common.docker.ContainerStorageHelper;
-import io.github.hectorvent.floci.core.common.docker.RetryingTarCopier;
 import io.github.hectorvent.floci.services.rds.model.DatabaseEngine;
-import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import org.jboss.logging.Logger;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.time.Clock;
-import java.time.Duration;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 /**
  * Manages backend Docker container lifecycle for RDS DB instances and clusters.
  * Starts postgres/mysql/mariadb containers and resolves the backend host:port for the auth proxy.
- * Every client of a container enters it through {@link #enterRuntime(String)}, which is how an Aurora Serverless
- * v2 cluster with MinCapacity 0 knows when it is idle enough to pause and when to resume.
  */
 @ApplicationScoped
-public class RdsContainerManager implements RdsBackendGate, RdsBackendEndpointResolver, Resettable {
+public class RdsContainerManager {
 
     private static final Logger LOG = Logger.getLogger(RdsContainerManager.class);
     private static final Pattern SAFE_STORAGE_COMPONENT = Pattern.compile("[A-Za-z0-9._-]+");
-    private static final Pattern MYSQL_PARAMETER_NAME = Pattern.compile("[A-Za-z][A-Za-z0-9_.-]*");
-    /**
-     * Where the server listens and keeps its data, which the proxy and the volume depend on, and
-     * the settings that would lock the proxy out: it talks to the server without TLS, so
-     * {@code require_secure_transport} refuses it, and {@code skip_grant_tables} turns
-     * networking off.
-     */
-    private static final Set<String> FLOCI_CONTROLLED_MYSQL_PARAMETERS = Set.of(
-            "bind_address", "datadir", "port", "require_secure_transport", "skip_grant_tables",
-            "skip_networking", "socket");
-    /** RDS parameters whose server option has another name: {@code time_zone} has no option of its own. */
-    private static final Map<String, String> MYSQL_OPTION_NAMES = Map.of("time_zone", "default-time-zone");
-    /** How long a server started with a parameter group's options gets to start listening. */
-    private static final int PARAMETER_GROUP_START_SECONDS = 120;
 
     private final ContainerBuilder containerBuilder;
     private final ContainerLifecycleManager lifecycleManager;
@@ -83,36 +54,11 @@ public class RdsContainerManager implements RdsBackendGate, RdsBackendEndpointRe
     private final EmulatorConfig config;
     private final RegionResolver regionResolver;
     private final ServiceConfigAccess serviceConfigAccess;
-    private final long uploadBackoffMillis;
     private final Map<String, RdsContainerHandle> activeContainers = new ConcurrentHashMap<>();
     private final Map<String, String> activeStorageOwners = new ConcurrentHashMap<>();
     private final Set<String> claimedRuntimes = ConcurrentHashMap.newKeySet();
     private final Set<String> cleanupPending = ConcurrentHashMap.newKeySet();
-    private final Set<String> parameterGroupRefusals = ConcurrentHashMap.newKeySet();
     private volatile boolean dockerUnavailableLogged;
-    // Auto-pause state of every running container, by runtime id. The timer thread only keeps
-    // time: each task it fires runs on a virtual thread of its own, since a pause first asks the
-    // RDS service whether the cluster may pause. Events reach the listener one at a time, in order.
-    private final Map<String, AutoPauseController> autoPauses = new ConcurrentHashMap<>();
-    private final ScheduledExecutorService autoPauseTimer = Executors.newSingleThreadScheduledExecutor(
-            runnable -> {
-                Thread thread = new Thread(runnable, "rds-auto-pause-timer");
-                thread.setDaemon(true);
-                return thread;
-            });
-    private final ExecutorService autoPauseEvents = Executors.newSingleThreadExecutor(
-            Thread.ofVirtual().name("rds-auto-pause-events").factory());
-    private final AutoPauseController.Freezer dockerFreezer = new AutoPauseController.Freezer() {
-        @Override
-        public void pause(String containerId) {
-            pauseContainer(containerId);
-        }
-
-        @Override
-        public void unpause(String containerId) {
-            unpauseContainer(containerId);
-        }
-    };
 
     @Inject
     public RdsContainerManager(ContainerBuilder containerBuilder,
@@ -122,18 +68,6 @@ public class RdsContainerManager implements RdsBackendGate, RdsBackendEndpointRe
                                EmulatorConfig config,
                                RegionResolver regionResolver,
                                ServiceConfigAccess serviceConfigAccess) {
-        this(containerBuilder, lifecycleManager, logStreamer, containerDetector, config,
-                regionResolver, serviceConfigAccess, RetryingTarCopier.DEFAULT_BACKOFF_MS);
-    }
-
-    RdsContainerManager(ContainerBuilder containerBuilder,
-                        ContainerLifecycleManager lifecycleManager,
-                        ContainerLogStreamer logStreamer,
-                        ContainerDetector containerDetector,
-                        EmulatorConfig config,
-                        RegionResolver regionResolver,
-                        ServiceConfigAccess serviceConfigAccess,
-                        long uploadBackoffMillis) {
         this.containerBuilder = containerBuilder;
         this.lifecycleManager = lifecycleManager;
         this.logStreamer = logStreamer;
@@ -141,7 +75,6 @@ public class RdsContainerManager implements RdsBackendGate, RdsBackendEndpointRe
         this.config = config;
         this.regionResolver = regionResolver;
         this.serviceConfigAccess = serviceConfigAccess;
-        this.uploadBackoffMillis = uploadBackoffMillis;
     }
 
     public RdsContainerHandle start(String instanceId, String volumeId, DatabaseEngine engine,
@@ -174,42 +107,24 @@ public class RdsContainerManager implements RdsBackendGate, RdsBackendEndpointRe
      * start that failed before Docker created anything, and is dropped when the daemon is
      * unreachable so the runtime can retry.
      *
-     * A server that stops while starting with its parameter group's options leaves no container
-     * either, and {@link #refusedParameterGroup} reports it until the runtime's next start.
-     *
-     * @param engineParameters the overrides of the parameter group the engine runs with
-     * @return the container handle, or {@code null} when no Docker daemon is reachable or the
-     *         server refused its parameter group
+     * @return the container handle, or {@code null} when no Docker daemon is reachable
      */
     public RdsContainerHandle tryStart(
             String runtimeId, String instanceId, String containerStorageResourceId,
             String dockerVolumeName, DatabaseEngine engine, String image,
-            String masterUsername, String masterPassword, String dbName,
-            Map<String, String> engineParameters) {
+            String masterUsername, String masterPassword, String dbName) {
         String effectiveRuntimeId = runtimeId == null || runtimeId.isBlank() ? instanceId : runtimeId;
-        parameterGroupRefusals.remove(effectiveRuntimeId);
         try {
             retryRetainedCleanup(effectiveRuntimeId);
             RdsContainerHandle handle = start(runtimeId, instanceId, containerStorageResourceId,
-                    dockerVolumeName, engine, image, masterUsername, masterPassword, dbName,
-                    engineParameters);
+                    dockerVolumeName, engine, image, masterUsername, masterPassword, dbName);
             dockerUnavailableLogged = false;
             return handle;
-        } catch (ParameterGroupRefusedException e) {
-            parameterGroupRefusals.add(effectiveRuntimeId);
-            LOG.warnv("The database of {0} did not start with its parameter group, so it reports "
-                    + "incompatible-parameters until a reboot starts it with values the server accepts: {1}",
-                    instanceId, e.getMessage());
-            return null;
         } catch (RuntimeException e) {
             if (isDockerReachable()) {
                 throw e;
             }
-            // The retained identity names the container, which is the normalised form of the
-            // volume name: a pre-migration volume keeps its legacy name while its container takes
-            // the current prefix, so the two are no longer the same string.
-            discardNeverCreatedIdentity(effectiveRuntimeId,
-                    ContainerStorageHelper.dockerName(config, dockerVolumeName));
+            discardNeverCreatedIdentity(effectiveRuntimeId, dockerVolumeName);
             if (!dockerUnavailableLogged) {
                 dockerUnavailableLogged = true;
                 LOG.warnv("No Docker daemon is reachable from Floci ({0}). RDS metadata operations "
@@ -219,14 +134,6 @@ public class RdsContainerManager implements RdsBackendGate, RdsBackendEndpointRe
             }
             return null;
         }
-    }
-
-    /**
-     * Whether the runtime's last start found its server refusing the parameter group's options,
-     * which AWS reports as incompatible-parameters.
-     */
-    public boolean refusedParameterGroup(String runtimeId) {
-        return runtimeId != null && parameterGroupRefusals.contains(runtimeId);
     }
 
     /**
@@ -270,15 +177,6 @@ public class RdsContainerManager implements RdsBackendGate, RdsBackendEndpointRe
             String runtimeId, String instanceId, String containerStorageResourceId,
             String dockerVolumeName, DatabaseEngine engine, String image,
             String masterUsername, String masterPassword, String dbName) {
-        return start(runtimeId, instanceId, containerStorageResourceId, dockerVolumeName,
-                engine, image, masterUsername, masterPassword, dbName, Map.of());
-    }
-
-    public RdsContainerHandle start(
-            String runtimeId, String instanceId, String containerStorageResourceId,
-            String dockerVolumeName, DatabaseEngine engine, String image,
-            String masterUsername, String masterPassword, String dbName,
-            Map<String, String> engineParameters) {
         LOG.infov("Starting RDS backend container for instance: {0} engine={1}", instanceId, engine);
 
         String effectiveRuntimeId = runtimeId == null || runtimeId.isBlank()
@@ -288,10 +186,7 @@ public class RdsContainerManager implements RdsBackendGate, RdsBackendEndpointRe
         String exactVolumeName = requireSafeStorageComponent(
                 dockerVolumeName, "Docker volume name");
         int enginePort = engine.defaultPort();
-        // The volume keeps whatever name it was persisted under, including a legacy one, because
-        // it holds the data. The container is disposable, so it always takes the current prefix;
-        // dockerName normalises an already-prefixed input, which is what makes that possible.
-        String containerName = ContainerStorageHelper.dockerName(config, exactVolumeName);
+        String containerName = exactVolumeName;
         String storageKey = storageKey(storageResourceId, exactVolumeName);
         String containerKey = "container:" + containerName;
         if (!claimedRuntimes.add(effectiveRuntimeId)) {
@@ -314,15 +209,8 @@ public class RdsContainerManager implements RdsBackendGate, RdsBackendEndpointRe
         String cleanupContainerId = containerName;
         RdsContainerHandle handle = null;
         try {
-            // Remove any stale container with the same name only after storage ownership is
-            // secured. The legacy-named twin must go too: a container left by a pre-migration
-            // version still holds this volume's engine lock, and failing to clear it must abort
-            // the start rather than surface later as a corrupt-looking database.
+            // Remove any stale container with the same name only after storage ownership is secured.
             lifecycleManager.removeIfExistsStrict(containerName);
-            String legacyContainerName = ContainerStorageHelper.legacyDockerName(config, exactVolumeName);
-            if (!legacyContainerName.equals(containerName)) {
-                lifecycleManager.removeIfExistsStrict(legacyContainerName);
-            }
             cleanupContainerId = null;
 
             // Build environment variables
@@ -352,7 +240,7 @@ public class RdsContainerManager implements RdsBackendGate, RdsBackendEndpointRe
                     specBuilder, storageResourceId, exactVolumeName, engine, image);
 
         // Add engine-specific command
-        List<String> cmd = buildContainerCmd(engine, image, engineParameters);
+        List<String> cmd = buildContainerCmd(engine, image);
         if (!cmd.isEmpty()) {
             specBuilder.withCmd(cmd);
         }
@@ -372,9 +260,6 @@ public class RdsContainerManager implements RdsBackendGate, RdsBackendEndpointRe
             EndpointInfo endpoint = info.getEndpoint(enginePort);
 
             LOG.infov("RDS backend for instance {0}: {1}", instanceId, endpoint);
-            if (!engineParameterOptions(engine, engineParameters).isEmpty()) {
-                awaitServerWithParameterGroup(containerName, info.containerId(), enginePort);
-            }
             initializeEngine(containerName, info.containerId(), engine, masterUsername, masterPassword, dbName);
 
             handle = new RdsContainerHandle(
@@ -396,9 +281,6 @@ public class RdsContainerManager implements RdsBackendGate, RdsBackendEndpointRe
                             info.containerId(), logGroup, logStream, runtimeIdentity.region(),
                             "rds:" + effectiveRuntimeId);
             handle.setLogStream(logHandle);
-            // Before the handle is returned, so that the connections of every proxy started on it
-            // are counted from the first one.
-            registerAutoPause(effectiveRuntimeId, handle);
             activeContainers.put(effectiveRuntimeId, handle);
 
             return handle;
@@ -467,7 +349,6 @@ public class RdsContainerManager implements RdsBackendGate, RdsBackendEndpointRe
         }
         RdsContainerHandle active = activeContainers.get(handle.getRuntimeId());
         RdsContainerHandle effectiveHandle = active != null ? active : handle;
-        releaseAutoPause(effectiveHandle.getRuntimeId());
         try {
             lifecycleManager.stopAndRemoveStrict(
                     effectiveHandle.getContainerId(), effectiveHandle.getLogStream());
@@ -556,157 +437,6 @@ public class RdsContainerManager implements RdsBackendGate, RdsBackendEndpointRe
                 LOG.warnv(e, "Failed to stop RDS container {0} during shutdown; continuing",
                         handle.getContainerId());
             }
-        }
-    }
-
-    /**
-     * Applies an Aurora Serverless v2 auto-pause interval to a running container: it pauses once
-     * no client has used it for that many seconds, and a null interval, for MinCapacity above 0
-     * or with auto-pause turned off, keeps it running. The listener decides whether the cluster
-     * may pause at that moment and is told each step.
-     */
-    public void configureAutoPause(String runtimeId, Integer secondsUntilAutoPause,
-                                   AutoPauseListener listener) {
-        AutoPauseController controller = runtimeId != null ? autoPauses.get(runtimeId) : null;
-        if (controller == null) {
-            return;
-        }
-        boolean enabled = config.services().rds().auroraAutoPauseEnabled();
-        controller.configure(enabled ? secondsUntilAutoPause : null, listener);
-    }
-
-    @Override
-    public Lease enterRuntime(String runtimeId) throws InterruptedException {
-        return enterRuntime(runtimeId, true);
-    }
-
-    @Override
-    public Lease enterRuntime(String runtimeId, boolean waitForResume) throws InterruptedException {
-        if (runtimeId == null || runtimeId.isBlank()) {
-            throw new IllegalArgumentException("RDS runtime ID is required to enter its backend");
-        }
-        AutoPauseController controller = autoPauses.get(runtimeId);
-        return controller != null ? controller.acquire(waitForResume) : Lease.NONE;
-    }
-
-    /**
-     * Runs a runtime's auto-pause idle check now instead of after SecondsUntilAutoPause, which
-     * the API does not let drop below 300 seconds. Returns whether the container paused.
-     */
-    boolean pauseIfIdle(String runtimeId) {
-        AutoPauseController controller = autoPauses.get(runtimeId);
-        return controller != null && controller.pauseIfIdle();
-    }
-
-    /**
-     * A reset wipes the RDS records but leaves their containers running, as it always has. It
-     * releases their auto-pause, which thaws a paused container, so none stays frozen with no
-     * cluster left to resume it.
-     */
-    @Override
-    public void clear() {
-        for (String runtimeId : List.copyOf(autoPauses.keySet())) {
-            releaseAutoPause(runtimeId);
-        }
-        parameterGroupRefusals.clear();
-    }
-
-    @PreDestroy
-    void shutdownAutoPause() {
-        autoPauseTimer.shutdownNow();
-        autoPauseEvents.shutdownNow();
-    }
-
-    private void registerAutoPause(String runtimeId, RdsContainerHandle handle) {
-        Duration resumeDelay = Duration.ofMillis(
-                Math.max(0, config.services().rds().auroraResumeDelayMillis()));
-        AutoPauseController controller = new AutoPauseController(
-                handle.getContainerId(), handle.getHost(), handle.getPort(), dockerFreezer,
-                this::scheduleAutoPauseTask, autoPauseEvents, Clock.systemUTC(), resumeDelay);
-        // Drop any controller still tied to this endpoint: Docker may have removed its container
-        // without Floci observing the stop before assigning the endpoint to this runtime.
-        for (Map.Entry<String, AutoPauseController> entry : List.copyOf(autoPauses.entrySet())) {
-            if (entry.getValue().serves(handle.getHost(), handle.getPort())
-                    && autoPauses.remove(entry.getKey(), entry.getValue())) {
-                entry.getValue().close();
-            }
-        }
-        AutoPauseController previous = autoPauses.put(runtimeId, controller);
-        if (previous != null) {
-            previous.close();
-        }
-    }
-
-    /** Stops a runtime's auto-pause before its container goes away, thawing it when paused. */
-    private void releaseAutoPause(String runtimeId) {
-        AutoPauseController controller = autoPauses.remove(runtimeId);
-        if (controller != null) {
-            controller.close();
-        }
-    }
-
-    /** Keeps a container awake, resuming it first, while Floci runs a command inside it. */
-    private Lease holdContainer(String containerId) {
-        if (containerId == null) {
-            return Lease.NONE;
-        }
-        for (AutoPauseController controller : autoPauses.values()) {
-            if (controller.runs(containerId)) {
-                try {
-                    return controller.acquire();
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    throw new IllegalStateException(
-                            "Interrupted while resuming RDS container " + containerId, e);
-                }
-            }
-        }
-        return Lease.NONE;
-    }
-
-    private Future<?> scheduleAutoPauseTask(Runnable task, Duration delay) {
-        try {
-            return autoPauseTimer.schedule(
-                    () -> Thread.ofVirtual().name("rds-auto-pause").start(task),
-                    delay.toMillis(), TimeUnit.MILLISECONDS);
-        } catch (RejectedExecutionException e) {
-            throw new IllegalStateException("RDS auto-pause timer is shut down", e);
-        }
-    }
-
-    private void pauseContainer(String containerId) {
-        try {
-            lifecycleManager.getDockerClient().pauseContainerCmd(containerId).exec();
-        } catch (RuntimeException e) {
-            // Docker refuses to pause a paused container; that one is where it should be.
-            if (!isRunning(containerId, true)) {
-                throw e;
-            }
-        }
-    }
-
-    private void unpauseContainer(String containerId) {
-        try {
-            lifecycleManager.getDockerClient().unpauseContainerCmd(containerId).exec();
-        } catch (RuntimeException e) {
-            // Docker refuses to unpause a container that is not paused, as after a manual
-            // `docker unpause`; one still running is where it should be.
-            if (!isRunning(containerId, false)) {
-                throw e;
-            }
-        }
-    }
-
-    /** Whether the container runs, paused or not as asked; false when Docker cannot say. */
-    private boolean isRunning(String containerId, boolean paused) {
-        try {
-            InspectContainerResponse.ContainerState state =
-                    lifecycleManager.getDockerClient().inspectContainerCmd(containerId).exec().getState();
-            return state != null && Boolean.TRUE.equals(state.getRunning())
-                    && paused == Boolean.TRUE.equals(state.getPaused());
-        } catch (RuntimeException e) {
-            LOG.debugv("Could not inspect RDS container {0}: {1}", containerId, e.getMessage());
-            return false;
         }
     }
 
@@ -854,11 +584,9 @@ public class RdsContainerManager implements RdsBackendGate, RdsBackendEndpointRe
      */
     public void rotateMasterPassword(String containerName, String containerId, DatabaseEngine engine,
                                      String masterUsername, String oldPassword, String newPassword) {
-        try (Lease _ = holdContainer(containerId)) {
-            execUntilSuccess(containerName, containerId,
-                    passwordRotationCommand(engine, masterUsername, oldPassword, newPassword),
-                    "master-password rotation");
-        }
+        execUntilSuccess(containerName, containerId,
+                passwordRotationCommand(engine, masterUsername, oldPassword, newPassword),
+                "master-password rotation");
     }
 
     static String[] passwordRotationCommand(DatabaseEngine engine, String masterUsername,
@@ -932,17 +660,31 @@ public class RdsContainerManager implements RdsBackendGate, RdsBackendEndpointRe
      */
     private void installMasterGrantInitScript(String containerId, String masterUsername) {
         byte[] sql = mysqlMasterGrantSql(masterUsername).getBytes(StandardCharsets.UTF_8);
-        RetryingTarCopier.copyBytes(lifecycleManager.getDockerClient(), containerId,
-                "/docker-entrypoint-initdb.d", "floci-master-grants.sql", sql, 0644,
-                RetryingTarCopier.DEFAULT_MAX_ATTEMPTS, uploadBackoffMillis);
+        try (ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
+            try (TarArchiveOutputStream tar = new TarArchiveOutputStream(bos)) {
+                TarArchiveEntry entry = new TarArchiveEntry("floci-master-grants.sql");
+                entry.setSize(sql.length);
+                entry.setMode(0644);
+                tar.putArchiveEntry(entry);
+                tar.write(sql);
+                tar.closeArchiveEntry();
+            }
+            lifecycleManager.getDockerClient().copyArchiveToContainerCmd(containerId)
+                    .withRemotePath("/docker-entrypoint-initdb.d")
+                    .withTarInputStream(new ByteArrayInputStream(bos.toByteArray()))
+                    .exec();
+        } catch (IOException e) {
+            throw new IllegalStateException(
+                    "Failed to install the master-grant init script into container " + containerId, e);
+        }
     }
 
     private void execUntilSuccess(String containerName, String containerId, String[] cmd, String description) {
         String lastOutput = "";
         for (int attempt = 1; attempt <= 60; attempt++) {
             try {
-                ContainerExec.Result result = execInContainer(containerId, cmd, 5);
-                lastOutput = result.stdout() + (result.stderr().isEmpty() ? "" : "\n" + result.stderr());
+                ContainerExecResult result = execInContainer(containerId, cmd, 5);
+                lastOutput = result.output() + (result.stderr().isEmpty() ? "" : "\n" + result.stderr());
                 if (result.exitCode() == 0) {
                     LOG.infov("Initialized {0} in RDS container {1}", description, containerName);
                     return;
@@ -960,134 +702,18 @@ public class RdsContainerManager implements RdsBackendGate, RdsBackendEndpointRe
         throw new IllegalStateException("Timed out initializing " + description + " in " + containerName + ": " + lastOutput);
     }
 
-    /**
-     * Waits for a MySQL or MariaDB server started with a parameter group's options to accept TCP
-     * connections. The image checks the options before it starts anything, and the server reads
-     * them again as it starts, so a container that stops here refused one of them. A server still
-     * starting when the wait ends is left to finish, as one started without a group is.
-     */
-    private void awaitServerWithParameterGroup(String containerName, String containerId, int enginePort) {
-        String[] probe = {"bash", "-c", ": < /dev/tcp/127.0.0.1/" + enginePort};
-        for (int attempt = 1; attempt <= PARAMETER_GROUP_START_SECONDS; attempt++) {
-            if (hasStopped(containerId)) {
-                throw new ParameterGroupRefusedException(serverErrors(containerId));
-            }
-            try {
-                if (execInContainer(containerId, probe, 5).exitCode() == 0) {
-                    return;
-                }
-            } catch (RuntimeException e) {
-                LOG.debugv("RDS container {0} is not accepting connections yet: {1}", containerName, e.getMessage());
-            }
-            try {
-                TimeUnit.SECONDS.sleep(1);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new IllegalStateException("Interrupted waiting for the server in " + containerName, e);
-            }
-        }
-        LOG.warnv("The server in RDS container {0} was still starting after {1} s", containerName,
-                PARAMETER_GROUP_START_SECONDS);
-    }
-
-    /** Whether Docker reports the container stopped; false when Docker cannot say. */
-    private boolean hasStopped(String containerId) {
-        try {
-            InspectContainerResponse.ContainerState state =
-                    lifecycleManager.getDockerClient().inspectContainerCmd(containerId).exec().getState();
-            return state != null && Boolean.FALSE.equals(state.getRunning());
-        } catch (RuntimeException e) {
-            LOG.debugv("Could not inspect RDS container {0}: {1}", containerId, e.getMessage());
-            return false;
-        }
-    }
-
-    /** The error lines of a stopped server's log, or its last lines when it named no error. */
-    private String serverErrors(String containerId) {
-        List<String> lines;
-        try {
-            lines = readLog(containerId);
-        } catch (RuntimeException e) {
-            return "its log could not be read: " + e.getMessage();
-        }
-        if (lines == null || lines.isEmpty()) {
-            return "the server stopped without writing a log";
-        }
-        List<String> errors = lines.stream().filter(line -> line.contains("ERROR")).toList();
-        List<String> reported = errors.isEmpty() ? lines : errors;
-        return String.join(" | ", reported.subList(Math.max(0, reported.size() - 5), reported.size()));
-    }
-
-    /** A server that stopped while starting with a parameter group's options. */
-    private static final class ParameterGroupRefusedException extends IllegalStateException {
-        ParameterGroupRefusedException(String serverErrors) {
-            super(serverErrors);
-        }
-    }
-
-    /** The most recent lines {@link #readLog} reads, so one call never holds an unbounded history. */
-    public static final int MAX_LOG_LINES = 100_000;
-
-    /**
-     * The container's log as Docker keeps it, stdout and stderr, at most the last
-     * {@link #MAX_LOG_LINES} lines, each with Docker's RFC 3339 timestamp in front. Null when Docker
-     * no longer knows the container, so the caller can tell a missing backend from an empty log. A
-     * read that does not finish in time fails rather than returning part of the log.
-     */
-    public List<String> readLog(String containerId) {
-        return readLog(containerId, Duration.ofSeconds(10));
-    }
-
-    List<String> readLog(String containerId, Duration timeout) {
-        ByteArrayOutputStream raw = new ByteArrayOutputStream();
-        ResultCallback.Adapter<Frame> callback = new ResultCallback.Adapter<>() {
-            @Override
-            public void onNext(Frame frame) {
-                synchronized (raw) {
-                    raw.writeBytes(frame.getPayload());
-                }
-            }
-        };
-        try (callback) {
-            boolean completed = lifecycleManager.getDockerClient().logContainerCmd(containerId)
-                    .withStdOut(true).withStdErr(true).withTimestamps(true).withTail(MAX_LOG_LINES)
-                    .exec(callback)
-                    .awaitCompletion(timeout.toMillis(), TimeUnit.MILLISECONDS);
-            if (!completed) {
-                // Closing the callback (try-with-resources) stops the stream, so nothing writes into
-                // the buffer after this read gives up.
-                throw new IllegalStateException("Timed out reading the log of container " + containerId);
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted while reading the log of container " + containerId, e);
-        } catch (NotFoundException e) {
-            return null;
-        } catch (IOException e) {
-            throw new IllegalStateException("Could not close the log stream of container " + containerId, e);
-        }
-        String text;
-        synchronized (raw) {
-            text = raw.toString(StandardCharsets.UTF_8);
-        }
-        if (text.isEmpty()) {
-            return List.of();
-        }
-        return List.of(text.split("\r?\n"));
-    }
-
     public String createPostgresSnapshot(String containerId, String masterUsername) {
         String effectiveUser = (masterUsername != null && !masterUsername.isBlank()) ? masterUsername : "postgres";
         String[] cmd = {
                 "pg_dumpall",
                 "-U", effectiveUser
         };
-        try (Lease _ = holdContainer(containerId)) {
-            ContainerExec.Result result = execInContainer(containerId, cmd, 120);
+        try {
+            ContainerExecResult result = execInContainer(containerId, cmd, 120);
             if (result.exitCode() != 0) {
                 throw new RuntimeException("pg_dumpall failed with exit code " + result.exitCode() + ": " + result.stderr());
             }
-            return result.stdout();
+            return result.output();
         } catch (Exception e) {
             throw new RuntimeException("Failed to create postgres snapshot", e);
         }
@@ -1096,25 +722,28 @@ public class RdsContainerManager implements RdsBackendGate, RdsBackendEndpointRe
     public void restorePostgresSnapshot(String containerId, String masterUsername, String sqlDump) {
         String effectiveUser = (masterUsername != null && !masterUsername.isBlank()) ? masterUsername : "postgres";
 
-        try (Lease _ = holdContainer(containerId)) {
+        try {
             String restoreScript = postgresRestoreScript();
 
-            ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            try (TarArchiveOutputStream tar = new TarArchiveOutputStream(bos)) {
-                tar.setLongFileMode(TarArchiveOutputStream.LONGFILE_GNU);
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            try (org.apache.commons.compress.archivers.tar.TarArchiveOutputStream tar =
+                         new org.apache.commons.compress.archivers.tar.TarArchiveOutputStream(bos)) {
+                tar.setLongFileMode(org.apache.commons.compress.archivers.tar.TarArchiveOutputStream.LONGFILE_GNU);
 
                 addTarEntry(tar, "dump.sql", sqlDump);
                 addTarEntry(tar, "restore.sh", restoreScript);
             }
 
-            byte[] archive = bos.toByteArray();
-            RetryingTarCopier.copyStreamed(lifecycleManager.getDockerClient(), containerId,
-                    "/tmp", "postgres-restore", out -> out.write(archive),
-                    RetryingTarCopier.DEFAULT_MAX_ATTEMPTS, uploadBackoffMillis);
+            try (java.io.InputStream tarStream = new java.io.ByteArrayInputStream(bos.toByteArray())) {
+                lifecycleManager.getDockerClient().copyArchiveToContainerCmd(containerId)
+                        .withRemotePath("/tmp")
+                        .withTarInputStream(tarStream)
+                        .exec();
+            }
 
             String[] cmd = { "sh", "/tmp/restore.sh", effectiveUser };
 
-            ContainerExec.Result result = null;
+            ContainerExecResult result = null;
             for (int i = 0; i < 60; i++) {
                 result = execInContainer(containerId, cmd, 120);
                 if (result.exitCode() == 0) {
@@ -1132,7 +761,7 @@ public class RdsContainerManager implements RdsBackendGate, RdsBackendEndpointRe
             }
 
             if (result == null || result.exitCode() != 0) {
-                String errMsg = result != null ? (result.stderr().isEmpty() ? result.stdout() : result.stderr()) : "";
+                String errMsg = result != null ? (result.stderr().isEmpty() ? result.output() : result.stderr()) : "";
                 throw new RuntimeException("psql restore failed with exit code "
                         + (result != null ? result.exitCode() : -1) + ": " + errMsg);
             }
@@ -1141,34 +770,6 @@ public class RdsContainerManager implements RdsBackendGate, RdsBackendEndpointRe
         } catch (Exception e) {
             throw new RuntimeException("Failed to restore postgres snapshot", e);
         }
-    }
-
-    /**
-     * Gives a restored database the name a point in time restore asked for. {@code from} is the
-     * database the source's dump brought over: its DBName, or the master user's name when it had
-     * none, which is how the image names its default database. The rename runs connected to
-     * template1, so it also works when {@code from} is {@code postgres}.
-     */
-    public void renamePostgresDatabase(String containerId, String masterUsername, String from, String to) {
-        String effectiveUser = (masterUsername != null && !masterUsername.isBlank()) ? masterUsername : "postgres";
-        String sql = "ALTER DATABASE " + quotePostgresIdentifier(from) + " RENAME TO " + quotePostgresIdentifier(to);
-        String[] cmd = {"psql", "-v", "ON_ERROR_STOP=1", "-U", effectiveUser, "-d", "template1", "-c", sql};
-        try (Lease _ = holdContainer(containerId)) {
-            ContainerExec.Result result = execInContainer(containerId, cmd, 60);
-            if (result.exitCode() != 0) {
-                throw new RuntimeException("Renaming database " + from + " to " + to + " failed with exit code "
-                        + result.exitCode() + ": " + result.stderr());
-            }
-        } catch (RuntimeException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to rename database " + from + " to " + to, e);
-        }
-    }
-
-    /** A PostgreSQL quoted identifier: wrapped in double quotes, with each embedded one doubled. */
-    static String quotePostgresIdentifier(String name) {
-        return "\"" + name.replace("\"", "\"\"") + "\"";
     }
 
     static String postgresRestoreScript() {
@@ -1215,9 +816,60 @@ public class RdsContainerManager implements RdsBackendGate, RdsBackendEndpointRe
         tar.closeArchiveEntry();
     }
 
-    private ContainerExec.Result execInContainer(String containerId, String[] cmd, int timeoutSeconds) {
-        return ContainerExec.run(lifecycleManager.getDockerClient(), containerId, cmd, timeoutSeconds);
+    private ContainerExecResult execInContainer(String containerId, String[] cmd, int timeoutSeconds) throws Exception {
+        String execId = lifecycleManager.getDockerClient().execCreateCmd(containerId)
+                .withCmd(cmd)
+                .withAttachStdout(true)
+                .withAttachStderr(true)
+                .exec()
+                .getId();
+
+        CountDownLatch latch = new CountDownLatch(1);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+        Closeable callback = lifecycleManager.getDockerClient().execStartCmd(execId).exec(new ResultCallback.Adapter<Frame>() {
+            @Override
+            public void onNext(Frame frame) {
+                if (frame.getPayload() != null) {
+                    try {
+                        if (frame.getStreamType() == com.github.dockerjava.api.model.StreamType.STDOUT) {
+                            output.write(frame.getPayload());
+                        } else if (frame.getStreamType() == com.github.dockerjava.api.model.StreamType.STDERR) {
+                            stderr.write(frame.getPayload());
+                        }
+                    } catch (IOException e) {
+                        LOG.warnv(e, "Failed to read output stream for container exec {0}", execId);
+                    }
+                }
+            }
+
+            @Override
+            public void onComplete() {
+                latch.countDown();
+            }
+
+            @Override
+            public void onError(Throwable t) {
+                LOG.warnv(t, "Container exec {0} failed", execId);
+                latch.countDown();
+            }
+        });
+        try {
+            boolean completed = latch.await(timeoutSeconds, TimeUnit.SECONDS);
+            if (!completed) {
+                return new ContainerExecResult(-1, "Timed out after " + timeoutSeconds + "s", "");
+            }
+            Long exitCode = lifecycleManager.getDockerClient().inspectExecCmd(execId).exec().getExitCodeLong();
+            return new ContainerExecResult(
+                    exitCode != null ? exitCode : -1,
+                    output.toString(StandardCharsets.UTF_8),
+                    stderr.toString(StandardCharsets.UTF_8));
+        } finally {
+            callback.close();
+        }
     }
+
+    record ContainerExecResult(long exitCode, String output, String stderr) {}
 
     public void removeVolume(String instanceId, String volumeId) {
         removeVolume(instanceId, instanceId,
@@ -1319,59 +971,6 @@ public class RdsContainerManager implements RdsBackendGate, RdsBackendEndpointRe
     }
 
     static List<String> buildContainerCmd(DatabaseEngine engine, String image) {
-        return buildContainerCmd(engine, image, Map.of());
-    }
-
-    /**
-     * The server options for an engine, with a parameter group's overrides ahead of the options
-     * Floci needs, so a group cannot take away the authentication plugin the proxy relies on.
-     */
-    static List<String> buildContainerCmd(
-            DatabaseEngine engine, String image, Map<String, String> engineParameters) {
-        List<String> cmd = new ArrayList<>(engineParameterOptions(engine, engineParameters));
-        cmd.addAll(authenticationOptions(engine, image));
-        return cmd;
-    }
-
-    /**
-     * A parameter group's overrides as MySQL or MariaDB server options. Each takes the
-     * {@code --loose-} prefix, so a parameter only Aurora or RDS knows (or one an older server
-     * does not have) is skipped with a warning instead of stopping the server. A value that is a
-     * formula, such as {@code {DBInstanceClassMemory*3/4}}, is worked out by AWS from the
-     * instance class and is left to the server's default, as are the parameters that decide
-     * where the server listens and keeps its data, which Floci controls, and the ones that would
-     * lock Floci's proxy out. {@code time_zone} is set through {@code --default-time-zone}, and
-     * Aurora's {@code binlog_format=OFF}, which turns binary logging off, through
-     * {@code --skip-log-bin}.
-     */
-    public static List<String> engineParameterOptions(
-            DatabaseEngine engine, Map<String, String> engineParameters) {
-        if (engineParameters == null || engineParameters.isEmpty()
-                || (engine != DatabaseEngine.MYSQL && engine != DatabaseEngine.MARIADB)) {
-            return List.of();
-        }
-        List<String> options = new ArrayList<>();
-        for (Map.Entry<String, String> parameter : new TreeMap<>(engineParameters).entrySet()) {
-            String name = parameter.getKey();
-            String value = parameter.getValue();
-            if (name == null || value == null || !MYSQL_PARAMETER_NAME.matcher(name).matches()
-                    || value.contains("{")) {
-                continue;
-            }
-            String normalizedName = name.replace('-', '_').toLowerCase(Locale.ROOT);
-            if (FLOCI_CONTROLLED_MYSQL_PARAMETERS.contains(normalizedName)) {
-                continue;
-            }
-            if (normalizedName.equals("binlog_format") && value.equalsIgnoreCase("OFF")) {
-                options.add("--skip-log-bin");
-                continue;
-            }
-            options.add("--loose-" + MYSQL_OPTION_NAMES.getOrDefault(normalizedName, name) + "=" + value);
-        }
-        return options;
-    }
-
-    private static List<String> authenticationOptions(DatabaseEngine engine, String image) {
         // Keep the backend handshake on mysql_native_password so the transparent proxy can
         // validate the client scramble. MySQL 8.4 removed default-authentication-plugin and
         // requires the native plugin to be enabled separately before selecting it as the default.

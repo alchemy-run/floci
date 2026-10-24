@@ -1,25 +1,5 @@
 package io.github.hectorvent.floci.services.dynamodb;
 
-import io.github.hectorvent.floci.core.common.AwsArnUtils;
-import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.core.common.RequestScopes;
-import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
-import io.github.hectorvent.floci.core.storage.StorageBackend;
-import io.github.hectorvent.floci.core.storage.StorageFactory;
-import io.github.hectorvent.floci.services.dynamodb.model.AttributeDefinition;
-import io.github.hectorvent.floci.services.dynamodb.model.ExportDescription;
-import io.github.hectorvent.floci.services.dynamodb.model.ExportSummary;
-import io.github.hectorvent.floci.services.dynamodb.model.GlobalSecondaryIndex;
-import io.github.hectorvent.floci.services.dynamodb.model.ImportSummary;
-import io.github.hectorvent.floci.services.dynamodb.model.ImportTableDescription;
-import io.github.hectorvent.floci.services.dynamodb.model.LocalSecondaryIndex;
-import io.github.hectorvent.floci.services.dynamodb.model.KeySchemaElement;
-import io.github.hectorvent.floci.services.dynamodb.model.TableBackup;
-import io.github.hectorvent.floci.services.dynamodb.model.StreamDescription;
-import io.github.hectorvent.floci.services.dynamodb.model.TableDefinition;
-import io.github.hectorvent.floci.services.dynamodb.model.ConditionalCheckFailedException;
-import io.github.hectorvent.floci.services.s3.S3Service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -80,8 +60,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.HexFormat;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -106,6 +84,8 @@ import java.util.zip.GZIPOutputStream;
 
 import static io.github.hectorvent.floci.services.dynamodb.DynamoDbTimestamps.epochSeconds;
 import static io.github.hectorvent.floci.services.dynamodb.DynamoDbTimestamps.instantOf;
+import io.github.hectorvent.floci.core.resource.ResourceProvider;
+import io.github.hectorvent.floci.core.resource.SupportedResourceType;
 
 @ApplicationScoped
 public class DynamoDbService {
@@ -151,7 +131,6 @@ public class DynamoDbService {
     private static final long TX_IDEMPOTENCY_TTL_NANOS = Duration.ofMinutes(10).toNanos();
 
     private static final int MAX_MULTI_ATTRIBUTE_KEY_PART_SIZE = 4;
-    private final ConcurrentHashMap<String, TableBackup> backups = new ConcurrentHashMap<>();
 
     private static final int MAX_VECTOR_INDEXES_PER_TABLE = 5;
     private static final int MAX_VECTOR_DIMENSIONS = 4096;
@@ -1477,16 +1456,6 @@ public class DynamoDbService {
             // AWS validates index key values against the item the update produces.
             validateIndexKeyTypes(table, item, true);
 
-            if (sizeRule == UpdateSizeRule.UPDATE_ITEM) {
-                requireUpdateItemWithinSizeLimit(item,
-                        writtenAttributes(touchedPaths, updateExpression, expressionAttrNames),
-                        updateExpression != null
-                                ? DynamoDbItemSize.updateExpressionCost(updateExpression)
-                                : DynamoDbItemSize.attributeUpdatesCost(attributeUpdates));
-            } else {
-                requireUpdatedItemWithinSizeLimit(item);
-            }
-
             if (sizeRule == UpdateSizeRule.UPDATE_ITEM && updateExpression != null) {
                 requireUpdateItemWithinSizeLimit(item, DynamoDbItemSize.updateStatementSize(updateExpression,
                         path -> parsePath(path, expressionAttrNames), expressionAttrValues));
@@ -1534,18 +1503,6 @@ public class DynamoDbService {
 
     private List<Object> pathTokens(String path, String updateExpression, JsonNode expressionAttrNames) {
         return updateExpression != null ? parsePath(path, expressionAttrNames) : List.<Object>of(path);
-    }
-
-    private Set<String> writtenAttributes(List<String> touchedPaths, String updateExpression,
-                                           JsonNode expressionAttrNames) {
-        Set<String> names = new LinkedHashSet<>();
-        for (String path : touchedPaths) {
-            List<Object> tokens = pathTokens(path, updateExpression, expressionAttrNames);
-            if (!tokens.isEmpty() && tokens.get(0) instanceof String name) {
-                names.add(name);
-            }
-        }
-        return names;
     }
 
     public QueryResult query(String tableName, JsonNode keyConditions,
@@ -2064,15 +2021,6 @@ public class DynamoDbService {
             if (hasFailed) {
                 throw new TransactionCanceledException(cancellationReasons);
             }
-
-            for (int i = 0; i < transactItems.size(); i++) {
-                try {
-                    validateTransactItem(transactItems.get(i), region, staged);
-                } catch (KeySchemaMismatchException | ItemNestingExceededException
-                        | UpdatedItemTooLargeException e) {
-                    throw cancelledByMember(transactItems.size(), i, e.getMessage());
-                }
-            }
             List<JsonNode> oldImages = stagedImages(memberParticipants, staged);
             for (JsonNode transactItem : transactItems) {
                 if (transactItem.has("Put")) {
@@ -2490,20 +2438,6 @@ public class DynamoDbService {
     public TableDefinition updateTable(String tableName, Long readCapacity, Long writeCapacity,
                                         List<GlobalSecondaryIndex> gsiCreates, List<String> gsiDeletes,
                                         List<AttributeDefinition> newAttrDefs, String region) {
-        return updateTable(tableName, readCapacity, writeCapacity, gsiCreates, gsiDeletes, newAttrDefs, region, false);
-    }
-
-    /**
-     * @param hasOtherUpdates true when the UpdateTable request also carries a
-     *                       non-throughput field (billing mode, streams, GSIs,
-     *                       SSE, table class, …). Real AWS only rejects an
-     *                       unchanged ProvisionedThroughput when that is the
-     *                       sole thing in the update.
-     */
-    public TableDefinition updateTable(String tableName, Long readCapacity, Long writeCapacity,
-                                        List<GlobalSecondaryIndex> gsiCreates, List<String> gsiDeletes,
-                                        List<AttributeDefinition> newAttrDefs, String region,
-                                        boolean hasOtherUpdates) {
         return updateTable(tableName, readCapacity, writeCapacity, gsiCreates, gsiDeletes,
                            newAttrDefs, List.of(), List.of(), null, region);
     }
@@ -2528,12 +2462,7 @@ public class DynamoDbService {
             throw new AwsException("ValidationException",
                     "The parameter 'ProvisionedThroughput.WriteCapacityUnits' must be greater than 0", 400);
         }
-        boolean otherUpdates = hasOtherUpdates
-                || (gsiCreates != null && !gsiCreates.isEmpty())
-                || (gsiDeletes != null && !gsiDeletes.isEmpty())
-                || (newAttrDefs != null && !newAttrDefs.isEmpty());
-        if (!otherUpdates
-                && readCapacity != null && writeCapacity != null
+        if (readCapacity != null && writeCapacity != null
                 && "PROVISIONED".equals(table.getBillingMode())
                 && readCapacity.equals(table.getProvisionedThroughput().getReadCapacityUnits())
                 && writeCapacity.equals(table.getProvisionedThroughput().getWriteCapacityUnits())) {
@@ -3094,154 +3023,6 @@ public class DynamoDbService {
         return table;
     }
 
-    // --- On-demand backups ---
-
-    public TableBackup createBackup(
-            String tableName, String backupName, String region) {
-        if (backupName == null || backupName.isBlank()) {
-            throw new AwsException("ValidationException", "BackupName must not be empty", 400);
-        }
-        String canonicalTableName = canonicalTableName(region, tableName);
-        String storageKey = regionKey(region, canonicalTableName);
-        TableDefinition table = tableStore.get(storageKey)
-                .orElseThrow(() -> resourceNotFoundException(canonicalTableName));
-
-        long now = Instant.now().getEpochSecond();
-        String backupId = now + "-" + UUID.randomUUID().toString().replace("-", "");
-        String backupArn = AwsArnUtils.Arn.of(
-                "dynamodb",
-                DynamoDbTableNames.resolveWithRegion(tableName, region).region() != null
-                        ? DynamoDbTableNames.resolveWithRegion(tableName, region).region()
-                        : region,
-                regionResolver.getAccountId(),
-                "table/" + table.getTableName() + "/backup/" + backupId).toString();
-
-        var items = itemsByTable.get(scopedItemsKey(storageKey));
-        Map<String, JsonNode> snapshot = items != null ? new HashMap<>(items) : new HashMap<>();
-
-        var backup = new TableBackup();
-        backup.setBackupArn(backupArn);
-        backup.setBackupName(backupName);
-        backup.setBackupStatus("AVAILABLE");
-        backup.setBackupType("USER");
-        backup.setBackupCreationDateTime(now);
-        backup.setBackupSizeBytes(snapshot.size());
-        backup.setTableName(table.getTableName());
-        backup.setTableId(table.getTableId());
-        backup.setTableArn(table.getTableArn());
-        backup.setBillingMode(table.getBillingMode());
-        backup.setReadCapacityUnits(table.getProvisionedThroughput().getReadCapacityUnits());
-        backup.setWriteCapacityUnits(table.getProvisionedThroughput().getWriteCapacityUnits());
-        backup.setKeySchema(new ArrayList<>(table.getKeySchema()));
-        backup.setAttributeDefinitions(new ArrayList<>(table.getAttributeDefinitions()));
-        backup.setItems(snapshot);
-        backups.put(backupArn, backup);
-        LOG.infov("Created backup {0} of table {1}", backupArn, canonicalTableName);
-        return backup;
-    }
-
-    public TableBackup describeBackup(String backupArn) {
-        return requireBackup(backupArn);
-    }
-
-    public TableBackup deleteBackup(String backupArn) {
-        TableBackup backup = requireBackup(backupArn);
-        backups.remove(backupArn);
-        backup.setBackupStatus("DELETED");
-        LOG.infov("Deleted backup {0}", backupArn);
-        return backup;
-    }
-
-    public List<TableBackup> listBackups(
-            String tableName, String region) {
-        String filterName = null;
-        if (tableName != null && !tableName.isBlank()) {
-            filterName = canonicalTableName(region, tableName);
-        }
-        String expectedName = filterName;
-        return backups.values().stream()
-                .filter(b -> !"DELETED".equals(b.getBackupStatus()))
-                .filter(b -> {
-                    AwsArnUtils.Arn arn = AwsArnUtils.parse(b.getBackupArn());
-                    return regionResolver.getAccountId().equals(arn.accountId()) && region.equals(arn.region());
-                })
-                .filter(b -> expectedName == null || expectedName.equals(b.getTableName()))
-                .sorted(Comparator.comparing(TableBackup::getBackupArn)
-                        .reversed())
-                .toList();
-    }
-
-    public TableDefinition restoreTableFromBackup(String backupArn, String targetTableName, String region) {
-        TableBackup backup = requireBackup(backupArn);
-        DynamoDbTableNames.requireShortName(targetTableName);
-        String storageKey = regionKey(region, targetTableName);
-        if (tableStore.get(storageKey).isPresent()) {
-            throw new AwsException("TableAlreadyExistsException",
-                    "Table already exists: " + targetTableName, 400);
-        }
-        TableDefinition restored = createTable(
-                targetTableName,
-                new ArrayList<>(backup.getKeySchema()),
-                new ArrayList<>(backup.getAttributeDefinitions()),
-                backup.getReadCapacityUnits(),
-                backup.getWriteCapacityUnits(),
-                List.of(),
-                List.of(),
-                region);
-        if (backup.getBillingMode() != null) {
-            restored.setBillingMode(backup.getBillingMode());
-        }
-        tableStore.put(storageKey, restored);
-        itemsByTable.put(scopedItemsKey(storageKey), new ConcurrentSkipListMap<>(backup.getItems()));
-        persistItems(storageKey);
-        LOG.infov("Restored table {0} from backup {1}", targetTableName, backupArn);
-        return restored;
-    }
-
-    public TableDefinition restoreTableToPointInTime(String sourceTableName, String targetTableName, String region) {
-        String canonicalSource = canonicalTableName(region, sourceTableName);
-        TableDefinition source = tableStore.get(regionKey(region, canonicalSource))
-                .orElseThrow(() -> new AwsException("TableNotFoundException",
-                        "Table not found: " + canonicalSource, 400));
-        if (!source.isPointInTimeRecoveryEnabled()) {
-            throw new AwsException("PointInTimeRecoveryUnavailableException",
-                    "Point in time recovery is not enabled for table " + canonicalSource, 400);
-        }
-        DynamoDbTableNames.requireShortName(targetTableName);
-        if (tableStore.get(regionKey(region, targetTableName)).isPresent()) {
-            throw new AwsException("TableAlreadyExistsException",
-                    "Table already exists: " + targetTableName, 400);
-        }
-        var items = itemsByTable.get(scopedItemsKey(regionKey(region, canonicalSource)));
-        TableDefinition restored = createTable(
-                targetTableName,
-                new ArrayList<>(source.getKeySchema()),
-                new ArrayList<>(source.getAttributeDefinitions()),
-                source.getProvisionedThroughput().getReadCapacityUnits(),
-                source.getProvisionedThroughput().getWriteCapacityUnits(),
-                List.of(),
-                List.of(),
-                region);
-        restored.setBillingMode(source.getBillingMode());
-        tableStore.put(regionKey(region, targetTableName), restored);
-        itemsByTable.put(scopedItemsKey(regionKey(region, targetTableName)),
-                items != null ? new ConcurrentSkipListMap<>(items) : new ConcurrentSkipListMap<>());
-        persistItems(regionKey(region, targetTableName));
-        LOG.infov("Restored table {0} to point in time from {1}", targetTableName, canonicalSource);
-        return restored;
-    }
-
-    private TableBackup requireBackup(String backupArn) {
-        if (backupArn == null || backupArn.isBlank()) {
-            throw new AwsException("ValidationException", "BackupArn must not be empty", 400);
-        }
-        TableBackup backup = backups.get(backupArn);
-        if (backup == null || "DELETED".equals(backup.getBackupStatus())
-                || !regionResolver.getAccountId().equals(AwsArnUtils.parse(backupArn).accountId())) {
-            throw new AwsException("BackupNotFoundException",
-                    "Backup not found: " + backupArn, 400);
-        }
-        return backup;
     /** The backup operations do not see a table that a restore is still creating. */
     private TableDefinition requireBackupSource(String storageKey, String tableName) {
         return tableStore.get(storageKey)
@@ -3460,30 +3241,6 @@ public class DynamoDbService {
         tableStore.put(storageKey, table);
         LOG.debugv("Deleted resource policy: {0}", resourceArn);
         return revisionId;
-    }
-
-    public String updateContributorInsights(String tableName, String indexName, String action, String region) {
-        TableDefinition table = describeTable(tableName, region);
-        if (!"ENABLE".equals(action) && !"DISABLE".equals(action)) {
-            throw new AwsException("ValidationException",
-                    "ContributorInsightsAction must be ENABLE or DISABLE", 400);
-        }
-        String status = "ENABLE".equals(action) ? "ENABLED" : "DISABLED";
-        table.setContributorInsightsStatusFor(indexName, status);
-        persistTable(table.getTableName(), table, region);
-        return status;
-    }
-
-    public String describeContributorInsights(String tableName, String indexName, String region) {
-        TableDefinition table = describeTable(tableName, region);
-        return table.contributorInsightsStatusFor(indexName);
-    }
-
-    public List<TableDefinition> listTableDefinitions(String region) {
-        String prefix = region + "::";
-        return tableStore.scan(k -> k.startsWith(prefix)).stream()
-                .sorted(Comparator.comparing(TableDefinition::getTableName))
-                .toList();
     }
 
     private TableDefinition findTableByArn(String arn, String region) {
@@ -4142,7 +3899,7 @@ public class DynamoDbService {
             arr.add(value);
         }
     }
-
+    
     private void setValueAtPath(ObjectNode item, String path, JsonNode value, JsonNode exprAttrNames) {
         List<Object> tokens = parsePath(path, exprAttrNames);
         if (tokens.isEmpty()) return;
@@ -5916,5 +5673,147 @@ public class DynamoDbService {
                     table.getTags() != null ? table.getTags() : Map.of()));
         }
         return resources;
+    }
+
+    private final ConcurrentHashMap<String, TableBackup> backups = new ConcurrentHashMap<>();
+
+    private Set<String> writtenAttributes(List<String> touchedPaths, String updateExpression,
+                                           JsonNode expressionAttrNames) {
+        Set<String> names = new LinkedHashSet<>();
+        for (String path : touchedPaths) {
+            List<Object> tokens = pathTokens(path, updateExpression, expressionAttrNames);
+            if (!tokens.isEmpty() && tokens.get(0) instanceof String name) {
+                names.add(name);
+            }
+        }
+        return names;
+    }
+
+    private TransactionCanceledException.CancellationReason transactUpdateValueTooDeep(JsonNode transactItem) {
+        var values = transactItem.path("Update").get("ExpressionAttributeValues");
+        if (DynamoDbAttributeValueValidator.nestingWithinLimit(values)) {
+            return null;
+        }
+        return new TransactionCanceledException.CancellationReason("ValidationError", null,
+                "Nesting Levels have exceeded supported limits");
+    }
+
+    public TableDefinition restoreTableFromBackup(String backupArn, String targetTableName, String region) {
+        TableBackup backup = requireBackup(backupArn);
+        DynamoDbTableNames.requireShortName(targetTableName);
+        String storageKey = regionKey(region, targetTableName);
+        if (tableStore.get(storageKey).isPresent()) {
+            throw new AwsException("TableAlreadyExistsException",
+                    "Table already exists: " + targetTableName, 400);
+        }
+        TableDefinition restored = createTable(
+                targetTableName,
+                new ArrayList<>(backup.getKeySchema()),
+                new ArrayList<>(backup.getAttributeDefinitions()),
+                backup.getReadCapacityUnits(),
+                backup.getWriteCapacityUnits(),
+                List.of(),
+                List.of(),
+                region);
+        if (backup.getBillingMode() != null) {
+            restored.setBillingMode(backup.getBillingMode());
+        }
+        tableStore.put(storageKey, restored);
+        itemsByTable.put(scopedItemsKey(storageKey), new ConcurrentSkipListMap<>(backup.getItems()));
+        persistItems(storageKey);
+        LOG.infov("Restored table {0} from backup {1}", targetTableName, backupArn);
+        return restored;
+    }
+
+    public TableDefinition restoreTableToPointInTime(String sourceTableName, String targetTableName, String region) {
+        String canonicalSource = canonicalTableName(region, sourceTableName);
+        TableDefinition source = tableStore.get(regionKey(region, canonicalSource))
+                .orElseThrow(() -> new AwsException("TableNotFoundException",
+                        "Table not found: " + canonicalSource, 400));
+        if (!source.isPointInTimeRecoveryEnabled()) {
+            throw new AwsException("PointInTimeRecoveryUnavailableException",
+                    "Point in time recovery is not enabled for table " + canonicalSource, 400);
+        }
+        DynamoDbTableNames.requireShortName(targetTableName);
+        if (tableStore.get(regionKey(region, targetTableName)).isPresent()) {
+            throw new AwsException("TableAlreadyExistsException",
+                    "Table already exists: " + targetTableName, 400);
+        }
+        var items = itemsByTable.get(scopedItemsKey(regionKey(region, canonicalSource)));
+        TableDefinition restored = createTable(
+                targetTableName,
+                new ArrayList<>(source.getKeySchema()),
+                new ArrayList<>(source.getAttributeDefinitions()),
+                source.getProvisionedThroughput().getReadCapacityUnits(),
+                source.getProvisionedThroughput().getWriteCapacityUnits(),
+                List.of(),
+                List.of(),
+                region);
+        restored.setBillingMode(source.getBillingMode());
+        tableStore.put(regionKey(region, targetTableName), restored);
+        itemsByTable.put(scopedItemsKey(regionKey(region, targetTableName)),
+                items != null ? new ConcurrentSkipListMap<>(items) : new ConcurrentSkipListMap<>());
+        persistItems(regionKey(region, targetTableName));
+        LOG.infov("Restored table {0} to point in time from {1}", targetTableName, canonicalSource);
+        return restored;
+    }
+
+    private TableBackup requireBackup(String backupArn) {
+        if (backupArn == null || backupArn.isBlank()) {
+            throw new AwsException("ValidationException", "BackupArn must not be empty", 400);
+        }
+        TableBackup backup = backups.get(backupArn);
+        if (backup == null || "DELETED".equals(backup.getBackupStatus())
+                || !regionResolver.getAccountId().equals(AwsArnUtils.parse(backupArn).accountId())) {
+            throw new AwsException("BackupNotFoundException",
+                    "Backup not found: " + backupArn, 400);
+        }
+        return backup;
+    }
+
+    public String updateContributorInsights(String tableName, String indexName, String action, String region) {
+        TableDefinition table = describeTable(tableName, region);
+        if (!"ENABLE".equals(action) && !"DISABLE".equals(action)) {
+            throw new AwsException("ValidationException",
+                    "ContributorInsightsAction must be ENABLE or DISABLE", 400);
+        }
+        String status = "ENABLE".equals(action) ? "ENABLED" : "DISABLED";
+        table.setContributorInsightsStatusFor(indexName, status);
+        persistTable(table.getTableName(), table, region);
+        return status;
+    }
+
+    public String describeContributorInsights(String tableName, String indexName, String region) {
+        TableDefinition table = describeTable(tableName, region);
+        return table.contributorInsightsStatusFor(indexName);
+    }
+
+    public List<TableDefinition> listTableDefinitions(String region) {
+        String prefix = region + "::";
+        return tableStore.scan(k -> k.startsWith(prefix)).stream()
+                .sorted(Comparator.comparing(TableDefinition::getTableName))
+                .toList();
+    }
+
+    /**
+     * SHA-256 hex digest of a string, used by ClientRequestToken idempotency to compare
+     * request bodies. SHA-256 is required (not MD5) for the dedup contract because a
+     * collision would allow a request with different parameters to be silently treated
+     * as a replay; SHA-256 is supported on every JVM via {@link MessageDigest}.
+     */
+    private static String sha256(String input) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException e) {
+            // SHA-256 is mandated by the JLS to be available on every JVM; this should never trigger.
+            throw new IllegalStateException("SHA-256 is required but not available on this JVM", e);
+        }
+    }
+
+    @Override
+    public Set<SupportedResourceType> getSupportedResourceTypes() {
+        return Set.of(new SupportedResourceType("dynamodb:table", "dynamodb", true));
     }
 }

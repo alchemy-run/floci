@@ -25,7 +25,6 @@ import io.github.hectorvent.floci.services.configservice.model.EvaluationModeCon
 import io.github.hectorvent.floci.services.configservice.model.EvaluationResult;
 import io.github.hectorvent.floci.services.configservice.model.EvaluationResultIdentifier;
 import io.github.hectorvent.floci.services.configservice.model.EvaluationResultQualifier;
-import io.github.hectorvent.floci.services.configservice.model.RecordingGroup;
 import io.github.hectorvent.floci.services.configservice.model.RetentionConfiguration;
 import io.github.hectorvent.floci.services.configservice.model.SourceDetail;
 import jakarta.annotation.PostConstruct;
@@ -46,6 +45,7 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import io.github.hectorvent.floci.services.configservice.model.RecordingGroup;
 
 @ApplicationScoped
 public class AwsConfigService {
@@ -676,86 +676,13 @@ public class AwsConfigService {
 
     // --- Configuration Recorder ---
 
-    public synchronized void putConfigurationRecorder(String region, ConfigurationRecorder recorder) {
-        if (recorder == null || isBlank(recorder.roleARN())
-                || !recorder.roleARN().matches("arn:[^:]+:iam::[0-9]{12}:role/.+")) {
-            throw new AwsException("InvalidRoleException", "A valid configuration recorder role ARN is required.", 400);
-        }
-        validateRecordingConfiguration(recorder);
-        String name = isBlank(recorder.name()) ? "default" : recorder.name();
-        ConfigurationRecorder existing = configurationRecorders.get(region);
-        if (existing != null && !name.equals(existing.name())) {
-            throw new AwsException("MaxNumberOfConfigurationRecordersExceededException",
-                    "Only one customer managed configuration recorder is allowed per account and region.", 400);
-        }
-        String arn = existing != null && existing.arn() != null ? existing.arn()
-                : regionResolver.buildArn("config", region, "configuration-recorder/" + name + "/" + shortId());
-        ConfigurationRecorder stored = new ConfigurationRecorder(name, recorder.roleARN(), recorder.recordingGroup(),
-                recorder.recordingMode(), arn);
+    public void putConfigurationRecorder(String region, ConfigurationRecorder recorder) {
+        String name = (recorder.name() == null || recorder.name().isEmpty()) ? "default" : recorder.name();
+        ConfigurationRecorder stored = new ConfigurationRecorder(name, recorder.roleARN(), recorder.recordingGroup());
         configurationRecorders.put(region, stored);
     }
 
-    public synchronized void putConfigurationRecorder(String region, ConfigurationRecorder recorder,
-            List<Map<String, String>> requestedTags) {
-        boolean creating = !configurationRecorders.containsKey(region);
-        putConfigurationRecorder(region, recorder);
-        if (creating && requestedTags != null && !requestedTags.isEmpty()) {
-            tagResource(configurationRecorders.get(region).arn(), requestedTags);
-        }
-    }
-
-    synchronized void requireRunningRecorder(String region) {
-        if (!configurationRecorders.containsKey(region)
-                || !recorderRunning.getOrDefault(recorderStateKey(region), false)) {
-            throw new AwsException("NoRunningConfigurationRecorderException",
-                    "No configuration recorder is running in this account and region.", 400);
-        }
-    }
-
-    private String recorderStateKey(String region) {
-        return regionResolver.getAccountId() + "|" + region;
-    }
-
-    private void validateRecordingConfiguration(ConfigurationRecorder recorder) {
-        RecordingGroup group = recorder.recordingGroup();
-        if (group != null) {
-            boolean includes = group.resourceTypes() != null && !group.resourceTypes().isEmpty();
-            boolean excludes = group.exclusionByResourceTypes() != null
-                    && group.exclusionByResourceTypes().get("resourceTypes") != null
-                    && !group.exclusionByResourceTypes().get("resourceTypes").isEmpty();
-            String strategy = group.recordingStrategy() == null ? null : group.recordingStrategy().get("useOnly");
-            if ((Boolean.TRUE.equals(group.allSupported()) && (includes || excludes)) || (includes && excludes)
-                    || (strategy != null && !Set.of("ALL_SUPPORTED_RESOURCE_TYPES", "INCLUSION_BY_RESOURCE_TYPES",
-                        "EXCLUSION_BY_RESOURCE_TYPES").contains(strategy))
-                    || ("INCLUSION_BY_RESOURCE_TYPES".equals(strategy) && !includes)
-                    || ("EXCLUSION_BY_RESOURCE_TYPES".equals(strategy) && !excludes)
-                    || ("ALL_SUPPORTED_RESOURCE_TYPES".equals(strategy) && !Boolean.TRUE.equals(group.allSupported()))
-                    || (excludes && !"EXCLUSION_BY_RESOURCE_TYPES".equals(strategy))) {
-                throw new AwsException("InvalidRecordingGroupException", "Invalid resource recording strategy.", 400);
-            }
-        }
-        Map<String, Object> mode = recorder.recordingMode();
-        if (mode != null) {
-            if (!Set.of("CONTINUOUS", "DAILY").contains(String.valueOf(mode.get("recordingFrequency")))) {
-                throw new AwsException("ValidationException", "Invalid recording frequency.", 400);
-            }
-            Object overrides = mode.get("recordingModeOverrides");
-            if (overrides != null) {
-                if (!(overrides instanceof List<?> entries)) {
-                    throw new AwsException("ValidationException", "recordingModeOverrides must be a list.", 400);
-                }
-                for (Object entry : entries) {
-                    if (!(entry instanceof Map<?, ?> override)
-                            || !Set.of("CONTINUOUS", "DAILY").contains(String.valueOf(override.get("recordingFrequency")))
-                            || !(override.get("resourceTypes") instanceof List<?> types) || types.isEmpty()) {
-                        throw new AwsException("ValidationException", "Invalid recording mode override.", 400);
-                    }
-                }
-            }
-        }
-    }
-
-    public synchronized List<ConfigurationRecorder> describeConfigurationRecorders(String region, List<String> names) {
+    public List<ConfigurationRecorder> describeConfigurationRecorders(String region, List<String> names) {
         ConfigurationRecorder recorder = configurationRecorders.get(region);
         if (recorder == null) {
             if (names != null && !names.isEmpty()) {
@@ -772,16 +699,10 @@ public class AwsConfigService {
                 }
             }
         }
-        if (recorder.arn() == null) {
-            recorder = new ConfigurationRecorder(recorder.name(), recorder.roleARN(), recorder.recordingGroup(),
-                    recorder.recordingMode(), regionResolver.buildArn("config", region,
-                            "configuration-recorder/" + recorder.name() + "/" + shortId()));
-            configurationRecorders.put(region, recorder);
-        }
         return List.of(recorder);
     }
 
-    public synchronized void deleteConfigurationRecorder(String region, String name) {
+    public void deleteConfigurationRecorder(String region, String name) {
         ConfigurationRecorder recorder = configurationRecorders.get(region);
         if (recorder == null || !recorder.name().equals(name)) {
             throw new AwsException("NoSuchConfigurationRecorderException",
@@ -793,7 +714,7 @@ public class AwsConfigService {
         recorderLastStopTime.remove(runtimeKey(region));
     }
 
-    public synchronized void startConfigurationRecorder(String region, String name) {
+    public void startConfigurationRecorder(String region, String name) {
         ConfigurationRecorder recorder = configurationRecorders.get(region);
         if (recorder == null || !recorder.name().equals(name)) {
             throw new AwsException("NoSuchConfigurationRecorderException",
@@ -803,7 +724,7 @@ public class AwsConfigService {
         recorderLastStartTime.put(runtimeKey(region), now());
     }
 
-    public synchronized void stopConfigurationRecorder(String region, String name) {
+    public void stopConfigurationRecorder(String region, String name) {
         ConfigurationRecorder recorder = configurationRecorders.get(region);
         if (recorder == null || !recorder.name().equals(name)) {
             throw new AwsException("NoSuchConfigurationRecorderException",
@@ -1276,5 +1197,56 @@ public class AwsConfigService {
 
     private static String shortId() {
         return UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+    }
+
+    synchronized void requireRunningRecorder(String region) {
+        if (!configurationRecorders.containsKey(region)
+                || !recorderRunning.getOrDefault(recorderStateKey(region), false)) {
+            throw new AwsException("NoRunningConfigurationRecorderException",
+                    "No configuration recorder is running in this account and region.", 400);
+        }
+    }
+
+    private String recorderStateKey(String region) {
+        return regionResolver.getAccountId() + "|" + region;
+    }
+
+    private void validateRecordingConfiguration(ConfigurationRecorder recorder) {
+        RecordingGroup group = recorder.recordingGroup();
+        if (group != null) {
+            boolean includes = group.resourceTypes() != null && !group.resourceTypes().isEmpty();
+            boolean excludes = group.exclusionByResourceTypes() != null
+                    && group.exclusionByResourceTypes().get("resourceTypes") != null
+                    && !group.exclusionByResourceTypes().get("resourceTypes").isEmpty();
+            String strategy = group.recordingStrategy() == null ? null : group.recordingStrategy().get("useOnly");
+            if ((Boolean.TRUE.equals(group.allSupported()) && (includes || excludes)) || (includes && excludes)
+                    || (strategy != null && !Set.of("ALL_SUPPORTED_RESOURCE_TYPES", "INCLUSION_BY_RESOURCE_TYPES",
+                        "EXCLUSION_BY_RESOURCE_TYPES").contains(strategy))
+                    || ("INCLUSION_BY_RESOURCE_TYPES".equals(strategy) && !includes)
+                    || ("EXCLUSION_BY_RESOURCE_TYPES".equals(strategy) && !excludes)
+                    || ("ALL_SUPPORTED_RESOURCE_TYPES".equals(strategy) && !Boolean.TRUE.equals(group.allSupported()))
+                    || (excludes && !"EXCLUSION_BY_RESOURCE_TYPES".equals(strategy))) {
+                throw new AwsException("InvalidRecordingGroupException", "Invalid resource recording strategy.", 400);
+            }
+        }
+        Map<String, Object> mode = recorder.recordingMode();
+        if (mode != null) {
+            if (!Set.of("CONTINUOUS", "DAILY").contains(String.valueOf(mode.get("recordingFrequency")))) {
+                throw new AwsException("ValidationException", "Invalid recording frequency.", 400);
+            }
+            Object overrides = mode.get("recordingModeOverrides");
+            if (overrides != null) {
+                if (!(overrides instanceof List<?> entries)) {
+                    throw new AwsException("ValidationException", "recordingModeOverrides must be a list.", 400);
+                }
+                for (Object entry : entries) {
+                    if (!(entry instanceof Map<?, ?> override)
+                            || !Set.of("CONTINUOUS", "DAILY").contains(String.valueOf(override.get("recordingFrequency")))
+                            || !(override.get("resourceTypes") instanceof List<?> types) || types.isEmpty()) {
+                        throw new AwsException("ValidationException", "Invalid recording mode override.", 400);
+                    }
+                }
+            }
+        }
     }
 }

@@ -17,7 +17,6 @@ import org.apache.hc.client5.http.impl.routing.DefaultRoutePlanner;
 import org.apache.hc.client5.http.protocol.HttpClientContext;
 import org.apache.hc.client5.http.routing.RoutingSupport;
 import org.apache.hc.client5.http.ssl.ClientTlsStrategyBuilder;
-import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.ClassicHttpResponse;
 import org.apache.hc.core5.http.Header;
 import org.apache.hc.core5.http.HttpEntity;
@@ -49,6 +48,14 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
+import org.apache.hc.core5.http.ContentType;
+import org.apache.hc.core5.http.io.entity.EntityUtils;
+import org.apache.hc.core5.http.io.support.ClassicRequestBuilder;
+import javax.net.ssl.SSLSession;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpResponse;
+import java.util.Optional;
 
 /**
  * HTTP/1.1 transport for CloudFront custom origins that validates and pins each DNS resolution to
@@ -379,6 +386,65 @@ final class CloudFrontOriginHttpClient implements AutoCloseable {
         client.close();
     }
 
+    private record ValidatingDnsResolver(DnsResolver delegate, Set<String> allowedHosts)
+            implements DnsResolver {
+
+        @Override
+        public InetAddress[] resolve(String host) throws UnknownHostException {
+            InetAddress[] addresses = delegate.resolve(host);
+            String normalizedHost = CloudFrontServingController.normalizeHost(host);
+            if (addresses == null || addresses.length == 0) {
+                throw new UnknownHostException("CloudFront origin host has no addresses: " + normalizedHost);
+            }
+            if (!allowedHosts.contains(normalizedHost)) {
+                for (InetAddress address : addresses) {
+                    if (SsrfProtection.isBlockedAddress(address)) {
+                        throw new UnknownHostException(
+                                "CloudFront origin host resolves to a blocked address: " + normalizedHost);
+                    }
+                }
+            }
+            return addresses.clone();
+        }
+
+        @Override
+        public String resolveCanonicalHostname(String host) {
+            return CloudFrontServingController.normalizeHost(host);
+        }
+    }
+
+    static boolean isLocalDevOrigin(String authority) {
+        if (authority == null) {
+            return false;
+        }
+        try {
+            URI parsed = URI.create("http://" + authority);
+            return authority.equals(parsed.getRawAuthority())
+                    && parsed.getRawUserInfo() == null
+                    && parsed.getHost() != null
+                    && Set.of("localhost", "127.0.0.1", "[::1]").contains(parsed.getHost().toLowerCase(Locale.ROOT))
+                    && parsed.getPort() > 0 && parsed.getPort() <= 65535;
+        } catch (IllegalArgumentException ignored) {
+            // Malformed authorities never receive the local-origin exception.
+            return false;
+        }
+    }
+
+    static CloudFrontOriginHttpClient forLocalDevOrigin(String authority, String targetHost) {
+        return forLocalDevOrigin(SystemDefaultDnsResolver.INSTANCE, authority, targetHost);
+    }
+
+    static CloudFrontOriginHttpClient forLocalDevOrigin(DnsResolver resolver, String authority, String targetHost) {
+        if (!isLocalDevOrigin(authority)) {
+            throw new IllegalArgumentException("A local dev origin requires a loopback host and explicit port");
+        }
+        String originHost = CloudFrontServingController.normalizeOriginHost(authority);
+        String target = CloudFrontServingController.normalizeHost(targetHost);
+        // Isolated from the public-origin pool; only the emulator's selected host is reachable.
+        return new CloudFrontOriginHttpClient(
+                new LocalDevDnsResolver(resolver, target, !originHost.equals(target)), List.of(target));
+    }
+
     private record PinnedHttpResponse(
             int statusCode,
             HttpRequest request,
@@ -433,33 +499,6 @@ final class CloudFrontOriginHttpClient implements AutoCloseable {
             byte[] bytes = address.getAddress();
             return address.isSiteLocalAddress()
                     || (bytes.length == 16 && (Byte.toUnsignedInt(bytes[0]) & 0xfe) == 0xfc);
-        }
-
-        @Override
-        public String resolveCanonicalHostname(String host) {
-            return CloudFrontServingController.normalizeHost(host);
-        }
-    }
-
-    private record ValidatingDnsResolver(DnsResolver delegate, Set<String> allowedHosts)
-            implements DnsResolver {
-
-        @Override
-        public InetAddress[] resolve(String host) throws UnknownHostException {
-            InetAddress[] addresses = delegate.resolve(host);
-            String normalizedHost = CloudFrontServingController.normalizeHost(host);
-            if (addresses == null || addresses.length == 0) {
-                throw new UnknownHostException("CloudFront origin host has no addresses: " + normalizedHost);
-            }
-            if (!allowedHosts.contains(normalizedHost)) {
-                for (InetAddress address : addresses) {
-                    if (SsrfProtection.isBlockedAddress(address)) {
-                        throw new UnknownHostException(
-                                "CloudFront origin host resolves to a blocked address: " + normalizedHost);
-                    }
-                }
-            }
-            return addresses.clone();
         }
 
         @Override

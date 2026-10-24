@@ -129,6 +129,10 @@ import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import io.github.hectorvent.floci.services.dynamodb.DynamoDbService;
+import io.quarkus.arc.Arc;
+import io.quarkus.arc.ArcContainer;
+import io.quarkus.arc.ManagedContext;
 
 @ApplicationScoped
 public class AslExecutor {
@@ -531,15 +535,7 @@ public class AslExecutor {
         } catch (java.util.concurrent.TimeoutException e) {
             answerTimedOutUnlessEnded(exec, history, onUpdate);
         } catch (Exception e) {
-            FailStateException fail = unwrapFail(e);
-            if (fail != null && "RUNNING".equals(exec.getStatus())) {
-                HistoryChain chain = HistoryChain.of(history);
-                chain.continueFrom(history.size());
-                failExecution(exec, chain, fail);
-                onUpdate.accept(exec, history);
-            } else {
-                LOG.warnv("Sync execution wait failed for {0}: {1}", exec.getExecutionArn(), e.getMessage());
-            }
+            LOG.warnv("Sync execution wait failed for {0}: {1}", exec.getExecutionArn(), e.getMessage());
         }
     }
 
@@ -1352,9 +1348,9 @@ public class AslExecutor {
                 return functionOutput;
             }
             ObjectNode invokeResponse = objectMapper.createObjectNode();
-            invokeResponse.put("ExecutedVersion", fn.getVersion() != null ? fn.getVersion() : "$LATEST");
+            invokeResponse.put("ExecutedVersion", fn.getVersion());
             invokeResponse.set("Payload", functionOutput);
-            invokeResponse.put("StatusCode", result.getStatusCode() > 0 ? result.getStatusCode() : 200);
+            invokeResponse.put("StatusCode", result.getStatusCode());
             return invokeResponse;
         }
 
@@ -1804,14 +1800,6 @@ public class AslExecutor {
         }
     }
 
-    /** Converts the SDK's RFC 3339 timestamps to the epoch-second values used by the wire parser. */
-    private JsonNode normalizeAwsSdkSchedulerInput(JsonNode input) {
-        JsonNode normalized = input.deepCopy();
-        if (normalized instanceof ObjectNode object) {
-            normalizeAwsSdkSchedulerTimestamp(object, "StartDate");
-            normalizeAwsSdkSchedulerTimestamp(object, "EndDate");
-        }
-        return normalized;
     /** Converts SDK task values to the representations used by the Scheduler wire parser. */
     private JsonNode normalizeAwsSdkSchedulerInput(JsonNode input) {
         JsonNode normalized = input.deepCopy();
@@ -3199,8 +3187,6 @@ public class AslExecutor {
             mapRunRecord = newMapRun(mapRun, context, itemCount, childCount, requestedConcurrency);
             mapRunRecord.setToleratedFailureCount(tolerated.declaredCount());
             mapRunRecord.setToleratedFailurePercentage(tolerated.declaredPercentage());
-            mapRunRecord.setStatus("RUNNING");
-            sfnService.get().recordMapRun(mapRunRecord);
             chain.publish("MapRunStarted", Map.of("mapRunArn", mapRun.arn()));
         }
         AtomicInteger succeededItems = new AtomicInteger();
@@ -3614,6 +3600,7 @@ public class AslExecutor {
         }
         return value;
     }
+
 
     /**
      * Emulates a Distributed Map state's {@code ResultWriter}
@@ -5168,6 +5155,7 @@ public class AslExecutor {
         return null;
     }
 
+
     /**
      * Evaluate a JSONPath-mode intrinsic function (States.*).
      * Supports: States.StringToJson, States.JsonToString, States.Format,
@@ -6154,17 +6142,6 @@ public class AslExecutor {
 
     record StateResult(JsonNode output, String nextState) {}
 
-    private static FailStateException unwrapFail(Throwable error) {
-        Throwable current = error;
-        while (current != null) {
-            if (current instanceof FailStateException fail) {
-                return fail;
-            }
-            current = current.getCause();
-        }
-        return null;
-    }
-
     /**
      * Thrown when the state machine's top-level {@code TimeoutSeconds} budget runs out. It is not a
      * {@link FailStateException} on purpose: a Catch clause never sees it, no Retry re-runs the
@@ -6312,5 +6289,34 @@ public class AslExecutor {
         boolean isNamedBy(String errorName) {
             return super.isNamedBy(errorName) || errorName.equals(expiredClockError);
         }
+    }
+
+    private static final int DEFAULT_TASK_TOKEN_TIMEOUT_SECONDS = 300;
+
+    private static final int ECS_SYNC_POLL_ATTEMPTS = 600;
+
+    private static final long ECS_SYNC_POLL_INTERVAL_MS = 100;
+
+    private static final String AWS_SDK_SFN_PREFIX = "arn:aws:states:::aws-sdk:sfn:";
+
+    private static final String AWS_SDK_SCHEDULER_PREFIX = "arn:aws:states:::aws-sdk:scheduler:";
+
+    private final LambdaFunctionStore functionStore;
+
+    private final DynamoDbService dynamoDbService;
+
+    private int maxItems(JsonNode itemReader) {
+        return itemReader.path("ReaderConfig").path("MaxItems").asInt(0);
+    }
+
+    private static FailStateException unwrapFail(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof FailStateException fail) {
+                return fail;
+            }
+            current = current.getCause();
+        }
+        return null;
     }
 }

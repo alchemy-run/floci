@@ -33,8 +33,6 @@ public class KmsKey {
     private long deletionDate;
     private String policy;
     private boolean keyRotationEnabled = false;
-    private int rotationPeriodInDays;
-    private boolean multiRegion;
     private Map<String, String> tags = new HashMap<>();
     private String privateKeyEncoded;
     private String publicKeyEncoded;
@@ -116,12 +114,6 @@ public class KmsKey {
     public boolean isKeyRotationEnabled() { return keyRotationEnabled; }
     public void setKeyRotationEnabled(boolean keyRotationEnabled) { this.keyRotationEnabled = keyRotationEnabled; }
 
-    public int getRotationPeriodInDays() { return rotationPeriodInDays; }
-    public void setRotationPeriodInDays(int rotationPeriodInDays) { this.rotationPeriodInDays = rotationPeriodInDays; }
-
-    public boolean isMultiRegion() { return multiRegion; }
-    public void setMultiRegion(boolean multiRegion) { this.multiRegion = multiRegion; }
-
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags; }
 
@@ -139,4 +131,10 @@ public class KmsKey {
 
     public String getCurrentBackingKeyId() { return currentBackingKeyId; }
     public void setCurrentBackingKeyId(String currentBackingKeyId) { this.currentBackingKeyId = currentBackingKeyId; }
+
+    private int rotationPeriodInDays;
+
+    public int getRotationPeriodInDays() { return rotationPeriodInDays; }
+
+    public void setRotationPeriodInDays(int rotationPeriodInDays) { this.rotationPeriodInDays = rotationPeriodInDays; }
 }

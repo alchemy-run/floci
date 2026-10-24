@@ -55,11 +55,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
+import java.util.Comparator;
+import java.util.concurrent.atomic.AtomicReference;
 
 @ApplicationScoped
 public class CodeBuildRunner implements ContainerTeardown {
@@ -126,23 +127,6 @@ public class CodeBuildRunner implements ContainerTeardown {
         }
     }
 
-    public void validateExecution(Build build, Project project) {
-        String sourceType = project.getSource() != null ? project.getSource().getType() : "NO_SOURCE";
-        if (!List.of("NO_SOURCE", "S3").contains(sourceType)) {
-            throw CodeBuildService.unsupportedExecution("Source type " + sourceType);
-        }
-        String type = build.getEnvironment() != null ? build.getEnvironment().getType() : null;
-        if (type != null && !List.of("LINUX_CONTAINER", "ARM_CONTAINER").contains(type)) {
-            throw CodeBuildService.unsupportedExecution("Environment type " + type);
-        }
-        if (project.getSecondarySources() != null && !project.getSecondarySources().isEmpty()) {
-            throw CodeBuildService.unsupportedExecution("Secondary sources");
-        }
-        if (project.getSecondaryArtifacts() != null && !project.getSecondaryArtifacts().isEmpty()) {
-            throw CodeBuildService.unsupportedExecution("Secondary artifacts");
-        }
-    }
-
     public void startBuild(String region, Build build, Project project, String buildspecOverride) {
         String executionId = build.getArn();
         AtomicBoolean stopFlag = new AtomicBoolean(false);
@@ -165,38 +149,7 @@ public class CodeBuildRunner implements ContainerTeardown {
         }
     }
 
-    /**
-     * The platform of an AWS curated build image, which is fixed by its name. Pinning it lets a
-     * locally cached curated image be used as is; checking it against the daemon's own platform
-     * never matches an x86_64 image on an arm64 host, so every build re-queried the registry and
-     * blocked on a full multi-gigabyte download whenever AWS republished the tag.
-     */
-    static String curatedImagePlatform(String resolvedImage) {
-        if (resolvedImage == null || !resolvedImage.startsWith("public.ecr.aws/codebuild/")) {
-            return null;
-        }
-        if (resolvedImage.contains("x86_64")) {
-            return "linux/amd64";
-        }
-        if (resolvedImage.contains("aarch64")) {
-            return "linux/arm64";
-        }
-        return null;
-    }
-
-    static String resolveBuildImage(String image) {
-        if (image == null || image.isBlank()) {
-            throw new AwsException("InvalidInputException", "environment.image is required", 400);
-        }
-        // AWS managed-image identifiers are not Docker Hub repositories.
-        if ("aws/codebuild/amazonlinux2-x86_64-standard:5.0".equals(image)) {
-            return "public.ecr.aws/codebuild/amazonlinux-x86_64-standard:5.0";
-        }
-        return image.startsWith("aws/codebuild/")
-                ? "public.ecr.aws/codebuild/" + image.substring("aws/codebuild/".length()) : image;
-    }
-
-    void runBuild(String region, Build build, Project project,
+    private void runBuild(String region, Build build, Project project,
                           String buildspecOverride, AtomicBoolean stopFlag, String executionId) {
         String buildId = build.getId();
         Path workspace = null;
@@ -272,12 +225,8 @@ public class CodeBuildRunner implements ContainerTeardown {
 
             // Keep the container alive so each phase can be run with docker exec.
             // No bind mount needed — source and artifacts are transferred with docker cp.
-            String resolvedImage = resolveBuildImage(image);
-            LOG.infov("Provisioning CodeBuild worker for {0}: requestedImage={1}, resolvedImage={2}",
-                    buildId, image, resolvedImage);
-            ContainerSpec spec = containerBuilder.newContainer(resolvedImage)
-                    .withEntrypoint(List.of("sh", "-c"))
-                    .withCmd(List.of("exec tail -f /dev/null"))
+            ContainerSpec spec = containerBuilder.newContainer(image)
+                    .withCmd(List.of("sh", "-c", "tail -f /dev/null"))
                     .withEnv(envList)
                     .withDockerNetwork(config.services().codebuild().dockerNetwork())
                     .withEmbeddedDns()
@@ -288,27 +237,11 @@ public class CodeBuildRunner implements ContainerTeardown {
                             "codebuild", buildId, regionResolver.getAccountId(), region))
                     .build();
 
-            if (config.services().codebuild().honourEnvironmentType()) {
-                String environmentType = build.getEnvironment() != null ? build.getEnvironment().getType() : null;
-                String platform = "ARM_CONTAINER".equals(environmentType) ? "linux/arm64" : "linux/amd64";
-                containerId = lifecycleManager.create(spec, platform);
-            } else if (curatedImagePlatform(resolvedImage) != null) {
-                containerId = lifecycleManager.create(spec, curatedImagePlatform(resolvedImage));
-            } else {
-                containerId = lifecycleManager.create(spec);
-            }
+            ContainerLifecycleManager.ContainerInfo info = lifecycleManager.createAndStart(spec);
+            containerId = info.containerId();
             runningContainers.put(executionId, containerId);
-            if (stopFlag.get()) { finishStopped(build); return; }
-            lifecycleManager.startCreated(containerId, spec);
-            if (stopFlag.get()) { finishStopped(build); return; }
 
-            Map<String, Object> logsConfig = project.getLogsConfig();
-            boolean logsDisabled = logsConfig != null
-                    && logsConfig.get("cloudWatchLogs") instanceof Map<?, ?> cloudWatchLogs
-                    && "DISABLED".equals(cloudWatchLogs.get("status"));
-            if (!logsDisabled) {
-                logHandle = logStreamer.attach(containerId, logGroup, logStream, region, "codebuild:" + buildId);
-            }
+            logHandle = logStreamer.attach(containerId, logGroup, logStream, region, "codebuild:" + buildId);
 
             String containerSrcDir = "/codebuild/output/src/src";
             int timeoutMinutes = build.getTimeoutInMinutes() != null ? build.getTimeoutInMinutes() : 60;
@@ -413,10 +346,7 @@ public class CodeBuildRunner implements ContainerTeardown {
             } catch (Exception e) {
                 LOG.warnv("Artifact upload failed for build {0}: {1}", buildId, e.getMessage());
                 completePhaseWithError(build, "UPLOAD_ARTIFACTS", "FAILED", e.getMessage());
-                buildFailed = true;
             }
-
-            if (stopFlag.get()) { finishStopped(build); return; }
 
             // FINALIZING
             beginPhase(build, "FINALIZING");
@@ -433,12 +363,7 @@ public class CodeBuildRunner implements ContainerTeardown {
             build.setBuildStatus(buildFailed ? "FAILED" : "SUCCEEDED");
 
         } catch (Exception e) {
-            LOG.errorv(e, "CodeBuild worker failed: build={0}, phase={1}, container={2}, stopped={3}: {4}",
-                    buildId, build.getCurrentPhase(), containerId, stopFlag.get(), e.getMessage());
-            if (stopFlag.get()) {
-                finishStopped(build);
-                return;
-            }
+            LOG.error("Unexpected error in build " + build.getId(), e);
             build.setEndTime(System.currentTimeMillis() / 1000.0);
             build.setBuildComplete(true);
             build.setBuildStatus("FAULT");
@@ -480,17 +405,21 @@ public class CodeBuildRunner implements ContainerTeardown {
                                            String buildspecOverride, Path workspace) throws IOException {
         String sourceType = project.getSource() != null ? project.getSource().getType() : "NO_SOURCE";
 
-        if ("S3".equals(sourceType)) {
+        if ("S3".equals(sourceType) && project.getSource().getLocation() != null) {
             String location = project.getSource().getLocation();
-            int slash = location != null ? location.indexOf('/') : -1;
-            if (slash <= 0 || slash == location.length() - 1) {
-                throw new AwsException("InvalidInputException", "S3 source location must be bucket/key", 400);
+            int slash = location.indexOf('/');
+            if (slash > 0) {
+                String bucket = location.substring(0, slash);
+                String key = location.substring(slash + 1);
+                try {
+                    S3Object obj = s3Service.getObject(bucket, key);
+                    if (obj != null && obj.getData() != null) {
+                        extractZip(obj.getData(), workspace);
+                    }
+                } catch (Exception e) {
+                    LOG.warnv("Could not acquire S3 source {0}: {1}", location, e.getMessage());
+                }
             }
-            S3Object obj = s3Service.getObject(location.substring(0, slash), location.substring(slash + 1));
-            if (obj == null || obj.getData() == null) {
-                throw new AwsException("InvalidInputException", "S3 source not found: " + location, 400);
-            }
-            extractZip(obj.getData(), workspace);
         }
 
         if (buildspecOverride != null && !buildspecOverride.isBlank()) {
@@ -638,7 +567,7 @@ public class CodeBuildRunner implements ContainerTeardown {
                 }
             }
         } catch (Exception e) {
-            throw new IOException("Could not copy artifacts from build container " + containerId, e);
+            LOG.warnv("Could not copy artifacts from container {0}: {1}", containerId, e.getMessage());
         }
     }
 
@@ -708,10 +637,7 @@ public class CodeBuildRunner implements ContainerTeardown {
                 @Override
                 public void onComplete() { latch.countDown(); }
                 @Override
-                public void onError(Throwable t) {
-                    executionError.set(t);
-                    latch.countDown();
-                }
+                public void onError(Throwable t) { latch.countDown(); }
             });
 
             boolean completed = latch.await(timeoutMinutes, TimeUnit.MINUTES);
@@ -722,16 +648,8 @@ public class CodeBuildRunner implements ContainerTeardown {
                 return PhaseResult.ofStopped();
             }
 
-            if (executionError.get() != null) {
-                LOG.errorv(executionError.get(), "CodeBuild exec stream failed: container={0}, exec={1}",
-                        containerId, execId);
-                return PhaseResult.ofFailure("Docker exec stream failed: " + executionError.get().getMessage());
-            }
             Long exitCode = dockerClient.inspectExecCmd(execId).exec().getExitCodeLong();
-            if (exitCode == null) {
-                return PhaseResult.ofFailure("Docker exec completed without an exit code");
-            }
-            if (exitCode != 0) {
+            if (exitCode != null && exitCode != 0) {
                 String output = outputCapture.asString().stripTrailing();
                 String msg = "Exit code " + exitCode;
                 if (!output.isBlank()) {
@@ -901,8 +819,6 @@ public class CodeBuildRunner implements ContainerTeardown {
     }
 
     private void completePhaseWithError(Build build, String phaseType, String status, String message) {
-        LOG.warnv("CodeBuild phase failed: build={0}, phase={1}, status={2}: {3}",
-                build.getId(), phaseType, status, message);
         findPhase(build, phaseType).ifPresent(p -> {
             double end = System.currentTimeMillis() / 1000.0;
             p.setPhaseStatus(status);
@@ -1024,5 +940,53 @@ public class CodeBuildRunner implements ContainerTeardown {
         static PhaseResult ofSuccess() { return new PhaseResult(PhaseStatus.SUCCEEDED, null); }
         static PhaseResult ofFailure(String msg) { return new PhaseResult(PhaseStatus.FAILED, msg); }
         static PhaseResult ofStopped() { return new PhaseResult(PhaseStatus.STOPPED, null); }
+    }
+
+    public void validateExecution(Build build, Project project) {
+        String sourceType = project.getSource() != null ? project.getSource().getType() : "NO_SOURCE";
+        if (!List.of("NO_SOURCE", "S3").contains(sourceType)) {
+            throw CodeBuildService.unsupportedExecution("Source type " + sourceType);
+        }
+        String type = build.getEnvironment() != null ? build.getEnvironment().getType() : null;
+        if (type != null && !List.of("LINUX_CONTAINER", "ARM_CONTAINER").contains(type)) {
+            throw CodeBuildService.unsupportedExecution("Environment type " + type);
+        }
+        if (project.getSecondarySources() != null && !project.getSecondarySources().isEmpty()) {
+            throw CodeBuildService.unsupportedExecution("Secondary sources");
+        }
+        if (project.getSecondaryArtifacts() != null && !project.getSecondaryArtifacts().isEmpty()) {
+            throw CodeBuildService.unsupportedExecution("Secondary artifacts");
+        }
+    }
+
+    /**
+     * The platform of an AWS curated build image, which is fixed by its name. Pinning it lets a
+     * locally cached curated image be used as is; checking it against the daemon's own platform
+     * never matches an x86_64 image on an arm64 host, so every build re-queried the registry and
+     * blocked on a full multi-gigabyte download whenever AWS republished the tag.
+     */
+    static String curatedImagePlatform(String resolvedImage) {
+        if (resolvedImage == null || !resolvedImage.startsWith("public.ecr.aws/codebuild/")) {
+            return null;
+        }
+        if (resolvedImage.contains("x86_64")) {
+            return "linux/amd64";
+        }
+        if (resolvedImage.contains("aarch64")) {
+            return "linux/arm64";
+        }
+        return null;
+    }
+
+    static String resolveBuildImage(String image) {
+        if (image == null || image.isBlank()) {
+            throw new AwsException("InvalidInputException", "environment.image is required", 400);
+        }
+        // AWS managed-image identifiers are not Docker Hub repositories.
+        if ("aws/codebuild/amazonlinux2-x86_64-standard:5.0".equals(image)) {
+            return "public.ecr.aws/codebuild/amazonlinux-x86_64-standard:5.0";
+        }
+        return image.startsWith("aws/codebuild/")
+                ? "public.ecr.aws/codebuild/" + image.substring("aws/codebuild/".length()) : image;
     }
 }

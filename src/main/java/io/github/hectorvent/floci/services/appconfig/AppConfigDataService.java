@@ -142,62 +142,6 @@ public class AppConfigDataService {
                 pollInterval);
     }
 
-    private byte[] resolveContent(ConfigurationSession session, HostedConfigurationVersion version) {
-        ConfigurationProfile profile = appConfigService.getConfigurationProfile(
-                session.getApplicationId(), session.getConfigurationProfileId());
-        if (!"AWS.AppConfig.FeatureFlags".equals(profile.getType())) {
-            return version.getContent();
-        }
-        return transformFeatureFlags(version.getContent(), objectMapper);
-    }
-
-    static byte[] transformFeatureFlags(byte[] content, ObjectMapper objectMapper) {
-        if (content == null || content.length == 0) {
-            return content;
-        }
-        try {
-            JsonNode document = objectMapper.readTree(content);
-            if (document == null || !document.isObject()) {
-                return content;
-            }
-            JsonNode values = document.get("values");
-            if (values == null || !values.isObject()) {
-                return content;
-            }
-
-            ObjectNode retrieval = objectMapper.createObjectNode();
-            Iterator<Map.Entry<String, JsonNode>> fields = values.fields();
-            while (fields.hasNext()) {
-                Map.Entry<String, JsonNode> entry = fields.next();
-                JsonNode definition = entry.getValue();
-                if (!definition.isObject()) {
-                    return content;
-                }
-                // Multi-variant feature flags require context evaluation and Amazon Ion output.
-                // Preserve the stored bytes until that retrieval path is implemented.
-                if (definition.has("_variants")) {
-                    return content;
-                }
-                JsonNode enabled = definition.get("enabled");
-                if (enabled == null || !enabled.isBoolean()) {
-                    return content;
-                }
-
-                if (!enabled.booleanValue()) {
-                    retrieval.putObject(entry.getKey()).put("enabled", false);
-                    continue;
-                }
-
-                ObjectNode flag = definition.deepCopy();
-                flag.remove("_createdAt");
-                flag.remove("_updatedAt");
-                retrieval.set(entry.getKey(), flag);
-            }
-            return objectMapper.writeValueAsBytes(retrieval);
-        } catch (IOException e) {
-            LOG.debugv(e, "Could not convert AppConfig feature flags to retrieval format");
-            return content;
-        }
     public LegacyConfiguration getConfiguration(String application, String environment, String configuration,
                                                  String clientId, String clientVersion, String accept) {
         for (String identifier : new String[]{application, environment, configuration, clientId}) {

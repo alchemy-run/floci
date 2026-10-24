@@ -1,6 +1,5 @@
 package io.github.hectorvent.floci.services.redshift.proxy;
 
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -15,28 +14,6 @@ import java.util.regex.Pattern;
 public final class CopyStatementParser {
 
     public sealed interface S3Statement permits S3CopyFrom, S3Unload {
-        String iamRoleArn();
-
-        boolean defaultIamRoleRequested();
-    }
-
-    /** COPY options that change field content; {@link #NONE} keeps the plain byte-copy path. */
-    public record CopyTransforms(
-            boolean blanksAsNull,
-            boolean emptyAsNull,
-            boolean removeQuotes,
-            boolean truncateColumns,
-            Character invalidCharReplacement) {
-
-        public static final CopyTransforms NONE = new CopyTransforms(false, false, false, false, null);
-
-        public boolean fieldLevel() {
-            return blanksAsNull || emptyAsNull || removeQuotes || truncateColumns;
-        }
-
-        public boolean any() {
-            return fieldLevel() || invalidCharReplacement != null;
-        }
     }
 
     public record S3CopyFrom(
@@ -119,18 +96,11 @@ public final class CopyStatementParser {
     private static final Pattern ADDQUOTES_PATTERN = Pattern.compile("(?i)\\bADDQUOTES\\b");
     private static final Pattern MANIFEST_PATTERN = Pattern.compile("(?i)\\bMANIFEST\\b");
     private static final Pattern ALLOWOVERWRITE_PATTERN = Pattern.compile("(?i)\\bALLOWOVERWRITE\\b");
-    private static final Pattern ESCAPE_PATTERN = Pattern.compile("(?i)\\bESCAPE\\b");
-    private static final Pattern CLEANPATH_PATTERN = Pattern.compile("(?i)\\bCLEANPATH\\b");
-    private static final Pattern ENCRYPTED_PATTERN = Pattern.compile("(?i)\\bENCRYPTED(?:\\s+(AUTO)\\b)?");
-    private static final Pattern KMS_KEY_ID_PATTERN = Pattern.compile(
-            "(?i)\\bKMS_KEY_ID\\s+(?:'((?:[^']|'')*)'|\"([^\"]*)\")");
-    private static final Pattern EXTENSION_PATTERN = Pattern.compile(
-            "(?i)\\bEXTENSION\\s+(?:'((?:[^']|'')*)'|\"([^\"]*)\")");
 
     /**
      * UNLOAD options this simulator cannot honour. Distinct from the COPY set:
-     * MANIFEST / ALLOWOVERWRITE / PARALLEL / MAXFILESIZE / EXTENSION / CLEANPATH are
-     * UNLOAD-supported here, while PARTITION is UNLOAD-only and unsupported.
+     * MANIFEST / ALLOWOVERWRITE / PARALLEL / MAXFILESIZE are UNLOAD-supported here,
+     * while EXTENSION / CLEANPATH / PARTITION are UNLOAD-only and unsupported.
      */
     private static final Pattern UNLOAD_UNSUPPORTED_CLAUSE = Pattern.compile(
             "(?i)\\b(FIXEDWIDTH|PARQUET|AVRO|ORC|JSON|SHAPEFILE|BZIP2|LZOP|ZSTD"
@@ -148,29 +118,6 @@ public final class CopyStatementParser {
             "(?i)\\bNULL\\s+(?:AS\\s+)?(?:'((?:[^']|'')*)'|\"([^\"]*)\")");
     private static final Pattern IAM_ROLE_PATTERN = Pattern.compile(
             "(?i)\\bIAM_ROLE\\s+(?:'((?:[^']|'')*)'|\"([^\"]*)\")");
-            "(?i)\\bIAM_ROLE\\s+(?:'((?:[^']|'')*)'|\"([^\"]*)\"|(default)(?=\\s|;|$))");
-    private static final Pattern BLANKSASNULL_PATTERN = Pattern.compile("(?i)\\bBLANKSASNULL\\b");
-    private static final Pattern EMPTYASNULL_PATTERN = Pattern.compile("(?i)\\bEMPTYASNULL\\b");
-    private static final Pattern REMOVEQUOTES_PATTERN = Pattern.compile("(?i)\\bREMOVEQUOTES\\b");
-    private static final Pattern TRUNCATECOLUMNS_PATTERN = Pattern.compile("(?i)\\bTRUNCATECOLUMNS\\b");
-    private static final Pattern ACCEPTINVCHARS_PATTERN = Pattern.compile(
-            "(?i)\\bACCEPTINVCHARS(?:\\s+(?:AS\\s+)?'([ -&(-~])')?");
-    private static final Pattern CREDENTIALS_PATTERN = Pattern.compile(
-            "(?i)\\bCREDENTIALS\\s+(?:AS\\s+)?(?:'((?:[^']|'')*)'|\"([^\"]*)\")");
-    private static final Pattern ACCESS_KEY_ID_PATTERN = Pattern.compile(
-            "(?i)\\bACCESS_KEY_ID\\s+(?:AS\\s+)?(?:'((?:[^']|'')*)'|\"([^\"]*)\")");
-    private static final Pattern SECRET_ACCESS_KEY_PATTERN = Pattern.compile(
-            "(?i)\\bSECRET_ACCESS_KEY\\s+(?:AS\\s+)?(?:'((?:[^']|'')*)'|\"([^\"]*)\")");
-    private static final Pattern SESSION_TOKEN_PATTERN = Pattern.compile(
-            "(?i)\\bSESSION_TOKEN\\s+(?:AS\\s+)?(?:'((?:[^']|'')*)'|\"([^\"]*)\")");
-    private static final Pattern REGION_PATTERN = Pattern.compile(
-            "(?i)\\bREGION\\s+(?:AS\\s+)?(?:'((?:[^']|'')*)'|\"([^\"]*)\")");
-    private static final Pattern CREDENTIALS_ROLE = Pattern.compile(
-            "(?i)(?:^|;)\\s*aws_iam_role\\s*=\\s*([^;\\s]+)");
-    private static final Pattern CREDENTIALS_KEY_ID = Pattern.compile(
-            "(?i)(?:^|;)\\s*aws_access_key_id\\s*=\\s*[^;\\s]+");
-    private static final Pattern CREDENTIALS_SECRET = Pattern.compile(
-            "(?i)(?:^|;)\\s*aws_secret_access_key\\s*=\\s*[^;\\s]+");
     private static final Pattern IGNOREHEADER_PATTERN = Pattern.compile(
             "(?i)\\bIGNOREHEADER\\s+(?:AS\\s+)?(\\d+)\\b");
     private static final Pattern HEADER_PATTERN = Pattern.compile("(?i)\\bHEADER\\b");
@@ -199,10 +146,6 @@ public final class CopyStatementParser {
     }
 
     public static S3Statement parse(String sql) {
-        return parse(sql, null);
-    }
-
-    public static S3Statement parse(String sql, String defaultIamRoleArn) {
         if (sql == null || sql.isBlank()) {
             return null;
         }
@@ -212,12 +155,12 @@ public final class CopyStatementParser {
         }
         Matcher unload = UNLOAD_PATTERN.matcher(cleaned);
         if (unload.matches()) {
-            return parseUnload(unload, defaultIamRoleArn);
+            return parseUnload(unload);
         }
-        return parseCopy(cleaned, defaultIamRoleArn);
+        return parseCopy(cleaned);
     }
 
-    private static S3Unload parseUnload(Matcher matcher, String defaultIamRoleArn) {
+    private static S3Unload parseUnload(Matcher matcher) {
         String select = unescapeSingleQuotes(matcher.group(1).trim());
         if (!isSafeUnloadSubquery(select)) {
             return null;
@@ -250,18 +193,7 @@ public final class CopyStatementParser {
         String delimiter = null;
         long maxFileSizeBytes = 0L;
         String iamRoleArn = null;
-        String extension = null;
-        boolean escape = false;
-        boolean cleanPath = false;
-        boolean encrypted = false;
-        boolean encryptedAuto = false;
-        String kmsKeyId = null;
 
-        boolean seenEscape = false;
-        boolean seenCleanPath = false;
-        boolean seenEncrypted = false;
-        boolean seenKmsKeyId = false;
-        boolean seenExtension = false;
         boolean seenCsv = false;
         boolean seenGzip = false;
         boolean seenHeader = false;
@@ -285,14 +217,7 @@ public final class CopyStatementParser {
         Matcher nullM = NULL_AS_PATTERN.matcher(options);
         Matcher maxFileSizeM = MAXFILESIZE_PATTERN.matcher(options);
         Matcher iamRoleM = IAM_ROLE_PATTERN.matcher(options);
-        Matcher extensionM = EXTENSION_PATTERN.matcher(options);
-        Matcher escapeM = ESCAPE_PATTERN.matcher(options);
-        Matcher cleanPathM = CLEANPATH_PATTERN.matcher(options);
-        Matcher encryptedM = ENCRYPTED_PATTERN.matcher(options);
-        Matcher kmsKeyIdM = KMS_KEY_ID_PATTERN.matcher(options);
-        AuthClauses auth = new AuthClauses(options, defaultIamRoleArn);
 
-        int next;
         int offset = 0;
         int len = options.length();
         while (offset < len) {
@@ -302,46 +227,7 @@ public final class CopyStatementParser {
             if (offset >= len) {
                 break;
             }
-            if (matchClause(extensionM, offset, len)) {
-                if (seenExtension) {
-                    return null;
-                }
-                seenExtension = true;
-                extension = extractNullValue(extensionM);
-                if (extension.isEmpty() || extension.indexOf('/') >= 0) {
-                    return null;
-                }
-                offset = extensionM.end();
-            } else if (matchClause(escapeM, offset, len)) {
-                if (seenEscape) {
-                    return null;
-                }
-                seenEscape = true;
-                escape = true;
-                offset = escapeM.end();
-            } else if (matchClause(cleanPathM, offset, len)) {
-                if (seenCleanPath) {
-                    return null;
-                }
-                seenCleanPath = true;
-                cleanPath = true;
-                offset = cleanPathM.end();
-            } else if (matchClause(encryptedM, offset, len)) {
-                if (seenEncrypted) {
-                    return null;
-                }
-                seenEncrypted = true;
-                encrypted = true;
-                encryptedAuto = encryptedM.group(1) != null;
-                offset = encryptedM.end();
-            } else if (matchClause(kmsKeyIdM, offset, len)) {
-                if (seenKmsKeyId) {
-                    return null;
-                }
-                seenKmsKeyId = true;
-                kmsKeyId = extractNullValue(kmsKeyIdM);
-                offset = kmsKeyIdM.end();
-            } else if (matchClause(maxFileSizeM, offset, len)) {
+            if (matchClause(maxFileSizeM, offset, len)) {
                 if (seenMaxFileSize) {
                     return null;
                 }
@@ -424,43 +310,19 @@ public final class CopyStatementParser {
                 seenIamRole = true;
                 iamRoleArn = extractNullValue(iamRoleM);
                 offset = iamRoleM.end();
-            } else if ((next = auth.consume(offset, len)) != AuthClauses.NO_MATCH) {
-                if (next == AuthClauses.REJECT) {
-                    return null;
-                }
-                offset = next;
             } else {
                 return null;
             }
         }
 
-        if (!auth.consistent()) {
-            return null;
-        }
-        String iamRoleArn = auth.iamRoleArn();
         if (delimiter == null) {
             delimiter = csv ? "," : "|";
-        }
-        // ESCAPE relies on PostgreSQL text framing, which CSV, ADDQUOTES and HEADER all replace here.
-        if (escape && (csv || addQuotes || header)) {
-            return null;
-        }
-        // An empty prefix would make CLEANPATH delete the whole bucket.
-        if (cleanPath && (allowOverwrite || prefix.isEmpty())) {
-            return null;
-        }
-        // Only ENCRYPTED AUTO and ENCRYPTED KMS_KEY_ID are emulated. Bare ENCRYPTED and MASTER_SYMMETRIC_KEY are not.
-        if (kmsKeyId != null && (kmsKeyId.isBlank() || !encrypted || encryptedAuto)) {
-            return null;
-        }
-        if (encrypted && !encryptedAuto && kmsKeyId == null) {
-            return null;
         }
         return new S3Unload(select, bucket, prefix, delimiter, header, gzip, csv,
                 addQuotes, nullAs, manifest, allowOverwrite, parallel, maxFileSizeBytes, iamRoleArn);
     }
 
-    private static S3CopyFrom parseCopy(String cleaned, String defaultIamRoleArn) {
+    private static S3CopyFrom parseCopy(String cleaned) {
         Matcher matcher = COPY_PATTERN.matcher(cleaned);
         if (!matcher.matches()) {
             return null;
@@ -511,17 +373,7 @@ public final class CopyStatementParser {
         String delimiter = null;
         int headerLines = 0;
         String iamRoleArn = null;
-        boolean blanksAsNull = false;
-        boolean emptyAsNull = false;
-        boolean removeQuotes = false;
-        boolean truncateColumns = false;
-        Character invalidChar = null;
 
-        boolean seenTruncateColumns = false;
-        boolean seenBlanksAsNull = false;
-        boolean seenEmptyAsNull = false;
-        boolean seenRemoveQuotes = false;
-        boolean seenAcceptInvChars = false;
         boolean seenCsv = false;
         boolean seenGzip = false;
         boolean seenJson = false;
@@ -540,14 +392,7 @@ public final class CopyStatementParser {
         Matcher delimiterMatcher = DELIMITER_PATTERN.matcher(options);
         Matcher nullMatcher = NULL_AS_PATTERN.matcher(options);
         Matcher iamRoleMatcher = IAM_ROLE_PATTERN.matcher(options);
-        Matcher blanksAsNullMatcher = BLANKSASNULL_PATTERN.matcher(options);
-        Matcher emptyAsNullMatcher = EMPTYASNULL_PATTERN.matcher(options);
-        Matcher removeQuotesMatcher = REMOVEQUOTES_PATTERN.matcher(options);
-        Matcher truncateColumnsMatcher = TRUNCATECOLUMNS_PATTERN.matcher(options);
-        Matcher acceptInvCharsMatcher = ACCEPTINVCHARS_PATTERN.matcher(options);
-        AuthClauses auth = new AuthClauses(options, defaultIamRoleArn);
 
-        int next;
         int offset = 0;
         int len = options.length();
         while (offset < len) {
@@ -622,57 +467,11 @@ public final class CopyStatementParser {
                 seenIamRole = true;
                 iamRoleArn = extractNullValue(iamRoleMatcher);
                 offset = iamRoleMatcher.end();
-            } else if (matchClause(blanksAsNullMatcher, offset, len)) {
-                if (seenBlanksAsNull) {
-                    return null;
-                }
-                seenBlanksAsNull = true;
-                blanksAsNull = true;
-                offset = blanksAsNullMatcher.end();
-            } else if (matchClause(emptyAsNullMatcher, offset, len)) {
-                if (seenEmptyAsNull) {
-                    return null;
-                }
-                seenEmptyAsNull = true;
-                emptyAsNull = true;
-                offset = emptyAsNullMatcher.end();
-            } else if (matchClause(removeQuotesMatcher, offset, len)) {
-                if (seenRemoveQuotes) {
-                    return null;
-                }
-                seenRemoveQuotes = true;
-                removeQuotes = true;
-                offset = removeQuotesMatcher.end();
-            } else if (matchClause(truncateColumnsMatcher, offset, len)) {
-                if (seenTruncateColumns) {
-                    return null;
-                }
-                seenTruncateColumns = true;
-                truncateColumns = true;
-                offset = truncateColumnsMatcher.end();
-            } else if (matchClause(acceptInvCharsMatcher, offset, len)) {
-                if (seenAcceptInvChars) {
-                    return null;
-                }
-                seenAcceptInvChars = true;
-                invalidChar = acceptInvCharsMatcher.group(1) != null
-                        ? Character.valueOf(acceptInvCharsMatcher.group(1).charAt(0))
-                        : Character.valueOf('?');
-                offset = acceptInvCharsMatcher.end();
-            } else if ((next = auth.consume(offset, len)) != AuthClauses.NO_MATCH) {
-                if (next == AuthClauses.REJECT) {
-                    return null;
-                }
-                offset = next;
             } else {
                 return null;
             }
         }
 
-        if (!auth.consistent()) {
-            return null;
-        }
-        String iamRoleArn = auth.iamRoleArn();
         if (delimiter == null) {
             delimiter = csv ? "," : "|";
         }
@@ -694,10 +493,6 @@ public final class CopyStatementParser {
             value = unescape(value);
         }
         return "\\t".equals(value) || "\t".equals(value) ? "\t" : value;
-    }
-
-    private static boolean isBlank(String value) {
-        return value == null || value.isBlank();
     }
 
     private static String extractNullValue(Matcher matcher) {

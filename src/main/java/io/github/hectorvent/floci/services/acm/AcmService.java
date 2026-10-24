@@ -25,8 +25,6 @@ import io.github.hectorvent.floci.services.acm.model.ListResult;
 import io.github.hectorvent.floci.services.acm.model.ResourceRecord;
 import io.github.hectorvent.floci.services.acm.model.RevocationReason;
 import io.github.hectorvent.floci.services.acm.model.ValidationMethod;
-import io.github.hectorvent.floci.services.route53.Route53Service;
-import io.github.hectorvent.floci.services.route53.model.HostedZone;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -42,7 +40,6 @@ import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -55,7 +52,6 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -87,7 +83,6 @@ public class AcmService implements ResourceProvider {
     private final FlociCertificateAuthority certificateAuthority;
     private final RegionResolver regionResolver;
     private final int validationWaitSeconds;
-    private final Route53Service route53Service;
     private final AtomicInteger accountDaysBeforeExpiry = new AtomicInteger(45);
     private final AtomicBoolean securityWarningLogged = new AtomicBoolean(false);
 
@@ -106,30 +101,23 @@ public class AcmService implements ResourceProvider {
     @Inject
     public AcmService(StorageFactory factory, CertificateGenerator certificateGenerator,
                       FlociCertificateAuthority certificateAuthority, EmulatorConfig config,
-                      RegionResolver regionResolver, Route53Service route53Service) {
+                      RegionResolver regionResolver) {
         this(factory.create("acm", "acm-certificates.json",
                 new TypeReference<Map<String, Certificate>>() {}),
             certificateGenerator,
             certificateAuthority,
             regionResolver,
-            config.services().acm().validationWaitSeconds(), route53Service);
+            config.services().acm().validationWaitSeconds());
     }
 
     AcmService(StorageBackend<String, Certificate> store, CertificateGenerator certificateGenerator,
                FlociCertificateAuthority certificateAuthority, RegionResolver regionResolver,
                int validationWaitSeconds) {
-        this(store, certificateGenerator, certificateAuthority, regionResolver, validationWaitSeconds, null);
-    }
-
-    AcmService(StorageBackend<String, Certificate> store, CertificateGenerator certificateGenerator,
-               FlociCertificateAuthority certificateAuthority, RegionResolver regionResolver,
-               int validationWaitSeconds, Route53Service route53Service) {
         this.store = store;
         this.certificateGenerator = certificateGenerator;
         this.certificateAuthority = certificateAuthority;
         this.regionResolver = regionResolver;
         this.validationWaitSeconds = validationWaitSeconds;
-        this.route53Service = route53Service;
     }
 
     /**
@@ -186,8 +174,6 @@ public class AcmService implements ResourceProvider {
         String certId = UUID.randomUUID().toString();
         String arn = buildCertificateArn(region, certId);
 
-        ValidationMethod method = validationMethod != null ? validationMethod : ValidationMethod.DNS;
-
         // Determine certificate type and initial status
         CertificateType type;
         CertificateStatus status;
@@ -196,10 +182,10 @@ public class AcmService implements ResourceProvider {
             status = CertificateStatus.ISSUED;
         } else {
             type = CertificateType.AMAZON_ISSUED;
-            // DNS requires proof of ownership; the configured wait only simulates email approval.
-            status = method == ValidationMethod.EMAIL && validationWaitSeconds == 0
-                ? CertificateStatus.ISSUED : CertificateStatus.PENDING_VALIDATION;
+            status = validationWaitSeconds > 0 ? CertificateStatus.PENDING_VALIDATION : CertificateStatus.ISSUED;
         }
+
+        ValidationMethod method = validationMethod != null ? validationMethod : ValidationMethod.DNS;
 
         // A server leaf signed by the local CA, so Certificate plus CertificateChain from
         // GetCertificate validate the way an ACM certificate and its chain do on AWS.
@@ -235,7 +221,7 @@ public class AcmService implements ResourceProvider {
         cert.setCertificateBody(generated.certificatePem());
         cert.setPrivateKey(generated.privateKeyPem());
         cert.setCertificateChain(certificateAuthority.caPem());
-        cert.setCertOptions(resolveRequestOptions(options));
+        cert.setCertOptions(options != null ? options : CertificateOptions.defaultOptions());
         cert.setCertAuthorityArn(certAuthorityArn);
         cert.setIdempotencyToken(idempotencyToken);
         cert.setTags(tags != null ? new HashMap<>(tags) : new HashMap<>());
@@ -278,12 +264,7 @@ public class AcmService implements ResourceProvider {
     // ============ GetCertificate ============
 
     public Certificate getCertificate(String certificateArn, String region) {
-        Certificate cert = getCertificateByArn(certificateArn, region);
-        if (cert.getStatus() == CertificateStatus.PENDING_VALIDATION) {
-            throw new AwsException("RequestInProgressException",
-                "The certificate request is in progress. The certificate body is not yet available.", 400);
-        }
-        return cert;
+        return getCertificateByArn(certificateArn, region);
     }
 
     // ============ ListCertificates ============
@@ -302,15 +283,12 @@ public class AcmService implements ResourceProvider {
                                        String region, int maxItems, String nextToken) {
         int limit = maxItems > 0 ? Math.min(maxItems, 1000) : 100;
         String lastArn = decodeToken(nextToken);
-        // AWS ListCertificates defaults to RSA_1024 + RSA_2048 when Includes.keyTypes is omitted.
-        List<KeyAlgorithm> effectiveKeyTypes = (keyTypes == null || keyTypes.isEmpty())
-            ? List.of(KeyAlgorithm.RSA_1024, KeyAlgorithm.RSA_2048)
-            : keyTypes;
 
-        List<Certificate> allCerts = store.scan(k -> k.startsWith(region + "::")).stream()
+        List<Certificate> allCerts = store.scan(k -> true).stream()
+            .filter(c -> c.getArn().contains(":acm:" + region + ":"))
             .map(c -> settleValidation(c, region))
             .filter(c -> statuses == null || statuses.isEmpty() || statuses.contains(c.getStatus()))
-            .filter(c -> effectiveKeyTypes.contains(c.getKeyAlgorithm()))
+            .filter(c -> keyTypes == null || keyTypes.isEmpty() || keyTypes.contains(c.getKeyAlgorithm()))
             .sorted(Comparator.comparing(Certificate::getArn))
             .collect(Collectors.toList());
 
@@ -556,130 +534,12 @@ public class AcmService implements ResourceProvider {
         // Encrypt the private key
         String encryptedKey = certificateGenerator.encryptPrivateKey(cert.getPrivateKey(), passphrase);
 
-        cert.setExported(true);
-        store.put(regionKey(region, cert.extractCertificateId()), cert);
-
         // Return certificate with encrypted private key
         Certificate exportCert = new Certificate();
         exportCert.setCertificateBody(cert.getCertificateBody());
         exportCert.setCertificateChain(cert.getCertificateChain());
         exportCert.setPrivateKey(encryptedKey);
         return exportCert;
-    }
-
-    // ============ UpdateCertificateOptions ============
-
-    /**
-     * Syncs mutable certificate options. Export is fixed at request time —
-     * AWS rejects changing it ("Export option for certificates cannot be updated").
-     */
-    public Certificate updateCertificateOptions(String certificateArn, CertificateOptions options, String region) {
-        Certificate cert = getCertificateByArn(certificateArn, region);
-        CertificateOptions current = cert.getCertOptions() != null
-            ? cert.getCertOptions()
-            : CertificateOptions.defaultOptions();
-
-        if (options != null && options.export() != null
-            && !options.export().equals(current.export())) {
-            throw new AwsException("InvalidStateException",
-                "Export option for certificates cannot be updated", 400);
-        }
-
-        String ctPref = options != null && options.certificateTransparencyLoggingPreference() != null
-            ? options.certificateTransparencyLoggingPreference()
-            : current.certificateTransparencyLoggingPreference();
-        cert.setCertOptions(new CertificateOptions(ctPref, current.export()));
-        store.put(regionKey(region, cert.extractCertificateId()), cert);
-        return cert;
-    }
-
-    // ============ SearchCertificates ============
-
-    /**
-     * Lists certificates matching an optional predicate, with the same
-     * cursor pagination as {@link #listCertificates}.
-     */
-    public ListResult searchCertificates(Predicate<Certificate> filter,
-                                         String region, int maxItems, String nextToken) {
-        Predicate<Certificate> predicate = filter != null ? filter : c -> true;
-        int limit = maxItems > 0 ? Math.min(maxItems, 1000) : 100;
-        String lastArn = decodeToken(nextToken);
-
-        List<Certificate> allCerts = store.scan(k -> k.startsWith(region + "::")).stream()
-            .map(c -> settleValidation(c, region))
-            .filter(predicate)
-            .sorted(Comparator.comparing(Certificate::getArn))
-            .collect(Collectors.toList());
-
-        int startIndex = 0;
-        if (lastArn != null) {
-            for (int i = 0; i < allCerts.size(); i++) {
-                if (allCerts.get(i).getArn().compareTo(lastArn) > 0) {
-                    startIndex = i;
-                    break;
-                }
-                if (i == allCerts.size() - 1) {
-                    startIndex = allCerts.size();
-                }
-            }
-        }
-
-        List<Certificate> page = allCerts.stream()
-            .skip(startIndex)
-            .limit(limit)
-            .collect(Collectors.toList());
-
-        String newNextToken = null;
-        if (startIndex + limit < allCerts.size() && !page.isEmpty()) {
-            newNextToken = encodeToken(page.get(page.size() - 1).getArn());
-        }
-
-        return new ListResult(page, newNextToken);
-    }
-
-    // ============ RenewCertificate ============
-
-
-    // ============ ResendValidationEmail ============
-
-    public void resendValidationEmail(String certificateArn, String domain,
-                                      String validationDomain, String region) {
-        Certificate cert = getCertificateByArn(certificateArn, region);
-        if (cert.getValidationMethod() != ValidationMethod.EMAIL) {
-            throw new AwsException("InvalidStateException",
-                "Email validation cannot be resent for a certificate that uses "
-                    + (cert.getValidationMethod() != null ? cert.getValidationMethod().name() : "DNS")
-                    + " validation.",
-                400);
-        }
-        boolean knownDomain = domain != null && (
-            domain.equalsIgnoreCase(cert.getDomainName())
-                || (cert.getSubjectAlternativeNames() != null
-                    && cert.getSubjectAlternativeNames().stream()
-                        .anyMatch(san -> san.equalsIgnoreCase(domain)))
-        );
-        if (!knownDomain) {
-            throw new AwsException("InvalidDomainValidationOptionsException",
-                "Domain is not associated with the certificate.", 400);
-        }
-        if (validationDomain == null || validationDomain.isBlank()
-                || !isValidationDomainOf(domain, validationDomain)) {
-            throw new AwsException("InvalidDomainValidationOptionsException",
-                "ValidationDomain must not be empty.", 400);
-        }
-        // Emulator: no email is sent. Success is enough for the control plane.
-    }
-
-    // ============ RevokeCertificate ============
-
-    public Certificate revokeCertificate(String certificateArn, String revocationReason, String region) {
-        RevocationReason reason;
-        try {
-            reason = RevocationReason.valueOf(revocationReason);
-        } catch (IllegalArgumentException | NullPointerException e) {
-            throw new AwsException("ValidationException", "Invalid RevocationReason: " + revocationReason, 400);
-        }
-        return revokeCertificate(certificateArn, reason, region);
     }
 
     // ============ Tagging Operations ============
@@ -768,22 +628,16 @@ public class AcmService implements ResourceProvider {
 
     public synchronized Certificate revokeCertificate(String certificateArn, RevocationReason reason, String region) {
         Certificate cert = getCertificateByArn(certificateArn, region);
-        if (cert.getType() == CertificateType.IMPORTED
-                && (cert.getCertOptions() == null || !"ENABLED".equals(cert.getCertOptions().export()))) {
+        boolean exportEnabled = cert.getCertOptions() != null && "ENABLED".equals(cert.getCertOptions().export());
+        if (!exportEnabled) {
             throw new AwsException("ValidationException",
                 "Certificate " + certificateArn + " cannot be revoked because it is not export-enabled.", 400);
         }
-        if (!cert.isExported()) {
-            throw new AwsException("ConflictException", "Only exported certificates can be revoked.", 409);
-        }
-        if (cert.getStatus() == CertificateStatus.REVOKED) {
-            throw new AwsException("ConflictException", "Certificate is already revoked.", 409);
         if (!certificateInUseBy(cert).isEmpty()) {
             throw new AwsException("ResourceInUseException",
                     "Certificate " + certificateArn + " is in use by another service.", 400);
         }
         cert.setStatus(CertificateStatus.REVOKED);
-        cert.setRevokedAt(Instant.now());
         store.put(regionKey(region, cert.extractCertificateId()), cert);
         return cert;
     }
@@ -829,7 +683,14 @@ public class AcmService implements ResourceProvider {
         return settleValidation(cert, region);
     }
 
-    /** Settles domain validation on reads and persists issuance for subsequent consumers. */
+    /**
+     * Brings a stored certificate in line on read. A PENDING_VALIDATION certificate whose configured
+     * validation wait has passed is issued, since nothing else moves it along; and a certificate
+     * that has been issued (status ISSUED, or IssuedAt set on one revoked or expired since) reports
+     * SUCCESS for every domain, which also repairs records stored by earlier releases as ISSUED
+     * with pending entries. A certificate revoked before it was ever issued keeps its pending
+     * entries. Changes are stored, which is what a client polling ACM observes.
+     */
     private synchronized Certificate settleValidation(Certificate cert, String region) {
         // A list scan may have captured a row before reimport or deletion acquired this guard.
         Certificate current = store.get(regionKey(region, cert.extractCertificateId())).orElse(null);
@@ -838,33 +699,12 @@ public class AcmService implements ResourceProvider {
         }
         cert = current;
         boolean changed = false;
-        if (cert.getStatus() == CertificateStatus.PENDING_VALIDATION) {
-            boolean validated;
-            if (cert.getValidationMethod() == ValidationMethod.DNS) {
-                List<HostedZone> zones = route53Service != null
-                    ? route53Service.listHostedZones(null, 0) : List.of();
-                List<DomainValidation> validations = cert.getDomainValidationOptions().stream()
-                    .map(validation -> new DomainValidation(validation.domainName(), validation.validationDomain(),
-                        hasValidationRecord(validation.resourceRecord(), zones) ? "SUCCESS" : "PENDING_VALIDATION",
-                        validation.validationMethod(), validation.resourceRecord(), validation.validationEmails()))
-                    .toList();
-                if (!validations.equals(cert.getDomainValidationOptions())) {
-                    cert.setDomainValidationOptions(validations);
-                    changed = true;
-                }
-                validated = !validations.isEmpty()
-                    && validations.stream().allMatch(validation -> "SUCCESS".equals(validation.validationStatus()));
-            } else {
-                validated = cert.getValidationMethod() == ValidationMethod.EMAIL && validationWaitSeconds >= 0
-                    && cert.getCreatedAt() != null
-                    && !Instant.now().isBefore(cert.getCreatedAt().plusSeconds(validationWaitSeconds));
-            }
-            if (validated) {
-                cert.setStatus(CertificateStatus.ISSUED);
-                cert.setIssuedAt(Instant.now());
-                LOG.debugv("Certificate {0} issued after domain validation", cert.getArn());
-                changed = true;
-            }
+        if (cert.getStatus() == CertificateStatus.PENDING_VALIDATION && cert.getCreatedAt() != null
+                && !Instant.now().isBefore(cert.getCreatedAt().plusSeconds(validationWaitSeconds))) {
+            cert.setStatus(CertificateStatus.ISSUED);
+            cert.setIssuedAt(Instant.now());
+            LOG.debugv("Certificate {0} issued after the validation wait", cert.getArn());
+            changed = true;
         }
         boolean issued = cert.getStatus() == CertificateStatus.ISSUED || cert.getIssuedAt() != null;
         if (issued && !cert.getDomainValidationOptions().stream()
@@ -879,41 +719,6 @@ public class AcmService implements ResourceProvider {
             store.put(regionKey(region, cert.extractCertificateId()), cert);
         }
         return cert;
-    }
-
-    private boolean hasValidationRecord(ResourceRecord record, List<HostedZone> zones) {
-        if (record == null || !"CNAME".equals(record.type())) {
-            return false;
-        }
-        String name = normalizeDnsName(record.name());
-        String value = normalizeDnsName(record.value());
-        for (HostedZone zone : zones) {
-            String zoneName = normalizeDnsName(zone.getName());
-            if (zone.isPrivateZone() || !(name.equals(zoneName) || name.endsWith("." + zoneName))) {
-                continue;
-            }
-            try {
-                if (route53Service.listResourceRecordSets(zone.getId(), null, null, 0).stream()
-                        .filter(recordSet -> "CNAME".equals(recordSet.getType())
-                            && normalizeDnsName(recordSet.getName()).equals(name)
-                            && recordSet.getRecords() != null)
-                        .flatMap(recordSet -> recordSet.getRecords().stream())
-                        .anyMatch(answer -> normalizeDnsName(answer.getValue()).equals(value))) {
-                    return true;
-                }
-            } catch (AwsException exception) {
-                if (!"NoSuchHostedZone".equals(exception.getErrorCode())) {
-                    throw exception;
-                }
-                LOG.debugv("Hosted zone {0} was deleted during certificate validation", zone.getId());
-            }
-        }
-        return false;
-    }
-
-    private static String normalizeDnsName(String name) {
-        String normalized = name.toLowerCase(Locale.ROOT);
-        return normalized.endsWith(".") ? normalized : normalized + ".";
     }
 
     /**

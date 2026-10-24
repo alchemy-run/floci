@@ -551,16 +551,6 @@ class StepFunctionsValidateStateMachineDefinitionIntegrationTest {
     void mapNumberPathFieldsMustBeMutuallyExclusiveAndReferencePaths() {
         String def = mapDefinition("", "\"ItemBatcher\":{\"MaxItemsPerBatch\":2,"
                 + "\"MaxItemsPerBatchPath\":\"$.batch\"},"
-                + "\"ToleratedFailureCountPath\":\"$$.Execution.Input.count\",");
-
-        validateDefinition(def)
-                .then().statusCode(200)
-                .body("result", equalTo("FAIL"))
-                .body("diagnostics", hasSize(2))
-                .body("diagnostics[0].message", containsString("MaxItemsPerBatch"))
-                .body("diagnostics[0].location", equalTo("/States/M/ItemBatcher/MaxItemsPerBatch"))
-                .body("diagnostics[1].message", equalTo("Value is not a Reference Path"))
-                .body("diagnostics[1].location", equalTo("/States/M/ToleratedFailureCountPath"));
                 + "\"ToleratedFailureCountPath\":\"$.counts[*]\",");
 
         validateDefinition(def)

@@ -59,6 +59,7 @@ import java.util.regex.Pattern;
  *
  * <p>Bypass rules (request is always allowed through):
  * <ul>
+ *   <li>Enforcement is disabled (default)</li>
  *   <li>Access key is {@code "test"} (root/admin stand-in)</li>
  *   <li>Access key is a real credential this filter cannot map to policies, such as a session
  *       carrying no role ARN. An access key that exists nowhere or is inactive, an expired
@@ -71,11 +72,6 @@ import java.util.regex.Pattern;
  *       policies cannot control authentication operations. The key itself is still checked.</li>
  * </ul>
  *
- * <p>Global {@code floci.services.iam.enforcement-enabled} stays off by default.
- * Assumed-role sessions (Lambda execution-role credentials) are still evaluated
- * for the explicitly modeled SES, KMS, Secrets Manager, EMR Serverless, GuardDuty, and Inspector2 actions
- * so scoped-IAM denial tests can observe {@code AccessDenied} without turning on
- * evaluation for every JSON 1.1 / Query operation.
  * <p>Authenticated temporary callers of {@code sts:GetFederationToken} are refused here with
  * the same operation-specific error as the handler, before policy evaluation.
  *
@@ -335,7 +331,6 @@ public class IamEnforcementFilter implements ContainerRequestFilter {
 
         String rawScope = akid == null ? null : extractCredentialScope(auth);
         if (rawScope == null) {
-            LOG.infov("IAM skip: no credential scope akid={0} auth={1}", akid, abbreviateAuth(auth));
             refuseUnreadableCredential(ctx, auth);
             return;
         }
@@ -357,15 +352,12 @@ public class IamEnforcementFilter implements ContainerRequestFilter {
             }
         }
 
-        boolean roleSession = iamService.isAssumedRoleSession(akid);
-        boolean roleEnforced = actionRegistry.isRoleEnforcedAction(action);
         // Global enforcement stays off by default. The Lambda execution-role path
         // still evaluates, but only for explicitly role-enforced actions — JSON 1.1
         // and Query auto-resolve every operation, and evaluating those would deny
         // suites whose resource ARNs / condition keys we do not model.
-        if (!config.services().iam().enforcementEnabled() && !(roleSession && roleEnforced)) {
-            LOG.debugv("IAM skip: global off roleSession={0} enforced={1} action={2} akid={3}",
-                    roleSession, roleEnforced, action, akid);
+        if (!config.services().iam().enforcementEnabled() && !actionRegistry.isRoleEnforcedAction(action)) {
+            LOG.debugv("IAM skip: global off, action={0} not role-enforced akid={1}", action, akid);
             return;
         }
 
@@ -532,43 +524,6 @@ public class IamEnforcementFilter implements ContainerRequestFilter {
             targetContexts.add(targetContext);
         }
 
-        if (abortIfDenied(ctx, caller, action, credentialScope, resources, targetContexts,
-                region, accountId, akid)) {
-            return;
-        }
-
-        if ("emr-serverless:StartJobRun".equals(action) || "emr-serverless:StartSession".equals(action)) {
-            String executionRoleArn = arnBuilder.buildExecutionRoleArn(ctx);
-            if (executionRoleArn != null) {
-                Map<String, List<String>> passRoleContext = new HashMap<>();
-                principalArn.ifPresent(arn -> passRoleContext.put("aws:PrincipalArn", List.of(arn)));
-                passRoleContext.put("iam:PassedToService", List.of("emr-serverless.amazonaws.com"));
-                if (abortIfDenied(ctx, caller, "iam:PassRole", credentialScope, List.of(executionRoleArn),
-                        List.of(passRoleContext), region, accountId, akid)) {
-                    return;
-                }
-            }
-        }
-
-        // A PutObject carrying If-Match compares against the object it replaces, and S3 authorizes
-        // that read as s3:GetObject, WITHOUT the object's tags in the request context. Measured
-        // against real AWS: under a GetObject allow conditioned on s3:ExistingObjectTag the
-        // conditional write is AccessDenied, under a GetObject allow scoped by prefix alone it
-        // succeeds, and with no GetObject at all it is denied. If-None-Match needs no such
-        // permission.
-        if ("s3:PutObject".equals(action) && ctx.getHeaderString("If-Match") != null) {
-            abortIfDenied(ctx, caller, "s3:GetObject", credentialScope, resources,
-                    withoutObjectTags(targetContexts), region, accountId, akid);
-        }
-    }
-
-    /**
-     * Evaluates one action against every resource and target context, aborting the request with
-     * AccessDenied on the first DENY. Returns true when the request was aborted.
-     */
-    private boolean abortIfDenied(ContainerRequestContext ctx, CallerContext caller, String action,
-                                  String credentialScope, List<String> resources,
-                                  List<Map<String, List<String>>> targetContexts,
         RequestPrincipal principal = RequestPrincipal.caller(callerArns.orElse(null));
         List<IamConditionContextResolver.DynamoDbTransactionItem> transactionItems =
                 "dynamodb".equals(credentialScope)
@@ -1138,19 +1093,6 @@ public class IamEnforcementFilter implements ContainerRequestFilter {
         return false;
     }
 
-    /** The same contexts with every object-tag key removed, keeping the principal and global keys. */
-    private static List<Map<String, List<String>>> withoutObjectTags(
-            List<Map<String, List<String>>> targetContexts) {
-        List<Map<String, List<String>>> stripped = new ArrayList<>();
-        for (Map<String, List<String>> targetContext : targetContexts) {
-            if (targetContext == null) {
-                stripped.add(null);
-                continue;
-            }
-            Map<String, List<String>> copy = new HashMap<>(targetContext);
-            copy.keySet().removeIf(key ->
-                    key.startsWith(IamConditionContextResolver.EXISTING_OBJECT_TAG_PREFIX)
-                            || key.startsWith(IamConditionContextResolver.REQUEST_OBJECT_TAG_PREFIX));
     /**
      * The scope of the service that will actually serve this request, which is not always the one
      * the caller signed for. Everything keyed by scope (the action, its ARNs, its condition keys)
@@ -1291,8 +1233,7 @@ public class IamEnforcementFilter implements ContainerRequestFilter {
      * Like {@link #authorizeAdditionalResource(String, String, String, ResourcePolicyDecision, String)},
      * but also evaluates assumed-role sessions (Lambda execution roles) while global enforcement is
      * off - the caller class {@link #filter} evaluates for role-enforced actions. Used for the
-     * secondary S3 permissions a request needs besides its own action: reading a copy source, and
-     * the {@code s3:ListBucket} that decides whether a missing object may be reported as missing.
+     * secondary S3 permissions a request needs besides its own action, such as reading a copy source.
      */
     public void authorizeAdditionalResourceForSession(
             String authorizationHeader,
@@ -1441,9 +1382,6 @@ public class IamEnforcementFilter implements ContainerRequestFilter {
                     || accountId.equals(effectiveOwnerAccountId)
                     ? ResourceAccountRelationship.SAME_ACCOUNT
                     : ResourceAccountRelationship.CROSS_ACCOUNT;
-            String region = requestContext.getRegion() == null ? config.defaultRegion() : requestContext.getRegion();
-            conditionContext = IamConditionContextResolver.withGlobalContext(
-                    conditionContext, resource, region, accountId, resourceOwnerAccountId);
             Decision decision = evaluator.evaluateResolvedResourcePolicy(
                     caller, effectiveDecision, accountRelationship,
                     action, resource, effectiveContext);

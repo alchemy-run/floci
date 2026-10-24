@@ -194,29 +194,6 @@ public class EcsLoadBalancerRegistrar {
         }
     }
 
-    /**
-     * Whether every target the task's load-balanced containers were registered as reports
-     * {@code healthy}: ECS waits for the load balancer health check before it counts a task
-     * towards a deployment's steady state. A task with no target to register has none to wait for.
-     */
-    public boolean targetsHealthy(EcsTask task, EcsServiceModel svc, String region) {
-        boolean[] healthy = {true};
-        forEachTarget(task, svc, (tgArn, td) -> {
-            if (!healthy[0]) {
-                return;
-            }
-            try {
-                List<TargetHealth> health = elbV2Service.describeTargetHealth(region, tgArn, List.of(td));
-                healthy[0] = !health.isEmpty()
-                        && health.stream().allMatch(h -> "healthy".equals(h.getState()));
-            } catch (Exception e) {
-                LOG.debugv("Could not read ECS target health in {0}: {1}", tgArn, e.getMessage());
-                healthy[0] = false;
-            }
-        });
-        return healthy[0];
-    }
-
     private void forEachTarget(EcsTask task, EcsServiceModel svc,
                                BiConsumer<String, TargetDescription> action) {
         if (svc == null || svc.getLoadBalancers() == null || svc.getLoadBalancers().isEmpty()) {
@@ -250,5 +227,28 @@ public class EcsLoadBalancerRegistrar {
             td.setPort(binding.hostPort());
             action.accept(lb.getTargetGroupArn(), td);
         }
+    }
+
+    /**
+     * Whether every target the task's load-balanced containers were registered as reports
+     * {@code healthy}: ECS waits for the load balancer health check before it counts a task
+     * towards a deployment's steady state. A task with no target to register has none to wait for.
+     */
+    public boolean targetsHealthy(EcsTask task, EcsServiceModel svc, String region) {
+        boolean[] healthy = {true};
+        forEachTarget(task, svc, (tgArn, td) -> {
+            if (!healthy[0]) {
+                return;
+            }
+            try {
+                List<TargetHealth> health = elbV2Service.describeTargetHealth(region, tgArn, List.of(td));
+                healthy[0] = !health.isEmpty()
+                        && health.stream().allMatch(h -> "healthy".equals(h.getState()));
+            } catch (Exception e) {
+                LOG.debugv("Could not read ECS target health in {0}: {1}", tgArn, e.getMessage());
+                healthy[0] = false;
+            }
+        });
+        return healthy[0];
     }
 }

@@ -11,8 +11,6 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RequestScopes;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
-import io.github.hectorvent.floci.services.cloudformation.CloudFormationResourceProvisioner;
-import io.github.hectorvent.floci.services.cloudformation.SsmResourceBackend;
 import io.github.hectorvent.floci.services.cloudformation.model.StackResource;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.CfnResourceDispatcher;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
@@ -44,15 +42,17 @@ import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import io.github.hectorvent.floci.services.cloudformation.CloudFormationResourceProvisioner;
+import io.github.hectorvent.floci.services.cloudformation.SsmResourceBackend;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.locks.ReentrantLock;
 
 @ApplicationScoped
 public class CloudControlService {
@@ -64,11 +64,6 @@ public class CloudControlService {
     private final IamService iamService;
     private final CfnResourceDispatcher provisioner;
     private final ObjectMapper mapper;
-    @Inject
-    SsmResourceBackend ssmBackend;
-    @Inject
-    SsmDocumentResource ssmDocuments;
-    private final Map<String, ReentrantLock> operationLocks = new ConcurrentHashMap<>();
     private final AccountAwareStorageBackend<PersistedRequest> requestStore;
     private final AccountAwareStorageBackend<PersistedCreatedResource> createdStore;
     /** How many finished request tokens to keep before evicting the oldest. */
@@ -279,6 +274,13 @@ public class CloudControlService {
         restorePersistedState();
     }
 
+    /**
+     * Cloud Control {@code CreateResource}. Cloud Control is asynchronous: the call returns an
+     * IN_PROGRESS ProgressEvent + a request token immediately, and provisioning runs in the
+     * background. Clients poll {@link #requestStatus} until SUCCESS/FAILED. This matters because
+     * some resources (e.g. an EC2 instance, which launches a container) take longer than a client's
+     * synchronous-call deadline — a synchronous create would time out on the caller.
+     */
     private boolean hasCreatedResourceForAnotherAccount(String region, String typeName,
                                                          String identifier, String accountId) {
         String suffix = "|" + region + "|" + typeName + "|" + identifier;
@@ -304,14 +306,8 @@ public class CloudControlService {
         } catch (Exception e) {
             throw new AwsException("InvalidRequestException", "DesiredState is not valid JSON.", 400);
         }
-        if (props == null || !props.isObject()) {
-            throw new AwsException("InvalidRequestException", "DesiredState must be a JSON object.", 400);
-        }
-        listResources(region, accountId, typeName);
         String token = UUID.randomUUID().toString();
         ProgressEvent pending = new ProgressEvent(typeName, null, token, "CREATE", "IN_PROGRESS", null, null, accountId);
-        operationLocks.put(token, new ReentrantLock());
-        persistRequest(new PersistedRequest(pending, region, desiredStateJson, System.currentTimeMillis()));
         record(pending);
         submitCreate(region, accountId, typeName, desiredStateJson, token, pending, props);
         return pending;
@@ -440,38 +436,29 @@ public class CloudControlService {
         return executor.awaitTermination(timeout, unit);
     }
 
-    public ProgressEvent updateResource(String region, String accountId, String typeName,
-                                        String identifier, String patchDocument) {
-        if (!"AWS::SSM::Parameter".equals(typeName) && !SsmDocumentResource.TYPE.equals(typeName)) {
-            throw new AwsException("UnsupportedActionException", "UpdateResource is not supported for " + typeName, 400);
-        }
-        JsonNode patch;
-        JsonNode observed;
+    /**
+     * The created resource's state, as Cloud Control returns in a ProgressEvent's ResourceModel —
+     * clients read it to resolve references (e.g. a subnet's SubnetId) without a second call. Prefer
+     * the read side (which carries the schema property names); fall back to the desired state echoed
+     * with the primary identifier, which is what dependents key on.
+     */
+    private String resourceModel(String region, String typeName, String physicalId, JsonNode desiredState) {
         try {
-            patch = mapper.readTree(patchDocument);
-            observed = mapper.readTree(getResource(region, accountId, typeName, identifier).properties());
-        } catch (JsonProcessingException | IllegalArgumentException e) {
-            throw new AwsException("InvalidRequestException", "PatchDocument is not valid JSON.", 400);
-        }
-        JsonNode desired = ResourcePatch.apply(observed, patch);
-        String token = UUID.randomUUID().toString();
-        ProgressEvent pending = new ProgressEvent(typeName, identifier, token, "UPDATE", "IN_PROGRESS", null, null, accountId);
-        persistRequest(new PersistedRequest(pending, region, desired.toString(), System.currentTimeMillis()));
-        record(pending);
-        try {
-            String actual;
-            if (SsmDocumentResource.TYPE.equals(typeName)) {
-                RequestScopes.runAs(accountId, () -> ssmDocuments.update(identifier, observed, desired, region));
-                actual = getResource(region, accountId, typeName, identifier).properties();
-            } else {
-                actual = RequestScopes.callAs(accountId, () -> ssmBackend.write(identifier, desired, true, region))
-                        .toString();
+            List<ResourceDescription> listed = resourcesForType(region, typeName);
+            if (listed != null) {
+                for (ResourceDescription d : listed) {
+                    if (physicalId.equals(d.identifier())) {
+                        return d.properties();
+                    }
+                }
             }
-            return record(new ProgressEvent(typeName, identifier, token, "UPDATE", "SUCCESS", null,
-                    actual, accountId));
-        } catch (AwsException e) {
-            return record(pending.failed(e));
+        } catch (Exception ignored) {
+            // fall through to the desired-state echo
         }
+        ObjectNode model = desiredState != null && desiredState.isObject()
+                ? ((ObjectNode) desiredState).deepCopy() : mapper.createObjectNode();
+        model.put(primaryIdentifierField(typeName), physicalId);
+        return propertiesString(model);
     }
 
     /**
@@ -513,9 +500,8 @@ public class CloudControlService {
         String key = createdKey(accountId, region, typeName, identifier);
         CreatedResource state = created.get(key);
         Map<String, String> attributes = state == null ? Map.of() : state.attributes();
-        if (state == null && hasCreatedResourceForAnotherAccount(region, typeName, identifier, accountId)
-                && listResources(region, accountId, typeName).stream().noneMatch(r -> identifier.equals(r.identifier()))) {
-            return record(region, new ProgressEvent(typeName, identifier, UUID.randomUUID().toString(),
+        if (state == null && hasCreatedResourceForAnotherAccount(region, typeName, identifier, accountId)) {
+            return record(new ProgressEvent(typeName, identifier, UUID.randomUUID().toString(),
                     "DELETE", "FAILED", "Resource belongs to another account.", null, accountId));
         }
         boolean custom = typeName != null
@@ -523,7 +509,7 @@ public class CloudControlService {
         if (attributes.isEmpty() && (custom || ATTRIBUTE_BACKED_DELETES.contains(typeName))) {
             // The delete would no-op. Reporting SUCCESS over a resource that is still there is the
             // worse failure, so surface it instead.
-            return record(region, new ProgressEvent(typeName, identifier, UUID.randomUUID().toString(),
+            return record(new ProgressEvent(typeName, identifier, UUID.randomUUID().toString(),
                     "DELETE", "FAILED",
                     "DeleteResource for " + typeName + " needs create-time state that Cloud Control does "
                     + "not hold for " + identifier + ".", null, accountId));
@@ -568,8 +554,11 @@ public class CloudControlService {
                 }
             }
         }
-        if (listed == null) {
-            throw new AwsException("UnsupportedActionException", "GetResource is not supported for " + typeName, 400);
+        // CreateResource provisions the whole CFN type set while the read side lists six types, so
+        // fall back to what the create recorded — otherwise a successful create is unreadable.
+        CreatedResource state = created.get(createdKey(accountId, region, typeName, identifier));
+        if (state != null) {
+            return new ResourceDescription(identifier, state.model());
         }
         throw new AwsException("ResourceNotFoundException",
                 "Resource " + identifier + " of type " + typeName + " was not found.", 404);
@@ -580,17 +569,6 @@ public class CloudControlService {
      * {@link #MAX_RETAINED_REQUESTS}. In-flight tokens are never evicted — a client still polling
      * must not get RequestTokenNotFound.
      */
-    private ProgressEvent record(String region, ProgressEvent event) {
-        persistRequest(new PersistedRequest(event, region, null, System.currentTimeMillis()));
-        return record(event);
-    }
-
-    public Double eventTime(ProgressEvent event) {
-        return requestStore.getForAccount(event.accountId(), event.requestToken())
-                .filter(request -> request.createdAt() > 0)
-                .map(request -> request.createdAt() / 1000.0).orElse(null);
-    }
-
     private ProgressEvent record(ProgressEvent event) {
         if (requests.put(event.requestToken(), event) == null) {
             requestOrder.add(event.requestToken());
@@ -630,14 +608,7 @@ public class CloudControlService {
     @RegisterForReflection
     public record ProgressEvent(String typeName, String identifier, String requestToken,
                                 String operation, String operationStatus, String statusMessage,
-                                String resourceModel, String accountId, String errorCode) {
-        public ProgressEvent(String typeName, String identifier, String requestToken,
-                             String operation, String operationStatus, String statusMessage,
-                             String resourceModel, String accountId) {
-            this(typeName, identifier, requestToken, operation, operationStatus, statusMessage,
-                    resourceModel, accountId, "FAILED".equals(operationStatus) ? "GeneralServiceException" : null);
-        }
-
+                                String resourceModel, String accountId) {
         public ProgressEvent(String typeName, String identifier, String requestToken,
                              String operation, String operationStatus, String statusMessage,
                              String resourceModel) {
@@ -648,22 +619,17 @@ public class CloudControlService {
         ProgressEvent failed(String message) {
             return new ProgressEvent(typeName, identifier, requestToken, operation, "FAILED", message, resourceModel, accountId);
         }
-
-        ProgressEvent failed(AwsException error) {
-            String code = switch (error.getErrorCode()) {
-                case "ParameterAlreadyExists", "DocumentAlreadyExists" -> "AlreadyExists";
-                case "ParameterNotFound", "ResourceNotFoundException", "InvalidDocument" -> "NotFound";
-                case "NotUpdatableException" -> "NotUpdatable";
-                case "ValidationException", "InvalidRequestException", "ParameterPatternMismatchException",
-                     "DuplicateDocumentContent", "InvalidDocumentContent" -> "InvalidRequest";
-                default -> "GeneralServiceException";
-            };
-            return new ProgressEvent(typeName, identifier, requestToken, operation, "FAILED", error.getMessage(),
-                    resourceModel, accountId, code);
-        }
     }
 
-    /** Unsupported backends are errors, not empty inventories. */
+    /**
+     * Cloud Control {@code ListResources}. A type this read side does not enumerate reports
+     * {@code UnsupportedActionException} rather than an empty list: an empty {@code
+     * ResourceDescriptions} is indistinguishable from "supported type, zero resources", which
+     * defeats a caller sweeping type names to discover inventory. Floci provisions many more types
+     * than {@link #resourcesForType} lists (see {@link #getResource} and {@link #createResource}),
+     * so this is a statement about read-side enumeration support, not about the type existing in
+     * AWS at all.
+     */
     public List<ResourceDescription> listResources(String region, String typeName) {
         return listResources(region, DEFAULT_ACCOUNT, typeName);
     }
@@ -681,18 +647,7 @@ public class CloudControlService {
     /** The types {@link #listResources} and {@link #getResource} can enumerate, or {@code null}. */
     private List<ResourceDescription> resourcesForType(String region, String typeName) {
         return switch (typeName) {
-            case "AWS::SSM::Parameter" -> ssmBackend.list(region).stream()
-                    .map(model -> new ResourceDescription(model.path("Name").asText(), model.toString())).toList();
-            case SsmDocumentResource.TYPE -> ssmDocuments.list(region).stream()
-                    .map(model -> new ResourceDescription(model.path("Name").asText(), model.toString())).toList();
             case "AWS::S3::Bucket" -> s3Buckets();
-            case "AWS::EC2::InternetGateway" -> ec2Service.describeInternetGateways(region, List.of(), Map.of()).stream()
-                    .map(gateway -> {
-                        ObjectNode model = mapper.createObjectNode();
-                        model.put("InternetGatewayId", gateway.getInternetGatewayId());
-                        addTags(model, gateway.getTags());
-                        return new ResourceDescription(gateway.getInternetGatewayId(), model.toString());
-                    }).toList();
             case "AWS::EC2::VPC" -> vpcs(region);
             case "AWS::EC2::Subnet" -> subnets(region);
             case "AWS::EC2::SecurityGroup" -> securityGroups(region);
@@ -873,4 +828,80 @@ public class CloudControlService {
     }
 
     public record ResourceDescription(String identifier, String properties) {}
+
+    @Inject
+    SsmResourceBackend ssmBackend;
+
+    @Inject
+    SsmDocumentResource ssmDocuments;
+
+    private final Map<String, ReentrantLock> operationLocks = new ConcurrentHashMap<>();
+
+    public ProgressEvent updateResource(String region, String accountId, String typeName,
+                                        String identifier, String patchDocument) {
+        if (!"AWS::SSM::Parameter".equals(typeName) && !SsmDocumentResource.TYPE.equals(typeName)) {
+            throw new AwsException("UnsupportedActionException", "UpdateResource is not supported for " + typeName, 400);
+        }
+        JsonNode patch;
+        JsonNode observed;
+        try {
+            patch = mapper.readTree(patchDocument);
+            observed = mapper.readTree(getResource(region, accountId, typeName, identifier).properties());
+        } catch (JsonProcessingException | IllegalArgumentException e) {
+            throw new AwsException("InvalidRequestException", "PatchDocument is not valid JSON.", 400);
+        }
+        JsonNode desired = ResourcePatch.apply(observed, patch);
+        String token = UUID.randomUUID().toString();
+        ProgressEvent pending = new ProgressEvent(typeName, identifier, token, "UPDATE", "IN_PROGRESS", null, null, accountId);
+        persistRequest(new PersistedRequest(pending, region, desired.toString(), System.currentTimeMillis()));
+        record(pending);
+        try {
+            String actual;
+            if (SsmDocumentResource.TYPE.equals(typeName)) {
+                RequestScopes.runAs(accountId, () -> ssmDocuments.update(identifier, observed, desired, region));
+                actual = getResource(region, accountId, typeName, identifier).properties();
+            } else {
+                actual = RequestScopes.callAs(accountId, () -> ssmBackend.write(identifier, desired, true, region))
+                        .toString();
+            }
+            return record(new ProgressEvent(typeName, identifier, token, "UPDATE", "SUCCESS", null,
+                    actual, accountId));
+        } catch (AwsException e) {
+            return record(pending.failed(e));
+        }
+    }
+
+    public List<ProgressEvent> listRequests(String region, String accountId, List<String> operations,
+                                           List<String> statuses) {
+        return requests.values().stream().filter(event -> accountId.equals(event.accountId()))
+                .filter(event -> requestStore.getForAccount(accountId, event.requestToken())
+                        .map(request -> region.equals(request.region())).orElse(false))
+                .filter(event -> operations.isEmpty() || operations.contains(event.operation()))
+                .filter(event -> statuses.isEmpty() || statuses.contains(event.operationStatus()))
+                .sorted(Comparator.comparing(ProgressEvent::requestToken)).toList();
+    }
+
+    public ProgressEvent cancelRequest(String region, String accountId, String token) {
+        requestStatus(region, accountId, token);
+        ReentrantLock lock = operationLocks.get(token);
+        if (lock != null && lock.tryLock()) {
+            try {
+                ProgressEvent current = requestStatus(region, accountId, token);
+                if ("IN_PROGRESS".equals(current.operationStatus())) {
+                    return record(new ProgressEvent(current.typeName(), current.identifier(), token,
+                            current.operation(), "CANCEL_COMPLETE", "Cancelled before provisioning started.",
+                            null, accountId));
+                }
+            } finally {
+                lock.unlock();
+            }
+        }
+        throw new AwsException("ConcurrentModificationException", "The resource operation cannot be cancelled in its current state.", 400);
+    }
+
+    public Double eventTime(ProgressEvent event) {
+        return requestStore.getForAccount(event.accountId(), event.requestToken())
+                .filter(request -> request.createdAt() > 0)
+                .map(request -> request.createdAt() / 1000.0).orElse(null);
+    }
 }

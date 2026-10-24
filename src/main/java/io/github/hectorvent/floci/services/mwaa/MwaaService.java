@@ -38,6 +38,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.Base64;
 
 @ApplicationScoped
 public class MwaaService implements TagHandler {
@@ -341,11 +342,6 @@ public class MwaaService implements TagHandler {
         return Map.of(
                 "CliToken", token,
                 "WebServerHostname", hostnameFromUrl(environment.getWebserverUrl()));
-    }
-
-    /** True when environments run without Airflow containers ({@code floci.services.mwaa.mock}). */
-    public boolean isMockMode() {
-        return config.services().mwaa().mock();
     }
 
     boolean isValidCliToken(String environmentIdentity, String token) {
@@ -732,4 +728,8 @@ public class MwaaService implements TagHandler {
         return MwaaEnvironmentManager.environmentRegion(environment, regionResolver.getDefaultRegion());
     }
 
+    /** True when environments run without Airflow containers ({@code floci.services.mwaa.mock}). */
+    public boolean isMockMode() {
+        return config.services().mwaa().mock();
+    }
 }

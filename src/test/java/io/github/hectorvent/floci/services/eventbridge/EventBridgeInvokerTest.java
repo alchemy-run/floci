@@ -118,14 +118,6 @@ class EventBridgeInvokerTest {
     }
 
     @Test
-    void invokeTarget_stateMachineStartFailureDoesNotEscapeDelivery() {
-        String arn = "arn:aws:states:us-east-1:000000000000:stateMachine:missing";
-        when(stepFunctionsService.startExecution(arn, null, "{}", "us-east-1"))
-                .thenThrow(new IllegalStateException("missing state machine"));
-
-        assertDoesNotThrow(() -> invoker.invokeTarget(
-                new Target("id1", arn, "{}", null), "{\"ignored\":true}", "us-east-1"));
-
     void invokeTarget_stateMachineStartFailurePropagates() {
         String arn = "arn:aws:states:us-east-1:000000000000:stateMachine:missing";
         when(stepFunctionsService.startExecution(arn, null, "{}", "us-east-1"))

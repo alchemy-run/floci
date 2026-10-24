@@ -40,14 +40,6 @@ public class Parameter {
     @JsonProperty("DataType")
     private String dataType = "text";
 
-    @JsonProperty("Tier")
-    private String tier = "Standard";
-
-    @JsonProperty("KeyId")
-    private String keyId;
-
-    @JsonProperty("AllowedPattern")
-    private String allowedPattern;
     @JsonProperty("KeyId")
     private String keyId;
 
@@ -107,14 +99,6 @@ public class Parameter {
     public String getDataType() { return dataType; }
     public void setDataType(String dataType) { this.dataType = dataType; }
 
-    public String getTier() { return tier; }
-    public void setTier(String tier) { this.tier = tier; }
-
-    public String getKeyId() { return keyId; }
-    public void setKeyId(String keyId) { this.keyId = keyId; }
-
-    public String getAllowedPattern() { return allowedPattern; }
-    public void setAllowedPattern(String allowedPattern) { this.allowedPattern = allowedPattern; }
     public String getKeyId() { return keyId; }
     public void setKeyId(String keyId) { this.keyId = keyId; }
 

@@ -19,20 +19,24 @@ public class NetworkFirewallJsonHandler {
     public Response handle(String action, JsonNode request, String region, String accountId) {
         return switch (action) {
             case "CreateRuleGroup" -> ok(service.createRuleGroup(request, region, accountId));
-            case "DescribeRuleGroup" -> ok(service.describeRuleGroup(request, region, accountId));
-            case "DescribeRuleGroupSummary" -> ok(service.describeRuleGroupSummary(request, region, accountId));
+            case "DescribeRuleGroup" -> ok(service.describeRuleGroup(
+                    textOrNull(request, "RuleGroupArn"), textOrNull(request, "RuleGroupName")));
             case "DescribeRuleGroupMetadata" -> ok(service.describeRuleGroupMetadata(request, region, accountId));
+            case "DescribeRuleGroupSummary" -> ok(service.describeRuleGroupSummary(request, region, accountId));
             case "UpdateRuleGroup" -> ok(service.updateRuleGroup(request));
-            case "DeleteRuleGroup" -> ok(service.deleteRuleGroup(request, region, accountId));
-            case "ListRuleGroups" -> ok(service.listRuleGroups(request));
+            case "DeleteRuleGroup" -> ok(service.deleteRuleGroup(
+                    textOrNull(request, "RuleGroupArn"), textOrNull(request, "RuleGroupName")));
+            case "ListRuleGroups" -> ok(service.listRuleGroups(textOrNull(request, "Type")));
             case "CreateFirewallPolicy" -> ok(service.createFirewallPolicy(request, region, accountId));
-            case "DescribeFirewallPolicy" -> ok(service.describeFirewallPolicy(request, region, accountId));
+            case "DescribeFirewallPolicy" -> ok(service.describeFirewallPolicy(
+                    textOrNull(request, "FirewallPolicyArn"), textOrNull(request, "FirewallPolicyName")));
             case "UpdateFirewallPolicy" -> ok(service.updateFirewallPolicy(request));
-            case "DeleteFirewallPolicy" -> ok(service.deleteFirewallPolicy(request, region, accountId));
-            case "ListFirewallPolicies" -> ok(service.listFirewallPolicies(request));
-            case "TagResource" -> ok(service.tagResource(request));
-            case "UntagResource" -> ok(service.untagResource(request));
+            case "DeleteFirewallPolicy" -> ok(service.deleteFirewallPolicy(
+                    textOrNull(request, "FirewallPolicyArn"), textOrNull(request, "FirewallPolicyName")));
+            case "ListFirewallPolicies" -> ok(service.listFirewallPolicies());
             case "ListTagsForResource" -> ok(service.listTagsForResource(request));
+            case "UntagResource" -> ok(service.untagResource(request));
+            case "TagResource" -> ok(service.tagResource(request));
             case "CreateFirewall" -> ok(service.createFirewall(request, region, accountId));
             case "DescribeFirewall" -> Response.ok(service.describeFirewall(
                     textOrNull(request, "FirewallArn"),
@@ -54,14 +58,14 @@ public class NetworkFirewallJsonHandler {
             case "DescribeLoggingConfiguration" -> ok(service.describeLoggingConfiguration(
                     textOrNull(request, "FirewallArn"), textOrNull(request, "FirewallName")));
             case "AssociateFirewallPolicy" -> ok(service.associateFirewallPolicy(request, region, accountId));
-            case "StartFlowCapture" -> ok(service.startFlowCapture(request, region));
-            case "StartFlowFlush" -> ok(service.startFlowFlush(request, region));
-            case "DescribeFlowOperation" -> ok(service.describeFlowOperation(request));
-            case "ListFlowOperations" -> ok(service.listFlowOperations(request));
-            case "ListFlowOperationResults" -> ok(service.listFlowOperationResults(request));
-            case "StartAnalysisReport" -> ok(service.startAnalysisReport(request));
-            case "ListAnalysisReports" -> ok(service.listAnalysisReports(request));
             case "GetAnalysisReportResults" -> ok(service.getAnalysisReportResults(request));
+            case "ListAnalysisReports" -> ok(service.listAnalysisReports(request));
+            case "StartAnalysisReport" -> ok(service.startAnalysisReport(request));
+            case "ListFlowOperationResults" -> ok(service.listFlowOperationResults(request));
+            case "ListFlowOperations" -> ok(service.listFlowOperations(request));
+            case "DescribeFlowOperation" -> ok(service.describeFlowOperation(request));
+            case "StartFlowFlush" -> ok(service.startFlowFlush(request, region));
+            case "StartFlowCapture" -> ok(service.startFlowCapture(request, region));
             default -> Response.status(400)
                     .entity(new AwsErrorResponse("UnknownOperationException",
                             "Unknown operation: NetworkFirewall_20201112." + action))

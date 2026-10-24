@@ -1,7 +1,6 @@
 package io.github.hectorvent.floci.services.cloudwatch.logs;
 
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
@@ -21,24 +20,17 @@ import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.core.storage.WriteProfile;
 import io.github.hectorvent.floci.services.cloudwatch.logs.filter.FilterPattern;
 import io.github.hectorvent.floci.services.cloudwatch.logs.filter.FilterPatternException;
-import io.github.hectorvent.floci.services.cloudwatch.logs.model.LogDestination;
 import io.github.hectorvent.floci.services.cloudwatch.logs.model.LogEvent;
 import io.github.hectorvent.floci.services.cloudwatch.logs.model.LogGroup;
 import io.github.hectorvent.floci.services.cloudwatch.logs.model.LogStream;
 import io.github.hectorvent.floci.services.cloudwatch.logs.model.MetricFilter;
 import io.github.hectorvent.floci.services.cloudwatch.logs.model.ResourcePolicy;
 import io.github.hectorvent.floci.services.cloudwatch.logs.model.SubscriptionFilter;
-import io.github.hectorvent.floci.services.iam.IamService;
-import io.github.hectorvent.floci.services.kinesis.KinesisService;
-import io.github.hectorvent.floci.services.lambda.LambdaService;
-import io.github.hectorvent.floci.services.lambda.model.InvocationType;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Event;
-import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
-import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -47,7 +39,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -56,9 +47,18 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
-import java.util.zip.GZIPOutputStream;
 
 import static io.github.hectorvent.floci.services.cloudwatch.logs.MetricFilterRules.invalid;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hectorvent.floci.services.cloudwatch.logs.model.LogDestination;
+import io.github.hectorvent.floci.services.iam.IamService;
+import io.github.hectorvent.floci.services.kinesis.KinesisService;
+import io.github.hectorvent.floci.services.lambda.LambdaService;
+import io.github.hectorvent.floci.services.lambda.model.InvocationType;
+import jakarta.enterprise.inject.Instance;
+import java.io.ByteArrayOutputStream;
+import java.util.LinkedHashSet;
+import java.util.zip.GZIPOutputStream;
 
 @ApplicationScoped
 public class CloudWatchLogsService implements ResourceProvider, Resettable {
@@ -79,26 +79,15 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
                     .thenComparingLong(LogEvent::getSequence)
                     .thenComparing(LogEvent::getEventId);
 
-    /** AWS PutLogEvents rejects events more than two hours in the future. */
-    private static final long TOO_NEW_HORIZON_MS = 2L * 60 * 60 * 1000;
-    private static final String DEFAULT_LOG_GROUP_CLASS = "STANDARD";
-    private static final String CANONICAL_ACCOUNT = "000000000000";
-    private static final ObjectMapper PAYLOAD_MAPPER = new ObjectMapper();
-
     private final StorageBackend<String, LogGroup> groupStore;
     private final StorageBackend<String, LogStream> streamStore;
     private final StorageBackend<String, LogEvent> eventStore;
     private final Map<String, LogEventIndex> eventIndexes = new ConcurrentHashMap<>();
     private volatile boolean resetting;
     private final StorageBackend<String, SubscriptionFilter> subscriptionFilterStore;
-    private final StorageBackend<String, LogDestination> destinationStore;
     private final StorageBackend<String, MetricFilter> metricFilterStore;
     private final StorageBackend<String, ResourcePolicy> resourcePolicyStore;
     private final RegionResolver regionResolver;
-    private final String canonicalAccountId;
-    private final Instance<LambdaService> lambdaServices;
-    private final Instance<IamService> iamServices;
-    private final Instance<KinesisService> kinesisServices;
     /**
      * What ingestion and group deletion tell the rest of the emulator, so features AWS drives from
      * them (metric filters) stay out of this class. Null when built by the test constructors.
@@ -141,9 +130,6 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
     public CloudWatchLogsService(StorageFactory storageFactory,
                                   EmulatorConfig config,
                                   RegionResolver regionResolver,
-                                  Instance<LambdaService> lambdaServices,
-                                  Instance<IamService> iamServices,
-                                  Instance<KinesisService> kinesisServices,
                                   Event<LogEventsIngested> logEventsIngested,
                                   Event<LogGroupDeleted> logGroupDeleted) {
         this(
@@ -157,8 +143,6 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
                         new TypeReference<>() {}, WriteProfile.APPEND_HEAVY),
                 storageFactory.create("cloudwatchlogs", "cwlogs-subscription-filters.json",
                         new TypeReference<>() {}),
-                storageFactory.create("cloudwatchlogs", "cwlogs-destinations.json",
-                        new TypeReference<>() {}),
                 storageFactory.create("cloudwatchlogs", "cwlogs-metric-filters.json",
                         new TypeReference<>() {}),
                 storageFactory.create("cloudwatchlogs", "cwlogs-resource-policies.json",
@@ -166,10 +150,6 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
                 config.services().cloudwatchlogs().maxEventsPerQuery(),
                 config.services().cloudwatchlogs().maxStoredEvents(),
                 regionResolver,
-                config.defaultAccountId() != null ? config.defaultAccountId() : CANONICAL_ACCOUNT,
-                lambdaServices,
-                iamServices,
-                kinesisServices,
                 config.services().cloudwatchlogs().queryCompletionDelayMs(),
                 System::currentTimeMillis,
                 logEventsIngested,
@@ -177,11 +157,6 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
         );
     }
 
-    public CloudWatchLogsService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver,
-                                 Event<LogEventsIngested> logEventsIngested, Event<LogGroupDeleted> logGroupDeleted) {
-        this(storageFactory, config, regionResolver, null, null, null, logEventsIngested, logGroupDeleted);
-    }
-
     CloudWatchLogsService(StorageBackend<String, LogGroup> groupStore,
                            StorageBackend<String, LogStream> streamStore,
                            StorageBackend<String, LogEvent> eventStore,
@@ -189,8 +164,8 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
                            StorageBackend<String, MetricFilter> metricFilterStore,
                            int maxEventsPerQuery,
                            RegionResolver regionResolver) {
-        this(groupStore, streamStore, eventStore, subscriptionFilterStore, new InMemoryStorage<>(), metricFilterStore, new InMemoryStorage<>(),
-                maxEventsPerQuery, Integer.MAX_VALUE, regionResolver, CANONICAL_ACCOUNT, null, null, null, 0L, System::currentTimeMillis);
+        this(groupStore, streamStore, eventStore, subscriptionFilterStore, metricFilterStore, new InMemoryStorage<>(),
+                maxEventsPerQuery, Integer.MAX_VALUE, regionResolver, 0L, System::currentTimeMillis);
     }
 
     CloudWatchLogsService(StorageBackend<String, LogGroup> groupStore,
@@ -201,8 +176,8 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
                            int maxEventsPerQuery,
                            int maxStoredEvents,
                            RegionResolver regionResolver) {
-        this(groupStore, streamStore, eventStore, subscriptionFilterStore, new InMemoryStorage<>(), metricFilterStore, new InMemoryStorage<>(),
-                maxEventsPerQuery, maxStoredEvents, regionResolver, CANONICAL_ACCOUNT, null, null, null, 0L, System::currentTimeMillis);
+        this(groupStore, streamStore, eventStore, subscriptionFilterStore, metricFilterStore, new InMemoryStorage<>(),
+                maxEventsPerQuery, maxStoredEvents, regionResolver, 0L, System::currentTimeMillis);
     }
 
     CloudWatchLogsService(StorageBackend<String, LogGroup> groupStore,
@@ -214,29 +189,23 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
                            RegionResolver regionResolver,
                            long queryCompletionDelayMs,
                            LongSupplier clock) {
-        this(groupStore, streamStore, eventStore, subscriptionFilterStore, new InMemoryStorage<>(), metricFilterStore, new InMemoryStorage<>(),
-                maxEventsPerQuery, Integer.MAX_VALUE, regionResolver, CANONICAL_ACCOUNT, null, null, null, queryCompletionDelayMs, clock);
+        this(groupStore, streamStore, eventStore, subscriptionFilterStore, metricFilterStore, new InMemoryStorage<>(),
+                maxEventsPerQuery, Integer.MAX_VALUE, regionResolver, queryCompletionDelayMs, clock);
     }
 
     CloudWatchLogsService(StorageBackend<String, LogGroup> groupStore,
                            StorageBackend<String, LogStream> streamStore,
                            StorageBackend<String, LogEvent> eventStore,
                            StorageBackend<String, SubscriptionFilter> subscriptionFilterStore,
-                           StorageBackend<String, LogDestination> destinationStore,
                            StorageBackend<String, MetricFilter> metricFilterStore,
                            StorageBackend<String, ResourcePolicy> resourcePolicyStore,
                            int maxEventsPerQuery,
                            int maxStoredEvents,
                            RegionResolver regionResolver,
-                           String canonicalAccountId,
-                           Instance<LambdaService> lambdaServices,
-                           Instance<IamService> iamServices,
-                           Instance<KinesisService> kinesisServices,
                            long queryCompletionDelayMs,
                            LongSupplier clock) {
-        this(groupStore, streamStore, eventStore, subscriptionFilterStore, destinationStore, metricFilterStore,
-                resourcePolicyStore, maxEventsPerQuery, maxStoredEvents, regionResolver, canonicalAccountId,
-                lambdaServices, iamServices, kinesisServices, queryCompletionDelayMs, clock, null, null);
+        this(groupStore, streamStore, eventStore, subscriptionFilterStore, metricFilterStore, resourcePolicyStore,
+                maxEventsPerQuery, maxStoredEvents, regionResolver, queryCompletionDelayMs, clock, null, null);
     }
 
     CloudWatchLogsService(StorageBackend<String, LogGroup> groupStore,
@@ -248,29 +217,6 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
                            int maxEventsPerQuery,
                            int maxStoredEvents,
                            RegionResolver regionResolver,
-                           long queryCompletionDelayMs,
-                           LongSupplier clock,
-                           Event<LogEventsIngested> logEventsIngested,
-                           Event<LogGroupDeleted> logGroupDeleted) {
-        this(groupStore, streamStore, eventStore, subscriptionFilterStore, new InMemoryStorage<>(), metricFilterStore,
-                resourcePolicyStore, maxEventsPerQuery, maxStoredEvents, regionResolver, CANONICAL_ACCOUNT,
-                null, null, null, queryCompletionDelayMs, clock, logEventsIngested, logGroupDeleted);
-    }
-
-    CloudWatchLogsService(StorageBackend<String, LogGroup> groupStore,
-                           StorageBackend<String, LogStream> streamStore,
-                           StorageBackend<String, LogEvent> eventStore,
-                           StorageBackend<String, SubscriptionFilter> subscriptionFilterStore,
-                           StorageBackend<String, LogDestination> destinationStore,
-                           StorageBackend<String, MetricFilter> metricFilterStore,
-                           StorageBackend<String, ResourcePolicy> resourcePolicyStore,
-                           int maxEventsPerQuery,
-                           int maxStoredEvents,
-                           RegionResolver regionResolver,
-                           String canonicalAccountId,
-                           Instance<LambdaService> lambdaServices,
-                           Instance<IamService> iamServices,
-                           Instance<KinesisService> kinesisServices,
                            long queryCompletionDelayMs,
                            LongSupplier clock,
                            Event<LogEventsIngested> logEventsIngested,
@@ -279,16 +225,11 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
         this.streamStore = streamStore;
         this.eventStore = eventStore;
         this.subscriptionFilterStore = subscriptionFilterStore;
-        this.destinationStore = destinationStore;
         this.metricFilterStore = metricFilterStore;
         this.resourcePolicyStore = resourcePolicyStore;
         this.maxEventsPerQuery = maxEventsPerQuery;
         this.maxStoredEvents = maxStoredEvents;
         this.regionResolver = regionResolver;
-        this.canonicalAccountId = canonicalAccountId != null ? canonicalAccountId : CANONICAL_ACCOUNT;
-        this.lambdaServices = lambdaServices;
-        this.iamServices = iamServices;
-        this.kinesisServices = kinesisServices;
         long maxSequence = eventStore.scan(k -> true).stream()
                 .mapToLong(LogEvent::getSequence)
                 .max()
@@ -299,52 +240,6 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
         this.clock = clock;
         this.logEventsIngested = logEventsIngested;
         this.logGroupDeleted = logGroupDeleted;
-        migrateLegacyMetricFilters();
-    }
-
-    private void migrateLegacyMetricFilters() {
-        synchronized (metricFilterStore) {
-            if (metricFilterStore instanceof AccountAwareStorageBackend<MetricFilter> aware) {
-                for (AccountAwareStorageBackend.AccountEntry<MetricFilter> entry : aware.scanAllAccountEntries(k -> true)) {
-                    String destination = migratedMetricFilterKey(entry.key(), entry.value());
-                    if (destination != null) {
-                        aware.migrateLegacyEntries(entry.accountId(), entry.key()::equals,
-                                ignored -> destination, ignored -> true);
-                    }
-                }
-            } else {
-                for (String source : List.copyOf(metricFilterStore.keys())) {
-                    MetricFilter filter = metricFilterStore.get(source).orElse(null);
-                    String destination = migratedMetricFilterKey(source, filter);
-                    if (destination != null) {
-                        if (metricFilterStore.get(destination).isEmpty()) {
-                            metricFilterStore.put(destination, filter);
-                        }
-                        metricFilterStore.delete(source);
-                    }
-                }
-            }
-        }
-    }
-
-    private static String migratedMetricFilterKey(String source, MetricFilter filter) {
-        int separator = source.indexOf("::");
-        if (separator < 0 || filter == null || filter.getLogGroupName() == null || filter.getFilterName() == null) {
-            return null;
-        }
-        String prefix = source.substring(0, separator) + "::" + filter.getLogGroupName() + "::";
-        return source.equals(prefix + "filter::" + filter.getFilterName()) ? prefix + filter.getFilterName() : null;
-    }
-
-    // ──────────────────────────── Resource Policies ─────────────────────
-
-    public void deleteResourcePolicy(String policyName, String region) {
-        String key = resourcePolicyKey(region, policyName);
-        if (resourcePolicyStore.get(key).isEmpty()) {
-            throw new AwsException("ResourceNotFoundException",
-                    "Policy with name [" + policyName + "] does not exist", 400);
-        }
-        resourcePolicyStore.delete(key);
     }
 
     /** Each reset hook empties every index and marks it stale; the next write refills from the store. */
@@ -409,19 +304,6 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
     public void createLogGroupForAccount(
             String accountId, String name, Integer retentionInDays,
             Map<String, String> tags, boolean deletionProtectionEnabled, String kmsKeyId, String region) {
-        createLogGroupForAccount(accountId, name, retentionInDays, tags, null, deletionProtectionEnabled, kmsKeyId, region);
-    }
-
-    public void createLogGroup(String name, Integer retentionInDays, Map<String, String> tags,
-                               String logGroupClass, Boolean deletionProtectionEnabled,
-                               String kmsKeyId, String region) {
-        createLogGroupForAccount(null, name, retentionInDays, tags, logGroupClass,
-                Boolean.TRUE.equals(deletionProtectionEnabled), kmsKeyId, region);
-    }
-
-    private void createLogGroupForAccount(String accountId, String name, Integer retentionInDays,
-                                          Map<String, String> tags, String logGroupClass,
-                                          boolean deletionProtectionEnabled, String kmsKeyId, String region) {
         createLogGroupForAccount(accountId, name, retentionInDays, tags, deletionProtectionEnabled, kmsKeyId, null, region);
     }
 
@@ -443,7 +325,6 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
             group.setLogGroupClass(logGroupClass == null ? "STANDARD" : logGroupClass);
             group.setCreatedTime(System.currentTimeMillis());
             group.setRetentionInDays(retentionInDays);
-            group.setLogGroupClass(normalizeLogGroupClass(logGroupClass));
             group.setDeletionProtectionEnabled(deletionProtectionEnabled);
             if (kmsKeyId != null && !kmsKeyId.isBlank()) {
                 group.setKmsKeyId(kmsKeyId);
@@ -574,7 +455,6 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
         group.setRetentionInDays(days);
         groupStore.put(key, group);
     }
-
 
     public void deleteRetentionPolicy(String groupName, String region) {
         String key = groupKey(region, groupName);
@@ -829,14 +709,12 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
 
     // ──────────────────────────── Log Events ────────────────────────────
 
-    public record PutLogEventsResult(String nextSequenceToken, Integer tooNewLogEventStartIndex) {}
-
-    public PutLogEventsResult putLogEvents(String groupName, String streamName,
+    public String putLogEvents(String groupName, String streamName,
                                List<Map<String, Object>> events, String region) {
         return putLogEventsForAccount(null, groupName, streamName, events, region);
     }
 
-    public PutLogEventsResult putLogEventsForAccount(
+    public String putLogEventsForAccount(
             String accountId, String groupName, String streamName,
             List<Map<String, Object>> events, String region) {
         requireLogGroupForAccount(accountId, region, groupName);
@@ -845,30 +723,18 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
                 .orElseThrow(CloudWatchLogsService::logStreamNotFound);
 
         long now = System.currentTimeMillis();
-        long tooNewAfter = now + TOO_NEW_HORIZON_MS;
         long totalBytes = 0;
         Long minTs = null;
         Long maxTs = null;
-        Integer tooNewStart = null;
-        List<LogEvent> ingested = new ArrayList<>();
+        List<LogEvent> stored = new ArrayList<>(events.size());
         Map<String, LogEvent> logEvents = new LinkedHashMap<>();
 
-        List<Map<String, Object>> batch = events != null ? events : List.of();
-        for (int i = 0; i < batch.size(); i++) {
-            Map<String, Object> evt = batch.get(i);
+        for (Map<String, Object> evt : events) {
             long ts = toLong(evt.get("timestamp"), now);
-            if (ts > tooNewAfter) {
-                if (tooNewStart == null) {
-                    tooNewStart = i;
-                }
-                continue;
-            }
             String msg = (String) evt.getOrDefault("message", "");
 
             LogEvent logEvent = new LogEvent();
             logEvent.setEventId(UUID.randomUUID().toString());
-            logEvent.setLogGroupName(groupName);
-            logEvent.setLogStreamName(streamName);
             logEvent.setTimestamp(ts);
             logEvent.setMessage(msg);
             logEvent.setIngestionTime(now);
@@ -876,7 +742,7 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
 
             String eventKey = eventKey(region, groupName, streamName, ts, logEvent.getEventId());
             logEvents.put(eventKey, logEvent);
-            ingested.add(logEvent);
+            stored.add(logEvent);
 
             totalBytes += msg.getBytes().length + 26; // approx overhead
             if (minTs == null || ts < minTs) { minTs = ts; }
@@ -918,14 +784,10 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
             putForAccount(streamStore, accountId, streamKey, stream);
         }
 
-        if (!ingested.isEmpty()) {
-            deliverSubscriptionMatches(accountId, groupName, streamName, ingested, region);
+        if (logEventsIngested != null && !stored.isEmpty()) {
+            logEventsIngested.fire(new LogEventsIngested(accountId, region, groupName, streamName, List.copyOf(stored)));
         }
-
-        if (logEventsIngested != null && !ingested.isEmpty()) {
-            logEventsIngested.fire(new LogEventsIngested(accountId, region, groupName, streamName, List.copyOf(ingested)));
-        }
-        return new PutLogEventsResult(nextToken, tooNewStart);
+        return nextToken;
     }
 
     /**
@@ -1052,7 +914,6 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
     public LogEventsResult getLogEvents(String groupName, String streamName,
                                         Long startTime, Long endTime,
                                         int limit, boolean startFromHead, String nextToken, String region) {
-        requireLogGroup(groupName, region);
         int maxEvents = Math.min(limit > 0 ? limit : Integer.MAX_VALUE,
                 maxEventsPerQuery);
 
@@ -1120,15 +981,8 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
 
     public FilteredLogEventsResult filterLogEvents(String groupName, List<String> streamNames,
                                                     Long startTime, Long endTime,
-                                                    String filterPattern, int limit, String region) {
-        return filterLogEvents(groupName, streamNames, startTime, endTime, filterPattern, limit, null, region);
-    }
-
-    public FilteredLogEventsResult filterLogEvents(String groupName, List<String> streamNames,
-                                                    Long startTime, Long endTime,
                                                     String filterPattern, int limit,
                                                     String nextToken, String region) {
-        requireLogGroup(groupName, region);
         requireNamedLogGroup(region, groupName);
 
         int maxEvents = Math.min(limit > 0 ? limit : Integer.MAX_VALUE,
@@ -1449,11 +1303,6 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
 
     public void putSubscriptionFilter(String logGroupName, String filterName, String filterPattern,
                                        String destinationArn, String distribution, String region) {
-        putSubscriptionFilter(logGroupName, filterName, filterPattern, destinationArn, null, distribution, region);
-    }
-
-    public void putSubscriptionFilter(String logGroupName, String filterName, String filterPattern,
-                                       String destinationArn, String roleArn, String distribution, String region) {
         synchronized (metricFilterStore) {
             requireLogGroup(region, logGroupName);
             String normalizedPattern = filterPattern != null ? filterPattern : "";
@@ -1465,7 +1314,6 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
             filter.setLogGroupName(logGroupName);
             filter.setFilterPattern(normalizedPattern);
             filter.setDestinationArn(destinationArn);
-            filter.setRoleArn(roleArn);
             filter.setDistribution(distribution != null ? distribution : "ByLogStream");
             filter.setCreationTime(System.currentTimeMillis());
 
@@ -1519,124 +1367,13 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
         }
     }
 
-    // ──────────────────────────── Destinations ────────────────────────────
-
-    public LogDestination putDestination(String destinationName, String targetArn, String roleArn, String region) {
-        if (destinationName == null || destinationName.isBlank()) {
-            throw new AwsException("InvalidParameterException", "destinationName is required.", 400);
-        }
-        if (targetArn == null || targetArn.isBlank()) {
-            throw new AwsException("InvalidParameterException", "targetArn is required.", 400);
-        }
-        requireSameAccountRole(roleArn);
-
-        String key = destinationKey(region, destinationName);
-        LogDestination existing = destinationStore.get(key).orElse(null);
-        LogDestination dest = existing != null ? existing : new LogDestination();
-        dest.setDestinationName(destinationName);
-        dest.setTargetArn(targetArn);
-        dest.setRoleArn(roleArn);
-        dest.setArn(regionResolver.buildArn("logs", region, "destination:" + destinationName));
-        if (existing == null) {
-            dest.setCreationTime(System.currentTimeMillis());
-        }
-        destinationStore.put(key, dest);
-        LOG.infov("Put destination: {0}", destinationName);
-        return dest;
-    }
-
-    public void putDestinationPolicy(String destinationName, String accessPolicy, String region) {
-        String key = destinationKey(region, destinationName);
-        LogDestination dest = destinationStore.get(key)
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                        "The specified destination does not exist: " + destinationName, 400));
-        dest.setAccessPolicy(accessPolicy);
-        destinationStore.put(key, dest);
-    }
-
-    public List<LogDestination> describeDestinations(String prefix, String region) {
-        String storagePrefix = region + "::destination::";
-        List<LogDestination> result = destinationStore.scan(k -> {
-            if (!k.startsWith(storagePrefix)) {
-                return false;
-            }
-            if (prefix == null || prefix.isBlank()) {
-                return true;
-            }
-            return k.substring(storagePrefix.length()).startsWith(prefix);
-        });
-        result.sort(Comparator.comparing(LogDestination::getDestinationName));
-        return result;
-    }
-
-    public void deleteDestination(String destinationName, String region) {
-        String key = destinationKey(region, destinationName);
-        if (destinationStore.get(key).isEmpty()) {
-            throw new AwsException("ResourceNotFoundException",
-                    "The specified destination does not exist: " + destinationName, 400);
-        }
-        destinationStore.delete(key);
-    }
-
-    // ──────────────────────────── Insights record / fields ────────────────────────────
-
-    public Map<String, String> getLogRecord(String logRecordPointer) {
-        if (logRecordPointer == null || logRecordPointer.isBlank()) {
-            throw new AwsException("InvalidParameterException", "logRecordPointer is required.", 400);
-        }
-        for (LogEvent event : eventStore.scan(k -> true)) {
-            if (logRecordPointer.equals(event.getEventId())) {
-                return toLogRecord(event);
-            }
-        }
-        throw new AwsException("InvalidParameterException",
-                "The specified log record pointer is invalid.", 400);
-    }
-
-    public record LogGroupField(String name, double percent) {}
-
-    public List<LogGroupField> getLogGroupFields(String groupName, String region) {
-        requireLogGroup(groupName, region);
-        String prefix = region + "::" + groupName + "::";
-        List<LogEvent> events = eventStore.scan(k -> k.startsWith(prefix));
-        Set<String> names = new LinkedHashSet<>();
-        names.add("@timestamp");
-        names.add("@message");
-        names.add("@logStream");
-        names.add("@logGroup");
-        for (LogEvent event : events) {
-            if (event.getLogStreamName() != null) {
-                names.add("@logStream");
-            }
-            try {
-                var node = PAYLOAD_MAPPER.readTree(event.getMessage() != null ? event.getMessage() : "");
-                if (node.isObject()) {
-                    node.fieldNames().forEachRemaining(names::add);
-                }
-            } catch (Exception ignored) {
-                // plain-text events have no discovered JSON fields
-            }
-        }
-        List<LogGroupField> fields = new ArrayList<>();
-        for (String name : names) {
-            fields.add(new LogGroupField(name, 100.0));
-        }
-        return fields;
-    }
-
     // ──────────────────────────── Resource Policies ────────────────────────────
 
     public ResourcePolicy putResourcePolicy(String policyName, String policyDocument, String region) {
-        if (policyName == null || policyName.isBlank()) {
-            throw new AwsException("InvalidParameterException", "policyName is required.", 400);
-        }
-        if (policyDocument == null || policyDocument.isBlank()) {
-            throw new AwsException("InvalidParameterException", "policyDocument is required.", 400);
-        }
         ResourcePolicy policy = new ResourcePolicy();
         policy.setPolicyName(policyName);
         policy.setPolicyDocument(policyDocument);
-        policy.setLastUpdatedTime(clock.getAsLong());
+        policy.setLastUpdatedTime(System.currentTimeMillis());
         resourcePolicyStore.put(resourcePolicyKey(region, policyName), policy);
         return policy;
     }
@@ -1742,10 +1479,6 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
         return region + "::" + logGroupName + "::filter::" + filterName;
     }
 
-    private static String destinationKey(String region, String destinationName) {
-        return region + "::destination::" + destinationName;
-    }
-
     private static String resourcePolicyKeyPrefix(String region) {
         return region + "::policy::";
     }
@@ -1801,5 +1534,409 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
     @Override
     public Set<SupportedResourceType> getSupportedResourceTypes() {
         return Set.of(new SupportedResourceType("logs:log-group", "logs", true));
+    }
+
+    /** AWS PutLogEvents rejects events more than two hours in the future. */
+    private static final long TOO_NEW_HORIZON_MS = 2L * 60 * 60 * 1000;
+
+    private static final String DEFAULT_LOG_GROUP_CLASS = "STANDARD";
+
+    private static final String CANONICAL_ACCOUNT = "000000000000";
+
+    private static final ObjectMapper PAYLOAD_MAPPER = new ObjectMapper();
+
+    private final StorageBackend<String, LogDestination> destinationStore;
+
+    private final String canonicalAccountId;
+
+    private final Instance<LambdaService> lambdaServices;
+
+    private final Instance<IamService> iamServices;
+
+    private final Instance<KinesisService> kinesisServices;
+
+    private void migrateLegacyMetricFilters() {
+        synchronized (metricFilterStore) {
+            if (metricFilterStore instanceof AccountAwareStorageBackend<MetricFilter> aware) {
+                for (AccountAwareStorageBackend.AccountEntry<MetricFilter> entry : aware.scanAllAccountEntries(k -> true)) {
+                    String destination = migratedMetricFilterKey(entry.key(), entry.value());
+                    if (destination != null) {
+                        aware.migrateLegacyEntries(entry.accountId(), entry.key()::equals,
+                                ignored -> destination, ignored -> true);
+                    }
+                }
+            } else {
+                for (String source : List.copyOf(metricFilterStore.keys())) {
+                    MetricFilter filter = metricFilterStore.get(source).orElse(null);
+                    String destination = migratedMetricFilterKey(source, filter);
+                    if (destination != null) {
+                        if (metricFilterStore.get(destination).isEmpty()) {
+                            metricFilterStore.put(destination, filter);
+                        }
+                        metricFilterStore.delete(source);
+                    }
+                }
+            }
+        }
+    }
+
+    private static String migratedMetricFilterKey(String source, MetricFilter filter) {
+        int separator = source.indexOf("::");
+        if (separator < 0 || filter == null || filter.getLogGroupName() == null || filter.getFilterName() == null) {
+            return null;
+        }
+        String prefix = source.substring(0, separator) + "::" + filter.getLogGroupName() + "::";
+        return source.equals(prefix + "filter::" + filter.getFilterName()) ? prefix + filter.getFilterName() : null;
+    }
+
+    public void deleteResourcePolicy(String policyName, String region) {
+        String key = resourcePolicyKey(region, policyName);
+        if (resourcePolicyStore.get(key).isEmpty()) {
+            throw new AwsException("ResourceNotFoundException",
+                    "Policy with name [" + policyName + "] does not exist", 400);
+        }
+        resourcePolicyStore.delete(key);
+    }
+
+    public record PutLogEventsResult(String nextSequenceToken, Integer tooNewLogEventStartIndex) {}
+
+    public LogDestination putDestination(String destinationName, String targetArn, String roleArn, String region) {
+        if (destinationName == null || destinationName.isBlank()) {
+            throw new AwsException("InvalidParameterException", "destinationName is required.", 400);
+        }
+        if (targetArn == null || targetArn.isBlank()) {
+            throw new AwsException("InvalidParameterException", "targetArn is required.", 400);
+        }
+        requireSameAccountRole(roleArn);
+
+        String key = destinationKey(region, destinationName);
+        LogDestination existing = destinationStore.get(key).orElse(null);
+        LogDestination dest = existing != null ? existing : new LogDestination();
+        dest.setDestinationName(destinationName);
+        dest.setTargetArn(targetArn);
+        dest.setRoleArn(roleArn);
+        dest.setArn(regionResolver.buildArn("logs", region, "destination:" + destinationName));
+        if (existing == null) {
+            dest.setCreationTime(System.currentTimeMillis());
+        }
+        destinationStore.put(key, dest);
+        LOG.infov("Put destination: {0}", destinationName);
+        return dest;
+    }
+
+    public void putDestinationPolicy(String destinationName, String accessPolicy, String region) {
+        String key = destinationKey(region, destinationName);
+        LogDestination dest = destinationStore.get(key)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "The specified destination does not exist: " + destinationName, 400));
+        dest.setAccessPolicy(accessPolicy);
+        destinationStore.put(key, dest);
+    }
+
+    public List<LogDestination> describeDestinations(String prefix, String region) {
+        String storagePrefix = region + "::destination::";
+        List<LogDestination> result = destinationStore.scan(k -> {
+            if (!k.startsWith(storagePrefix)) {
+                return false;
+            }
+            if (prefix == null || prefix.isBlank()) {
+                return true;
+            }
+            return k.substring(storagePrefix.length()).startsWith(prefix);
+        });
+        result.sort(Comparator.comparing(LogDestination::getDestinationName));
+        return result;
+    }
+
+    public void deleteDestination(String destinationName, String region) {
+        String key = destinationKey(region, destinationName);
+        if (destinationStore.get(key).isEmpty()) {
+            throw new AwsException("ResourceNotFoundException",
+                    "The specified destination does not exist: " + destinationName, 400);
+        }
+        destinationStore.delete(key);
+    }
+
+    public Map<String, String> getLogRecord(String logRecordPointer) {
+        if (logRecordPointer == null || logRecordPointer.isBlank()) {
+            throw new AwsException("InvalidParameterException", "logRecordPointer is required.", 400);
+        }
+        for (LogEvent event : eventStore.scan(k -> true)) {
+            if (logRecordPointer.equals(event.getEventId())) {
+                return toLogRecord(event);
+            }
+        }
+        throw new AwsException("InvalidParameterException",
+                "The specified log record pointer is invalid.", 400);
+    }
+
+    public record LogGroupField(String name, double percent) {}
+
+    public List<LogGroupField> getLogGroupFields(String groupName, String region) {
+        requireLogGroup(groupName, region);
+        String prefix = region + "::" + groupName + "::";
+        List<LogEvent> events = eventStore.scan(k -> k.startsWith(prefix));
+        Set<String> names = new LinkedHashSet<>();
+        names.add("@timestamp");
+        names.add("@message");
+        names.add("@logStream");
+        names.add("@logGroup");
+        for (LogEvent event : events) {
+            if (event.getLogStreamName() != null) {
+                names.add("@logStream");
+            }
+            try {
+                var node = PAYLOAD_MAPPER.readTree(event.getMessage() != null ? event.getMessage() : "");
+                if (node.isObject()) {
+                    node.fieldNames().forEachRemaining(names::add);
+                }
+            } catch (Exception ignored) {
+                // plain-text events have no discovered JSON fields
+            }
+        }
+        List<LogGroupField> fields = new ArrayList<>();
+        for (String name : names) {
+            fields.add(new LogGroupField(name, 100.0));
+        }
+        return fields;
+    }
+
+    private static String normalizeLogGroupClass(String logGroupClass) {
+        if (logGroupClass == null || logGroupClass.isBlank()) {
+            return DEFAULT_LOG_GROUP_CLASS;
+        }
+        return logGroupClass;
+    }
+
+    private void deleteByPrefix(StorageBackend<String, ?> store, String prefix) {
+        List<String> keys = store.keys().stream().filter(k -> k.startsWith(prefix)).toList();
+        keys.forEach(store::delete);
+    }
+
+    /**
+     * Same-account pass-role. The emulator aliases the request-scoped account
+     * (from SigV4 / assumed-role sessions) with the configured canonical
+     * account {@code 000000000000}; comparing only one of those two IDs
+     * mis-detects in-account role passes as cross-account.
+     */
+    void requireSameAccountRole(String roleArn) {
+        if (roleArn == null || roleArn.isBlank()) {
+            throw new AwsException("InvalidParameterException", "roleArn is required.", 400);
+        }
+        if (isEmulatorAccount(accountFromArn(roleArn)) || roleExistsLocally(roleArn)) {
+            return;
+        }
+        throw new AwsException("InvalidParameterException",
+                "Cross-account role passing is not allowed.", 400);
+    }
+
+    private void validateSubscriptionDestination(String destinationArn, String roleArn, String region) {
+        if (destinationArn.contains(":destination:")) {
+            String name = resourceNameAfter(destinationArn, ":destination:");
+            if (destinationStore.get(destinationKey(region, name)).isEmpty()) {
+                throw new AwsException("InvalidParameterException",
+                        "Could not deliver test message to specified destination. Check if the destination exists.",
+                        400);
+            }
+            return;
+        }
+        if (destinationArn.contains(":function:")) {
+            if (!isEmulatorAccount(accountFromArn(destinationArn)) && !lambdaExistsLocally(destinationArn, region)) {
+                throw new AwsException("AccessDeniedException",
+                        "Cross-account lambda invocation passing is not allowed. You must use DestinationPolicies to enable cross-account subscriptions.",
+                        400);
+            }
+            if (lambdaExistsLocally(destinationArn, region) || isEmulatorAccount(accountFromArn(destinationArn))) {
+                return;
+            }
+        }
+        if (roleArn != null && !roleArn.isBlank()) {
+            requireSameAccountRole(roleArn);
+        }
+    }
+
+    private boolean isEmulatorAccount(String accountId) {
+        if (accountId == null || accountId.isBlank()) {
+            return true;
+        }
+        String caller = regionResolver.getAccountId();
+        // The request-scoped identity and Floci's configured account are the
+        // same tenant. Comparing against only one of them is what produced
+        // false "cross-account role passing" rejections.
+        return accountId.equals(caller) || accountId.equals(canonicalAccountId);
+    }
+
+    private boolean roleExistsLocally(String roleArn) {
+        if (iamServices == null || iamServices.isUnsatisfied()) {
+            return false;
+        }
+        String name = resourceNameAfter(roleArn, ":role/");
+        if (name.contains("/")) {
+            name = name.substring(name.lastIndexOf('/') + 1);
+        }
+        IamService iam = iamServices.get();
+        String arnAccount = accountFromArn(roleArn);
+        return iam.findRole(arnAccount, name).isPresent()
+                || iam.findRole(canonicalAccountId, name).isPresent()
+                || iam.findRole(regionResolver.getAccountId(), name).isPresent();
+    }
+
+    private boolean lambdaExistsLocally(String functionArn, String region) {
+        if (lambdaServices == null || lambdaServices.isUnsatisfied()) {
+            return false;
+        }
+        try {
+            lambdaServices.get().getFunction(region, functionArn);
+            return true;
+        } catch (AwsException e) {
+            return false;
+        }
+    }
+
+    private static String accountFromArn(String arn) {
+        return AwsArnUtils.accountOrDefault(arn, "");
+    }
+
+    private static String resourceNameAfter(String arn, String marker) {
+        int idx = arn.indexOf(marker);
+        return idx >= 0 ? arn.substring(idx + marker.length()) : arn;
+    }
+
+    static boolean matchesFilterPattern(String message, String filterPattern) {
+        if (filterPattern == null || filterPattern.isBlank()) {
+            return true;
+        }
+        String haystack = message != null ? message : "";
+        String pattern = filterPattern.trim();
+        if (pattern.length() >= 2 && pattern.startsWith("\"") && pattern.endsWith("\"")) {
+            return haystack.contains(pattern.substring(1, pattern.length() - 1));
+        }
+        if (pattern.startsWith("?")) {
+            for (String token : pattern.split("\\s+")) {
+                String term = token.startsWith("?") ? token.substring(1) : token;
+                if (!term.isBlank() && haystack.contains(term)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        return haystack.contains(pattern);
+    }
+
+    private Map<String, String> toLogRecord(LogEvent event) {
+        Map<String, String> record = new LinkedHashMap<>();
+        record.put("@ptr", event.getEventId());
+        record.put("@timestamp", String.valueOf(event.getTimestamp()));
+        record.put("@message", event.getMessage() != null ? event.getMessage() : "");
+        if (event.getLogGroupName() != null) {
+            record.put("@logGroup", event.getLogGroupName());
+        }
+        if (event.getLogStreamName() != null) {
+            record.put("@logStream", event.getLogStreamName());
+        }
+        return record;
+    }
+
+    private void deliverSubscriptionMatches(String accountId, String groupName, String streamName,
+                                            List<LogEvent> ingested, String region) {
+        String prefix = subscriptionFilterKeyPrefix(region, groupName);
+        List<SubscriptionFilter> filters = keysForAccount(subscriptionFilterStore, accountId).stream()
+                .filter(key -> key.startsWith(prefix))
+                .map(key -> getForAccount(subscriptionFilterStore, accountId, key))
+                .flatMap(Optional::stream)
+                .toList();
+        if (filters.isEmpty()) {
+            return;
+        }
+        for (SubscriptionFilter filter : filters) {
+            List<LogEvent> matched = ingested.stream()
+                    .filter(e -> matchesFilterPattern(e.getMessage(), filter.getFilterPattern()))
+                    .toList();
+            if (matched.isEmpty()) {
+                continue;
+            }
+            try {
+                deliverToDestination(accountId, filter, groupName, streamName, matched, region);
+            } catch (Exception e) {
+                LOG.warnv("Failed to deliver subscription filter {0}: {1}",
+                        filter.getFilterName(), e.getMessage());
+            }
+        }
+    }
+
+    private void deliverToDestination(String accountId, SubscriptionFilter filter, String groupName, String streamName,
+                                      List<LogEvent> matched, String region) throws Exception {
+        String destinationArn = filter.getDestinationArn();
+        if (destinationArn != null && destinationArn.contains(":destination:")) {
+            String name = resourceNameAfter(destinationArn, ":destination:");
+            LogDestination dest = getForAccount(destinationStore, accountId, destinationKey(region, name)).orElse(null);
+            if (dest == null) {
+                return;
+            }
+            destinationArn = dest.getTargetArn();
+        }
+        if (destinationArn != null && destinationArn.contains(":function:")) {
+            invokeLambdaSubscription(accountId, destinationArn, filter, groupName, streamName, matched, region);
+            return;
+        }
+        if (destinationArn != null && destinationArn.contains(":stream/") && kinesisServices != null
+                && !kinesisServices.isUnsatisfied()) {
+            String stream = resourceNameAfter(destinationArn, ":stream/");
+            byte[] payload = gzipJson(subscriptionPayload(accountId, filter, groupName, streamName, matched, region));
+            kinesisServices.get().putRecordForAccount(accountId, stream, payload, streamName, region);
+        }
+    }
+
+    private void invokeLambdaSubscription(String accountId, String functionArn, SubscriptionFilter filter,
+                                          String groupName, String streamName,
+                                          List<LogEvent> matched, String region) throws Exception {
+        if (lambdaServices == null || lambdaServices.isUnsatisfied()) {
+            return;
+        }
+        Map<String, Object> envelope = Map.of("awslogs", Map.of("data",
+                Base64.getEncoder().encodeToString(
+                        gzipJson(subscriptionPayload(accountId, filter, groupName, streamName, matched, region)))));
+        byte[] body = PAYLOAD_MAPPER.writeValueAsBytes(envelope);
+        lambdaServices.get().invoke(region, functionArn, body, InvocationType.Event);
+    }
+
+    private Map<String, Object> subscriptionPayload(String accountId, SubscriptionFilter filter, String groupName,
+                                                    String streamName, List<LogEvent> matched, String region) {
+        List<Map<String, Object>> events = new ArrayList<>();
+        for (LogEvent event : matched) {
+            events.add(Map.of(
+                    "id", event.getEventId(),
+                    "timestamp", event.getTimestamp(),
+                    "message", event.getMessage() != null ? event.getMessage() : ""));
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("messageType", "DATA_MESSAGE");
+        payload.put("owner", accountId != null ? accountId : regionResolver.getAccountId());
+        payload.put("logGroup", groupName);
+        payload.put("logStream", streamName);
+        payload.put("subscriptionFilters", List.of(filter.getFilterName()));
+        payload.put("logEvents", events);
+        return payload;
+    }
+
+    private static byte[] gzipJson(Map<String, Object> payload) throws Exception {
+        byte[] json = PAYLOAD_MAPPER.writeValueAsBytes(payload);
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        try (GZIPOutputStream gzip = new GZIPOutputStream(bos)) {
+            gzip.write(json);
+        }
+        return bos.toByteArray();
+    }
+
+    private void deleteEventsForStream(String region, String groupName, String streamName) {
+        String eventPrefix = eventKeyPrefix(region, groupName, streamName);
+        List<String> keys = eventStore.keys().stream()
+                .filter(k -> k.startsWith(eventPrefix))
+                .toList();
+        keys.forEach(eventStore::delete);
+    }
+
+    private static String destinationKey(String region, String destinationName) {
+        return region + "::destination::" + destinationName;
     }
 }

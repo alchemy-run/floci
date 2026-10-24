@@ -133,24 +133,6 @@ public class EcsTaskHandle {
         return removedContainers.containsAll(containerIds.keySet());
     }
 
-    /** The container's {@code stopTimeout} in seconds, or {@link #DEFAULT_STOP_TIMEOUT_SECONDS}. */
-    public int stopTimeoutFor(String containerName) {
-        Integer configured = stopTimeouts.get(containerName);
-        return configured != null ? configured : DEFAULT_STOP_TIMEOUT_SECONDS;
-    }
-
-    /** Notes when a container finished. A null is ignored, so a failed read leaves no entry. */
-    public void recordFinishedAt(String containerName, Instant instant) {
-        if (instant != null) {
-            finishedAt.put(containerName, instant);
-        }
-    }
-
-    /** When each container finished, for the containers teardown could read a time for. */
-    public Map<String, Instant> getFinishedAt() {
-        return finishedAt;
-    }
-
     /** Removes and returns the log stream that no longer needs task-level ownership. */
     public Closeable removeLogStream(String containerId) {
         return logStreamsByContainerId.remove(containerId);

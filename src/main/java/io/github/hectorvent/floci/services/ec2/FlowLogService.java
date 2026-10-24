@@ -11,7 +11,6 @@ import io.github.hectorvent.floci.services.ec2.model.Instance;
 import io.github.hectorvent.floci.services.ec2.model.InstanceNetworkInterface;
 import io.github.hectorvent.floci.services.ec2.model.NetworkInterface;
 import io.github.hectorvent.floci.services.ec2.model.Reservation;
-import io.github.hectorvent.floci.services.ec2.model.Tag;
 import io.github.hectorvent.floci.services.ec2.model.VpcEndpoint;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.quarkus.runtime.ShutdownEvent;
@@ -28,7 +27,6 @@ import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -39,6 +37,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.GZIPOutputStream;
+import io.github.hectorvent.floci.services.ec2.model.Tag;
+import java.util.Comparator;
 
 /**
  * Manages VPC Flow Logs (a floci addition — absent upstream) and a background
@@ -155,44 +155,21 @@ public class FlowLogService {
 
     public FlowLog createFlowLog(String region, String resourceId, String resourceType,
                                  String trafficType, String logDestinationType,
-                                 String logDestination, String logFormat, int maxAggregationInterval) {
-        return createFlowLog(region, resourceId, resourceType, trafficType, logDestinationType,
-                logDestination, logFormat, maxAggregationInterval, null, null, List.of());
-    }
-
-    public FlowLog createFlowLog(String region, String resourceId, String resourceType,
-                                 String trafficType, String logDestinationType,
                                  String logDestination, String deliverLogsPermissionArn,
                                  String logFormat, int maxAggregationInterval) {
-        return createFlowLog(region, resourceId, resourceType, trafficType, logDestinationType,
-                logDestination, logFormat, maxAggregationInterval, null, deliverLogsPermissionArn, List.of());
-    }
-
-    public FlowLog createFlowLog(String region, String resourceId, String resourceType,
-                                 String trafficType, String logDestinationType,
-                                 String logDestination, String logFormat, int maxAggregationInterval,
-                                 String logGroupName, String deliverLogsPermissionArn, List<Tag> tags) {
         FlowLog fl = new FlowLog();
         fl.setFlowLogId("fl-" + randomHex(17));
         fl.setResourceId(resourceId);
         fl.setResourceType(resourceType != null ? resourceType : "VPC");
         fl.setTrafficType(trafficType != null ? trafficType : "ALL");
-        boolean cloudWatch = logGroupName != null && !logGroupName.isBlank();
-        String destinationType = logDestinationType != null && !logDestinationType.isBlank()
-                ? logDestinationType
-                : (cloudWatch ? "cloud-watch-logs" : "s3");
-        fl.setLogDestinationType(destinationType);
+        fl.setLogDestinationType(logDestinationType != null ? logDestinationType : "s3");
         fl.setLogDestination(logDestination);
-        fl.setLogGroupName(logGroupName);
         fl.setDeliverLogsPermissionArn(deliverLogsPermissionArn);
         fl.setBucketName(bucketFromArn(logDestination));
         fl.setLogFormat(logFormat);
         fl.setMaxAggregationInterval(maxAggregationInterval);
         fl.setRegion(region);
         fl.setAccountId(ec2Service.callerAccountId());
-        if (tags != null && !tags.isEmpty()) {
-            fl.setTags(new ArrayList<>(tags));
-        }
         flowLogs.put(fl.getFlowLogId(), fl);
         LOG.infov("Created flow log {0} for {1} {2} -> {3}",
                 fl.getFlowLogId(), fl.getResourceType(), resourceId, fl.getBucketName());
@@ -210,11 +187,6 @@ public class FlowLogService {
     }
 
     public List<FlowLog> describeFlowLogs(String region, List<String> flowLogIds) {
-        return describeFlowLogs(region, flowLogIds, Map.of(), 0, null).logs();
-    }
-
-    public FlowLogListResult describeFlowLogs(String region, List<String> flowLogIds,
-                                              Map<String, List<String>> filters, int maxResults, String nextToken) {
         List<FlowLog> result = new ArrayList<>();
         for (FlowLog fl : flowLogs.scan(k -> true)) {
             if (region != null && fl.getRegion() != null && !region.equals(fl.getRegion())) {
@@ -223,58 +195,10 @@ public class FlowLogService {
             if (flowLogIds != null && !flowLogIds.isEmpty() && !flowLogIds.contains(fl.getFlowLogId())) {
                 continue;
             }
-            if (!matchesFlowLogFilters(fl, filters)) {
-                continue;
-            }
             result.add(fl);
         }
-        result.sort(Comparator.comparing(FlowLog::getFlowLogId, Comparator.nullsLast(String::compareTo)));
-        int start = parseOffsetToken(nextToken);
-        if (start > result.size()) {
-            start = result.size();
-        }
-        int end = maxResults > 0 ? Math.min(result.size(), start + maxResults) : result.size();
-        String token = end < result.size() ? String.valueOf(end) : null;
-        return new FlowLogListResult(result.subList(start, end), token);
+        return result;
     }
-
-    private static boolean matchesFlowLogFilters(FlowLog fl, Map<String, List<String>> filters) {
-        if (filters == null || filters.isEmpty()) {
-            return true;
-        }
-        for (Map.Entry<String, List<String>> filter : filters.entrySet()) {
-            List<String> values = filter.getValue();
-            if (values == null || values.isEmpty()) {
-                continue;
-            }
-            String observed = switch (filter.getKey()) {
-                case "flow-log-id" -> fl.getFlowLogId();
-                case "resource-id" -> fl.getResourceId();
-                case "resource-type" -> fl.getResourceType();
-                case "traffic-type" -> fl.getTrafficType();
-                case "log-destination-type" -> fl.getLogDestinationType();
-                case "log-group-name" -> fl.getLogGroupName();
-                default -> null;
-            };
-            if (observed != null && values.stream().noneMatch(observed::equals)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static int parseOffsetToken(String nextToken) {
-        if (nextToken == null || nextToken.isBlank()) {
-            return 0;
-        }
-        try {
-            return Math.max(0, Integer.parseInt(nextToken));
-        } catch (NumberFormatException e) {
-            return 0;
-        }
-    }
-
-    public record FlowLogListResult(List<FlowLog> logs, String nextToken) {}
 
     public List<String> deleteFlowLogs(String region, List<String> flowLogIds) {
         List<String> deleted = new ArrayList<>();
@@ -577,6 +501,14 @@ public class FlowLogService {
                     case "VPC" -> resourceId == null || resourceId.equals(inst.getVpcId());
                     case "Subnet" -> resourceId == null || resourceId.equals(inst.getSubnetId());
                     case "NetworkInterface" -> hasEni(inst, resourceId);
+            case "ap-southeast-2" -> "apse2";
+            case "ap-southeast-1" -> "apse1";
+            case "eu-central-1" -> "euc1";
+            case "eu-west-1" -> "euw1";
+            case "us-west-2" -> "usw2";
+            case "us-west-1" -> "usw1";
+            case "us-east-2" -> "use2";
+            case "us-east-1" -> "use1";
                     default -> true;
                 };
                 if (!match) {
@@ -705,5 +637,55 @@ public class FlowLogService {
         String subnetId;
         String vpcId;
         String az;
+    }
+
+    /** AWS VPC Flow Logs default (version 5) field order. */
+    static final String DEFAULT_HEADER =
+            "account-id action az-id bytes dstaddr dstport end flow-direction instance-id "
+            + "interface-id log-status packets pkt-dst-aws-service pkt-dstaddr pkt-src-aws-service "
+            + "pkt-srcaddr protocol region srcaddr srcport start sublocation-id sublocation-type "
+            + "subnet-id tcp-flags traffic-path type version vpc-id";
+
+    private static boolean matchesFlowLogFilters(FlowLog fl, Map<String, List<String>> filters) {
+        if (filters == null || filters.isEmpty()) {
+            return true;
+        }
+        for (Map.Entry<String, List<String>> filter : filters.entrySet()) {
+            List<String> values = filter.getValue();
+            if (values == null || values.isEmpty()) {
+                continue;
+            }
+            String observed = switch (filter.getKey()) {
+                case "flow-log-id" -> fl.getFlowLogId();
+                case "resource-id" -> fl.getResourceId();
+                case "resource-type" -> fl.getResourceType();
+                case "traffic-type" -> fl.getTrafficType();
+                case "log-destination-type" -> fl.getLogDestinationType();
+                case "log-group-name" -> fl.getLogGroupName();
+                default -> null;
+            };
+            if (observed != null && values.stream().noneMatch(observed::equals)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static int parseOffsetToken(String nextToken) {
+        if (nextToken == null || nextToken.isBlank()) {
+            return 0;
+        }
+        try {
+            return Math.max(0, Integer.parseInt(nextToken));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    public record FlowLogListResult(List<FlowLog> logs, String nextToken) {}
+
+    private static String customHeader(String logFormat) {
+        // AWS custom format uses ${field-name} tokens; convert to a space-delimited header.
+        return logFormat.replace("${", "").replace("}", "").trim();
     }
 }

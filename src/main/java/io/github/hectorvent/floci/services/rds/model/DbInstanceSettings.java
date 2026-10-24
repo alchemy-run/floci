@@ -315,11 +315,6 @@ public record DbInstanceSettings(Boolean storageEncrypted,
         }
         if (networkType != null && !networkType.isBlank()) {
             instance.setNetworkType(networkType.toUpperCase(Locale.ROOT));
-        if (storageType != null) {
-            instance.setStorageType(storageType);
-        }
-        if (maxAllocatedStorage != null) {
-            instance.setMaxAllocatedStorage(maxAllocatedStorage);
         }
     }
 }

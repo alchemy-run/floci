@@ -3,10 +3,10 @@ package io.github.hectorvent.floci.services.apigateway.model;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
+import java.util.Map;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 @RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -25,10 +25,6 @@ public class CustomDomain {
     private String domainNameStatus; // AVAILABLE, UPDATING, PENDING
     private String securityPolicy;
     private Map<String, String> tags;
-    private String routingMode;
-    private String apiMappingSelectionExpression;
-    private Map<String, Object> mutualTlsAuthentication;
-    private List<Map<String, Object>> domainNameConfigurations;
 
     public CustomDomain() {
         this.domainNameStatus = "AVAILABLE";
@@ -78,18 +74,30 @@ public class CustomDomain {
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags; }
 
+    private String routingMode;
+
+    private String apiMappingSelectionExpression;
+
+    private Map<String, Object> mutualTlsAuthentication;
+
+    private List<Map<String, Object>> domainNameConfigurations;
+
     public String getRoutingMode() { return routingMode; }
+
     public void setRoutingMode(String routingMode) { this.routingMode = routingMode; }
 
     public String getApiMappingSelectionExpression() { return apiMappingSelectionExpression; }
+
     public void setApiMappingSelectionExpression(String expression) { this.apiMappingSelectionExpression = expression; }
 
     public Map<String, Object> getMutualTlsAuthentication() { return mutualTlsAuthentication; }
+
     public void setMutualTlsAuthentication(Map<String, Object> authentication) {
         this.mutualTlsAuthentication = authentication == null ? null : new LinkedHashMap<>(authentication);
     }
 
     public List<Map<String, Object>> getDomainNameConfigurations() { return domainNameConfigurations; }
+
     public void setDomainNameConfigurations(List<Map<String, Object>> configurations) {
         this.domainNameConfigurations = configurations == null ? null : new ArrayList<>();
         if (configurations != null) {

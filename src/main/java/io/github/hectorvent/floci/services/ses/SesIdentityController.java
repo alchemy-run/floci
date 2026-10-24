@@ -39,6 +39,8 @@ import static io.github.hectorvent.floci.services.ses.SesV2Json.remapV1Exception
 import static io.github.hectorvent.floci.services.ses.SesV2Json.requireObjectOrAbsent;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.stringMapMemberOrAbsent;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.stringMemberOrAbsent;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.requireJsonObject;
 
 /**
  * SES V2 email-identity endpoints ({@code /v2/email/identities}), including the sending
@@ -117,10 +119,8 @@ public class SesIdentityController {
             // The service builds the complete identity (default configuration set and tags included)
             // and persists it with a single write, so any failure (AlreadyExists, invalid tags, a
             // missing configuration set) fails the whole call and creates nothing, matching AWS.
-            JsonNode dkimSigning = requireObjectOrAbsent(request, "DkimSigningAttributes");
-            String nextSigningKeyLength = dkimSigning.path("NextSigningKeyLength").asText(null);
             Identity identity = sesService.createEmailIdentity(emailIdentity,
-                    hasConfigSet ? configurationSetName : null, parsedTags, region, nextSigningKeyLength);
+                    hasConfigSet ? configurationSetName : null, parsedTags, region);
 
             ObjectNode result = objectMapper.createObjectNode();
             result.put("IdentityType", toV2IdentityType(identity.getIdentityType()));
@@ -587,6 +587,7 @@ public class SesIdentityController {
             default -> v1Status;
         };
     }
+
     @GET
     @Path("/deliverability-dashboard/statistics-report/{domain}")
     public Response getDomainStatisticsReport(@Context HttpHeaders headers,

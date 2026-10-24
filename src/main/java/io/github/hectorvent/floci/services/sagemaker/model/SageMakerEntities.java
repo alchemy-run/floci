@@ -60,12 +60,6 @@ public final class SageMakerEntities {
         // late.
         public long generation;
         public Map<String, String> tags = new LinkedHashMap<>();
-        // Specified image -> digest-pinned image, filled in by the start worker before it
-        // publishes an InService result.
-        public Map<String, String> resolvedImages = new LinkedHashMap<>();
-        // DescribeEndpoint ProductionVariants (ProductionVariantSummary); empty until the
-        // endpoint first reaches InService.
-        public List<Map<String, Object>> productionVariants = new ArrayList<>();
     }
 
     @RegisterForReflection

@@ -3,7 +3,6 @@ package io.github.hectorvent.floci.services.cloudfront;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RequestHost;
-import io.github.hectorvent.floci.services.cloudfront.CloudFrontResolvedOrigin.AccessControl;
 import io.github.hectorvent.floci.services.cloudfront.model.CloudFrontOriginAccessIdentity;
 import io.github.hectorvent.floci.services.cloudfront.model.Distribution;
 import io.github.hectorvent.floci.services.cloudfront.model.DistributionConfig;
@@ -58,6 +57,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import io.github.hectorvent.floci.services.cloudfront.CloudFrontResolvedOrigin.AccessControl;
+import java.net.http.HttpResponse;
 
 /**
  * Serves viewer requests routed to a CloudFront distribution (via {@link CloudFrontDistributionFilter})
@@ -74,7 +75,7 @@ import java.util.Set;
  *   <li>Custom origins are fetched over HTTP(S) with {@link CloudFrontOriginHttpClient}, carrying the
  *       viewer headers, cookies and query strings the matched behavior forwards, as decided by
  *       {@link CloudFrontOriginRequestBuilder}.</li>
- *   <li>When an origin returns an error status, a matching {@code CustomErrorResponse} is applied -
+ *   <li>When an origin returns an error status, a matching {@code CustomErrorResponse} is applied —
  *       most importantly the single-page-app fallback that rewrites 403/404 to 200 {@code /index.html}.
  *       If the configured error page is itself missing, the received status is returned (no loop).</li>
  * </ul>
@@ -332,101 +333,6 @@ public class CloudFrontServingController {
             }
         }
         return toResponse(origin, includeBody, directives);
-    }
-
-    /** CloudFront rejects ports in DomainName; this loopback form is an emulator-only dev origin. */
-    public static boolean isLocalDevOrigin(String authority) {
-        return CloudFrontOriginHttpClient.isLocalDevOrigin(authority);
-    }
-
-    public Response forwardEdgeLocalDevOrigin(String authority, URI target, String method,
-                                              Map<String, String> headers, byte[] body) throws Exception {
-        try (CloudFrontOriginHttpClient localClient =
-                     CloudFrontOriginHttpClient.forLocalDevOrigin(authority, target.getHost())) {
-            return forwardEdgeCustomOrigin(localClient, target, method, headers, body);
-        }
-    }
-
-    public Response forwardEdgeCustomOrigin(URI target, String method, Map<String, String> headers, byte[] body)
-            throws Exception {
-        return forwardEdgeCustomOrigin(httpClient, target, method, headers, body);
-    }
-
-    private Response forwardEdgeCustomOrigin(CloudFrontOriginHttpClient client, URI target, String method,
-                                              Map<String, String> headers, byte[] body) throws Exception {
-        HttpRequest request = HttpRequest.newBuilder(target).timeout(Duration.ofSeconds(30))
-                .method(method, HttpRequest.BodyPublishers.noBody()).build();
-        HttpResponse<byte[]> response = client.send(
-                request, headers, HttpResponse.BodyHandlers.ofByteArray(), body);
-        byte[] data = response.body() != null ? response.body() : new byte[0];
-        boolean includeBody = !"HEAD".equals(method);
-        return toResponse(new OriginResponse(response.statusCode(),
-                response.headers().firstValue("content-type").orElse(DEFAULT_CONTENT_TYPE),
-                includeBody ? data : null, includeBody ? data.length : responseContentLength(response),
-                response.headers().map()), includeBody, null);
-    }
-
-    public Response serveEdgeS3Origin(Distribution distribution, CloudFrontResolvedOrigin resolved, String rawPath,
-                                      String method, Map<String, String> headers) {
-        Origin origin = resolved.origin();
-        OriginResponse response;
-        if ("OPTIONS".equals(method)) {
-            response = fetchS3Preflight(origin, headers.get("origin"),
-                    headers.get("access-control-request-method"), headers.get("access-control-request-headers"));
-        } else {
-            String key = CloudFrontRequestRouter.resolveOriginKey(origin.getOriginPath(),
-                    decodedViewerPath(rawPath), distribution.getConfig().getDefaultRootObject());
-            response = fetchFromS3(distribution, origin, key, headers.get("authorization"), !"HEAD".equals(method),
-                    resolved.accessControl());
-        }
-        return toResponse(response, !"HEAD".equals(method), null);
-    }
-
-    public Response applyEdgeResponse(Distribution distribution, String rawViewerPath, String method,
-                                       HttpHeaders viewerHeaders, String viewerScheme, Response response,
-                                       boolean originResponse) {
-        String normalized = CloudFrontRequestRouter.normalizePath(decodedViewerPath(rawViewerPath));
-        String policyId = CloudFrontRequestRouter.matchResponseHeadersPolicyId(distribution.getConfig(), normalized);
-        String viewerOrigin = viewerHeaders.getHeaderString("Origin");
-        boolean preflight = "OPTIONS".equals(method) && viewerOrigin != null
-                && viewerHeaders.getHeaderString("Access-Control-Request-Method") != null;
-        ResponseHeadersPolicyConfigCodec.Directives directives = responseHeaderDirectives(
-                policyId, viewerOrigin, preflight, viewerHeaders.getHeaderString("Pragma"));
-        Object entity = response.getEntity();
-        byte[] body = entity instanceof byte[] bytes ? bytes
-                : entity == null ? null : entity.toString().getBytes(StandardCharsets.UTF_8);
-        OriginResponse origin = new OriginResponse(response.getStatus(),
-                response.getHeaderString("Content-Type"), body,
-                body != null ? body.length : response.getLength(), response.getStringHeaders());
-        boolean includeBody = !"HEAD".equals(method);
-        if (originResponse && response.getStatus() >= 400) {
-            Response fallback = applyCustomError(distribution, origin, viewerScheme,
-                    viewerHeaders.getHeaderString(HttpHeaders.AUTHORIZATION), includeBody, directives);
-            if (fallback != null) {
-                return fallback;
-            }
-        }
-        return toResponse(origin, includeBody, directives);
-    }
-
-    public Response validateEdgeViewerRequest(Distribution distribution, String rawViewerPath, String method) {
-        DistributionConfig config = distribution.getConfig();
-        if (config == null || !config.isEnabled()) {
-            return textError(404, "Distribution is disabled.");
-        }
-        String normalized = CloudFrontRequestRouter.normalizePath(decodedViewerPath(rawViewerPath));
-        if (!CloudFrontRequestRouter.matchAllowedMethods(config, normalized).contains(method)) {
-            return textError(403, "Invalid method.");
-        }
-        List<String> trustedKeyGroups = CloudFrontRequestRouter.trustedKeyGroupsFor(config, normalized);
-        if (!trustedKeyGroups.isEmpty()) {
-            CloudFrontSignatureVerifier.Result verdict =
-                    verifySignedRequest(distribution, rawViewerPath, trustedKeyGroups);
-            if (!verdict.allowed()) {
-                return textError(403, "Access denied: " + verdict.reason());
-            }
-        }
-        return null;
     }
 
     /** Resolves the response-headers policy for a behavior into the headers it contributes, if any. */
@@ -688,7 +594,7 @@ public class CloudFrontServingController {
         OriginResponse response;
         try {
             authorizeS3OriginRead(
-                    distribution, origin, bucket, key, viewerAuthorization, accessControl);
+                    distribution, origin, bucket, key, viewerAuthorization);
             if (includeBody) {
                 // The body is streamed to the viewer, so an object of any size is served without
                 // being read into the heap; the metadata and the stream come from one snapshot.
@@ -776,24 +682,20 @@ public class CloudFrontServingController {
             Origin origin,
             String bucket,
             String key,
-            String viewerAuthorization,
-            AccessControl accessControl) {
+            String viewerAuthorization) {
         String oacId = origin.getOriginAccessControlId();
-        if (accessControl == null && oacId != null && !oacId.isBlank()) {
-            accessControl = AccessControl.configured(service.getOriginAccessControl(oacId));
-        }
-        if (accessControl != null) {
-            String signingBehavior = accessControl.signingBehavior();
-            // Even an empty Authorization header suppresses no-override signing.
-            boolean viewerSigned = viewerAuthorization != null;
-            boolean cloudFrontSigns = accessControl.enabled() && ("always".equalsIgnoreCase(signingBehavior)
-                    || ("no-override".equalsIgnoreCase(signingBehavior) && !viewerSigned));
+        if (oacId != null && !oacId.isBlank()) {
+            OriginAccessControl oac = service.getOriginAccessControl(oacId);
+            String signingBehavior = oac.getSigningBehavior();
+            boolean viewerSigned = viewerAuthorization != null && !viewerAuthorization.isBlank();
+            boolean cloudFrontSigns = "always".equalsIgnoreCase(signingBehavior)
+                    || ("no-override".equalsIgnoreCase(signingBehavior) && !viewerSigned);
             if (cloudFrontSigns) {
                 s3Service.authorizeCloudFrontOacGetObject(
                         bucket, key, distribution.getArn());
                 return;
             }
-            if (viewerSigned) {
+            if ("no-override".equalsIgnoreCase(signingBehavior) && viewerSigned) {
                 s3Service.authorizeCloudFrontViewerGetObject(
                         bucket, key, viewerAuthorization);
                 return;
@@ -1030,7 +932,7 @@ public class CloudFrontServingController {
         return normalized.substring(prefix.length());
     }
 
-    public static URI buildCustomOriginUri(String protocol, String domainName, int port,
+    static URI buildCustomOriginUri(String protocol, String domainName, int port,
                                     String forwardUri, String rawQuery) {
         if (port < 1 || port > 65535) {
             throw new IllegalArgumentException("Custom origin port is outside the valid range");
@@ -1130,7 +1032,7 @@ public class CloudFrontServingController {
      *       on success, returned with {@code ResponseCode} (the single-page-app 403/404 -&gt; 200
      *       {@code /index.html} fallback);</li>
      *   <li>if the custom error page is itself unavailable, CloudFront returns the status code it
-     *       received from the origin that holds the error pages, not the original status, and does
+     *       received from the origin that holds the error pages — not the original status — and does
      *       not recurse (no loop).</li>
      * </ul>
      */
@@ -1385,7 +1287,7 @@ public class CloudFrontServingController {
         Map<String, List<String>> headers = new LinkedHashMap<>(response.headers());
         s3Service.evaluateCors(bucket, configuredOrigin, method, List.of()).ifPresent(cors -> {
             // A rule whose AllowedOrigin is "*" echoes "*" rather than the request origin, and the
-            // CORS spec forbids pairing that with Access-Control-Allow-Credentials: true, browsers
+            // CORS spec forbids pairing that with Access-Control-Allow-Credentials: true — browsers
             // reject the combination outright for credentialed requests. Verified against real S3:
             // with AllowedOrigins ["*"] it returns only Allow-Origin/Allow-Methods/Max-Age, while a
             // concrete AllowedOrigin additionally returns Allow-Credentials: true and Vary.
@@ -1550,6 +1452,116 @@ public class CloudFrontServingController {
             } catch (IOException e) {
                 LOG.debugv("Could not close an unsent origin body: {0}", e.getMessage());
             }
+        }
+    }
+
+    /** CloudFront rejects ports in DomainName; this loopback form is an emulator-only dev origin. */
+    public static boolean isLocalDevOrigin(String authority) {
+        return CloudFrontOriginHttpClient.isLocalDevOrigin(authority);
+    }
+
+    public Response forwardEdgeLocalDevOrigin(String authority, URI target, String method,
+                                              Map<String, String> headers, byte[] body) throws Exception {
+        try (CloudFrontOriginHttpClient localClient =
+                     CloudFrontOriginHttpClient.forLocalDevOrigin(authority, target.getHost())) {
+            return forwardEdgeCustomOrigin(localClient, target, method, headers, body);
+        }
+    }
+
+    public Response forwardEdgeCustomOrigin(URI target, String method, Map<String, String> headers, byte[] body)
+            throws Exception {
+        return forwardEdgeCustomOrigin(httpClient, target, method, headers, body);
+    }
+
+    private Response forwardEdgeCustomOrigin(CloudFrontOriginHttpClient client, URI target, String method,
+                                              Map<String, String> headers, byte[] body) throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(target).timeout(Duration.ofSeconds(30))
+                .method(method, HttpRequest.BodyPublishers.noBody()).build();
+        HttpResponse<byte[]> response = client.send(
+                request, headers, HttpResponse.BodyHandlers.ofByteArray(), body);
+        byte[] data = response.body() != null ? response.body() : new byte[0];
+        boolean includeBody = !"HEAD".equals(method);
+        return toResponse(new OriginResponse(response.statusCode(),
+                response.headers().firstValue("content-type").orElse(DEFAULT_CONTENT_TYPE),
+                includeBody ? data : null, includeBody ? data.length : responseContentLength(response),
+                response.headers().map()), includeBody, null);
+    }
+
+    public Response serveEdgeS3Origin(Distribution distribution, CloudFrontResolvedOrigin resolved, String rawPath,
+                                      String method, Map<String, String> headers) {
+        Origin origin = resolved.origin();
+        OriginResponse response;
+        if ("OPTIONS".equals(method)) {
+            response = fetchS3Preflight(origin, headers.get("origin"),
+                    headers.get("access-control-request-method"), headers.get("access-control-request-headers"));
+        } else {
+            String key = CloudFrontRequestRouter.resolveOriginKey(origin.getOriginPath(),
+                    decodedViewerPath(rawPath), distribution.getConfig().getDefaultRootObject());
+            response = fetchFromS3(distribution, origin, key, headers.get("authorization"), !"HEAD".equals(method),
+                    resolved.accessControl());
+        }
+        return toResponse(response, !"HEAD".equals(method), null);
+    }
+
+    public Response applyEdgeResponse(Distribution distribution, String rawViewerPath, String method,
+                                       HttpHeaders viewerHeaders, String viewerScheme, Response response,
+                                       boolean originResponse) {
+        String normalized = CloudFrontRequestRouter.normalizePath(decodedViewerPath(rawViewerPath));
+        String policyId = CloudFrontRequestRouter.matchResponseHeadersPolicyId(distribution.getConfig(), normalized);
+        String viewerOrigin = viewerHeaders.getHeaderString("Origin");
+        boolean preflight = "OPTIONS".equals(method) && viewerOrigin != null
+                && viewerHeaders.getHeaderString("Access-Control-Request-Method") != null;
+        ResponseHeadersPolicyConfigCodec.Directives directives = responseHeaderDirectives(
+                policyId, viewerOrigin, preflight, viewerHeaders.getHeaderString("Pragma"));
+        Object entity = response.getEntity();
+        byte[] body = entity instanceof byte[] bytes ? bytes
+                : entity == null ? null : entity.toString().getBytes(StandardCharsets.UTF_8);
+        OriginResponse origin = new OriginResponse(response.getStatus(),
+                response.getHeaderString("Content-Type"), body,
+                body != null ? body.length : response.getLength(), response.getStringHeaders());
+        boolean includeBody = !"HEAD".equals(method);
+        if (originResponse && response.getStatus() >= 400) {
+            Response fallback = applyCustomError(distribution, origin, viewerScheme,
+                    viewerHeaders.getHeaderString(HttpHeaders.AUTHORIZATION), includeBody, directives);
+            if (fallback != null) {
+                return fallback;
+            }
+        }
+        return toResponse(origin, includeBody, directives);
+    }
+
+    public Response validateEdgeViewerRequest(Distribution distribution, String rawViewerPath, String method) {
+        DistributionConfig config = distribution.getConfig();
+        if (config == null || !config.isEnabled()) {
+            return textError(404, "Distribution is disabled.");
+        }
+        String normalized = CloudFrontRequestRouter.normalizePath(decodedViewerPath(rawViewerPath));
+        if (!CloudFrontRequestRouter.matchAllowedMethods(config, normalized).contains(method)) {
+            return textError(403, "Invalid method.");
+        }
+        List<String> trustedKeyGroups = CloudFrontRequestRouter.trustedKeyGroupsFor(config, normalized);
+        if (!trustedKeyGroups.isEmpty()) {
+            CloudFrontSignatureVerifier.Result verdict =
+                    verifySignedRequest(distribution, rawViewerPath, trustedKeyGroups);
+            if (!verdict.allowed()) {
+                return textError(403, "Access denied: " + verdict.reason());
+            }
+        }
+        return null;
+    }
+
+    private static long responseContentLength(HttpResponse<?> response) {
+        try {
+            return response.headers().firstValueAsLong("content-length").orElse(-1L);
+        } catch (NumberFormatException e) {
+            LOG.debugv("Ignoring invalid custom-origin Content-Length: {0}", e.getMessage());
+            return -1L;
+        }
+    }
+
+    private static void addRequestHeader(HttpRequest.Builder request, String name, String value) {
+        if (value != null && !value.isBlank()) {
+            request.header(name, value);
         }
     }
 }

@@ -45,8 +45,8 @@ public class SnsQueryHandler {
             case "ListTopics" -> handleListTopics(params, region);
             case "GetTopicAttributes" -> handleGetTopicAttributes(params, region);
             case "SetTopicAttributes" -> handleSetTopicAttributes(params, region);
-            case "GetDataProtectionPolicy" -> handleGetDataProtectionPolicy(params, region);
             case "PutDataProtectionPolicy" -> handlePutDataProtectionPolicy(params, region);
+            case "GetDataProtectionPolicy" -> handleGetDataProtectionPolicy(params, region);
             case "AddPermission" -> handleAddPermission(params, region);
             case "RemovePermission" -> handleRemovePermission(params, region);
             case "SetSMSAttributes" -> handleSetSmsAttributes(params, region);
@@ -59,6 +59,7 @@ public class SnsQueryHandler {
             case "CheckIfPhoneNumberIsOptedOut" -> handleCheckIfPhoneNumberIsOptedOut(params);
             case "ListPhoneNumbersOptedOut" -> handleListPhoneNumbersOptedOut();
             case "OptInPhoneNumber" -> handleOptInPhoneNumber(params);
+            case "ListOriginationNumbers" -> handleListOriginationNumbers();
             case "Subscribe" -> handleSubscribe(params, region);
             case "Unsubscribe" -> handleUnsubscribe(params, region);
             case "ListSubscriptions" -> handleListSubscriptions(params, region);
@@ -81,19 +82,6 @@ public class SnsQueryHandler {
             case "GetEndpointAttributes" -> handleGetEndpointAttributes(params, region);
             case "SetEndpointAttributes" -> handleSetEndpointAttributes(params, region);
             case "ListEndpointsByPlatformApplication" -> handleListEndpointsByPlatformApplication(params, region);
-            case "AddPermission" -> handleAddPermission(params, region);
-            case "RemovePermission" -> handleRemovePermission(params, region);
-            case "GetSMSAttributes" -> handleGetSmsAttributes(params, region);
-            case "SetSMSAttributes" -> handleSetSmsAttributes(params, region);
-            case "CheckIfPhoneNumberIsOptedOut" -> handleCheckIfPhoneNumberIsOptedOut(params, region);
-            case "ListPhoneNumbersOptedOut" -> handleListPhoneNumbersOptedOut(region);
-            case "OptInPhoneNumber" -> handleOptInPhoneNumber(params, region);
-            case "ListOriginationNumbers" -> handleListOriginationNumbers();
-            case "GetSMSSandboxAccountStatus" -> handleGetSmsSandboxAccountStatus();
-            case "ListSMSSandboxPhoneNumbers" -> handleListSmsSandboxPhoneNumbers(region);
-            case "CreateSMSSandboxPhoneNumber" -> handleCreateSmsSandboxPhoneNumber(params, region);
-            case "VerifySMSSandboxPhoneNumber" -> handleVerifySmsSandboxPhoneNumber(params, region);
-            case "DeleteSMSSandboxPhoneNumber" -> handleDeleteSmsSandboxPhoneNumber(params, region);
             default -> AwsQueryResponse.error("UnsupportedOperation",
                     "Operation " + action + " is not supported by SNS.", AwsNamespaces.SNS, 400);
         };
@@ -300,28 +288,6 @@ public class SnsQueryHandler {
                     .build();
         } catch (AwsException e) {
             return xmlErrorResponse(e);
-        }
-    }
-
-    private Response handleGetDataProtectionPolicy(MultivaluedMap<String, String> params, String region) {
-        String resourceArn = getParam(params, "ResourceArn");
-        try {
-            String policy = snsService.getDataProtectionPolicy(resourceArn, region);
-            String result = new XmlBuilder().elem("DataProtectionPolicy", policy).build();
-            return Response.ok(AwsQueryResponse.envelope("GetDataProtectionPolicy", AwsNamespaces.SNS, result)).build();
-        } catch (AwsException e) {
-            return xmlErrorResponse(e.getErrorCode(), e.getMessage(), e.getHttpStatus());
-        }
-    }
-
-    private Response handlePutDataProtectionPolicy(MultivaluedMap<String, String> params, String region) {
-        String resourceArn = getParam(params, "ResourceArn");
-        String dataProtectionPolicy = getParam(params, "DataProtectionPolicy");
-        try {
-            snsService.putDataProtectionPolicy(resourceArn, dataProtectionPolicy, region);
-            return Response.ok(AwsQueryResponse.envelopeNoResult("PutDataProtectionPolicy", AwsNamespaces.SNS)).build();
-        } catch (AwsException e) {
-            return xmlErrorResponse(e.getErrorCode(), e.getMessage(), e.getHttpStatus());
         }
     }
 
@@ -665,131 +631,6 @@ public class SnsQueryHandler {
         }
     }
 
-    private Response handleAddPermission(MultivaluedMap<String, String> params, String region) {
-        String topicArn = getParam(params, "TopicArn");
-        String label = getParam(params, "Label");
-        List<String> accountIds = collectIndexed(params, "AWSAccountId");
-        List<String> actions = collectIndexed(params, "ActionName");
-        try {
-            snsService.addPermission(topicArn, label, accountIds, actions, region);
-            return Response.ok(AwsQueryResponse.envelopeNoResult("AddPermission", AwsNamespaces.SNS)).build();
-        } catch (AwsException e) {
-            return xmlErrorResponse(e.getErrorCode(), e.getMessage(), e.getHttpStatus());
-        }
-    }
-
-    private Response handleRemovePermission(MultivaluedMap<String, String> params, String region) {
-        String topicArn = getParam(params, "TopicArn");
-        String label = getParam(params, "Label");
-        try {
-            snsService.removePermission(topicArn, label, region);
-            return Response.ok(AwsQueryResponse.envelopeNoResult("RemovePermission", AwsNamespaces.SNS)).build();
-        } catch (AwsException e) {
-            return xmlErrorResponse(e.getErrorCode(), e.getMessage(), e.getHttpStatus());
-        }
-    }
-
-    private Response handleGetSmsAttributes(MultivaluedMap<String, String> params, String region) {
-        Map<String, String> attrs = snsService.getSmsAttributes(region);
-        List<String> requested = collectIndexed(params, "attributes");
-        if (requested.isEmpty()) {
-            requested = collectIndexed(params, "Attributes");
-        }
-        var xml = new XmlBuilder().start("attributes");
-        for (var entry : attrs.entrySet()) {
-            if (!requested.isEmpty() && !requested.contains(entry.getKey())) {
-                continue;
-            }
-            xml.start("entry").elem("key", entry.getKey()).elem("value", entry.getValue()).end("entry");
-        }
-        xml.end("attributes");
-        return Response.ok(AwsQueryResponse.envelope("GetSMSAttributes", AwsNamespaces.SNS, xml.build())).build();
-    }
-
-    private Response handleSetSmsAttributes(MultivaluedMap<String, String> params, String region) {
-        Map<String, String> attrs = extractSnsAttributes(params, "attributes");
-        if (attrs.isEmpty()) {
-            attrs = extractSnsAttributes(params, "Attributes");
-        }
-        snsService.setSmsAttributes(attrs, region);
-        return Response.ok(AwsQueryResponse.envelopeNoResult("SetSMSAttributes", AwsNamespaces.SNS)).build();
-    }
-
-    private Response handleCheckIfPhoneNumberIsOptedOut(MultivaluedMap<String, String> params, String region) {
-        String phone = firstNonNull(getParam(params, "phoneNumber"), getParam(params, "PhoneNumber"));
-        boolean optedOut = snsService.isPhoneNumberOptedOut(phone, region);
-        String result = new XmlBuilder().elem("isOptedOut", optedOut).build();
-        return Response.ok(AwsQueryResponse.envelope("CheckIfPhoneNumberIsOptedOut", AwsNamespaces.SNS, result)).build();
-    }
-
-    private Response handleListPhoneNumbersOptedOut(String region) {
-        var xml = new XmlBuilder().start("phoneNumbers");
-        for (String number : snsService.listPhoneNumbersOptedOut(region)) {
-            xml.elem("member", number);
-        }
-        xml.end("phoneNumbers");
-        return Response.ok(AwsQueryResponse.envelope("ListPhoneNumbersOptedOut", AwsNamespaces.SNS, xml.build())).build();
-    }
-
-    private Response handleOptInPhoneNumber(MultivaluedMap<String, String> params, String region) {
-        String phone = firstNonNull(getParam(params, "phoneNumber"), getParam(params, "PhoneNumber"));
-        snsService.optInPhoneNumber(phone, region);
-        return Response.ok(AwsQueryResponse.envelopeNoResult("OptInPhoneNumber", AwsNamespaces.SNS)).build();
-    }
-
-    private Response handleListOriginationNumbers() {
-        var xml = new XmlBuilder().start("PhoneNumbers").end("PhoneNumbers");
-        return Response.ok(AwsQueryResponse.envelope("ListOriginationNumbers", AwsNamespaces.SNS, xml.build())).build();
-    }
-
-    private Response handleGetSmsSandboxAccountStatus() {
-        String result = new XmlBuilder().elem("IsInSandbox", snsService.isInSmsSandbox()).build();
-        return Response.ok(AwsQueryResponse.envelope("GetSMSSandboxAccountStatus", AwsNamespaces.SNS, result)).build();
-    }
-
-    private Response handleListSmsSandboxPhoneNumbers(String region) {
-        var xml = new XmlBuilder().start("PhoneNumbers");
-        for (Map<String, String> number : snsService.listSmsSandboxPhoneNumbers(region)) {
-            xml.start("member")
-                    .elem("PhoneNumber", number.get("PhoneNumber"))
-                    .elem("Status", number.get("Status"))
-                    .end("member");
-        }
-        xml.end("PhoneNumbers");
-        return Response.ok(AwsQueryResponse.envelope("ListSMSSandboxPhoneNumbers", AwsNamespaces.SNS, xml.build())).build();
-    }
-
-    private Response handleCreateSmsSandboxPhoneNumber(MultivaluedMap<String, String> params, String region) {
-        String phone = getParam(params, "PhoneNumber");
-        try {
-            snsService.createSmsSandboxPhoneNumber(phone, region);
-            return Response.ok(AwsQueryResponse.envelopeNoResult("CreateSMSSandboxPhoneNumber", AwsNamespaces.SNS)).build();
-        } catch (AwsException e) {
-            return xmlErrorResponse(e.getErrorCode(), e.getMessage(), e.getHttpStatus());
-        }
-    }
-
-    private Response handleVerifySmsSandboxPhoneNumber(MultivaluedMap<String, String> params, String region) {
-        String phone = getParam(params, "PhoneNumber");
-        String otp = getParam(params, "OneTimePassword");
-        try {
-            snsService.verifySmsSandboxPhoneNumber(phone, otp, region);
-            return Response.ok(AwsQueryResponse.envelopeNoResult("VerifySMSSandboxPhoneNumber", AwsNamespaces.SNS)).build();
-        } catch (AwsException e) {
-            return xmlErrorResponse(e.getErrorCode(), e.getMessage(), e.getHttpStatus());
-        }
-    }
-
-    private Response handleDeleteSmsSandboxPhoneNumber(MultivaluedMap<String, String> params, String region) {
-        String phone = getParam(params, "PhoneNumber");
-        try {
-            snsService.deleteSmsSandboxPhoneNumber(phone, region);
-            return Response.ok(AwsQueryResponse.envelopeNoResult("DeleteSMSSandboxPhoneNumber", AwsNamespaces.SNS)).build();
-        } catch (AwsException e) {
-            return xmlErrorResponse(e.getErrorCode(), e.getMessage(), e.getHttpStatus());
-        }
-    }
-
     // --- Helpers ---
 
     private Map<String, String> extractSnsAttributes(MultivaluedMap<String, String> params, String prefix) {
@@ -818,23 +659,6 @@ public class SnsQueryHandler {
         return params.getFirst(name);
     }
 
-    private static String firstNonNull(String a, String b) {
-        return a != null ? a : b;
-    }
-
-    private List<String> collectIndexed(MultivaluedMap<String, String> params, String name) {
-        List<String> values = new ArrayList<>();
-        for (int i = 1; ; i++) {
-            String v = getParam(params, name + ".member." + i);
-            if (v == null) {
-                v = getParam(params, name + "." + i);
-            }
-            if (v == null) {
-                break;
-            }
-            values.add(v);
-        }
-        return values;
     /** A list parameter's {@code <name>.member.N} values, in order, up to the first gap. */
     private List<String> memberList(MultivaluedMap<String, String> params, String name) {
         List<String> values = new ArrayList<>();
@@ -884,5 +708,51 @@ public class SnsQueryHandler {
         }
         return AwsQueryResponse.error(e.getErrorCode(), e.getMessage(), AwsNamespaces.SNS, e.getHttpStatus(),
                 members);
+    }
+
+    private Response handleGetDataProtectionPolicy(MultivaluedMap<String, String> params, String region) {
+        String resourceArn = getParam(params, "ResourceArn");
+        try {
+            String policy = snsService.getDataProtectionPolicy(resourceArn, region);
+            String result = new XmlBuilder().elem("DataProtectionPolicy", policy).build();
+            return Response.ok(AwsQueryResponse.envelope("GetDataProtectionPolicy", AwsNamespaces.SNS, result)).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e.getErrorCode(), e.getMessage(), e.getHttpStatus());
+        }
+    }
+
+    private Response handlePutDataProtectionPolicy(MultivaluedMap<String, String> params, String region) {
+        String resourceArn = getParam(params, "ResourceArn");
+        String dataProtectionPolicy = getParam(params, "DataProtectionPolicy");
+        try {
+            snsService.putDataProtectionPolicy(resourceArn, dataProtectionPolicy, region);
+            return Response.ok(AwsQueryResponse.envelopeNoResult("PutDataProtectionPolicy", AwsNamespaces.SNS)).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e.getErrorCode(), e.getMessage(), e.getHttpStatus());
+        }
+    }
+
+    private Response handleListOriginationNumbers() {
+        var xml = new XmlBuilder().start("PhoneNumbers").end("PhoneNumbers");
+        return Response.ok(AwsQueryResponse.envelope("ListOriginationNumbers", AwsNamespaces.SNS, xml.build())).build();
+    }
+
+    private static String firstNonNull(String a, String b) {
+        return a != null ? a : b;
+    }
+
+    private List<String> collectIndexed(MultivaluedMap<String, String> params, String name) {
+        List<String> values = new ArrayList<>();
+        for (int i = 1; ; i++) {
+            String v = getParam(params, name + ".member." + i);
+            if (v == null) {
+                v = getParam(params, name + "." + i);
+            }
+            if (v == null) {
+                break;
+            }
+            values.add(v);
+        }
+        return values;
     }
 }

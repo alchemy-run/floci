@@ -49,7 +49,6 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.Comparator;
 import java.util.Enumeration;
 import java.util.HashSet;
@@ -74,6 +73,7 @@ import java.util.zip.CRC32;
 import java.util.zip.Inflater;
 import java.util.zip.InflaterInputStream;
 import java.util.zip.ZipEntry;
+import java.util.Base64;
 
 @ApplicationScoped
 public class CodePipelineService {
@@ -233,7 +233,7 @@ public class CodePipelineService {
             case "ListPipelineExecutions" -> listPipelineExecutions(request, region, account);
             case "ListActionExecutions" -> listActionExecutions(request, region, account);
             case "ListRuleExecutions" -> listRuleExecutions(request, region, account);
-            case "ListDeployActionExecutionTargets" -> listDeployActionExecutionTargets(request, region, account);
+            case "ListDeployActionExecutionTargets" -> emptyPage("targets");
             case "DisableStageTransition" -> setStageTransition(request, region, account, false);
             case "EnableStageTransition" -> setStageTransition(request, region, account, true);
             case "PutApprovalResult" -> putApprovalResult(request, region, account);
@@ -254,7 +254,7 @@ public class CodePipelineService {
                     completeJob(request, region, account, true);
             case "PutJobFailureResult", "PutThirdPartyJobFailureResult" ->
                     completeJob(request, region, account, false);
-            case "PutActionRevision" -> putActionRevision(request, region, account);
+            case "PutActionRevision" -> putActionRevision(request);
             case "PutWebhook" -> putWebhook(request, region, account);
             case "DeleteWebhook" -> deleteWebhook(request, region, account);
             case "ListWebhooks" -> listWebhooks(request, region, account);
@@ -534,12 +534,6 @@ public class CodePipelineService {
                 }
             }
             deleteSourcePollingBaselines(account, region, name);
-            for (String key : itemStore.keysForAccount(account)) {
-                if (key.startsWith(itemKey(region, "action-revision", name + "::"))
-                        || key.startsWith(itemKey(region, "artifact", name + "::"))) {
-                    itemStore.deleteForAccount(account, key);
-                }
-            }
         });
         return mapper.createObjectNode();
     }
@@ -750,6 +744,7 @@ public class CodePipelineService {
     private ObjectNode getPipelineState(JsonNode request, String region, String account) {
         CodePipelinePipeline pipeline = requirePipeline(account, region, text(request, "name"));
         List<CodePipelineExecution> pipelineExecutions = executions(account, region, pipeline.getName());
+        CodePipelineExecution latest = pipelineExecutions.stream().findFirst().orElse(null);
         ObjectNode response = mapper.createObjectNode();
         response.put("pipelineName", pipeline.getName());
         response.put("pipelineVersion", pipeline.getVersion());
@@ -766,10 +761,6 @@ public class CodePipelineService {
             putIfNotNull(transitionNode, "lastChangedAt", transition.getLastChangedAt());
             putIfNotNull(transitionNode, "lastChangedBy", transition.getLastChangedBy());
             putIfNotNull(transitionNode, "disabledReason", transition.getReason());
-            CodePipelineExecution latestStageExecution = pipelineExecutions.stream()
-                    .filter(execution -> hasStageExecution(execution, stageName))
-                    .findFirst()
-                    .orElse(null);
             ArrayNode actionStates = state.putArray("actionStates");
             for (JsonNode action : stage.path("actions")) {
                 ObjectNode actionState = actionStates.addObject();
@@ -782,6 +773,10 @@ public class CodePipelineService {
                     }
                 }
             }
+            CodePipelineExecution latestStageExecution = pipelineExecutions.stream()
+                    .filter(execution -> hasStageExecution(execution, stageName))
+                    .findFirst()
+                    .orElse(null);
             if (latestStageExecution != null) {
                 ObjectNode latestExecution = state.putObject("latestExecution");
                 latestExecution.put("pipelineExecutionId", latestStageExecution.getPipelineExecutionId());
@@ -963,14 +958,6 @@ public class CodePipelineService {
     }
 
     private ObjectNode rollbackStage(JsonNode request, String region, String account) {
-        return startLocks.withLock(pipelineLockKey(account, region, text(request, "pipelineName")),
-                () -> rollbackStageLocked(request, region, account));
-    }
-
-    private ObjectNode rollbackStageLocked(JsonNode request, String region, String account) {
-        CodePipelinePipeline pipeline = requirePipeline(account, region, text(request, "pipelineName"));
-        String stageName = text(request, "stageName");
-        requireStage(pipeline, stageName);
         String pipelineName = text(request, "pipelineName");
         String stageName = text(request, "stageName");
         CodePipelinePipeline pipeline = requirePipeline(account, region, pipelineName);
@@ -1372,24 +1359,11 @@ public class CodePipelineService {
                     thirdParty ? "PollForThirdPartyJobs requires owner ThirdParty"
                             : "PollForJobs requires owner Custom", 400);
         }
-        String requested = actionTypeId(text(actionTypeId, "category"),
-                owner, text(actionTypeId, "provider"), text(actionTypeId, "version"));
-        requireItem(account, region, "action", requested, "ActionTypeNotFoundException");
-        if (request.hasNonNull("maxBatchSize") && (!request.path("maxBatchSize").isIntegralNumber()
-                || !request.path("maxBatchSize").canConvertToInt() || request.path("maxBatchSize").asInt() < 1)) {
-            throw new AwsException("ValidationException", "maxBatchSize must be a positive integer", 400);
-        }
-        JsonNode query = request.path("queryParam");
-        if (!query.isMissingNode() && !query.isObject()) {
-            throw new AwsException("ValidationException", "queryParam must be an object", 400);
-        }
-        for (JsonNode value : query) {
-            if (!value.isTextual()) {
-                throw new AwsException("ValidationException", "queryParam values must be strings", 400);
-            }
-        }
+        String requested = actionTypeId(actionTypeId.path("category").asText(),
+                owner, actionTypeId.path("provider").asText(),
+                actionTypeId.path("version").asText());
         ArrayNode jobs = mapper.createArrayNode();
-        int maximum = request.path("maxBatchSize").asInt(1);
+        int maximum = Math.max(1, request.path("maxBatchSize").asInt(1));
         for (CodePipelineStoredItem item : items(account, region, "job")) {
             if (jobs.size() >= maximum) {
                 break;
@@ -1399,24 +1373,13 @@ public class CodePipelineService {
             }
             JsonNode data = item.getData();
             if (requested.equals(data.path("actionTypeKey").asText())
-                    && thirdParty == data.path("thirdParty").asBoolean(false)
-                    && matchesJobQuery(data.path("job").path("data").path("actionConfiguration")
-                            .path("configuration"), query)) {
+                    && thirdParty == data.path("thirdParty").asBoolean(false)) {
                 jobs.add(data.path("job"));
             }
         }
         ObjectNode response = mapper.createObjectNode();
         response.set("jobs", jobs);
         return response;
-    }
-
-    private boolean matchesJobQuery(JsonNode configuration, JsonNode query) {
-        for (Map.Entry<String, JsonNode> entry : query.properties()) {
-            if (!entry.getValue().equals(configuration.path(entry.getKey()))) {
-                return false;
-            }
-        }
-        return true;
     }
 
     private ObjectNode acknowledgeJob(JsonNode request, String region, String account) {
@@ -1427,7 +1390,7 @@ public class CodePipelineService {
             throw new AwsException("InvalidNonceException", "Invalid job nonce", 400);
         }
         if (!"Created".equals(job.getStatus())) {
-            return mapper.createObjectNode().put("status", job.getStatus());
+            throw new AwsException("InvalidJobStateException", "Job has already been acknowledged", 400);
         }
         job.setStatus("InProgress");
         job.setUpdated(now());
@@ -1438,9 +1401,7 @@ public class CodePipelineService {
     private ObjectNode getJobDetails(JsonNode request, String region, String account) {
         CodePipelineStoredItem job = requireItem(
                 account, region, "job", text(request, "jobId"), "JobNotFoundException");
-        ObjectNode details = job.getData().path("job").deepCopy();
-        details.remove("nonce");
-        return mapper.createObjectNode().set("jobDetails", details);
+        return mapper.createObjectNode().set("jobDetails", job.getData().path("job"));
     }
 
     private ObjectNode completeJob(JsonNode request, String region, String account, boolean success) {
@@ -1457,37 +1418,11 @@ public class CodePipelineService {
         return mapper.createObjectNode();
     }
 
-    private ObjectNode putActionRevision(JsonNode request, String region, String account) {
-        CodePipelinePipeline pipeline = requirePipeline(account, region, text(request, "pipelineName"));
-        String stageName = text(request, "stageName");
-        String actionName = text(request, "actionName");
-        JsonNode action = requireAction(pipeline, stageName, actionName);
-        if (!"Source".equals(action.path("actionTypeId").path("category").asText())) {
-            throw new AwsException("ValidationException", "Action revisions require a source action", 400);
-        }
-        JsonNode revision = request.path("actionRevision");
-        String revisionId = text(revision, "revisionId");
-        text(revision, "revisionChangeId");
-        if (!revision.path("created").isNumber()) {
-            throw new AwsException("ValidationException", "actionRevision.created must be a timestamp", 400);
-        }
-        String id = sourcePollCursorId(pipeline.getName(), stageName, actionName);
-        return sourcePollLocks.withLock(pipelineLockKey(account, region, pipeline.getName()), () -> {
-            Optional<CodePipelineStoredItem> previous = itemStore.getForAccount(
-                    account, itemKey(region, "action-revision", id));
-            if (previous.isPresent()
-                    && revisionId.equals(previous.get().getData().path("revision").path("revisionId").asText())) {
-                return mapper.createObjectNode().put("newRevision", false)
-                        .put("pipelineExecutionId", previous.get().getData().path("pipelineExecutionId").asText());
-            }
-            ObjectNode started = startPipelineExecution(mapper.createObjectNode().put("name", pipeline.getName()),
-                    region, account, "PutActionRevision", revisionId);
-            ObjectNode data = mapper.createObjectNode();
-            data.set("revision", revision.deepCopy());
-            data.put("pipelineExecutionId", started.path("pipelineExecutionId").asText());
-            storeItem(account, region, "action-revision", id, "ACTIVE", data);
-            return started.put("newRevision", true);
-        });
+    private ObjectNode putActionRevision(JsonNode request) {
+        ObjectNode response = mapper.createObjectNode();
+        response.put("newRevision", true);
+        response.put("pipelineExecutionId", UUID.randomUUID().toString());
+        return response;
     }
 
     private ObjectNode putWebhook(JsonNode request, String region, String account) {
@@ -1590,11 +1525,6 @@ public class CodePipelineService {
     }
 
     private void runExecution(CodePipelinePipeline pipeline, CodePipelineExecution execution) {
-        runExecution(pipeline, execution, execution.getResumeStageName(), execution.isRetryFailedActionsOnly());
-    }
-
-    private void runExecution(CodePipelinePipeline pipeline, CodePipelineExecution execution,
-                              String startStageName, boolean failedActionsOnly) {
         activeRuns.add(runKey(execution));
         Runnable work = () -> {
             try {
@@ -1977,13 +1907,7 @@ public class CodePipelineService {
     private void runStage(CodePipelinePipeline pipeline, CodePipelineExecution execution, JsonNode stage,
                           String retryMode, Map<String, String> previousStatuses) {
         Map<Integer, List<JsonNode>> groups = new LinkedHashMap<>();
-        List<ActionExecution> previous = actionExecutionsForStage(execution, stage.path("name").asText());
         for (JsonNode action : stage.path("actions")) {
-            if (failedActionsOnly && previous.stream().anyMatch(attempt ->
-                    action.path("name").asText().equals(attempt.getActionName())
-                            && "Succeeded".equals(attempt.getStatus()))) {
-                continue;
-            }
             groups.computeIfAbsent(action.path("runOrder").asInt(1), ignored -> new ArrayList<>()).add(action);
         }
         groups.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry -> {
@@ -2099,11 +2023,7 @@ public class CodePipelineService {
                     execution, state.getActionName(), "S3_OBJECT_VERSION_ID");
             S3Object object = s3Service.getObject(bucket, key, versionId);
             for (JsonNode artifact : action.path("outputArtifacts")) {
-                String artifactName = artifact.path("name").asText();
-                runtimeArtifacts.put(artifactKey(execution, artifactName), object.getData());
-                storeItem(execution.getAccountId(), execution.getRegion(), "artifact",
-                        storedArtifactId(execution, artifactName), "AVAILABLE",
-                        mapper.createObjectNode().put("bytes", Base64.getEncoder().encodeToString(object.getData())));
+                runtimeArtifacts.put(artifactKey(execution, artifact.path("name").asText()), object.getData());
             }
             String revisionId = object.getVersionId() != null
                     ? object.getVersionId() : unquoteETag(object.getETag());
@@ -2125,14 +2045,7 @@ public class CodePipelineService {
         String bucket = config.path("BucketName").asText(config.path("S3Bucket").asText(null));
         String objectKey = config.path("ObjectKey").asText(state.getActionName() + ".zip");
         JsonNode input = action.path("inputArtifacts").path(0);
-        String artifactName = input.path("name").asText();
-        byte[] data = runtimeArtifacts.get(artifactKey(execution, artifactName));
-        if (data == null) {
-            data = itemStore.getForAccount(execution.getAccountId(),
-                            itemKey(execution.getRegion(), "artifact", storedArtifactId(execution, artifactName)))
-                    .map(item -> Base64.getDecoder().decode(item.getData().path("bytes").asText()))
-                    .orElse(null);
-        }
+        byte[] data = runtimeArtifacts.get(artifactKey(execution, input.path("name").asText()));
         if (data == null) {
             throw new AwsException("InvalidJobStateException", "Input artifact is not available", 400);
         }
@@ -2560,17 +2473,13 @@ public class CodePipelineService {
         ObjectNode job = mapper.createObjectNode();
         job.put("id", jobId);
         job.put("nonce", nonce);
-        job.put("accountId", execution.getAccountId());
         ObjectNode data = job.putObject("data");
-        data.set("actionTypeId", action.path("actionTypeId").deepCopy());
         data.set("actionConfiguration", mapper.createObjectNode().set("configuration", action.path("configuration")));
-        ObjectNode context = data.putObject("pipelineContext");
-        context.put("pipelineName", pipeline.getName());
-        context.put("pipelineArn", pipeline.getArn());
-        context.put("pipelineExecutionId", execution.getPipelineExecutionId());
-        context.putObject("stage").put("name", state.getStageName());
-        context.putObject("action").put("name", state.getActionName())
-                .put("actionExecutionId", state.getActionExecutionId());
+        data.set("pipelineContext", mapper.createObjectNode()
+                .put("pipelineName", pipeline.getName())
+                .put("pipelineExecutionId", execution.getPipelineExecutionId())
+                .put("stageName", state.getStageName())
+                .put("actionName", state.getActionName()));
         ObjectNode stored = mapper.createObjectNode();
         stored.put("actionTypeKey", actionTypeId(
                 state.getCategory(), state.getOwner(), state.getProvider(),
@@ -2889,7 +2798,7 @@ public class CodePipelineService {
             if (stageName.equals(stage.path("name").asText())) {
                 for (JsonNode action : stage.path("actions")) {
                     if (actionName.equals(action.path("name").asText())) {
-                        return action;
+                        return;
                     }
                 }
                 throw new AwsException("ActionNotFoundException", "Action not found: " + actionName, 400);
@@ -2988,13 +2897,9 @@ public class CodePipelineService {
     }
 
     private List<ActionExecution> actionExecutionsForStage(CodePipelineExecution execution, String stage) {
-        Map<String, ActionExecution> latest = new LinkedHashMap<>();
-        for (ActionExecution action : execution.getActionExecutions()) {
-            if (stage.equals(action.getStageName())) {
-                latest.put(action.getActionName(), action);
-            }
-        }
-        return new ArrayList<>(latest.values());
+        return execution.getActionExecutions().stream()
+                .filter(a -> stage.equals(a.getStageName()))
+                .toList();
     }
 
     private boolean hasStageExecution(CodePipelineExecution execution, String stage) {
@@ -3236,19 +3141,6 @@ public class CodePipelineService {
         return action.path("configuration").path("BucketName").asText("codepipeline-artifacts");
     }
 
-    private static String storedArtifactId(CodePipelineExecution execution, String artifactName) {
-        return execution.getPipelineName() + "::" + execution.getPipelineExecutionId() + "::" + artifactName;
-    }
-
-    private void copyExecutionArtifacts(CodePipelineExecution source, CodePipelineExecution target) {
-        String prefix = storedArtifactId(source, "");
-        for (CodePipelineStoredItem artifact : items(source.getAccountId(), source.getRegion(), "artifact")) {
-            if (artifact.getId().startsWith(prefix)) {
-                String name = artifact.getId().substring(prefix.length());
-                storeItem(target.getAccountId(), target.getRegion(), "artifact",
-                        storedArtifactId(target, name), "AVAILABLE", artifact.getData());
-            }
-        }
     private static String runKey(CodePipelineExecution execution) {
         return execution.getAccountId() + ":" + execution.getPipelineExecutionId();
     }
@@ -3302,5 +3194,165 @@ public class CodePipelineService {
     }
 
     private record Page(int start, int end) {
+    }
+
+    private static final long POLL_INTERVAL_MS = 100L;
+
+    private static final long SOURCE_POLL_INTERVAL_MS = 500L;
+
+    private ObjectNode retryStageExecutionLocked(JsonNode request, String region, String account) {
+        CodePipelinePipeline pipeline = requirePipeline(account, region, text(request, "pipelineName"));
+        String stageName = text(request, "stageName");
+        requireStage(pipeline, stageName);
+        String retryMode = text(request, "retryMode");
+        if (!List.of("FAILED_ACTIONS", "ALL_ACTIONS").contains(retryMode)) {
+            throw new AwsException("ValidationException", "Invalid retryMode: " + retryMode, 400);
+        }
+        CodePipelineExecution source = requireLatestStageExecution(
+                pipeline, stageName, text(request, "pipelineExecutionId"));
+        if (!Objects.equals(source.getPipelineVersion(), pipeline.getVersion())
+                || !hasStageExecution(source, stageName)
+                || !"Failed".equals(stageExecutionStatus(source, stageName))) {
+            throw new AwsException("StageNotRetryableException", "The stage has no retryable failed execution", 400);
+        }
+        if (source.getCurrentStage() != null || !isTerminal(source.getStatus())) {
+            throw new AwsException("ConflictException", "The pipeline execution is still running", 400);
+        }
+        source.setStatus("InProgress");
+        source.setStatusSummary("Retrying stage " + stageName);
+        source.setStopRequested(false);
+        source.setAbandon(false);
+        source.setLastUpdateTime(now());
+        source.getStageExecutionStatuses().remove(stageName);
+        putExecution(source);
+        submitStageExecution(pipeline, source, stageName, "FAILED_ACTIONS".equals(retryMode));
+        return mapper.createObjectNode().put("pipelineExecutionId", source.getPipelineExecutionId());
+    }
+
+    private ObjectNode rollbackStageLocked(JsonNode request, String region, String account) {
+        CodePipelinePipeline pipeline = requirePipeline(account, region, text(request, "pipelineName"));
+        String stageName = text(request, "stageName");
+        requireStage(pipeline, stageName);
+        CodePipelineExecution target = requireExecution(
+                account, region, pipeline.getName(), text(request, "targetPipelineExecutionId"));
+        if (!Objects.equals(target.getPipelineVersion(), pipeline.getVersion())) {
+            throw new AwsException("PipelineExecutionOutdatedException", "The pipeline structure has changed", 400);
+        }
+        if (!hasStageExecution(target, stageName) || !"Succeeded".equals(stageExecutionStatus(target, stageName))
+                || "ROLLBACK".equals(target.getExecutionType()) || "PARALLEL".equals(target.getExecutionMode())) {
+            throw new AwsException("UnableToRollbackStageException", "The target stage execution cannot be rolled back", 400);
+        }
+        if (executions(account, region, pipeline.getName()).stream()
+                .anyMatch(execution -> stageName.equals(execution.getCurrentStage()))) {
+            throw new AwsException("ConflictException", "The stage is still running", 400);
+        }
+        CodePipelineExecution rollback = mapper.convertValue(target, CodePipelineExecution.class);
+        rollback.setPipelineExecutionId(UUID.randomUUID().toString());
+        rollback.setExecutionType("ROLLBACK");
+        rollback.setRollbackTargetPipelineExecutionId(target.getPipelineExecutionId());
+        rollback.setStatus("InProgress");
+        rollback.setStatusSummary("Rolling back stage " + stageName);
+        rollback.setStartTime(now());
+        rollback.setLastUpdateTime(rollback.getStartTime());
+        rollback.setCurrentStage(null);
+        rollback.setStopRequested(false);
+        rollback.setAbandon(false);
+        rollback.setActionExecutions(new ArrayList<>());
+        rollback.setStageExecutionStatuses(new LinkedHashMap<>());
+        rollback.setTrigger(Map.of("triggerType", "ManualRollback", "triggerDetail", target.getPipelineExecutionId()));
+        copyExecutionArtifacts(target, rollback);
+        putExecution(rollback);
+        submitStageExecution(pipeline, rollback, stageName, false);
+        return mapper.createObjectNode().put("pipelineExecutionId", rollback.getPipelineExecutionId());
+    }
+
+    private void submitStageExecution(CodePipelinePipeline pipeline, CodePipelineExecution execution,
+                                      String stageName, boolean failedActionsOnly) {
+        execution.setCurrentStage(stageName);
+        execution.setResumeStageName(stageName);
+        execution.setRetryFailedActionsOnly(failedActionsOnly);
+        putExecution(execution);
+        try {
+            executor.submit(() -> runExecution(pipeline, execution));
+        } catch (RejectedExecutionException exception) {
+            execution.setStatus("Failed");
+            execution.setCurrentStage(null);
+            execution.setStatusSummary("Pipeline execution could not be scheduled.");
+            putExecution(execution);
+            throw new AwsException("ConflictException", "The pipeline execution could not be scheduled", 400);
+        }
+    }
+
+    private CodePipelineExecution requireLatestStageExecution(CodePipelinePipeline pipeline, String stageName,
+                                                               String executionId) {
+        CodePipelineExecution latest = executions(pipeline.getAccountId(), pipeline.getRegion(), pipeline.getName())
+                .stream().filter(execution -> hasStageExecution(execution, stageName)).findFirst().orElse(null);
+        if (latest == null || !executionId.equals(latest.getPipelineExecutionId())) {
+            throw new AwsException("NotLatestPipelineExecutionException",
+                    "The execution is not the latest execution for stage " + stageName, 400);
+        }
+        return latest;
+    }
+
+    private ObjectNode listDeployActionExecutionTargets(JsonNode request, String region, String account) {
+        String pipelineName = text(request, "pipelineName");
+        requirePipeline(account, region, pipelineName);
+        String actionExecutionId = text(request, "actionExecutionId");
+        ActionExecution action = executions(account, region, pipelineName).stream()
+                .flatMap(execution -> execution.getActionExecutions().stream())
+                .filter(candidate -> actionExecutionId.equals(candidate.getActionExecutionId()))
+                .findFirst().orElseThrow(() -> new AwsException("ActionExecutionNotFoundException",
+                        "Action execution not found: " + actionExecutionId, 400));
+        if (!"Deploy".equals(action.getCategory())) {
+            throw new AwsException("ValidationException", "The action execution is not a deploy action", 400);
+        }
+        page(request, 0, 100);
+        return emptyPage("targets");
+    }
+
+    private boolean matchesJobQuery(JsonNode configuration, JsonNode query) {
+        for (Map.Entry<String, JsonNode> entry : query.properties()) {
+            if (!entry.getValue().equals(configuration.path(entry.getKey()))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void applyExecutionMode(CodePipelineExecution execution) {
+        if (!"SUPERSEDED".equals(execution.getExecutionMode())) {
+            return;
+        }
+        executions(execution.getAccountId(), execution.getRegion(), execution.getPipelineName()).stream()
+                .filter(e -> !e.getPipelineExecutionId().equals(execution.getPipelineExecutionId()))
+                .filter(e -> "InProgress".equals(e.getStatus()) && e.getCurrentStage() == null)
+                .forEach(e -> {
+                    e.setStatus("Superseded");
+                    e.setStatusSummary("Superseded by " + execution.getPipelineExecutionId());
+                    e.setLastUpdateTime(now());
+                    putExecution(e);
+                });
+    }
+
+    private List<Map<String, Object>> objectList(JsonNode node) {
+        if (node == null || !node.isArray()) {
+            return new ArrayList<>();
+        }
+        return mapper.convertValue(node, new TypeReference<List<Map<String, Object>>>() {});
+    }
+
+    private static String storedArtifactId(CodePipelineExecution execution, String artifactName) {
+        return execution.getPipelineName() + "::" + execution.getPipelineExecutionId() + "::" + artifactName;
+    }
+
+    private void copyExecutionArtifacts(CodePipelineExecution source, CodePipelineExecution target) {
+        String prefix = storedArtifactId(source, "");
+        for (CodePipelineStoredItem artifact : items(source.getAccountId(), source.getRegion(), "artifact")) {
+            if (artifact.getId().startsWith(prefix)) {
+                String name = artifact.getId().substring(prefix.length());
+                storeItem(target.getAccountId(), target.getRegion(), "artifact",
+                        storedArtifactId(target, name), "AVAILABLE", artifact.getData());
+            }
+        }
     }
 }

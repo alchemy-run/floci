@@ -53,7 +53,6 @@ public class Ec2PortForwardManager {
     private final ContainerLifecycleManager lifecycleManager;
     private final PortAllocator portAllocator;
     private final EmulatorConfig config;
-    private final Ec2HttpPortMux httpPortMux;
 
     private final ExecutorService executor = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r, "ec2-port-forward");
@@ -70,14 +69,12 @@ public class Ec2PortForwardManager {
                                  ContainerBuilder containerBuilder,
                                  ContainerLifecycleManager lifecycleManager,
                                  PortAllocator portAllocator,
-                                 EmulatorConfig config,
-                                 Ec2HttpPortMux httpPortMux) {
+                                 EmulatorConfig config) {
         this.dockerClient = dockerClient;
         this.containerBuilder = containerBuilder;
         this.lifecycleManager = lifecycleManager;
         this.portAllocator = portAllocator;
         this.config = config;
-        this.httpPortMux = httpPortMux;
     }
 
     @PreDestroy
@@ -159,11 +156,6 @@ public class Ec2PortForwardManager {
         for (Map.Entry<Integer, Integer> entry : new LinkedHashMap<>(instance.getPublishedPorts()).entrySet()) {
             int appPort = entry.getKey();
             int hostPort = entry.getValue();
-            if (hostPort == appPort && publishViaMux(instance, appPort)) {
-                LOG.infov("Restored HTTP mux for EC2 instance {0} app port {1}",
-                        instance.getInstanceId(), appPort);
-                continue;
-            }
             portAllocator.markReserved(hostPort);
             // A surviving sidecar is adopted by name, so check the pre-migration name too:
             // otherwise a forward created before the rename is recreated while the old container
@@ -189,50 +181,12 @@ public class Ec2PortForwardManager {
     }
 
     void publish(Instance instance, int appPort) {
-        if (publishViaMux(instance, appPort)) {
-            return;
-        }
         int hostPort = portAllocator.allocate(
                 config.services().ec2().appPortRangeStart(),
                 config.services().ec2().appPortRangeEnd());
         if (!publishOn(instance, appPort, hostPort)) {
             portAllocator.release(hostPort);
         }
-    }
-
-    private boolean publishViaMux(Instance instance, int appPort) {
-        if (httpPortMux == null) {
-            return false;
-        }
-        NetworkTarget target = resolveInstanceTarget(instance);
-        if (target == null) {
-            return false;
-        }
-        String containerName = ContainerStorageHelper.resourceName(config, "ec2", null, instance.getInstanceId());
-        if (!httpPortMux.register(appPort, publicHost(instance), target.ip(), containerName)) {
-            return false;
-        }
-        instance.getPublishedPorts().put(appPort, appPort);
-        persist(instance);
-        return true;
-    }
-
-    public static String publicHost(Instance instance) {
-        if (instance == null) {
-            return "localhost";
-        }
-        String dns = instance.getPublicDnsName();
-        if (dns != null && dns.endsWith(".localhost.floci.io")) {
-            return dns;
-        }
-        String ip = instance.getPublicIpAddress();
-        if (ip != null && ip.endsWith(".localhost.floci.io")) {
-            return ip;
-        }
-        if (instance.getInstanceId() != null && !instance.getInstanceId().isBlank()) {
-            return instance.getInstanceId() + ".localhost.floci.io";
-        }
-        return "localhost";
     }
 
     private boolean publishOn(Instance instance, int appPort, int hostPort) {
@@ -279,19 +233,12 @@ public class Ec2PortForwardManager {
         String name = forwardContainerName(config, instance.getInstanceId(), appPort);
         ContainerStorageHelper.removeStaleContainer(config, lifecycleManager, name);
         Integer hostPort = instance.getPublishedPorts().remove(appPort);
-        boolean muxed = httpPortMux != null && hostPort != null && hostPort == appPort;
-        if (muxed) {
-            httpPortMux.unregister(appPort, publicHost(instance));
-        } else {
-            String name = forwardContainerName(instance.getInstanceId(), appPort);
-            lifecycleManager.removeIfExists(name);
-            if (hostPort != null) {
-                portAllocator.release(hostPort);
-            }
+        if (hostPort != null) {
+            portAllocator.release(hostPort);
+            persist(instance);
+            LOG.infov("Unpublished EC2 instance {0} app port {1} (released host port {2})",
+                    instance.getInstanceId(), appPort, hostPort);
         }
-        persist(instance);
-        LOG.infov("Unpublished EC2 instance {0} app port {1} (released host port {2})",
-                instance.getInstanceId(), appPort, hostPort);
     }
 
     private void persist(Instance instance) {
@@ -320,30 +267,13 @@ public class Ec2PortForwardManager {
         return ContainerStorageHelper.legacyDockerName(config, forwardContainerToken(instanceId, appPort));
     }
 
-    NetworkTarget resolveInstanceTarget(Instance instance) {
-        boolean managed = instance.getLogicalPrivateIpAddress() != null;
+    private NetworkTarget resolveInstanceTarget(Instance instance) {
         String containerId = instance.getDockerContainerId();
         if (containerId != null) {
             try {
                 InspectContainerResponse inspect = dockerClient.inspectContainerCmd(containerId).exec();
-                String mode = inspect.getHostConfig() == null ? null : inspect.getHostConfig().getNetworkMode();
-                if (mode != null && mode.startsWith("container:")) {
-                    managed = true;
-                    inspect = dockerClient.inspectContainerCmd(mode.substring("container:".length())).exec();
-                }
                 if (inspect.getNetworkSettings() != null) {
                     Map<String, ContainerNetwork> networks = inspect.getNetworkSettings().getNetworks();
-                    String retained = instance.getContainerBridgeIp();
-                    if (managed && retained != null && !retained.isBlank()) {
-                        if (networks != null) {
-                            for (Map.Entry<String, ContainerNetwork> entry : networks.entrySet()) {
-                                if (entry.getValue() != null && retained.equals(entry.getValue().getIpAddress())) {
-                                    return new NetworkTarget("bridge".equals(entry.getKey()) ? null : entry.getKey(), retained);
-                                }
-                            }
-                        }
-                        return null;
-                    }
                     NetworkTarget target = pickTarget(networks);
                     if (target != null) {
                         return target;
@@ -359,7 +289,7 @@ public class Ec2PortForwardManager {
             }
         }
         String stored = instance.getContainerBridgeIp();
-        if (!managed && stored != null && !stored.isBlank()) {
+        if (stored != null && !stored.isBlank()) {
             return new NetworkTarget(null, stored);
         }
         return null;
@@ -457,5 +387,42 @@ public class Ec2PortForwardManager {
 
     /** A resolved forward destination: the instance IP and the network to reach it on (null = default bridge). */
     record NetworkTarget(String network, String ip) {
+    }
+
+    private final Ec2HttpPortMux httpPortMux;
+
+    private boolean publishViaMux(Instance instance, int appPort) {
+        if (httpPortMux == null) {
+            return false;
+        }
+        NetworkTarget target = resolveInstanceTarget(instance);
+        if (target == null) {
+            return false;
+        }
+        String containerName = ContainerStorageHelper.resourceName(config, "ec2", null, instance.getInstanceId());
+        if (!httpPortMux.register(appPort, publicHost(instance), target.ip(), containerName)) {
+            return false;
+        }
+        instance.getPublishedPorts().put(appPort, appPort);
+        persist(instance);
+        return true;
+    }
+
+    public static String publicHost(Instance instance) {
+        if (instance == null) {
+            return "localhost";
+        }
+        String dns = instance.getPublicDnsName();
+        if (dns != null && dns.endsWith(".localhost.floci.io")) {
+            return dns;
+        }
+        String ip = instance.getPublicIpAddress();
+        if (ip != null && ip.endsWith(".localhost.floci.io")) {
+            return ip;
+        }
+        if (instance.getInstanceId() != null && !instance.getInstanceId().isBlank()) {
+            return instance.getInstanceId() + ".localhost.floci.io";
+        }
+        return "localhost";
     }
 }

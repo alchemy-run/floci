@@ -22,7 +22,6 @@ public class NetworkInterface {
     private boolean sourceDestCheck = true;
     private String availabilityZone;
     private String interfaceType = "interface";
-    private String region;
     /**
      * Whether AWS itself manages this interface, rather than the account it is billed to.
      * False for anything a customer created; true for the service-owned interfaces AWS
@@ -82,8 +81,6 @@ public class NetworkInterface {
     public String getInterfaceType() { return interfaceType; }
     public void setInterfaceType(String interfaceType) { this.interfaceType = interfaceType; }
 
-    public String getRegion() { return region; }
-    public void setRegion(String region) { this.region = region; }
     public boolean isRequesterManaged() { return requesterManaged; }
     public void setRequesterManaged(boolean requesterManaged) { this.requesterManaged = requesterManaged; }
 
@@ -98,4 +95,10 @@ public class NetworkInterface {
 
     public List<NetworkInterfacePrivateIpAddress> getPrivateIpAddresses() { return privateIpAddresses; }
     public void setPrivateIpAddresses(List<NetworkInterfacePrivateIpAddress> privateIpAddresses) { this.privateIpAddresses = privateIpAddresses; }
+
+    private String region;
+
+    public String getRegion() { return region; }
+
+    public void setRegion(String region) { this.region = region; }
 }

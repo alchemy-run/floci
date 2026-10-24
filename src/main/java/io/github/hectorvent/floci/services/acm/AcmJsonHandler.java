@@ -66,11 +66,11 @@ public class AcmJsonHandler {
             case "PutAccountConfiguration" -> handlePutAccountConfiguration(request, region);
             case "UpdateCertificateOptions" -> handleUpdateCertificateOptions(request, region);
             case "SearchCertificates" -> handleSearchCertificates(request, region);
+            case "RevokeCertificate" -> handleRevokeCertificate(request, region);
             case "RenewCertificate" -> handleRenewCertificate(request, region);
             case "ResendValidationEmail" -> handleResendValidationEmail(request, region);
-            case "RevokeCertificate" -> handleRevokeCertificate(request, region);
             default -> Response.status(400)
-                .entity(new AwsErrorResponse("UnknownOperationException", "Operation " + action + " is not supported."))
+                .entity(new AwsErrorResponse("UnsupportedOperation", "Operation " + action + " is not supported."))
                 .build();
         };
     }
@@ -82,7 +82,15 @@ public class AcmJsonHandler {
         if (certificateArn == null || certificateArn.isBlank() || domain == null || domain.isBlank() || validationDomain == null || validationDomain.isBlank()) {
             return Response.status(400).entity(new AwsErrorResponse("ValidationException", "Required parameter is missing")).build();
         }
-        service.resendValidationEmail(certificateArn, domain, validationDomain, region);
+        Certificate cert = service.describeCertificate(certificateArn, region);
+        boolean domainMatchesCertificate = domain.equalsIgnoreCase(cert.getDomainName())
+            || cert.getSubjectAlternativeNames().stream().anyMatch(domain::equalsIgnoreCase);
+        if (!domainMatchesCertificate || !AcmService.isValidationDomainOf(domain, validationDomain)) {
+            return Response.status(400)
+                .entity(new AwsErrorResponse("InvalidDomainValidationOptionsException",
+                    "One or more values in the DomainValidationOption structure is incorrect."))
+                .build();
+        }
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
@@ -266,27 +274,6 @@ public class AcmJsonHandler {
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
-    private Response handleSearchCertificates(JsonNode request, String region) {
-        int maxItems = request.path("MaxResults").asInt(100);
-        String nextToken = request.path("NextToken").asText(null);
-        JsonNode filterStatement = request.get("FilterStatement");
-
-        ListResult result = service.searchCertificates(
-            cert -> matchesFilterStatement(cert, filterStatement),
-            region, maxItems, nextToken);
-
-        ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode results = objectMapper.createArrayNode();
-        for (Certificate cert : result.certificates()) {
-            results.add(buildSearchResult(cert));
-        }
-        response.set("Results", results);
-        if (result.nextToken() != null) {
-            response.put("NextToken", result.nextToken());
-        }
-        return Response.ok(response).build();
-    }
-
     private Response handleRevokeCertificate(JsonNode request, String region) {
         String certificateArn = request.path("CertificateArn").asText(null);
         if (certificateArn == null || certificateArn.isBlank()) {
@@ -413,9 +400,6 @@ public class AcmJsonHandler {
         if (cert.getNotAfter() != null) {
             node.put("NotAfter", cert.getNotAfter().toEpochMilli() / 1000.0);
         }
-        if (cert.getRevokedAt() != null) {
-            node.put("RevokedAt", cert.getRevokedAt().toEpochMilli() / 1000.0);
-        }
 
         ArrayNode inUseBy = objectMapper.createArrayNode();
         service.certificateInUseBy(cert).forEach(inUseBy::add);
@@ -468,18 +452,13 @@ public class AcmJsonHandler {
         extKeyUsages.add(eku2);
         node.set("ExtendedKeyUsages", extKeyUsages);
 
-        ObjectNode opts = objectMapper.createObjectNode();
-        CertificateOptions certOptions = cert.getCertOptions() != null
-            ? cert.getCertOptions()
-            : CertificateOptions.defaultOptions();
-        if (certOptions.certificateTransparencyLoggingPreference() != null) {
+        if (cert.getCertOptions() != null) {
+            ObjectNode opts = objectMapper.createObjectNode();
             opts.put("CertificateTransparencyLoggingPreference",
-                certOptions.certificateTransparencyLoggingPreference());
+                cert.getCertOptions().certificateTransparencyLoggingPreference());
+            opts.put("Export", cert.getCertOptions().export());
+            node.set("Options", opts);
         }
-        if (certOptions.export() != null) {
-            opts.put("Export", certOptions.export());
-        }
-        node.set("Options", opts);
 
         return node;
     }
@@ -590,19 +569,121 @@ public class AcmJsonHandler {
     }
 
     private CertificateOptions parseOptions(JsonNode optionsNode) {
-        if (optionsNode == null || optionsNode.isMissingNode() || optionsNode.isNull()) {
-            return null;
+        if (optionsNode.isMissingNode()) return null;
+        String ctPref = optionsNode.path("CertificateTransparencyLoggingPreference").asText("ENABLED");
+        return new CertificateOptions(ctPref, "DISABLED");
+    }
+
+    private List<CertificateStatus> parseCertificateStatuses(JsonNode node) {
+        if (!node.isArray()) return null;
+        List<CertificateStatus> list = new ArrayList<>();
+        for (JsonNode n : node) {
+            try {
+                list.add(CertificateStatus.valueOf(n.asText()));
+            } catch (IllegalArgumentException e) {
+                LOG.debugv("Ignoring unknown certificate status: {0}", n.asText());
+            }
         }
-        String ctPref = optionsNode.hasNonNull("CertificateTransparencyLoggingPreference")
-            ? optionsNode.get("CertificateTransparencyLoggingPreference").asText()
-            : null;
-        String export = optionsNode.hasNonNull("Export")
-            ? optionsNode.get("Export").asText()
-            : null;
-        if (ctPref == null && export == null) {
-            return null;
+        return list.isEmpty() ? null : list;
+    }
+
+    /**
+     * Decodes a base64-encoded blob field from the AWS JSON 1.1 wire protocol.
+     * AWS SDKs send binary fields (Certificate, PrivateKey, Passphrase, etc.)
+     * as base64-encoded strings. If the value is already in PEM format (e.g. from
+     * direct HTTP calls), it is returned as-is.
+     */
+    private String decodeBlob(String value) {
+        if (value == null || value.startsWith("-----")) {
+            return value;
         }
-        return new CertificateOptions(ctPref, export);
+        try {
+            return new String(Base64.getDecoder().decode(value));
+        } catch (IllegalArgumentException e) {
+            // Not valid base64 — return as-is
+            return value;
+        }
+    }
+
+    private List<KeyAlgorithm> parseKeyTypes(JsonNode node) {
+        if (!node.isArray()) return null;
+        List<KeyAlgorithm> list = new ArrayList<>();
+        for (JsonNode n : node) {
+            KeyAlgorithm alg = KeyAlgorithm.fromAwsName(n.asText());
+            if (alg != null) {
+                list.add(alg);
+            }
+        }
+        return list.isEmpty() ? null : list;
+    }
+
+    private Response handleSearchCertificates(JsonNode request, String region) {
+        int maxItems = request.path("MaxResults").asInt(100);
+        String nextToken = request.path("NextToken").asText(null);
+        JsonNode filterStatement = request.get("FilterStatement");
+
+        ListResult result = service.searchCertificates(
+            cert -> matchesFilterStatement(cert, filterStatement),
+            region, maxItems, nextToken);
+
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode results = objectMapper.createArrayNode();
+        for (Certificate cert : result.certificates()) {
+            results.add(buildSearchResult(cert));
+        }
+        response.set("Results", results);
+        if (result.nextToken() != null) {
+            response.put("NextToken", result.nextToken());
+        }
+        return Response.ok(response).build();
+    }
+
+    private ObjectNode buildSearchResult(Certificate cert) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("CertificateArn", cert.getArn());
+
+        ObjectNode metadata = objectMapper.createObjectNode();
+        metadata.put("Status", cert.getStatus().name());
+        metadata.put("Type", cert.getType().name());
+        metadata.put("Exported", cert.isExported());
+        metadata.put("InUse", cert.getInUseBy() != null && !cert.getInUseBy().isEmpty());
+        metadata.put("RenewalEligibility", "INELIGIBLE");
+        if (cert.getCertOptions() != null && cert.getCertOptions().export() != null) {
+            metadata.put("ExportOption", cert.getCertOptions().export());
+        }
+        if (cert.getValidationMethod() != null) {
+            metadata.put("ValidationMethod", cert.getValidationMethod().name());
+        }
+        if (cert.getCreatedAt() != null) {
+            metadata.put("CreatedAt", cert.getCreatedAt().toEpochMilli() / 1000.0);
+        }
+        if (cert.getIssuedAt() != null) {
+            metadata.put("IssuedAt", cert.getIssuedAt().toEpochMilli() / 1000.0);
+        }
+        if (cert.getImportedAt() != null) {
+            metadata.put("ImportedAt", cert.getImportedAt().toEpochMilli() / 1000.0);
+        }
+        if (cert.getRevokedAt() != null) {
+            metadata.put("RevokedAt", cert.getRevokedAt().toEpochMilli() / 1000.0);
+        }
+        ObjectNode wrapper = objectMapper.createObjectNode();
+        wrapper.set("AcmCertificateMetadata", metadata);
+        node.set("CertificateMetadata", wrapper);
+
+        ObjectNode x509 = objectMapper.createObjectNode();
+        if (cert.getDomainName() != null) {
+            ObjectNode subject = objectMapper.createObjectNode();
+            subject.put("CommonName", cert.getDomainName());
+            x509.set("Subject", subject);
+        }
+        if (cert.getKeyAlgorithm() != null) {
+            x509.put("KeyAlgorithm", cert.getKeyAlgorithm().getAwsName());
+        }
+        if (cert.getSerial() != null) {
+            x509.put("SerialNumber", cert.getSerial());
+        }
+        node.set("X509Attributes", x509);
+        return node;
     }
 
     private boolean matchesFilterStatement(Certificate cert, JsonNode statement) {
@@ -693,48 +774,5 @@ public class AcmJsonHandler {
             return true;
         }
         return true;
-    }
-
-    private List<CertificateStatus> parseCertificateStatuses(JsonNode node) {
-        if (!node.isArray()) return null;
-        List<CertificateStatus> list = new ArrayList<>();
-        for (JsonNode n : node) {
-            try {
-                list.add(CertificateStatus.valueOf(n.asText()));
-            } catch (IllegalArgumentException e) {
-                LOG.debugv("Ignoring unknown certificate status: {0}", n.asText());
-            }
-        }
-        return list.isEmpty() ? null : list;
-    }
-
-    /**
-     * Decodes a base64-encoded blob field from the AWS JSON 1.1 wire protocol.
-     * AWS SDKs send binary fields (Certificate, PrivateKey, Passphrase, etc.)
-     * as base64-encoded strings. If the value is already in PEM format (e.g. from
-     * direct HTTP calls), it is returned as-is.
-     */
-    private String decodeBlob(String value) {
-        if (value == null || value.startsWith("-----")) {
-            return value;
-        }
-        try {
-            return new String(Base64.getDecoder().decode(value));
-        } catch (IllegalArgumentException e) {
-            // Not valid base64 — return as-is
-            return value;
-        }
-    }
-
-    private List<KeyAlgorithm> parseKeyTypes(JsonNode node) {
-        if (!node.isArray()) return null;
-        List<KeyAlgorithm> list = new ArrayList<>();
-        for (JsonNode n : node) {
-            KeyAlgorithm alg = KeyAlgorithm.fromAwsName(n.asText());
-            if (alg != null) {
-                list.add(alg);
-            }
-        }
-        return list.isEmpty() ? null : list;
     }
 }

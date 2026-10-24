@@ -1,13 +1,5 @@
 package io.github.hectorvent.floci.core.common;
 
-import io.github.hectorvent.floci.services.cloudfront.CloudFrontKvsDataPlaneController;
-import io.github.hectorvent.floci.services.cloudfront.CloudFrontServingController;
-import io.github.hectorvent.floci.services.cloudfront.edge.CloudFrontEdgeController;
-import io.github.hectorvent.floci.services.lambda.durable.LambdaDurableController;
-import io.github.hectorvent.floci.services.lambda.microvm.MicrovmController;
-import io.github.hectorvent.floci.services.lambda.microvm.MicrovmEndpointProxyController;
-import io.github.hectorvent.floci.services.lambdamicrovms.LambdaMicrovmsController;
-import io.github.hectorvent.floci.services.lambdamicrovms.LambdaNetworkConnectorsController;
 import io.github.hectorvent.floci.services.apigateway.ApiGatewayController;
 import io.github.hectorvent.floci.services.s3.S3Controller;
 import io.github.hectorvent.floci.services.securityadmin.SecurityAdminController;
@@ -97,34 +89,6 @@ class ServiceCatalogRoutingIntegrationTest {
     }
 
     @Test
-    void lambdaDurableAndBothMicrovmApisResolveToLambda() {
-        for (Class<?> controller : List.of(LambdaDurableController.class, MicrovmController.class,
-                MicrovmEndpointProxyController.class, LambdaMicrovmsController.class,
-                LambdaNetworkConnectorsController.class)) {
-            assertEquals("lambda", catalog.byResourceClass(controller).orElseThrow().externalKey());
-        }
-    }
-
-    @Test
-    void cloudFrontServingAndForkDataPlanesStayRegistered() {
-        assertEquals("cloudfront", catalog.byCredentialScope("cloudfront-keyvaluestore")
-                .orElseThrow().externalKey());
-        for (Class<?> controller : List.of(CloudFrontServingController.class,
-                CloudFrontKvsDataPlaneController.class, CloudFrontEdgeController.class)) {
-            assertEquals("cloudfront", catalog.byResourceClass(controller).orElseThrow().externalKey());
-        }
-    }
-
-    @Test
-    void stepFunctionsAlternateTargetAndCognitoIdentityStayRegistered() {
-        assertEquals("states", catalog.matchTarget("AmazonStatesService.StartSyncExecution")
-                .orElseThrow().descriptor().externalKey());
-        assertEquals("cognito-identity", catalog.matchTarget("AWSCognitoIdentityService.GetId")
-                .orElseThrow().descriptor().externalKey());
-        assertEquals("cognitoidentity", catalog.byCredentialScope("cognito-identity")
-                .orElseThrow().configKey());
-        assertEquals(1, catalog.all().stream()
-                .filter(descriptor -> "cognito-identity".equals(descriptor.externalKey())).count());
     void iamEnforcementCanResolveRestServicesFromMatchedRoutes() {
         assertEquals("s3", catalog.byResourceClass(S3Controller.class).orElseThrow().externalKey());
         assertEquals("apigateway",

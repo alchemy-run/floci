@@ -14,7 +14,6 @@ public class CreateApplicationRequest {
     private DiskEncryptionConfiguration diskEncryptionConfiguration;
     private IdentityCenterConfiguration identityCenterConfiguration;
     private ImageConfiguration imageConfiguration;
-    private InteractiveConfiguration interactiveConfiguration;
     private Map<String, InitialCapacityConfig> initialCapacity;
     private InteractiveConfiguration interactiveConfiguration;
     private JobLevelCostAllocationConfiguration jobLevelCostAllocationConfiguration;
@@ -37,8 +36,6 @@ public class CreateApplicationRequest {
     public void setAutoStopConfiguration(AutoStopConfiguration autoStopConfiguration) { this.autoStopConfiguration = autoStopConfiguration; }
     public String getClientToken() { return clientToken; }
     public void setClientToken(String clientToken) { this.clientToken = clientToken; }
-    public InteractiveConfiguration getInteractiveConfiguration() { return interactiveConfiguration; }
-    public void setInteractiveConfiguration(InteractiveConfiguration interactiveConfiguration) { this.interactiveConfiguration = interactiveConfiguration; }
     public DiskEncryptionConfiguration getDiskEncryptionConfiguration() { return diskEncryptionConfiguration; }
     public void setDiskEncryptionConfiguration(DiskEncryptionConfiguration diskEncryptionConfiguration) { this.diskEncryptionConfiguration = diskEncryptionConfiguration; }
     public IdentityCenterConfiguration getIdentityCenterConfiguration() { return identityCenterConfiguration; }

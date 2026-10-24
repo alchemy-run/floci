@@ -14,7 +14,6 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.nio.charset.StandardCharsets;
-import java.util.*;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -26,6 +25,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
+import io.github.hectorvent.floci.core.storage.StorageBackend;
+import java.util.*;
 
 @ApplicationScoped
 public class S3VectorsService {
@@ -69,8 +70,7 @@ public class S3VectorsService {
         return buildBucketArn(region, bucketName) + "/index/" + indexName;
     }
 
-    public VectorBucket createVectorBucket(String bucketName, Object encryptionConfiguration,
-                                           Map<String, String> tags, String region) {
+    public VectorBucket createVectorBucket(String bucketName, Object encryptionConfiguration, String region) {
         return createVectorBucket(bucketName, encryptionConfiguration, Map.of(), region);
     }
 
@@ -90,14 +90,6 @@ public class S3VectorsService {
             LOG.infov("Created Vector Bucket: {0} in region {1}", bucketName, region);
             return bucket;
         }
-        String arn = buildBucketArn(region, bucketName);
-        VectorBucket bucket = new VectorBucket(bucketName, arn, encryptionConfiguration);
-        if (tags != null) {
-            bucket.getTags().putAll(tags);
-        }
-        store.put(key, bucket);
-        LOG.infov("Created Vector Bucket: {0} in region {1}", bucketName, region);
-        return bucket;
     }
 
     public VectorBucket getVectorBucket(String bucketName, String region) {
@@ -222,11 +214,7 @@ public class S3VectorsService {
     }
 
     public List<VectorIndex> listIndexes(String bucketName, String region) {
-        return listIndexes(bucketName, null, region);
-    }
-
-    public List<VectorIndex> listIndexes(String bucketName, String vectorBucketArn, String region) {
-        VectorBucket bucket = getVectorBucket(bucketName, vectorBucketArn, region);
+        VectorBucket bucket = getVectorBucket(bucketName, region);
         return bucket.getIndexes().values().stream()
                 .sorted(Comparator.comparing(VectorIndex::getIndexName))
                 .collect(Collectors.toList());
@@ -276,12 +264,10 @@ public class S3VectorsService {
             store.put(buildStorageKey(region, bucketName), bucket);
             LOG.infov("Put {0} vectors into index {1}", vectors.size(), indexName);
         }
-        store.put(buildStorageKey(region, ids[0]), bucket);
-        LOG.infov("Put {0} vectors into index {1}", vectors.size(), ids[1]);
     }
 
-    public List<VectorData> getVectors(String bucketName, String indexName, String indexArn, List<String> keys, String region) {
-        VectorIndex index = getIndex(bucketName, indexName, indexArn, region);
+    public List<VectorData> getVectors(String bucketName, String indexName, List<String> keys, String region) {
+        VectorIndex index = getIndex(bucketName, indexName, region);
         List<VectorData> result = new ArrayList<>();
         for (String key : keys) {
             VectorData v = index.getVectors().get(key);
@@ -400,20 +386,11 @@ public class S3VectorsService {
             store.put(buildStorageKey(region, bucketName), bucket);
             LOG.infov("Deleted {0} vectors from index {1}", keys.size(), indexName);
         }
-        store.put(buildStorageKey(region, ids[0]), bucket);
-        LOG.infov("Deleted {0} vectors from index {1}", keys.size(), ids[1]);
     }
 
-    public List<VectorData> listVectors(String bucketName, String indexName, String indexArn, String region) {
-        VectorIndex index = getIndex(bucketName, indexName, indexArn, region);
-        return index.getVectors().values().stream()
-                .sorted(Comparator.comparing(VectorData::getKey))
-                .collect(Collectors.toList());
-    }
-
-    public List<QueryResult> queryVectors(String bucketName, String indexName, String indexArn,
-                                          List<Float> queryVector, Object filter, int topK, String region) {
-        VectorIndex index = getIndex(bucketName, indexName, indexArn, region);
+    public List<QueryResult> queryVectors(String bucketName, String indexName, List<Float> queryVector,
+                                          Object filter, int topK, String region) {
+        VectorIndex index = getIndex(bucketName, indexName, region);
         if (queryVector.size() != index.getDimension()) {
             throw new AwsException("ValidationException",
                     "Query vector dimension " + queryVector.size() + " does not match index dimension " + index.getDimension(), 400);
@@ -492,6 +469,44 @@ public class S3VectorsService {
             sum += diff * diff;
         }
         return Math.sqrt(sum);
+    }
+
+    public static class QueryResult {
+        private final VectorData vector;
+        private final double distance;
+
+        public QueryResult(VectorData vector, double distance) {
+            this.vector = vector;
+            this.distance = distance;
+        }
+
+        public VectorData getVector() { return vector; }
+        public double getDistance() { return distance; }
+    }
+
+    public void putVectorBucketPolicy(String bucketName, String vectorBucketArn, String policy, String region) {
+        VectorBucket bucket = getVectorBucket(bucketName, vectorBucketArn, region);
+        bucket.setPolicy(policy);
+        store.put(buildStorageKey(region, bucket.getVectorBucketName()), bucket);
+    }
+
+    public String getVectorBucketPolicy(String bucketName, String vectorBucketArn, String region) {
+        VectorBucket bucket = getVectorBucket(bucketName, vectorBucketArn, region);
+        if (bucket.getPolicy() == null) {
+            throw new AwsException("NotFoundException",
+                    "The vector bucket " + bucket.getVectorBucketName() + " does not have a policy.", 404);
+        }
+        return bucket.getPolicy();
+    }
+
+    public void deleteVectorBucketPolicy(String bucketName, String vectorBucketArn, String region) {
+        VectorBucket bucket = getVectorBucket(bucketName, vectorBucketArn, region);
+        if (bucket.getPolicy() == null) {
+            throw new AwsException("NotFoundException",
+                    "The vector bucket " + bucket.getVectorBucketName() + " does not have a policy.", 404);
+        }
+        bucket.setPolicy(null);
+        store.put(buildStorageKey(region, bucket.getVectorBucketName()), bucket);
     }
 
     public Map<String, String> listTags(String resourceArn, String region) {
@@ -579,18 +594,5 @@ public class S3VectorsService {
             dotProduct += v1.get(i) * v2.get(i);
         }
         return dotProduct;
-    }
-
-    public static class QueryResult {
-        private final VectorData vector;
-        private final double distance;
-
-        public QueryResult(VectorData vector, double distance) {
-            this.vector = vector;
-            this.distance = distance;
-        }
-
-        public VectorData getVector() { return vector; }
-        public double getDistance() { return distance; }
     }
 }

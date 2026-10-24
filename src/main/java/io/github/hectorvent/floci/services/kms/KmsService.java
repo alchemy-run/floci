@@ -32,13 +32,18 @@ import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.security.*;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.*;
+import java.util.function.Function;
+import java.util.regex.Pattern;
+
+import static io.github.hectorvent.floci.services.kms.model.KmsMessageType.RAW;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
-import java.security.*;
-import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
@@ -52,14 +57,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
-import java.util.regex.Pattern;
-import javax.crypto.Cipher;
-import javax.crypto.spec.GCMParameterSpec;
-import javax.crypto.spec.SecretKeySpec;
-import java.util.*;
-import java.util.function.Function;
-
-import static io.github.hectorvent.floci.services.kms.model.KmsMessageType.RAW;
 
 @ApplicationScoped
 public class KmsService implements ResourceProvider {
@@ -153,12 +150,7 @@ public class KmsService implements ResourceProvider {
     }
 
     public KmsKey createKey(String description, String keyUsage, String keySpec, String policy, Map<String, String> tags, String region) {
-        return createKey(description, keyUsage, keySpec, policy, tags, false, null, region);
-    }
-
-    public KmsKey createKey(String description, String keyUsage, String keySpec, String policy,
-                            Map<String, String> tags, boolean multiRegion, String region) {
-        return createKey(description, keyUsage, keySpec, policy, tags, multiRegion, null, region);
+        return createKey(description, keyUsage, keySpec, policy, tags, null, region);
     }
 
     public KmsKey createKey(String description, String keyUsage, String keySpec, String policy,
@@ -188,7 +180,6 @@ public class KmsService implements ResourceProvider {
         key.setDescription(description == null ? "" : description);
         key.setKeyUsage(effectiveUsage);
         key.setKeySpec(effectiveSpec);
-        key.setMultiRegion(multiRegion);
         key.setPolicy(policy != null ? policy : buildDefaultKeyPolicy());
         key.getTags().putAll(ReservedTags.stripReservedTags(tags));
         key.setOrigin(resolveOrigin(origin, effectiveSpec));
@@ -424,8 +415,8 @@ public class KmsService implements ResourceProvider {
             "GenerateMac", "VerifyMac", "DeriveSharedSecret"));
 
     /** GrantNameType pattern/length from the KMS model (kms/2014-11-01/service-2.json). */
-    private static final Pattern GRANT_NAME_PATTERN =
-            Pattern.compile("^[a-zA-Z0-9:/_-]+$");
+    private static final java.util.regex.Pattern GRANT_NAME_PATTERN =
+            java.util.regex.Pattern.compile("^[a-zA-Z0-9:/_-]+$");
 
     /**
      * GrantConstraintSourceArnType pattern from the KMS model (kms/2014-11-01/service-2.json),
@@ -789,7 +780,6 @@ public class KmsService implements ResourceProvider {
         requireCustomerManaged(key, "kms:ScheduleKeyDeletion");
         requireNotPendingDeletion(key);
         key.setKeyState("PendingDeletion");
-        key.setEnabled(false);
         key.setDeletionDate(Instant.now().plusSeconds((long) pendingWindowInDays * 86400).getEpochSecond());
         keyStore.put(region + "::" + key.getKeyId(), key);
     }
@@ -864,26 +854,16 @@ public class KmsService implements ResourceProvider {
 
     // ──────────────────────────── Key Rotation ────────────────────────────
 
-    public record KeyRotationStatus(boolean keyRotationEnabled, Integer rotationPeriodInDays) {}
-
-    public KeyRotationStatus getKeyRotationStatus(String keyId, String region) {
+    public boolean getKeyRotationStatus(String keyId, String region) {
         KmsKey key = resolveKey(keyId, region);
         if (KmsKeyUsage.ENCRYPT_DECRYPT != key.getKeyUsage()
                 || KmsKeySpec.SYMMETRIC_DEFAULT != key.getKeySpec()) {
-            return new KeyRotationStatus(false, null);
+            return false;
         }
-        if (!key.isKeyRotationEnabled()) {
-            return new KeyRotationStatus(false, null);
-        }
-        int period = key.getRotationPeriodInDays() > 0 ? key.getRotationPeriodInDays() : DEFAULT_ROTATION_PERIOD_DAYS;
-        return new KeyRotationStatus(true, period);
+        return key.isKeyRotationEnabled();
     }
 
     public void enableKeyRotation(String keyId, String region) {
-        enableKeyRotation(keyId, null, region);
-    }
-
-    public void enableKeyRotation(String keyId, Integer rotationPeriodInDays, String region) {
         KmsKey key = resolveKey(keyId, region);
         requireCustomerManaged(key, "kms:EnableKeyRotation");
         validateRotationOrigin(key);
@@ -927,9 +907,6 @@ public class KmsService implements ResourceProvider {
     }
 
     private static final int ON_DEMAND_ROTATION_LIMIT = 25;
-    private static final int DEFAULT_ROTATION_PERIOD_DAYS = 365;
-    private static final int MIN_ROTATION_PERIOD_DAYS = 90;
-    private static final int MAX_ROTATION_PERIOD_DAYS = 2560;
     public String rotateKeyOnDemand(String keyId, String region) {
         synchronized (backingKeyMaterialLock) {
             KmsKey key = resolveKey(keyId, region);
@@ -1446,10 +1423,6 @@ public class KmsService implements ResourceProvider {
         if (!aliasName.startsWith("alias/")) {
             throw new AwsException("InvalidAliasNameException", "Alias name must begin with 'alias/'", 400);
         }
-        String storageKey = region + "::" + aliasName;
-        if (aliasStore.get(storageKey).isPresent()) {
-            throw new AwsException("AlreadyExistsException",
-                    "An alias with the name " + aliasName + " already exists", 400);
         if (AwsManagedKeys.isReservedAlias(aliasName)) {
             // AWS reserves the whole alias/aws/ namespace for its own keys and rejects the name
             // outright, so a module that tries to claim one fails here exactly as it would there.
@@ -1468,14 +1441,11 @@ public class KmsService implements ResourceProvider {
 
         String aliasArn = regionResolver.buildArn("kms", region, aliasName);
         KmsAlias alias = new KmsAlias(aliasName, aliasArn, key.getKeyId());
-        aliasStore.put(storageKey, alias);
+        aliasStore.put(region + "::" + aliasName, alias);
         LOG.infov("Created KMS alias: {0} -> {1}", aliasName, key.getKeyId());
     }
 
     public void updateAlias(String aliasName, String targetKeyId, String region) {
-        if (aliasName == null || !aliasName.startsWith("alias/")) {
-            throw new AwsException("InvalidAliasNameException", "Alias name must begin with 'alias/'", 400);
-        }
         requireUnreservedAlias(aliasName, "kms:UpdateAlias");
         String storageKey = region + "::" + aliasName;
         KmsAlias existing = aliasStore.get(storageKey)
@@ -2179,68 +2149,6 @@ public class KmsService implements ResourceProvider {
         return result;
     }
 
-    public Map<String, Object> generateDataKeyPair(String keyId, String keyPairSpec,
-                                                   Map<String, String> encryptionContext, String region) {
-        if (keyPairSpec == null || keyPairSpec.isBlank()) {
-            throw new AwsException("ValidationException", "KeyPairSpec is required", 400);
-        }
-        KmsKey wrappingKey = resolveKey(keyId, region);
-        validateKeyIsUsableForCryptoOperations(wrappingKey);
-        if (KmsKeyUsage.ENCRYPT_DECRYPT != wrappingKey.getKeyUsage()
-                || KmsKeySpec.SYMMETRIC_DEFAULT != wrappingKey.getKeySpec()) {
-            throw new AwsException("UnsupportedOperationException",
-                    "GenerateDataKeyPair is only supported on symmetric ENCRYPT_DECRYPT keys.", 400);
-        }
-        KmsKeySpec spec = KmsKeySpec.fromString(keyPairSpec);
-        if (spec.getKeyType() != KmsKeySpec.KeyType.RSA && spec.getKeyType() != KmsKeySpec.KeyType.ECC) {
-            throw new AwsException("ValidationException",
-                    "KeyPairSpec " + keyPairSpec + " is not a valid data-key pair spec.", 400);
-        }
-        KmsKey dataKey = new KmsKey();
-        dataKey.setKeySpec(spec);
-        generateKeyMaterial(dataKey, region);
-        byte[] privateDer = Base64.getDecoder().decode(dataKey.getPrivateKeyEncoded());
-        byte[] publicDer = Base64.getDecoder().decode(dataKey.getPublicKeyEncoded());
-        byte[] ciphertext = encrypt(keyId, privateDer, encryptionContext, region);
-
-        Map<String, Object> result = new HashMap<>();
-        result.put("PrivateKeyPlaintext", privateDer);
-        result.put("PrivateKeyCiphertextBlob", ciphertext);
-        result.put("PublicKey", publicDer);
-        result.put("KeyPairSpec", spec.name());
-        result.put("KeyId", wrappingKey.getArn());
-        return result;
-    }
-
-    public record DeriveSharedSecretResult(byte[] sharedSecret, String keyArn, String algorithm) {}
-
-    public DeriveSharedSecretResult deriveSharedSecret(String keyId, byte[] publicKeyDer, String algorithm, String region) {
-        if (algorithm == null || algorithm.isBlank()) {
-            throw new AwsException("ValidationException", "KeyAgreementAlgorithm is required", 400);
-        }
-        if (!"ECDH".equals(algorithm)) {
-            throw new AwsException("ValidationException", "KeyAgreementAlgorithm must be ECDH", 400);
-        }
-        if (publicKeyDer == null || publicKeyDer.length == 0) {
-            throw new AwsException("ValidationException", "PublicKey is required", 400);
-        }
-        KmsKey key = resolveKey(keyId, region);
-        validateKeyIsUsableForCryptoOperations(key);
-        if (KmsKeyUsage.KEY_AGREEMENT != key.getKeyUsage()) {
-            throw new AwsException("InvalidKeyUsageException",
-                    "DeriveSharedSecret requires a key with KeyUsage KEY_AGREEMENT.", 400);
-        }
-        try {
-            byte[] secret = keyTypes.of(key.getKeySpec()).deriveSharedSecret(key, publicKeyDer);
-            return new DeriveSharedSecretResult(secret, key.getArn(), algorithm);
-        } catch (AwsException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new AwsException("InvalidKeyUsageException",
-                    "Unable to derive shared secret: " + e.getMessage(), 400);
-        }
-    }
-
     // ──────────────────────────── Tags ────────────────────────────
 
     public void tagResource(String keyId, Map<String, String> tags, String region) {
@@ -2359,5 +2267,84 @@ public class KmsService implements ResourceProvider {
     @Override
     public Set<SupportedResourceType> getSupportedResourceTypes() {
         return Set.of(new SupportedResourceType("kms:key", "kms", true));
+    }
+
+    public record KeyRotationStatus(boolean keyRotationEnabled, Integer rotationPeriodInDays) {}
+
+    private static final int DEFAULT_ROTATION_PERIOD_DAYS = 365;
+
+    private static final int MIN_ROTATION_PERIOD_DAYS = 90;
+
+    private static final int MAX_ROTATION_PERIOD_DAYS = 2560;
+
+    private static void validateMaterialLength(KmsKey key, byte[] material) {
+        int expected = key.getKeySpec().materialByteLength();
+        if (material.length != expected) {
+            throw new AwsException("IncorrectKeyMaterialException",
+                    "Key material for key spec " + key.getKeySpec() + " must be " + expected
+                            + " bytes but was " + material.length + " bytes.", 400);
+        }
+    }
+
+    public Map<String, Object> generateDataKeyPair(String keyId, String keyPairSpec,
+                                                   Map<String, String> encryptionContext, String region) {
+        if (keyPairSpec == null || keyPairSpec.isBlank()) {
+            throw new AwsException("ValidationException", "KeyPairSpec is required", 400);
+        }
+        KmsKey wrappingKey = resolveKey(keyId, region);
+        validateKeyIsUsableForCryptoOperations(wrappingKey);
+        if (KmsKeyUsage.ENCRYPT_DECRYPT != wrappingKey.getKeyUsage()
+                || KmsKeySpec.SYMMETRIC_DEFAULT != wrappingKey.getKeySpec()) {
+            throw new AwsException("UnsupportedOperationException",
+                    "GenerateDataKeyPair is only supported on symmetric ENCRYPT_DECRYPT keys.", 400);
+        }
+        KmsKeySpec spec = KmsKeySpec.fromString(keyPairSpec);
+        if (spec.getKeyType() != KmsKeySpec.KeyType.RSA && spec.getKeyType() != KmsKeySpec.KeyType.ECC) {
+            throw new AwsException("ValidationException",
+                    "KeyPairSpec " + keyPairSpec + " is not a valid data-key pair spec.", 400);
+        }
+        KmsKey dataKey = new KmsKey();
+        dataKey.setKeySpec(spec);
+        generateKeyMaterial(dataKey, region);
+        byte[] privateDer = Base64.getDecoder().decode(dataKey.getPrivateKeyEncoded());
+        byte[] publicDer = Base64.getDecoder().decode(dataKey.getPublicKeyEncoded());
+        byte[] ciphertext = encrypt(keyId, privateDer, encryptionContext, region);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("PrivateKeyPlaintext", privateDer);
+        result.put("PrivateKeyCiphertextBlob", ciphertext);
+        result.put("PublicKey", publicDer);
+        result.put("KeyPairSpec", spec.name());
+        result.put("KeyId", wrappingKey.getArn());
+        return result;
+    }
+
+    public record DeriveSharedSecretResult(byte[] sharedSecret, String keyArn, String algorithm) {}
+
+    public DeriveSharedSecretResult deriveSharedSecret(String keyId, byte[] publicKeyDer, String algorithm, String region) {
+        if (algorithm == null || algorithm.isBlank()) {
+            throw new AwsException("ValidationException", "KeyAgreementAlgorithm is required", 400);
+        }
+        if (!"ECDH".equals(algorithm)) {
+            throw new AwsException("ValidationException", "KeyAgreementAlgorithm must be ECDH", 400);
+        }
+        if (publicKeyDer == null || publicKeyDer.length == 0) {
+            throw new AwsException("ValidationException", "PublicKey is required", 400);
+        }
+        KmsKey key = resolveKey(keyId, region);
+        validateKeyIsUsableForCryptoOperations(key);
+        if (KmsKeyUsage.KEY_AGREEMENT != key.getKeyUsage()) {
+            throw new AwsException("InvalidKeyUsageException",
+                    "DeriveSharedSecret requires a key with KeyUsage KEY_AGREEMENT.", 400);
+        }
+        try {
+            byte[] secret = keyTypes.of(key.getKeySpec()).deriveSharedSecret(key, publicKeyDer);
+            return new DeriveSharedSecretResult(secret, key.getArn(), algorithm);
+        } catch (AwsException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new AwsException("InvalidKeyUsageException",
+                    "Unable to derive shared secret: " + e.getMessage(), 400);
+        }
     }
 }

@@ -1,28 +1,5 @@
 package io.github.hectorvent.floci.services.sns;
 
-import io.github.hectorvent.floci.config.EmulatorConfig;
-import io.github.hectorvent.floci.core.common.AwsArnUtils;
-import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.core.common.Resettable;
-import io.github.hectorvent.floci.core.resource.ExplorerResource;
-import io.github.hectorvent.floci.core.resource.ResourceProvider;
-import io.github.hectorvent.floci.core.resource.SupportedResourceType;
-import io.github.hectorvent.floci.core.storage.StorageBackend;
-import io.github.hectorvent.floci.core.storage.StorageFactory;
-import io.github.hectorvent.floci.services.firehose.FirehoseService;
-import io.github.hectorvent.floci.services.firehose.model.Record;
-import io.github.hectorvent.floci.services.lambda.LambdaService;
-import io.github.hectorvent.floci.services.lambda.model.InvocationType;
-import io.github.hectorvent.floci.core.storage.InMemoryStorage;
-import io.github.hectorvent.floci.services.sns.model.PlatformApplication;
-import io.github.hectorvent.floci.services.sns.model.PlatformEndpoint;
-import io.github.hectorvent.floci.services.sns.model.PushNotification;
-import io.github.hectorvent.floci.services.sns.model.SentSms;
-import io.github.hectorvent.floci.services.sns.model.Subscription;
-import io.github.hectorvent.floci.services.sns.model.Topic;
-import io.github.hectorvent.floci.services.sqs.SqsService;
-import io.github.hectorvent.floci.services.sqs.model.MessageAttributeValue;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -95,6 +72,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 @ApplicationScoped
 public class SnsService implements Resettable, ResourceProvider {
@@ -170,9 +149,6 @@ public class SnsService implements Resettable, ResourceProvider {
             "APNS", "APNS_SANDBOX", "GCM", "FCM");
     private static final java.util.regex.Pattern PLATFORM_APP_NAME_PATTERN =
             java.util.regex.Pattern.compile("[a-zA-Z0-9_.\\-]{1,256}");
-    private static final java.util.regex.Pattern E164_PHONE =
-            java.util.regex.Pattern.compile("^\\+[1-9]\\d{1,14}$");
-    private static final int MIN_GCM_CREDENTIAL_LENGTH = 24;
 
     /**
      * Operator names that may not appear as a field name inside a {@code $or} array; their
@@ -200,9 +176,6 @@ public class SnsService implements Resettable, ResourceProvider {
     private final HttpClient httpClient;
     private final SnsMessageSigner messageSigner;
     private final Map<String, Instant> fifoDeduplicationCache = new ConcurrentHashMap<>();
-    private final Map<String, Map<String, String>> smsAttributesByRegion = new ConcurrentHashMap<>();
-    private final Set<String> optedOutNumbers = ConcurrentHashMap.newKeySet();
-    private final Map<String, String> sandboxNumbers = new ConcurrentHashMap<>();
     private static final HexFormat HEX = HexFormat.of();
     
     @Inject
@@ -379,9 +352,6 @@ public class SnsService implements Resettable, ResourceProvider {
     public void clear() {
         pushCapture.clear();
         fifoDeduplicationCache.clear();
-        smsAttributesByRegion.clear();
-        optedOutNumbers.clear();
-        sandboxNumbers.clear();
     }
 
     public synchronized void setSmsAttributes(Map<String, String> attributes, String region) {
@@ -1170,14 +1140,6 @@ public class SnsService implements Resettable, ResourceProvider {
                     "Invalid parameter: Platform Reason: Floci mocks only APNS, APNS_SANDBOX, GCM, and FCM.",
                     400);
         }
-        if ("GCM".equals(platform) || "FCM".equals(platform)) {
-            String credential = attributes != null ? attributes.get("PlatformCredential") : null;
-            if (!isPlausibleGcmCredential(credential)) {
-                throw new AwsException("InvalidParameter",
-                        "Invalid parameter: Attributes Reason: Platform credentials are invalid",
-                        400);
-            }
-        }
         String arn = platformApplicationArn(region, platform, name);
         String key = platformAppKey(region, arn);
 
@@ -1622,26 +1584,6 @@ public class SnsService implements Resettable, ResourceProvider {
             successful.add(new String[]{id, messageId});
         }
         return new BatchPublishResult(successful, failed);
-    }
-
-    public String getDataProtectionPolicy(String resourceArn, String region) {
-        String key = topicKey(region, resourceArn);
-        Topic topic = topicStore.get(key)
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                        "Resource does not exist.", 404));
-        return topic.getDataProtectionPolicy() != null ? topic.getDataProtectionPolicy() : "";
-    }
-
-    public void putDataProtectionPolicy(String resourceArn, String dataProtectionPolicy, String region) {
-        if (dataProtectionPolicy == null) {
-            throw new AwsException("InvalidParameter", "DataProtectionPolicy is required.", 400);
-        }
-        String key = topicKey(region, resourceArn);
-        Topic topic = topicStore.get(key)
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                        "Resource does not exist.", 404));
-        topic.setDataProtectionPolicy(dataProtectionPolicy);
-        topicStore.put(key, topic);
     }
 
     public void tagResource(String resourceArn, Map<String, String> tags, String region) {
@@ -2666,7 +2608,6 @@ public class SnsService implements Resettable, ResourceProvider {
                             && "true".equalsIgnoreCase(sub.getAttributes().get("RawMessageDelivery"));
                     String body = rawDelivery
                             ? protocolMessage
-                            : buildSnsEnvelope(protocolMessage, subject, messageAttributes, topicArn, messageId);
                             : buildSnsEnvelope(protocolMessage, subject, messageAttributes, topicArn, messageId,
                                     null, null);
                     byte[] data = body.getBytes(StandardCharsets.UTF_8);
@@ -3093,98 +3034,88 @@ public class SnsService implements Resettable, ResourceProvider {
         return "sub::" + region + "::" + subscriptionArn;
     }
 
-    public Map<String, String> getSmsAttributes(String region) {
-        Map<String, String> attrs = new java.util.LinkedHashMap<>();
-        attrs.put("DefaultSMSType", "Promotional");
-        Map<String, String> stored = smsAttributesByRegion.get(region);
-        if (stored != null) {
-            attrs.putAll(stored);
-        }
-        return attrs;
+    /** All SMS messages published since last clear. Used by SnsInspectionController. */
+    public List<SentSms> getSentMessages() {
+        return smsStore.scan(k -> k.startsWith("sms::"));
     }
 
-    public void setSmsAttributes(Map<String, String> attributes, String region) {
-        if (attributes == null || attributes.isEmpty()) {
-            return;
-        }
-        smsAttributesByRegion.computeIfAbsent(region, k -> new ConcurrentHashMap<>()).putAll(attributes);
-    }
-
-    public boolean isPhoneNumberOptedOut(String phoneNumber, String region) {
-        return optedOutNumbers.contains(phoneKey(region, phoneNumber));
-    }
-
-    public List<String> listPhoneNumbersOptedOut(String region) {
-        String prefix = region + "::";
-        List<String> numbers = new ArrayList<>();
-        for (String key : optedOutNumbers) {
-            if (key.startsWith(prefix)) {
-                numbers.add(key.substring(prefix.length()));
+    /** Drop all stored SMS records. Used by SnsInspectionController. */
+    public void clearSentMessages() {
+        for (String key : smsStore.keys()) {
+            if (key.startsWith("sms::")) {
+                smsStore.delete(key);
             }
         }
-        return numbers;
+        LOG.info("Cleared all SNS SMS records");
     }
 
-    public void optInPhoneNumber(String phoneNumber, String region) {
-        optedOutNumbers.remove(phoneKey(region, phoneNumber));
+    private static final java.util.regex.Pattern E164_PHONE =
+            java.util.regex.Pattern.compile("^\\+[1-9]\\d{1,14}$");
+
+    private static final int MIN_GCM_CREDENTIAL_LENGTH = 24;
+
+    private final Map<String, Map<String, String>> smsAttributesByRegion = new ConcurrentHashMap<>();
+
+    private final Set<String> optedOutNumbers = ConcurrentHashMap.newKeySet();
+
+    private final Map<String, String> sandboxNumbers = new ConcurrentHashMap<>();
+
+    public String getDataProtectionPolicy(String resourceArn, String region) {
+        String key = topicKey(region, resourceArn);
+        Topic topic = topicStore.get(key)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Resource does not exist.", 404));
+        return topic.getDataProtectionPolicy() != null ? topic.getDataProtectionPolicy() : "";
     }
 
-    public boolean isInSmsSandbox() {
-        return true;
+    public void putDataProtectionPolicy(String resourceArn, String dataProtectionPolicy, String region) {
+        if (dataProtectionPolicy == null) {
+            throw new AwsException("InvalidParameter", "DataProtectionPolicy is required.", 400);
+        }
+        String key = topicKey(region, resourceArn);
+        Topic topic = topicStore.get(key)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Resource does not exist.", 404));
+        topic.setDataProtectionPolicy(dataProtectionPolicy);
+        topicStore.put(key, topic);
+    }
+
+    private static final String FUNCTION_MARKER = ":function:";
+
+    /**
+     * Function name out of a Lambda ARN, which may carry a qualifier:
+     * {@code arn:aws:lambda:<region>:<account>:function:<name>[:<alias-or-version>]}.
+     *
+     * <p>Taking the segment after the last colon reads the qualifier as the function name, so a
+     * subscription to {@code ...:function:order-processor:PROD} invoked a function called
+     * {@code PROD} and the message went nowhere. Cut after {@code :function:} instead, matching
+     * what S3 and Step Functions already do for the same ARN.
+     */
+    static String extractFunctionName(String functionArn) {
+        if (functionArn == null) {
+            return null;
+        }
+        int functionMarker = functionArn.indexOf(FUNCTION_MARKER);
+        if (functionMarker < 0) {
+            return functionArn;
+        }
+        String suffix = functionArn.substring(functionMarker + FUNCTION_MARKER.length());
+        int qualifierSeparator = suffix.indexOf(':');
+        return qualifierSeparator >= 0 ? suffix.substring(0, qualifierSeparator) : suffix;
+    }
+
+    private static String sha256(String message) {
+        try {
+        	MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] hash = md.digest(message.getBytes(StandardCharsets.UTF_8));
+            return HEX.formatHex(hash);
+        } catch (NoSuchAlgorithmException e) {
+            return UUID.randomUUID().toString();
+        }
     }
 
     public List<Map<String, String>> listOriginationNumbers() {
         return List.of();
-    }
-
-    public List<Map<String, String>> listSmsSandboxPhoneNumbers(String region) {
-        String prefix = region + "::";
-        List<Map<String, String>> numbers = new ArrayList<>();
-        for (var entry : sandboxNumbers.entrySet()) {
-            if (!entry.getKey().startsWith(prefix)) {
-                continue;
-            }
-            numbers.add(Map.of(
-                    "PhoneNumber", entry.getKey().substring(prefix.length()),
-                    "Status", entry.getValue()));
-        }
-        return numbers;
-    }
-
-    public void createSmsSandboxPhoneNumber(String phoneNumber, String region) {
-        if (!isE164(phoneNumber)) {
-            throw new AwsException("InvalidParameter",
-                    "Invalid parameter: PhoneNumber Reason: invalid phone number",
-                    400);
-        }
-        sandboxNumbers.putIfAbsent(phoneKey(region, phoneNumber), "Pending");
-    }
-
-    public void verifySmsSandboxPhoneNumber(String phoneNumber, String oneTimePassword, String region) {
-        String key = phoneKey(region, phoneNumber);
-        if (!sandboxNumbers.containsKey(key)) {
-            throw new AwsException("ResourceNotFound",
-                    "The phone number is not registered in the SMS sandbox.", 404);
-        }
-        if (oneTimePassword == null || oneTimePassword.isBlank()) {
-            throw new AwsException("InvalidParameter",
-                    "Invalid parameter: OneTimePassword Reason: invalid OTP", 400);
-        }
-        sandboxNumbers.put(key, "Verified");
-    }
-
-    public void deleteSmsSandboxPhoneNumber(String phoneNumber, String region) {
-        String key = phoneKey(region, phoneNumber);
-        if (sandboxNumbers.remove(key) == null) {
-            throw new AwsException("ResourceNotFound",
-                    "The phone number is not registered in the SMS sandbox.", 404);
-        }
-    }
-
-    private String defaultTopicPolicy(String topicArn) {
-        String account = regionResolver.getAccountId();
-        return "{\"Version\":\"2012-10-17\",\"Id\":\"__default_policy_ID\",\"Statement\":[{\"Sid\":\"__default_statement_ID\",\"Effect\":\"Allow\",\"Principal\":{\"AWS\":\"*\"},\"Action\":[\"SNS:GetTopicAttributes\",\"SNS:SetTopicAttributes\",\"SNS:AddPermission\",\"SNS:RemovePermission\",\"SNS:DeleteTopic\",\"SNS:Subscribe\",\"SNS:ListSubscriptionsByTopic\",\"SNS:Publish\"],\"Resource\":\""
-                + topicArn + "\",\"Condition\":{\"StringEquals\":{\"AWS:SourceAccount\":\"" + account + "\"}}}]}";
     }
 
     private ObjectNode parseTopicPolicy(String raw, String topicArn) {
@@ -3242,20 +3173,5 @@ public class SnsService implements Resettable, ResourceProvider {
 
     private static String phoneKey(String region, String phoneNumber) {
         return region + "::" + (phoneNumber == null ? "" : phoneNumber);
-    }
-
-    /** All SMS messages published since last clear. Used by SnsInspectionController. */
-    public List<SentSms> getSentMessages() {
-        return smsStore.scan(k -> k.startsWith("sms::"));
-    }
-
-    /** Drop all stored SMS records. Used by SnsInspectionController. */
-    public void clearSentMessages() {
-        for (String key : smsStore.keys()) {
-            if (key.startsWith("sms::")) {
-                smsStore.delete(key);
-            }
-        }
-        LOG.info("Cleared all SNS SMS records");
     }
 }

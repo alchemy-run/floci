@@ -56,8 +56,8 @@ public class AutoScalingQueryHandler {
                 case "DeleteWarmPool"               -> handleDeleteWarmPool(p, region);
                 case "StartInstanceRefresh"         -> handleStartInstanceRefresh(p, region);
                 case "DescribeInstanceRefreshes"    -> handleDescribeInstanceRefreshes(p, region);
-                case "CancelInstanceRefresh"        -> handleCancelInstanceRefresh(p, region);
                 case "RollbackInstanceRefresh"      -> handleRollbackInstanceRefresh(p, region);
+                case "CancelInstanceRefresh"        -> handleCancelInstanceRefresh(p, region);
                 case "CreateOrUpdateTags"           -> handleCreateOrUpdateTags(p, region);
                 case "DeleteTags"                   -> handleDeleteTags(p, region);
                 case "DescribeTags"                 -> handleDescribeTags(p, region);
@@ -65,13 +65,13 @@ public class AutoScalingQueryHandler {
                 case "DisableMetricsCollection"     -> handleDisableMetricsCollection(p, region);
                 // Instances
                 case "DescribeAutoScalingInstances" -> handleDescribeAutoScalingInstances(p, region);
+                case "SetInstanceProtection"        -> handleSetInstanceProtection(p, region);
+                case "SetInstanceHealth"            -> handleSetInstanceHealth(p, region);
+                case "ExitStandby"                  -> handleExitStandby(p, region);
+                case "EnterStandby"                 -> handleEnterStandby(p, region);
                 case "AttachInstances"              -> handleAttachInstances(p, region);
                 case "DetachInstances"              -> handleDetachInstances(p, region);
                 case "TerminateInstanceInAutoScalingGroup" -> handleTerminateInstance(p, region);
-                case "SetInstanceProtection"        -> handleSetInstanceProtection(p, region);
-                case "SetInstanceHealth"            -> handleSetInstanceHealth(p, region);
-                case "EnterStandby"                 -> handleEnterStandby(p, region);
-                case "ExitStandby"                  -> handleExitStandby(p, region);
                 // Load balancer attachment
                 case "AttachLoadBalancerTargetGroups"    -> handleAttachLoadBalancerTargetGroups(p, region);
                 case "DetachLoadBalancerTargetGroups"    -> handleDetachLoadBalancerTargetGroups(p, region);
@@ -93,10 +93,9 @@ public class AutoScalingQueryHandler {
                 case "DeletePolicy"                 -> handleDeletePolicy(p, region);
                 case "DescribePolicies"             -> handleDescribePolicies(p, region);
                 case "ExecutePolicy"                -> handleExecutePolicy(p, region);
-                // Scheduled actions
                 case "PutScheduledUpdateGroupAction" -> handlePutScheduledUpdateGroupAction(p, region);
-                case "DescribeScheduledActions"      -> handleDescribeScheduledActions(p, region);
                 case "DeleteScheduledAction"         -> handleDeleteScheduledAction(p, region);
+                case "DescribeScheduledActions"      -> handleDescribeScheduledActions(p, region);
                 // Activities
                 case "DescribeScalingActivities"    -> handleDescribeScalingActivities(p, region);
                 // Metadata
@@ -310,10 +309,9 @@ public class AutoScalingQueryHandler {
            .elem("MaxSize", String.valueOf(asg.getMaxSize()))
            .elem("DesiredCapacity", String.valueOf(asg.getDesiredCapacity()))
            .elem("DefaultCooldown", String.valueOf(asg.getDefaultCooldown()))
-           .elem("HealthCheckType", asg.getHealthCheckType() != null ? asg.getHealthCheckType() : "EC2")
+           .elem("HealthCheckType", asg.getHealthCheckType())
            .elem("HealthCheckGracePeriod", String.valueOf(asg.getHealthCheckGracePeriod()))
-           .elem("CreatedTime", ISO_FMT.format(
-                   asg.getCreatedTime() != null ? asg.getCreatedTime() : Instant.EPOCH));
+           .elem("CreatedTime", ISO_FMT.format(asg.getCreatedTime()));
 
         if (asg.getDesiredCapacityType() != null) {
             xml.elem("DesiredCapacityType", asg.getDesiredCapacityType());
@@ -355,7 +353,7 @@ public class AutoScalingQueryHandler {
         // DescribeAutoScalingGroups' response, not only reachable via DescribeWarmPool -
         // terraform-aws-autoscaling's warm_pool example reads the group's warm pool state this
         // way. Shared with handleDescribeWarmPool so the two never drift.
-        appendWarmPoolConfigurationXml(xml, service.warmPoolForSnapshot(asg.getRegion(), asg.getAutoScalingGroupName()));
+        appendWarmPoolConfigurationXml(xml, service.describeWarmPool(asg.getRegion(), asg.getAutoScalingGroupName()));
 
         xml.start("AvailabilityZones");
         for (String az : asg.getAvailabilityZones()) { xml.elem("member", az); }
@@ -441,28 +439,6 @@ public class AutoScalingQueryHandler {
                   .end("StartInstanceRefreshResult")
                   .raw(AwsQueryResponse.responseMetadata())
                 .end("StartInstanceRefreshResponse").build());
-    }
-
-    private Response handleCancelInstanceRefresh(MultivaluedMap<String, String> p, String region) {
-        InstanceRefresh refresh = service.cancelInstanceRefresh(region, p.getFirst("AutoScalingGroupName"));
-        return ok(new XmlBuilder()
-                .start("CancelInstanceRefreshResponse", NS)
-                  .start("CancelInstanceRefreshResult")
-                    .elem("InstanceRefreshId", refresh.getInstanceRefreshId())
-                  .end("CancelInstanceRefreshResult")
-                  .raw(AwsQueryResponse.responseMetadata())
-                .end("CancelInstanceRefreshResponse").build());
-    }
-
-    private Response handleRollbackInstanceRefresh(MultivaluedMap<String, String> p, String region) {
-        InstanceRefresh refresh = service.rollbackInstanceRefresh(region, p.getFirst("AutoScalingGroupName"));
-        return ok(new XmlBuilder()
-                .start("RollbackInstanceRefreshResponse", NS)
-                  .start("RollbackInstanceRefreshResult")
-                    .elem("InstanceRefreshId", refresh.getInstanceRefreshId())
-                  .end("RollbackInstanceRefreshResult")
-                  .raw(AwsQueryResponse.responseMetadata())
-                .end("RollbackInstanceRefreshResponse").build());
     }
 
     private Response handleDescribeInstanceRefreshes(MultivaluedMap<String, String> p, String region) {
@@ -947,36 +923,6 @@ public class AutoScalingQueryHandler {
                 .end("TerminateInstanceInAutoScalingGroupResponse").build());
     }
 
-    private Response handleEnterStandby(MultivaluedMap<String, String> p, String region) {
-        List<ScalingActivity> activities = service.enterStandby(region,
-                p.getFirst("AutoScalingGroupName"),
-                memberList(p, "InstanceIds"),
-                "true".equalsIgnoreCase(p.getFirst("ShouldDecrementDesiredCapacity")));
-        return ok(activitiesResponse("EnterStandby", activities));
-    }
-
-    private Response handleExitStandby(MultivaluedMap<String, String> p, String region) {
-        List<ScalingActivity> activities = service.exitStandby(region,
-                p.getFirst("AutoScalingGroupName"),
-                memberList(p, "InstanceIds"));
-        return ok(activitiesResponse("ExitStandby", activities));
-    }
-
-    private String activitiesResponse(String action, List<ScalingActivity> activities) {
-        XmlBuilder xml = new XmlBuilder()
-                .start(action + "Response", NS)
-                  .start(action + "Result")
-                    .start("Activities");
-        for (ScalingActivity a : activities) {
-            appendActivityMember(xml, a);
-        }
-        xml.end("Activities")
-           .end(action + "Result")
-           .raw(AwsQueryResponse.responseMetadata())
-           .end(action + "Response");
-        return xml.build();
-    }
-
     // ── Load balancer attachment ───────────────────────────────────────────────
 
     private Response handleAttachLoadBalancerTargetGroups(MultivaluedMap<String, String> p, String region) {
@@ -1198,13 +1144,6 @@ public class AutoScalingQueryHandler {
         return ok(xml.build());
     }
 
-    private Response handleExecutePolicy(MultivaluedMap<String, String> p, String region) {
-        service.executePolicy(region, p.getFirst("AutoScalingGroupName"), p.getFirst("PolicyName"));
-        return ok(new XmlBuilder()
-                .start("ExecutePolicyResponse", NS)
-                  .raw(AwsQueryResponse.responseMetadata())
-                .end("ExecutePolicyResponse").build());
-    }
     private static final String TTC = "TargetTrackingConfiguration.";
     private static final String CUSTOM = TTC + "CustomizedMetricSpecification.";
 
@@ -1433,7 +1372,17 @@ public class AutoScalingQueryHandler {
                   .start("DescribeScalingActivitiesResult")
                     .start("Activities");
         for (ScalingActivity a : activities) {
-            appendActivityMember(xml, a);
+            xml.start("member")
+               .elem("ActivityId", a.getActivityId())
+               .elem("AutoScalingGroupName", a.getAutoScalingGroupName())
+               .elem("StatusCode", a.getStatusCode())
+               .elem("Progress", String.valueOf(a.getProgress()))
+               .elem("StartTime", ISO_FMT.format(a.getStartTime()));
+            if (a.getDescription() != null) { xml.elem("Description", a.getDescription()); }
+            if (a.getCause() != null) { xml.elem("Cause", a.getCause()); }
+            if (a.getEndTime() != null) { xml.elem("EndTime", ISO_FMT.format(a.getEndTime())); }
+            if (a.getStatusMessage() != null) { xml.elem("StatusMessage", a.getStatusMessage()); }
+            xml.end("member");
         }
         xml.end("Activities")
            .end("DescribeScalingActivitiesResult")
@@ -2030,20 +1979,6 @@ public class AutoScalingQueryHandler {
         try { return Double.parseDouble(val); } catch (NumberFormatException e) { return null; }
     }
 
-    private void appendActivityMember(XmlBuilder xml, ScalingActivity a) {
-        xml.start("member")
-           .elem("ActivityId", a.getActivityId())
-           .elem("AutoScalingGroupName", a.getAutoScalingGroupName())
-           .elem("StatusCode", a.getStatusCode())
-           .elem("Progress", String.valueOf(a.getProgress()))
-           .elem("StartTime", ISO_FMT.format(a.getStartTime()));
-        if (a.getDescription() != null) { xml.elem("Description", a.getDescription()); }
-        if (a.getCause() != null) { xml.elem("Cause", a.getCause()); }
-        if (a.getEndTime() != null) { xml.elem("EndTime", ISO_FMT.format(a.getEndTime())); }
-        if (a.getStatusMessage() != null) { xml.elem("StatusMessage", a.getStatusMessage()); }
-        xml.end("member");
-    }
-
     private Boolean nullableBoolParam(MultivaluedMap<String, String> p, String key) {
         String val = p.getFirst(key);
         if (val == null || val.isBlank()) { return null; }
@@ -2185,5 +2120,79 @@ public class AutoScalingQueryHandler {
                 .end("ErrorResponse")
                 .build();
         return Response.status(status).entity(xml).type("application/xml").build();
+    }
+
+    private Response handleCancelInstanceRefresh(MultivaluedMap<String, String> p, String region) {
+        InstanceRefresh refresh = service.cancelInstanceRefresh(region, p.getFirst("AutoScalingGroupName"));
+        return ok(new XmlBuilder()
+                .start("CancelInstanceRefreshResponse", NS)
+                  .start("CancelInstanceRefreshResult")
+                    .elem("InstanceRefreshId", refresh.getInstanceRefreshId())
+                  .end("CancelInstanceRefreshResult")
+                  .raw(AwsQueryResponse.responseMetadata())
+                .end("CancelInstanceRefreshResponse").build());
+    }
+
+    private Response handleRollbackInstanceRefresh(MultivaluedMap<String, String> p, String region) {
+        InstanceRefresh refresh = service.rollbackInstanceRefresh(region, p.getFirst("AutoScalingGroupName"));
+        return ok(new XmlBuilder()
+                .start("RollbackInstanceRefreshResponse", NS)
+                  .start("RollbackInstanceRefreshResult")
+                    .elem("InstanceRefreshId", refresh.getInstanceRefreshId())
+                  .end("RollbackInstanceRefreshResult")
+                  .raw(AwsQueryResponse.responseMetadata())
+                .end("RollbackInstanceRefreshResponse").build());
+    }
+
+    private Response handleEnterStandby(MultivaluedMap<String, String> p, String region) {
+        List<ScalingActivity> activities = service.enterStandby(region,
+                p.getFirst("AutoScalingGroupName"),
+                memberList(p, "InstanceIds"),
+                "true".equalsIgnoreCase(p.getFirst("ShouldDecrementDesiredCapacity")));
+        return ok(activitiesResponse("EnterStandby", activities));
+    }
+
+    private Response handleExitStandby(MultivaluedMap<String, String> p, String region) {
+        List<ScalingActivity> activities = service.exitStandby(region,
+                p.getFirst("AutoScalingGroupName"),
+                memberList(p, "InstanceIds"));
+        return ok(activitiesResponse("ExitStandby", activities));
+    }
+
+    private String activitiesResponse(String action, List<ScalingActivity> activities) {
+        XmlBuilder xml = new XmlBuilder()
+                .start(action + "Response", NS)
+                  .start(action + "Result")
+                    .start("Activities");
+        for (ScalingActivity a : activities) {
+            appendActivityMember(xml, a);
+        }
+        xml.end("Activities")
+           .end(action + "Result")
+           .raw(AwsQueryResponse.responseMetadata())
+           .end(action + "Response");
+        return xml.build();
+    }
+
+    private Response handleExecutePolicy(MultivaluedMap<String, String> p, String region) {
+        service.executePolicy(region, p.getFirst("AutoScalingGroupName"), p.getFirst("PolicyName"));
+        return ok(new XmlBuilder()
+                .start("ExecutePolicyResponse", NS)
+                  .raw(AwsQueryResponse.responseMetadata())
+                .end("ExecutePolicyResponse").build());
+    }
+
+    private void appendActivityMember(XmlBuilder xml, ScalingActivity a) {
+        xml.start("member")
+           .elem("ActivityId", a.getActivityId())
+           .elem("AutoScalingGroupName", a.getAutoScalingGroupName())
+           .elem("StatusCode", a.getStatusCode())
+           .elem("Progress", String.valueOf(a.getProgress()))
+           .elem("StartTime", ISO_FMT.format(a.getStartTime()));
+        if (a.getDescription() != null) { xml.elem("Description", a.getDescription()); }
+        if (a.getCause() != null) { xml.elem("Cause", a.getCause()); }
+        if (a.getEndTime() != null) { xml.elem("EndTime", ISO_FMT.format(a.getEndTime())); }
+        if (a.getStatusMessage() != null) { xml.elem("StatusMessage", a.getStatusMessage()); }
+        xml.end("member");
     }
 }

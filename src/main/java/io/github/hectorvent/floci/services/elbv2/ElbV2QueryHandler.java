@@ -109,13 +109,12 @@ public class ElbV2QueryHandler {
                 case "AddListenerCertificates"       -> handleAddListenerCertificates(params, region);
                 case "RemoveListenerCertificates"    -> handleRemoveListenerCertificates(params, region);
                 case "DescribeListenerCertificates"  -> handleDescribeListenerCertificates(params, region);
-                // Trust Stores
-                case "CreateTrustStore"              -> handleCreateTrustStore(params, region);
-                case "DescribeTrustStores"           -> handleDescribeTrustStores(params, region);
-                case "ModifyTrustStore"              -> handleModifyTrustStore(params, region);
-                case "DeleteTrustStore"              -> handleDeleteTrustStore(params, region);
-                case "GetTrustStoreCaCertificatesBundle" -> handleGetTrustStoreCaCertificatesBundle(params, region);
                 case "GetTrustStoreRevocationContent" -> handleGetTrustStoreRevocationContent(params, region);
+                case "GetTrustStoreCaCertificatesBundle" -> handleGetTrustStoreCaCertificatesBundle(params, region);
+                case "DeleteTrustStore"              -> handleDeleteTrustStore(params, region);
+                case "ModifyTrustStore"              -> handleModifyTrustStore(params, region);
+                case "DescribeTrustStores"           -> handleDescribeTrustStores(params, region);
+                case "CreateTrustStore"              -> handleCreateTrustStore(params, region);
                 default -> xmlError("UnsupportedOperation",
                         "Action " + action + " is not supported.", 400);
             };
@@ -241,33 +240,6 @@ public class ElbV2QueryHandler {
            .end("DescribeCapacityReservationResult")
            .raw(AwsQueryResponse.responseMetadata())
            .end("DescribeCapacityReservationResponse");
-        return Response.ok(xml.build()).type(MediaType.APPLICATION_XML).build();
-    }
-
-    private Response handleModifyCapacityReservation(MultivaluedMap<String, String> p, String region) {
-        String arn = p.getFirst("LoadBalancerArn");
-        Integer capacityUnits = parseIntOrNull(p.getFirst("MinimumLoadBalancerCapacity.CapacityUnits"));
-        Boolean reset = parseBoolOrNull(p.getFirst("ResetCapacityReservation"));
-        ElbV2Service.CapacityReservation cr = service.modifyCapacityReservation(region, arn, capacityUnits, reset);
-
-        XmlBuilder xml = new XmlBuilder()
-                .start("ModifyCapacityReservationResponse", AwsNamespaces.ELB_V2)
-                .start("ModifyCapacityReservationResult");
-        if (cr.lastModifiedTime() != null) {
-            xml.elem("LastModifiedTime", ISO_FMT.format(cr.lastModifiedTime()));
-        }
-        if (cr.decreaseRequestsRemaining() != null) {
-            xml.elem("DecreaseRequestsRemaining", cr.decreaseRequestsRemaining());
-        }
-        if (cr.minimumCapacityUnits() != null) {
-            xml.start("MinimumLoadBalancerCapacity")
-                 .elem("CapacityUnits", cr.minimumCapacityUnits())
-               .end("MinimumLoadBalancerCapacity");
-        }
-        xml.start("CapacityReservationState").end("CapacityReservationState")
-           .end("ModifyCapacityReservationResult")
-           .raw(AwsQueryResponse.responseMetadata())
-           .end("ModifyCapacityReservationResponse");
         return Response.ok(xml.build()).type(MediaType.APPLICATION_XML).build();
     }
 
@@ -819,10 +791,7 @@ public class ElbV2QueryHandler {
                 .start("AddListenerCertificatesResult")
                   .start("Certificates");
         for (String c : certs) {
-            xml.start("member")
-               .elem("CertificateArn", c)
-               .elem("IsDefault", false)
-               .end("member");
+            xml.start("member").elem("CertificateArn", c).end("member");
         }
         xml.end("Certificates")
            .end("AddListenerCertificatesResult")
@@ -846,11 +815,8 @@ public class ElbV2QueryHandler {
                 .start("DescribeListenerCertificatesResponse", AwsNamespaces.ELB_V2)
                 .start("DescribeListenerCertificatesResult")
                   .start("Certificates");
-        for (int i = 0; i < certs.size(); i++) {
-            xml.start("member")
-               .elem("CertificateArn", certs.get(i))
-               .elem("IsDefault", i == 0)
-               .end("member");
+        for (String c : certs) {
+            xml.start("member").elem("CertificateArn", c).end("member");
         }
         xml.end("Certificates")
            .elem("NextMarker", "")
@@ -858,103 +824,6 @@ public class ElbV2QueryHandler {
            .raw(AwsQueryResponse.responseMetadata())
            .end("DescribeListenerCertificatesResponse");
         return Response.ok(xml.build()).type(MediaType.APPLICATION_XML).build();
-    }
-
-    // ── Trust Stores ──────────────────────────────────────────────────────────
-
-    private Response handleCreateTrustStore(MultivaluedMap<String, String> p, String region) {
-        TrustStore trustStore = service.createTrustStore(
-                region,
-                p.getFirst("Name"),
-                p.getFirst("CaCertificatesBundleS3Bucket"),
-                p.getFirst("CaCertificatesBundleS3Key"),
-                p.getFirst("CaCertificatesBundleS3ObjectVersion"),
-                parseTags(p));
-
-        String xml = new XmlBuilder()
-                .start("CreateTrustStoreResponse", AwsNamespaces.ELB_V2)
-                .start("CreateTrustStoreResult")
-                  .start("TrustStores")
-                    .start("member").raw(trustStoreXml(trustStore)).end("member")
-                  .end("TrustStores")
-                .end("CreateTrustStoreResult")
-                .raw(AwsQueryResponse.responseMetadata())
-                .end("CreateTrustStoreResponse")
-                .build();
-        return Response.ok(xml).type(MediaType.APPLICATION_XML).build();
-    }
-
-    private Response handleDescribeTrustStores(MultivaluedMap<String, String> p, String region) {
-        List<String> arns = memberList(p, "TrustStoreArns");
-        List<String> names = memberList(p, "Names");
-        List<TrustStore> stores = service.describeTrustStores(region, arns, names);
-
-        XmlBuilder xml = new XmlBuilder()
-                .start("DescribeTrustStoresResponse", AwsNamespaces.ELB_V2)
-                .start("DescribeTrustStoresResult")
-                  .start("TrustStores");
-        for (TrustStore ts : stores) {
-            xml.start("member").raw(trustStoreXml(ts)).end("member");
-        }
-        xml.end("TrustStores")
-           .elem("NextMarker", "")
-           .end("DescribeTrustStoresResult")
-           .raw(AwsQueryResponse.responseMetadata())
-           .end("DescribeTrustStoresResponse");
-        return Response.ok(xml.build()).type(MediaType.APPLICATION_XML).build();
-    }
-
-    private Response handleModifyTrustStore(MultivaluedMap<String, String> p, String region) {
-        TrustStore trustStore = service.modifyTrustStore(
-                region,
-                p.getFirst("TrustStoreArn"),
-                p.getFirst("CaCertificatesBundleS3Bucket"),
-                p.getFirst("CaCertificatesBundleS3Key"),
-                p.getFirst("CaCertificatesBundleS3ObjectVersion"));
-
-        String xml = new XmlBuilder()
-                .start("ModifyTrustStoreResponse", AwsNamespaces.ELB_V2)
-                .start("ModifyTrustStoreResult")
-                  .start("TrustStores")
-                    .start("member").raw(trustStoreXml(trustStore)).end("member")
-                  .end("TrustStores")
-                .end("ModifyTrustStoreResult")
-                .raw(AwsQueryResponse.responseMetadata())
-                .end("ModifyTrustStoreResponse")
-                .build();
-        return Response.ok(xml).type(MediaType.APPLICATION_XML).build();
-    }
-
-    private Response handleDeleteTrustStore(MultivaluedMap<String, String> p, String region) {
-        service.deleteTrustStore(region, p.getFirst("TrustStoreArn"));
-        return voidResponse("DeleteTrustStoreResponse");
-    }
-
-    private Response handleGetTrustStoreCaCertificatesBundle(MultivaluedMap<String, String> p, String region) {
-        String location = service.getTrustStoreCaCertificatesBundleLocation(region, p.getFirst("TrustStoreArn"));
-        String xml = new XmlBuilder()
-                .start("GetTrustStoreCaCertificatesBundleResponse", AwsNamespaces.ELB_V2)
-                .start("GetTrustStoreCaCertificatesBundleResult")
-                  .elem("Location", location)
-                .end("GetTrustStoreCaCertificatesBundleResult")
-                .raw(AwsQueryResponse.responseMetadata())
-                .end("GetTrustStoreCaCertificatesBundleResponse")
-                .build();
-        return Response.ok(xml).type(MediaType.APPLICATION_XML).build();
-    }
-
-    private Response handleGetTrustStoreRevocationContent(MultivaluedMap<String, String> p, String region) {
-        String location = service.getTrustStoreRevocationContentLocation(
-                region, p.getFirst("TrustStoreArn"), parseLongOrNull(p.getFirst("RevocationId")));
-        String xml = new XmlBuilder()
-                .start("GetTrustStoreRevocationContentResponse", AwsNamespaces.ELB_V2)
-                .start("GetTrustStoreRevocationContentResult")
-                  .elem("Location", location)
-                .end("GetTrustStoreRevocationContentResult")
-                .raw(AwsQueryResponse.responseMetadata())
-                .end("GetTrustStoreRevocationContentResponse")
-                .build();
-        return Response.ok(xml).type(MediaType.APPLICATION_XML).build();
     }
 
     // ── XML builders ─────────────────────────────────────────────────────────
@@ -1024,44 +893,20 @@ public class ElbV2QueryHandler {
         xml.elem("Protocol", safe(l.getProtocol()));
         xml.elem("SslPolicy", safe(l.getSslPolicy()));
         xml.start("Certificates");
-        // DescribeListeners returns only the default certificate. SNI extras
-        // are listed by DescribeListenerCertificates.
-        List<String> listenerCerts = l.getCertificates();
-        if (listenerCerts != null && !listenerCerts.isEmpty()) {
-            xml.start("member")
-               .elem("CertificateArn", listenerCerts.getFirst())
-               .elem("IsDefault", true)
-               .end("member");
+        for (String c : l.getCertificates()) {
+            xml.start("member").elem("CertificateArn", c).end("member");
         }
         xml.end("Certificates");
         xml.start("DefaultActions");
-        List<Action> defaultActions = l.getDefaultActions();
-        if (defaultActions != null) {
-            for (Action a : defaultActions) {
-                if (a != null) {
-                    xml.start("member").raw(actionXml(a)).end("member");
-                }
-            }
+        for (Action a : l.getDefaultActions()) {
+            xml.start("member").raw(actionXml(a)).end("member");
         }
         xml.end("DefaultActions");
         xml.start("AlpnPolicy");
-        List<String> alpn = l.getAlpnPolicy();
-        if (alpn != null) {
-            for (String ap : alpn) {
-                xml.start("member").raw(ap).end("member");
-            }
+        for (String ap : l.getAlpnPolicy()) {
+            xml.start("member").raw(ap).end("member");
         }
         xml.end("AlpnPolicy");
-        return xml.build();
-    }
-
-    private String trustStoreXml(TrustStore ts) {
-        XmlBuilder xml = new XmlBuilder();
-        xml.elem("Name", safe(ts.getName()));
-        xml.elem("TrustStoreArn", ts.getTrustStoreArn());
-        xml.elem("Status", safe(ts.getStatus()));
-        xml.elem("NumberOfCaCertificates", ts.getNumberOfCaCertificates());
-        xml.elem("TotalRevokedEntries", ts.getTotalRevokedEntries());
         return xml.build();
     }
 
@@ -1088,17 +933,10 @@ public class ElbV2QueryHandler {
         xml.elem("Type", safe(a.getType()));
         if (a.getOrder() != null) xml.elem("Order", String.valueOf(a.getOrder()));
         if (a.getTargetGroupArn() != null) xml.elem("TargetGroupArn", a.getTargetGroupArn());
-        List<Action.TargetGroupTuple> tuples = a.getTargetGroups();
-        if (tuples == null) {
-            tuples = List.of();
-        }
-        if (!tuples.isEmpty() || a.getTargetGroupArn() == null && "forward".equals(a.getType())) {
+        if (!a.getTargetGroups().isEmpty() || a.getTargetGroupArn() == null && "forward".equals(a.getType())) {
             xml.start("ForwardConfig");
             xml.start("TargetGroups");
-            for (Action.TargetGroupTuple t : tuples) {
-                if (t == null) {
-                    continue;
-                }
+            for (Action.TargetGroupTuple t : a.getTargetGroups()) {
                 xml.start("member");
                 xml.elem("TargetGroupArn", safe(t.getTargetGroupArn()));
                 if (t.getWeight() != null) xml.elem("Weight", String.valueOf(t.getWeight()));
@@ -1250,13 +1088,6 @@ public class ElbV2QueryHandler {
         return result;
     }
 
-    private List<String> subnetMappingIds(MultivaluedMap<String, String> p) {
-        List<String> result = new ArrayList<>();
-        int i = 1;
-        while (true) {
-            String val = p.getFirst("SubnetMappings.member." + i + ".SubnetId");
-            if (val == null) break;
-            result.add(val);
     private List<String> subnetMappingSubnetIds(MultivaluedMap<String, String> p) {
         List<String> result = new ArrayList<>();
         int i = 1;
@@ -1481,17 +1312,14 @@ public class ElbV2QueryHandler {
     // <base>.AuthenticationRequestExtraParams.entry.N.key / .value.
     private Map<String, String> parseAuthExtraParams(MultivaluedMap<String, String> p, String base) {
         Map<String, String> params = new LinkedHashMap<>();
-        for (String element : List.of("entry", "member")) {
-            int n = 1;
-            while (true) {
-                String prefix = base + "AuthenticationRequestExtraParams." + element + "." + n;
-                String key = p.getFirst(prefix + ".key");
-                if (key == null) {
-                    break;
-                }
-                params.put(key, safe(p.getFirst(prefix + ".value")));
-                n++;
+        int n = 1;
+        while (true) {
+            String key = p.getFirst(base + "AuthenticationRequestExtraParams.entry." + n + ".key");
+            if (key == null) {
+                break;
             }
+            params.put(key, safe(p.getFirst(base + "AuthenticationRequestExtraParams.entry." + n + ".value")));
+            n++;
         }
         return params;
     }
@@ -1650,11 +1478,6 @@ public class ElbV2QueryHandler {
         return Integer.parseInt(s);
     }
 
-    private static Long parseLongOrNull(String s) {
-        if (s == null || s.isEmpty()) return null;
-        return Long.parseLong(s);
-    }
-
     private static Boolean parseBoolOrNull(String s) {
         if (s == null || s.isEmpty()) return null;
         return Boolean.parseBoolean(s);
@@ -1676,5 +1499,154 @@ public class ElbV2QueryHandler {
         copy.setIpAddressType(lb.getIpAddressType());
         copy.setRegion(lb.getRegion());
         return copy;
+    }
+
+    private Response handleModifyCapacityReservation(MultivaluedMap<String, String> p, String region) {
+        String arn = p.getFirst("LoadBalancerArn");
+        Integer capacityUnits = parseIntOrNull(p.getFirst("MinimumLoadBalancerCapacity.CapacityUnits"));
+        Boolean reset = parseBoolOrNull(p.getFirst("ResetCapacityReservation"));
+        ElbV2Service.CapacityReservation cr = service.modifyCapacityReservation(region, arn, capacityUnits, reset);
+
+        XmlBuilder xml = new XmlBuilder()
+                .start("ModifyCapacityReservationResponse", AwsNamespaces.ELB_V2)
+                .start("ModifyCapacityReservationResult");
+        if (cr.lastModifiedTime() != null) {
+            xml.elem("LastModifiedTime", ISO_FMT.format(cr.lastModifiedTime()));
+        }
+        if (cr.decreaseRequestsRemaining() != null) {
+            xml.elem("DecreaseRequestsRemaining", cr.decreaseRequestsRemaining());
+        }
+        if (cr.minimumCapacityUnits() != null) {
+            xml.start("MinimumLoadBalancerCapacity")
+                 .elem("CapacityUnits", cr.minimumCapacityUnits())
+               .end("MinimumLoadBalancerCapacity");
+        }
+        xml.start("CapacityReservationState").end("CapacityReservationState")
+           .end("ModifyCapacityReservationResult")
+           .raw(AwsQueryResponse.responseMetadata())
+           .end("ModifyCapacityReservationResponse");
+        return Response.ok(xml.build()).type(MediaType.APPLICATION_XML).build();
+    }
+
+    private Response handleCreateTrustStore(MultivaluedMap<String, String> p, String region) {
+        TrustStore trustStore = service.createTrustStore(
+                region,
+                p.getFirst("Name"),
+                p.getFirst("CaCertificatesBundleS3Bucket"),
+                p.getFirst("CaCertificatesBundleS3Key"),
+                p.getFirst("CaCertificatesBundleS3ObjectVersion"),
+                parseTags(p));
+
+        String xml = new XmlBuilder()
+                .start("CreateTrustStoreResponse", AwsNamespaces.ELB_V2)
+                .start("CreateTrustStoreResult")
+                  .start("TrustStores")
+                    .start("member").raw(trustStoreXml(trustStore)).end("member")
+                  .end("TrustStores")
+                .end("CreateTrustStoreResult")
+                .raw(AwsQueryResponse.responseMetadata())
+                .end("CreateTrustStoreResponse")
+                .build();
+        return Response.ok(xml).type(MediaType.APPLICATION_XML).build();
+    }
+
+    private Response handleDescribeTrustStores(MultivaluedMap<String, String> p, String region) {
+        List<String> arns = memberList(p, "TrustStoreArns");
+        List<String> names = memberList(p, "Names");
+        List<TrustStore> stores = service.describeTrustStores(region, arns, names);
+
+        XmlBuilder xml = new XmlBuilder()
+                .start("DescribeTrustStoresResponse", AwsNamespaces.ELB_V2)
+                .start("DescribeTrustStoresResult")
+                  .start("TrustStores");
+        for (TrustStore ts : stores) {
+            xml.start("member").raw(trustStoreXml(ts)).end("member");
+        }
+        xml.end("TrustStores")
+           .elem("NextMarker", "")
+           .end("DescribeTrustStoresResult")
+           .raw(AwsQueryResponse.responseMetadata())
+           .end("DescribeTrustStoresResponse");
+        return Response.ok(xml.build()).type(MediaType.APPLICATION_XML).build();
+    }
+
+    private Response handleModifyTrustStore(MultivaluedMap<String, String> p, String region) {
+        TrustStore trustStore = service.modifyTrustStore(
+                region,
+                p.getFirst("TrustStoreArn"),
+                p.getFirst("CaCertificatesBundleS3Bucket"),
+                p.getFirst("CaCertificatesBundleS3Key"),
+                p.getFirst("CaCertificatesBundleS3ObjectVersion"));
+
+        String xml = new XmlBuilder()
+                .start("ModifyTrustStoreResponse", AwsNamespaces.ELB_V2)
+                .start("ModifyTrustStoreResult")
+                  .start("TrustStores")
+                    .start("member").raw(trustStoreXml(trustStore)).end("member")
+                  .end("TrustStores")
+                .end("ModifyTrustStoreResult")
+                .raw(AwsQueryResponse.responseMetadata())
+                .end("ModifyTrustStoreResponse")
+                .build();
+        return Response.ok(xml).type(MediaType.APPLICATION_XML).build();
+    }
+
+    private Response handleDeleteTrustStore(MultivaluedMap<String, String> p, String region) {
+        service.deleteTrustStore(region, p.getFirst("TrustStoreArn"));
+        return voidResponse("DeleteTrustStoreResponse");
+    }
+
+    private Response handleGetTrustStoreCaCertificatesBundle(MultivaluedMap<String, String> p, String region) {
+        String location = service.getTrustStoreCaCertificatesBundleLocation(region, p.getFirst("TrustStoreArn"));
+        String xml = new XmlBuilder()
+                .start("GetTrustStoreCaCertificatesBundleResponse", AwsNamespaces.ELB_V2)
+                .start("GetTrustStoreCaCertificatesBundleResult")
+                  .elem("Location", location)
+                .end("GetTrustStoreCaCertificatesBundleResult")
+                .raw(AwsQueryResponse.responseMetadata())
+                .end("GetTrustStoreCaCertificatesBundleResponse")
+                .build();
+        return Response.ok(xml).type(MediaType.APPLICATION_XML).build();
+    }
+
+    private Response handleGetTrustStoreRevocationContent(MultivaluedMap<String, String> p, String region) {
+        String location = service.getTrustStoreRevocationContentLocation(
+                region, p.getFirst("TrustStoreArn"), parseLongOrNull(p.getFirst("RevocationId")));
+        String xml = new XmlBuilder()
+                .start("GetTrustStoreRevocationContentResponse", AwsNamespaces.ELB_V2)
+                .start("GetTrustStoreRevocationContentResult")
+                  .elem("Location", location)
+                .end("GetTrustStoreRevocationContentResult")
+                .raw(AwsQueryResponse.responseMetadata())
+                .end("GetTrustStoreRevocationContentResponse")
+                .build();
+        return Response.ok(xml).type(MediaType.APPLICATION_XML).build();
+    }
+
+    private String trustStoreXml(TrustStore ts) {
+        XmlBuilder xml = new XmlBuilder();
+        xml.elem("Name", safe(ts.getName()));
+        xml.elem("TrustStoreArn", ts.getTrustStoreArn());
+        xml.elem("Status", safe(ts.getStatus()));
+        xml.elem("NumberOfCaCertificates", ts.getNumberOfCaCertificates());
+        xml.elem("TotalRevokedEntries", ts.getTotalRevokedEntries());
+        return xml.build();
+    }
+
+    private List<String> subnetMappingIds(MultivaluedMap<String, String> p) {
+        List<String> result = new ArrayList<>();
+        int i = 1;
+        while (true) {
+            String val = p.getFirst("SubnetMappings.member." + i + ".SubnetId");
+            if (val == null) break;
+            result.add(val);
+            i++;
+        }
+        return result;
+    }
+
+    private static Long parseLongOrNull(String s) {
+        if (s == null || s.isEmpty()) return null;
+        return Long.parseLong(s);
     }
 }

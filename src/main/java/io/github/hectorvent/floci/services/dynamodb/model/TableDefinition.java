@@ -50,8 +50,6 @@ public class TableDefinition {
     private String tableClass; // "STANDARD" or "STANDARD_INFREQUENT_ACCESS"
     private Integer onDemandMaxReadRequestUnits;
     private Integer onDemandMaxWriteRequestUnits;
-    private String contributorInsightsStatus;
-    private Map<String, String> indexContributorInsightsStatus;
     // Replica regions for a global table (single-process emulator backs them all with this table's
     // data; the list drives the DescribeTable Replicas/GlobalTableVersion projection).
     private List<String> replicaRegions;
@@ -71,8 +69,6 @@ public class TableDefinition {
         this.vectorIndexes = new ArrayList<>();
         this.pointInTimeRecoveryRecoveryPeriodInDays = 35;
         this.kinesisStreamingDestinations = new ArrayList<>();
-        this.contributorInsightsStatus = "DISABLED";
-        this.indexContributorInsightsStatus = new HashMap<>();
         this.replicaRegions = new ArrayList<>();
     }
 
@@ -102,8 +98,6 @@ public class TableDefinition {
         this.vectorIndexes = new ArrayList<>();
         this.pointInTimeRecoveryRecoveryPeriodInDays = 35;
         this.kinesisStreamingDestinations = new ArrayList<>();
-        this.contributorInsightsStatus = "DISABLED";
-        this.indexContributorInsightsStatus = new HashMap<>();
         this.replicaRegions = new ArrayList<>();
     }
 
@@ -248,39 +242,6 @@ public class TableDefinition {
     public String getResourcePolicy() { return resourcePolicy; }
     public void setResourcePolicy(String resourcePolicy) { this.resourcePolicy = resourcePolicy; }
 
-    public String getContributorInsightsStatus() {
-        return contributorInsightsStatus != null ? contributorInsightsStatus : "DISABLED";
-    }
-    public void setContributorInsightsStatus(String contributorInsightsStatus) {
-        this.contributorInsightsStatus = contributorInsightsStatus != null ? contributorInsightsStatus : "DISABLED";
-    }
-
-    public Map<String, String> getIndexContributorInsightsStatus() {
-        if (indexContributorInsightsStatus == null) {
-            indexContributorInsightsStatus = new HashMap<>();
-        }
-        return indexContributorInsightsStatus;
-    }
-    public void setIndexContributorInsightsStatus(Map<String, String> status) {
-        this.indexContributorInsightsStatus = status != null ? status : new HashMap<>();
-    }
-
-    public String contributorInsightsStatusFor(String indexName) {
-        if (indexName == null || indexName.isBlank()) {
-            return getContributorInsightsStatus();
-        }
-        return getIndexContributorInsightsStatus().getOrDefault(indexName, "DISABLED");
-    }
-
-    public void setContributorInsightsStatusFor(String indexName, String status) {
-        String resolved = status != null ? status : "DISABLED";
-        if (indexName == null || indexName.isBlank()) {
-            setContributorInsightsStatus(resolved);
-            return;
-        }
-        getIndexContributorInsightsStatus().put(indexName, resolved);
-    }
-
     public String getResourcePolicyRevisionId() { return resourcePolicyRevisionId; }
     public void setResourcePolicyRevisionId(String resourcePolicyRevisionId) { this.resourcePolicyRevisionId = resourcePolicyRevisionId; }
 
@@ -346,5 +307,44 @@ public class TableDefinition {
         return vectorIndexes.stream()
                 .filter(v -> indexName.equals(v.getIndexName()))
                 .findFirst();
+    }
+
+    private String contributorInsightsStatus;
+
+    private Map<String, String> indexContributorInsightsStatus;
+
+    public String getContributorInsightsStatus() {
+        return contributorInsightsStatus != null ? contributorInsightsStatus : "DISABLED";
+    }
+
+    public void setContributorInsightsStatus(String contributorInsightsStatus) {
+        this.contributorInsightsStatus = contributorInsightsStatus != null ? contributorInsightsStatus : "DISABLED";
+    }
+
+    public Map<String, String> getIndexContributorInsightsStatus() {
+        if (indexContributorInsightsStatus == null) {
+            indexContributorInsightsStatus = new HashMap<>();
+        }
+        return indexContributorInsightsStatus;
+    }
+
+    public void setIndexContributorInsightsStatus(Map<String, String> status) {
+        this.indexContributorInsightsStatus = status != null ? status : new HashMap<>();
+    }
+
+    public String contributorInsightsStatusFor(String indexName) {
+        if (indexName == null || indexName.isBlank()) {
+            return getContributorInsightsStatus();
+        }
+        return getIndexContributorInsightsStatus().getOrDefault(indexName, "DISABLED");
+    }
+
+    public void setContributorInsightsStatusFor(String indexName, String status) {
+        String resolved = status != null ? status : "DISABLED";
+        if (indexName == null || indexName.isBlank()) {
+            setContributorInsightsStatus(resolved);
+            return;
+        }
+        getIndexContributorInsightsStatus().put(indexName, resolved);
     }
 }

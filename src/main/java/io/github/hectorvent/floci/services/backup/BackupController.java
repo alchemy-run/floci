@@ -4,14 +4,27 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.services.backup.model.*;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.*;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
+import org.jboss.logging.Logger;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import io.github.hectorvent.floci.services.backup.model.BackupJob;
 import io.github.hectorvent.floci.services.backup.model.BackupPlan;
 import io.github.hectorvent.floci.services.backup.model.BackupRule;
 import io.github.hectorvent.floci.services.backup.model.BackupSelection;
 import io.github.hectorvent.floci.services.backup.model.BackupVault;
 import io.github.hectorvent.floci.services.backup.model.Lifecycle;
-import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
@@ -20,22 +33,15 @@ import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
-import jakarta.ws.rs.core.Context;
-import jakarta.ws.rs.core.HttpHeaders;
-import jakarta.ws.rs.core.MediaType;
-import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
-
-import java.io.IOException;
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 
 @Path("/")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 public class BackupController {
+
+    private static final Logger LOG = Logger.getLogger(BackupController.class);
 
     private final BackupService service;
     private final RegionResolver regionResolver;
@@ -266,7 +272,6 @@ public class BackupController {
         String creatorRequestId = textOrNull(req, "CreatorRequestId");
 
         BackupPlan plan = service.createBackupPlan(planName, rules, creatorRequestId, region);
-        service.tagResource(plan.getBackupPlanArn(), readStringMap(req, "BackupPlanTags"));
 
         ObjectNode out = objectMapper.createObjectNode();
         out.put("BackupPlanId", plan.getBackupPlanId());
@@ -349,10 +354,6 @@ public class BackupController {
 
         BackupSelection sel = service.createBackupSelection(planId, selectionName, iamRoleArn,
                 resources, notResources, creatorRequestId);
-        BackupSelection input = objectMapper.treeToValue(selNode, BackupSelection.class);
-        sel.setListOfTags(input.getListOfTags());
-        sel.setConditions(input.getConditions());
-        service.saveSelection(sel);
 
         ObjectNode out = objectMapper.createObjectNode();
         out.put("SelectionId", sel.getSelectionId());
@@ -375,10 +376,6 @@ public class BackupController {
         selBody.put("IamRoleArn", sel.getIamRoleArn());
         selBody.set("Resources", objectMapper.valueToTree(sel.getResources()));
         selBody.set("NotResources", objectMapper.valueToTree(sel.getNotResources()));
-        selBody.set("ListOfTags", objectMapper.valueToTree(sel.getListOfTags()));
-        if (sel.getConditions() != null) {
-            selBody.set("Conditions", objectMapper.valueToTree(sel.getConditions()));
-        }
         return Response.ok(out).build();
     }
 
@@ -428,6 +425,7 @@ public class BackupController {
         out.put("BackupJobId", job.getBackupJobId());
         out.put("BackupVaultArn", job.getBackupVaultArn());
         out.put("CreationDate", job.getCreationDate());
+        out.put("RecoveryPointArn", "");
         return Response.status(200).entity(out).build();
     }
 
@@ -439,8 +437,8 @@ public class BackupController {
 
     @POST
     @Path("/backup-jobs/{backupJobId}")
-    public Response stopBackupJob(@Context HttpHeaders headers, @PathParam("backupJobId") String jobId) {
-        service.stopBackupJob(jobId, regionResolver.resolveRegion(headers));
+    public Response stopBackupJob(@PathParam("backupJobId") String jobId) {
+        service.stopBackupJob(jobId);
         return Response.noContent().build();
     }
 
@@ -466,33 +464,148 @@ public class BackupController {
     // ── Recovery Point ─────────────────────────────────────────────────────────
 
     @GET
-    @Path("/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn: .+}")
+    @Path("/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn}")
     public Response describeRecoveryPoint(@Context HttpHeaders headers,
                                            @PathParam("backupVaultName") String vaultName,
                                            @PathParam("recoveryPointArn") String recoveryPointArn) {
         String region = regionResolver.resolveRegion(headers);
-        ObjectNode point = objectMapper.valueToTree(service.describeRecoveryPoint(vaultName, recoveryPointArn, region));
-        point.remove("RestoreMetadata");
-        return Response.ok(point).build();
+        return Response.ok(service.describeRecoveryPoint(vaultName, recoveryPointArn, region)).build();
     }
 
     @GET
     @Path("/backup-vaults/{backupVaultName}/recovery-points/")
-    public Response listRecoveryPointsByBackupVault(@Context HttpHeaders headers, @Context UriInfo uri,
+    public Response listRecoveryPointsByBackupVault(@Context HttpHeaders headers,
                                                      @PathParam("backupVaultName") String vaultName) {
         String region = regionResolver.resolveRegion(headers);
-        return Response.ok(service.page("RecoveryPoints", service.listRecoveryPointsByBackupVault(vaultName, region),
-                query(uri), region)).build();
+        List<RecoveryPoint> points = service.listRecoveryPointsByBackupVault(vaultName, region);
+        ObjectNode out = objectMapper.createObjectNode();
+        ArrayNode list = out.putArray("RecoveryPoints");
+        points.forEach(list::addPOJO);
+        return Response.ok(out).build();
     }
 
     @DELETE
-    @Path("/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn: .+}")
+    @Path("/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn}")
     public Response deleteRecoveryPoint(@Context HttpHeaders headers,
                                          @PathParam("backupVaultName") String vaultName,
                                          @PathParam("recoveryPointArn") String recoveryPointArn) {
         String region = regionResolver.resolveRegion(headers);
         service.deleteRecoveryPoint(vaultName, recoveryPointArn, region);
         return Response.noContent().build();
+    }
+
+    // ── Untag (POST /untag/{arn} with body — distinct from shared DELETE /tags pattern) ──
+
+    @POST
+    @Path("/untag/{resourceArn: .*}")
+    public Response untagResource(@PathParam("resourceArn") String resourceArn,
+                                   String body) throws IOException {
+        JsonNode req = objectMapper.readTree(body);
+        List<String> tagKeys = readStringList(req.path("TagKeyList"));
+        service.untagResource(resourceArn, tagKeys);
+        return Response.noContent().build();
+    }
+
+    // ── Supported resource types ───────────────────────────────────────────────
+
+    @GET
+    @Path("/supported-resource-types")
+    public Response getSupportedResourceTypes() {
+        ObjectNode out = objectMapper.createObjectNode();
+        ArrayNode list = out.putArray("ResourceTypes");
+        service.getSupportedResourceTypes().forEach(list::add);
+        return Response.ok(out).build();
+    }
+
+    // ── Helpers ────────────────────────────────────────────────────────────────
+
+    // Absent and null both mean "not supplied", which for these members is meaningful:
+    // omitting ChangeableForDays is what selects compliance mode.
+    //
+    // A present value must be an INTEGRAL NUMBER, and is rejected rather than coerced.
+    // asLong() would silently accept anything: 1.5 truncates to 1, true becomes 1, and
+    // the string "7" becomes 7 -- so a request AWS rejects with a serialization error
+    // would instead succeed here against a value the caller never asked for, and a
+    // retention floor could be set from a number that was never sent. Matches the
+    // existing shape in KinesisJsonHandler#optionalMaxRecordSize and
+    // TimestreamInfluxDbValidation, which reject on !isIntegralNumber() for the same
+    // reason. Found by Greptile on the fork PR.
+    private static Long longOrNull(JsonNode node, String field) {
+        JsonNode n = node.path(field);
+        if (n.isMissingNode() || n.isNull()) {
+            return null;
+        }
+        // canConvertToLong as well as isIntegralNumber, because the first alone leaves
+        // one coercion open: 18446744073709551623 IS an integral number, and
+        // longValue() keeps its low 64 bits, wrapping it to 7, which then passes the
+        // retention checks as if the caller had sent it. Kinesis guards the same way
+        // with canConvertToInt (KinesisJsonHandler#optionalMaxRecordSize). Rejecting
+        // a value we cannot represent is the whole point of not coercing.
+        if (!n.isIntegralNumber() || !n.canConvertToLong()) {
+            throw new AwsException("InvalidParameterValueException",
+                    field + " must be an integer", 400);
+        }
+        return n.longValue();
+    }
+
+    private static String textOrNull(JsonNode node, String field) {
+        JsonNode n = node.path(field);
+        return n.isMissingNode() || n.isNull() ? null : n.asText();
+    }
+
+    /**
+     * Like {@link #textOrNull} but refuses to invent a string out of something that is not one.
+     *
+     * <p>{@code asText()} coerces: a request carrying {@code "SNSTopicArn": 123} yields the
+     * nonblank string {@code "123"}, which passes every present-and-nonblank check the service
+     * makes and is stored as the topic. The configuration then reads back as valid while naming a
+     * topic that cannot exist. This is the same coercion Greptile found in {@link #longOrNull}
+     * above, in the other direction, and it gets the same answer: reject a value we would have to
+     * fabricate rather than read.
+     *
+     * <p>Used for the fields where the fabricated value would survive validation. The advisory
+     * ones -- CreatorRequestId and the like -- stay on textOrNull, because a coerced value there
+     * is stored and echoed and misleads nobody.
+     */
+    private static String stringOrNull(JsonNode node, String field) {
+        JsonNode n = node.path(field);
+        if (n.isMissingNode() || n.isNull()) {
+            return null;
+        }
+        if (!n.isTextual()) {
+            throw new AwsException("InvalidParameterValueException",
+                    field + " must be a string", 400);
+        }
+        return n.asText();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, String> readStringMap(JsonNode node, String field) {
+        JsonNode mapNode = node.path(field);
+        if (mapNode.isMissingNode() || mapNode.isNull()) {
+            return new java.util.HashMap<>();
+        }
+        return objectMapper.convertValue(mapNode, Map.class);
+    }
+
+    private static List<String> readStringList(JsonNode node) {
+        List<String> result = new ArrayList<>();
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return result;
+        }
+        node.forEach(n -> result.add(n.asText()));
+        return result;
+    }
+
+    private List<BackupRule> readRules(JsonNode rulesNode) throws IOException {
+        List<BackupRule> rules = new ArrayList<>();
+        if (rulesNode == null || rulesNode.isMissingNode() || !rulesNode.isArray()) {
+            return rules;
+        }
+        for (JsonNode ruleNode : rulesNode) {
+            rules.add(objectMapper.treeToValue(ruleNode, BackupRule.class));
+        }
+        return rules;
     }
 
     @GET
@@ -590,119 +703,5 @@ public class BackupController {
         Map<String, String> query = new HashMap<>();
         uri.getQueryParameters().forEach((key, values) -> query.put(key, values.getFirst()));
         return query;
-    }
-
-    // ── Untag (POST /untag/{arn} with body — distinct from shared DELETE /tags pattern) ──
-
-    @POST
-    @Path("/untag/{resourceArn: .*}")
-    public Response untagResource(@PathParam("resourceArn") String resourceArn,
-                                   String body) throws IOException {
-        JsonNode req = objectMapper.readTree(body);
-        List<String> tagKeys = readStringList(req.path("TagKeyList"));
-        service.untagResource(resourceArn, tagKeys);
-        return Response.noContent().build();
-    }
-
-    // ── Supported resource types ───────────────────────────────────────────────
-
-    @GET
-    @Path("/supported-resource-types")
-    public Response getSupportedResourceTypes() {
-        ObjectNode out = objectMapper.createObjectNode();
-        ArrayNode list = out.putArray("ResourceTypes");
-        service.getSupportedResourceTypes().forEach(list::add);
-        return Response.ok(out).build();
-    }
-
-    // ── Helpers ────────────────────────────────────────────────────────────────
-
-    // Absent and null both mean "not supplied", which for these members is meaningful:
-    // omitting ChangeableForDays is what selects compliance mode.
-    //
-    // A present value must be an INTEGRAL NUMBER, and is rejected rather than coerced.
-    // asLong() would silently accept anything: 1.5 truncates to 1, true becomes 1, and
-    // the string "7" becomes 7 -- so a request AWS rejects with a serialization error
-    // would instead succeed here against a value the caller never asked for, and a
-    // retention floor could be set from a number that was never sent. Matches the
-    // existing shape in KinesisJsonHandler#optionalMaxRecordSize and
-    // TimestreamInfluxDbValidation, which reject on !isIntegralNumber() for the same
-    // reason. Found by Greptile on the fork PR.
-    private static Long longOrNull(JsonNode node, String field) {
-        JsonNode n = node.path(field);
-        if (n.isMissingNode() || n.isNull()) {
-            return null;
-        }
-        // canConvertToLong as well as isIntegralNumber, because the first alone leaves
-        // one coercion open: 18446744073709551623 IS an integral number, and
-        // longValue() keeps its low 64 bits, wrapping it to 7, which then passes the
-        // retention checks as if the caller had sent it. Kinesis guards the same way
-        // with canConvertToInt (KinesisJsonHandler#optionalMaxRecordSize). Rejecting
-        // a value we cannot represent is the whole point of not coercing.
-        if (!n.isIntegralNumber() || !n.canConvertToLong()) {
-            throw new AwsException("InvalidParameterValueException",
-                    field + " must be an integer", 400);
-        }
-        return n.longValue();
-    }
-
-    private static String textOrNull(JsonNode node, String field) {
-        JsonNode n = node.path(field);
-        return n.isMissingNode() || n.isNull() ? null : n.asText();
-    }
-
-    /**
-     * Like {@link #textOrNull} but refuses to invent a string out of something that is not one.
-     *
-     * <p>{@code asText()} coerces: a request carrying {@code "SNSTopicArn": 123} yields the
-     * nonblank string {@code "123"}, which passes every present-and-nonblank check the service
-     * makes and is stored as the topic. The configuration then reads back as valid while naming a
-     * topic that cannot exist. This is the same coercion Greptile found in {@link #longOrNull}
-     * above, in the other direction, and it gets the same answer: reject a value we would have to
-     * fabricate rather than read.
-     *
-     * <p>Used for the fields where the fabricated value would survive validation. The advisory
-     * ones -- CreatorRequestId and the like -- stay on textOrNull, because a coerced value there
-     * is stored and echoed and misleads nobody.
-     */
-    private static String stringOrNull(JsonNode node, String field) {
-        JsonNode n = node.path(field);
-        if (n.isMissingNode() || n.isNull()) {
-            return null;
-        }
-        if (!n.isTextual()) {
-            throw new AwsException("InvalidParameterValueException",
-                    field + " must be a string", 400);
-        }
-        return n.asText();
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, String> readStringMap(JsonNode node, String field) {
-        JsonNode mapNode = node.path(field);
-        if (mapNode.isMissingNode() || mapNode.isNull()) {
-            return new HashMap<>();
-        }
-        return objectMapper.convertValue(mapNode, Map.class);
-    }
-
-    private static List<String> readStringList(JsonNode node) {
-        List<String> result = new ArrayList<>();
-        if (node == null || node.isMissingNode() || node.isNull()) {
-            return result;
-        }
-        node.forEach(n -> result.add(n.asText()));
-        return result;
-    }
-
-    private List<BackupRule> readRules(JsonNode rulesNode) throws IOException {
-        List<BackupRule> rules = new ArrayList<>();
-        if (rulesNode == null || rulesNode.isMissingNode() || !rulesNode.isArray()) {
-            return rules;
-        }
-        for (JsonNode ruleNode : rulesNode) {
-            rules.add(objectMapper.treeToValue(ruleNode, BackupRule.class));
-        }
-        return rules;
     }
 }

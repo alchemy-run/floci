@@ -18,7 +18,6 @@ public class CloudFrontFunction {
     private String etag;
     private Instant createdTime;
     private Instant lastModifiedTime;
-    private List<String> keyValueStoreArns = new ArrayList<>();
 
     public CloudFrontFunction() {}
 
@@ -49,7 +48,10 @@ public class CloudFrontFunction {
     public Instant getLastModifiedTime() { return lastModifiedTime; }
     public void setLastModifiedTime(Instant lastModifiedTime) { this.lastModifiedTime = lastModifiedTime; }
 
+    private List<String> keyValueStoreArns = new ArrayList<>();
+
     public List<String> getKeyValueStoreArns() { return keyValueStoreArns; }
+
     public void setKeyValueStoreArns(List<String> keyValueStoreArns) {
         this.keyValueStoreArns = keyValueStoreArns != null ? keyValueStoreArns : new ArrayList<>();
     }

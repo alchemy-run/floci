@@ -38,15 +38,6 @@ public class KmsJsonHandler {
     }
 
     private static final Set<String> KEY_ID_OPERATIONS = Set.of(
-            "GetPublicKey", "DescribeKey", "CreateGrant", "ListGrants", "RevokeGrant", "Encrypt", "GenerateDataKey",
-            "GenerateDataKeyWithoutPlaintext", "Sign", "Verify", "GenerateMac", "VerifyMac", "ScheduleKeyDeletion",
-            "CancelKeyDeletion", "TagResource", "UntagResource", "ListResourceTags", "GetKeyPolicy", "PutKeyPolicy",
-            "ListKeyPolicies", "UpdateKeyDescription", "GetKeyRotationStatus", "EnableKeyRotation",
-            "DisableKeyRotation", "EnableKey", "DisableKey", "RotateKeyOnDemand", "GetParametersForImport",
-            "ImportKeyMaterial", "DeleteImportedKeyMaterial");
-
-    private static final Set<String> KEY_ONLY_OPERATIONS = Set.of(
-            "CreateGrant", "ListGrants", "RevokeGrant", "ScheduleKeyDeletion", "CancelKeyDeletion", "TagResource",
             "GetPublicKey", "DescribeKey", "ReplicateKey", "CreateGrant", "ListGrants", "RevokeGrant", "Encrypt", "GenerateDataKey",
             "GenerateDataKeyWithoutPlaintext", "Sign", "Verify", "GenerateMac", "VerifyMac", "ScheduleKeyDeletion",
             "CancelKeyDeletion", "TagResource", "UntagResource", "ListResourceTags", "GetKeyPolicy", "PutKeyPolicy",
@@ -90,9 +81,9 @@ public class KmsJsonHandler {
             case "ReEncrypt" -> handleReEncrypt(request, region);
             case "GenerateDataKey" -> handleGenerateDataKey(request, region);
             case "GenerateDataKeyWithoutPlaintext" -> handleGenerateDataKeyWithoutPlaintext(request, region);
-            case "GenerateDataKeyPair" -> handleGenerateDataKeyPair(request, region);
-            case "GenerateDataKeyPairWithoutPlaintext" -> handleGenerateDataKeyPairWithoutPlaintext(request, region);
             case "DeriveSharedSecret" -> handleDeriveSharedSecret(request, region);
+            case "GenerateDataKeyPairWithoutPlaintext" -> handleGenerateDataKeyPairWithoutPlaintext(request, region);
+            case "GenerateDataKeyPair" -> handleGenerateDataKeyPair(request, region);
             case "Sign" -> handleSign(request, region);
             case "Verify" -> handleVerify(request, region);
             case "GenerateMac" -> handleGenerateMac(request, region);
@@ -135,7 +126,6 @@ public class KmsJsonHandler {
         Map<String, String> tags = new HashMap<>();
         request.path("Tags").forEach(t -> tags.put(t.path("TagKey").asText(), t.path("TagValue").asText()));
         rejectUnknownReservedTags(tags,"TagException");
-        boolean multiRegion = request.path("MultiRegion").asBoolean(false);
         String origin = request.path("Origin").asText(null);
         boolean multiRegion = request.path("MultiRegion").asBoolean(false);
         KmsKey key = service.createKey(description, keyUsage, keySpec, policy, tags, origin, multiRegion, region);
@@ -628,12 +618,9 @@ public class KmsJsonHandler {
 
     private Response handleGetKeyRotationStatus(JsonNode request, String region) {
         String keyId = request.path("KeyId").asText();
-        KmsService.KeyRotationStatus status = service.getKeyRotationStatus(keyId, region);
+        boolean enabled = service.getKeyRotationStatus(keyId, region);
         ObjectNode response = objectMapper.createObjectNode();
-        response.put("KeyRotationEnabled", status.keyRotationEnabled());
-        if (status.rotationPeriodInDays() != null) {
-            response.put("RotationPeriodInDays", status.rotationPeriodInDays());
-        }
+        response.put("KeyRotationEnabled", enabled);
         return Response.ok(response).build();
     }
 
@@ -642,9 +629,7 @@ public class KmsJsonHandler {
         if (rotationPeriod.isNumber()) {
             validateRange("rotationPeriodInDays", rotationPeriod.asInt(), 90, 2560);
         }
-        Integer period = rotationPeriod.isMissingNode() || rotationPeriod.isNull()
-                ? null : rotationPeriod.asInt();
-        service.enableKeyRotation(request.path("KeyId").asText(), period, region);
+        service.enableKeyRotation(request.path("KeyId").asText(), region);
         return Response.ok().build();
     }
 
@@ -737,61 +722,6 @@ public class KmsJsonHandler {
     private static String readDataKeySpec(JsonNode request) {
         String spec = request.path("KeySpec").asText(null);
         if (spec != null && !"AES_256".equals(spec) && !"AES_128".equals(spec)) {
-            throw new AwsException("ValidationException", "1 validation error detected: Value '" + spec
-                    + "' at 'keySpec' failed to satisfy constraint: Member must satisfy enum value set: [RSA_2048, "
-                    + "RSA_3072, RSA_4096, ECC_NIST_P256, ECC_NIST_P384, ECC_NIST_P521, ECC_SECG_P256K1, "
-                    + "ECC_NIST_EDWARDS25519, SYMMETRIC_DEFAULT, HMAC_224, HMAC_256, HMAC_384, HMAC_512, SM2, "
-                    + "ML_DSA_44, ML_DSA_65, ML_DSA_87]", 400);
-        }
-        return spec;
-    }
-
-    private static Integer readNumberOfBytes(JsonNode request) {
-        JsonNode numberOfBytes = request.path("NumberOfBytes");
-        if (!numberOfBytes.isNumber()) {
-            return null;
-        }
-        validateRange("numberOfBytes", numberOfBytes.asInt(), 1, 1024);
-        return numberOfBytes.asInt();
-    }
-
-    private static void validateRange(String member, int value, int min, int max) {
-        if (value < min) {
-            throw new AwsException("ValidationException", "1 validation error detected: Value '" + value + "' at '"
-                    + member + "' failed to satisfy constraint: Member must have value greater than or equal to " + min, 400);
-        }
-        if (max < value) {
-            throw new AwsException("ValidationException", "1 validation error detected: Value '" + value + "' at '"
-                    + member + "' failed to satisfy constraint: Member must have value less than or equal to " + max, 400);
-        }
-    }
-
-    private static void validateKeyIdMember(JsonNode request, String member) {
-        String name = Character.toLowerCase(member.charAt(0)) + member.substring(1);
-        JsonNode value = request.path(member);
-        if (value.isMissingNode() || value.isNull()) {
-            throw new AwsException("ValidationException", "1 validation error detected: Value null at '" + name
-                    + "' failed to satisfy constraint: Member must not be null", 400);
-        }
-        String keyId = value.asText();
-        String pattern = "Value '" + keyId + "' at '" + name
-                + "' failed to satisfy constraint: Member must satisfy regular expression pattern: ^\\p{ASCII}+$";
-        if (keyId.isEmpty()) {
-            throw new AwsException("ValidationException", "2 validation errors detected: Value '' at '" + name
-                    + "' failed to satisfy constraint: Member must have length greater than or equal to 1; " + pattern, 400);
-        }
-        if (!keyId.chars().allMatch(c -> c < 128)) {
-            throw new AwsException("ValidationException", "1 validation error detected: " + pattern, 400);
-        }
-    }
-
-    // KMS hides the value of a sensitive member, even when it is null.
-    private static byte[] requireSizedBlob(JsonNode request, String member, boolean sensitive, int max) {
-        String name = Character.toLowerCase(member.charAt(0)) + member.substring(1);
-        JsonNode value = request.path(member);
-        if (value.isMissingNode() || value.isNull()) {
-            throw new AwsException("ValidationException", "1 validation error detected: Value " + (sensitive ? "" : "null ")
-                    + "at '" + name + "' failed to satisfy constraint: Member must not be null", 400);
             throw SmithyValidationErrors.validationException("Value '" + spec
                     + "' at 'keySpec' failed to satisfy constraint: Member must satisfy enum value set: [RSA_2048, "
                     + "RSA_3072, RSA_4096, ECC_NIST_P256, ECC_NIST_P384, ECC_NIST_P521, ECC_SECG_P256K1, "
@@ -977,9 +907,7 @@ public class KmsJsonHandler {
         } else if (KmsKeyUsage.GENERATE_VERIFY_MAC == key.getKeyUsage()
                 && key.getKeySpec().getKeyType() == KmsKeySpec.KeyType.HMAC) {
                     response.putArray("MacAlgorithms").add(key.getKeySpec().getAlgorithm().getFirst().getAlgName());
-        } else if (KmsKeyUsage.KEY_AGREEMENT == key.getKeyUsage()) {
-            response.putArray("KeyAgreementAlgorithms").add("ECDH");
-        }
+            }
     }
 
     private Response handleGenerateDataKeyPair(JsonNode request, String region) {

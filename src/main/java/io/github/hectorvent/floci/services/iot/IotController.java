@@ -535,10 +535,8 @@ public class IotController {
     @Path("/thing-types/{thingTypeName}/deprecate")
     @Consumes(MediaType.WILDCARD)
     public Response deprecateThingType(@Context HttpHeaders headers,
-                                       @PathParam("thingTypeName") String thingTypeName,
-                                       String body) {
-        boolean undoDeprecate = parseProperties(body, "undoDeprecate").asBoolean(false);
-        iotService.deprecateThingType(thingTypeName, undoDeprecate, regionResolver.resolveRegion(headers));
+                                       @PathParam("thingTypeName") String thingTypeName) {
+        iotService.deprecateThingType(thingTypeName, regionResolver.resolveRegion(headers));
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 

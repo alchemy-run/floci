@@ -1,8 +1,6 @@
 package io.github.hectorvent.floci.services.secretsmanager;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
@@ -39,18 +37,20 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.Optional;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 
 @ApplicationScoped
 public class SecretsManagerService implements ResourceProvider {
@@ -420,18 +420,6 @@ public class SecretsManagerService implements ResourceProvider {
     }
 
     /**
-     * The secret {@code secretId} (name, partial ARN or full ARN) names in the request's account,
-     * or empty when there is none. Used by IAM to evaluate policies against the secret's real ARN.
-     */
-    public java.util.Optional<Secret> findSecret(String secretId, String region) {
-        if (secretId == null || secretId.isBlank()) {
-            return java.util.Optional.empty();
-        }
-        try {
-            return java.util.Optional.of(resolveSecret(secretId, region));
-        } catch (AwsException e) {
-            return java.util.Optional.empty();
-        }
      * The full ARN of the secret {@code secretId} names in the given account, or empty when there is
      * none, resolved in the order the operations resolve it: a name in {@code region}, or an ARN,
      * matched exactly before it is read as a partial ARN without the random suffix. An ARN that
@@ -1439,14 +1427,22 @@ public class SecretsManagerService implements ResourceProvider {
         }
 
         try {
-            // Do NOT persist an empty AWSPENDING row before createSecret.
-            // AWS leaves VersionId reservation to the rotation function's
-            // PutSecretValue; official templates (and Alchemy's fixture) skip
-            // the put when ListSecretVersionIds already reports the token.
-            synchronized (lockFor(secretArn)) {
-                Secret secret = resolveSecret(secretArn, region);
-                if (secret.getVersions() != null && secret.getVersions().containsKey(clientRequestToken)) {
-                    isExistingVersion = true;
+            if (!isExistingVersion) {
+                synchronized (lockFor(secretArn)) {
+                    Secret secret = resolveSecret(secretArn, region);
+                    if (secret.getVersions() != null && secret.getVersions().containsKey(clientRequestToken)) {
+                        isExistingVersion = true;
+                    } else {
+                        SecretVersion pendingVersion = new SecretVersion();
+                        pendingVersion.setVersionId(clientRequestToken);
+                        pendingVersion.setVersionStages(List.of("AWSPENDING"));
+                        pendingVersion.setCreatedDate(Instant.now());
+                        if (secret.getVersions() == null) {
+                            secret.setVersions(new HashMap<>());
+                        }
+                        secret.getVersions().put(clientRequestToken, pendingVersion);
+                        persist(secret, region);
+                    }
                 }
             }
             if (!isExistingVersion) {
@@ -1545,25 +1541,6 @@ public class SecretsManagerService implements ResourceProvider {
         persist(secret, region);
         LOG.infov("Deleted resource policy on secret: {0}", secret.getName());
         return secret;
-    }
-
-    public Secret putResourcePolicy(String secretId, String resourcePolicy, Boolean blockPublicPolicy, String region) {
-        if (resourcePolicy == null || resourcePolicy.isBlank() || resourcePolicy.length() > 20_480) {
-            throw new AwsException("InvalidParameterException", "ResourcePolicy must contain 1 to 20480 characters.", 400);
-        }
-        JsonNode parsedPolicy;
-        try {
-            parsedPolicy = objectMapper.readTree(resourcePolicy);
-        } catch (JsonProcessingException e) {
-            throw new AwsException("MalformedPolicyDocumentException", "The resource policy is not valid JSON.", 400);
-        }
-        if (parsedPolicy == null || !parsedPolicy.isObject()) {
-            throw new AwsException("MalformedPolicyDocumentException", "The resource policy is not a JSON object.", 400);
-        }
-        if (Boolean.TRUE.equals(blockPublicPolicy) && !ResourcePolicyValidator.validate(parsedPolicy).isEmpty()) {
-            throw new AwsException("PublicPolicyException", "The resource policy did not prevent broad access.", 400);
-        }
-        return putResourcePolicy(secretId, resourcePolicy, region);
     }
 
     public Map<String, List<String>> listSecretVersionIds(String secretId, String region) {
@@ -1948,5 +1925,22 @@ public class SecretsManagerService implements ResourceProvider {
     @Override
     public Set<SupportedResourceType> getSupportedResourceTypes() {
         return Set.of(new SupportedResourceType("secretsmanager:secret", "secretsmanager", true));
+    }
+
+    private final ConcurrentHashMap<String, Object> rotationLocks = new ConcurrentHashMap<>();
+
+    /**
+     * The secret {@code secretId} (name, partial ARN or full ARN) names in the request's account,
+     * or empty when there is none. Used by IAM to evaluate policies against the secret's real ARN.
+     */
+    public java.util.Optional<Secret> findSecret(String secretId, String region) {
+        if (secretId == null || secretId.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        try {
+            return java.util.Optional.of(resolveSecret(secretId, region));
+        } catch (AwsException e) {
+            return java.util.Optional.empty();
+        }
     }
 }

@@ -1,19 +1,20 @@
 package io.github.hectorvent.floci.services.guardduty;
 
-import io.github.hectorvent.floci.core.common.AwsArnUtils;
-import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.TagHandler;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import java.util.List;
 import java.util.Map;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
+import io.github.hectorvent.floci.core.common.AwsException;
 
 /**
  * {@link TagHandler} implementation for GuardDuty.
  *
- * <p>Supports detector ARNs and their filter, ipset, and threatintelset children.
- * The wire shape is a {@code tags} map and a {@code tagKeys} query parameter on untag.
+ * <p>ARN format: {@code arn:aws:guardduty:<region>:<account>:detector/<detectorId>}. GuardDuty's
+ * tag wire shape matches every {@code TagHandler} default: a {@code tags} map in the body and a
+ * {@code tagKeys} query parameter on untag.
  */
 @ApplicationScoped
 public class GuardDutyTagHandler implements TagHandler {
@@ -32,19 +33,16 @@ public class GuardDutyTagHandler implements TagHandler {
 
     @Override
     public Map<String, String> listTags(String region, String arn) {
-        validateRegion(region, arn);
         return service.listTags(arn);
     }
 
     @Override
     public void tagResource(String region, String arn, Map<String, String> tags) {
-        validateRegion(region, arn);
         service.tagResource(arn, tags);
     }
 
     @Override
     public void untagResource(String region, String arn, List<String> tagKeys) {
-        validateRegion(region, arn);
         service.untagResource(arn, tagKeys);
     }
 

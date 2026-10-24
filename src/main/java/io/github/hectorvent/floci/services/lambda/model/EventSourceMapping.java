@@ -33,10 +33,8 @@ public class EventSourceMapping {
     private Integer maximumRetryAttempts;
     private Integer maximumRecordAgeInSeconds;
     private DestinationConfig destinationConfig;
-    private Map<String, String> tags = new HashMap<>();
     private FilterCriteria filterCriteria;
     private Map<String, Object> selfManagedEventSource;
-    private Map<String, Object> amazonManagedKafkaEventSourceConfig;
     private List<String> topics = new ArrayList<>();
     private List<Map<String, Object>> sourceAccessConfigurations = new ArrayList<>();
     private Map<String, String> tags = new HashMap<>();
@@ -146,14 +144,6 @@ public class EventSourceMapping {
         this.destinationConfig = destinationConfig;
     }
 
-    public Map<String, String> getTags() {
-        return tags;
-    }
-
-    public void setTags(Map<String, String> tags) {
-        this.tags = tags != null ? tags : new HashMap<>();
-    }
-
     public FilterCriteria getFilterCriteria() {
         return filterCriteria;
     }
@@ -168,14 +158,6 @@ public class EventSourceMapping {
 
     public void setSelfManagedEventSource(Map<String, Object> selfManagedEventSource) {
         this.selfManagedEventSource = selfManagedEventSource;
-    }
-
-    public Map<String, Object> getAmazonManagedKafkaEventSourceConfig() {
-        return amazonManagedKafkaEventSourceConfig;
-    }
-
-    public void setAmazonManagedKafkaEventSourceConfig(Map<String, Object> amazonManagedKafkaEventSourceConfig) {
-        this.amazonManagedKafkaEventSourceConfig = amazonManagedKafkaEventSourceConfig;
     }
 
     public List<String> getTopics() {
@@ -268,5 +250,15 @@ public class EventSourceMapping {
         public void setPattern(String pattern) {
             this.pattern = pattern;
         }
+    }
+
+    private Map<String, Object> amazonManagedKafkaEventSourceConfig;
+
+    public Map<String, Object> getAmazonManagedKafkaEventSourceConfig() {
+        return amazonManagedKafkaEventSourceConfig;
+    }
+
+    public void setAmazonManagedKafkaEventSourceConfig(Map<String, Object> amazonManagedKafkaEventSourceConfig) {
+        this.amazonManagedKafkaEventSourceConfig = amazonManagedKafkaEventSourceConfig;
     }
 }

@@ -29,8 +29,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 
 /**
  * Manages a pool of warm Lambda containers per function.
@@ -61,8 +63,6 @@ public class WarmPool implements ContainerTeardown, Resettable {
     private final long drainTimeoutNanos;
     private final ConcurrentHashMap<String, PoolState> poolStates = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<ContainerHandle, Lease> activeLeases = new ConcurrentHashMap<>();
-    private final Set<ContainerHandle> leased = ConcurrentHashMap.newKeySet();
-    private final ConcurrentHashMap<String, Semaphore> inFlight = new ConcurrentHashMap<>();
     private final Set<ContainerHandle> owned = ConcurrentHashMap.newKeySet();
     private final Set<ContainerHandle> pendingTeardown = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<ContainerHandle, CountDownLatch> stoppingHandles = new ConcurrentHashMap<>();
@@ -236,16 +236,6 @@ public class WarmPool implements ContainerTeardown, Resettable {
      * Otherwise returns a warm container from the pool, or cold-starts a new one.
      */
     public ContainerHandle acquire(LambdaFunction fn) {
-        takeLease(fn.getFunctionName());
-        try {
-            return acquireLeased(fn);
-        } catch (RuntimeException e) {
-            releaseLease(fn.getFunctionName(), null);
-            throw e;
-        }
-    }
-
-    private ContainerHandle acquireLeased(LambdaFunction fn) {
         LifecycleState admission;
         synchronized (capLock) {
             admission = lifecycleState;
@@ -346,34 +336,6 @@ public class WarmPool implements ContainerTeardown, Resettable {
         if (admission.stopped || admission != lifecycleState) {
             throw new AwsException("ResourceConflictException", "Lambda executor is stopping", 409);
         }
-        handle.setState(ContainerState.BUSY);
-        leased.add(handle);
-        return handle;
-    }
-
-    private int maxConcurrent() {
-        if (config == null) {
-            return DEFAULT_MAX_POOL_SIZE;
-        }
-        return Math.max(1, config.services().lambda().maxConcurrentContainers());
-    }
-
-    private Semaphore semaphoreFor(String functionName) {
-        return inFlight.computeIfAbsent(functionName, k -> new Semaphore(maxConcurrent()));
-    }
-
-    private void takeLease(String functionName) {
-        semaphoreFor(functionName).acquireUninterruptibly();
-    }
-
-    private void releaseLease(String functionName, ContainerHandle handle) {
-        if (handle != null && !leased.remove(handle)) {
-            return;
-        }
-        Semaphore sem = inFlight.get(functionName);
-        if (sem != null) {
-            sem.release();
-        }
     }
 
     /**
@@ -382,14 +344,6 @@ public class WarmPool implements ContainerTeardown, Resettable {
      * Otherwise it is returned to the warm pool.
      */
     public void release(ContainerHandle handle) {
-        try {
-            releaseInner(handle);
-        } finally {
-            releaseLease(handle.getFunctionName(), handle);
-        }
-    }
-
-    private void releaseInner(ContainerHandle handle) {
         if (provisioned != null && provisioned.release(handle, false)) {
             return;
         }
@@ -414,6 +368,7 @@ public class WarmPool implements ContainerTeardown, Resettable {
             stopQuietly(handle);
             return;
         }
+
         if (lease == null) {
             LOG.warnv("Container {0} for function {1} has no active warm-pool lease; stopping it",
                     handle.getContainerId(), handle.getFunctionName());
@@ -517,11 +472,7 @@ public class WarmPool implements ContainerTeardown, Resettable {
         activeLeases.remove(handle);
         LOG.debugv("Destroying timed-out container {0} for function {1}",
                 handle.getContainerId(), handle.getFunctionName());
-        try {
-            stopQuietly(handle);
-        } finally {
-            releaseLease(handle.getFunctionName(), handle);
-        }
+        stopQuietly(handle);
     }
 
     ContainerHandle acquireProvisioned(LambdaFunction fn, String qualifier) {
@@ -748,6 +699,144 @@ public class WarmPool implements ContainerTeardown, Resettable {
         } finally {
             stoppingHandles.remove(handle, completion);
             completion.countDown();
+        }
+    }
+
+    private final Set<ContainerHandle> leased = ConcurrentHashMap.newKeySet();
+
+    private final ConcurrentHashMap<String, Semaphore> inFlight = new ConcurrentHashMap<>();
+
+    private ContainerHandle acquireLeased(LambdaFunction fn) {
+        boolean ephemeral = config != null && config.services().lambda().ephemeral();
+        ContainerHandle handle = null;
+        PoolState poolState = null;
+        long leaseEpoch = 0;
+        String environmentKey = executionEnvironmentKey(fn);
+
+        if (!ephemeral) {
+            poolState = poolStates.computeIfAbsent(fn.getFunctionName(), ignored -> new PoolState());
+            synchronized (poolState) {
+                leaseEpoch = poolState.epochByEnvironment.computeIfAbsent(environmentKey, ignored -> 0L);
+            }
+            // Skip pooled handles whose container died out-of-band — otherwise the
+            // caller would wait the full Lambda function timeout.
+            while (true) {
+                ContainerHandle candidate;
+                synchronized (poolState) {
+                    ArrayDeque<ContainerHandle> idle = poolState.idleByEnvironment.get(environmentKey);
+                    candidate = idle == null ? null : idle.pollFirst();
+                }
+                if (candidate == null) {
+                    break;
+                }
+                // A container whose extension reported a fatal error is still *running*, so the
+                // liveness probe alone would hand it back out. Skip it for the same reason a dead
+                // one is skipped: it can no longer serve invocations correctly.
+                if (candidate.isFaulted()) {
+                    LOG.infov("Discarding pooled container {0} for function {1}: an extension reported a fatal error",
+                            candidate.getContainerId(), fn.getFunctionName());
+                    stopQuietly(candidate);
+                    continue;
+                }
+                if (lambdaRuntimeLauncher.isAlive(candidate)) {
+                    handle = candidate;
+                    break;
+                }
+                LOG.infov("Discarding dead pooled container {0} for function {1}",
+                        candidate.getContainerId(), fn.getFunctionName());
+                stopQuietly(candidate);
+            }
+        }
+
+        if (handle == null) {
+            LOG.debugv(ephemeral ? "Ephemeral start for function: {0}" : "Cold start for function: {0}",
+                    fn.getFunctionName());
+            handle = lambdaRuntimeLauncher.launch(fn);
+        } else {
+            LOG.debugv("Reusing warm container for function: {0}", fn.getFunctionName());
+        }
+        if (!ephemeral) {
+            activeLeases.put(handle, new Lease(poolState, leaseEpoch, environmentKey));
+        }
+        handle.setState(ContainerState.BUSY);
+        leased.add(handle);
+        return handle;
+    }
+
+    private int maxConcurrent() {
+        if (config == null) {
+            return DEFAULT_MAX_POOL_SIZE;
+        }
+        return Math.max(1, config.services().lambda().maxConcurrentContainers());
+    }
+
+    private Semaphore semaphoreFor(String functionName) {
+        return inFlight.computeIfAbsent(functionName, k -> new Semaphore(maxConcurrent()));
+    }
+
+    private void takeLease(String functionName) {
+        semaphoreFor(functionName).acquireUninterruptibly();
+    }
+
+    private void releaseLease(String functionName, ContainerHandle handle) {
+        if (handle != null && !leased.remove(handle)) {
+            return;
+        }
+        Semaphore sem = inFlight.get(functionName);
+        if (sem != null) {
+            sem.release();
+        }
+    }
+
+    private void releaseInner(ContainerHandle handle) {
+        Lease lease = activeLeases.remove(handle);
+        boolean ephemeral = config != null && config.services().lambda().ephemeral();
+        // An extension reporting an init/exit error is fatal to the execution environment in real
+        // AWS. RuntimeApiServer already refuses new work at that point; the container is torn down
+        // here rather than at fault time so the invocation that was in flight when the extension
+        // failed still completes normally through the runtime.
+        if (handle.isFaulted()) {
+            LOG.infov("Retiring container {0} for function {1}: an extension reported a fatal error",
+                    handle.getContainerId(), handle.getFunctionName());
+            stopQuietly(handle);
+            return;
+        }
+        if (ephemeral || handle.isHotReload()) {
+            LOG.debugv("{0}: stopping container {1} after invocation",
+                    handle.isHotReload() ? "Hot-reload" : "Ephemeral", handle.getContainerId());
+            stopQuietly(handle);
+            return;
+        }
+        if (lease == null) {
+            LOG.warnv("Container {0} for function {1} has no active warm-pool lease; stopping it",
+                    handle.getContainerId(), handle.getFunctionName());
+            stopQuietly(handle);
+            return;
+        }
+
+        boolean stale;
+        boolean returned;
+        synchronized (lease.poolState()) {
+            stale = lease.epoch() != lease.poolState().epochByEnvironment
+                    .getOrDefault(lease.environmentKey(), 0L);
+            returned = !stale && idleSize(lease.poolState()) < maxPoolSizePerFunction;
+            if (returned) {
+                handle.setState(ContainerState.WARM);
+                handle.touchLastUsed();
+                lease.poolState().idleByEnvironment
+                        .computeIfAbsent(lease.environmentKey(), ignored -> new ArrayDeque<>())
+                        .addFirst(handle);
+            }
+        }
+        if (stale) {
+            LOG.debugv("Pool was invalidated while container {0} was busy; stopping it",
+                    handle.getContainerId());
+            stopQuietly(handle);
+        } else if (returned) {
+            LOG.debugv("Released container back to pool for function: {0}", handle.getFunctionName());
+        } else {
+            LOG.debugv("Pool full for function {0}, stopping excess container", handle.getFunctionName());
+            stopQuietly(handle);
         }
     }
 }

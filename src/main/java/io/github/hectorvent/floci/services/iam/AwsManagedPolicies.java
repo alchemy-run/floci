@@ -101,19 +101,8 @@ final class AwsManagedPolicies {
         }
     }
 
-    static String documentFor(String name) {
-        return POLICIES.stream()
-                .filter(def -> def.name().equals(name))
-                .map(ManagedPolicyDef::document)
-                .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("unknown managed policy: " + name));
-    }
-
     /** The commercial catalog, byte-identical to the bundled data. */
     static final List<ManagedPolicyDef> POLICIES = load();
-    static final String LAMBDA_BASIC_EXECUTION_DOCUMENT = documentFor("AWSLambdaBasicExecutionRole");
-    static final String XRAY_DAEMON_WRITE_DOCUMENT = documentFor("AWSXRayDaemonWriteAccess");
-    static final String PERMISSIVE_DOCUMENT = documentFor("AdministratorAccess");
 
     private static final Map<String, List<ManagedPolicyDef>> BY_PARTITION = new ConcurrentHashMap<>();
 
@@ -279,4 +268,20 @@ final class AwsManagedPolicies {
         /** ISO-8601 instant at which AWS created the current default version. */
         public String updateDate;
     }
+
+    static final String ARN_PREFIX = "arn:aws:iam::aws:policy";
+
+    static String documentFor(String name) {
+        return POLICIES.stream()
+                .filter(def -> def.name().equals(name))
+                .map(ManagedPolicyDef::document)
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("unknown managed policy: " + name));
+    }
+
+    static final String LAMBDA_BASIC_EXECUTION_DOCUMENT = documentFor("AWSLambdaBasicExecutionRole");
+
+    static final String XRAY_DAEMON_WRITE_DOCUMENT = documentFor("AWSXRayDaemonWriteAccess");
+
+    static final String PERMISSIVE_DOCUMENT = documentFor("AdministratorAccess");
 }

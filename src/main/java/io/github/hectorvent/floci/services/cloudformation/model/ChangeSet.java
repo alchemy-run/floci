@@ -47,8 +47,6 @@ public class ChangeSet {
     public void setParameters(Map<String, String> parameters) { this.parameters = parameters; }
     public List<String> getCapabilities() { return capabilities; }
     public void setCapabilities(List<String> capabilities) { this.capabilities = capabilities; }
-    public Map<String, String> getTags() { return tags; }
-    public void setTags(Map<String, String> tags) { this.tags = tags == null ? null : new LinkedHashMap<>(tags); }
     public String getChangeSetType() { return changeSetType; }
     public void setChangeSetType(String changeSetType) { this.changeSetType = changeSetType; }
     public Instant getCreationTime() { return creationTime; }

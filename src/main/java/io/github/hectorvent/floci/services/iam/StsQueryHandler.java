@@ -79,9 +79,6 @@ public class StsQueryHandler {
     /** CSPRNG for session secret keys and session tokens; ordinary IDs keep using {@link ThreadLocalRandom}. */
     private final SecureRandom secureRandom = new SecureRandom();
 
-    /** CSPRNG for session secret keys and session tokens; ordinary IDs keep using {@link ThreadLocalRandom}. */
-    private final SecureRandom secureRandom = new SecureRandom();
-
     @Context
     HttpHeaders headers;
 

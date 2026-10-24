@@ -13,7 +13,6 @@ public class DbSnapshot {
 
     private String dbSnapshotIdentifier;
     private String dbSnapshotArn;
-    private String snapshotType;
     private String sourceDbSnapshotIdentifier;
     private String dbInstanceIdentifier;
     private Instant snapshotCreateTime;
@@ -33,7 +32,6 @@ public class DbSnapshot {
     private String dbName;
     private String dbInstanceClass;
     private String optionGroupName;
-    private Boolean storageEncrypted;
     private String kmsKeyId;
     private Map<String, String> tags = new LinkedHashMap<>();
     /** Account IDs authorized to copy/restore this snapshot; the "restore" DBSnapshotAttribute. */
@@ -89,9 +87,6 @@ public class DbSnapshot {
     public String getEngineVersion() { return engineVersion; }
     public void setEngineVersion(String engineVersion) { this.engineVersion = engineVersion; }
 
-    public String getStorageType() { return storageType != null ? storageType : DbInstance.DEFAULT_STORAGE_TYPE; }
-    public void setStorageType(String storageType) { this.storageType = storageType; }
-
     public int getAllocatedStorage() { return allocatedStorage; }
     public void setAllocatedStorage(int allocatedStorage) { this.allocatedStorage = allocatedStorage; }
 
@@ -140,14 +135,6 @@ public class DbSnapshot {
 
     public String getOptionGroupName() { return optionGroupName; }
     public void setOptionGroupName(String optionGroupName) { this.optionGroupName = optionGroupName; }
-
-    public boolean isStorageEncrypted() {
-        if (storageEncrypted != null) {
-            return storageEncrypted;
-        }
-        return kmsKeyId != null && !kmsKeyId.isBlank();
-    }
-    public void setStorageEncrypted(boolean storageEncrypted) { this.storageEncrypted = storageEncrypted; }
 
     public String getKmsKeyId() { return kmsKeyId; }
     public void setKmsKeyId(String kmsKeyId) { this.kmsKeyId = kmsKeyId; }

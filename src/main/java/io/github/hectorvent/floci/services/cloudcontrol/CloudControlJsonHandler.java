@@ -33,10 +33,10 @@ public class CloudControlJsonHandler {
             case "UpdateResource" -> progressResponse(service.updateResource(region, accountId,
                     required(request, "TypeName"), required(request, "Identifier"), required(request, "PatchDocument")));
             case "GetResourceRequestStatus" -> progressResponse(
-                    service.requestStatus(region, accountId, requestToken(request)));
+                    service.requestStatus(accountId, requestToken(request)));
+            case "ListResourceRequests" -> listRequests(request, region, accountId);
             case "CancelResourceRequest" -> progressResponse(
                     service.cancelRequest(region, accountId, requestToken(request)));
-            case "ListResourceRequests" -> listRequests(request, region, accountId);
             default -> throw new AwsException("UnsupportedOperation",
                     "Operation " + action + " is not supported.", 400);
         };
@@ -56,7 +56,63 @@ public class CloudControlJsonHandler {
 
     private Response progressResponse(CloudControlService.ProgressEvent event) {
         ObjectNode response = mapper.createObjectNode();
-        response.set("ProgressEvent", progressNode(event));
+        ObjectNode pe = response.putObject("ProgressEvent");
+        pe.put("TypeName", event.typeName());
+        pe.put("Identifier", event.identifier());
+        pe.put("RequestToken", event.requestToken());
+        pe.put("Operation", event.operation());
+        pe.put("OperationStatus", event.operationStatus());
+        if (event.statusMessage() != null) {
+            pe.put("StatusMessage", event.statusMessage());
+        }
+        if (event.resourceModel() != null) {
+            pe.put("ResourceModel", event.resourceModel());
+        }
+        return Response.ok(response).build();
+    }
+
+    /**
+     * Compatibility entry point for direct callers that do not have request context.
+     */
+    public Response handle(String action, JsonNode request, String region) {
+        return handle(action, request, region, "000000000000");
+    }
+
+    /**
+     * InvalidRequestException is the code Cloud Control declares for a malformed request, so it is
+     * what an SDK maps onto a typed exception. ValidationException is not in the service model.
+     */
+    private String required(JsonNode request, String field) {
+        String value = request.path(field).asText(null);
+        if (value == null || value.isBlank()) {
+            throw new AwsException("InvalidRequestException", field + " is required.", 400);
+        }
+        return value;
+    }
+
+    /**
+     * GetResourceRequestStatus declares only RequestTokenNotFoundException, so an absent token
+     * reports that rather than the InvalidRequestException the other operations declare.
+     */
+    private String requestToken(JsonNode request) {
+        String value = request.path("RequestToken").asText(null);
+        if (value == null || value.isBlank()) {
+            throw new AwsException("RequestTokenNotFoundException", "RequestToken is required.", 404);
+        }
+        return value;
+    }
+
+    private Response listResources(JsonNode request, String region, String accountId) {
+        String typeName = required(request, "TypeName");
+        ObjectNode response = mapper.createObjectNode();
+        response.put("TypeName", typeName);
+        ArrayNode resources = response.putArray("ResourceDescriptions");
+        for (CloudControlService.ResourceDescription resource : service.listResources(region, accountId, typeName)) {
+            ObjectNode node = mapper.createObjectNode();
+            node.put("Identifier", resource.identifier());
+            node.put("Properties", resource.properties());
+            resources.add(node);
+        }
         return Response.ok(response).build();
     }
 
@@ -115,55 +171,5 @@ public class CloudControlJsonHandler {
         int size = request.path("MaxResults").asInt(100);
         if (size < 1 || size > 100) throw new AwsException("InvalidRequestException", "Invalid MaxResults.", 400);
         return size;
-    }
-
-    /**
-     * Compatibility entry point for direct callers that do not have request context.
-     */
-    public Response handle(String action, JsonNode request, String region) {
-        return handle(action, request, region, "000000000000");
-    }
-
-    /**
-     * InvalidRequestException is the code Cloud Control declares for a malformed request, so it is
-     * what an SDK maps onto a typed exception. ValidationException is not in the service model.
-     */
-    private String required(JsonNode request, String field) {
-        String value = request.path(field).asText(null);
-        if (value == null || value.isBlank()) {
-            throw new AwsException("InvalidRequestException", field + " is required.", 400);
-        }
-        return value;
-    }
-
-    /**
-     * GetResourceRequestStatus declares only RequestTokenNotFoundException, so an absent token
-     * reports that rather than the InvalidRequestException the other operations declare.
-     */
-    private String requestToken(JsonNode request) {
-        String value = request.path("RequestToken").asText(null);
-        if (value == null || value.isBlank()) {
-            throw new AwsException("RequestTokenNotFoundException", "RequestToken is required.", 404);
-        }
-        return value;
-    }
-
-    private Response listResources(JsonNode request, String region, String accountId) {
-        String typeName = required(request, "TypeName");
-        ObjectNode response = mapper.createObjectNode();
-        response.put("TypeName", typeName);
-        ArrayNode resources = response.putArray("ResourceDescriptions");
-        var listed = service.listResources(region, accountId, typeName).stream()
-                .sorted(java.util.Comparator.comparing(CloudControlService.ResourceDescription::identifier)).toList();
-        int start = offset(request, listed.size());
-        int end = Math.min(listed.size(), start + pageSize(request));
-        if (end < listed.size()) response.put("NextToken", Integer.toString(end));
-        for (CloudControlService.ResourceDescription resource : listed.subList(start, end)) {
-            ObjectNode node = mapper.createObjectNode();
-            node.put("Identifier", resource.identifier());
-            node.put("Properties", resource.properties());
-            resources.add(node);
-        }
-        return Response.ok(response).build();
     }
 }

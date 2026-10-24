@@ -17,7 +17,6 @@ public class Volume {
     private String state;             // creating, available, in-use, deleting, deleted, error
     private String availabilityZone;
     private boolean encrypted;
-    private String kmsKeyId;
     private int iops;
     private Integer throughput;        // MiB/s; only meaningful for gp3 (null otherwise)
     private String snapshotId;
@@ -47,9 +46,6 @@ public class Volume {
     public boolean isEncrypted() { return encrypted; }
     public void setEncrypted(boolean encrypted) { this.encrypted = encrypted; }
 
-    public String getKmsKeyId() { return kmsKeyId; }
-    public void setKmsKeyId(String kmsKeyId) { this.kmsKeyId = kmsKeyId; }
-
     public int getIops() { return iops; }
     public void setIops(int iops) { this.iops = iops; }
 
@@ -73,4 +69,10 @@ public class Volume {
 
     public List<VolumeAttachment> getAttachments() { return attachments; }
     public void setAttachments(List<VolumeAttachment> attachments) { this.attachments = attachments; }
+
+    private String kmsKeyId;
+
+    public String getKmsKeyId() { return kmsKeyId; }
+
+    public void setKmsKeyId(String kmsKeyId) { this.kmsKeyId = kmsKeyId; }
 }

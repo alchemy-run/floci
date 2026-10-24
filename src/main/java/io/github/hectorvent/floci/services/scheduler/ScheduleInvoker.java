@@ -13,9 +13,8 @@ import io.github.hectorvent.floci.services.ecs.model.LaunchType;
 import io.github.hectorvent.floci.services.eventbridge.EventBridgeService;
 import io.github.hectorvent.floci.services.lambda.LambdaService;
 import io.github.hectorvent.floci.services.lambda.model.InvocationType;
-import io.github.hectorvent.floci.services.scheduler.model.AwsVpcConfiguration;
-import io.github.hectorvent.floci.services.scheduler.model.EventBridgeParameters;
 import io.github.hectorvent.floci.services.redshiftdata.RedshiftDataService;
+import io.github.hectorvent.floci.services.scheduler.model.AwsVpcConfiguration;
 import io.github.hectorvent.floci.services.scheduler.model.EcsParameters;
 import io.github.hectorvent.floci.services.scheduler.model.EventBridgeParameters;
 import io.github.hectorvent.floci.services.scheduler.model.Schedule;
@@ -31,9 +30,7 @@ import org.jboss.logging.Logger;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
-import java.util.Base64;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -573,9 +570,6 @@ public class ScheduleInvoker {
         return AwsArnUtils.regionOrDefault(arn, defaultRegion);
     }
 
-    /** The region a schedule lives in, taken from its ARN. */
-    static String regionOf(Schedule schedule) {
-        return AwsArnUtils.regionOrDefault(schedule.getArn(), "us-east-1");
     /** The region a schedule lives in, taken from its ARN; {@code defaultRegion} answers for one without. */
     static String regionOf(Schedule schedule, String defaultRegion) {
         return AwsArnUtils.regionOrDefault(schedule.getArn(), defaultRegion);

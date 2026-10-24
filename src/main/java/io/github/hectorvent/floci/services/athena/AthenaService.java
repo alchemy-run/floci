@@ -1,20 +1,15 @@
 package io.github.hectorvent.floci.services.athena;
 
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.CsvParser;
-import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.athena.model.CreateWorkGroupConfigurationRequest;
 import io.github.hectorvent.floci.services.athena.model.CreateWorkGroupRequest;
 import io.github.hectorvent.floci.services.athena.model.DataCatalog;
-import io.github.hectorvent.floci.services.athena.model.NamedQuery;
-import io.github.hectorvent.floci.services.athena.model.PreparedStatement;
 import io.github.hectorvent.floci.services.athena.model.QueryExecution;
 import io.github.hectorvent.floci.services.athena.model.QueryExecutionContext;
 import io.github.hectorvent.floci.services.athena.model.QueryExecutionState;
@@ -27,7 +22,6 @@ import io.github.hectorvent.floci.services.athena.model.WorkGroupConfiguration;
 import io.github.hectorvent.floci.services.athena.model.WorkGroupConfigurationUpdates;
 import io.github.hectorvent.floci.services.athena.model.WorkGroupEngineVersionRequest;
 import io.github.hectorvent.floci.services.athena.model.WorkGroupTag;
-import io.github.hectorvent.floci.services.eventbridge.EventBridgeService;
 import io.github.hectorvent.floci.services.floci.duck.FlociDuckClient;
 import io.github.hectorvent.floci.services.glue.GlueService;
 import io.github.hectorvent.floci.services.glue.PartitionProjection;
@@ -56,9 +50,15 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.services.athena.model.NamedQuery;
+import io.github.hectorvent.floci.services.athena.model.PreparedStatement;
+import io.github.hectorvent.floci.services.eventbridge.EventBridgeService;
+import java.util.concurrent.ConcurrentHashMap;
 
 @ApplicationScoped
 public class AthenaService {
@@ -68,9 +68,6 @@ public class AthenaService {
     private static final String DEFAULT_OUTPUT_BUCKET = "floci-athena-results";
     private static final String DEFAULT_WORKGROUP = "primary";
     private static final String DEFAULT_ENGINE_VERSION = "Athena engine version 3";
-    private static final Pattern SIMPLE_SELECT_LITERAL = Pattern.compile(
-            "^\\s*SELECT\\s+(\\d+)(?:\\s+AS\\s+[A-Za-z_][A-Za-z0-9_]*)?\\s*;?\\s*$",
-            Pattern.CASE_INSENSITIVE);
     private static final long MIN_BYTES_SCANNED_CUTOFF_PER_QUERY = 10_000_000L;
     private static final String WORKGROUP_RESOURCE = "workgroup/";
     private static final String DATA_CATALOG_RESOURCE = "datacatalog/";
@@ -100,18 +97,11 @@ public class AthenaService {
     private final StorageBackend<String, QueryExecution> queryStore;
     private final StorageBackend<String, WorkGroup> workGroupStore;
     private final StorageBackend<String, DataCatalog> dataCatalogStore;
-    private final StorageBackend<String, NamedQuery> namedQueryStore;
-    private final StorageBackend<String, PreparedStatement> preparedStatementStore;
     private final FlociDuckClient duckClient;
     private final GlueService glueService;
     private final S3Service s3Service;
     private final EmulatorConfig config;
     private final Vertx vertx;
-    private final RegionResolver regionResolver;
-    private final EventBridgeService eventBridgeService;
-    private final ObjectMapper objectMapper;
-    private final ConcurrentHashMap<String, Integer> queryStateSequence = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, ResultSet> queryResults = new ConcurrentHashMap<>();
     private final GlueViewDdlBuilder ddlBuilder;
 
     @Inject
@@ -121,28 +111,18 @@ public class AthenaService {
                          S3Service s3Service,
                          EmulatorConfig config,
                          Vertx vertx,
-                         RegionResolver regionResolver,
-                         EventBridgeService eventBridgeService,
-                         ObjectMapper objectMapper,
                          GlueViewDdlBuilder ddlBuilder) {
         this.queryStore = storageFactory.create("athena", "queries.json",
                 new TypeReference<>() {});
         this.workGroupStore = storageFactory.create("athena", "workgroups.json",
                 new TypeReference<>() {});
-        this.dataCatalogStore = storageFactory.create("athena", "datacatalogs.json",
-                new TypeReference<>() {});
-        this.namedQueryStore = storageFactory.create("athena", "named_queries.json",
-                new TypeReference<>() {});
-        this.preparedStatementStore = storageFactory.create("athena", "prepared_statements.json",
+        this.dataCatalogStore = storageFactory.create("athena", "data-catalogs.json",
                 new TypeReference<>() {});
         this.duckClient = duckClient;
         this.glueService = glueService;
         this.s3Service = s3Service;
         this.config = config;
         this.vertx = vertx;
-        this.regionResolver = regionResolver;
-        this.eventBridgeService = eventBridgeService;
-        this.objectMapper = objectMapper;
         this.ddlBuilder = ddlBuilder;
     }
 
@@ -173,20 +153,8 @@ public class AthenaService {
         if (createDatabaseStatement) {
             execution.setStatementType("DDL");
         }
+        execution.getStatus().setState(QueryExecutionState.RUNNING);
         queryStore.put(id, execution);
-        publishQueryStateChange(execution, null, QueryExecutionState.QUEUED);
-
-        transitionQueryState(execution, QueryExecutionState.QUEUED, QueryExecutionState.RUNNING);
-
-        Optional<String> literal = simpleSelectLiteral(query);
-        if (literal.isPresent()) {
-            ResultSet results = literalResultSet(literal.get());
-            queryResults.put(id, results);
-            writeLiteralCsv(outputLocation, literal.get());
-            transitionQueryState(execution, QueryExecutionState.RUNNING, QueryExecutionState.SUCCEEDED);
-            LOG.infov("Query {0} succeeded (literal SELECT)", id);
-            return id;
-        }
 
         if (createDatabaseStatement) {
             try {
@@ -327,22 +295,8 @@ public class AthenaService {
         workGroupStore.put(workGroupKey(region, workGroup.getName()), workGroup);
     }
 
-    public void deleteWorkGroup(String name, String region, boolean recursive) {
-        if (recursive) {
-            namedQueryStore.scan(k -> true).stream()
-                    .filter(q -> name.equals(q.getWorkGroup()))
-                    .map(NamedQuery::getNamedQueryId)
-                    .forEach(namedQueryStore::delete);
-            preparedStatementStore.scan(k -> true).stream()
-                    .filter(s -> name.equals(s.getWorkGroupName()))
-                    .map(s -> preparedStatementKey(s.getWorkGroupName(), s.getStatementName()))
-                    .forEach(preparedStatementStore::delete);
-        }
-        workGroupStore.delete(workGroupKey(region, name));
-    }
-
     public void deleteWorkGroup(String name, String region) {
-        deleteWorkGroup(name, region, false);
+        workGroupStore.delete(workGroupKey(region, name));
     }
 
     /**
@@ -421,7 +375,6 @@ public class AthenaService {
      * {@code CreateDataCatalog}, sorted by name.
      */
     public List<Map<String, Object>> listDataCatalogs(String region) {
-        migrateLegacyDataCatalogs(region);
         List<Map<String, Object>> summaries = new ArrayList<>();
         summaries.add(Map.of("CatalogName", DEFAULT_CATALOG, "Type", "GLUE"));
         summaries.addAll(dataCatalogStore.scan(k -> k.startsWith(region + ":")).stream()
@@ -451,7 +404,6 @@ public class AthenaService {
                     DEFAULT_CATALOG + " is a reserved data catalog name.", 400);
         }
         validateCatalogType(type);
-        migrateLegacyDataCatalogs(region);
         if (dataCatalogStore.get(catalogKey(region, name)).isPresent()) {
             throw new AwsException("InvalidRequestException",
                     "DataCatalog " + name + " already exists.", 400);
@@ -506,182 +458,6 @@ public class AthenaService {
         return toCatalogDetail(catalog);
     }
 
-    public Map<String, Object> getDatabase(String catalog, String name) {
-        Database database = glueService.getDatabase(name);
-        Map<String, Object> detail = new LinkedHashMap<>();
-        detail.put("Name", database.getName());
-        if (database.getDescription() != null) {
-            detail.put("Description", database.getDescription());
-        }
-        if (database.getParameters() != null) {
-            detail.put("Parameters", database.getParameters());
-        }
-        return detail;
-    }
-
-    public String createNamedQuery(NamedQuery query) {
-        if (query.getClientRequestToken() != null && !query.getClientRequestToken().isBlank()) {
-            Optional<NamedQuery> existing = namedQueryStore.scan(k -> true).stream()
-                    .filter(q -> query.getClientRequestToken().equals(q.getClientRequestToken()))
-                    .findFirst();
-            if (existing.isPresent()) {
-                return existing.get().getNamedQueryId();
-            }
-        }
-        if (query.getWorkGroup() == null || query.getWorkGroup().isBlank()) {
-            query.setWorkGroup(DEFAULT_WORKGROUP);
-        }
-        query.setNamedQueryId(UUID.randomUUID().toString());
-        namedQueryStore.put(query.getNamedQueryId(), query);
-        return query.getNamedQueryId();
-    }
-
-    public NamedQuery getNamedQuery(String id) {
-        return namedQueryStore.get(id)
-                .orElseThrow(() -> new AwsException("InvalidRequestException",
-                        "NamedQuery " + id + " does not exist", 400));
-    }
-
-    public List<String> listNamedQueries(String workGroup) {
-        String wg = workGroup == null || workGroup.isBlank() ? DEFAULT_WORKGROUP : workGroup;
-        return namedQueryStore.scan(k -> true).stream()
-                .filter(q -> wg.equals(q.getWorkGroup()))
-                .map(NamedQuery::getNamedQueryId)
-                .toList();
-    }
-
-    public void updateNamedQuery(String id, String name, String description, String queryString) {
-        NamedQuery query = getNamedQuery(id);
-        if (name != null) {
-            query.setName(name);
-        }
-        if (description != null) {
-            query.setDescription(description);
-        }
-        if (queryString != null) {
-            query.setQueryString(queryString);
-        }
-        namedQueryStore.put(id, query);
-    }
-
-    public void deleteNamedQuery(String id) {
-        if (namedQueryStore.get(id).isEmpty()) {
-            throw new AwsException("InvalidRequestException", "NamedQuery " + id + " does not exist", 400);
-        }
-        namedQueryStore.delete(id);
-    }
-
-    public Map<String, Object> batchGetNamedQuery(List<String> ids) {
-        List<NamedQuery> found = new ArrayList<>();
-        List<Map<String, Object>> unprocessed = new ArrayList<>();
-        for (String id : ids == null ? List.<String>of() : ids) {
-            Optional<NamedQuery> query = namedQueryStore.get(id);
-            if (query.isPresent()) {
-                found.add(query.get());
-            } else {
-                unprocessed.add(Map.of("NamedQueryId", id));
-            }
-        }
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("NamedQueries", found);
-        out.put("UnprocessedNamedQueryIds", unprocessed);
-        return out;
-    }
-
-    public void createPreparedStatement(PreparedStatement statement) {
-        if (statement.getWorkGroupName() == null || statement.getWorkGroupName().isBlank()) {
-            statement.setWorkGroupName(DEFAULT_WORKGROUP);
-        }
-        statement.setLastModifiedTime(Instant.now());
-        preparedStatementStore.put(preparedStatementKey(statement.getWorkGroupName(), statement.getStatementName()),
-                statement);
-    }
-
-    public PreparedStatement getPreparedStatement(String workGroup, String statementName) {
-        return preparedStatementStore.get(preparedStatementKey(workGroup, statementName))
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                        "Prepared statement not found: " + statementName, 400));
-    }
-
-    public List<Map<String, Object>> listPreparedStatements(String workGroup) {
-        String wg = workGroup == null || workGroup.isBlank() ? DEFAULT_WORKGROUP : workGroup;
-        return preparedStatementStore.scan(k -> true).stream()
-                .filter(s -> wg.equals(s.getWorkGroupName()))
-                .sorted(Comparator.comparing(PreparedStatement::getStatementName))
-                .map(s -> {
-                    Map<String, Object> summary = new LinkedHashMap<>();
-                    summary.put("StatementName", s.getStatementName());
-                    if (s.getLastModifiedTime() != null) {
-                        summary.put("LastModifiedTime", s.getLastModifiedTime().getEpochSecond());
-                    }
-                    return summary;
-                })
-                .toList();
-    }
-
-    public void updatePreparedStatement(PreparedStatement statement) {
-        PreparedStatement existing = getPreparedStatement(statement.getWorkGroupName(), statement.getStatementName());
-        if (statement.getQueryStatement() != null) {
-            existing.setQueryStatement(statement.getQueryStatement());
-        }
-        if (statement.getDescription() != null) {
-            existing.setDescription(statement.getDescription());
-        }
-        existing.setLastModifiedTime(Instant.now());
-        preparedStatementStore.put(preparedStatementKey(existing.getWorkGroupName(), existing.getStatementName()),
-                existing);
-    }
-
-    public void deletePreparedStatement(String workGroup, String statementName) {
-        getPreparedStatement(workGroup, statementName);
-        preparedStatementStore.delete(preparedStatementKey(workGroup, statementName));
-    }
-
-    public Map<String, Object> batchGetPreparedStatement(String workGroup, List<String> names) {
-        List<PreparedStatement> found = new ArrayList<>();
-        List<Map<String, Object>> unprocessed = new ArrayList<>();
-        for (String name : names == null ? List.<String>of() : names) {
-            Optional<PreparedStatement> statement = preparedStatementStore.get(preparedStatementKey(workGroup, name));
-            if (statement.isPresent()) {
-                found.add(statement.get());
-            } else {
-                unprocessed.add(Map.of("StatementName", name));
-            }
-        }
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("PreparedStatements", found);
-        out.put("UnprocessedPreparedStatementNames", unprocessed);
-        return out;
-    }
-
-    public Map<String, Object> batchGetQueryExecution(List<String> ids) {
-        List<QueryExecution> found = new ArrayList<>();
-        List<Map<String, Object>> unprocessed = new ArrayList<>();
-        for (String id : ids == null ? List.<String>of() : ids) {
-            Optional<QueryExecution> execution = queryStore.get(id);
-            if (execution.isPresent()) {
-                found.add(execution.get());
-            } else {
-                unprocessed.add(Map.of("QueryExecutionId", id));
-            }
-        }
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("QueryExecutions", found);
-        out.put("UnprocessedQueryExecutionIds", unprocessed);
-        return out;
-    }
-
-    public Map<String, Object> getQueryRuntimeStatistics(String id) {
-        getQueryExecution(id);
-        Map<String, Object> timeline = new LinkedHashMap<>();
-        timeline.put("QueryQueueTimeInMillis", 0L);
-        timeline.put("QueryPlanningTimeInMillis", 0L);
-        timeline.put("EngineExecutionTimeInMillis", 1L);
-        timeline.put("ServiceProcessingTimeInMillis", 0L);
-        timeline.put("TotalExecutionTimeInMillis", 1L);
-        return Map.of("QueryRuntimeStatistics", Map.of("Timeline", timeline));
-    }
-
     public List<Map<String, Object>> listDatabases(String catalog) {
         return glueService.getDatabases().stream()
                 .map(Database::getName)
@@ -708,11 +484,6 @@ public class AthenaService {
             throw new AwsException("InvalidRequestException", "Query has not succeeded yet", 400);
         }
 
-        ResultSet cached = queryResults.get(id);
-        if (cached != null) {
-            return cached;
-        }
-
         if (config.services().athena().mock()
                 || execution.getResultConfiguration() == null
                 || execution.getResultConfiguration().getOutputLocation() == null) {
@@ -723,36 +494,6 @@ public class AthenaService {
     }
 
     // ── private helpers ───────────────────────────────────────────────────────
-
-    private static Optional<String> simpleSelectLiteral(String query) {
-        if (query == null) {
-            return Optional.empty();
-        }
-        Matcher matcher = SIMPLE_SELECT_LITERAL.matcher(query);
-        return matcher.matches() ? Optional.of(matcher.group(1)) : Optional.empty();
-    }
-
-    private static ResultSet literalResultSet(String value) {
-        ResultSet.ColumnInfo column = new ResultSet.ColumnInfo("_col0", "integer");
-        ResultSet.Row header = new ResultSet.Row(List.of(new ResultSet.Datum("_col0")));
-        ResultSet.Row data = new ResultSet.Row(List.of(new ResultSet.Datum(value)));
-        return new ResultSet(List.of(header, data), new ResultSet.ResultSetMetadata(List.of(column)));
-    }
-
-    private void writeLiteralCsv(String outputLocation, String value) {
-        try {
-            ensureOutputBucket(outputLocation);
-            String bucket = extractBucket(outputLocation);
-            String key = extractKey(outputLocation);
-            if (bucket == null || key == null || key.isBlank()) {
-                return;
-            }
-            byte[] csv = ("_col0\n" + value + "\n").getBytes(StandardCharsets.UTF_8);
-            s3Service.putObject(bucket, key, csv, "text/csv", Map.of());
-        } catch (Exception e) {
-            LOG.debugv("Could not write literal SELECT result to {0}: {1}", outputLocation, e.getMessage());
-        }
-    }
 
     private CreateDatabaseDdl parseCreateDatabase(String query) {
         Matcher matcher = CREATE_DATABASE_PATTERN.matcher(statementText(query));
@@ -779,66 +520,6 @@ public class AthenaService {
             if (!statement.ifNotExists() || !"AlreadyExistsException".equals(e.getErrorCode())) {
                 throw e;
             }
-        }
-    }
-
-    private void transitionQueryState(QueryExecution execution,
-                                      QueryExecutionState previous,
-                                      QueryExecutionState next) {
-        execution.getStatus().setState(next);
-        if (next == QueryExecutionState.SUCCEEDED
-                || next == QueryExecutionState.FAILED
-                || next == QueryExecutionState.CANCELLED) {
-            execution.getStatus().setCompletionDateTime(Instant.now());
-        }
-        queryStore.put(execution.getQueryExecutionId(), execution);
-        // Publish off the caller stack. StartQueryExecution is often nested
-        // inside a Lambda Function URL invoke; a synchronous EventBridge→Lambda
-        // delivery of the same function re-enters the executor and drops the
-        // in-flight HTTP socket.
-        publishQueryStateChange(execution, previous, next);
-    }
-
-    private void publishQueryStateChange(QueryExecution execution,
-                                         QueryExecutionState previous,
-                                         QueryExecutionState current) {
-        if (eventBridgeService == null || objectMapper == null) {
-            return;
-        }
-        String queryId = execution.getQueryExecutionId();
-        String statementType = execution.getStatementType() != null
-                ? execution.getStatementType() : "DML";
-        String workGroup = execution.getWorkGroup() != null
-                ? execution.getWorkGroup() : DEFAULT_WORKGROUP;
-        int sequence = queryStateSequence.merge(queryId, 1, Integer::sum);
-        String region = regionResolver.getRegion();
-        Runnable publish = () -> {
-            try {
-                ObjectNode detail = objectMapper.createObjectNode();
-                detail.put("versionId", "0");
-                detail.put("currentState", current.name());
-                if (previous != null) {
-                    detail.put("previousState", previous.name());
-                }
-                detail.put("statementType", statementType);
-                detail.put("queryExecutionId", queryId);
-                detail.put("workgroupName", workGroup);
-                detail.put("sequenceNumber", String.valueOf(sequence));
-
-                Map<String, Object> entry = new LinkedHashMap<>();
-                entry.put("Source", "aws.athena");
-                entry.put("DetailType", "Athena Query State Change");
-                entry.put("Detail", objectMapper.writeValueAsString(detail));
-                eventBridgeService.putEvents(List.of(entry), region);
-            } catch (Exception e) {
-                LOG.warnv("Failed to publish Athena Query State Change for {0}: {1}",
-                        queryId, e.getMessage());
-            }
-        };
-        if (vertx != null) {
-            vertx.runOnContext(ignored -> publish.run());
-        } else {
-            publish.run();
         }
     }
 
@@ -946,11 +627,11 @@ public class AthenaService {
             return normalized;
         }
 
-        if (configuration.getResultConfiguration() != null) {
-            ResultConfiguration result = new ResultConfiguration(
-                    configuration.getResultConfiguration().getOutputLocation());
-            result.setEncryptionConfiguration(configuration.getResultConfiguration().getEncryptionConfiguration());
-            normalized.setResultConfiguration(result);
+        if (configuration.getResultConfiguration() != null
+                && configuration.getResultConfiguration().getOutputLocation() != null
+                && !configuration.getResultConfiguration().getOutputLocation().isBlank()) {
+            normalized.setResultConfiguration(
+                    new ResultConfiguration(configuration.getResultConfiguration().getOutputLocation()));
         }
         if (configuration.getEnforceWorkGroupConfiguration() != null) {
             normalized.setEnforceWorkGroupConfiguration(configuration.getEnforceWorkGroupConfiguration());
@@ -1151,30 +832,7 @@ public class AthenaService {
                         "WorkGroup " + name + " is not found.", 400));
     }
 
-    private synchronized void migrateLegacyDataCatalogs(String region) {
-        // Fork catalogs had no region key; migrate them into the configured default region only.
-        if (!regionResolver.getDefaultRegion().equals(region)) {
-            return;
-        }
-        for (String key : List.copyOf(dataCatalogStore.keys())) {
-            if (key.contains(":")) {
-                continue;
-            }
-            dataCatalogStore.get(key).ifPresent(catalog -> {
-                String regionalKey = catalogKey(region, catalog.getName());
-                if (dataCatalogStore.get(regionalKey).isEmpty()) {
-                    if (catalog.getStatus() == null) {
-                        catalog.setStatus("CREATE_COMPLETE");
-                    }
-                    dataCatalogStore.put(regionalKey, catalog);
-                }
-                dataCatalogStore.delete(key);
-            });
-        }
-    }
-
     private DataCatalog requireDataCatalog(String region, String name) {
-        migrateLegacyDataCatalogs(region);
         return dataCatalogStore.get(catalogKey(region, name))
                 .orElseThrow(() -> new AwsException("InvalidRequestException",
                         "DataCatalog " + name + " was not found.", 400));
@@ -1186,7 +844,6 @@ public class AthenaService {
      * only InvalidRequestException, so they keep {@link #requireDataCatalog}.
      */
     private DataCatalog requireTaggedDataCatalog(String region, String name, String resourceArn) {
-        migrateLegacyDataCatalogs(region);
         return dataCatalogStore.get(catalogKey(region, name))
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException",
                         "Resource " + resourceArn + " was not found.", 400));
@@ -1282,13 +939,6 @@ public class AthenaService {
     private String workGroupKey(String region, String name) {
         return region + ":" + name;
     }
-
-    private String preparedStatementKey(String workGroup, String statementName) {
-        return workGroup + ":" + statementName;
-    }
-
-    @SuppressWarnings("unchecked")
-
 
     private void validateWorkGroupName(String name) {
         if (name == null || name.isBlank()) {
@@ -1464,5 +1114,315 @@ public class AthenaService {
 
     private ResultSet emptyResultSet() {
         return new ResultSet(List.of(), new ResultSet.ResultSetMetadata(List.of()));
+    }
+
+    private static final Pattern SIMPLE_SELECT_LITERAL = Pattern.compile(
+            "^\\s*SELECT\\s+(\\d+)(?:\\s+AS\\s+[A-Za-z_][A-Za-z0-9_]*)?\\s*;?\\s*$",
+            Pattern.CASE_INSENSITIVE);
+
+    private final StorageBackend<String, NamedQuery> namedQueryStore;
+
+    private final StorageBackend<String, PreparedStatement> preparedStatementStore;
+
+    private final RegionResolver regionResolver;
+
+    private final EventBridgeService eventBridgeService;
+
+    private final ObjectMapper objectMapper;
+
+    private final ConcurrentHashMap<String, Integer> queryStateSequence = new ConcurrentHashMap<>();
+
+    private final ConcurrentHashMap<String, ResultSet> queryResults = new ConcurrentHashMap<>();
+
+    public Map<String, Object> getDatabase(String catalog, String name) {
+        Database database = glueService.getDatabase(name);
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("Name", database.getName());
+        if (database.getDescription() != null) {
+            detail.put("Description", database.getDescription());
+        }
+        if (database.getParameters() != null) {
+            detail.put("Parameters", database.getParameters());
+        }
+        return detail;
+    }
+
+    public String createNamedQuery(NamedQuery query) {
+        if (query.getClientRequestToken() != null && !query.getClientRequestToken().isBlank()) {
+            Optional<NamedQuery> existing = namedQueryStore.scan(k -> true).stream()
+                    .filter(q -> query.getClientRequestToken().equals(q.getClientRequestToken()))
+                    .findFirst();
+            if (existing.isPresent()) {
+                return existing.get().getNamedQueryId();
+            }
+        }
+        if (query.getWorkGroup() == null || query.getWorkGroup().isBlank()) {
+            query.setWorkGroup(DEFAULT_WORKGROUP);
+        }
+        query.setNamedQueryId(UUID.randomUUID().toString());
+        namedQueryStore.put(query.getNamedQueryId(), query);
+        return query.getNamedQueryId();
+    }
+
+    public NamedQuery getNamedQuery(String id) {
+        return namedQueryStore.get(id)
+                .orElseThrow(() -> new AwsException("InvalidRequestException",
+                        "NamedQuery " + id + " does not exist", 400));
+    }
+
+    public List<String> listNamedQueries(String workGroup) {
+        String wg = workGroup == null || workGroup.isBlank() ? DEFAULT_WORKGROUP : workGroup;
+        return namedQueryStore.scan(k -> true).stream()
+                .filter(q -> wg.equals(q.getWorkGroup()))
+                .map(NamedQuery::getNamedQueryId)
+                .toList();
+    }
+
+    public void updateNamedQuery(String id, String name, String description, String queryString) {
+        NamedQuery query = getNamedQuery(id);
+        if (name != null) {
+            query.setName(name);
+        }
+        if (description != null) {
+            query.setDescription(description);
+        }
+        if (queryString != null) {
+            query.setQueryString(queryString);
+        }
+        namedQueryStore.put(id, query);
+    }
+
+    public void deleteNamedQuery(String id) {
+        if (namedQueryStore.get(id).isEmpty()) {
+            throw new AwsException("InvalidRequestException", "NamedQuery " + id + " does not exist", 400);
+        }
+        namedQueryStore.delete(id);
+    }
+
+    public Map<String, Object> batchGetNamedQuery(List<String> ids) {
+        List<NamedQuery> found = new ArrayList<>();
+        List<Map<String, Object>> unprocessed = new ArrayList<>();
+        for (String id : ids == null ? List.<String>of() : ids) {
+            Optional<NamedQuery> query = namedQueryStore.get(id);
+            if (query.isPresent()) {
+                found.add(query.get());
+            } else {
+                unprocessed.add(Map.of("NamedQueryId", id));
+            }
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("NamedQueries", found);
+        out.put("UnprocessedNamedQueryIds", unprocessed);
+        return out;
+    }
+
+    public void createPreparedStatement(PreparedStatement statement) {
+        if (statement.getWorkGroupName() == null || statement.getWorkGroupName().isBlank()) {
+            statement.setWorkGroupName(DEFAULT_WORKGROUP);
+        }
+        statement.setLastModifiedTime(Instant.now());
+        preparedStatementStore.put(preparedStatementKey(statement.getWorkGroupName(), statement.getStatementName()),
+                statement);
+    }
+
+    public PreparedStatement getPreparedStatement(String workGroup, String statementName) {
+        return preparedStatementStore.get(preparedStatementKey(workGroup, statementName))
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Prepared statement not found: " + statementName, 400));
+    }
+
+    public List<Map<String, Object>> listPreparedStatements(String workGroup) {
+        String wg = workGroup == null || workGroup.isBlank() ? DEFAULT_WORKGROUP : workGroup;
+        return preparedStatementStore.scan(k -> true).stream()
+                .filter(s -> wg.equals(s.getWorkGroupName()))
+                .sorted(Comparator.comparing(PreparedStatement::getStatementName))
+                .map(s -> {
+                    Map<String, Object> summary = new LinkedHashMap<>();
+                    summary.put("StatementName", s.getStatementName());
+                    if (s.getLastModifiedTime() != null) {
+                        summary.put("LastModifiedTime", s.getLastModifiedTime().getEpochSecond());
+                    }
+                    return summary;
+                })
+                .toList();
+    }
+
+    public void updatePreparedStatement(PreparedStatement statement) {
+        PreparedStatement existing = getPreparedStatement(statement.getWorkGroupName(), statement.getStatementName());
+        if (statement.getQueryStatement() != null) {
+            existing.setQueryStatement(statement.getQueryStatement());
+        }
+        if (statement.getDescription() != null) {
+            existing.setDescription(statement.getDescription());
+        }
+        existing.setLastModifiedTime(Instant.now());
+        preparedStatementStore.put(preparedStatementKey(existing.getWorkGroupName(), existing.getStatementName()),
+                existing);
+    }
+
+    public void deletePreparedStatement(String workGroup, String statementName) {
+        getPreparedStatement(workGroup, statementName);
+        preparedStatementStore.delete(preparedStatementKey(workGroup, statementName));
+    }
+
+    public Map<String, Object> batchGetPreparedStatement(String workGroup, List<String> names) {
+        List<PreparedStatement> found = new ArrayList<>();
+        List<Map<String, Object>> unprocessed = new ArrayList<>();
+        for (String name : names == null ? List.<String>of() : names) {
+            Optional<PreparedStatement> statement = preparedStatementStore.get(preparedStatementKey(workGroup, name));
+            if (statement.isPresent()) {
+                found.add(statement.get());
+            } else {
+                unprocessed.add(Map.of("StatementName", name));
+            }
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("PreparedStatements", found);
+        out.put("UnprocessedPreparedStatementNames", unprocessed);
+        return out;
+    }
+
+    public Map<String, Object> batchGetQueryExecution(List<String> ids) {
+        List<QueryExecution> found = new ArrayList<>();
+        List<Map<String, Object>> unprocessed = new ArrayList<>();
+        for (String id : ids == null ? List.<String>of() : ids) {
+            Optional<QueryExecution> execution = queryStore.get(id);
+            if (execution.isPresent()) {
+                found.add(execution.get());
+            } else {
+                unprocessed.add(Map.of("QueryExecutionId", id));
+            }
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("QueryExecutions", found);
+        out.put("UnprocessedQueryExecutionIds", unprocessed);
+        return out;
+    }
+
+    public Map<String, Object> getQueryRuntimeStatistics(String id) {
+        getQueryExecution(id);
+        Map<String, Object> timeline = new LinkedHashMap<>();
+        timeline.put("QueryQueueTimeInMillis", 0L);
+        timeline.put("QueryPlanningTimeInMillis", 0L);
+        timeline.put("EngineExecutionTimeInMillis", 1L);
+        timeline.put("ServiceProcessingTimeInMillis", 0L);
+        timeline.put("TotalExecutionTimeInMillis", 1L);
+        return Map.of("QueryRuntimeStatistics", Map.of("Timeline", timeline));
+    }
+
+    private static Optional<String> simpleSelectLiteral(String query) {
+        if (query == null) {
+            return Optional.empty();
+        }
+        Matcher matcher = SIMPLE_SELECT_LITERAL.matcher(query);
+        return matcher.matches() ? Optional.of(matcher.group(1)) : Optional.empty();
+    }
+
+    private static ResultSet literalResultSet(String value) {
+        ResultSet.ColumnInfo column = new ResultSet.ColumnInfo("_col0", "integer");
+        ResultSet.Row header = new ResultSet.Row(List.of(new ResultSet.Datum("_col0")));
+        ResultSet.Row data = new ResultSet.Row(List.of(new ResultSet.Datum(value)));
+        return new ResultSet(List.of(header, data), new ResultSet.ResultSetMetadata(List.of(column)));
+    }
+
+    private void writeLiteralCsv(String outputLocation, String value) {
+        try {
+            ensureOutputBucket(outputLocation);
+            String bucket = extractBucket(outputLocation);
+            String key = extractKey(outputLocation);
+            if (bucket == null || key == null || key.isBlank()) {
+                return;
+            }
+            byte[] csv = ("_col0\n" + value + "\n").getBytes(StandardCharsets.UTF_8);
+            s3Service.putObject(bucket, key, csv, "text/csv", Map.of());
+        } catch (Exception e) {
+            LOG.debugv("Could not write literal SELECT result to {0}: {1}", outputLocation, e.getMessage());
+        }
+    }
+
+    private void transitionQueryState(QueryExecution execution,
+                                      QueryExecutionState previous,
+                                      QueryExecutionState next) {
+        execution.getStatus().setState(next);
+        if (next == QueryExecutionState.SUCCEEDED
+                || next == QueryExecutionState.FAILED
+                || next == QueryExecutionState.CANCELLED) {
+            execution.getStatus().setCompletionDateTime(Instant.now());
+        }
+        queryStore.put(execution.getQueryExecutionId(), execution);
+        // Publish off the caller stack. StartQueryExecution is often nested
+        // inside a Lambda Function URL invoke; a synchronous EventBridge→Lambda
+        // delivery of the same function re-enters the executor and drops the
+        // in-flight HTTP socket.
+        publishQueryStateChange(execution, previous, next);
+    }
+
+    private void publishQueryStateChange(QueryExecution execution,
+                                         QueryExecutionState previous,
+                                         QueryExecutionState current) {
+        if (eventBridgeService == null || objectMapper == null) {
+            return;
+        }
+        String queryId = execution.getQueryExecutionId();
+        String statementType = execution.getStatementType() != null
+                ? execution.getStatementType() : "DML";
+        String workGroup = execution.getWorkGroup() != null
+                ? execution.getWorkGroup() : DEFAULT_WORKGROUP;
+        int sequence = queryStateSequence.merge(queryId, 1, Integer::sum);
+        String region = regionResolver.getRegion();
+        Runnable publish = () -> {
+            try {
+                ObjectNode detail = objectMapper.createObjectNode();
+                detail.put("versionId", "0");
+                detail.put("currentState", current.name());
+                if (previous != null) {
+                    detail.put("previousState", previous.name());
+                }
+                detail.put("statementType", statementType);
+                detail.put("queryExecutionId", queryId);
+                detail.put("workgroupName", workGroup);
+                detail.put("sequenceNumber", String.valueOf(sequence));
+
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("Source", "aws.athena");
+                entry.put("DetailType", "Athena Query State Change");
+                entry.put("Detail", objectMapper.writeValueAsString(detail));
+                eventBridgeService.putEvents(List.of(entry), region);
+            } catch (Exception e) {
+                LOG.warnv("Failed to publish Athena Query State Change for {0}: {1}",
+                        queryId, e.getMessage());
+            }
+        };
+        if (vertx != null) {
+            vertx.runOnContext(ignored -> publish.run());
+        } else {
+            publish.run();
+        }
+    }
+
+    private synchronized void migrateLegacyDataCatalogs(String region) {
+        // Fork catalogs had no region key; migrate them into the configured default region only.
+        if (!regionResolver.getDefaultRegion().equals(region)) {
+            return;
+        }
+        for (String key : List.copyOf(dataCatalogStore.keys())) {
+            if (key.contains(":")) {
+                continue;
+            }
+            dataCatalogStore.get(key).ifPresent(catalog -> {
+                String regionalKey = catalogKey(region, catalog.getName());
+                if (dataCatalogStore.get(regionalKey).isEmpty()) {
+                    if (catalog.getStatus() == null) {
+                        catalog.setStatus("CREATE_COMPLETE");
+                    }
+                    dataCatalogStore.put(regionalKey, catalog);
+                }
+                dataCatalogStore.delete(key);
+            });
+        }
+    }
+
+    private String preparedStatementKey(String workGroup, String statementName) {
+        return workGroup + ":" + statementName;
     }
 }

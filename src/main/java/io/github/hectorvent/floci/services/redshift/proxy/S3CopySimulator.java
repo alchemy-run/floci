@@ -9,7 +9,6 @@ import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.iam.model.CallerContext;
 import io.github.hectorvent.floci.services.iam.model.IamRole;
 import io.github.hectorvent.floci.services.s3.S3Service;
-import io.github.hectorvent.floci.services.s3.model.PutObjectOptions;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
 import org.jboss.logging.Logger;
 
@@ -24,9 +23,7 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Semaphore;
@@ -60,11 +57,6 @@ public final class S3CopySimulator {
     static long UNLOAD_TARGET_FILE_BYTES = 6L * 1024 * 1024;
     /** Whole-result ceiling; a larger UNLOAD is aborted rather than filling the in-memory S3 store. */
     static long UNLOAD_MAX_TOTAL_BYTES = 256L * 1024 * 1024;
-    /** Decompressed size ceiling for one object when a COPY field-content option forces it into heap. */
-    static long COPY_TRANSFORM_MAX_OBJECT_BYTES = 64L * 1024 * 1024;
-    /** Shared across every connection: a transform holds the input plus about two further copies of it. */
-    static final Semaphore COPY_TRANSFORM_HEAP_MIB = new Semaphore(192);
-    private static final int COPY_TRANSFORM_HEAP_FACTOR = 3;
     private static final long UNLOAD_WARN_BYTES = 32L * 1024 * 1024;
     /** Shared across every connection so concurrent UNLOADs cannot multiply the per-slice heap cost without bound. */
     static final Semaphore UNLOAD_HEAP_MIB = new Semaphore(192);
@@ -211,15 +203,15 @@ public final class S3CopySimulator {
         void close();
     }
 
-    public static final class S3TransferException extends RuntimeException {
+    static final class S3TransferException extends RuntimeException {
         private final String sqlState;
 
-        public S3TransferException(String sqlState, String message, Throwable cause) {
+        S3TransferException(String sqlState, String message, Throwable cause) {
             super(message, cause);
             this.sqlState = sqlState;
         }
 
-        public String sqlState() {
+        String sqlState() {
             return sqlState;
         }
     }
@@ -237,9 +229,6 @@ public final class S3CopySimulator {
                                  String clusterAccountId, List<String> associatedRoleArns) {
         RoleSession roleSession = spec.iamRoleArn() != null
                 ? resolveRoleSession(spec.iamRoleArn(), iamService, clusterAccountId, associatedRoleArns)
-        requireDefaultIamRole(spec);
-        RedshiftRoleAccess.RoleSession roleSession = spec.iamRoleArn() != null
-                ? RedshiftRoleAccess.resolveRoleSession(spec.iamRoleArn(), iamService, clusterAccountId, associatedRoleArns)
                 : null;
         try {
             try {
@@ -330,7 +319,6 @@ public final class S3CopySimulator {
                 ? resolveRoleSession(spec.iamRoleArn(), iamService, clusterAccountId, associatedRoleArns)
                 : null;
         String probeKey = unloadDataKey(spec, 0);
-        boolean cleanPath = false;
         try {
             if (roleSession != null) {
                 authorizeRoleAction(s3, iamService, spec.iamRoleArn(), "s3:PutObject", objectArn(spec.bucket(), probeKey));
@@ -363,23 +351,16 @@ public final class S3CopySimulator {
                     }
                 }
             }
-            if (spec.cleanPath()) {
-                collectCleanPathKeys(spec, s3, iamService, roleSession);
-                cleanPath = true;
-            }
         } catch (AwsException e) {
             releaseRoleSession(roleSession, spec.iamRoleArn(), iamService);
-            RedshiftRoleAccess.releaseRoleSession(roleSession, spec.iamRoleArn(), iamService);
             throw new S3TransferException(unloadWriteSqlState(e), unloadWriteMessage(e, spec), e);
         } catch (RuntimeException e) {
             releaseRoleSession(roleSession, spec.iamRoleArn(), iamService);
-            RedshiftRoleAccess.releaseRoleSession(roleSession, spec.iamRoleArn(), iamService);
             throw e;
         }
 
         if (!UNLOAD_HEAP_MIB.tryAcquire(UNLOAD_INITIAL_MIB)) {
             releaseRoleSession(roleSession, spec.iamRoleArn(), iamService);
-            RedshiftRoleAccess.releaseRoleSession(roleSession, spec.iamRoleArn(), iamService);
             throw new S3TransferException(SQLSTATE_CONFIGURATION_LIMIT_EXCEEDED,
                     "UNLOAD memory budget exhausted; retry shortly", null);
         }
@@ -388,7 +369,6 @@ public final class S3CopySimulator {
         } catch (IOException e) {
             UNLOAD_HEAP_MIB.release(UNLOAD_INITIAL_MIB);
             releaseRoleSession(roleSession, spec.iamRoleArn(), iamService);
-            RedshiftRoleAccess.releaseRoleSession(roleSession, spec.iamRoleArn(), iamService);
             throw new S3TransferException(SQLSTATE_INTERNAL, "UNLOAD failed: " + e.getMessage(), e);
         }
     }
@@ -575,19 +555,10 @@ public final class S3CopySimulator {
     private static void streamObjects(CopyStatementParser.S3CopyFrom spec, List<String> discoveredColumns,
                                       S3Service s3, IamService iamService, RoleSession roleSession,
                                       List<String> keys, OutputStream backendOut) throws IOException {
-        if (spec.transforms().truncateColumns() && columnMaxBytes == null) {
-            // Extended Query fixes the statement at Parse time, so there is no catalog round trip to
-            // learn column lengths; same limitation and remedy as FORMAT AS JSON 'auto'.
-            throw new S3TransferException(SQLSTATE_INTERNAL,
-                    "COPY ... TRUNCATECOLUMNS needs catalog column lengths, which are only available over "
-                            + "the Simple Query protocol; connect with preferQueryMode=simple", null);
-        }
         byte[] buffer = new byte[CHUNK];
         for (int i = 0; i < keys.size(); i++) {
             if (roleSession != null) {
                 authorizeRoleAction(s3, iamService, spec.iamRoleArn(), "s3:GetObject", objectArn(spec.bucket(), keys.get(i)));
-                RedshiftRoleAccess.authorizeRoleAction(s3, iamService, spec.iamRoleArn(), "s3:GetObject",
-                        RedshiftRoleAccess.objectArn(spec.iamRoleArn(), spec.bucket(), keys.get(i)));
                 s3.authorizeSignedGetObject(roleSession.accessKeyId(), roleSession.sessionToken(), spec.bucket(), keys.get(i));
             } else {
                 s3.authorizeAnonymousGetObject(spec.bucket(), keys.get(i));
@@ -609,14 +580,10 @@ public final class S3CopySimulator {
                     if (i == 0 && spec.headerLines() > 0) {
                         skipLines(in, spec.headerLines());
                     }
-                    InputStream source = in;
-                    if (spec.transforms().any()) {
-                        source = new ByteArrayInputStream(transformObject(spec, columnMaxBytes, in));
-                    }
                     int read;
                     boolean endsWithNewline = false;
                     boolean hasData = false;
-                    while ((read = source.read(buffer)) != -1) {
+                    while ((read = in.read(buffer)) != -1) {
                         if (read > 0) {
                             hasData = true;
                             endsWithNewline = (buffer[read - 1] == '\n');
@@ -660,107 +627,6 @@ public final class S3CopySimulator {
                             cols.add(new String(body, 6, colLen, StandardCharsets.UTF_8));
                         }
                     }
-    /**
-     * Reads one decompressed object into heap and transforms it. The read is bounded by a per-object
-     * ceiling and by a budget shared across connections, so a large or highly compressed object fails
-     * its own statement instead of exhausting the emulator heap.
-     */
-    private static byte[] transformObject(CopyStatementParser.S3CopyFrom spec, List<Integer> columnMaxBytes,
-                                          InputStream in) throws IOException {
-        int heldMib = 0;
-        try {
-            ByteArrayOutputStream buffered = new ByteArrayOutputStream();
-            byte[] chunk = new byte[CHUNK];
-            long total = 0;
-            int read;
-            while ((read = in.read(chunk)) != -1) {
-                total += read;
-                if (total > COPY_TRANSFORM_MAX_OBJECT_BYTES) {
-                    throw new S3TransferException(SQLSTATE_PROGRAM_LIMIT_EXCEEDED,
-                            "COPY object exceeds the " + COPY_TRANSFORM_MAX_OBJECT_BYTES
-                                    + "-byte limit for the field-level options "
-                                    + "(EMPTYASNULL, BLANKSASNULL, REMOVEQUOTES, ACCEPTINVCHARS, TRUNCATECOLUMNS)", null);
-                }
-                int wantedMib = (int) ((total * COPY_TRANSFORM_HEAP_FACTOR) / (1024 * 1024)) + 1;
-                while (heldMib < wantedMib) {
-                    if (!COPY_TRANSFORM_HEAP_MIB.tryAcquire(1)) {
-                        throw new S3TransferException(SQLSTATE_CONFIGURATION_LIMIT_EXCEEDED,
-                                "COPY memory budget exhausted; retry shortly", null);
-                    }
-                    heldMib++;
-                }
-                buffered.write(chunk, 0, read);
-            }
-            return new CopyRecordTransformer(spec, columnMaxBytes).apply(buffered.toByteArray());
-        } finally {
-            COPY_TRANSFORM_HEAP_MIB.release(heldMib);
-        }
-    }
-
-    record ColumnInfo(String name, Integer maxBytes) {
-    }
-
-    /** Positional max character length per COPY column; null entries mean no limit. */
-    static List<Integer> alignMaxBytes(CopyStatementParser.S3CopyFrom spec, List<ColumnInfo> catalog) {
-        if (spec.columns() == null || spec.columns().isEmpty()) {
-            return catalog.stream().map(ColumnInfo::maxBytes).toList();
-        }
-        Map<String, Integer> byName = new HashMap<>();
-        for (ColumnInfo info : catalog) {
-            byName.put(info.name(), info.maxBytes());
-        }
-        List<Integer> aligned = new ArrayList<>();
-        for (String column : spec.columns()) {
-            String key = column.startsWith("\"") ? unquoteIdentifier(column) : column.toLowerCase(Locale.ROOT);
-            aligned.add(byName.get(key));
-        }
-        return aligned;
-    }
-
-    private static List<String> parseDataRow(byte[] body) {
-        int count = ((body[0] & 0xFF) << 8) | (body[1] & 0xFF);
-        List<String> values = new ArrayList<>(count);
-        int offset = 2;
-        for (int i = 0; i < count; i++) {
-            int length = ((body[offset] & 0xFF) << 24) | ((body[offset + 1] & 0xFF) << 16)
-                    | ((body[offset + 2] & 0xFF) << 8) | (body[offset + 3] & 0xFF);
-            offset += 4;
-            if (length < 0) {
-                values.add(null);
-                continue;
-            }
-            values.add(new String(body, offset, length, StandardCharsets.UTF_8));
-            offset += length;
-        }
-        return values;
-    }
-
-    private static List<ColumnInfo> discoverColumnInfo(Socket client, Socket backend,
-                                                       CopyStatementParser.S3CopyFrom spec,
-                                                       char txStatus, IntConsumer onStatusChange) throws IOException {
-        // 1042 = bpchar, 1043 = varchar; atttypmod carries the declared length plus a 4-byte header.
-        String query = "SELECT a.attname, CASE WHEN a.atttypid IN (1042, 1043) AND a.atttypmod > 4 "
-                + "THEN a.atttypmod - 4 END FROM pg_catalog.pg_attribute a "
-                + "WHERE a.attrelid = to_regclass('" + quoteLiteral(spec.targetTable()) + "') "
-                + "AND a.attnum > 0 AND NOT a.attisdropped "
-                + "ORDER BY a.attnum";
-
-        OutputStream backendOut = backend.getOutputStream();
-        backendOut.write(PostgresWireDecoder.encodeQuery(query));
-        backendOut.flush();
-
-        PostgresWireDecoder backendDecoder = new PostgresWireDecoder(backend.getInputStream());
-        List<ColumnInfo> cols = new ArrayList<>();
-        PostgresWireDecoder.FrontendMessage msg;
-        while ((msg = backendDecoder.nextMessage()) != null) {
-            char type = msg.type();
-            if (type == 'D') {
-                List<String> values = parseDataRow(msg.body());
-                if (!values.isEmpty() && values.get(0) != null) {
-                    Integer maxBytes = values.size() >= 2 && values.get(1) != null
-                            ? Integer.valueOf(values.get(1))
-                            : null;
-                    cols.add(new ColumnInfo(values.get(0), maxBytes));
                 }
             } else if (type == 'E') {
                 forward(client, msg);
@@ -1141,80 +1007,6 @@ public final class S3CopySimulator {
         return true;
     }
 
-    /**
-     * Lists every object under the target prefix and authorizes the delete of each, so a denial fails
-     * the UNLOAD before anything is removed or written. It runs at preparation, to fail early, and
-     * again when the first output arrives, to delete what is there then. Nothing is deleted here, so
-     * a query the backend rejects, or a failed memory reservation, leaves the previous export in place.
-     */
-    private static List<String> collectCleanPathKeys(CopyStatementParser.S3Unload spec, S3Service s3,
-                                                     IamService iamService,
-                                                     RedshiftRoleAccess.RoleSession roleSession) {
-        authorizeCleanPathList(spec, s3, iamService, roleSession);
-        List<String> keys = new ArrayList<>();
-        String continuationToken = null;
-        do {
-            S3Service.ListObjectsResult result = s3.listObjectsWithPrefixes(
-                    spec.bucket(), spec.prefix(), null, LIST_PAGE_SIZE, continuationToken, null);
-            if (result != null && result.objects() != null) {
-                for (S3Object object : result.objects()) {
-                    keys.add(object.getKey());
-                }
-            }
-            continuationToken = (result != null && result.isTruncated()) ? result.nextContinuationToken() : null;
-        } while (continuationToken != null);
-
-        for (String key : keys) {
-            authorizeCleanPathDelete(spec, s3, iamService, roleSession, key);
-        }
-        return keys;
-    }
-
-    private static void authorizeCleanPathList(CopyStatementParser.S3Unload spec, S3Service s3,
-                                               IamService iamService,
-                                               RedshiftRoleAccess.RoleSession roleSession) {
-        if (roleSession != null) {
-            RedshiftRoleAccess.authorizeRoleAction(s3, iamService, spec.iamRoleArn(), "s3:ListBucket",
-                    RedshiftRoleAccess.bucketArn(spec.iamRoleArn(), spec.bucket()));
-            s3.authorizeSignedListBucket(roleSession.accessKeyId(), roleSession.sessionToken(), spec.bucket());
-        } else {
-            s3.authorizeAnonymousListBucket(spec.bucket());
-        }
-    }
-
-    private static void authorizeCleanPathDelete(CopyStatementParser.S3Unload spec, S3Service s3,
-                                                 IamService iamService,
-                                                 RedshiftRoleAccess.RoleSession roleSession, String key) {
-        if (roleSession != null) {
-            RedshiftRoleAccess.authorizeRoleAction(s3, iamService, spec.iamRoleArn(), "s3:DeleteObject",
-                    RedshiftRoleAccess.objectArn(spec.iamRoleArn(), spec.bucket(), key));
-            s3.authorizeSignedDeleteObject(roleSession.accessKeyId(), roleSession.sessionToken(),
-                    spec.bucket(), key);
-        } else {
-            s3.authorizeAnonymousDeleteObject(spec.bucket(), key);
-        }
-    }
-
-    /** Server-side encryption headers requested by ENCRYPTED KMS_KEY_ID, or null when none apply. */
-    private static PutObjectOptions unloadObjectOptions(CopyStatementParser.S3Unload spec) {
-        if (spec.sseKmsKeyId() == null) {
-            return null;
-        }
-        return new PutObjectOptions()
-                .withServerSideEncryption("aws:kms")
-                .withSseKmsKeyId(spec.sseKmsKeyId());
-    }
-
-    private static void putUnloadObject(S3Service s3, CopyStatementParser.S3Unload spec, String key,
-                                        byte[] payload, String contentType) {
-        PutObjectOptions options = unloadObjectOptions(spec);
-        if (options == null) {
-            s3.putObject(spec.bucket(), key, payload, contentType, Map.of());
-        } else {
-            s3.putObject(spec.bucket(), key, payload, contentType, Map.of(), options);
-        }
-    }
-
     private static boolean targetPrefixHasObjects(CopyStatementParser.S3Unload spec, S3Service s3) {
         S3Service.ListObjectsResult r = s3.listObjectsWithPrefixes(
                 spec.bucket(), spec.prefix(), null, 1, null, null);
@@ -1245,13 +1037,10 @@ public final class S3CopySimulator {
         private final S3Service s3;
         private final IamService iamService;
         private final RoleSession roleSession;
-        private final RedshiftRoleAccess.RoleSession roleSession;
         private final long threshold;
         private final String contentType;
         private final List<String> writtenKeys = new ArrayList<>();
         private final List<Integer> writtenLengths = new ArrayList<>();
-        private final boolean cleanPathPending;
-        private boolean cleanPathDone;
 
         private ByteArrayOutputStream sink = new ByteArrayOutputStream();
         private OutputStream acc;
@@ -1272,7 +1061,6 @@ public final class S3CopySimulator {
         private S3UnloadCollector(CopyStatementParser.S3Unload spec, S3Service s3,
                                   IamService iamService, RoleSession roleSession) throws IOException {
             this.spec = spec;
-            this.cleanPathPending = cleanPath;
             this.s3 = s3;
             this.iamService = iamService;
             this.roleSession = roleSession;
@@ -1286,7 +1074,6 @@ public final class S3CopySimulator {
         @Override
         public void accept(byte[] body) throws IOException {
             ensureOpen();
-            runCleanPath();
             int dataStart = 0;
             if (capturingHeader) {
                 int newline = -1;
@@ -1335,7 +1122,6 @@ public final class S3CopySimulator {
         @Override
         public void complete() throws IOException {
             ensureOpen();
-            runCleanPath();
             byte[] payload = finishSlice(acc, sink);
             if (slicePayload > 0 || writtenKeys.isEmpty()) {
                 writePayload(payload, sliceIndex);
@@ -1352,7 +1138,7 @@ public final class S3CopySimulator {
                     s3.putObject(spec.bucket(), key,
                             manifestJson(spec.bucket(), writtenKeys, writtenLengths)
                                     .getBytes(StandardCharsets.UTF_8),
-                            "application/json");
+                            "application/json", Map.of());
                 } catch (RuntimeException e) {
                     fail(SQLSTATE_INTERNAL, "UNLOAD manifest write failed", e);
                 }
@@ -1383,27 +1169,7 @@ public final class S3CopySimulator {
             UNLOAD_HEAP_MIB.release(heldMib);
             heldMib = 0;
             releaseRoleSession(roleSession, spec.iamRoleArn(), iamService);
-            RedshiftRoleAccess.releaseRoleSession(roleSession, spec.iamRoleArn(), iamService);
             closed = true;
-        }
-
-        /**
-         * CLEANPATH, second half: once, before the first write, removes what is under the prefix then.
-         * S3 lists, authorizes every delete and deletes under one bucket lock, so an object uploaded
-         * since preparation, or while this runs, does not survive next to the new export.
-         */
-        private void runCleanPath() {
-            if (cleanPathDone || !cleanPathPending) {
-                return;
-            }
-            cleanPathDone = true;
-            try {
-                authorizeCleanPathList(spec, s3, iamService, roleSession);
-                s3.deleteObjectsWithPrefix(spec.bucket(), spec.prefix(),
-                        key -> authorizeCleanPathDelete(spec, s3, iamService, roleSession, key));
-            } catch (RuntimeException e) {
-                fail(SQLSTATE_INTERNAL, "UNLOAD CLEANPATH failed", e);
-            }
         }
 
         private void acquireForCurrentSlice() {
@@ -1487,11 +1253,6 @@ public final class S3CopySimulator {
         String base = spec.parallel()
                 ? spec.prefix() + String.format("%04d_part_00", index)
                 : spec.prefix() + String.format("%03d", index);
-        if (spec.extension() != null) {
-            // AWS adds the compression suffix only when no extension is given (its example is
-            // EXTENSION 'txt.gz' GZIP), so the caller's extension is the whole suffix.
-            return spec.extension().startsWith(".") ? base + spec.extension() : base + "." + spec.extension();
-        }
         return spec.gzip() ? base + ".gz" : base;
     }
 

@@ -1,8 +1,5 @@
 package io.github.hectorvent.floci.services.emrserverless;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.services.emrserverless.model.Application;
@@ -31,7 +28,6 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
-import jakarta.ws.rs.HeaderParam;
 import jakarta.ws.rs.PATCH;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
@@ -41,6 +37,10 @@ import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 
 import java.util.List;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.core.common.AwsException;
+import jakarta.ws.rs.HeaderParam;
 import java.util.Map;
 
 @Path("/_emrserverless/applications")
@@ -102,7 +102,9 @@ public class EmrServerlessController {
                                                      UpdateApplicationRequest request) {
         Application app = service.updateApplication(applicationId, request);
         UpdateApplicationResponse response = new UpdateApplicationResponse();
-        response.setApplication(app);
+        response.setApplicationId(app.getApplicationId());
+        response.setArn(app.getArn());
+        response.setName(app.getName());
         return response;
     }
 
@@ -113,101 +115,6 @@ public class EmrServerlessController {
         DeleteApplicationResponse response = new DeleteApplicationResponse();
         response.setApplicationId(applicationId);
         return response;
-    }
-
-    @GET
-    @Path("/{applicationId}/jobruns")
-    public Map<String, Object> listJobRuns(@PathParam("applicationId") String applicationId,
-                                          @QueryParam("maxResults") String maxResults,
-                                          @QueryParam("nextToken") String nextToken,
-                                          @QueryParam("states") List<String> states,
-                                          @QueryParam("createdAtAfter") String after,
-                                          @QueryParam("createdAtBefore") String before,
-                                          @QueryParam("mode") String mode) {
-        PaginatedResult<ObjectNode> page = service.listJobRuns(applicationId,
-                Pagination.parseMaxResults(maxResults, "ValidationException"), nextToken, states,
-                timestamp(after), timestamp(before), mode);
-        return page.nextToken() == null ? Map.of("jobRuns", page.items())
-                : Map.of("jobRuns", page.items(), "nextToken", page.nextToken());
-    }
-
-    @POST
-    @Path("/{applicationId}/jobruns")
-    public ObjectNode startJobRun(@PathParam("applicationId") String applicationId,
-                                  @HeaderParam("Authorization") String authorization, JsonNode request) {
-        return service.startJobRun(applicationId, request, authorization);
-    }
-
-    @GET
-    @Path("/{applicationId}/jobruns/{jobRunId}")
-    public Map<String, Object> getJobRun(@PathParam("applicationId") String applicationId,
-                                        @PathParam("jobRunId") String jobRunId,
-                                        @QueryParam("attempt") String attempt) {
-        return Map.of("jobRun", service.getJobRun(applicationId, jobRunId, attempt));
-    }
-
-    @DELETE
-    @Path("/{applicationId}/jobruns/{jobRunId}")
-    public ObjectNode cancelJobRun(@PathParam("applicationId") String applicationId,
-                                   @PathParam("jobRunId") String jobRunId) {
-        return service.cancelJobRun(applicationId, jobRunId);
-    }
-
-    @GET
-    @Path("/{applicationId}/jobruns/{jobRunId}/attempts")
-    public Map<String, Object> listJobRunAttempts(@PathParam("applicationId") String applicationId,
-                                                @PathParam("jobRunId") String jobRunId,
-                                                @QueryParam("maxResults") String maxResults,
-                                                @QueryParam("nextToken") String nextToken) {
-        PaginatedResult<ObjectNode> page = service.listJobRunAttempts(applicationId, jobRunId,
-                Pagination.parseMaxResults(maxResults, "ValidationException"), nextToken);
-        return page.nextToken() == null ? Map.of("jobRunAttempts", page.items())
-                : Map.of("jobRunAttempts", page.items(), "nextToken", page.nextToken());
-    }
-
-    @GET
-    @Path("/{applicationId}/jobruns/{jobRunId}/dashboard")
-    public void getDashboardForJobRun(@PathParam("applicationId") String applicationId,
-                                      @PathParam("jobRunId") String jobRunId) {
-        service.getDashboardForJobRun(applicationId, jobRunId);
-    }
-
-    private static Double timestamp(String value) {
-        if (value == null) {
-            return null;
-        }
-        try {
-            double result = Double.parseDouble(value);
-            if (Double.isFinite(result)) {
-                return result;
-            }
-        } catch (NumberFormatException ignored) {
-        }
-        throw new AwsException("ValidationException", "Invalid timestamp filter", 400);
-    }
-
-    @GET
-    @Path("/{applicationId}/sessions")
-    public Map<String, Object> listSessions(@PathParam("applicationId") String applicationId,
-                                           @QueryParam("maxResults") String maxResults,
-                                           @QueryParam("nextToken") String nextToken) {
-        return Map.of("sessions", service.listSessions(applicationId,
-                Pagination.parseMaxResults(maxResults, "ValidationException"), nextToken));
-    }
-
-    @POST
-    @Path("/{applicationId}/sessions")
-    public void startSession(@PathParam("applicationId") String applicationId, JsonNode request) {
-        service.startSession(applicationId, request);
-    }
-
-    @GET
-    @Path("/{applicationId}/dashboard")
-    public void getResourceDashboard(@PathParam("applicationId") String applicationId,
-                                     @QueryParam("resourceId") String resourceId,
-                                     @QueryParam("resourceType") String resourceType,
-                                     @HeaderParam("Authorization") String authorization) {
-        service.getResourceDashboard(applicationId, resourceId, resourceType, authorization);
     }
 
     @POST
@@ -291,5 +198,50 @@ public class EmrServerlessController {
         response.setApplicationId(run.getApplicationId());
         response.setJobRunId(run.getJobRunId());
         return response;
+    }
+
+    @GET
+    @Path("/{applicationId}/jobruns/{jobRunId}/dashboard")
+    public void getDashboardForJobRun(@PathParam("applicationId") String applicationId,
+                                      @PathParam("jobRunId") String jobRunId) {
+        service.getDashboardForJobRun(applicationId, jobRunId);
+    }
+
+    private static Double timestamp(String value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            double result = Double.parseDouble(value);
+            if (Double.isFinite(result)) {
+                return result;
+            }
+        } catch (NumberFormatException ignored) {
+        }
+        throw new AwsException("ValidationException", "Invalid timestamp filter", 400);
+    }
+
+    @GET
+    @Path("/{applicationId}/sessions")
+    public Map<String, Object> listSessions(@PathParam("applicationId") String applicationId,
+                                           @QueryParam("maxResults") String maxResults,
+                                           @QueryParam("nextToken") String nextToken) {
+        return Map.of("sessions", service.listSessions(applicationId,
+                Pagination.parseMaxResults(maxResults, "ValidationException"), nextToken));
+    }
+
+    @POST
+    @Path("/{applicationId}/sessions")
+    public void startSession(@PathParam("applicationId") String applicationId, JsonNode request) {
+        service.startSession(applicationId, request);
+    }
+
+    @GET
+    @Path("/{applicationId}/dashboard")
+    public void getResourceDashboard(@PathParam("applicationId") String applicationId,
+                                     @QueryParam("resourceId") String resourceId,
+                                     @QueryParam("resourceType") String resourceType,
+                                     @HeaderParam("Authorization") String authorization) {
+        service.getResourceDashboard(applicationId, resourceId, resourceType, authorization);
     }
 }

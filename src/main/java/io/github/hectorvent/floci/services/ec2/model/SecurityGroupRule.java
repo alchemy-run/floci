@@ -22,8 +22,6 @@ public class SecurityGroupRule {
     /** Set instead of a CIDR when the rule's source is a managed prefix list. */
     private String prefixListId;
     private ReferencedSecurityGroup referencedGroupInfo;
-    // Retains unresolved name-only sources; not part of the Query response shape.
-    private String referencedGroupName;
     private String description;
     private List<Tag> tags = new ArrayList<>();
 
@@ -64,12 +62,15 @@ public class SecurityGroupRule {
         this.referencedGroupInfo = referencedGroupInfo;
     }
 
-    public String getReferencedGroupName() { return referencedGroupName; }
-    public void setReferencedGroupName(String referencedGroupName) { this.referencedGroupName = referencedGroupName; }
-
     public String getDescription() { return description; }
     public void setDescription(String description) { this.description = description; }
 
     public List<Tag> getTags() { return tags; }
     public void setTags(List<Tag> tags) { this.tags = tags; }
+
+    private String referencedGroupName;
+
+    public String getReferencedGroupName() { return referencedGroupName; }
+
+    public void setReferencedGroupName(String referencedGroupName) { this.referencedGroupName = referencedGroupName; }
 }

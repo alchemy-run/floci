@@ -5,8 +5,8 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -40,10 +40,6 @@ public class ReportDefinition {
      * (default) request scope. Not part of the AWS wire response.
      */
     private String ownerAccountId;
-    private Map<String, String> tags = new LinkedHashMap<>();
-
-    public Map<String, String> getTags() { return tags; }
-    public void setTags(Map<String, String> tags) { this.tags = tags; }
 
     public ReportDefinition() {
     }
@@ -95,4 +91,10 @@ public class ReportDefinition {
 
     public String getOwnerAccountId() { return ownerAccountId; }
     public void setOwnerAccountId(String v) { this.ownerAccountId = v; }
+
+    private Map<String, String> tags = new LinkedHashMap<>();
+
+    public Map<String, String> getTags() { return tags; }
+
+    public void setTags(Map<String, String> tags) { this.tags = tags; }
 }

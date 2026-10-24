@@ -1,6 +1,5 @@
 package io.github.hectorvent.floci.services.iam;
 
-import io.github.hectorvent.floci.services.iam.model.IamSamlProvider;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsRegionFacts;
 import io.github.hectorvent.floci.core.common.Digests;
@@ -24,6 +23,8 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Set;
+import io.github.hectorvent.floci.services.iam.model.IamSamlProvider;
+import java.security.MessageDigest;
 
 /** Verifies the specific SAML assertion contract consumed by STS. */
 final class SAMLAssertionVerifier {
@@ -42,7 +43,7 @@ final class SAMLAssertionVerifier {
                     Instant expiration, List<RolePair> roles) {}
     record RolePair(String roleArn, String principalArn) {}
 
-    static Verified verify(String encoded, IamSamlProvider provider, Instant now) throws InvalidAssertionException {
+    static Verified verify(String encoded, SAMLProvider provider, Instant now) throws InvalidAssertionException {
         try {
             byte[] bytes = Base64.getDecoder().decode(encoded);
             Document document = SAMLXml.document(new String(bytes, StandardCharsets.UTF_8));

@@ -8,7 +8,6 @@ import org.bouncycastle.asn1.ASN1Primitive;
 import org.bouncycastle.asn1.DEROctetString;
 import org.bouncycastle.asn1.pkcs.EncryptedPrivateKeyInfo;
 import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers;
-import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
 import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.asn1.x509.AlgorithmIdentifier;
 import org.bouncycastle.asn1.x509.BasicConstraints;
@@ -26,9 +25,6 @@ import org.bouncycastle.cert.X509v3CertificateBuilder;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
 import org.bouncycastle.cert.jcajce.JcaX509ExtensionUtils;
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
-import org.bouncycastle.openssl.PEMKeyPair;
-import org.bouncycastle.openssl.PEMParser;
-import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
 import org.bouncycastle.openssl.jcajce.JcaPEMWriter;
 import org.bouncycastle.openssl.jcajce.JcePEMEncryptorBuilder;
 import org.bouncycastle.operator.ContentSigner;
@@ -67,11 +63,10 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.regex.Pattern;
-import javax.crypto.Cipher;
-import javax.crypto.SecretKey;
-import javax.crypto.SecretKeyFactory;
-import javax.crypto.spec.PBEKeySpec;
-import javax.crypto.spec.PBEParameterSpec;
+import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
+import org.bouncycastle.openssl.PEMKeyPair;
+import org.bouncycastle.openssl.PEMParser;
+import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
 
 @ApplicationScoped
 public class CertificateGenerator {
@@ -495,23 +490,6 @@ public class CertificateGenerator {
     }
 
 
-    public PrivateKey parsePrivateKey(String keyPem) {
-        try (PEMParser parser = new PEMParser(new StringReader(keyPem))) {
-            Object obj = parser.readObject();
-            JcaPEMKeyConverter converter = new JcaPEMKeyConverter();
-
-            if (obj instanceof PEMKeyPair pemKeyPair) {
-                // Only the private half is needed, and a SEC1 key may carry no public half at all.
-                return converter.getPrivateKey(pemKeyPair.getPrivateKeyInfo());
-            } else if (obj instanceof PrivateKeyInfo pkInfo) {
-                return converter.getPrivateKey(pkInfo);
-            }
-            throw new IllegalArgumentException("Invalid private key PEM format");
-        } catch (Exception e) {
-            LOG.error("Failed to parse private key", e);
-            throw new CertificateGenerationException("Private key parsing failed: " + e.getMessage(), e);
-        }
-    }
 
     public void validateCertificate(X509Certificate cert) {
         try {
@@ -550,5 +528,51 @@ public class CertificateGenerator {
             }
         }
         return KeyAlgorithm.RSA_2048;
+    }
+
+    /** True when {@code privateKey} signs what {@code publicKey} verifies. */
+    public static boolean isPair(PrivateKey privateKey, PublicKey publicKey) throws Exception {
+        String algorithm = privateKey instanceof ECKey ? "SHA256withECDSA" : "SHA256withRSA";
+        byte[] probe = "floci".getBytes(StandardCharsets.US_ASCII);
+        Signature signer = Signature.getInstance(algorithm);
+        signer.initSign(privateKey);
+        signer.update(probe);
+        byte[] signature = signer.sign();
+        Signature verifier = Signature.getInstance(algorithm);
+        verifier.initVerify(publicKey);
+        verifier.update(probe);
+        return verifier.verify(signature);
+    }
+
+    public X509Certificate parseCertificate(String certPem) {
+        try (PEMParser parser = new PEMParser(new StringReader(certPem))) {
+            Object obj = parser.readObject();
+            if (obj instanceof X509CertificateHolder holder) {
+                return new JcaX509CertificateConverter()
+                    .getCertificate(holder);
+            }
+            throw new IllegalArgumentException("Invalid certificate PEM format");
+        } catch (Exception e) {
+            LOG.error("Failed to parse certificate", e);
+            throw new CertificateGenerationException("Certificate parsing failed: " + e.getMessage(), e);
+        }
+    }
+
+    public PrivateKey parsePrivateKey(String keyPem) {
+        try (PEMParser parser = new PEMParser(new StringReader(keyPem))) {
+            Object obj = parser.readObject();
+            JcaPEMKeyConverter converter = new JcaPEMKeyConverter();
+
+            if (obj instanceof PEMKeyPair pemKeyPair) {
+                // Only the private half is needed, and a SEC1 key may carry no public half at all.
+                return converter.getPrivateKey(pemKeyPair.getPrivateKeyInfo());
+            } else if (obj instanceof PrivateKeyInfo pkInfo) {
+                return converter.getPrivateKey(pkInfo);
+            }
+            throw new IllegalArgumentException("Invalid private key PEM format");
+        } catch (Exception e) {
+            LOG.error("Failed to parse private key", e);
+            throw new CertificateGenerationException("Private key parsing failed: " + e.getMessage(), e);
+        }
     }
 }

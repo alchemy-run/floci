@@ -3,6 +3,11 @@ package io.github.hectorvent.floci.services.lakeformation;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.services.lakeformation.model.*;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+
+import java.util.List;
 import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.iam.model.IamRole;
 import io.github.hectorvent.floci.services.lakeformation.model.AddLFTagsToResourceRequest;
@@ -44,11 +49,7 @@ import io.github.hectorvent.floci.services.lakeformation.model.UpdateLFTagReques
 import io.github.hectorvent.floci.services.lakeformation.model.UpdateLFTagResponse;
 import io.github.hectorvent.floci.services.lakeformation.model.UpdateResourceRequest;
 import io.github.hectorvent.floci.services.lakeformation.model.UpdateResourceResponse;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
-
 import java.time.Instant;
-import java.util.List;
 import java.util.Optional;
 
 @ApplicationScoped
@@ -56,16 +57,11 @@ public class LakeFormationService {
 
     private final LakeFormationStorage storage;
     private final RegionResolver regionResolver;
-    private final IamService iam;
-    private final LakeFormationCatalogService catalog;
 
     @Inject
-    public LakeFormationService(LakeFormationStorage storage, RegionResolver regionResolver,
-                                IamService iam, LakeFormationCatalogService catalog) {
+    public LakeFormationService(LakeFormationStorage storage, RegionResolver regionResolver) {
         this.storage = storage;
         this.regionResolver = regionResolver;
-        this.iam = iam;
-        this.catalog = catalog;
     }
 
     public PutDataLakeSettingsResponse putDataLakeSettings(String region, PutDataLakeSettingsRequest request) {
@@ -83,57 +79,29 @@ public class LakeFormationService {
         return response;
     }
 
-    public synchronized RegisterResourceResponse registerResource(String region, RegisterResourceRequest request) {
-        validateResourceArn(request.getResourceArn());
+    public RegisterResourceResponse registerResource(String region, RegisterResourceRequest request) {
+        if (request.getResourceArn() == null) {
+            throw new AwsException("InvalidInputException", "ResourceArn is required", 400);
+        }
+        if (!request.getResourceArn().startsWith("arn:")) {
+            throw new AwsException("InvalidInputException", "ResourceArn must be a valid ARN", 400);
+        }
         if (storage.describeResource(region, request.getResourceArn()).isPresent()) {
             throw new AwsException("AlreadyExistsException", "Resource is already registered", 400);
         }
-        String roleArn = request.getRoleArn();
-        boolean serviceLinked = Boolean.TRUE.equals(request.getUseServiceLinkedRole());
-        if (roleArn == null && serviceLinked) {
-            roleArn = serviceLinkedRole().getArn();
-        }
-        validateRoleArn(roleArn);
-        ResourceInfo info = new ResourceInfo();
-        info.setResourceArn(request.getResourceArn());
-        info.setRoleArn(roleArn);
-        info.setExpectedResourceOwnerAccount(request.getExpectedResourceOwnerAccount());
-        info.setHybridAccessEnabled(Boolean.TRUE.equals(request.getHybridAccessEnabled()));
-        info.setWithFederation(Boolean.TRUE.equals(request.getWithFederation()));
-        info.setWithPrivilegedAccess(Boolean.TRUE.equals(request.getWithPrivilegedAccess()));
-        info.setLastModified(Instant.now().getEpochSecond());
-        storage.registerResource(region, info);
+        storage.registerResource(
+                region,
+                request.getResourceArn(),
+                request.getRoleArn(),
+                Boolean.TRUE.equals(request.getUseServiceLinkedRole()),
+                request.getWithFederation()
+        );
         return new RegisterResourceResponse();
-    }
-
-    private IamRole serviceLinkedRole() {
-        String name = "AWSServiceRoleForLakeFormationDataAccess";
-        Optional<IamRole> existing = iam.findRole(regionResolver.getAccountId(), name);
-        if (existing.isPresent()) {
-            if (!existing.get().isServiceLinkedRole()) {
-                throw new AwsException("InvalidInputException", "The data access role is not a service-linked role", 400);
-            }
-            return existing.get();
-        }
-        try {
-            return iam.createServiceLinkedRole("lakeformation.amazonaws.com", null, null);
-        } catch (AwsException error) {
-            if (!"InvalidInput".equals(error.getErrorCode())) {
-                throw error;
-            }
-            return iam.findRole(regionResolver.getAccountId(), name).orElseThrow(() -> error);
-        }
     }
 
     public UpdateResourceResponse updateResource(String region, UpdateResourceRequest request) {
         validateResourceArn(request.getResourceArn());
         validateRoleArn(request.getRoleArn());
-        storage.describeResource(region, request.getResourceArn()).ifPresent(info -> {
-            if (info.getRoleArn() != null
-                    && info.getRoleArn().contains("/aws-service-role/lakeformation.amazonaws.com/")) {
-                throw new AwsException("InvalidInputException", "Resource managed by Service Linked Role", 400);
-            }
-        });
 
         storage.updateResource(
                 region,
@@ -226,7 +194,7 @@ public class LakeFormationService {
         String catalogId = request.getCatalogId() != null ? request.getCatalogId() : regionResolver.getAccountId();
         
         if (request.getPermissionsWithGrantOption() != null) {
-            List<String> perms = request.getPermissions() != null ? request.getPermissions() : List.of();
+            java.util.List<String> perms = request.getPermissions() != null ? request.getPermissions() : java.util.List.of();
             for (String grantOption : request.getPermissionsWithGrantOption()) {
                 if (!perms.contains(grantOption)) {
                     throw new AwsException("InvalidInputException", "PermissionsWithGrantOption must be a subset of Permissions", 400);
@@ -287,12 +255,8 @@ public class LakeFormationService {
 
     public CreateLFTagResponse createLFTag(String region, CreateLFTagRequest request) {
         String catalogId = request.getCatalogId() != null ? request.getCatalogId() : regionResolver.getAccountId();
-        if (request.getTagKey() == null || request.getTagKey().isBlank()) {
+        if (request.getTagKey() == null) {
             throw new AwsException("InvalidInputException", "TagKey is required", 400);
-        }
-        if (request.getTagValues() == null || request.getTagValues().isEmpty()
-                || request.getTagValues().stream().anyMatch(value -> value == null || value.isBlank())) {
-            throw new AwsException("InvalidInputException", "TagValues must contain nonempty strings", 400);
         }
         if (storage.getLFTag(region, catalogId, request.getTagKey()).isPresent()) {
             throw new AwsException("AlreadyExistsException", "Tag already exists", 400);
@@ -346,8 +310,10 @@ public class LakeFormationService {
         if (request.getResource() == null) {
             throw new AwsException("InvalidInputException", "Resource is required", 400);
         }
+        storage.addLFTagsToResource(region, catalogId, request.getResource(), request.getLfTags());
+        
         AddLFTagsToResourceResponse response = new AddLFTagsToResourceResponse();
-        response.setFailures(catalog.changeTags(region, catalogId, request.getResource(), request.getLfTags(), false));
+        response.setFailures(List.of()); // Success for all
         return response;
     }
 
@@ -356,9 +322,33 @@ public class LakeFormationService {
         if (request.getResource() == null) {
             throw new AwsException("InvalidInputException", "Resource is required", 400);
         }
+        storage.removeLFTagsFromResource(region, catalogId, request.getResource(), request.getLfTags());
+        
         RemoveLFTagsFromResourceResponse response = new RemoveLFTagsFromResourceResponse();
-        response.setFailures(catalog.changeTags(region, catalogId, request.getResource(), request.getLfTags(), true));
+        response.setFailures(List.of()); // Success for all
         return response;
     }
 
+    private final IamService iam;
+
+    private final LakeFormationCatalogService catalog;
+
+    private IamRole serviceLinkedRole() {
+        String name = "AWSServiceRoleForLakeFormationDataAccess";
+        Optional<IamRole> existing = iam.findRole(regionResolver.getAccountId(), name);
+        if (existing.isPresent()) {
+            if (!existing.get().isServiceLinkedRole()) {
+                throw new AwsException("InvalidInputException", "The data access role is not a service-linked role", 400);
+            }
+            return existing.get();
+        }
+        try {
+            return iam.createServiceLinkedRole("lakeformation.amazonaws.com", null, null);
+        } catch (AwsException error) {
+            if (!"InvalidInput".equals(error.getErrorCode())) {
+                throw error;
+            }
+            return iam.findRole(regionResolver.getAccountId(), name).orElseThrow(() -> error);
+        }
+    }
 }

@@ -28,22 +28,6 @@ public class ServiceDeployment {
     private Instant updatedAt;
     private String targetServiceRevisionArn;
     private List<String> sourceServiceRevisionArns;
-
-    public Instant getStartedAt() { return startedAt; }
-    public void setStartedAt(Instant startedAt) { this.startedAt = startedAt; }
-
-    public Instant getFinishedAt() { return finishedAt; }
-    public void setFinishedAt(Instant finishedAt) { this.finishedAt = finishedAt; }
-
-    public String getTargetServiceRevisionArn() { return targetServiceRevisionArn; }
-    public void setTargetServiceRevisionArn(String targetServiceRevisionArn) {
-        this.targetServiceRevisionArn = targetServiceRevisionArn;
-    }
-
-    public List<String> getSourceServiceRevisionArns() { return sourceServiceRevisionArns; }
-    public void setSourceServiceRevisionArns(List<String> sourceServiceRevisionArns) {
-        this.sourceServiceRevisionArns = sourceServiceRevisionArns;
-    }
     /** Internal revision restored if this deployment rolls back. */
     private String rollbackTargetServiceRevisionArn;
     private Instant rollbackStartedAt;

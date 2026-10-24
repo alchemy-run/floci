@@ -36,46 +36,18 @@ public class Listener {
     public String getProtocol() { return protocol; }
     public void setProtocol(String protocol) { this.protocol = protocol; }
 
-    public List<String> getCertificates() {
-        if (certificates == null) {
-            certificates = new ArrayList<>();
-        }
-        return certificates;
-    }
-    public void setCertificates(List<String> certificates) {
-        this.certificates = certificates != null ? certificates : new ArrayList<>();
-    }
+    public List<String> getCertificates() { return certificates; }
+    public void setCertificates(List<String> certificates) { this.certificates = certificates; }
 
     public String getSslPolicy() { return sslPolicy; }
     public void setSslPolicy(String sslPolicy) { this.sslPolicy = sslPolicy; }
 
-    public List<Action> getDefaultActions() {
-        if (defaultActions == null) {
-            defaultActions = new ArrayList<>();
-        }
-        return defaultActions;
-    }
-    public void setDefaultActions(List<Action> defaultActions) {
-        this.defaultActions = defaultActions != null ? defaultActions : new ArrayList<>();
-    }
+    public List<Action> getDefaultActions() { return defaultActions; }
+    public void setDefaultActions(List<Action> defaultActions) { this.defaultActions = defaultActions; }
 
-    public List<String> getAlpnPolicy() {
-        if (alpnPolicy == null) {
-            alpnPolicy = new ArrayList<>();
-        }
-        return alpnPolicy;
-    }
-    public void setAlpnPolicy(List<String> alpnPolicy) {
-        this.alpnPolicy = alpnPolicy != null ? alpnPolicy : new ArrayList<>();
-    }
+    public List<String> getAlpnPolicy() { return alpnPolicy; }
+    public void setAlpnPolicy(List<String> alpnPolicy) { this.alpnPolicy = alpnPolicy; }
 
-    public Map<String, String> getAttributes() {
-        if (attributes == null) {
-            attributes = new LinkedHashMap<>();
-        }
-        return attributes;
-    }
-    public void setAttributes(Map<String, String> attributes) {
-        this.attributes = attributes != null ? attributes : new LinkedHashMap<>();
-    }
+    public Map<String, String> getAttributes() { return attributes; }
+    public void setAttributes(Map<String, String> attributes) { this.attributes = attributes; }
 }

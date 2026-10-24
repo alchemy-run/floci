@@ -114,23 +114,22 @@ public class SsmJsonHandler {
     }
 
     @RegisterForReflection
-    record PutParameterResponse(@JsonProperty("Version") long version, @JsonProperty("Tier") String tier) {
+    record PutParameterResponse(@JsonProperty("Version") long version) {
     }
 
     private Response handlePutParameter(JsonNode request, String region) {
         String name = request.path("Name").asText();
         String value = request.path("Value").asText();
-        String type = request.has("Type") ? request.path("Type").asText() : null;
+        String type = request.path("Type").asText("String");
         String description = request.has("Description") ? request.path("Description").asText() : null;
         boolean overwrite = request.path("Overwrite").asBoolean(false);
-        String tier = request.has("Tier") ? request.path("Tier").asText() : null;
-        String keyId = request.has("KeyId") ? request.path("KeyId").asText() : null;
-        String allowedPattern = request.has("AllowedPattern") ? request.path("AllowedPattern").asText() : null;
-        String dataType = request.has("DataType") ? request.path("DataType").asText() : null;
-        Map<String, String> tags = new HashMap<>();
-        if (request.has("Tags") && request.get("Tags").isArray()) {
-            request.get("Tags").forEach(t ->
-                    tags.put(t.path("Key").asText(), t.path("Value").asText()));
+
+        Map<String, String> tags = null;
+        if (request.has("Tags") && request.path("Tags").isArray()) {
+            tags = new LinkedHashMap<>();
+            for (JsonNode t : request.path("Tags")) {
+                tags.put(t.path("Key").asText(), t.path("Value").asText());
+            }
         }
 
         // Null when the request has no Policies, so an overwrite keeps the existing ones.
@@ -154,8 +153,7 @@ public class SsmJsonHandler {
                 optionalText(request, "KeyId"), optionalText(request, "AllowedPattern"),
                 optionalText(request, "Tier"), policies, region);
 
-        Parameter stored = ssmService.getParameter(name, region);
-        return Response.ok(new PutParameterResponse(version, stored.getTier())).build();
+        return Response.ok(new PutParameterResponse(version)).build();
     }
 
     private Response handleGetParameter(JsonNode request, String region, String authorization) {
@@ -339,17 +337,6 @@ public class SsmJsonHandler {
                 node.put("Description", p.getDescription());
             }
             node.put("DataType", p.getDataType());
-            if (p.getArn() != null) {
-                node.put("ARN", p.getArn());
-            }
-            if (p.getTier() != null) {
-                node.put("Tier", p.getTier());
-            }
-            if (p.getAllowedPattern() != null) {
-                node.put("AllowedPattern", p.getAllowedPattern());
-            }
-            if (p.getKeyId() != null) {
-                node.put("KeyId", p.getKeyId());
             if (SsmService.keyIdOf(p) != null) {
                 node.put("KeyId", SsmService.keyIdOf(p));
             }
@@ -598,11 +585,8 @@ public class SsmJsonHandler {
         String name = requireDocumentName(request);
         String content = requireDocumentContent(request);
         String documentType = requireDocumentType(request);
-        Map<String, String> tags = new LinkedHashMap<>();
-        request.path("Tags").forEach(t -> tags.put(t.path("Key").asText(), t.path("Value").asText()));
 
-        SsmDocument document = ssmService.createDocument(name, content, documentType,
-                request.path("DocumentFormat").asText(null), request.path("TargetType").asText(null), tags, region);
+        SsmDocument document = ssmService.createDocument(name, content, documentType, region);
         return Response.ok(documentDescriptionResponse(document)).build();
     }
 
@@ -1151,19 +1135,13 @@ public class SsmJsonHandler {
         request.path("Tags").forEach(t ->
                 tags.put(t.path("Key").asText(), t.path("Value").asText()));
 
-        if ("Document".equals(request.path("ResourceType").asText())) {
-            ssmService.tagDocument(resourceId, tags, List.of(), region);
-            return Response.ok(objectMapper.createObjectNode()).build();
-        }
         ssmService.addTagsToResource(resourceId, tags, region);
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
     private Response handleListTagsForResource(JsonNode request, String region) {
         String resourceId = request.path("ResourceId").asText();
-        Map<String, String> tags = "Document".equals(request.path("ResourceType").asText())
-                ? documentTags(resourceId, region)
-                : ssmService.listTagsForResource(resourceId, region);
+        Map<String, String> tags = ssmService.listTagsForResource(resourceId, region);
 
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode tagsArray = objectMapper.createArrayNode();
@@ -1182,23 +1160,8 @@ public class SsmJsonHandler {
         List<String> tagKeys = new ArrayList<>();
         request.path("TagKeys").forEach(k -> tagKeys.add(k.asText()));
 
-        if ("Document".equals(request.path("ResourceType").asText())) {
-            ssmService.tagDocument(resourceId, Map.of(), tagKeys, region);
-            return Response.ok(objectMapper.createObjectNode()).build();
-        }
         ssmService.removeTagsFromResource(resourceId, tagKeys, region);
         return Response.ok(objectMapper.createObjectNode()).build();
-    }
-
-    private Map<String, String> documentTags(String name, String region) {
-        try {
-            return ssmService.getDocument(name, region).getTags();
-        } catch (AwsException e) {
-            if ("InvalidDocument".equals(e.getErrorCode())) {
-                throw new AwsException("InvalidResourceId", "Resource " + name + " not found.", 400);
-            }
-            throw e;
-        }
     }
 
     private ObjectNode parameterToNode(Parameter p) {
@@ -1496,5 +1459,16 @@ public class SsmJsonHandler {
         String name = requireDocumentName(request);
         ssmService.deleteDocument(name, region);
         return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Map<String, String> documentTags(String name, String region) {
+        try {
+            return ssmService.getDocument(name, region).getTags();
+        } catch (AwsException e) {
+            if ("InvalidDocument".equals(e.getErrorCode())) {
+                throw new AwsException("InvalidResourceId", "Resource " + name + " not found.", 400);
+            }
+            throw e;
+        }
     }
 }

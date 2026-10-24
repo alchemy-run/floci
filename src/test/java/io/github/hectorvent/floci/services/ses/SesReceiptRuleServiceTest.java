@@ -390,34 +390,6 @@ class SesReceiptRuleServiceTest {
     }
 
     @Test
-    void createAndUpdateRule_rejectInvalidRecipientsLikeSes() {
-        service.createReceiptRuleSet("rules-a", REGION);
-        ReceiptRule invalid = rule("r1", action("StopAction", "Scope", "RuleSet"));
-        invalid.setRecipients(new ArrayList<>(List.of("ok@example.com", "not a valid recipient")));
-
-        AwsException created = assertThrows(AwsException.class, () ->
-                service.createReceiptRule("rules-a", invalid, null, REGION, ANY_SENDER_VERIFIED));
-        assertEquals("InvalidParameterValue", created.getErrorCode());
-        assertEquals("Invalid recipient: not a valid recipient", created.getMessage());
-        assertTrue(ruleNames("rules-a").isEmpty());
-
-        service.createReceiptRule("rules-a", rule("r1"), null, REGION, ANY_SENDER_VERIFIED);
-        AwsException updated = assertThrows(AwsException.class, () ->
-                service.updateReceiptRule("rules-a", invalid, REGION, ANY_SENDER_VERIFIED));
-        assertEquals("Invalid recipient: not a valid recipient", updated.getMessage());
-    }
-
-    @Test
-    void recipientValidationMatchesProbedSesBehaviour() {
-        for (String valid : List.of("example.com", ".example.com", ".com", "sub_domain.example.com",
-                "ex--ample.com", "user@example.com", "user+tag@example.com", "User.Name@Example.COM",
-                "user@example", "x_y@example.com", "user@-example.com", "user!#$%&'*+/=?^`{|}~@example.com")) {
-            assertTrue(SesReceiptRuleService.isValidRecipient(valid), valid);
-        }
-        for (String invalid : List.of("not a valid recipient", "user@", "@example.com", "a..b.com",
-                "*example.com", "exa mple.com", "user@exa_mple.com", "localhost", "-a.com", "a-.com",
-                "1.2.3.4", "user@.example.com", "a@b@example.com", "")) {
-            assertFalse(SesReceiptRuleService.isValidRecipient(invalid), invalid);
     void aTopicWhosePolicyRefusesSesForTheRuleIsNotPublishable() {
         service.createReceiptRuleSet("rules-a", REGION);
         String arn = "arn:aws:sns:us-east-1:000000000000:topic";

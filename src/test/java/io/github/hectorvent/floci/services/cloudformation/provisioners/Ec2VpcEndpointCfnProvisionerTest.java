@@ -133,7 +133,6 @@ class Ec2VpcEndpointCfnProvisionerTest {
     @Test
     void dnsEntriesPairTheZoneWithTheNameAndJoinOnCommas() {
         when(ec2.createVpcEndpoint(anyString(), anyString(), anyString(), anyString(),
-                anyList(), anyList(), anyList(), any(), any(), anyList()))
                 anyList(), anyList(), anyList(), any(), any(), anyList(), anyList(), any()))
                 .thenReturn(endpoint("vpce-entries"));
         when(ec2.endpointDnsEntries(any())).thenReturn(List.of(

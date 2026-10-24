@@ -8,10 +8,8 @@ import io.github.hectorvent.floci.core.common.AwsErrorResponse;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.Alarm;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.PredefinedMetricSpecification;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.ScalableTarget;
-import io.github.hectorvent.floci.services.applicationautoscaling.model.ScalableTargetAction;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.ScalingActivity;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.ScalingPolicy;
-import io.github.hectorvent.floci.services.applicationautoscaling.model.ScheduledAction;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.StepAdjustment;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.StepScalingConfiguration;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.SuspendedState;
@@ -21,12 +19,14 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import io.github.hectorvent.floci.services.applicationautoscaling.model.ScalableTargetAction;
+import io.github.hectorvent.floci.services.applicationautoscaling.model.ScheduledAction;
+import java.time.Instant;
 
 /**
  * JSON 1.1 handler for the Application Auto Scaling API.
@@ -58,9 +58,9 @@ public class ApplicationAutoScalingJsonHandler {
             case "PutScalingPolicy" -> handlePutScalingPolicy(request, region);
             case "DescribeScalingPolicies" -> handleDescribeScalingPolicies(request, region);
             case "DeleteScalingPolicy" -> handleDeleteScalingPolicy(request, region);
-            case "PutScheduledAction" -> handlePutScheduledAction(request, region);
-            case "DescribeScheduledActions" -> handleDescribeScheduledActions(request, region);
             case "DeleteScheduledAction" -> handleDeleteScheduledAction(request, region);
+            case "DescribeScheduledActions" -> handleDescribeScheduledActions(request, region);
+            case "PutScheduledAction" -> handlePutScheduledAction(request, region);
             case "DescribeScalingActivities" -> handleDescribeScalingActivities(request, region);
             case "GetPredictiveScalingForecast" -> handleGetPredictiveScalingForecast(request, region);
             case "ListTagsForResource" -> handleListTagsForResource(request, region);
@@ -158,48 +158,6 @@ public class ApplicationAutoScalingJsonHandler {
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
-    // ---------------------------------------------------------------- scheduled actions
-
-    private Response handlePutScheduledAction(JsonNode request, String region) {
-        ScheduledAction action = service.putScheduledAction(
-                text(request, "ScheduledActionName"),
-                text(request, "ServiceNamespace"),
-                text(request, "ResourceId"),
-                text(request, "ScalableDimension"),
-                text(request, "Schedule"),
-                text(request, "Timezone"),
-                epochSeconds(request, "StartTime"),
-                epochSeconds(request, "EndTime"),
-                parseScalableTargetAction(request.path("ScalableTargetAction")),
-                region);
-        ObjectNode response = objectMapper.createObjectNode();
-        response.put("ScheduledActionARN", action.getScheduledActionArn());
-        return Response.ok(response).build();
-    }
-
-    private Response handleDescribeScheduledActions(JsonNode request, String region) {
-        List<ScheduledAction> found = service.describeScheduledActions(
-                text(request, "ServiceNamespace"),
-                text(request, "ResourceId"),
-                text(request, "ScalableDimension"),
-                stringList(request.path("ScheduledActionNames")),
-                region);
-        ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode array = response.putArray("ScheduledActions");
-        found.forEach(a -> array.add(scheduledActionJson(a)));
-        return Response.ok(response).build();
-    }
-
-    private Response handleDeleteScheduledAction(JsonNode request, String region) {
-        service.deleteScheduledAction(
-                text(request, "ScheduledActionName"),
-                text(request, "ServiceNamespace"),
-                text(request, "ResourceId"),
-                text(request, "ScalableDimension"),
-                region);
-        return Response.ok(objectMapper.createObjectNode()).build();
-    }
-
     private Response handleDescribeScalingActivities(JsonNode request, String region) {
         List<ScalingActivity> found = service.describeScalingActivities(
                 text(request, "ServiceNamespace"),
@@ -210,22 +168,6 @@ public class ApplicationAutoScalingJsonHandler {
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode array = response.putArray("ScalingActivities");
         found.forEach(a -> array.add(scalingActivityJson(a)));
-        return Response.ok(response).build();
-    }
-
-    private Response handleGetPredictiveScalingForecast(JsonNode request, String region) {
-        service.requirePredictiveScalingForecast(
-                text(request, "ServiceNamespace"),
-                text(request, "ResourceId"),
-                text(request, "ScalableDimension"),
-                text(request, "PolicyName"),
-                region);
-        ObjectNode response = objectMapper.createObjectNode();
-        response.putArray("LoadForecast");
-        ObjectNode capacity = response.putObject("CapacityForecast");
-        capacity.putArray("Timestamps");
-        capacity.putArray("Values");
-        response.put("UpdateTime", Instant.now().getEpochSecond());
         return Response.ok(response).build();
     }
 
@@ -358,62 +300,27 @@ public class ApplicationAutoScalingJsonHandler {
         return node;
     }
 
+    private ObjectNode scalingActivityJson(ScalingActivity a) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("ActivityId", a.getActivityId());
+        node.put("ServiceNamespace", a.getServiceNamespace());
+        node.put("ResourceId", a.getResourceId());
+        node.put("ScalableDimension", a.getScalableDimension());
+        node.put("Description", a.getDescription());
+        node.put("Cause", a.getCause());
+        node.put("StartTime", a.getStartTime());
+        node.put("EndTime", a.getEndTime());
+        node.put("StatusCode", a.getStatusCode());
+        if (a.getStatusMessage() != null) {
+            node.put("StatusMessage", a.getStatusMessage());
+        }
+        return node;
+    }
+
     private ObjectNode alarmJson(Alarm alarm) {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("AlarmName", alarm.getAlarmName());
         node.put("AlarmARN", alarm.getAlarmArn());
-        return node;
-    }
-
-    private ObjectNode scheduledActionJson(ScheduledAction action) {
-        ObjectNode node = objectMapper.createObjectNode();
-        node.put("ScheduledActionName", action.getScheduledActionName());
-        node.put("ScheduledActionARN", action.getScheduledActionArn());
-        node.put("ServiceNamespace", action.getServiceNamespace());
-        node.put("ResourceId", action.getResourceId());
-        node.put("ScalableDimension", action.getScalableDimension());
-        node.put("Schedule", action.getSchedule());
-        node.put("CreationTime", action.getCreationTime());
-        if (action.getTimezone() != null) {
-            node.put("Timezone", action.getTimezone());
-        }
-        if (action.getStartTime() != null) {
-            node.put("StartTime", action.getStartTime());
-        }
-        if (action.getEndTime() != null) {
-            node.put("EndTime", action.getEndTime());
-        }
-        if (action.getScalableTargetAction() != null) {
-            ObjectNode capacity = node.putObject("ScalableTargetAction");
-            if (action.getScalableTargetAction().getMinCapacity() != null) {
-                capacity.put("MinCapacity", action.getScalableTargetAction().getMinCapacity());
-            }
-            if (action.getScalableTargetAction().getMaxCapacity() != null) {
-                capacity.put("MaxCapacity", action.getScalableTargetAction().getMaxCapacity());
-            }
-        }
-        return node;
-    }
-
-    private ObjectNode scalingActivityJson(ScalingActivity activity) {
-        ObjectNode node = objectMapper.createObjectNode();
-        node.put("ActivityId", activity.getActivityId());
-        node.put("ServiceNamespace", activity.getServiceNamespace());
-        node.put("ResourceId", activity.getResourceId());
-        node.put("ScalableDimension", activity.getScalableDimension());
-        node.put("Description", activity.getDescription());
-        node.put("Cause", activity.getCause());
-        node.put("StartTime", activity.getStartTime());
-        node.put("StatusCode", activity.getStatusCode());
-        if (activity.getEndTime() != null) {
-            node.put("EndTime", activity.getEndTime());
-        }
-        if (activity.getStatusMessage() != null) {
-            node.put("StatusMessage", activity.getStatusMessage());
-        }
-        if (activity.getDetails() != null) {
-            node.put("Details", activity.getDetails());
-        }
         return node;
     }
 
@@ -436,20 +343,6 @@ public class ApplicationAutoScalingJsonHandler {
 
     private StepScalingConfiguration parseStepScaling(JsonNode node) {
         return ScalingConfigurationParser.parseStepScaling(node);
-    }
-
-    private ScalableTargetAction parseScalableTargetAction(JsonNode node) {
-        if (node == null || node.isMissingNode() || node.isNull()) {
-            return null;
-        }
-        ScalableTargetAction action = new ScalableTargetAction();
-        if (node.hasNonNull("MinCapacity")) {
-            action.setMinCapacity(node.get("MinCapacity").asInt());
-        }
-        if (node.hasNonNull("MaxCapacity")) {
-            action.setMaxCapacity(node.get("MaxCapacity").asInt());
-        }
-        return action;
     }
 
     private Map<String, String> parseTags(JsonNode node) {
@@ -482,6 +375,106 @@ public class ApplicationAutoScalingJsonHandler {
     private static Integer integer(JsonNode node, String field) {
         JsonNode value = node.path(field);
         return value.isMissingNode() || value.isNull() ? null : value.asInt();
+    }
+
+    private Response handlePutScheduledAction(JsonNode request, String region) {
+        ScheduledAction action = service.putScheduledAction(
+                text(request, "ScheduledActionName"),
+                text(request, "ServiceNamespace"),
+                text(request, "ResourceId"),
+                text(request, "ScalableDimension"),
+                text(request, "Schedule"),
+                text(request, "Timezone"),
+                epochSeconds(request, "StartTime"),
+                epochSeconds(request, "EndTime"),
+                parseScalableTargetAction(request.path("ScalableTargetAction")),
+                region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("ScheduledActionARN", action.getScheduledActionArn());
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeScheduledActions(JsonNode request, String region) {
+        List<ScheduledAction> found = service.describeScheduledActions(
+                text(request, "ServiceNamespace"),
+                text(request, "ResourceId"),
+                text(request, "ScalableDimension"),
+                stringList(request.path("ScheduledActionNames")),
+                region);
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode array = response.putArray("ScheduledActions");
+        found.forEach(a -> array.add(scheduledActionJson(a)));
+        return Response.ok(response).build();
+    }
+
+    private Response handleDeleteScheduledAction(JsonNode request, String region) {
+        service.deleteScheduledAction(
+                text(request, "ScheduledActionName"),
+                text(request, "ServiceNamespace"),
+                text(request, "ResourceId"),
+                text(request, "ScalableDimension"),
+                region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleGetPredictiveScalingForecast(JsonNode request, String region) {
+        service.requirePredictiveScalingForecast(
+                text(request, "ServiceNamespace"),
+                text(request, "ResourceId"),
+                text(request, "ScalableDimension"),
+                text(request, "PolicyName"),
+                region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.putArray("LoadForecast");
+        ObjectNode capacity = response.putObject("CapacityForecast");
+        capacity.putArray("Timestamps");
+        capacity.putArray("Values");
+        response.put("UpdateTime", Instant.now().getEpochSecond());
+        return Response.ok(response).build();
+    }
+
+    private ObjectNode scheduledActionJson(ScheduledAction action) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("ScheduledActionName", action.getScheduledActionName());
+        node.put("ScheduledActionARN", action.getScheduledActionArn());
+        node.put("ServiceNamespace", action.getServiceNamespace());
+        node.put("ResourceId", action.getResourceId());
+        node.put("ScalableDimension", action.getScalableDimension());
+        node.put("Schedule", action.getSchedule());
+        node.put("CreationTime", action.getCreationTime());
+        if (action.getTimezone() != null) {
+            node.put("Timezone", action.getTimezone());
+        }
+        if (action.getStartTime() != null) {
+            node.put("StartTime", action.getStartTime());
+        }
+        if (action.getEndTime() != null) {
+            node.put("EndTime", action.getEndTime());
+        }
+        if (action.getScalableTargetAction() != null) {
+            ObjectNode capacity = node.putObject("ScalableTargetAction");
+            if (action.getScalableTargetAction().getMinCapacity() != null) {
+                capacity.put("MinCapacity", action.getScalableTargetAction().getMinCapacity());
+            }
+            if (action.getScalableTargetAction().getMaxCapacity() != null) {
+                capacity.put("MaxCapacity", action.getScalableTargetAction().getMaxCapacity());
+            }
+        }
+        return node;
+    }
+
+    private ScalableTargetAction parseScalableTargetAction(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        ScalableTargetAction action = new ScalableTargetAction();
+        if (node.hasNonNull("MinCapacity")) {
+            action.setMinCapacity(node.get("MinCapacity").asInt());
+        }
+        if (node.hasNonNull("MaxCapacity")) {
+            action.setMaxCapacity(node.get("MaxCapacity").asInt());
+        }
+        return action;
     }
 
     private static Double epochSeconds(JsonNode node, String field) {

@@ -35,14 +35,11 @@ import java.util.Optional;
 public class CognitoJsonHandler {
 
     private final CognitoService service;
-    private final CognitoManagedLoginBrandingService brandingService;
     private final ObjectMapper objectMapper;
 
     @Inject
-    public CognitoJsonHandler(CognitoService service, CognitoManagedLoginBrandingService brandingService,
-                              ObjectMapper objectMapper) {
+    public CognitoJsonHandler(CognitoService service, ObjectMapper objectMapper) {
         this.service = service;
-        this.brandingService = brandingService;
         this.objectMapper = objectMapper;
     }
 
@@ -131,10 +128,9 @@ public class CognitoJsonHandler {
             case "VerifyUserAttribute" -> handleVerifyUserAttribute(request);
             case "UpdateUserAttributes" -> handleUpdateUserAttributes(request);
             case "DeleteUserAttributes" -> handleDeleteUserAttributes(request);
-            case "DeleteUser" -> handleDeleteUser(request);
-            case "AdminListDevices" -> handleAdminListDevices(request);
             case "GlobalSignOut" -> handleGlobalSignOut(request);
             case "DeleteUser" -> handleDeleteUser(request);
+            case "AdminListDevices" -> handleAdminListDevices(request);
             case "CreateGroup" -> handleCreateGroup(request);
             case "GetGroup" -> handleGetGroup(request);
             case "ListGroups" -> handleListGroups(request);
@@ -149,8 +145,8 @@ public class CognitoJsonHandler {
             case "ListUserPoolClientSecrets" -> handleListUserPoolClientSecrets(request);
             case "AddUserPoolClientSecret" -> handleAddUserPoolClientSecret(request);
             case "DeleteUserPoolClientSecret" -> handleDeleteUserPoolClientSecret(request);
-            case "SetRiskConfiguration" -> handleSetRiskConfiguration(request);
             case "DescribeRiskConfiguration" -> handleDescribeRiskConfiguration(request);
+            case "SetRiskConfiguration" -> handleSetRiskConfiguration(request);
             case "AdminSetUserMFAPreference" -> handleAdminSetUserMFAPreference(request);
             case "SetUserMFAPreference" -> handleSetUserMFAPreference(request);
             case "StartWebAuthnRegistration" -> handleStartWebAuthnRegistration(request);
@@ -301,9 +297,7 @@ public class CognitoJsonHandler {
     }
 
     private Response handleDeleteUserPool(JsonNode request) {
-        String userPoolId = request.path("UserPoolId").asText();
-        service.deleteUserPool(userPoolId);
-        brandingService.deleteAllForUserPool(userPoolId);
+        service.deleteUserPool(request.path("UserPoolId").asText());
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
@@ -369,10 +363,10 @@ public class CognitoJsonHandler {
     }
 
     private Response handleDeleteUserPoolClient(JsonNode request) {
-        String userPoolId = request.path("UserPoolId").asText();
-        String clientId = request.path("ClientId").asText();
-        service.deleteUserPoolClient(userPoolId, clientId);
-        brandingService.deleteAllForClient(userPoolId, clientId);
+        service.deleteUserPoolClient(
+                request.path("UserPoolId").asText(),
+                request.path("ClientId").asText()
+        );
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
@@ -570,16 +564,9 @@ public class CognitoJsonHandler {
     }
 
     private Response handleDescribeUserPoolDomain(JsonNode request) {
+        UserPoolDomain domain = service.describeUserPoolDomain(request.path("Domain").asText());
         ObjectNode response = objectMapper.createObjectNode();
-        try {
-            UserPoolDomain domain = service.describeUserPoolDomain(request.path("Domain").asText());
-            response.set("DomainDescription", userPoolDomainToNode(domain));
-        } catch (AwsException e) {
-            if (!"ResourceNotFoundException".equals(e.getErrorCode())) {
-                throw e;
-            }
-            response.set("DomainDescription", objectMapper.createObjectNode());
-        }
+        response.set("DomainDescription", userPoolDomainToNode(domain));
         return Response.ok(response).build();
     }
 
@@ -801,7 +788,7 @@ public class CognitoJsonHandler {
     }
 
     private Response handleCreateManagedLoginBranding(JsonNode request) {
-        ManagedLoginBranding branding = brandingService.create(
+        ManagedLoginBranding branding = service.createManagedLoginBranding(
                 request.path("UserPoolId").asText(),
                 request.path("ClientId").asText(),
                 readUseCognitoProvidedValues(request),
@@ -812,19 +799,19 @@ public class CognitoJsonHandler {
     }
 
     private Response handleDescribeManagedLoginBranding(JsonNode request) {
-        ManagedLoginBranding branding = brandingService.describe(
-                request.path("UserPoolId").asText(), request.path("ManagedLoginBrandingId").asText(null));
-        return brandingResponse(branding, request.path("ReturnMergedResources").asBoolean(false));
+        return brandingResponse(service.describeManagedLoginBranding(
+                request.path("UserPoolId").asText(),
+                request.path("ManagedLoginBrandingId").asText(null)));
     }
 
     private Response handleDescribeManagedLoginBrandingByClient(JsonNode request) {
-        ManagedLoginBranding branding = brandingService.describeByClient(
-                request.path("UserPoolId").asText(), request.path("ClientId").asText());
-        return brandingResponse(branding, request.path("ReturnMergedResources").asBoolean(false));
+        return brandingResponse(service.describeManagedLoginBrandingByClient(
+                request.path("UserPoolId").asText(),
+                request.path("ClientId").asText()));
     }
 
     private Response handleUpdateManagedLoginBranding(JsonNode request) {
-        return brandingResponse(brandingService.update(
+        return brandingResponse(service.updateManagedLoginBranding(
                 request.path("UserPoolId").asText(),
                 request.path("ManagedLoginBrandingId").asText(null),
                 readUseCognitoProvidedValues(request),
@@ -833,23 +820,15 @@ public class CognitoJsonHandler {
     }
 
     private Response handleDeleteManagedLoginBranding(JsonNode request) {
-        brandingService.delete(
+        service.deleteManagedLoginBranding(
                 request.path("UserPoolId").asText(),
                 request.path("ManagedLoginBrandingId").asText(null));
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
     private Response brandingResponse(ManagedLoginBranding branding) {
-        return brandingResponse(branding, false);
-    }
-
-    private Response brandingResponse(ManagedLoginBranding branding, boolean merged) {
         ObjectNode response = objectMapper.createObjectNode();
-        ObjectNode node = managedLoginBrandingToNode(branding);
-        if (merged) {
-            node.set("Settings", objectMapper.valueToTree(brandingService.mergedSettings(branding)));
-        }
-        response.set("ManagedLoginBranding", node);
+        response.set("ManagedLoginBranding", managedLoginBrandingToNode(branding));
         return Response.ok(response).build();
     }
 
@@ -1167,21 +1146,6 @@ public class CognitoJsonHandler {
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
-    private Response handleDeleteUser(JsonNode request) {
-        service.deleteUser(request.path("AccessToken").asText());
-        return Response.ok(objectMapper.createObjectNode()).build();
-    }
-
-    private Response handleAdminListDevices(JsonNode request) {
-        List<Map<String, Object>> devices = service.adminListDevices(
-                request.path("UserPoolId").asText(),
-                request.path("Username").asText()
-        );
-        ObjectNode response = objectMapper.createObjectNode();
-        response.set("Devices", objectMapper.valueToTree(devices));
-        return Response.ok(response).build();
-    }
-
     private Response handleGlobalSignOut(JsonNode request) {
         service.globalSignOut(request.path("AccessToken").asText(null));
         return Response.ok(objectMapper.createObjectNode()).build();
@@ -1268,13 +1232,6 @@ public class CognitoJsonHandler {
             node.set("UserAttributeUpdateSettings", objectMapper.valueToTree(p.getUserAttributeUpdateSettings()));
         }
         node.put("UserPoolTier", p.getUserPoolTier() != null ? p.getUserPoolTier() : "ESSENTIALS");
-        for (UserPoolDomain domain : service.listUserPoolDomains(p.getId())) {
-            if (domain.isCustomDomain()) {
-                node.put("CustomDomain", domain.getDomain());
-            } else {
-                node.put("Domain", domain.getDomain());
-            }
-        }
 
         return node;
     }
@@ -1579,53 +1536,6 @@ public class CognitoJsonHandler {
         return node;
     }
 
-    private Response handleSetRiskConfiguration(JsonNode request) {
-        String clientId = optionalText(request, "ClientId");
-        Map<String, Object> config = service.setRiskConfiguration(
-                request.path("UserPoolId").asText(),
-                clientId,
-                objectMap(request.path("CompromisedCredentialsRiskConfiguration")),
-                objectMap(request.path("AccountTakeoverRiskConfiguration")),
-                objectMap(request.path("RiskExceptionConfiguration"))
-        );
-        ObjectNode response = objectMapper.createObjectNode();
-        response.set("RiskConfiguration", objectMapper.valueToTree(config));
-        return Response.ok(response).build();
-    }
-
-    private Response handleDescribeRiskConfiguration(JsonNode request) {
-        Map<String, Object> config = service.describeRiskConfiguration(
-                request.path("UserPoolId").asText(),
-                optionalText(request, "ClientId")
-        );
-        ObjectNode response = objectMapper.createObjectNode();
-        response.set("RiskConfiguration", objectMapper.valueToTree(config));
-        return Response.ok(response).build();
-    }
-
-    private Map<String, String> readStringMap(JsonNode node) {
-        if (node == null || !node.isObject()) {
-            return new HashMap<>();
-        }
-        return objectMapper.convertValue(node, new TypeReference<Map<String, String>>() {});
-    }
-
-    private Map<String, Object> objectMap(JsonNode node) {
-        if (node == null || !node.isObject()) {
-            return null;
-        }
-        return objectMapper.convertValue(node, new TypeReference<Map<String, Object>>() {});
-    }
-
-    private static String optionalText(JsonNode request, String field) {
-        JsonNode node = request.path(field);
-        if (node.isMissingNode() || node.isNull()) {
-            return null;
-        }
-        String value = node.asText();
-        return value.isBlank() ? null : value;
-    }
-
     private Response handleListUserPoolClientSecrets(JsonNode request) {
         List<UserPoolClientSecret> clientSecrets =
                 service.listUserPoolClientSecrets(
@@ -1740,4 +1650,55 @@ public class CognitoJsonHandler {
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
+    private final CognitoManagedLoginBrandingService brandingService;
+
+    private Response handleAdminListDevices(JsonNode request) {
+        List<Map<String, Object>> devices = service.adminListDevices(
+                request.path("UserPoolId").asText(),
+                request.path("Username").asText()
+        );
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("Devices", objectMapper.valueToTree(devices));
+        return Response.ok(response).build();
+    }
+
+    private Response handleSetRiskConfiguration(JsonNode request) {
+        String clientId = optionalText(request, "ClientId");
+        Map<String, Object> config = service.setRiskConfiguration(
+                request.path("UserPoolId").asText(),
+                clientId,
+                objectMap(request.path("CompromisedCredentialsRiskConfiguration")),
+                objectMap(request.path("AccountTakeoverRiskConfiguration")),
+                objectMap(request.path("RiskExceptionConfiguration"))
+        );
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("RiskConfiguration", objectMapper.valueToTree(config));
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeRiskConfiguration(JsonNode request) {
+        Map<String, Object> config = service.describeRiskConfiguration(
+                request.path("UserPoolId").asText(),
+                optionalText(request, "ClientId")
+        );
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("RiskConfiguration", objectMapper.valueToTree(config));
+        return Response.ok(response).build();
+    }
+
+    private Map<String, Object> objectMap(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return null;
+        }
+        return objectMapper.convertValue(node, new TypeReference<Map<String, Object>>() {});
+    }
+
+    private static String optionalText(JsonNode request, String field) {
+        JsonNode node = request.path(field);
+        if (node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        String value = node.asText();
+        return value.isBlank() ? null : value;
+    }
 }

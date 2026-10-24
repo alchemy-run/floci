@@ -4,6 +4,24 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.services.glue.model.*;
+import io.github.hectorvent.floci.services.glue.schemaregistry.GlueSchemaRegistryService;
+import io.github.hectorvent.floci.services.glue.schemaregistry.model.Registry;
+import io.github.hectorvent.floci.services.glue.schemaregistry.model.RegistryId;
+import io.github.hectorvent.floci.services.glue.schemaregistry.model.Schema;
+import io.github.hectorvent.floci.services.glue.schemaregistry.model.SchemaId;
+import io.github.hectorvent.floci.services.glue.schemaregistry.model.SchemaVersion;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.core.Response;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import io.github.hectorvent.floci.services.glue.model.Classifier;
 import io.github.hectorvent.floci.services.glue.model.Connection;
 import io.github.hectorvent.floci.services.glue.model.ConnectionInput;
@@ -34,23 +52,6 @@ import io.github.hectorvent.floci.services.glue.model.UpdateCrawlerRequest;
 import io.github.hectorvent.floci.services.glue.model.UpdateJobRequest;
 import io.github.hectorvent.floci.services.glue.model.UpdateJobResponse;
 import io.github.hectorvent.floci.services.glue.model.UserDefinedFunction;
-import io.github.hectorvent.floci.services.glue.schemaregistry.GlueSchemaRegistryService;
-import io.github.hectorvent.floci.services.glue.schemaregistry.model.Registry;
-import io.github.hectorvent.floci.services.glue.schemaregistry.model.RegistryId;
-import io.github.hectorvent.floci.services.glue.schemaregistry.model.Schema;
-import io.github.hectorvent.floci.services.glue.schemaregistry.model.SchemaId;
-import io.github.hectorvent.floci.services.glue.schemaregistry.model.SchemaVersion;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
-import jakarta.ws.rs.core.Response;
-
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
 
 @ApplicationScoped
 public class GlueJsonHandler {
@@ -328,6 +329,8 @@ public class GlueJsonHandler {
                 yield Response.ok(pageResponse("JobRuns", page.items(), page.nextToken())).build();
             }
             case "BatchStopJobRun" -> handleBatchStopJobRun(request);
+            case "ResetJobBookmark" -> handleResetJobBookmark(request);
+            case "GetJobBookmark" -> handleGetJobBookmark(request);
             case "CreateClassifier" -> {
                 Classifier classifier = mapper.treeToValue(request, Classifier.class);
                 glueService.createClassifier(classifier);
@@ -379,19 +382,6 @@ public class GlueJsonHandler {
                 crawlerRunService.deleteCrawler(req.getName(), region);
                 yield Response.ok().build();
             }
-            case "StartJobRun" -> handleStartJobRun(request);
-            case "GetJobRun" -> handleGetJobRun(request);
-            case "GetJobRuns" -> handleGetJobRuns(request);
-            case "BatchStopJobRun" -> handleBatchStopJobRun(request);
-            case "GetJobBookmark" -> handleGetJobBookmark(request);
-            case "ResetJobBookmark" -> handleResetJobBookmark(request);
-            case "StartCrawler" -> {
-                glueService.startCrawler(request.get("Name").asText());
-                yield Response.ok().build();
-            }
-            case "StopCrawler" -> {
-                glueService.stopCrawler(request.get("Name").asText());
-                yield Response.ok().build();
             case "ListCrawlers" -> {
                 Map<String, String> tags = request.hasNonNull("Tags")
                         ? mapper.convertValue(request.get("Tags"), STRING_MAP)
@@ -761,8 +751,6 @@ public class GlueJsonHandler {
         glueService.deletePartition(dbName, tableName, partitionValues);
         return Response.ok().build();
     }
-
-
 
     private Response handleUpdatePartition(JsonNode request) throws Exception {
         String dbName = request.get("DatabaseName").asText();
@@ -1449,11 +1437,6 @@ public class GlueJsonHandler {
         return Response.ok(Map.of("JobRuns", glueService.getJobRuns(request.get("JobName").asText()))).build();
     }
 
-    private Response handleBatchStopJobRun(JsonNode request) {
-        List<String> ids = mapper.convertValue(request.get("JobRunIds"), STRING_LIST);
-        return Response.ok(glueService.batchStopJobRun(request.get("JobName").asText(), ids)).build();
-    }
-
     private Response handleGetJobBookmark(JsonNode request) {
         return Response.ok(Map.of("JobBookmarkEntry", glueService.getJobBookmark(
                 request.get("JobName").asText(),
@@ -1465,5 +1448,4 @@ public class GlueJsonHandler {
                 request.get("JobName").asText(),
                 request.path("RunId").asText(null)))).build();
     }
-
 }

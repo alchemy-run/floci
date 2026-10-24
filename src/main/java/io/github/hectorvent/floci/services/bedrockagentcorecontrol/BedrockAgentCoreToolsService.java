@@ -2,7 +2,6 @@ package io.github.hectorvent.floci.services.bedrockagentcorecontrol;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
@@ -16,11 +15,12 @@ import jakarta.inject.Inject;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Pattern;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import java.util.LinkedHashMap;
 
 @ApplicationScoped
 public class BedrockAgentCoreToolsService {
@@ -252,18 +252,6 @@ public class BedrockAgentCoreToolsService {
                         "Browser profile not found: " + profileId, 404));
     }
 
-    /** Records that a browser session's state was saved into the profile (SaveBrowserSessionProfile). */
-    public ObjectNode recordBrowserProfileSave(String profileId, String browserId, String sessionId,
-                                               Instant savedAt, String region) {
-        ObjectNode profile = getBrowserProfile(profileId, region);
-        profile.put("lastSavedAt", savedAt.toString());
-        profile.put("lastSavedBrowserId", browserId);
-        profile.put("lastSavedBrowserSessionId", sessionId);
-        profile.put("lastUpdatedAt", savedAt.toString());
-        storage.put(key("browser-profile", region, profileId), profile);
-        return profile.deepCopy();
-    }
-
     public PaginatedResult<ObjectNode> listBrowserProfiles(Integer maxResults, String nextToken,
                                                             String name, String region) {
         if (name != null && !name.isBlank() && !TOOL_NAME.matcher(name).matches()) {
@@ -341,72 +329,6 @@ public class BedrockAgentCoreToolsService {
                 node -> node.path("browserId").asText(), maxResults, nextToken,
                 100, 100, "ValidationException");
     }
-
-    public Map<String, String> getTagsByArn(String region, String arn) {
-        ToolResource tool = findByArn(region, arn);
-        Map<String, String> tags = new LinkedHashMap<>();
-        tool.resource().path("tags").fields().forEachRemaining(entry ->
-                tags.put(entry.getKey(), entry.getValue().asText()));
-        return tags;
-    }
-
-    public void tagByArn(String region, String arn, Map<String, String> tags) {
-        ToolResource tool = findByArn(region, arn);
-        ObjectNode updated = tool.resource().deepCopy();
-        ObjectNode merged = updated.get("tags") instanceof ObjectNode existing
-                ? existing : updated.putObject("tags");
-        tags.forEach(merged::put);
-        BedrockAgentCoreTagValidation.validateTags(merged);
-        storage.put(tool.key(), updated);
-    }
-
-    public void untagByArn(String region, String arn, List<String> tagKeys) {
-        ToolResource tool = findByArn(region, arn);
-        ObjectNode keys = JsonNodeFactory.instance.objectNode();
-        tagKeys.forEach(key -> keys.put(key, ""));
-        BedrockAgentCoreTagValidation.validateTags(keys);
-        ObjectNode updated = tool.resource().deepCopy();
-        if (updated.get("tags") instanceof ObjectNode tags) {
-            tagKeys.forEach(tags::remove);
-        }
-        storage.put(tool.key(), updated);
-    }
-
-    private ToolResource findByArn(String region, String arn) {
-        AwsArnUtils.Arn parsed;
-        try {
-            parsed = AwsArnUtils.parse(arn);
-        } catch (IllegalArgumentException e) {
-            throw new AwsException("ValidationException", "Invalid AgentCore tool ARN: " + arn, 400);
-        }
-        String[] resource = parsed.resource().split("/", 2);
-        if (!"bedrock-agentcore".equals(parsed.service()) || resource.length != 2
-                || !resource[1].matches("[a-zA-Z][a-zA-Z0-9_]{0,47}-[a-zA-Z0-9]{10}")) {
-            throw new AwsException("ValidationException", "Invalid AgentCore tool ARN: " + arn, 400);
-        }
-        String family = switch (resource[0]) {
-            case "browser-custom" -> "browser";
-            case "browser-profile" -> "browser-profile";
-            case "code-interpreter-custom" -> "code-interpreter";
-            default -> throw new AwsException("ValidationException", "Unsupported AgentCore tool ARN: " + arn, 400);
-        };
-        String arnField = switch (family) {
-            case "browser" -> "browserArn";
-            case "browser-profile" -> "profileArn";
-            default -> "codeInterpreterArn";
-        };
-        if (!arn.equals(regionResolver.buildArn("bedrock-agentcore", region, parsed.resource()))) {
-            throw new AwsException("ResourceNotFoundException", "AgentCore tool not found: " + arn, 404);
-        }
-        String storageKey = key(family, region, resource[1]);
-        ObjectNode tool = storage.get(storageKey)
-                .filter(node -> arn.equals(node.path(arnField).asText()))
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                        "AgentCore tool not found: " + arn, 404));
-        return new ToolResource(storageKey, tool);
-    }
-
-    private record ToolResource(String key, ObjectNode resource) {}
 
     private ObjectNode findByClientToken(String family, String region, String clientToken) {
         return storage.scan(k -> k.startsWith(prefix(family, region))).stream()
@@ -540,4 +462,82 @@ public class BedrockAgentCoreToolsService {
     private static String prefix(String family, String region) {
         return family + ":" + region + ":";
     }
+
+    /** Records that a browser session's state was saved into the profile (SaveBrowserSessionProfile). */
+    public ObjectNode recordBrowserProfileSave(String profileId, String browserId, String sessionId,
+                                               Instant savedAt, String region) {
+        ObjectNode profile = getBrowserProfile(profileId, region);
+        profile.put("lastSavedAt", savedAt.toString());
+        profile.put("lastSavedBrowserId", browserId);
+        profile.put("lastSavedBrowserSessionId", sessionId);
+        profile.put("lastUpdatedAt", savedAt.toString());
+        storage.put(key("browser-profile", region, profileId), profile);
+        return profile.deepCopy();
+    }
+
+    public Map<String, String> getTagsByArn(String region, String arn) {
+        ToolResource tool = findByArn(region, arn);
+        Map<String, String> tags = new LinkedHashMap<>();
+        tool.resource().path("tags").fields().forEachRemaining(entry ->
+                tags.put(entry.getKey(), entry.getValue().asText()));
+        return tags;
+    }
+
+    public void tagByArn(String region, String arn, Map<String, String> tags) {
+        ToolResource tool = findByArn(region, arn);
+        ObjectNode updated = tool.resource().deepCopy();
+        ObjectNode merged = updated.get("tags") instanceof ObjectNode existing
+                ? existing : updated.putObject("tags");
+        tags.forEach(merged::put);
+        BedrockAgentCoreTagValidation.validateTags(merged);
+        storage.put(tool.key(), updated);
+    }
+
+    public void untagByArn(String region, String arn, List<String> tagKeys) {
+        ToolResource tool = findByArn(region, arn);
+        ObjectNode keys = JsonNodeFactory.instance.objectNode();
+        tagKeys.forEach(key -> keys.put(key, ""));
+        BedrockAgentCoreTagValidation.validateTags(keys);
+        ObjectNode updated = tool.resource().deepCopy();
+        if (updated.get("tags") instanceof ObjectNode tags) {
+            tagKeys.forEach(tags::remove);
+        }
+        storage.put(tool.key(), updated);
+    }
+
+    private ToolResource findByArn(String region, String arn) {
+        AwsArnUtils.Arn parsed;
+        try {
+            parsed = AwsArnUtils.parse(arn);
+        } catch (IllegalArgumentException e) {
+            throw new AwsException("ValidationException", "Invalid AgentCore tool ARN: " + arn, 400);
+        }
+        String[] resource = parsed.resource().split("/", 2);
+        if (!"bedrock-agentcore".equals(parsed.service()) || resource.length != 2
+                || !resource[1].matches("[a-zA-Z][a-zA-Z0-9_]{0,47}-[a-zA-Z0-9]{10}")) {
+            throw new AwsException("ValidationException", "Invalid AgentCore tool ARN: " + arn, 400);
+        }
+        String family = switch (resource[0]) {
+            case "browser-custom" -> "browser";
+            case "browser-profile" -> "browser-profile";
+            case "code-interpreter-custom" -> "code-interpreter";
+            default -> throw new AwsException("ValidationException", "Unsupported AgentCore tool ARN: " + arn, 400);
+        };
+        String arnField = switch (family) {
+            case "browser" -> "browserArn";
+            case "browser-profile" -> "profileArn";
+            default -> "codeInterpreterArn";
+        };
+        if (!arn.equals(regionResolver.buildArn("bedrock-agentcore", region, parsed.resource()))) {
+            throw new AwsException("ResourceNotFoundException", "AgentCore tool not found: " + arn, 404);
+        }
+        String storageKey = key(family, region, resource[1]);
+        ObjectNode tool = storage.get(storageKey)
+                .filter(node -> arn.equals(node.path(arnField).asText()))
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "AgentCore tool not found: " + arn, 404));
+        return new ToolResource(storageKey, tool);
+    }
+
+    private record ToolResource(String key, ObjectNode resource) {}
 }

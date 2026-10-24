@@ -33,12 +33,12 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.Map;
 
 /**
  * Manages the lifecycle of the shared {@code registry:2} container that backs
@@ -60,14 +60,6 @@ public class EcrRegistryManager {
     private static final int REPOSITORY_DELETION_KILL_GRACE_SECONDS = 1;
     private static final String NAMED_VOLUME = "ecr-registry-data";
     private static final String REPOSITORIES_PATH = "/var/lib/registry/docker/registry/v2/repositories/";
-    /**
-     * Marks a registry started without the in-memory blob descriptor cache. Repository
-     * deletion and garbage collection edit storage behind the registry process, and a
-     * cached descriptor keeps answering HEAD for blobs whose repository link is gone, so a
-     * recreated repository would report layers it never received.
-     */
-    static final String BLOB_CACHE_LABEL = "io.floci.ecr.blob-descriptor-cache";
-    static final String BLOB_CACHE_DISABLED = "disabled";
 
     /**
      * Matches an AWS-shaped ECR image URI in any partition:
@@ -96,7 +88,6 @@ public class EcrRegistryManager {
     private volatile boolean unavailableLogged;
     private volatile int hostPort;
     private volatile String containerId;
-    private volatile String registryInternalHost;
     private volatile Closeable logStream;
     private volatile java.util.function.Consumer<List<String>> reconcileHook;
 
@@ -214,16 +205,6 @@ public class EcrRegistryManager {
      * the two must name the same host.
      */
     public String getProxyEndpoint() {
-        return getProxyEndpoint(regionResolver.getAccountId(), regionResolver.getDefaultRegion());
-    }
-
-    /**
-     * AWS-shaped registry login URL. Hostname style is
-     * {@code http(s)://<account>.dkr.ecr.<region>.localhost:<port>} so the
-     * host matches {@link #getRepositoryUri} and Alchemy's token binding
-     * (which asserts the endpoint contains {@code .ecr.}).
-     */
-    public String getProxyEndpoint(String accountId, String region) {
         if (tlsUriEnabled()) {
             String host = "path".equalsIgnoreCase(config.services().ecr().uriStyle())
                     ? "localhost.floci.io"
@@ -258,9 +239,8 @@ public class EcrRegistryManager {
     }
 
     /**
-     * The registry endpoint reachable from other containers on the Docker network.
-     * Prefers the inspected container IP — the default {@code bridge} network has
-     * no embedded DNS, so {@code floci-ecr-registry} does not resolve.
+     * The registry endpoint reachable from other containers on the Docker network:
+     * the container name plus the container-internal port (not the published host port).
      */
     public String internalEndpoint() {
         // In-network clients reach the registry by container name, so this must be the name the
@@ -275,16 +255,6 @@ public class EcrRegistryManager {
             return new RegistryHttpClient(internalEndpoint());
         }
         return new RegistryHttpClient("http://localhost:" + effectivePort());
-    }
-
-    private void rememberInternalHost(ContainerInfo info) {
-        if (info == null) {
-            return;
-        }
-        ContainerLifecycleManager.EndpointInfo endpoint = info.getEndpoint(CONTAINER_INTERNAL_PORT);
-        if (endpoint != null && endpoint.host() != null && !endpoint.host().isBlank()) {
-            this.registryInternalHost = endpoint.host();
-        }
     }
 
     /**
@@ -696,7 +666,6 @@ public class EcrRegistryManager {
                 LOG.warnv("Adopted ECR registry container {0} has no published binding for port {1}; keeping configured port {2}",
                         containerId, String.valueOf(CONTAINER_INTERNAL_PORT), String.valueOf(hostPort));
             }
-            rememberInternalHost(info);
             this.started = true;
             LOG.infov("Adopted existing ECR registry container {0} on host port {1}",
                     containerId, String.valueOf(hostPort));
@@ -726,11 +695,6 @@ public class EcrRegistryManager {
         return found;
     }
 
-    private static boolean hasBlobCacheDisabled(Container container) {
-        Map<String, String> labels = container.getLabels();
-        return labels != null && BLOB_CACHE_DISABLED.equals(labels.get(BLOB_CACHE_LABEL));
-    }
-
     private void ensureDataDir() {
         try {
             Path dir = Paths.get(config.services().ecr().dataPath(), "registry");
@@ -743,5 +707,32 @@ public class EcrRegistryManager {
     // Test seam
     boolean isStarted() {
         return started;
+    }
+
+    /**
+     * Marks a registry started without the in-memory blob descriptor cache. Repository
+     * deletion and garbage collection edit storage behind the registry process, and a
+     * cached descriptor keeps answering HEAD for blobs whose repository link is gone, so a
+     * recreated repository would report layers it never received.
+     */
+    static final String BLOB_CACHE_LABEL = "io.floci.ecr.blob-descriptor-cache";
+
+    static final String BLOB_CACHE_DISABLED = "disabled";
+
+    private volatile String registryInternalHost;
+
+    private void rememberInternalHost(ContainerInfo info) {
+        if (info == null) {
+            return;
+        }
+        ContainerLifecycleManager.EndpointInfo endpoint = info.getEndpoint(CONTAINER_INTERNAL_PORT);
+        if (endpoint != null && endpoint.host() != null && !endpoint.host().isBlank()) {
+            this.registryInternalHost = endpoint.host();
+        }
+    }
+
+    private static boolean hasBlobCacheDisabled(Container container) {
+        Map<String, String> labels = container.getLabels();
+        return labels != null && BLOB_CACHE_DISABLED.equals(labels.get(BLOB_CACHE_LABEL));
     }
 }

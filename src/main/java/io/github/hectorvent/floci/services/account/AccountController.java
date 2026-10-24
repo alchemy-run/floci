@@ -51,7 +51,17 @@ public class AccountController {
     @Path("/deleteAlternateContact")
     public Response deleteAlternateContact(String body) {
         accountService.deleteAlternateContact(requestContext.getAccountId(), readTree(body));
-        return Response.ok(objectMapper.createObjectNode()).build();
+        return Response.ok().build();
+    }
+
+    private JsonNode readTree(String body) {
+        try {
+            return objectMapper.reader()
+                    .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                    .readTree(body == null || body.isBlank() ? "{}" : body);
+        } catch (Exception e) {
+            throw new WebApplicationException(JsonErrorResponseUtils.createSerializationErrorResponse());
+        }
     }
 
     @POST
@@ -118,16 +128,5 @@ public class AccountController {
             throw new WebApplicationException(JsonErrorResponseUtils.createSerializationErrorResponse());
         }
         return request;
-        return Response.ok().build();
-    }
-
-    private JsonNode readTree(String body) {
-        try {
-            return objectMapper.reader()
-                    .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-                    .readTree(body == null || body.isBlank() ? "{}" : body);
-        } catch (Exception e) {
-            throw new WebApplicationException(JsonErrorResponseUtils.createSerializationErrorResponse());
-        }
     }
 }

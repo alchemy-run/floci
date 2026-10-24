@@ -26,28 +26,5 @@ public record ReadReplicaRequest(String dbInstanceIdentifier,
                                  Boolean iamDatabaseAuthenticationEnabled,
                                  Integer allocatedStorage,
                                  String replicaMode,
-                                 Map<String, String> tags,
-                                 String storageType) {
-
-    public ReadReplicaRequest(String dbInstanceIdentifier,
-            String sourceDbInstanceIdentifier,
-            String dbInstanceClass,
-            String availabilityZone,
-            Boolean multiAz,
-            Boolean autoMinorVersionUpgrade,
-            String optionGroupName,
-            String dbParameterGroupName,
-            Boolean publiclyAccessible,
-            String dbSubnetGroupName,
-            List<String> vpcSecurityGroupIds,
-            Boolean copyTagsToSnapshot,
-            Boolean iamDatabaseAuthenticationEnabled,
-            Integer allocatedStorage,
-            String replicaMode,
-            Map<String, String> tags) {
-        this(dbInstanceIdentifier, sourceDbInstanceIdentifier, dbInstanceClass, availabilityZone, multiAz,
-                autoMinorVersionUpgrade, optionGroupName, dbParameterGroupName, publiclyAccessible,
-                dbSubnetGroupName, vpcSecurityGroupIds, copyTagsToSnapshot, iamDatabaseAuthenticationEnabled,
-                allocatedStorage, replicaMode, tags, null);
-    }
+                                 Map<String, String> tags) {
 }

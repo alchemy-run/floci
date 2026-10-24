@@ -9,10 +9,6 @@ import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
-import io.github.hectorvent.floci.services.cloudformation.CloudFormationService;
-import io.github.hectorvent.floci.services.cloudformation.model.ChangeSet;
-import io.github.hectorvent.floci.services.cloudformation.model.Stack;
-import io.github.hectorvent.floci.services.cloudformation.model.TemplateSummary;
 import io.github.hectorvent.floci.services.organizations.OrganizationsService;
 import io.github.hectorvent.floci.services.organizations.model.CreateAccountStatus;
 import io.github.hectorvent.floci.services.organizations.model.OrganizationAccount;
@@ -20,12 +16,16 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import io.github.hectorvent.floci.services.cloudformation.CloudFormationService;
+import io.github.hectorvent.floci.services.cloudformation.model.ChangeSet;
+import io.github.hectorvent.floci.services.cloudformation.model.Stack;
+import io.github.hectorvent.floci.services.cloudformation.model.TemplateSummary;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 
 @ApplicationScoped
 public class ServiceCatalogService {
@@ -45,11 +45,10 @@ public class ServiceCatalogService {
     private final StorageBackend<String, ObjectNode> provisionedProductStore;
     private final ObjectMapper objectMapper;
     private final OrganizationsService organizationsService;
-    private final CloudFormationService cloudFormationService;
 
     @Inject
     public ServiceCatalogService(StorageFactory storageFactory, ObjectMapper objectMapper,
-                                 OrganizationsService organizationsService, CloudFormationService cloudFormationService) {
+                                 OrganizationsService organizationsService) {
         this.portfolioStore = storageFactory.create("servicecatalog", "servicecatalog-portfolios.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.productStore = storageFactory.create("servicecatalog", "servicecatalog-products.json",
@@ -64,16 +63,11 @@ public class ServiceCatalogService {
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.objectMapper = objectMapper;
         this.organizationsService = organizationsService;
-        this.cloudFormationService = cloudFormationService;
     }
 
-    public synchronized ObjectNode createPortfolio(JsonNode request, String region, String accountId) {
+    public ObjectNode createPortfolio(JsonNode request, String region, String accountId) {
         requireText(request, "DisplayName");
         requireText(request, "ProviderName");
-        ObjectNode existing = findByToken(portfolioStore, request, region, accountId);
-        if (existing != null) {
-            return existing.deepCopy();
-        }
         String id = id("port");
         ObjectNode portfolio = copy(request);
         portfolio.put("Id", id);
@@ -86,7 +80,6 @@ public class ServiceCatalogService {
     public ObjectNode updatePortfolio(String id, JsonNode request) {
         ObjectNode portfolio = require(portfolioStore, id, "portfolio");
         copyIfPresent(request, portfolio, "DisplayName", "ProviderName", "Description", "Tags");
-        applyTagChanges(portfolio, request);
         portfolioStore.put(id, portfolio);
         return portfolio.deepCopy();
     }
@@ -140,7 +133,7 @@ public class ServiceCatalogService {
     /**
      * AWS refuses to delete a portfolio that "has associated products, users, constraints, or
      * shared accounts" rather than cascading. Every one of those rows carries the portfolio's
-     * id in {@code PortfolioId}, products, principals and constraints alike, so a single scan
+     * id in {@code PortfolioId} — products, principals and constraints alike — so a single scan
      * covers the documented list. Tag-option associations key off {@code ResourceId} instead and
      * are deliberately not counted: they are absent from AWS's list, and the previous cascade
      * never removed them either, so nothing is orphaned that was not orphaned before.
@@ -157,30 +150,26 @@ public class ServiceCatalogService {
         portfolioStore.delete(id);
     }
 
-    public synchronized ObjectNode createProduct(JsonNode request, String region, String accountId) {
+    public ObjectNode createProduct(JsonNode request, String region, String accountId) {
         requireText(request, "Name");
         requireText(request, "Owner");
-        ObjectNode existing = findByToken(productStore, request, region, accountId);
-        if (existing != null) {
-            return existing.deepCopy();
-        }
         String id = id("prod");
         ObjectNode product = copy(request);
         product.put("Id", id);
         product.put("ARN", AwsArnUtils.Arn.of("catalog", region, accountId, "product/" + id).toString());
         product.put("CreatedTime", Instant.now().toEpochMilli() / 1000.0);
-        product.putArray("ProvisioningArtifactIds");
-        product.putArray("ProvisioningArtifactNames");
+        ArrayNode artifactIds = product.putArray("ProvisioningArtifactIds");
+        ArrayNode artifactNames = product.putArray("ProvisioningArtifactNames");
         JsonNode artifacts = request.path("ProvisioningArtifactParameters");
         if (artifacts.isArray()) {
             for (JsonNode artifact : artifacts) {
-                addArtifact(product, artifact);
+                artifactIds.add(id("pa"));
+                artifactNames.add(artifact.path("Name").asText(""));
             }
-        } else if (artifacts.isObject()) {
-            addArtifact(product, artifacts);
         }
-        if (product.path("ProvisioningArtifactIds").isEmpty()) {
-            addArtifact(product, objectMapper.createObjectNode());
+        if (artifactIds.isEmpty()) {
+            artifactIds.add(id("pa"));
+            artifactNames.add("v1");
         }
         productStore.put(id, product);
         return product.deepCopy();
@@ -190,23 +179,12 @@ public class ServiceCatalogService {
         ObjectNode product = requireProduct(id);
         copyIfPresent(request, product, "Name", "Owner", "Description", "Distributor", "SupportDescription",
                 "SupportEmail", "SupportUrl", "Tags", "ProvisioningArtifactParameters");
-        applyTagChanges(product, request);
         productStore.put(text(product, "Id"), product);
         return product.deepCopy();
     }
 
     public ObjectNode describeProduct(String id) {
         return requireProduct(id).deepCopy();
-    }
-
-    public ObjectNode describeProduct(JsonNode request) {
-        String id = text(request, "Id");
-        if (id != null && !id.isBlank()) {
-            return describeProduct(id);
-        }
-        ObjectNode selector = objectMapper.createObjectNode();
-        selector.put("ProductName", requireText(request, "Name"));
-        return resolveProduct(selector).deepCopy();
     }
 
     public List<ObjectNode> listProducts() {
@@ -224,10 +202,9 @@ public class ServiceCatalogService {
                 .map(ObjectNode::deepCopy).toList();
     }
 
-    public synchronized ObjectNode provisionProduct(JsonNode request, String region, String accountId) {
+    public ObjectNode provisionProduct(JsonNode request, String region, String accountId) {
         ensureControlTowerCatalog(region, accountId);
         String name = requireText(request, "ProvisionedProductName");
-        String token = requireText(request, "ProvisionToken");
         ObjectNode product = resolveProduct(request);
         String productId = text(product, "Id");
         String artifactId = resolveArtifactId(product, request);
@@ -235,10 +212,7 @@ public class ServiceCatalogService {
                 .filter(candidate -> name.equals(text(candidate, "Name")))
                 .findFirst().orElse(null);
         if (existing != null) {
-            if (token.equals(text(existing, "IdempotencyToken"))) {
-                return existing.deepCopy();
-            }
-            throw new AwsException("DuplicateResourceException", "Provisioned product name already exists: " + name, 400);
+            return existing.deepCopy();
         }
         String provisionedId = id("pp");
         ObjectNode provisioned = objectMapper.createObjectNode();
@@ -256,108 +230,8 @@ public class ServiceCatalogService {
         provisioned.put("ProductId", productId);
         provisioned.put("ProvisioningArtifactId", artifactId);
         provisioned.put("CreatedTime", Instant.now().toEpochMilli() / 1000.0);
-        provisioned.put("IdempotencyToken", token);
-        ObjectNode artifact = provisioningArtifacts(product).stream()
-                .filter(value -> text(value, "Id").equals(artifactId))
-                .findFirst().orElseThrow(() -> notFound("provisioning artifact", artifactId));
-        String templateUrl = text(artifact.path("Info"), "LoadTemplateFromURL");
-        if (!CONTROL_TOWER_PRODUCT_ID.equals(productId)) {
-            if (!"CLOUD_FORMATION_TEMPLATE".equals(artifact.path("Type").asText())) {
-                throw new AwsException("InvalidParametersException", "Provisioning requires a CloudFormation artifact", 400);
-            }
-            if (!artifact.path("Active").asBoolean(true)) {
-                throw new AwsException("InvalidParametersException", "Provisioning artifact is inactive: " + artifactId, 400);
-            }
-            if (templateUrl == null || templateUrl.isBlank()) {
-                throw new AwsException("InvalidParametersException", "Provisioning artifact has no CloudFormation template URL", 400);
-            }
-            Map<String, String> parameters = new LinkedHashMap<>();
-            request.path("ProvisioningParameters").forEach(parameter ->
-                    parameters.put(text(parameter, "Key"), text(parameter, "Value")));
-            Map<String, String> tags = new LinkedHashMap<>();
-            request.path("Tags").forEach(tag -> tags.put(text(tag, "Key"), text(tag, "Value")));
-            String stackName = "SC-" + accountId + "-" + provisionedId;
-            try {
-                ChangeSet changeSet = cloudFormationService.createChangeSet(stackName, "provision", "CREATE",
-                        null, templateUrl, parameters, List.of(), tags, region, accountId);
-                provisioned.put("PhysicalId", changeSet.getStackId());
-                provisioned.put("StackRegion", region);
-                provisioned.put("StackAccountId", accountId);
-                provisioned.put("Status", "UNDER_CHANGE");
-                cloudFormationService.executeChangeSet(stackName, "provision", region, accountId);
-            } catch (AwsException e) {
-                if (!provisioned.has("PhysicalId")) {
-                    throw new AwsException("InvalidParametersException", e.getMessage(), 400);
-                }
-                provisioned.put("Status", "ERROR");
-                provisioned.put("StatusMessage", e.getMessage());
-            }
-        }
-        String recordStatus = switch (provisioned.path("Status").asText()) {
-            case "UNDER_CHANGE" -> "IN_PROGRESS";
-            case "ERROR" -> "FAILED";
-            default -> "SUCCEEDED";
-        };
-        ObjectNode record = newRecord(provisioned, "PROVISION_PRODUCT", recordStatus);
-        if ("FAILED".equals(recordStatus)) {
-            record.withArray("RecordErrors").add(objectMapper.createObjectNode()
-                    .put("Code", "InvalidParametersException").put("Description", text(provisioned, "StatusMessage")));
-        }
-        provisioned.put("LastRecordId", text(record, "RecordId"));
-        provisioned.put("LastProvisioningRecordId", text(record, "RecordId"));
-        associationStore.put(text(record, "RecordId"), record);
         provisionedProductStore.put(provisionedId, provisioned);
         return provisioned.deepCopy();
-    }
-
-    private ObjectNode newRecord(ObjectNode product, String recordType, String status) {
-        ObjectNode record = objectMapper.createObjectNode();
-        record.put("Type", "RECORD");
-        record.put("RecordId", id("rec"));
-        record.put("ProvisionedProductId", text(product, "Id"));
-        record.put("ProvisionedProductName", text(product, "Name"));
-        record.put("ProvisionedProductType", text(product, "Type"));
-        record.put("ProductId", text(product, "ProductId"));
-        record.put("ProvisioningArtifactId", text(product, "ProvisioningArtifactId"));
-        record.put("RecordType", recordType);
-        record.put("Status", status);
-        record.put("CreatedTime", Instant.now().toEpochMilli() / 1000.0);
-        record.putArray("RecordErrors");
-        return record;
-    }
-
-    private synchronized ObjectNode refreshProvisionedProduct(ObjectNode product) {
-        String status = text(product, "Status");
-        if (!product.has("StackRegion") || (!"UNDER_CHANGE".equals(status) && !"PLAN_IN_PROGRESS".equals(status))) {
-            return product;
-        }
-        Stack stack = cloudFormationService.describeStacks(text(product, "PhysicalId"),
-                text(product, "StackRegion"), text(product, "StackAccountId")).getFirst();
-        String stackStatus = stack.getStatus();
-        if (stackStatus.endsWith("_IN_PROGRESS")) {
-            return product;
-        }
-        ObjectNode record = require(associationStore, text(product, "LastRecordId"), "record");
-        boolean terminating = "TERMINATE_PROVISIONED_PRODUCT".equals(text(record, "RecordType"));
-        boolean succeeded = (terminating ? "DELETE_COMPLETE" : "CREATE_COMPLETE").equals(stackStatus);
-        record.put("Status", succeeded ? "SUCCEEDED" : "FAILED");
-        record.put("UpdatedTime", Instant.now().toEpochMilli() / 1000.0);
-        if (!succeeded) {
-            record.putArray("RecordErrors").add(objectMapper.createObjectNode()
-                    .put("Code", stackStatus)
-                    .put("Description", stack.getStatusReason() != null ? stack.getStatusReason() : stackStatus));
-        }
-        associationStore.put(text(record, "RecordId"), record);
-        if (terminating && succeeded) {
-            provisionedProductStore.delete(text(product, "Id"));
-        } else {
-            product.put("Status", succeeded ? "AVAILABLE" : "ERROR");
-            if (succeeded) {
-                product.put("LastSuccessfulProvisioningRecordId", text(record, "RecordId"));
-            }
-            provisionedProductStore.put(text(product, "Id"), product);
-        }
-        return product;
     }
 
     /**
@@ -371,7 +245,7 @@ public class ServiceCatalogService {
                 parameters.put(text(parameter, "Key"), text(parameter, "Value")));
         String email = parameters.get("AccountEmail");
         if (email == null || email.isBlank()) {
-            // Without this, Organizations' validateEmail raises InvalidInputException, an
+            // Without this, Organizations' validateEmail raises InvalidInputException — an
             // Organizations shape a servicecatalog client cannot deserialize. Keep every error
             // a Service Catalog caller sees inside the Service Catalog model, the same way the
             // createAccount failure below is translated.
@@ -472,7 +346,6 @@ public class ServiceCatalogService {
 
     public List<ObjectNode> searchProvisionedProducts(JsonNode request) {
         JsonNode terms = request.path("Filters").path("SearchQuery");
-        provisionedProductStore.scan(key -> true).forEach(this::refreshProvisionedProduct);
         return provisionedProductStore.scan(key -> true).stream()
                 .filter(product -> matchesProvisionedProductTerms(product, terms))
                 .map(ObjectNode::deepCopy).toList();
@@ -502,7 +375,7 @@ public class ServiceCatalogService {
 
     /**
      * AWS refuses to delete a product that "is associated with a portfolio". Only the portfolio
-     * association blocks, a product carrying just service-action associations or constraints is
+     * association blocks — a product carrying just service-action associations or constraints is
      * still deletable, and those rows are cleaned up below as before.
      */
     public void deleteProduct(String id) {
@@ -517,8 +390,7 @@ public class ServiceCatalogService {
         productStore.delete(productId);
         associationStore.keys().stream()
                 .filter(key -> associationStore.get(key)
-                        .map(value -> !"RECORD".equals(text(value, "Type"))
-                                && productMatches(value.path("ProductId").asText(), product)).orElse(false))
+                        .map(value -> productMatches(value.path("ProductId").asText(), product)).orElse(false))
                 .toList().forEach(associationStore::delete);
     }
 
@@ -652,7 +524,7 @@ public class ServiceCatalogService {
     static final List<String> ORGANIZATION_NODE_TYPES =
             List.of("ORGANIZATION", "ORGANIZATIONAL_UNIT", "ACCOUNT");
 
-    /** botocore {@code DescribePortfolioShareType}, a superset of the node types above. */
+    /** botocore {@code DescribePortfolioShareType} — a superset of the node types above. */
     static final List<String> DESCRIBE_PORTFOLIO_SHARE_TYPES =
             List.of("ACCOUNT", "ORGANIZATION", "ORGANIZATIONAL_UNIT", "ORGANIZATION_MEMBER_ACCOUNT");
 
@@ -661,7 +533,7 @@ public class ServiceCatalogService {
 
     /**
      * Rejects a value botocore does not list in the member's enum. Accepting one leaves the
-     * emulator holding state AWS would never have created, a portfolio share keyed by an
+     * emulator holding state AWS would never have created — a portfolio share keyed by an
      * unmodelled node type is reported back by DescribePortfolioShares as though real.
      */
     static void requireEnum(String value, String field, List<String> allowed) {
@@ -731,90 +603,6 @@ public class ServiceCatalogService {
                 target.set(field, source.get(field).deepCopy());
             }
         }
-    }
-
-    private ObjectNode findByToken(StorageBackend<String, ObjectNode> store, JsonNode request,
-                                   String region, String accountId) {
-        String token = text(request, "IdempotencyToken");
-        if (token == null || token.isBlank()) {
-            return null;
-        }
-        String arnPrefix = "arn:aws:catalog:" + region + ":" + accountId + ":";
-        return store.scan(key -> true).stream()
-                .filter(value -> token.equals(text(value, "IdempotencyToken"))
-                        && value.path("ARN").asText().startsWith(arnPrefix))
-                .findFirst().orElse(null);
-    }
-
-    private void applyTagChanges(ObjectNode resource, JsonNode request) {
-        if (!request.has("AddTags") && !request.has("RemoveTags")) {
-            return;
-        }
-        Map<String, JsonNode> tags = new LinkedHashMap<>();
-        resource.path("Tags").forEach(tag -> tags.put(tag.path("Key").asText(), tag.deepCopy()));
-        request.path("RemoveTags").forEach(key -> tags.remove(key.asText()));
-        request.path("AddTags").forEach(tag -> tags.put(tag.path("Key").asText(), tag.deepCopy()));
-        ArrayNode result = resource.putArray("Tags");
-        tags.values().forEach(result::add);
-    }
-
-    private ObjectNode addArtifact(ObjectNode product, JsonNode parameters) {
-        String artifactId = id("pa");
-        String name = parameters.path("Name").asText("v" + (product.path("ProvisioningArtifactIds").size() + 1));
-        ObjectNode detail = objectMapper.createObjectNode();
-        detail.put("Id", artifactId);
-        detail.put("Name", name);
-        detail.put("Type", parameters.path("Type").asText("CLOUD_FORMATION_TEMPLATE"));
-        detail.put("CreatedTime", Instant.now().toEpochMilli() / 1000.0);
-        detail.put("Active", true);
-        detail.put("Guidance", "DEFAULT");
-        copyIfPresent(parameters, detail, "Description", "Info");
-        ((ArrayNode) product.path("ProvisioningArtifactIds")).add(artifactId);
-        ((ArrayNode) product.path("ProvisioningArtifactNames")).add(name);
-        product.withObject("/ProvisioningArtifacts").set(artifactId, detail);
-        return detail.deepCopy();
-    }
-
-    public List<ObjectNode> provisioningArtifacts(ObjectNode product) {
-        List<ObjectNode> artifacts = new ArrayList<>();
-        JsonNode ids = product.path("ProvisioningArtifactIds");
-        JsonNode names = product.path("ProvisioningArtifactNames");
-        for (int i = 0; i < ids.size(); i++) {
-            String artifactId = ids.get(i).asText();
-            JsonNode stored = product.path("ProvisioningArtifacts").path(artifactId);
-            ObjectNode detail;
-            if (stored.isObject()) {
-                detail = ((ObjectNode) stored).deepCopy();
-            } else {
-                // Older persisted products stored only parallel identifier and name arrays.
-                detail = objectMapper.createObjectNode();
-                detail.put("Id", artifactId);
-                detail.put("Name", i < names.size() ? names.get(i).asText() : "");
-                detail.put("Type", "CLOUD_FORMATION_TEMPLATE");
-                detail.put("CreatedTime", product.path("CreatedTime").asDouble());
-                detail.put("Active", true);
-                detail.put("Guidance", "DEFAULT");
-                JsonNode parameters = product.path("ProvisioningArtifactParameters");
-                if (parameters.isArray()) {
-                    parameters = parameters.path(i);
-                } else if (i != 0) {
-                    parameters = objectMapper.createObjectNode();
-                }
-                copyIfPresent(parameters, detail, "Description", "Info", "Type");
-            }
-            artifacts.add(detail);
-        }
-        return artifacts;
-    }
-
-    public ObjectNode describeProvisioningArtifact(JsonNode request) {
-        String productId = text(request, "ProductId");
-        ObjectNode product = productId != null ? describeProduct(productId)
-                : describeProduct(objectMapper.createObjectNode().put("Name", text(request, "ProductName")));
-        String artifactId = resolveArtifactId(product, request);
-        return provisioningArtifacts(product).stream()
-                .filter(artifact -> artifactId.equals(text(artifact, "Id")))
-                .findFirst().orElseThrow(() -> notFound("provisioning artifact", artifactId));
     }
 
     private String associationId(String type, String left, String right) {
@@ -1198,7 +986,6 @@ public class ServiceCatalogService {
         if (index < names.size()) {
             ((ArrayNode) names).remove(index);
         }
-        product.withObject("/ProvisioningArtifacts").remove(artifactId);
         productStore.put(text(product, "Id"), product);
     }
 
@@ -1218,18 +1005,16 @@ public class ServiceCatalogService {
     }
 
     public ObjectNode describeProvisionedProduct(String id, String name) {
-        ObjectNode product;
         if (id != null && !id.isBlank()) {
-            product = require(provisionedProductStore, id, "provisioned product");
-        } else if (name != null && !name.isBlank()) {
-            product = provisionedProductStore.scan(key -> true).stream()
-                    .filter(value -> name.equals(text(value, "Name")))
-                    .findFirst().orElseThrow(() -> notFound("provisioned product", name));
-        } else {
-            throw new AwsException("InvalidParametersException", "Id or Name is required", 400);
+            return require(provisionedProductStore, id, "provisioned product").deepCopy();
         }
-        refreshProvisionedProduct(product);
-        return require(provisionedProductStore, text(product, "Id"), "provisioned product").deepCopy();
+        if (name != null && !name.isBlank()) {
+            return provisionedProductStore.scan(key -> true).stream()
+                    .filter(product -> name.equals(text(product, "Name")))
+                    .findFirst().map(ObjectNode::deepCopy)
+                    .orElseThrow(() -> notFound("provisioned product", name));
+        }
+        throw new AwsException("InvalidParametersException", "Id or Name is required", 400);
     }
 
     public ObjectNode describeProvisionedProductPlan(String planId) {
@@ -1239,49 +1024,20 @@ public class ServiceCatalogService {
         return require(associationStore, planId, "provisioned product plan").deepCopy();
     }
 
-    public ArrayNode describeProvisioningParameters(JsonNode request) {
+    public ObjectNode describeProvisioningParameters(JsonNode request) {
         ObjectNode product = resolveProduct(request);
-        String artifactId = resolveArtifactId(product, request);
-        ObjectNode artifact = provisioningArtifacts(product).stream()
-                .filter(value -> text(value, "Id").equals(artifactId))
-                .findFirst().orElseThrow(() -> notFound("provisioning artifact", artifactId));
-        String templateUrl = text(artifact.path("Info"), "LoadTemplateFromURL");
-        if (templateUrl == null || templateUrl.isBlank()) {
-            throw new AwsException("InvalidParametersException", "Provisioning artifact has no CloudFormation template URL", 400);
-        }
-        String region = product.path("ARN").asText().split(":")[3];
-        TemplateSummary summary;
-        try {
-            summary = cloudFormationService.getTemplateSummary(null, null, templateUrl, region);
-        } catch (AwsException e) {
-            throw new AwsException("InvalidParametersException", e.getMessage(), 400);
-        }
-        ArrayNode parameters = objectMapper.createArrayNode();
-        for (TemplateSummary.ParameterDeclaration parameter : summary.parameters()) {
-            ObjectNode detail = parameters.addObject();
-            detail.put("ParameterKey", parameter.parameterKey());
-            detail.put("ParameterType", parameter.parameterType());
-            detail.put("IsNoEcho", parameter.noEcho());
-            if (parameter.defaultValue() != null) {
-                detail.put("DefaultValue", parameter.defaultValue());
-            }
-            if (parameter.description() != null) {
-                detail.put("Description", parameter.description());
-            }
-        }
-        return parameters;
+        resolveArtifactId(product, request);
+        return product.deepCopy();
     }
 
     public ObjectNode describeRecord(String id) {
         if (id == null || id.isBlank()) {
             throw new AwsException("InvalidParametersException", "Id is required", 400);
         }
-        ObjectNode record = require(associationStore, id, "record");
-        if (!"RECORD".equals(text(record, "Type"))) {
-            throw notFound("record", id);
-        }
-        provisionedProductStore.get(text(record, "ProvisionedProductId")).ifPresent(this::refreshProvisionedProduct);
-        return require(associationStore, id, "record").deepCopy();
+        return associationStore.scan(key -> true).stream()
+                .filter(record -> "RECORD".equals(text(record, "Type")) && id.equals(text(record, "RecordId")))
+                .findFirst().map(ObjectNode::deepCopy)
+                .orElseThrow(() -> notFound("record", id));
     }
 
     public void describeServiceActionExecutionParameters(String provisionedProductId, String serviceActionId) {
@@ -1377,33 +1133,21 @@ public class ServiceCatalogService {
         return result;
     }
 
-    public List<ObjectNode> getProvisionedProductOutputs(JsonNode request) {
+    public void getProvisionedProductOutputs(JsonNode request) {
         String id = text(request, "ProvisionedProductId");
+        if (id != null && !id.isBlank()) {
+            require(provisionedProductStore, id, "provisioned product");
+            return;
+        }
         String name = text(request, "ProvisionedProductName");
-        if ((id == null || id.isBlank()) && (name == null || name.isBlank())) {
-            throw new AwsException("InvalidParametersException",
-                    "ProvisionedProductId or ProvisionedProductName is required", 400);
+        if (name != null && !name.isBlank()) {
+            provisionedProductStore.scan(key -> true).stream()
+                    .filter(product -> name.equals(text(product, "Name")))
+                    .findFirst().orElseThrow(() -> notFound("provisioned product", name));
+            return;
         }
-        ObjectNode product = describeProvisionedProduct(id, name);
-        if (!product.has("StackRegion")) {
-            return List.of();
-        }
-        Stack stack = cloudFormationService.describeStacks(text(product, "PhysicalId"),
-                text(product, "StackRegion"), text(product, "StackAccountId")).getFirst();
-        Map<String, String> outputs = new LinkedHashMap<>(stack.getOutputs());
-        outputs.put("CloudformationStackARN", stack.getStackId());
-        List<ObjectNode> result = new ArrayList<>();
-        outputs.forEach((key, value) -> {
-            JsonNode keys = request.path("OutputKeys");
-            boolean selected = !keys.isArray() || keys.isEmpty();
-            for (JsonNode requested : keys) {
-                selected |= key.equals(requested.asText());
-            }
-            if (selected) {
-                result.add(objectMapper.createObjectNode().put("OutputKey", key).put("OutputValue", value));
-            }
-        });
-        return result;
+        throw new AwsException("InvalidParametersException",
+                "ProvisionedProductId or ProvisionedProductName is required", 400);
     }
 
     public ObjectNode importAsProvisionedProduct(JsonNode request, String region, String accountId) {
@@ -1520,10 +1264,7 @@ public class ServiceCatalogService {
     }
 
     public List<ObjectNode> listRecordHistory() {
-        provisionedProductStore.scan(key -> true).forEach(this::refreshProvisionedProduct);
-        return associationStore.scan(key -> true).stream()
-                .filter(record -> "RECORD".equals(text(record, "Type")))
-                .map(ObjectNode::deepCopy).toList();
+        return provisionedProductStore.scan(key -> true).stream().map(ObjectNode::deepCopy).toList();
     }
 
     public List<ObjectNode> listResourcesForTagOption(String tagOptionId, String resourceType) {
@@ -1735,8 +1476,28 @@ public class ServiceCatalogService {
             throw new AwsException("InvalidParametersException", "Parameters is required", 400);
         }
         ObjectNode product = requireProduct(productId);
-        ObjectNode detail = addArtifact(product, parameters);
+        String name = text(parameters, "Name");
+        if (name == null || name.isBlank()) {
+            name = "v" + (product.path("ProvisioningArtifactIds").size() + 1);
+        }
+        String type = text(parameters, "Type");
+        if (type == null || type.isBlank()) {
+            type = "CLOUD_FORMATION_TEMPLATE";
+        }
+        String artifactId = id("pa");
+        ((ArrayNode) product.path("ProvisioningArtifactIds")).add(artifactId);
+        ((ArrayNode) product.path("ProvisioningArtifactNames")).add(name);
         productStore.put(text(product, "Id"), product);
+        ObjectNode detail = objectMapper.createObjectNode();
+        detail.put("Id", artifactId);
+        detail.put("Name", name);
+        detail.put("Type", type);
+        detail.put("CreatedTime", Instant.now().toEpochMilli() / 1000.0);
+        detail.put("Active", true);
+        String description = text(parameters, "Description");
+        if (description != null && !description.isBlank()) {
+            detail.put("Description", description);
+        }
         return detail;
     }
 
@@ -1748,16 +1509,8 @@ public class ServiceCatalogService {
                 new AwsException("ResourceNotFoundException", "Unknown copy product token: " + token, 400));
     }
 
-    public synchronized ObjectNode terminateProvisionedProduct(JsonNode request, String region, String accountId) {
-        String token = requireText(request, "TerminateToken");
-        ObjectNode previous = associationStore.scan(key -> true).stream()
-                .filter(record -> "TERMINATE_PROVISIONED_PRODUCT".equals(text(record, "RecordType"))
-                        && token.equals(text(record, "TerminateToken"))
-                        && region.equals(text(record, "Region")) && accountId.equals(text(record, "AccountId")))
-                .findFirst().orElse(null);
-        if (previous != null) {
-            return describeRecord(text(previous, "RecordId"));
-        }
+    public ObjectNode terminateProvisionedProduct(JsonNode request, String region, String accountId) {
+        requireText(request, "TerminateToken");
         String provisionedProductId = text(request, "ProvisionedProductId");
         String provisionedProductName = text(request, "ProvisionedProductName");
         ObjectNode product = null;
@@ -1779,28 +1532,27 @@ public class ServiceCatalogService {
                     "Unknown provisioned product: " + (provisionedProductId != null ? provisionedProductId : provisionedProductName), 400);
         }
         String id = text(product, "Id");
-        boolean deleteStack = product.has("StackRegion") && !request.path("RetainPhysicalResources").asBoolean(false);
-        if (deleteStack) {
-            try {
-                cloudFormationService.deleteStack(text(product, "PhysicalId"),
-                        text(product, "StackRegion"), text(product, "StackAccountId"));
-            } catch (AwsException e) {
-                throw new AwsException("InvalidParametersException", e.getMessage(), 400);
-            }
-        }
-        ObjectNode record = newRecord(product, "TERMINATE_PROVISIONED_PRODUCT", deleteStack ? "IN_PROGRESS" : "SUCCEEDED");
-        record.put("TerminateToken", token);
-        record.put("Region", region);
-        record.put("AccountId", accountId);
-        associationStore.put(text(record, "RecordId"), record);
-        if (deleteStack) {
-            product.put("Status", "UNDER_CHANGE");
-            product.put("LastRecordId", text(record, "RecordId"));
-            provisionedProductStore.put(id, product);
-        } else {
-            provisionedProductStore.delete(id);
-        }
-        return describeRecord(text(record, "RecordId"));
+        product.put("Status", "TERMINATED");
+        product.put("UpdatedTime", Instant.now().toEpochMilli() / 1000.0);
+        provisionedProductStore.put(id, product);
+
+        String recordId = id("rec");
+        ObjectNode record = objectMapper.createObjectNode();
+        record.put("Type", "RECORD");
+        record.put("RecordId", recordId);
+        record.put("ProvisionedProductId", id);
+        record.put("ProvisionedProductName", text(product, "Name"));
+        record.put("ProductId", text(product, "ProductId"));
+        record.put("ProvisioningArtifactId", text(product, "ProvisioningArtifactId"));
+        record.put("RecordType", "TERMINATE_PROVISIONED_PRODUCT");
+        record.put("Status", "SUCCEEDED");
+        record.put("CreatedTime", product.get("CreatedTime").asDouble());
+        record.put("UpdatedTime", product.get("UpdatedTime").asDouble());
+        associationStore.put(recordId, record);
+
+        ObjectNode result = product.deepCopy();
+        result.put("RecordId", recordId);
+        return result;
     }
 
     public ObjectNode updateProvisioningArtifact(String productId, String artifactId, JsonNode request) {
@@ -1823,13 +1575,154 @@ public class ServiceCatalogService {
             throw new AwsException("ResourceNotFoundException",
                     "Unknown provisioning artifact: " + artifactId, 400);
         }
-        ObjectNode detail = provisioningArtifacts(product).get(index);
-        copyIfPresent(request, detail, "Name", "Description", "Active", "Guidance");
-        if (request.hasNonNull("Name")) {
-            ((ArrayNode) product.path("ProvisioningArtifactNames")).set(index, detail.get("Name"));
+        JsonNode names = product.path("ProvisioningArtifactNames");
+        String newName = text(request, "Name");
+        if (newName != null && !newName.isBlank()) {
+            ((ArrayNode) names).set(index, objectMapper.getNodeFactory().textNode(newName));
+            productStore.put(text(product, "Id"), product);
         }
+        ObjectNode detail = objectMapper.createObjectNode();
+        detail.put("Id", artifactId);
+        detail.put("Name", index < names.size() ? names.get(index).asText() : "");
+        detail.put("Active", true);
+        detail.put("Type", "CLOUD_FORMATION_TEMPLATE");
+        detail.put("CreatedTime", product.path("CreatedTime").asDouble());
+        return detail;
+    }
+
+    private final CloudFormationService cloudFormationService;
+
+    private ObjectNode newRecord(ObjectNode product, String recordType, String status) {
+        ObjectNode record = objectMapper.createObjectNode();
+        record.put("Type", "RECORD");
+        record.put("RecordId", id("rec"));
+        record.put("ProvisionedProductId", text(product, "Id"));
+        record.put("ProvisionedProductName", text(product, "Name"));
+        record.put("ProvisionedProductType", text(product, "Type"));
+        record.put("ProductId", text(product, "ProductId"));
+        record.put("ProvisioningArtifactId", text(product, "ProvisioningArtifactId"));
+        record.put("RecordType", recordType);
+        record.put("Status", status);
+        record.put("CreatedTime", Instant.now().toEpochMilli() / 1000.0);
+        record.putArray("RecordErrors");
+        return record;
+    }
+
+    private synchronized ObjectNode refreshProvisionedProduct(ObjectNode product) {
+        String status = text(product, "Status");
+        if (!product.has("StackRegion") || (!"UNDER_CHANGE".equals(status) && !"PLAN_IN_PROGRESS".equals(status))) {
+            return product;
+        }
+        Stack stack = cloudFormationService.describeStacks(text(product, "PhysicalId"),
+                text(product, "StackRegion"), text(product, "StackAccountId")).getFirst();
+        String stackStatus = stack.getStatus();
+        if (stackStatus.endsWith("_IN_PROGRESS")) {
+            return product;
+        }
+        ObjectNode record = require(associationStore, text(product, "LastRecordId"), "record");
+        boolean terminating = "TERMINATE_PROVISIONED_PRODUCT".equals(text(record, "RecordType"));
+        boolean succeeded = (terminating ? "DELETE_COMPLETE" : "CREATE_COMPLETE").equals(stackStatus);
+        record.put("Status", succeeded ? "SUCCEEDED" : "FAILED");
+        record.put("UpdatedTime", Instant.now().toEpochMilli() / 1000.0);
+        if (!succeeded) {
+            record.putArray("RecordErrors").add(objectMapper.createObjectNode()
+                    .put("Code", stackStatus)
+                    .put("Description", stack.getStatusReason() != null ? stack.getStatusReason() : stackStatus));
+        }
+        associationStore.put(text(record, "RecordId"), record);
+        if (terminating && succeeded) {
+            provisionedProductStore.delete(text(product, "Id"));
+        } else {
+            product.put("Status", succeeded ? "AVAILABLE" : "ERROR");
+            if (succeeded) {
+                product.put("LastSuccessfulProvisioningRecordId", text(record, "RecordId"));
+            }
+            provisionedProductStore.put(text(product, "Id"), product);
+        }
+        return product;
+    }
+
+    private ObjectNode findByToken(StorageBackend<String, ObjectNode> store, JsonNode request,
+                                   String region, String accountId) {
+        String token = text(request, "IdempotencyToken");
+        if (token == null || token.isBlank()) {
+            return null;
+        }
+        String arnPrefix = "arn:aws:catalog:" + region + ":" + accountId + ":";
+        return store.scan(key -> true).stream()
+                .filter(value -> token.equals(text(value, "IdempotencyToken"))
+                        && value.path("ARN").asText().startsWith(arnPrefix))
+                .findFirst().orElse(null);
+    }
+
+    private void applyTagChanges(ObjectNode resource, JsonNode request) {
+        if (!request.has("AddTags") && !request.has("RemoveTags")) {
+            return;
+        }
+        Map<String, JsonNode> tags = new LinkedHashMap<>();
+        resource.path("Tags").forEach(tag -> tags.put(tag.path("Key").asText(), tag.deepCopy()));
+        request.path("RemoveTags").forEach(key -> tags.remove(key.asText()));
+        request.path("AddTags").forEach(tag -> tags.put(tag.path("Key").asText(), tag.deepCopy()));
+        ArrayNode result = resource.putArray("Tags");
+        tags.values().forEach(result::add);
+    }
+
+    private ObjectNode addArtifact(ObjectNode product, JsonNode parameters) {
+        String artifactId = id("pa");
+        String name = parameters.path("Name").asText("v" + (product.path("ProvisioningArtifactIds").size() + 1));
+        ObjectNode detail = objectMapper.createObjectNode();
+        detail.put("Id", artifactId);
+        detail.put("Name", name);
+        detail.put("Type", parameters.path("Type").asText("CLOUD_FORMATION_TEMPLATE"));
+        detail.put("CreatedTime", Instant.now().toEpochMilli() / 1000.0);
+        detail.put("Active", true);
+        detail.put("Guidance", "DEFAULT");
+        copyIfPresent(parameters, detail, "Description", "Info");
+        ((ArrayNode) product.path("ProvisioningArtifactIds")).add(artifactId);
+        ((ArrayNode) product.path("ProvisioningArtifactNames")).add(name);
         product.withObject("/ProvisioningArtifacts").set(artifactId, detail);
-        productStore.put(text(product, "Id"), product);
         return detail.deepCopy();
+    }
+
+    public List<ObjectNode> provisioningArtifacts(ObjectNode product) {
+        List<ObjectNode> artifacts = new ArrayList<>();
+        JsonNode ids = product.path("ProvisioningArtifactIds");
+        JsonNode names = product.path("ProvisioningArtifactNames");
+        for (int i = 0; i < ids.size(); i++) {
+            String artifactId = ids.get(i).asText();
+            JsonNode stored = product.path("ProvisioningArtifacts").path(artifactId);
+            ObjectNode detail;
+            if (stored.isObject()) {
+                detail = ((ObjectNode) stored).deepCopy();
+            } else {
+                // Older persisted products stored only parallel identifier and name arrays.
+                detail = objectMapper.createObjectNode();
+                detail.put("Id", artifactId);
+                detail.put("Name", i < names.size() ? names.get(i).asText() : "");
+                detail.put("Type", "CLOUD_FORMATION_TEMPLATE");
+                detail.put("CreatedTime", product.path("CreatedTime").asDouble());
+                detail.put("Active", true);
+                detail.put("Guidance", "DEFAULT");
+                JsonNode parameters = product.path("ProvisioningArtifactParameters");
+                if (parameters.isArray()) {
+                    parameters = parameters.path(i);
+                } else if (i != 0) {
+                    parameters = objectMapper.createObjectNode();
+                }
+                copyIfPresent(parameters, detail, "Description", "Info", "Type");
+            }
+            artifacts.add(detail);
+        }
+        return artifacts;
+    }
+
+    public ObjectNode describeProvisioningArtifact(JsonNode request) {
+        String productId = text(request, "ProductId");
+        ObjectNode product = productId != null ? describeProduct(productId)
+                : describeProduct(objectMapper.createObjectNode().put("Name", text(request, "ProductName")));
+        String artifactId = resolveArtifactId(product, request);
+        return provisioningArtifacts(product).stream()
+                .filter(artifact -> artifactId.equals(text(artifact, "Id")))
+                .findFirst().orElseThrow(() -> notFound("provisioning artifact", artifactId));
     }
 }

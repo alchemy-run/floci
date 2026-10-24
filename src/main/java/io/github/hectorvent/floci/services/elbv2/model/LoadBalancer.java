@@ -27,9 +27,6 @@ public class LoadBalancer {
     private String ipAddressType;
     private String region;
     private Map<String, String> attributes = new LinkedHashMap<>();
-    private Integer minimumCapacityUnits;
-    private Integer decreaseRequestsRemaining;
-    private Instant capacityReservationLastModified;
 
     public LoadBalancer() {}
 
@@ -75,17 +72,26 @@ public class LoadBalancer {
     public Map<String, String> getAttributes() { return attributes; }
     public void setAttributes(Map<String, String> attributes) { this.attributes = attributes; }
 
+    private Integer minimumCapacityUnits;
+
+    private Integer decreaseRequestsRemaining;
+
+    private Instant capacityReservationLastModified;
+
     public Integer getMinimumCapacityUnits() { return minimumCapacityUnits; }
+
     public void setMinimumCapacityUnits(Integer minimumCapacityUnits) {
         this.minimumCapacityUnits = minimumCapacityUnits;
     }
 
     public Integer getDecreaseRequestsRemaining() { return decreaseRequestsRemaining; }
+
     public void setDecreaseRequestsRemaining(Integer decreaseRequestsRemaining) {
         this.decreaseRequestsRemaining = decreaseRequestsRemaining;
     }
 
     public Instant getCapacityReservationLastModified() { return capacityReservationLastModified; }
+
     public void setCapacityReservationLastModified(Instant capacityReservationLastModified) {
         this.capacityReservationLastModified = capacityReservationLastModified;
     }

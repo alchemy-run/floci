@@ -41,9 +41,6 @@ public class Snapshot {
     // /opt/flink/savepoints/savepoint-<short-job-id>-<random>), used to remove the files on delete.
     private String flinkLocation;
 
-    // Savepoint re-triggers after Flink aborted one because tasks were not all running yet.
-    private int flinkTriggerAttempts;
-
     public Snapshot() {}
 
     public Snapshot(String snapshotName, long applicationVersionId, String runtimeEnvironment) {
@@ -75,6 +72,9 @@ public class Snapshot {
     public String getFlinkLocation() { return flinkLocation; }
     public void setFlinkLocation(String flinkLocation) { this.flinkLocation = flinkLocation; }
 
+    private int flinkTriggerAttempts;
+
     public int getFlinkTriggerAttempts() { return flinkTriggerAttempts; }
+
     public void setFlinkTriggerAttempts(int flinkTriggerAttempts) { this.flinkTriggerAttempts = flinkTriggerAttempts; }
 }

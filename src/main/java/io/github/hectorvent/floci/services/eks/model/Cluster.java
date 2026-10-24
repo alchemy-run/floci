@@ -230,30 +230,6 @@ public class Cluster {
     public boolean isExplicitVersion() { return explicitVersion; }
     public void setExplicitVersion(boolean explicitVersion) { this.explicitVersion = explicitVersion; }
 
-    public Cluster copy() {
-        Cluster c = new Cluster();
-        c.name = this.name;
-        c.arn = this.arn;
-        c.createdAt = this.createdAt;
-        c.version = this.version;
-        c.endpoint = this.endpoint;
-        c.roleArn = this.roleArn;
-        c.resourcesVpcConfig = this.resourcesVpcConfig;
-        c.kubernetesNetworkConfig = this.kubernetesNetworkConfig;
-        c.logging = this.logging;
-        c.encryptionConfig = this.encryptionConfig;
-        c.status = this.status;
-        c.certificateAuthority = this.certificateAuthority;
-        c.identity = this.identity;
-        c.platformVersion = this.platformVersion;
-        c.tags = this.tags;
-        c.containerId = this.containerId;
-        c.accountId = this.accountId;
-        c.internalEndpoint = this.internalEndpoint;
-        c.hostPort = this.hostPort;
-        c.podCidr = this.podCidr;
-        c.explicitVersion = this.explicitVersion;
-        c.dockerName = this.dockerName;
     public boolean isFinalizePending() { return finalizePending; }
     public void setFinalizePending(boolean finalizePending) { this.finalizePending = finalizePending; }
 

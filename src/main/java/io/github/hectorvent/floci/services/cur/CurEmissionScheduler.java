@@ -1,7 +1,6 @@
 package io.github.hectorvent.floci.services.cur;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
-import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RequestContext;
 import io.github.hectorvent.floci.services.bcmdataexports.BcmDataExportsService;
 import io.github.hectorvent.floci.services.bcmdataexports.model.DestinationConfiguration;
@@ -22,6 +21,7 @@ import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import io.github.hectorvent.floci.core.common.AwsException;
 
 /**
  * CUR / BCM Data Exports emission orchestrator.
@@ -201,11 +201,6 @@ public class CurEmissionScheduler {
 
     private void emitForReport(String accountId, ReportDefinition definition, String region) {
         try {
-            if (!"Parquet".equals(definition.getFormat()) || !"Parquet".equals(definition.getCompression())) {
-                throw new AwsException("InternalServerException",
-                        "CUR delivery for " + definition.getFormat() + "/" + definition.getCompression()
-                                + " is not implemented; only Parquet delivery is available.", 500);
-            }
             engine.emitForCurrentMonth(
                     definition.getReportName(),
                     definition.getS3Bucket(),
@@ -241,18 +236,6 @@ public class CurEmissionScheduler {
         try {
             DestinationConfiguration.S3Destination dest =
                     export.getDestinationConfigurations().getS3Destination();
-            DestinationConfiguration.S3OutputConfigurations output = dest.getS3OutputConfigurations();
-            if (output == null || !"PARQUET".equals(output.getFormat())
-                    || !"PARQUET".equals(output.getCompression())) {
-                throw new AwsException("InternalServerException",
-                        "BCM Data Exports delivery is implemented only for PARQUET format and compression.", 500);
-            }
-            if (!export.getDataQuery().getQueryStatement().trim()
-                    .matches("(?i)SELECT\\s+\\*\\s+FROM\\s+COST_AND_USAGE_REPORT\\s*;?")) {
-                throw new AwsException("InternalServerException",
-                        "BCM Data Exports query execution is not implemented for this query;"
-                                + " the local Parquet emitter only supports a full-table export.", 500);
-            }
             engine.emitForCurrentMonth(
                     export.getName(),
                     dest.getS3Bucket(),

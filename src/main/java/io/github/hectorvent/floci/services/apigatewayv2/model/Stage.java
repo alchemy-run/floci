@@ -33,7 +33,6 @@ public class Stage {
     public boolean isAutoDeploy() { return autoDeploy; }
     public void setAutoDeploy(boolean autoDeploy) { this.autoDeploy = autoDeploy; }
 
-
     public long getCreatedDate() { return createdDate; }
     public void setCreatedDate(long createdDate) { this.createdDate = createdDate; }
 

@@ -1,14 +1,14 @@
 package io.github.hectorvent.floci.services.ses.model;
 
-import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.JsonNode;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import com.fasterxml.jackson.annotation.JsonAnySetter;
+import com.fasterxml.jackson.databind.JsonNode;
 
 /**
  * One action inside a receipt rule, stored as its wire type name plus the members that were
@@ -73,19 +73,6 @@ public class ReceiptAction {
         this.properties = properties;
     }
 
-    @JsonAnySetter
-    public void readLegacyAction(String actionType, JsonNode fields) {
-        if (ACTION_FIELDS.containsKey(actionType) && fields != null && fields.isObject()) {
-            type = actionType;
-            properties = new LinkedHashMap<>();
-            fields.properties().forEach(entry -> {
-                if (!entry.getValue().isNull()) {
-                    properties.put(entry.getKey(), entry.getValue().asText());
-                }
-            });
-        }
-    }
-
     public String property(String name) {
         return getProperties().get(name);
     }
@@ -99,5 +86,18 @@ public class ReceiptAction {
 
     public boolean is(String actionType) {
         return actionType.equals(type);
+    }
+
+    @JsonAnySetter
+    public void readLegacyAction(String actionType, JsonNode fields) {
+        if (ACTION_FIELDS.containsKey(actionType) && fields != null && fields.isObject()) {
+            type = actionType;
+            properties = new LinkedHashMap<>();
+            fields.properties().forEach(entry -> {
+                if (!entry.getValue().isNull()) {
+                    properties.put(entry.getKey(), entry.getValue().asText());
+                }
+            });
+        }
     }
 }

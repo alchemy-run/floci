@@ -8,7 +8,6 @@ import io.github.hectorvent.floci.core.common.AwsEndpoints;
 import io.github.hectorvent.floci.core.common.AwsErrorResponse;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.AwsJson11Controller;
-import io.github.hectorvent.floci.services.emr.model.EmrBootstrapAction;
 import io.github.hectorvent.floci.core.common.AwsJsonTimestamp;
 import io.github.hectorvent.floci.core.common.AwsRegions;
 import io.github.hectorvent.floci.core.common.JsonErrorResponseUtils;
@@ -18,7 +17,6 @@ import io.github.hectorvent.floci.services.emr.model.EmrBlockPublicAccess;
 import io.github.hectorvent.floci.services.emr.model.EmrCluster;
 import io.github.hectorvent.floci.services.emr.model.EmrInstanceFleet;
 import io.github.hectorvent.floci.services.emr.model.EmrInstanceGroup;
-import io.github.hectorvent.floci.services.emr.model.EmrManagedScalingPolicy;
 import io.github.hectorvent.floci.services.emr.model.EmrStep;
 import io.github.hectorvent.floci.services.emr.model.SecurityConfiguration;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -33,6 +31,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import io.github.hectorvent.floci.services.emr.model.EmrBootstrapAction;
+import io.github.hectorvent.floci.services.emr.model.EmrManagedScalingPolicy;
 
 /**
  * EMR (elasticmapreduce) JSON 1.1 handler. Dispatched from {@link AwsJson11Controller}
@@ -45,16 +45,11 @@ public class EmrHandler {
 
     private final EmrService service;
     private final ObjectMapper objectMapper;
-    private final EmrReleaseCatalog releaseCatalog;
-    private final EmrStudioService studios;
 
     @Inject
-    public EmrHandler(EmrService service, ObjectMapper objectMapper,
-                      EmrReleaseCatalog releaseCatalog, EmrStudioService studios) {
+    public EmrHandler(EmrService service, ObjectMapper objectMapper) {
         this.service = service;
         this.objectMapper = objectMapper;
-        this.releaseCatalog = releaseCatalog;
-        this.studios = studios;
     }
 
     public Response handle(String action, JsonNode request, String region) {
@@ -79,21 +74,6 @@ public class EmrHandler {
                 case "AddInstanceFleet" -> handleAddInstanceFleet(request);
                 case "ListInstanceFleets" -> handleListInstanceFleets(request);
                 case "ListInstances" -> handleListInstances(request);
-                case "ModifyInstanceGroups" -> handleModifyInstanceGroups(request);
-                case "ModifyInstanceFleet" -> handleModifyInstanceFleet(request);
-                case "ListBootstrapActions" -> handleListBootstrapActions(request);
-                case "PutAutoTerminationPolicy" -> handlePutAutoTerminationPolicy(request);
-                case "GetAutoTerminationPolicy" -> handleGetAutoTerminationPolicy(request);
-                case "RemoveAutoTerminationPolicy" -> {
-                    service.removeAutoTerminationPolicy(text(request, "ClusterId"));
-                    yield Response.ok(objectMapper.createObjectNode()).build();
-                }
-                case "PutManagedScalingPolicy" -> handlePutManagedScalingPolicy(request);
-                case "GetManagedScalingPolicy" -> handleGetManagedScalingPolicy(request);
-                case "RemoveManagedScalingPolicy" -> {
-                    service.removeManagedScalingPolicy(text(request, "ClusterId"));
-                    yield Response.ok(objectMapper.createObjectNode()).build();
-                }
                 case "CreateSecurityConfiguration" -> handleCreateSecurityConfiguration(request);
                 case "DescribeSecurityConfiguration" -> handleDescribeSecurityConfiguration(request);
                 case "DeleteSecurityConfiguration" -> handleDeleteSecurityConfiguration(request);
@@ -114,6 +94,18 @@ public class EmrHandler {
                 case "ListReleaseLabels" -> handleListReleaseLabels(request);
                 case "DescribeReleaseLabel" -> handleDescribeReleaseLabel(request);
                 case "ListSupportedInstanceTypes" -> handleListSupportedInstanceTypes(request);
+                case "DeleteStudio" -> {
+                    studios.delete(text(request, "StudioId"), region);
+                    yield Response.ok(objectMapper.createObjectNode()).build();
+                }
+                case "UpdateStudio" -> {
+                    studios.update(request, region);
+                    yield Response.ok(objectMapper.createObjectNode()).build();
+                }
+                case "ListStudios" -> Response.ok(studios.list(request, region)).build();
+                case "DescribeStudio" -> Response.ok(objectMapper.createObjectNode()
+                        .set("Studio", studios.describe(text(request, "StudioId"), region))).build();
+                case "CreateStudio" -> Response.ok(studios.create(request, region)).build();
                 case "GetBlockPublicAccessConfiguration" -> handleGetBlockPublicAccessConfiguration(region);
                 case "PutBlockPublicAccessConfiguration" -> handlePutBlockPublicAccessConfiguration(request, region);
                 default -> Response.status(400)
@@ -355,98 +347,6 @@ public class EmrHandler {
         return Response.ok(response).build();
     }
 
-    private Response handleModifyInstanceGroups(JsonNode request) {
-        List<EmrService.InstanceGroupModification> modifications = new ArrayList<>();
-        JsonNode groups = request.path("InstanceGroups");
-        if (groups.isArray()) {
-            for (JsonNode g : groups) {
-                JsonNode count = g.path("InstanceCount");
-                modifications.add(new EmrService.InstanceGroupModification(
-                        g.path("InstanceGroupId").asText(null),
-                        count.isNumber() ? Integer.valueOf(count.asInt()) : null));
-            }
-        }
-        service.modifyInstanceGroups(text(request, "ClusterId"), modifications);
-        return Response.ok(objectMapper.createObjectNode()).build();
-    }
-
-    private Response handleModifyInstanceFleet(JsonNode request) {
-        JsonNode fleet = request.path("InstanceFleet");
-        JsonNode onDemand = fleet.path("TargetOnDemandCapacity");
-        JsonNode spot = fleet.path("TargetSpotCapacity");
-        service.modifyInstanceFleet(text(request, "ClusterId"), fleet.path("InstanceFleetId").asText(null),
-                onDemand.isNumber() ? Integer.valueOf(onDemand.asInt()) : null,
-                spot.isNumber() ? Integer.valueOf(spot.asInt()) : null);
-        return Response.ok(objectMapper.createObjectNode()).build();
-    }
-
-    private Response handleListBootstrapActions(JsonNode request) {
-        List<EmrBootstrapAction> actions = service.listBootstrapActions(text(request, "ClusterId"));
-        ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode arr = response.putArray("BootstrapActions");
-        for (EmrBootstrapAction action : actions) {
-            ObjectNode node = objectMapper.createObjectNode();
-            if (action.getName() != null) {
-                node.put("Name", action.getName());
-            }
-            if (action.getScriptPath() != null) {
-                node.put("ScriptPath", action.getScriptPath());
-            }
-            ArrayNode args = node.putArray("Args");
-            action.getArgs().forEach(args::add);
-            arr.add(node);
-        }
-        return Response.ok(response).build();
-    }
-
-    // ──────────────────────────── Auto-termination / managed scaling ────────────────────────────
-
-    private Response handlePutAutoTerminationPolicy(JsonNode request) {
-        JsonNode policy = request.path("AutoTerminationPolicy");
-        service.putAutoTerminationPolicy(text(request, "ClusterId"),
-                policy.isObject() ? idleTimeout(policy) : null);
-        return Response.ok(objectMapper.createObjectNode()).build();
-    }
-
-    private Response handleGetAutoTerminationPolicy(JsonNode request) {
-        Long idleTimeout = service.getAutoTerminationIdleTimeout(text(request, "ClusterId"));
-        ObjectNode response = objectMapper.createObjectNode();
-        if (idleTimeout != null) {
-            response.putObject("AutoTerminationPolicy").put("IdleTimeout", idleTimeout.longValue());
-        }
-        return Response.ok(response).build();
-    }
-
-    private Response handlePutManagedScalingPolicy(JsonNode request) {
-        JsonNode policy = request.path("ManagedScalingPolicy");
-        service.putManagedScalingPolicy(text(request, "ClusterId"),
-                policy.isObject() ? parseManagedScalingPolicy(policy) : null);
-        return Response.ok(objectMapper.createObjectNode()).build();
-    }
-
-    private Response handleGetManagedScalingPolicy(JsonNode request) {
-        EmrManagedScalingPolicy policy = service.getManagedScalingPolicy(text(request, "ClusterId"));
-        ObjectNode response = objectMapper.createObjectNode();
-        if (policy != null) {
-            ObjectNode node = response.putObject("ManagedScalingPolicy");
-            ObjectNode limits = node.putObject("ComputeLimits");
-            limits.put("UnitType", policy.getUnitType());
-            limits.put("MinimumCapacityUnits", policy.getMinimumCapacityUnits());
-            limits.put("MaximumCapacityUnits", policy.getMaximumCapacityUnits());
-            if (policy.getMaximumOnDemandCapacityUnits() != null) {
-                limits.put("MaximumOnDemandCapacityUnits", policy.getMaximumOnDemandCapacityUnits());
-            }
-            if (policy.getMaximumCoreCapacityUnits() != null) {
-                limits.put("MaximumCoreCapacityUnits", policy.getMaximumCoreCapacityUnits());
-            }
-            if (policy.getUtilizationPerformanceIndex() != null) {
-                node.put("UtilizationPerformanceIndex", policy.getUtilizationPerformanceIndex());
-            }
-            if (policy.getScalingStrategy() != null) {
-                node.put("ScalingStrategy", policy.getScalingStrategy());
-            }
-        }
-        return Response.ok(response).build();
     static boolean withinTerminatedInstanceRetention(Instant endedAt, Instant now) {
         return endedAt != null && !endedAt.isBefore(now.minus(30, ChronoUnit.DAYS));
     }
@@ -562,23 +462,13 @@ public class EmrHandler {
 
     // ──────────────────────────── Tags ────────────────────────────
 
-    private Response handleAddTags(JsonNode request, String region) {
-        String id = text(request, "ResourceId");
-        if (id != null && id.startsWith("es-")) {
-            studios.addTags(id, request.path("Tags"), region);
-        } else {
-            service.addTags(id, parseTags(request.path("Tags")));
-        }
+    private Response handleAddTags(JsonNode request) {
+        service.addTags(text(request, "ResourceId"), parseTags(request.path("Tags")));
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
-    private Response handleRemoveTags(JsonNode request, String region) {
-        String id = text(request, "ResourceId");
-        if (id != null && id.startsWith("es-")) {
-            studios.removeTags(id, stringList(request.path("TagKeys")), region);
-        } else {
-            service.removeTags(id, stringList(request.path("TagKeys")));
-        }
+    private Response handleRemoveTags(JsonNode request) {
+        service.removeTags(text(request, "ResourceId"), stringList(request.path("TagKeys")));
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
@@ -912,45 +802,6 @@ public class EmrHandler {
         return steps;
     }
 
-    private List<EmrBootstrapAction> parseBootstrapActions(JsonNode actionsNode) {
-        List<EmrBootstrapAction> actions = new ArrayList<>();
-        if (!actionsNode.isArray()) {
-            return actions;
-        }
-        for (JsonNode a : actionsNode) {
-            EmrBootstrapAction action = new EmrBootstrapAction();
-            action.setName(a.path("Name").asText(null));
-            JsonNode script = a.path("ScriptBootstrapAction");
-            action.setScriptPath(script.path("Path").asText(null));
-            action.setArgs(stringList(script.path("Args")));
-            actions.add(action);
-        }
-        return actions;
-    }
-
-    private Long idleTimeout(JsonNode policy) {
-        JsonNode value = policy.path("IdleTimeout");
-        return value.isNumber() ? Long.valueOf(value.asLong()) : null;
-    }
-
-    private EmrManagedScalingPolicy parseManagedScalingPolicy(JsonNode node) {
-        EmrManagedScalingPolicy policy = new EmrManagedScalingPolicy();
-        JsonNode limits = node.path("ComputeLimits");
-        policy.setUnitType(limits.path("UnitType").asText(null));
-        policy.setMinimumCapacityUnits(optionalInt(limits, "MinimumCapacityUnits"));
-        policy.setMaximumCapacityUnits(optionalInt(limits, "MaximumCapacityUnits"));
-        policy.setMaximumOnDemandCapacityUnits(optionalInt(limits, "MaximumOnDemandCapacityUnits"));
-        policy.setMaximumCoreCapacityUnits(optionalInt(limits, "MaximumCoreCapacityUnits"));
-        policy.setUtilizationPerformanceIndex(optionalInt(node, "UtilizationPerformanceIndex"));
-        policy.setScalingStrategy(node.path("ScalingStrategy").asText(null));
-        return policy;
-    }
-
-    private Integer optionalInt(JsonNode node, String field) {
-        JsonNode value = node.path(field);
-        return value.isNumber() ? Integer.valueOf(value.asInt()) : null;
-    }
-
     private List<EmrInstanceGroup> parseInstanceGroups(JsonNode groupsNode) {
         List<EmrInstanceGroup> groups = new ArrayList<>();
         if (!groupsNode.isArray()) {
@@ -1082,5 +933,48 @@ public class EmrHandler {
         if (instant != null) {
             node.put(field, epoch(instant));
         }
+    }
+
+    private final EmrReleaseCatalog releaseCatalog;
+
+    private final EmrStudioService studios;
+
+    private List<EmrBootstrapAction> parseBootstrapActions(JsonNode actionsNode) {
+        List<EmrBootstrapAction> actions = new ArrayList<>();
+        if (!actionsNode.isArray()) {
+            return actions;
+        }
+        for (JsonNode a : actionsNode) {
+            EmrBootstrapAction action = new EmrBootstrapAction();
+            action.setName(a.path("Name").asText(null));
+            JsonNode script = a.path("ScriptBootstrapAction");
+            action.setScriptPath(script.path("Path").asText(null));
+            action.setArgs(stringList(script.path("Args")));
+            actions.add(action);
+        }
+        return actions;
+    }
+
+    private Long idleTimeout(JsonNode policy) {
+        JsonNode value = policy.path("IdleTimeout");
+        return value.isNumber() ? Long.valueOf(value.asLong()) : null;
+    }
+
+    private EmrManagedScalingPolicy parseManagedScalingPolicy(JsonNode node) {
+        EmrManagedScalingPolicy policy = new EmrManagedScalingPolicy();
+        JsonNode limits = node.path("ComputeLimits");
+        policy.setUnitType(limits.path("UnitType").asText(null));
+        policy.setMinimumCapacityUnits(optionalInt(limits, "MinimumCapacityUnits"));
+        policy.setMaximumCapacityUnits(optionalInt(limits, "MaximumCapacityUnits"));
+        policy.setMaximumOnDemandCapacityUnits(optionalInt(limits, "MaximumOnDemandCapacityUnits"));
+        policy.setMaximumCoreCapacityUnits(optionalInt(limits, "MaximumCoreCapacityUnits"));
+        policy.setUtilizationPerformanceIndex(optionalInt(node, "UtilizationPerformanceIndex"));
+        policy.setScalingStrategy(node.path("ScalingStrategy").asText(null));
+        return policy;
+    }
+
+    private Integer optionalInt(JsonNode node, String field) {
+        JsonNode value = node.path(field);
+        return value.isNumber() ? Integer.valueOf(value.asInt()) : null;
     }
 }

@@ -1,6 +1,5 @@
 package io.github.hectorvent.floci.services.ec2.model;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
@@ -9,6 +8,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 @RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -83,8 +83,6 @@ public class Instance {
 
     // Docker backing fields (not serialised to AWS wire format)
     private String dockerContainerId;
-    private volatile boolean containerLaunchPending;
-    private volatile boolean containerLaunchFailed;
     private String containerBridgeIp;
     /**
      * The container's default-bridge address, kept alongside {@code containerBridgeIp} when the
@@ -121,14 +119,6 @@ public class Instance {
         state = updated;
         return true;
     }
-
-    @JsonIgnore
-    public boolean isContainerLaunchPending() { return containerLaunchPending; }
-    public void setContainerLaunchPending(boolean pending) { this.containerLaunchPending = pending; }
-
-    @JsonIgnore
-    public boolean isContainerLaunchFailed() { return containerLaunchFailed; }
-    public void setContainerLaunchFailed(boolean failed) { this.containerLaunchFailed = failed; }
 
     public String getStateTransitionReason() { return stateTransitionReason; }
     public void setStateTransitionReason(String stateTransitionReason) { this.stateTransitionReason = stateTransitionReason; }
@@ -287,4 +277,18 @@ public class Instance {
     public LaunchTemplateData.MetadataOptions effectiveMetadataOptions() {
         return metadataOptions != null ? metadataOptions : LaunchTemplateData.MetadataOptions.launchDefaults();
     }
+
+    private volatile boolean containerLaunchPending;
+
+    private volatile boolean containerLaunchFailed;
+
+    @JsonIgnore
+    public boolean isContainerLaunchPending() { return containerLaunchPending; }
+
+    public void setContainerLaunchPending(boolean pending) { this.containerLaunchPending = pending; }
+
+    @JsonIgnore
+    public boolean isContainerLaunchFailed() { return containerLaunchFailed; }
+
+    public void setContainerLaunchFailed(boolean failed) { this.containerLaunchFailed = failed; }
 }

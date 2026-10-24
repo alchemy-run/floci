@@ -42,6 +42,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import java.util.*;
 
 /**
  * CloudHSM v2 service implementation for the local emulator.
@@ -127,17 +128,7 @@ public class CloudHsmV2Service {
         cluster.setSubnetIds(new ArrayList<>(SubnetIds));
         Map<String, String> subnetMapping = new LinkedHashMap<>();
         if (ec2Service != null) {
-            List<Subnet> subnets;
-            try {
-                subnets = ec2Service.describeSubnets(region, SubnetIds, Collections.emptyMap());
-            } catch (AwsException e) {
-                if (e.getErrorCode() != null && e.getErrorCode().startsWith("InvalidSubnetID.")) {
-                    throw new AwsException("CloudHsmInvalidRequestException", e.getMessage(), 400);
-                }
-                throw e;
-            }
-            subnets.stream().map(Subnet::getVpcId).filter(Objects::nonNull).findFirst()
-                    .ifPresent(cluster::setVpcId);
+            List<Subnet> subnets = ec2Service.describeSubnets(region, SubnetIds, Collections.emptyMap());
             for (int i = 0; i < SubnetIds.size(); i++) {
                 String subId = SubnetIds.get(i);
                 final int index = i;
@@ -353,8 +344,8 @@ public class CloudHsmV2Service {
     public Hsm createHsm(String clusterId, String availabilityZone, String ipAddress, String region) {
         Cluster cluster = getCluster(clusterId, region);
 
-        // The first HSM is added to an UNINITIALIZED cluster; InitializeCluster comes after it.
-        if (!acceptsNewHsm(cluster.getState())) {
+        if (cluster.getState() != ClusterState.INITIALIZED
+                && cluster.getState() != ClusterState.ACTIVE) {
             throw new AwsException("CloudHsmInvalidRequestException",
                     "Cannot create HSM in cluster " + clusterId + " with state " + cluster.getState().wireValue(), 400);
         }
@@ -534,13 +525,6 @@ public class CloudHsmV2Service {
         return clusters.get(regionKey(region, clusterId)).orElseThrow(() ->
                 new AwsException("CloudHsmResourceNotFoundException",
                         "Cluster " + clusterId + " not found.", 400));
-    }
-
-    static boolean acceptsNewHsm(ClusterState state) {
-        return state == ClusterState.UNINITIALIZED
-                || state == ClusterState.INITIALIZED
-                || state == ClusterState.ACTIVE
-                || state == ClusterState.DEGRADED;
     }
 
     private String regionKey(String region, String clusterId) {
@@ -827,4 +811,10 @@ public class CloudHsmV2Service {
                 new AwsException("CloudHsmResourceNotFoundException", "Backup " + backupId + " not found.", 400));
     }
 
+    static boolean acceptsNewHsm(ClusterState state) {
+        return state == ClusterState.UNINITIALIZED
+                || state == ClusterState.INITIALIZED
+                || state == ClusterState.ACTIVE
+                || state == ClusterState.DEGRADED;
+    }
 }

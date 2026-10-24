@@ -1,8 +1,5 @@
 package io.github.hectorvent.floci.core.common.docker;
 
-import io.github.hectorvent.floci.config.ContainerCaBundle;
-import io.github.hectorvent.floci.config.EmulatorConfig;
-import io.github.hectorvent.floci.services.lambda.launcher.ImageCacheService;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.CreateContainerCmd;
@@ -197,20 +194,6 @@ public class ContainerLifecycleManager {
     }
 
     private String create(ContainerSpec spec, String resolvedImage, String platform) {
-        String containerId = createWithCaBundle(spec, resolvedImage, platform);
-        if (spec.hasNetworkConfiguration()) {
-            try {
-                attachNetworkBeforeStart(containerId, spec);
-            } catch (RuntimeException e) {
-                removeIfExists(containerId);
-                throw new IllegalStateException(
-                        "Failed to attach pre-start network configuration for container " + containerId, e);
-            }
-        }
-        return containerId;
-    }
-
-    private String createWithCaBundle(ContainerSpec spec, String resolvedImage, String platform) {
         return create(spec, resolvedImage, platform, false);
     }
 
@@ -456,7 +439,6 @@ public class ContainerLifecycleManager {
     }
 
     private ContainerInfo withPublishedHostPorts(ContainerInfo info, ContainerSpec spec) {
-        if (spec.portBindings() == null || spec.portBindings().isEmpty()) {
         if (!spec.publishesPorts()) {
             return info;
         }
@@ -1377,17 +1359,6 @@ public class ContainerLifecycleManager {
             hostConfig.withInit(true);
         }
 
-        // CPU quota and weight
-        if (spec.nanoCpus() != null && spec.nanoCpus() > 0) {
-            hostConfig.withNanoCPUs(clampToHostCpus(spec.nanoCpus()));
-        }
-        if (spec.cpuShares() != null && spec.cpuShares() > 0) {
-            hostConfig.withCpuShares(spec.cpuShares());
-        }
-        if (spec.readonlyRootfs()) {
-            hostConfig.withReadonlyRootfs(true);
-        }
-
         // Port bindings — services decide whether to request them based on their
         // own in-container-vs-native logic. When Floci runs inside Docker, most
         // backends are reached via the docker network IP, so services omit the
@@ -1463,47 +1434,6 @@ public class ContainerLifecycleManager {
     }
 
     /**
-     * Holds a CPU quota to what the daemon will accept. Docker rejects a NanoCpus above the
-     * host's CPU count ("range of CPUs is from 0.01 to 8.00, as there are only 8 CPUs
-     * available"), while ECS accepts a task cpu of up to 196608 units, so a 16 vCPU task
-     * asked for verbatim would simply fail to start on a smaller machine. Emulating the
-     * larger task on fewer CPUs is closer to the caller's intent than refusing to run it.
-     */
-    private long clampToHostCpus(long nanoCpus) {
-        OptionalInt cpus = hostCpuCount();
-        if (cpus.isEmpty()) {
-            return nanoCpus;
-        }
-        long ceiling = cpus.getAsInt() * NANO_CPUS_PER_CPU;
-        if (nanoCpus <= ceiling) {
-            return nanoCpus;
-        }
-        LOG.warnv("Requested {0} nanoCPUs but the Docker daemon reports {1} CPUs; clamping to {2}",
-                nanoCpus, cpus.getAsInt(), ceiling);
-        return ceiling;
-    }
-
-    /** The daemon's CPU count, resolved once. Empty when the daemon did not report one. */
-    private OptionalInt hostCpuCount() {
-        OptionalInt cached = hostCpuCount.get();
-        if (cached != null) {
-            return cached;
-        }
-        OptionalInt resolved = OptionalInt.empty();
-        try {
-            Integer ncpu = dockerClient.infoCmd().exec().getNCPU();
-            if (ncpu != null && ncpu > 0) {
-                resolved = OptionalInt.of(ncpu);
-            }
-        } catch (RuntimeException e) {
-            LOG.debugv(e, "Could not read the Docker daemon's CPU count; leaving CPU quotas unclamped");
-        }
-        hostCpuCount.set(resolved);
-        return resolved;
-    }
-
-    private static boolean isContainerNetworkMode(String networkMode) {
-        return networkMode != null && networkMode.startsWith("container:");
      * The host interface a published port binds to.
      *
      * <p>An explicit address from {@code portBindingHostIps} wins, so a caller that reads the

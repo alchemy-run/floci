@@ -1,10 +1,6 @@
 package io.github.hectorvent.floci.services.amazonmq;
 
-import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.core.common.PaginatedResult;
-import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.services.amazonmq.model.Broker;
-import io.github.hectorvent.floci.services.amazonmq.model.MqConfiguration;
 import io.github.hectorvent.floci.services.amazonmq.model.MqUser;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
@@ -15,6 +11,10 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
+import io.github.hectorvent.floci.core.common.Pagination;
+import io.github.hectorvent.floci.services.amazonmq.model.MqConfiguration;
 
 /**
  * Amazon MQ control plane (REST JSON). Paths and wire keys mirror the AWS
@@ -25,32 +25,16 @@ import java.util.Map;
 @Consumes(MediaType.APPLICATION_JSON)
 public class AmazonMqController {
 
-    /** {@link AmazonMqRouteFilter} rewrites mq-signed {@code /v1/configurations} requests here. */
-    private static final String CONFIGURATIONS = AmazonMqRouteFilter.INTERNAL_PREFIX + "/v1/configurations";
-
-    /** Engine versions DescribeBrokerEngineTypes reports, mirroring the AWS catalog. */
-    private static final Map<String, List<String>> ENGINE_VERSIONS = engineVersions();
-
     private final AmazonMqService service;
-    private final AmazonMqConfigurationService configurations;
 
     @Inject
-    public AmazonMqController(AmazonMqService service, AmazonMqConfigurationService configurations) {
+    public AmazonMqController(AmazonMqService service) {
         this.service = service;
-        this.configurations = configurations;
     }
 
     @POST
     @Path("/v1/brokers")
     public Response createBroker(Map<String, Object> request) {
-        String configurationId = null;
-        Integer configurationRevision = null;
-        if (request.get("configuration") instanceof Map<?, ?> reference) {
-            configurationId = reference.get("id") == null ? null : String.valueOf(reference.get("id"));
-            configurationRevision = integer(reference.get("revision"));
-            configurations.validateBrokerReference(configurationId, configurationRevision,
-                    str(request, "engineType"));
-        }
         CreateBrokerParams params = new CreateBrokerParams(
                 str(request, "brokerName"),
                 str(request, "engineType"),
@@ -119,29 +103,6 @@ public class AmazonMqController {
         body.put("created", b.getCreated());
         body.put("brokerInstances", b.getBrokerInstances());
         body.put("tags", b.getTags());
-        body.put("authenticationStrategy", AmazonMqService.effectiveAuthenticationStrategy(b));
-        body.put("dataReplicationMode", "NONE");
-        putIfPresent(body, "pendingEngineVersion", b.getPendingEngineVersion());
-        putIfPresent(body, "pendingHostInstanceType", b.getPendingHostInstanceType());
-        putIfPresent(body, "pendingAuthenticationStrategy", b.getPendingAuthenticationStrategy());
-        putIfPresent(body, "maintenanceWindowStartTime", b.getMaintenanceWindowStartTime());
-        putIfPresent(body, "logs", b.getLogs());
-        putIfPresent(body, "securityGroups", b.getSecurityGroups());
-        // ActiveMQ brokers list their users (with any staged change); AWS omits them for
-        // RabbitMQ, whose users are managed in the RabbitMQ console.
-        if (AmazonMqService.ENGINE_ACTIVEMQ.equals(b.getEngineType())) {
-            body.put("users", b.getUsers().stream().map(AmazonMqController::userSummary).toList());
-        }
-        if (b.getConfigurationId() != null || b.getPendingConfigurationId() != null) {
-            Map<String, Object> configurations = new LinkedHashMap<>();
-            if (b.getConfigurationId() != null) {
-                configurations.put("current", configurationRef(b.getConfigurationId(), b.getConfigurationRevision()));
-            }
-            if (b.getPendingConfigurationId() != null) {
-                configurations.put("pending",
-                        configurationRef(b.getPendingConfigurationId(), b.getPendingConfigurationRevision()));
-            }
-            body.put("configurations", configurations);
         // Optional CreateBroker members: omitted when the request did not set them.
         putIfPresent(body, "securityGroups", b.getSecurityGroups());
         putIfPresent(body, "subnetIds", b.getSubnetIds());
@@ -157,6 +118,162 @@ public class AmazonMqController {
         return body;
     }
 
+    // LogsSummary: general and generalLogGroup are required. Audit logs are ActiveMQ-only,
+    // so a RabbitMQ broker reports the general log group alone.
+    private static Map<String, Object> logsSummary(Broker b) {
+        boolean general = b.getLogs() != null && Boolean.TRUE.equals(b.getLogs().get("general"));
+        Map<String, Object> logs = new LinkedHashMap<>();
+        logs.put("general", general);
+        logs.put("generalLogGroup", b.generalLogGroup());
+        return logs;
+    }
+
+    private static void putIfPresent(Map<String, Object> body, String key, Object value) {
+        if (value != null) {
+            body.put(key, value);
+        }
+    }
+
+    @DELETE
+    @Path("/v1/brokers/{broker-id}")
+    public Response deleteBroker(@PathParam("broker-id") String brokerId) {
+        service.deleteBroker(brokerId);
+        return Response.ok(Map.of("brokerId", brokerId)).build();
+    }
+
+    @POST
+    @Path("/v1/brokers/{broker-id}/reboot")
+    public Response rebootBroker(@PathParam("broker-id") String brokerId) {
+        service.rebootBroker(brokerId);
+        return Response.ok(Map.of()).build();
+    }
+
+    @POST
+    @Path("/v1/brokers/{broker-id}/users/{username}")
+    public Response createUser(@PathParam("broker-id") String brokerId,
+                               @PathParam("username") String username,
+                               Map<String, Object> request) {
+        MqUser user = new MqUser(
+                username,
+                str(request, "password"),
+                bool(request, "consoleAccess"),
+                strList(request.get("groups")));
+        service.createUser(brokerId, user);
+        return Response.ok(Map.of()).build();
+    }
+
+    @GET
+    @Path("/v1/brokers/{broker-id}/users/{username}")
+    public Response describeUser(@PathParam("broker-id") String brokerId,
+                                 @PathParam("username") String username) {
+        MqUser user = service.describeUser(brokerId, username);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("brokerId", brokerId);
+        body.put("username", user.getUsername());
+        body.put("consoleAccess", user.isConsoleAccess());
+        body.put("groups", user.getGroups());
+        return Response.ok(body).build();
+    }
+
+    @GET
+    @Path("/v1/brokers/{broker-id}/users")
+    public Response listUsers(@PathParam("broker-id") String brokerId) {
+        List<Map<String, Object>> users = new ArrayList<>();
+        for (MqUser u : service.listUsers(brokerId)) {
+            users.add(Map.of("username", u.getUsername()));
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("brokerId", brokerId);
+        body.put("users", users);
+        return Response.ok(body).build();
+    }
+
+    @GET
+    @Path("/v1/brokers/{broker-id}/shared-resources")
+    public Response describeSharedResources(@PathParam("broker-id") String brokerId) {
+        // Always empty: a resource share reaches a broker only through UpdateBroker's
+        // resourceShareArns, and Floci has no UpdateBroker to associate one with the broker.
+        service.describeBroker(brokerId);
+        return Response.ok(Map.of("sharedResources", List.of())).build();
+    }
+
+    @DELETE
+    @Path("/v1/brokers/{broker-id}/users/{username}")
+    public Response deleteUser(@PathParam("broker-id") String brokerId,
+                               @PathParam("username") String username) {
+        service.deleteUser(brokerId, username);
+        return Response.ok(Map.of()).build();
+    }
+
+    // --- request parsing helpers ---
+
+    private static String str(Map<String, Object> request, String key) {
+        Object value = request.get(key);
+        return value == null ? null : value.toString();
+    }
+
+    private static boolean bool(Map<String, Object> request, String key) {
+        return Boolean.TRUE.equals(request.get(key));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<String> strList(Object raw) {
+        if (raw instanceof List<?> list) {
+            List<String> result = new ArrayList<>();
+            for (Object o : list) {
+                result.add(String.valueOf(o));
+            }
+            return result;
+        }
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, String> tags(Object raw) {
+        if (raw instanceof Map<?, ?> map) {
+            Map<String, String> result = new LinkedHashMap<>();
+            map.forEach((k, v) -> result.put(String.valueOf(k), String.valueOf(v)));
+            return result;
+        }
+        return null;
+    }
+
+    private static Map<String, Object> map(Object raw) {
+        if (raw instanceof Map<?, ?> m) {
+            Map<String, Object> result = new LinkedHashMap<>();
+            m.forEach((k, v) -> result.put(String.valueOf(k), v));
+            return result;
+        }
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<MqUser> parseUsers(Object raw) {
+        if (!(raw instanceof List<?> list)) {
+            return null;
+        }
+        List<MqUser> users = new ArrayList<>();
+        for (Object item : list) {
+            if (item instanceof Map<?, ?> map) {
+                Map<String, Object> u = (Map<String, Object>) map;
+                users.add(new MqUser(
+                        str(u, "username"),
+                        str(u, "password"),
+                        bool(u, "consoleAccess"),
+                        strList(u.get("groups"))));
+            }
+        }
+        return users;
+    }
+
+    /** {@link AmazonMqRouteFilter} rewrites mq-signed {@code /v1/configurations} requests here. */
+    private static final String CONFIGURATIONS = AmazonMqRouteFilter.INTERNAL_PREFIX + "/v1/configurations";
+
+    /** Engine versions DescribeBrokerEngineTypes reports, mirroring the AWS catalog. */
+    private static final Map<String, List<String>> ENGINE_VERSIONS = engineVersions();
+
+    private final AmazonMqConfigurationService configurations;
+
     private static Map<String, Object> configurationRef(String id, Integer revision) {
         Map<String, Object> ref = new LinkedHashMap<>();
         ref.put("id", id);
@@ -164,12 +281,6 @@ public class AmazonMqController {
             ref.put("revision", revision);
         }
         return ref;
-    }
-
-    private static void putIfPresent(Map<String, Object> body, String key, Object value) {
-        if (value != null) {
-            body.put(key, value);
-        }
     }
 
     @PUT
@@ -218,73 +329,6 @@ public class AmazonMqController {
     public Response promote(@PathParam("broker-id") String brokerId, Map<String, Object> request) {
         service.promote(brokerId, request == null ? null : str(request, "mode"));
         return Response.ok(Map.of("brokerId", brokerId)).build();
-    // LogsSummary: general and generalLogGroup are required. Audit logs are ActiveMQ-only,
-    // so a RabbitMQ broker reports the general log group alone.
-    private static Map<String, Object> logsSummary(Broker b) {
-        boolean general = b.getLogs() != null && Boolean.TRUE.equals(b.getLogs().get("general"));
-        Map<String, Object> logs = new LinkedHashMap<>();
-        logs.put("general", general);
-        logs.put("generalLogGroup", b.generalLogGroup());
-        return logs;
-    }
-
-    private static void putIfPresent(Map<String, Object> body, String key, Object value) {
-        if (value != null) {
-            body.put(key, value);
-        }
-    }
-
-    @DELETE
-    @Path("/v1/brokers/{broker-id}")
-    public Response deleteBroker(@PathParam("broker-id") String brokerId) {
-        service.deleteBroker(brokerId);
-        return Response.ok(Map.of("brokerId", brokerId)).build();
-    }
-
-    @POST
-    @Path("/v1/brokers/{broker-id}/reboot")
-    public Response rebootBroker(@PathParam("broker-id") String brokerId) {
-        service.rebootBroker(brokerId);
-        return Response.ok(Map.of()).build();
-    }
-
-    @POST
-    @Path("/v1/brokers/{broker-id}/users/{username}")
-    public Response createUser(@PathParam("broker-id") String brokerId,
-                               @PathParam("username") String username,
-                               Map<String, Object> request) {
-        Map<String, Object> safeRequest = request != null ? request : Map.of();
-        MqUser user = new MqUser(
-                username,
-                str(safeRequest, "password"),
-                bool(safeRequest, "consoleAccess"),
-                strList(safeRequest.get("groups")));
-        service.createUser(brokerId, user);
-        return Response.ok(Map.of()).build();
-    }
-
-    @GET
-    @Path("/v1/brokers/{broker-id}/users/{username}")
-    public Response describeUser(@PathParam("broker-id") String brokerId,
-                                 @PathParam("username") String username) {
-        MqUser user = service.describeUser(brokerId, username);
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("brokerId", brokerId);
-        body.put("username", user.getUsername());
-        // A user only staged for creation has no applied settings yet; they live under pending.
-        if (!MqUser.CHANGE_CREATE.equals(user.getPendingChange())) {
-            body.put("consoleAccess", user.isConsoleAccess());
-            body.put("groups", user.getGroups() != null ? user.getGroups() : List.of());
-        }
-        if (user.getPendingChange() != null) {
-            Map<String, Object> pending = new LinkedHashMap<>();
-            putIfPresent(pending, "consoleAccess", user.getPendingConsoleAccess());
-            putIfPresent(pending, "groups", user.getPendingGroups());
-            pending.put("pendingChange", user.getPendingChange());
-            body.put("pending", pending);
-        }
-        body.put("replicationUser", false);
-        return Response.ok(body).build();
     }
 
     @PUT
@@ -300,48 +344,12 @@ public class AmazonMqController {
         return Response.ok(Map.of()).build();
     }
 
-    @GET
-    @Path("/v1/brokers/{broker-id}/users")
-    public Response listUsers(@PathParam("broker-id") String brokerId,
-                              @QueryParam("maxResults") String maxResultsParam,
-                              @QueryParam("nextToken") String nextToken) {
-        List<MqUser> all = service.listUsers(brokerId);
-        Integer maxResults = Pagination.parseMaxResults(maxResultsParam, "BadRequestException");
-        PaginatedResult<MqUser> page = Pagination.paginate(all, MqUser::getUsername, maxResults, nextToken,
-                100, "BadRequestException");
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("brokerId", brokerId);
-        body.put("maxResults", maxResults != null ? maxResults : 100);
-        body.put("users", page.items().stream().map(AmazonMqController::userSummary).toList());
-        if (page.nextToken() != null) {
-            body.put("nextToken", page.nextToken());
-        }
-        return Response.ok(body).build();
-    }
-
     private static Map<String, Object> userSummary(MqUser user) {
         Map<String, Object> summary = new LinkedHashMap<>();
         summary.put("username", user.getUsername());
         putIfPresent(summary, "pendingChange", user.getPendingChange());
         return summary;
-    @GET
-    @Path("/v1/brokers/{broker-id}/shared-resources")
-    public Response describeSharedResources(@PathParam("broker-id") String brokerId) {
-        // Always empty: a resource share reaches a broker only through UpdateBroker's
-        // resourceShareArns, and Floci has no UpdateBroker to associate one with the broker.
-        service.describeBroker(brokerId);
-        return Response.ok(Map.of("sharedResources", List.of())).build();
     }
-
-    @DELETE
-    @Path("/v1/brokers/{broker-id}/users/{username}")
-    public Response deleteUser(@PathParam("broker-id") String brokerId,
-                               @PathParam("username") String username) {
-        service.deleteUser(brokerId, username);
-        return Response.ok(Map.of()).build();
-    }
-
-    // --- broker engine types ---
 
     @GET
     @Path("/v1/broker-engine-types")
@@ -374,8 +382,6 @@ public class AmazonMqController {
         versions.put(AmazonMqConfigurationService.ENGINE_RABBITMQ, AmazonMqService.RABBITMQ_ENGINE_VERSIONS);
         return versions;
     }
-
-    // --- configurations ---
 
     @POST
     @Path(CONFIGURATIONS)
@@ -508,8 +514,6 @@ public class AmazonMqController {
         return body;
     }
 
-    // --- request parsing helpers ---
-
     private static Integer integer(Object raw) {
         if (raw == null) {
             return null;
@@ -525,27 +529,6 @@ public class AmazonMqController {
         }
     }
 
-    private static String str(Map<String, Object> request, String key) {
-        Object value = request.get(key);
-        return value == null ? null : value.toString();
-    }
-
-    private static boolean bool(Map<String, Object> request, String key) {
-        return Boolean.TRUE.equals(request.get(key));
-    }
-
-    @SuppressWarnings("unchecked")
-    private static List<String> strList(Object raw) {
-        if (raw instanceof List<?> list) {
-            List<String> result = new ArrayList<>();
-            for (Object o : list) {
-                result.add(String.valueOf(o));
-            }
-            return result;
-        }
-        return null;
-    }
-
     private static Map<String, Object> objectMap(Object raw) {
         if (raw instanceof Map<?, ?> map) {
             Map<String, Object> result = new LinkedHashMap<>();
@@ -553,43 +536,5 @@ public class AmazonMqController {
             return result;
         }
         return null;
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, String> tags(Object raw) {
-        if (raw instanceof Map<?, ?> map) {
-            Map<String, String> result = new LinkedHashMap<>();
-            map.forEach((k, v) -> result.put(String.valueOf(k), String.valueOf(v)));
-            return result;
-        }
-        return null;
-    }
-
-    private static Map<String, Object> map(Object raw) {
-        if (raw instanceof Map<?, ?> m) {
-            Map<String, Object> result = new LinkedHashMap<>();
-            m.forEach((k, v) -> result.put(String.valueOf(k), v));
-            return result;
-        }
-        return null;
-    }
-
-    @SuppressWarnings("unchecked")
-    private static List<MqUser> parseUsers(Object raw) {
-        if (!(raw instanceof List<?> list)) {
-            return null;
-        }
-        List<MqUser> users = new ArrayList<>();
-        for (Object item : list) {
-            if (item instanceof Map<?, ?> map) {
-                Map<String, Object> u = (Map<String, Object>) map;
-                users.add(new MqUser(
-                        str(u, "username"),
-                        str(u, "password"),
-                        bool(u, "consoleAccess"),
-                        strList(u.get("groups"))));
-            }
-        }
-        return users;
     }
 }

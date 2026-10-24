@@ -21,14 +21,12 @@ public class ResourceShare {
     private final Instant creationTime;
     private final Instant lastUpdatedTime;
     private final Map<String, String> tags;
-    private final List<String> sources;
-    private final List<String> permissionArns;
 
     public ResourceShare(String resourceShareArn, String name, String owningAccountId,
                          List<String> principals, List<String> resourceArns,
                          boolean allowExternalPrincipals) {
         this(resourceShareArn, name, owningAccountId, principals, resourceArns,
-                allowExternalPrincipals, "ACTIVE", Instant.now(), null, Map.of(), List.of(), List.of());
+                allowExternalPrincipals, "ACTIVE", Instant.now(), null, Map.of());
     }
 
     @JsonCreator
@@ -42,9 +40,7 @@ public class ResourceShare {
             @JsonProperty("status") String status,
             @JsonProperty("creationTime") Instant creationTime,
             @JsonProperty("lastUpdatedTime") Instant lastUpdatedTime,
-            @JsonProperty("tags") Map<String, String> tags,
-            @JsonProperty("sources") List<String> sources,
-            @JsonProperty("permissionArns") List<String> permissionArns) {
+            @JsonProperty("tags") Map<String, String> tags) {
         this.resourceShareArn = resourceShareArn;
         this.name = name;
         this.owningAccountId = owningAccountId;
@@ -57,9 +53,6 @@ public class ResourceShare {
         // written, so creation time is its correct last-updated value.
         this.lastUpdatedTime = lastUpdatedTime == null ? creationTime : lastUpdatedTime;
         this.tags = tags == null ? Map.of() : Map.copyOf(tags);
-        // State persisted before sources/permissionArns were modelled had neither.
-        this.sources = sources == null ? List.of() : List.copyOf(sources);
-        this.permissionArns = permissionArns == null ? List.of() : List.copyOf(permissionArns);
     }
 
     public String getResourceShareArn() { return resourceShareArn; }
@@ -72,7 +65,43 @@ public class ResourceShare {
     public Instant getCreationTime() { return creationTime; }
     public Instant getLastUpdatedTime() { return lastUpdatedTime; }
     public Map<String, String> getTags() { return tags; }
+
+    public ResourceShare withName(String newName) {
+        return new ResourceShare(resourceShareArn, newName, owningAccountId, principals, resourceArns,
+                allowExternalPrincipals, status, creationTime, lastUpdatedTime, tags);
+    }
+
+    public ResourceShare withAllowExternalPrincipals(boolean value) {
+        return new ResourceShare(resourceShareArn, name, owningAccountId, principals, resourceArns,
+                value, status, creationTime, lastUpdatedTime, tags);
+    }
+
+    public ResourceShare withStatus(String newStatus) {
+        return new ResourceShare(resourceShareArn, name, owningAccountId, principals, resourceArns,
+                allowExternalPrincipals, newStatus, creationTime, lastUpdatedTime, tags);
+    }
+
+    public ResourceShare withPrincipalsAndResources(List<String> newPrincipals, List<String> newResourceArns) {
+        return new ResourceShare(resourceShareArn, name, owningAccountId, newPrincipals, newResourceArns,
+                allowExternalPrincipals, status, creationTime, lastUpdatedTime, tags);
+    }
+
+    public ResourceShare withLastUpdatedTime(Instant stamp) {
+        return new ResourceShare(resourceShareArn, name, owningAccountId, principals, resourceArns,
+                allowExternalPrincipals, status, creationTime, stamp, tags);
+    }
+
+    public ResourceShare withTags(Map<String, String> newTags) {
+        return new ResourceShare(resourceShareArn, name, owningAccountId, principals, resourceArns,
+                allowExternalPrincipals, status, creationTime, lastUpdatedTime, newTags);
+    }
+
+    private final List<String> sources;
+
+    private final List<String> permissionArns;
+
     public List<String> getSources() { return sources; }
+
     public List<String> getPermissionArns() { return permissionArns; }
 
     private ResourceShare copy(String newName, List<String> newPrincipals, List<String> newResourceArns,
@@ -84,26 +113,6 @@ public class ResourceShare {
                 newPermissionArns);
     }
 
-    public ResourceShare withName(String newName) {
-        return copy(newName, principals, resourceArns, allowExternalPrincipals, status, lastUpdatedTime,
-                tags, sources, permissionArns);
-    }
-
-    public ResourceShare withAllowExternalPrincipals(boolean value) {
-        return copy(name, principals, resourceArns, value, status, lastUpdatedTime,
-                tags, sources, permissionArns);
-    }
-
-    public ResourceShare withStatus(String newStatus) {
-        return copy(name, principals, resourceArns, allowExternalPrincipals, newStatus, lastUpdatedTime,
-                tags, sources, permissionArns);
-    }
-
-    public ResourceShare withPrincipalsAndResources(List<String> newPrincipals, List<String> newResourceArns) {
-        return copy(name, newPrincipals, newResourceArns, allowExternalPrincipals, status, lastUpdatedTime,
-                tags, sources, permissionArns);
-    }
-
     public ResourceShare withSources(List<String> newSources) {
         return copy(name, principals, resourceArns, allowExternalPrincipals, status, lastUpdatedTime,
                 tags, newSources, permissionArns);
@@ -112,15 +121,5 @@ public class ResourceShare {
     public ResourceShare withPermissionArns(List<String> newPermissionArns) {
         return copy(name, principals, resourceArns, allowExternalPrincipals, status, lastUpdatedTime,
                 tags, sources, newPermissionArns);
-    }
-
-    public ResourceShare withLastUpdatedTime(Instant stamp) {
-        return copy(name, principals, resourceArns, allowExternalPrincipals, status, stamp,
-                tags, sources, permissionArns);
-    }
-
-    public ResourceShare withTags(Map<String, String> newTags) {
-        return copy(name, principals, resourceArns, allowExternalPrincipals, status, lastUpdatedTime,
-                newTags, sources, permissionArns);
     }
 }

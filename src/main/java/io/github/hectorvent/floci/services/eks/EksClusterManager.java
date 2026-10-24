@@ -53,21 +53,9 @@ import io.github.hectorvent.floci.services.eks.model.Cluster;
 import io.github.hectorvent.floci.services.eks.model.ClusterIdentity;
 import io.github.hectorvent.floci.services.eks.model.ClusterOidcKey;
 import io.github.hectorvent.floci.services.eks.model.LogSetup;
-import io.github.hectorvent.floci.services.eks.model.OidcIdentity;
-import com.github.dockerjava.api.DockerClient;
-import com.github.dockerjava.api.async.ResultCallback;
-import com.github.dockerjava.api.command.ExecCreateCmdResponse;
-import com.github.dockerjava.api.command.InspectContainerResponse;
-import com.github.dockerjava.api.model.ContainerNetwork;
-import com.github.dockerjava.api.model.Frame;
-import io.github.hectorvent.floci.services.ec2.Ec2MetadataProxy;
-import io.github.hectorvent.floci.services.ec2.Ec2MetadataServer;
-import io.github.hectorvent.floci.services.ec2.model.Instance;
-import io.github.hectorvent.floci.services.ec2.model.InstanceState;
-import io.github.hectorvent.floci.services.ec2.model.Placement;
-import io.vertx.core.json.JsonObject;
 import io.github.hectorvent.floci.services.eks.model.Nodegroup;
 import io.github.hectorvent.floci.services.eks.model.NodegroupStatus;
+import io.github.hectorvent.floci.services.eks.model.OidcIdentity;
 import io.github.hectorvent.floci.services.eks.model.ResourcesVpcConfig;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -107,6 +95,11 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
+import com.github.dockerjava.api.async.ResultCallback;
+import com.github.dockerjava.api.model.Frame;
+import io.vertx.core.json.JsonObject;
+import java.io.ByteArrayInputStream;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Manages the Docker lifecycle of k3s containers for real-mode EKS clusters.
@@ -119,10 +112,6 @@ public class EksClusterManager
 
     private static final Logger LOG = Logger.getLogger(EksClusterManager.class);
     private static final int K3S_API_SERVER_PORT = 6443;
-    /** Authenticated with the in-container admin kubeconfig; see {@link #isReady(Cluster)}. */
-    static final String[] CONTROL_PLANE_READY_COMMAND = {"sh", "-c",
-            "kubectl get --raw=/readyz >/dev/null && kubectl get serviceaccount default -n default -o name"};
-    private static final int CONTROL_PLANE_READY_TIMEOUT_SECONDS = 10;
     static final String DEFAULT_NODE_INSTANCE_TYPE = "m5.large";
     private static final String NODE_CAPACITY_LABEL = "io.floci.eks.node-capacity";
     private static final String DEFAULT_STORAGE_CLASS_LABEL = "io.floci.eks.default-storage-class";
@@ -818,8 +807,6 @@ public class EksClusterManager
             return;
         }
 
-        if (config.services().eks().irsaSigningKey() && oidcService != null) {
-            reinjectSigningKeys(existing.get().getId(), cluster);
         String desiredCapacity = capacityLabel(cluster, resolveNodeCapacity(cluster));
         Map<String, String> existingLabels = existing.get().getLabels();
         boolean capacityChanged = existingLabels == null
@@ -991,38 +978,9 @@ public class EksClusterManager
     }
 
     /**
-     * Whether the cluster can take workloads, which is what ACTIVE means on EKS: the API server
-     * is ready (every post-start hook has run) and the {@code default} namespace has its
-     * {@code default} service account, so a pod can be created right away.
-     *
-     * <p>k3s runs with anonymous auth off, so an unauthenticated probe is answered 401 as soon as
-     * the listener is up, long before the control plane has bootstrapped. The unauthenticated
-     * probe therefore only gates the authenticated in-container check that decides.
+     * Checks whether the k3s API server is ready by polling its /readyz endpoint.
      */
     public boolean isReady(Cluster cluster) {
-        return isApiServerListening(cluster) && isControlPlaneBootstrapped(cluster.getContainerId());
-    }
-
-    private boolean isControlPlaneBootstrapped(String containerId) {
-        try {
-            ContainerExecResult result = execInContainerForResult(containerId,
-                    CONTROL_PLANE_READY_COMMAND, CONTROL_PLANE_READY_TIMEOUT_SECONDS);
-            if (result.exitCode() != 0) {
-                LOG.debugv("k3s control plane in container {0} is not ready yet: {1}",
-                        containerId, result.summary());
-                return false;
-            }
-            return true;
-        } catch (Exception e) {
-            if (e instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
-            }
-            LOG.debugv("Could not check the k3s control plane in container {0}: {1}", containerId, e.getMessage());
-            return false;
-        }
-    }
-
-    private boolean isApiServerListening(Cluster cluster) {
         // Prefer internalEndpoint (IP-based) for connectivity — works on both user-defined
         // networks and the default bridge where container-name DNS is unavailable.
         String endpoint = cluster.getInternalEndpoint() != null
@@ -1032,7 +990,7 @@ public class EksClusterManager
             return false;
         }
 
-        // Any HTTP answer, 401 included, only proves the TLS listener is up.
+        // /livez endpoint on the k3s API server (usually unauthenticated)
         String livezUrl = endpoint + "/livez";
         try {
             HttpURLConnection conn = (HttpURLConnection) URI.create(livezUrl).toURL().openConnection();
@@ -1107,49 +1065,14 @@ public class EksClusterManager
     }
 
     /**
-     * Returns the {@code apiserver_requested_deprecated_apis} samples from the cluster's k3s API
-     * server metrics, or empty when the cluster has no running API server or the scrape fails.
-     * Only the matching lines are returned, so the multi-megabyte metrics page never leaves the
-     * container; a failed {@code kubectl} exits non-zero and is reported as unavailable rather than
-     * as "no deprecated API usage".
-     */
-    public Optional<String> readDeprecatedApiMetrics(Cluster cluster) {
-        String containerId = cluster.getContainerId();
-        if (containerId == null) {
-            return Optional.empty();
-        }
-        String script = "metrics=$(kubectl get --raw /metrics) || exit 3; "
-                + "printf '%s\\n' \"$metrics\" | grep '^apiserver_requested_deprecated_apis{'; exit 0";
-        try {
-            ContainerExecResult result = execInContainerForResult(containerId,
-                    new String[]{"sh", "-c", script}, 20);
-            if (result.exitCode() != 0) {
-                LOG.debugv("Could not read API server metrics for EKS cluster {0}: {1}",
-                        cluster.getName(), result.summary());
-                return Optional.empty();
-            }
-            return Optional.of(result.output());
-        } catch (Exception e) {
-            if (e instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
-            }
-            LOG.debugv("Could not read API server metrics for EKS cluster {0}: {1}",
-                    cluster.getName(), e.getMessage());
-            return Optional.empty();
-        }
-    }
-
-    /**
      * Stops and removes the k3s container for the given cluster. The k3s data volume follows the
      * storage prune policy ({@link ContainerStorageHelper#removeNamedVolume}): it is only removed
      * in {@code memory} storage mode or when {@code prune-volumes-on-delete} is set, so a persisted
      * cluster's workloads survive a Floci restart and are re-latched by {@link #restoreCluster}.
      */
     public void stopCluster(Cluster cluster) {
-        unregisterMetadataEndpoint(cluster);
-        Closeable logStream = clusterLogHandles.remove(clusterResourceName(cluster));
+        String resourceName = clusterResourceName(cluster);
         if (cluster.getContainerId() == null) {
-            closeQuietly(logStream);
             unregisterMetadataEndpoint(cluster);
             closeQuietly(clusterLogHandles.remove(resourceName));
             return;
@@ -1179,144 +1102,10 @@ public class EksClusterManager
             // record so explicit deletion can be retried once Docker accepts the removal.
             lifecycleManager.removeIfExistsStrict(capacityBackupName(cluster));
         }
-        lifecycleManager.stopAndRemove(cluster.getContainerId(), logStream);
         ContainerStorageHelper.removeNamedVolume(config, lifecycleManager, clusterResourceName(cluster));
         LOG.infov("Stopped k3s container for cluster {0}", cluster.getName());
     }
 
-    private static void closeQuietly(Closeable closeable) {
-        if (closeable != null) {
-            try {
-                closeable.close();
-            } catch (Exception ignored) {
-                // Swallowing is safe because closing an already closed or failed log stream during shutdown is best-effort.
-            }
-        }
-    }
-
-    /**
-     * Checks whether the cluster has control plane logging enabled for either api or audit.
-     */
-    public static boolean hasLoggingEnabled(Cluster cluster) {
-        return hasLoggingEnabled(cluster, "api") || hasLoggingEnabled(cluster, "audit");
-    }
-
-    /**
-     * Checks whether the cluster has the specified control plane log type enabled.
-     */
-    public static boolean hasLoggingEnabled(Cluster cluster, String logType) {
-        if (cluster == null || cluster.getLogging() == null || logType == null) {
-            return false;
-        }
-        List<LogSetup> clusterLogging = cluster.getLogging().getClusterLogging();
-        if (clusterLogging == null || clusterLogging.isEmpty()) {
-            return false;
-        }
-        for (LogSetup setup : clusterLogging) {
-            if (Boolean.TRUE.equals(setup.getEnabled()) && setup.getTypes() != null
-                    && setup.getTypes().contains(logType)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Attaches CloudWatch Logs delivery for the cluster container if logging is enabled.
-     */
-    public void attachClusterLogs(Cluster cluster) {
-        attachClusterLogs(cluster, false);
-    }
-
-    /**
-     * Attaches CloudWatch Logs delivery for an adopted cluster container, only forwarding lines
-     * emitted from now on.
-     */
-    public void attachClusterLogsFromNow(Cluster cluster) {
-        attachClusterLogs(cluster, true);
-    }
-
-    private void attachClusterLogs(Cluster cluster, boolean fromNow) {
-        if (logStreamer == null || cluster == null || !hasLoggingEnabled(cluster)) {
-            return;
-        }
-        String containerId = cluster.getContainerId();
-        if (containerId == null || containerId.isBlank()) {
-            return;
-        }
-        String resourceName = clusterResourceName(cluster);
-        if (clusterLogHandles.containsKey(resourceName)) {
-            return;
-        }
-        String logGroup = "/aws/eks/" + cluster.getName() + "/cluster";
-        String hash = containerId.length() >= 32 ? containerId.substring(0, 32) : containerId;
-        String region = clusterRegion(cluster);
-        String accountId = resolveClusterAccountId(cluster);
-
-        List<Closeable> handles = new ArrayList<>();
-        if (hasLoggingEnabled(cluster, "api")) {
-            try {
-                String logStream = "kube-apiserver-" + hash;
-                Closeable handle = fromNow
-                        ? logStreamer.attachFromNowForAccount(
-                                accountId, containerId, logGroup, logStream, region, "eks:" + cluster.getName())
-                        : logStreamer.attachForAccount(
-                                accountId, containerId, logGroup, logStream, region, "eks:" + cluster.getName());
-                if (handle != null) {
-                    handles.add(handle);
-                }
-            } catch (Exception e) {
-                LOG.warnv("Could not attach control plane log stream for EKS cluster {0}: {1}",
-                        cluster.getName(), e.getMessage());
-            }
-        }
-
-        if (hasLoggingEnabled(cluster, "audit")) {
-            try {
-                Closeable auditHandle = attachAuditLogFollower(
-                        containerId, accountId, logGroup, hash, region, cluster.getName(), fromNow);
-                if (auditHandle != null) {
-                    handles.add(auditHandle);
-                }
-            } catch (Exception e) {
-                LOG.warnv("Could not attach audit log follower for EKS cluster {0}: {1}",
-                        cluster.getName(), e.getMessage());
-            }
-        }
-
-        if (handles.size() == 1) {
-            clusterLogHandles.put(resourceName, handles.getFirst());
-        } else if (handles.size() > 1) {
-            clusterLogHandles.put(resourceName, () -> {
-                for (Closeable h : handles) {
-                    closeQuietly(h);
-                }
-            });
-        }
-    }
-
-    private Closeable attachAuditLogFollower(String containerId, String accountId, String logGroup,
-                                             String hash, String region, String clusterName, boolean fromNow) {
-        DockerClient dockerClient = lifecycleManager.getDockerClient();
-        if (dockerClient == null) {
-            return null;
-        }
-        String logStream = "kube-apiserver-audit-" + hash;
-        logStreamer.ensureLogGroupAndStreamForAccount(accountId, logGroup, logStream, region);
-        String tailLineArg = fromNow ? "0" : "+1";
-        String[] cmd = new String[] {
-                "sh", "-c", "touch " + AUDIT_LOG_CONTAINER_PATH + " && exec tail -n " + tailLineArg + " -F " + AUDIT_LOG_CONTAINER_PATH
-        };
-        ExecCreateCmdResponse execCreate = dockerClient
-                .execCreateCmd(containerId)
-                .withCmd(cmd)
-                .withAttachStdout(true)
-                .withAttachStderr(false)
-                .exec();
-        return dockerClient
-                .execStartCmd(execCreate.getId())
-                .exec(logStreamer.execLogCallbackForAccount(
-                        accountId, logGroup, logStream, region, "eks-audit:" + clusterName));
     String selectNodeInstanceType(String requestedType) {
         if (instanceTypeCatalog.find(requestedType).isPresent()) {
             return requestedType;
@@ -1713,8 +1502,6 @@ public class EksClusterManager
         return serverArgs;
     }
 
-    static List<String> buildServerArgs(boolean disableCni) {
-        return buildServerArgs(disableCni, null, null);
     static List<String> buildServerArgs(boolean disableCni, String serviceCidr, String clusterCidr) {
         return buildServerArgs(disableCni, false, serviceCidr, clusterCidr);
     }
@@ -1853,343 +1640,6 @@ public class EksClusterManager
         try {
             DockerClient dockerClient = lifecycleManager.getDockerClient();
             if (dockerClient != null) {
-                dockerClient.copyArchiveToContainerCmd(containerId)
-                        .withHostResource(localFile)
-                        .withRemotePath(AUDIT_POLICY_DIR)
-                        .exec();
-                LOG.debugv("Injected audit policy file into k3s container {0} for cluster {1}",
-                        containerId, clusterName);
-            }
-        } catch (Exception e) {
-            LOG.warnv("EKS audit logs may not be emitted for cluster {0}: could not copy "
-                    + "audit policy into the k3s container: {1}", clusterName, e.getMessage());
-        }
-    }
-
-    /**
-     * Official Amazon EKS control plane audit policy documented in the Amazon EKS Best Practices Guide.
-     */
-    public static String buildAuditPolicy() {
-        return """
-                apiVersion: audit.k8s.io/v1
-                kind: Policy
-                rules:
-                  # Log full request and response for changes to aws-auth ConfigMap in kube-system namespace
-                  - level: RequestResponse
-                    namespaces: ["kube-system"]
-                    verbs: ["update", "patch", "delete"]
-                    resources:
-                      - group: ""
-                        resources: ["configmaps"]
-                        resourceNames: ["aws-auth"]
-                    omitStages:
-                      - "RequestReceived"
-
-                  # Do not log watch operations performed by kube-proxy on endpoints and services
-                  - level: None
-                    users: ["system:kube-proxy"]
-                    verbs: ["watch"]
-                    resources:
-                      - group: ""
-                        resources: ["endpoints", "services", "services/status"]
-
-                  # Do not log get operations performed by kubelet on nodes and their statuses
-                  - level: None
-                    users: ["kubelet"]
-                    verbs: ["get"]
-                    resources:
-                      - group: ""
-                        resources: ["nodes", "nodes/status"]
-
-                  # Do not log get operations performed by the system:nodes group on nodes and their statuses
-                  - level: None
-                    userGroups: ["system:nodes"]
-                    verbs: ["get"]
-                    resources:
-                      - group: ""
-                        resources: ["nodes", "nodes/status"]
-
-                  # Do not log get and update operations performed by controller manager, scheduler, and endpoint-controller on endpoints in kube-system namespace
-                  - level: None
-                    users:
-                      - system:kube-controller-manager
-                      - system:kube-scheduler
-                      - system:serviceaccount:kube-system:endpoint-controller
-                    verbs: ["get", "update"]
-                    namespaces: ["kube-system"]
-                    resources:
-                      - group: ""
-                        resources: ["endpoints"]
-
-                  # Do not log get operations performed by apiserver on namespaces and their statuses/finalizations
-                  - level: None
-                    users: ["system:apiserver"]
-                    verbs: ["get"]
-                    resources:
-                      - group: ""
-                        resources: ["namespaces", "namespaces/status", "namespaces/finalize"]
-
-                  # Do not log get and list operations performed by controller manager on metrics.k8s.io resources
-                  - level: None
-                    users:
-                      - system:kube-controller-manager
-                    verbs: ["get", "list"]
-                    resources:
-                      - group: "metrics.k8s.io"
-
-                  # Do not log access to health, version, and swagger non-resource URLs
-                  - level: None
-                    nonResourceURLs:
-                      - /healthz*
-                      - /version
-                      - /swagger*
-
-                  # Do not log events resources
-                  - level: None
-                    resources:
-                      - group: ""
-                        resources: ["events"]
-
-                  # Log request for updates/patches to nodes and pods statuses by kubelet and node problem detector
-                  - level: Request
-                    users: ["kubelet", "system:node-problem-detector", "system:serviceaccount:kube-system:node-problem-detector"]
-                    verbs: ["update", "patch"]
-                    resources:
-                      - group: ""
-                        resources: ["nodes/status", "pods/status"]
-                    omitStages:
-                      - "RequestReceived"
-
-                  # Log request for updates/patches to nodes and pods statuses by system:nodes group
-                  - level: Request
-                    userGroups: ["system:nodes"]
-                    verbs: ["update", "patch"]
-                    resources:
-                      - group: ""
-                        resources: ["nodes/status", "pods/status"]
-                    omitStages:
-                      - "RequestReceived"
-
-                  # Log delete collection requests by namespace-controller in kube-system namespace
-                  - level: Request
-                    users: ["system:serviceaccount:kube-system:namespace-controller"]
-                    verbs: ["deletecollection"]
-                    omitStages:
-                      - "RequestReceived"
-
-                  # Log metadata for secrets, configmaps, and tokenreviews to protect sensitive data
-                  - level: Metadata
-                    resources:
-                      - group: ""
-                        resources: ["secrets", "configmaps"]
-                      - group: authentication.k8s.io
-                        resources: ["tokenreviews"]
-                    omitStages:
-                      - "RequestReceived"
-
-                  # Log requests for serviceaccounts/token resources
-                  - level: Request
-                    resources:
-                      - group: ""
-                        resources: ["serviceaccounts/token"]
-
-                  # Log get, list, and watch requests for various resource groups
-                  - level: Request
-                    verbs: ["get", "list", "watch"]
-                    resources:
-                      - group: ""
-                      - group: "admissionregistration.k8s.io"
-                      - group: "apiextensions.k8s.io"
-                      - group: "apiregistration.k8s.io"
-                      - group: "apps"
-                      - group: "authentication.k8s.io"
-                      - group: "authorization.k8s.io"
-                      - group: "autoscaling"
-                      - group: "batch"
-                      - group: "certificates.k8s.io"
-                      - group: "extensions"
-                      - group: "metrics.k8s.io"
-                      - group: "networking.k8s.io"
-                      - group: "policy"
-                      - group: "rbac.authorization.k8s.io"
-                      - group: "scheduling.k8s.io"
-                      - group: "settings.k8s.io"
-                      - group: "storage.k8s.io"
-                    omitStages:
-                      - "RequestReceived"
-
-                  # Default logging level for known APIs to log request and response
-                  - level: RequestResponse
-                    resources:
-                      - group: ""
-                      - group: "admissionregistration.k8s.io"
-                      - group: "apiextensions.k8s.io"
-                      - group: "apiregistration.k8s.io"
-                      - group: "apps"
-                      - group: "authentication.k8s.io"
-                      - group: "authorization.k8s.io"
-                      - group: "autoscaling"
-                      - group: "batch"
-                      - group: "certificates.k8s.io"
-                      - group: "extensions"
-                      - group: "metrics.k8s.io"
-                      - group: "networking.k8s.io"
-                      - group: "policy"
-                      - group: "rbac.authorization.k8s.io"
-                      - group: "scheduling.k8s.io"
-                      - group: "settings.k8s.io"
-                      - group: "storage.k8s.io"
-                    omitStages:
-                      - "RequestReceived"
-
-                  # Default logging level for all other requests to log metadata only
-                  - level: Metadata
-                    omitStages:
-                      - "RequestReceived"
-                """;
-    }
-
-    /**
-     * Builds the API server arguments configuring k3s to sign service account tokens with the
-     * cluster's OIDC keypair and advertise the cluster's OIDC issuer URL. api-audiences includes
-     * both the standard Kubernetes in-cluster audience and STS_AUDIENCE.
-     */
-    static List<String> buildIrsaServerArgs(String issuerUrl) {
-        if (issuerUrl == null || issuerUrl.isBlank()) {
-            throw new IllegalArgumentException("issuerUrl is required");
-        }
-        return List.of(
-                "--kube-apiserver-arg=service-account-signing-key-file=" + SA_SIGNING_KEY_CONTAINER_PATH,
-                "--kube-apiserver-arg=service-account-key-file=" + SA_PUBLIC_KEY_CONTAINER_PATH,
-                "--kube-apiserver-arg=service-account-issuer=" + issuerUrl,
-                "--kube-apiserver-arg=service-account-issuer=" + KUBERNETES_DEFAULT_ISSUER,
-                "--kube-apiserver-arg=api-audiences=" + KUBERNETES_DEFAULT_ISSUER + "," + EksOidcService.STS_AUDIENCE
-        );
-    }
-
-    String resolveClusterIssuer(Cluster cluster) {
-        if (cluster.getIdentity() != null && cluster.getIdentity().getOidc() != null
-                && cluster.getIdentity().getOidc().getIssuer() != null
-                && !cluster.getIdentity().getOidc().getIssuer().isBlank()) {
-            return cluster.getIdentity().getOidc().getIssuer();
-        }
-        String region = clusterRegion(cluster);
-        String issuer = oidcService.newIssuerUrl(region);
-        cluster.setIdentity(new ClusterIdentity(new OidcIdentity(issuer)));
-        return issuer;
-    }
-
-    record SigningKeyFiles(Path signingKeyPath, Path publicKeyPath) {}
-
-    String resolveClusterAccountId(Cluster cluster) {
-        if (cluster != null) {
-            if (cluster.getAccountId() != null && !cluster.getAccountId().isBlank()) {
-                return cluster.getAccountId();
-            }
-            if (cluster.getArn() != null) {
-                String[] parts = cluster.getArn().split(":");
-                if (parts.length > 4 && !parts[4].isBlank()) {
-                    return parts[4];
-                }
-            }
-        }
-        if (regionResolver != null && regionResolver.getAccountId() != null && !regionResolver.getAccountId().isBlank()) {
-            return regionResolver.getAccountId();
-        }
-        if (config != null && config.defaultAccountId() != null && !config.defaultAccountId().isBlank()) {
-            return config.defaultAccountId();
-        }
-        return "000000000000";
-    }
-
-    Path resolveKeysDir(Cluster cluster) {
-        String accountId = resolveClusterAccountId(cluster);
-        String region = clusterRegion(cluster);
-        return Paths.get(config.services().eks().dataPath(), "keys", accountId, region, cluster.getName())
-                .toAbsolutePath().normalize();
-    }
-
-    /**
-     * Writes the cluster's RSA signing key and public key PEM files to Floci's local filesystem
-     * under the account- and region-qualified EKS data path with restrictive permissions (0600 for
-     * files, 0700 for directories). Files are created with owner-only permissions atomically from
-     * creation, avoiding any window with default umask permissions. Returns the paths or null if
-     * writing failed.
-     */
-    SigningKeyFiles writeSigningKeyFiles(Cluster cluster, ClusterOidcKey oidcKey) {
-        Path keysDir = resolveKeysDir(cluster);
-        try {
-            if (!Files.isDirectory(keysDir)) {
-                if (Files.getFileAttributeView(keysDir.getParent(), PosixFileAttributeView.class) != null) {
-                    Files.createDirectories(keysDir, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
-                } else {
-                    Files.createDirectories(keysDir);
-                }
-            }
-            setRestrictivePermissions(keysDir, true);
-
-            Path signingKeyPath = keysDir.resolve(SA_SIGNING_KEY_FILE);
-            writeSecureFile(signingKeyPath, oidcService.exportSigningKeyPem(oidcKey), "rw-------");
-
-            Path publicKeyPath = keysDir.resolve(SA_PUBLIC_KEY_FILE);
-            writeSecureFile(publicKeyPath, oidcService.exportPublicKeyPem(oidcKey), "rw-------");
-
-            return new SigningKeyFiles(signingKeyPath, publicKeyPath);
-        } catch (IOException e) {
-            LOG.warnv("EKS IRSA signing key disabled for cluster {0}: could not write key files: {1}",
-                    cluster.getName(), e.getMessage());
-            return null;
-        }
-    }
-
-    private static void writeSecureFile(Path path, String content, String posixPerms) throws IOException {
-        Files.deleteIfExists(path);
-        if (Files.getFileAttributeView(path.getParent(), PosixFileAttributeView.class) != null) {
-            Files.createFile(path, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString(posixPerms)));
-        } else {
-            Files.createFile(path);
-        }
-        Files.writeString(path, content);
-        setRestrictivePermissions(path, false);
-    }
-
-    private static void setRestrictivePermissions(Path path, boolean isDirectory) {
-        try {
-            Set<PosixFilePermission> perms = isDirectory
-                    ? PosixFilePermissions.fromString("rwx------")
-                    : PosixFilePermissions.fromString("rw-------");
-            Files.setPosixFilePermissions(path, perms);
-        } catch (UnsupportedOperationException | IOException ignored) {
-            File file = path.toFile();
-            file.setReadable(false, false);
-            file.setReadable(true, true);
-            file.setWritable(false, false);
-            file.setWritable(true, true);
-            if (isDirectory) {
-                file.setExecutable(false, false);
-                file.setExecutable(true, true);
-            } else {
-                file.setExecutable(false, false);
-            }
-        }
-    }
-
-    /**
-     * Streams the signing key and public key PEM files into the k3s container at /etc using the Docker API.
-     * A failure logs a warning and lets cluster startup continue.
-     */
-    void copySigningKeysIntoContainer(String containerId, SigningKeyFiles keyFiles, String clusterName) {
-        try {
-            lifecycleManager.getDockerClient()
-                    .copyArchiveToContainerCmd(containerId)
-                    .withHostResource(keyFiles.signingKeyPath().toString())
-                    .withRemotePath(WEBHOOK_CONFIG_DIR)
-                    .exec();
-            lifecycleManager.getDockerClient()
-                    .copyArchiveToContainerCmd(containerId)
-                    .withHostResource(keyFiles.publicKeyPath().toString())
-                    .withRemotePath(WEBHOOK_CONFIG_DIR)
-                    .exec();
                 RetryingTarCopier.copyHostResource(dockerClient, containerId, AUDIT_POLICY_DIR, localFile,
                         RetryingTarCopier.DEFAULT_MAX_ATTEMPTS, archiveRetryBackoffMillis);
                 LOG.debugv("Injected audit policy file into k3s container {0} for cluster {1}",
@@ -2585,44 +2035,6 @@ public class EksClusterManager
     }
 
     /**
-     * Drops the cluster's {@code MutatingWebhookConfiguration} into the k3s server manifests
-     * directory of the (created, not-yet-started) container, so the API server registers it as it
-     * comes up and starts sending pod CREATE admission reviews to Floci.
-     *
-     * <p>Kubernetes requires an {@code https} {@code clientConfig.url} and a {@code caBundle} it
-     * trusts, neither of which Floci can offer with TLS off, so the webhook is skipped with a
-     * warning in that case. A failure here leaves the cluster running without pod identity
-     * injection, matching the token webhook and the ECR mirror.
-     */
-    void registerPodIdentityWebhook(String containerId, Cluster cluster) {
-        if (!config.services().eks().podIdentityWebhook()) {
-            return;
-        }
-        String clusterName = cluster.getName();
-        if (!config.tls().enabled()) {
-            LOG.warnv("EKS Pod Identity injection is off for cluster {0}: Kubernetes only accepts an "
-                    + "https admission webhook URL, and Floci serves HTTP with floci.tls.enabled=false. "
-                    + "Set FLOCI_TLS_ENABLED=true to have pods mutated. Pods still start, without the "
-                    + "pod identity token or credentials environment variables.", clusterName);
-            return;
-        }
-        if (certificateAuthority == null) {
-            LOG.warnv("EKS Pod Identity injection is off for cluster {0}: no local CA is available to "
-                    + "put in the webhook caBundle", clusterName);
-            return;
-        }
-        String url = "https://" + dockerHostResolver.resolve() + ":" + config.port()
-                + podIdentityWebhookPath(clusterName, resolveClusterAccountId(cluster));
-        String manifest = buildPodIdentityWebhookConfiguration(url, certificateAuthority.caPem());
-        writeLocalCopy(Paths.get(config.services().eks().dataPath(), "webhook", clusterName,
-                POD_IDENTITY_MANIFEST_FILE), manifest, clusterName);
-        try {
-            lifecycleManager.getDockerClient()
-                    .copyArchiveToContainerCmd(containerId)
-                    .withTarInputStream(new ByteArrayInputStream(
-                            tarSingleFile(POD_IDENTITY_MANIFEST_TAR_ENTRY, manifest)))
-                    .withRemotePath(K3S_DATA_DIR)
-                    .exec();
      * Symlinks {@code /etc/containerd/certs.d} to k3s containerd's certs directory
      * ({@code /var/lib/rancher/k3s/agent/etc/containerd/certs.d}) inside the container before start.
      * EKS node group launch template user data writes registry host configurations (including
@@ -2769,17 +2181,13 @@ public class EksClusterManager
     }
 
     private static byte[] tarSingleFile(String entryName, String content) {
-        return tarSingleFile(entryName, content, 0644);
-    }
-
-    private static byte[] tarSingleFile(String entryName, String content, int mode) {
         try {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             byte[] data = content.getBytes(StandardCharsets.UTF_8);
             try (TarArchiveOutputStream tar = new TarArchiveOutputStream(out)) {
                 TarArchiveEntry entry = new TarArchiveEntry(entryName);
                 entry.setSize(data.length);
-                entry.setMode(mode);
+                entry.setMode(0644);
                 tar.putArchiveEntry(entry);
                 tar.write(data);
                 tar.closeArchiveEntry();
@@ -2920,12 +2328,9 @@ public class EksClusterManager
     }
 
     void configureLinkLocalMetadataEndpoint(Cluster cluster, String containerId) {
-        if (!config.services().eks().imds() || metadataServer == null) {
+        if (!config.services().eks().imds()) {
             return;
         }
-        Instance nodeInstance = null;
-        String capability = null;
-        boolean configured = false;
         try {
             ClusterNodeRecord record = clusterNodeInstances.get(clusterResourceName(cluster));
             Instance nodeInstance = record != null ? record.instance() : null;
@@ -2945,32 +2350,22 @@ public class EksClusterManager
             }
 
             ContainerExec.Result install = execInContainerForResult(containerId,
-                    Ec2MetadataProxy.authenticatedInstallCommand(), 180);
+                    Ec2MetadataProxy.installCommand(), 180);
             if (install.exitCode() != 0) {
                 LOG.warnv("Could not install IMDS proxy dependencies for EKS cluster {0}: {1}",
                         cluster.getName(), install.summary());
                 return;
             }
 
-            capability = metadataServer.registerProxy(nodeInstance);
-            String proxyConfig = new JsonObject()
-                    .put("host", dockerHostResolver.resolve())
-                    .put("port", config.services().ec2().imdsPort())
-                    .put("capability", capability).encode();
-            copyMetadataFile(containerId, "floci-imds-proxy.py", Ec2MetadataProxy.authenticatedProxyScript(), 0700);
-            copyMetadataFile(containerId, "floci-imds-proxy.json.next", proxyConfig, 0600);
+            String flociHost = dockerHostResolver.resolve();
+            int imdsPort = config.services().ec2().imdsPort();
+
             ContainerExec.Result start = execInContainerForResult(containerId,
-                    Ec2MetadataProxy.authenticatedStartCommand(nodeInstance.getInstanceId()), 30);
+                    Ec2MetadataProxy.startCommand(flociHost, imdsPort), 30);
             if (start.exitCode() != 0) {
                 LOG.warnv("Could not start link-local IMDS proxy for EKS cluster {0}: {1}",
                         cluster.getName(), start.summary());
                 return;
-            }
-            clusterNodeInstances.put(clusterResourceName(cluster), nodeInstance);
-            configured = true;
-
-            if (config.services().eks().imdsPodNetwork()) {
-                configurePodNetworkRouting(cluster, containerId);
             }
 
             if (config.services().eks().imdsPodNetwork()) {
@@ -2980,70 +2375,6 @@ public class EksClusterManager
             LOG.infov("Configured link-local IMDS endpoint for EKS cluster {0}", cluster.getName());
         } catch (Exception e) {
             LOG.warnv("Could not configure link-local IMDS endpoint for EKS cluster {0}: {1}",
-                    cluster.getName(), e.getMessage());
-        } finally {
-            if (!configured && capability != null) {
-                metadataServer.unregisterProxy(nodeInstance, capability);
-            }
-        }
-    }
-
-    private void copyMetadataFile(String containerId, String name, String content, int mode) {
-        lifecycleManager.getDockerClient().copyArchiveToContainerCmd(containerId)
-                .withTarInputStream(new ByteArrayInputStream(tarSingleFile(name, content, mode)))
-                .withRemotePath("/var/lib")
-                .exec();
-    }
-
-    void configurePodIdentityRelay(Cluster cluster, String containerId) {
-        if (!config.services().eks().podIdentityWebhook() || !config.tls().enabled()) {
-            return;
-        }
-        try {
-            ContainerExecResult install = execInContainerForResult(containerId,
-                    Ec2MetadataProxy.installCommand(), 180);
-            if (install.exitCode() != 0) {
-                LOG.warnv("Could not install Pod Identity relay dependencies for EKS cluster {0}: {1}",
-                        cluster.getName(), install.summary());
-                return;
-            }
-
-            String flociHost = dockerHostResolver.resolve();
-            int flociPort = config.port();
-
-            ContainerExecResult start = execInContainerForResult(containerId,
-                    Ec2MetadataProxy.podIdentityStartCommand(flociHost, flociPort), 30);
-            if (start.exitCode() != 0) {
-                LOG.warnv("Could not start link-local Pod Identity relay for EKS cluster {0}: {1}",
-                        cluster.getName(), start.summary());
-                return;
-            }
-
-            configurePodNetworkRouting(cluster, containerId, List.of(EksPodNetworkRouting.POD_IDENTITY_ENDPOINT));
-
-            LOG.infov("Configured link-local Pod Identity relay for EKS cluster {0}", cluster.getName());
-        } catch (Exception e) {
-            LOG.warnv("Could not configure link-local Pod Identity relay for EKS cluster {0}: {1}",
-                    cluster.getName(), e.getMessage());
-        }
-    }
-
-    void configurePodNetworkRouting(Cluster cluster, String containerId) {
-        configurePodNetworkRouting(cluster, containerId, EksPodNetworkRouting.DEFAULT_ENDPOINTS);
-    }
-
-    void configurePodNetworkRouting(Cluster cluster, String containerId, List<LinkLocalEndpoint> endpoints) {
-        try {
-            String[] routingCmd = EksPodNetworkRouting.buildRoutingCommand(
-                    EksPodNetworkRouting.DEFAULT_POD_CIDR,
-                    endpoints);
-            ContainerExecResult routing = execInContainerForResult(containerId, routingCmd, 15);
-            if (routing.exitCode() != 0) {
-                LOG.warnv("Could not configure link-local pod network routing for EKS cluster {0}: {1}",
-                        cluster.getName(), routing.summary());
-            }
-        } catch (Exception e) {
-            LOG.warnv("Could not configure link-local pod network routing for EKS cluster {0}: {1}",
                     cluster.getName(), e.getMessage());
         }
     }
@@ -3872,6 +3203,105 @@ public class EksClusterManager
             conn.setHostnameVerifier((h, s) -> true);
         } catch (Exception e) {
             LOG.debugv("Could not disable SSL verification: {0}", e.getMessage());
+        }
+    }
+
+    /** Authenticated with the in-container admin kubeconfig; see {@link #isReady(Cluster)}. */
+    static final String[] CONTROL_PLANE_READY_COMMAND = {"sh", "-c",
+            "kubectl get --raw=/readyz >/dev/null && kubectl get serviceaccount default -n default -o name"};
+
+    private static final int CONTROL_PLANE_READY_TIMEOUT_SECONDS = 10;
+
+    private boolean isControlPlaneBootstrapped(String containerId) {
+        try {
+            ContainerExecResult result = execInContainerForResult(containerId,
+                    CONTROL_PLANE_READY_COMMAND, CONTROL_PLANE_READY_TIMEOUT_SECONDS);
+            if (result.exitCode() != 0) {
+                LOG.debugv("k3s control plane in container {0} is not ready yet: {1}",
+                        containerId, result.summary());
+                return false;
+            }
+            return true;
+        } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            LOG.debugv("Could not check the k3s control plane in container {0}: {1}", containerId, e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean isApiServerListening(Cluster cluster) {
+        // Prefer internalEndpoint (IP-based) for connectivity — works on both user-defined
+        // networks and the default bridge where container-name DNS is unavailable.
+        String endpoint = cluster.getInternalEndpoint() != null
+                ? cluster.getInternalEndpoint()
+                : cluster.getEndpoint();
+        if (endpoint == null || cluster.getContainerId() == null) {
+            return false;
+        }
+
+        // Any HTTP answer, 401 included, only proves the TLS listener is up.
+        String livezUrl = endpoint + "/livez";
+        try {
+            HttpURLConnection conn = (HttpURLConnection) URI.create(livezUrl).toURL().openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(2000);
+            conn.setReadTimeout(2000);
+            // k3s uses self-signed TLS — disable verification
+            if (conn instanceof javax.net.ssl.HttpsURLConnection https) {
+                disableSslVerification(https);
+            }
+            int code = conn.getResponseCode();
+            return code == 200 || code == 401 || code == 403;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * Returns the {@code apiserver_requested_deprecated_apis} samples from the cluster's k3s API
+     * server metrics, or empty when the cluster has no running API server or the scrape fails.
+     * Only the matching lines are returned, so the multi-megabyte metrics page never leaves the
+     * container; a failed {@code kubectl} exits non-zero and is reported as unavailable rather than
+     * as "no deprecated API usage".
+     */
+    public Optional<String> readDeprecatedApiMetrics(Cluster cluster) {
+        String containerId = cluster.getContainerId();
+        if (containerId == null) {
+            return Optional.empty();
+        }
+        String script = "metrics=$(kubectl get --raw /metrics) || exit 3; "
+                + "printf '%s\\n' \"$metrics\" | grep '^apiserver_requested_deprecated_apis{'; exit 0";
+        try {
+            ContainerExecResult result = execInContainerForResult(containerId,
+                    new String[]{"sh", "-c", script}, 20);
+            if (result.exitCode() != 0) {
+                LOG.debugv("Could not read API server metrics for EKS cluster {0}: {1}",
+                        cluster.getName(), result.summary());
+                return Optional.empty();
+            }
+            return Optional.of(result.output());
+        } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            LOG.debugv("Could not read API server metrics for EKS cluster {0}: {1}",
+                    cluster.getName(), e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    private void copyMetadataFile(String containerId, String name, String content, int mode) {
+        lifecycleManager.getDockerClient().copyArchiveToContainerCmd(containerId)
+                .withTarInputStream(new ByteArrayInputStream(tarSingleFile(name, content, mode)))
+                .withRemotePath("/var/lib")
+                .exec();
+    }
+
+    record ContainerExecResult(long exitCode, String output) {
+        String summary() {
+            return output == null || output.isBlank() ? "(no output)" : output.trim();
         }
     }
 }

@@ -82,13 +82,6 @@ public class FirehoseJsonHandler {
                 KinesisStreamSource source = request.has("KinesisStreamSourceConfiguration")
                         ? mapper.treeToValue(request.get("KinesisStreamSourceConfiguration"), KinesisStreamSource.class)
                         : null;
-                io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration encryption = null;
-                if (request.has("DeliveryStreamEncryptionConfigurationInput")
-                        && !request.get("DeliveryStreamEncryptionConfigurationInput").isNull()) {
-                    encryption = mapper.treeToValue(
-                            request.get("DeliveryStreamEncryptionConfigurationInput"),
-                            io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration.class);
-                }
                 String arn = firehoseService.createDeliveryStream(
                         region, name, s3, redshift, tags, deliveryStreamType, source);
                 yield Response.ok(Map.of("DeliveryStreamARN", arn)).build();
@@ -153,12 +146,6 @@ public class FirehoseJsonHandler {
                 yield Response.ok(Map.of("DeliveryStreamDescription", withoutSecrets(desc))).build();
             }
             case "ListDeliveryStreams" -> {
-                String exclusiveStart = request != null && request.has("ExclusiveStartDeliveryStreamName")
-                        ? request.get("ExclusiveStartDeliveryStreamName").asText() : null;
-                Integer limit = request != null && request.has("Limit") ? request.get("Limit").asInt() : null;
-                String type = request != null && request.has("DeliveryStreamType")
-                        ? request.get("DeliveryStreamType").asText() : null;
-                var page = firehoseService.listDeliveryStreams(exclusiveStart, limit, type);
                 JsonNode limitNode = request.get("Limit");
                 int limit = limitNode == null || limitNode.isNull() ? 10 : limitNode.asInt();
                 if (limitNode != null && !limitNode.isNull()

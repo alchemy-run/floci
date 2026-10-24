@@ -1,18 +1,22 @@
 package io.github.hectorvent.floci.services.athena;
 
-import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.glue.GlueService;
 import io.github.hectorvent.floci.services.glue.GlueTableResolver;
 import io.github.hectorvent.floci.services.glue.model.Database;
 import io.github.hectorvent.floci.services.glue.model.Table;
-import io.github.hectorvent.floci.services.s3.S3Service;
-import io.github.hectorvent.floci.services.s3.model.S3Object;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.List;
-
+import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.services.glue.model.Column;
+import io.github.hectorvent.floci.services.s3.S3Service;
+import io.github.hectorvent.floci.services.s3.model.S3Object;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Locale;
+import java.util.Set;
 
 @ApplicationScoped
 public class GlueViewDdlBuilder {
@@ -27,12 +31,10 @@ public class GlueViewDdlBuilder {
     private static final String ICEBERG_EXTENSION_SETUP = "INSTALL iceberg; LOAD iceberg;\n";
 
     private final GlueService glueService;
-    private final S3Service s3Service;
 
     @Inject
-    public GlueViewDdlBuilder(GlueService glueService, S3Service s3Service) {
+    public GlueViewDdlBuilder(GlueService glueService) {
         this.glueService = glueService;
-        this.s3Service = s3Service;
     }
 
     public String build(String contextDatabase) {
@@ -128,6 +130,20 @@ public class GlueViewDdlBuilder {
         }
         return usesIceberg;
     }
+
+    static String quote(String id) {
+        return "\"" + id.replace("\"", "\"\"") + "\"";
+    }
+
+    /** Glue table property AWS/pyiceberg set to mark a table as Iceberg-format. */
+    private static final String PARAM_TABLE_TYPE = "table_type";
+
+    /** Glue table property holding the path to the table's current Iceberg metadata JSON. */
+    private static final String PARAM_METADATA_LOCATION = "metadata_location";
+
+    private static final String ICEBERG_TABLE_TYPE = "ICEBERG";
+
+    private final S3Service s3Service;
 
     private List<String> dataPaths(Table table, String location) {
         if (!location.startsWith("s3://")) {
@@ -261,9 +277,5 @@ public class GlueViewDdlBuilder {
 
     static boolean containsIgnoreCase(String str, String sub) {
         return str != null && str.toLowerCase(Locale.ROOT).contains(sub);
-    }
-
-    static String quote(String id) {
-        return "\"" + id.replace("\"", "\"\"") + "\"";
     }
 }

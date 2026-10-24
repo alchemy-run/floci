@@ -369,6 +369,8 @@ public class LambdaExecutorService implements Resettable {
 
             handle.getRuntimeApiServer().enqueue(invocation);
 
+            // A cold start can queue behind an image pull or an earlier container's boot, so the
+            // dispatch budget is wider than the function timeout.
             int queueBudgetSeconds = Math.max(60, fn.getTimeout() * 8);
             CompletableFuture.anyOf(invocation.getDispatchedFuture(), invocation.getResultFuture())
                     .get(queueBudgetSeconds + RUNTIME_DISPATCH_GRACE_SECONDS, TimeUnit.SECONDS);

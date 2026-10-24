@@ -1,18 +1,12 @@
 package io.github.hectorvent.floci.services.detective;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.Resettable;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
-import io.github.hectorvent.floci.services.cloudtrail.CloudTrailEventService;
 import io.github.hectorvent.floci.services.detective.model.DetectiveMember;
 import io.github.hectorvent.floci.services.detective.model.DetectiveState;
 import io.github.hectorvent.floci.services.organizations.OrganizationsService;
@@ -20,12 +14,18 @@ import io.github.hectorvent.floci.services.organizations.model.Organization;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.util.List;
+import java.util.Map;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.services.cloudtrail.CloudTrailEventService;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -34,49 +34,169 @@ public class DetectiveService implements Resettable {
     private static final int MAX_MEMBERS = 1200;
     private static final String ACCEPTED_BUT_DISABLED = "ACCEPTED_BUT_DISABLED";
     private static final String ENABLED = "ENABLED";
-    private static final String GRAPH_ARN_PATTERN = "arn:aws:detective:[a-z0-9-]+:\\d{12}:graph:[a-f0-9]{32}";
 
     private final AccountAwareStorageBackend<DetectiveState> states;
     private final RegionResolver regionResolver;
     private final OrganizationsService organizationsService;
-    private final CloudTrailEventService cloudTrailEvents;
-    private final ObjectMapper objectMapper;
-    private final boolean cloudTrailEnabled;
 
     @Inject
     public DetectiveService(StorageFactory storageFactory, RegionResolver regionResolver,
-                            OrganizationsService organizationsService, CloudTrailEventService cloudTrailEvents,
-                            ObjectMapper objectMapper, EmulatorConfig config) {
+                            OrganizationsService organizationsService) {
         this(storageFactory.create("detective", "detective-state.json",
-                new TypeReference<Map<String, DetectiveState>>() {}), regionResolver, organizationsService,
-                cloudTrailEvents, objectMapper, config.services().cloudtrail().enabled());
+                new TypeReference<Map<String, DetectiveState>>() {}), regionResolver, organizationsService);
     }
 
     DetectiveService(AccountAwareStorageBackend<DetectiveState> states, RegionResolver regionResolver,
-                     OrganizationsService organizationsService, CloudTrailEventService cloudTrailEvents,
-                     ObjectMapper objectMapper, boolean cloudTrailEnabled) {
+                     OrganizationsService organizationsService) {
         this.states = states;
         this.regionResolver = regionResolver;
         this.organizationsService = organizationsService;
-        this.cloudTrailEvents = cloudTrailEvents;
-        this.objectMapper = objectMapper;
-        this.cloudTrailEnabled = cloudTrailEnabled;
     }
 
-    public synchronized DetectiveState state(String region) {
-        DetectiveState state = states.get(region).orElseGet(DetectiveState::new);
-        if (state.isGraph() && state.getGraphArn() == null) {
-            // Preserve the identity used by pre-lifecycle persisted graphs.
-            state.setGraphArn(graphArnForAccount(regionResolver.getAccountId(), region,
-                    "00000000000000000000000000000001"));
+    public DetectiveState state(String region) {
+        return states.get(region).orElseGet(DetectiveState::new);
+    }
+
+    public String graphArn(String region) {
+        return graphArnForAccount(regionResolver.getAccountId(), region);
+    }
+
+    public synchronized void enableAdmin(String region, String callerAccountId, String accountId) {
+        requireAccountId(accountId);
+        Organization organization = organizationsService.describeOrganization(callerAccountId);
+        if (!callerAccountId.equals(organization.getMasterAccountId())) {
+            throw new AwsException("AccessDeniedException",
+                    "Only the organization management account can designate the Detective administrator account.", 403);
+        }
+        boolean accountInOrganization = organizationsService.listAccounts(callerAccountId).stream()
+                .anyMatch(account -> accountId.equals(account.getId()));
+        if (!accountInOrganization) {
+            throw new AwsException("ValidationException",
+                    "AccountId must identify an account in the organization.", 400);
+        }
+        DetectiveState management = state(region);
+        if (management.getAdminAccountId() != null && !management.getAdminAccountId().equals(accountId)) {
+            throw new AwsException("ConflictException",
+                    "A different Detective administrator account is already configured.", 409);
+        }
+        management.setAdminAccountId(accountId);
+        states.put(region, management);
+
+        DetectiveState delegated = states.getForAccount(accountId, region).orElseGet(DetectiveState::new);
+        delegated.setAdminAccountId(accountId);
+        delegated.setGraph(true);
+        states.putForAccount(accountId, region, delegated);
+    }
+
+    public synchronized void updateOrganizationConfiguration(String region, String graphArn, Boolean autoEnable) {
+        requireGraphArn(region, graphArn);
+        DetectiveState state = requireGraph(region);
+        if (autoEnable != null) {
+            state.setAutoEnable(autoEnable);
             states.put(region, state);
+        }
+    }
+
+    public synchronized DetectiveMember createMember(String region, String graphArn,
+                                                      String accountId, String emailAddress) {
+        requireGraphArn(region, graphArn);
+        requireAccountId(accountId);
+        DetectiveState state = requireGraph(region);
+        if (state.getMembers().containsKey(accountId)) {
+            throw new AwsException("ConflictException",
+                    "The account is already a member of the behavior graph.", 409);
+        }
+        if (state.getMembers().size() >= MAX_MEMBERS) {
+            throw new AwsException("ServiceQuotaExceededException",
+                    "The behavior graph member quota has been exceeded.", 402);
+        }
+        DetectiveMember member = new DetectiveMember(accountId, emailAddress, ACCEPTED_BUT_DISABLED);
+        state.getMembers().put(accountId, member);
+        states.put(region, state);
+        return member;
+    }
+
+    public synchronized void validateCreateMembers(String region, String graphArn, List<String> accountIds) {
+        requireGraphArn(region, graphArn);
+        DetectiveState state = requireGraph(region);
+        int newMembers = 0;
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (String accountId : accountIds) {
+            requireAccountId(accountId);
+            if (seen.add(accountId) && !state.getMembers().containsKey(accountId)) {
+                newMembers++;
+            }
+        }
+        if (state.getMembers().size() + newMembers > MAX_MEMBERS) {
+            throw new AwsException("ServiceQuotaExceededException",
+                    "The behavior graph member quota has been exceeded.", 402);
+        }
+    }
+
+    public synchronized DetectiveMember startMonitoring(String region, String accountId, String graphArn) {
+        requireGraphArn(region, graphArn);
+        requireAccountId(accountId);
+        DetectiveState state = requireGraph(region);
+        DetectiveMember member = state.getMembers().get(accountId);
+        if (member == null) {
+            throw new AwsException("ResourceNotFoundException", "Member account not found.", 404);
+        }
+        if (ENABLED.equals(member.getStatus())) {
+            throw new AwsException("ConflictException",
+                    "The member account is already contributing data to the behavior graph.", 409);
+        }
+        if (!ACCEPTED_BUT_DISABLED.equals(member.getStatus())) {
+            throw new AwsException("ConflictException",
+                    "The member account is not in a state that can start monitoring.", 409);
+        }
+        member.setStatus(ENABLED);
+        states.put(region, state);
+        return member;
+    }
+
+    public List<DetectiveMember> listMembers(String region, String graphArn) {
+        requireGraphArn(region, graphArn);
+        return requireGraph(region).getMembers().values().stream()
+                .sorted(java.util.Comparator.comparing(DetectiveMember::getAccountId))
+                .toList();
+    }
+
+    @Override
+    public void clear() {
+        states.clear();
+    }
+
+    public DetectiveState requireGraph(String region) {
+        DetectiveState state = state(region);
+        if (!state.isGraph()) {
+            throw new AwsException("ResourceNotFoundException", "Behavior graph not found.", 404);
         }
         return state;
     }
 
-    public String graphArn(String region) {
-        return requireGraph(region).getGraphArn();
+    public void requireGraphArn(String region, String graphArn) {
+        if (graphArn == null || !graphArnForAccount(regionResolver.getAccountId(), region).equals(graphArn)) {
+            throw new AwsException("ResourceNotFoundException", "Behavior graph not found.", 404);
+        }
     }
+
+    private static String graphArnForAccount(String accountId, String region) {
+        return AwsArnUtils.Arn.of("detective", region, accountId, "graph:00000000000000000000000000000001").toString();
+    }
+
+    private static void requireAccountId(String accountId) {
+        if (accountId == null || !accountId.matches("\\d{12}")) {
+            throw new AwsException("ValidationException", "AccountId must be a 12 digit account ID.", 400);
+        }
+    }
+
+    private static final String GRAPH_ARN_PATTERN = "arn:aws:detective:[a-z0-9-]+:\\d{12}:graph:[a-f0-9]{32}";
+
+    private final CloudTrailEventService cloudTrailEvents;
+
+    private final ObjectMapper objectMapper;
+
+    private final boolean cloudTrailEnabled;
 
     public synchronized String createGraph(String region, Map<String, String> tags) {
         Map<String, String> validated = validateTags(tags);
@@ -334,116 +454,6 @@ public class DetectiveService implements Resettable {
         state.setCreatedTime(Instant.now().toString());
     }
 
-    public synchronized void enableAdmin(String region, String callerAccountId, String accountId) {
-        requireAccountId(accountId);
-        Organization organization = organizationsService.describeOrganization(callerAccountId);
-        if (!callerAccountId.equals(organization.getMasterAccountId())) {
-            throw new AwsException("AccessDeniedException",
-                    "Only the organization management account can designate the Detective administrator account.", 403);
-        }
-        boolean accountInOrganization = organizationsService.listAccounts(callerAccountId).stream()
-                .anyMatch(account -> accountId.equals(account.getId()));
-        if (!accountInOrganization) {
-            throw new AwsException("ValidationException",
-                    "AccountId must identify an account in the organization.", 400);
-        }
-        DetectiveState management = state(region);
-        if (management.getAdminAccountId() != null && !management.getAdminAccountId().equals(accountId)) {
-            throw new AwsException("ConflictException",
-                    "A different Detective administrator account is already configured.", 409);
-        }
-        management.setAdminAccountId(accountId);
-        states.put(region, management);
-
-        DetectiveState delegated = states.getForAccount(accountId, region).orElseGet(DetectiveState::new);
-        delegated.setAdminAccountId(accountId);
-        if (!delegated.isGraph()) {
-            initializeGraph(delegated, accountId, region);
-        }
-        states.putForAccount(accountId, region, delegated);
-    }
-
-    public synchronized void updateOrganizationConfiguration(String region, String graphArn, Boolean autoEnable) {
-        requireGraphArn(region, graphArn);
-        DetectiveState state = requireGraph(region);
-        if (autoEnable != null) {
-            state.setAutoEnable(autoEnable);
-            states.put(region, state);
-        }
-    }
-
-    public synchronized DetectiveMember createMember(String region, String graphArn,
-                                                      String accountId, String emailAddress) {
-        requireGraphArn(region, graphArn);
-        requireAccountId(accountId);
-        DetectiveState state = requireGraph(region);
-        if (state.getMembers().containsKey(accountId)) {
-            throw new AwsException("ConflictException",
-                    "The account is already a member of the behavior graph.", 409);
-        }
-        if (state.getMembers().size() >= MAX_MEMBERS) {
-            throw new AwsException("ServiceQuotaExceededException",
-                    "The behavior graph member quota has been exceeded.", 402);
-        }
-        boolean organizationMember = regionResolver.getAccountId().equals(state.getAdminAccountId())
-                && organizationsService.listAccounts(regionResolver.getAccountId()).stream()
-                .anyMatch(account -> accountId.equals(account.getId()));
-        if (!organizationMember && (emailAddress == null || emailAddress.isBlank()
-                || emailAddress.indexOf('@') <= 0 || emailAddress.endsWith("@"))) {
-            throw new AwsException("ValidationException", "EmailAddress is required for invited members.", 400);
-        }
-        DetectiveMember member = new DetectiveMember(accountId, emailAddress,
-                organizationMember ? ACCEPTED_BUT_DISABLED : "INVITED");
-        member.setInvitationType(organizationMember ? "ORGANIZATION" : "INVITATION");
-        member.setInvitedTime(Instant.now().toString());
-        state.getMembers().put(accountId, member);
-        states.put(region, state);
-        return member;
-    }
-
-    public synchronized void validateCreateMembers(String region, String graphArn, List<String> accountIds) {
-        requireGraphArn(region, graphArn);
-        DetectiveState state = requireGraph(region);
-        int newMembers = 0;
-        java.util.Set<String> seen = new java.util.HashSet<>();
-        for (String accountId : accountIds) {
-            requireAccountId(accountId);
-            if (seen.add(accountId) && !state.getMembers().containsKey(accountId)) {
-                newMembers++;
-            }
-        }
-        if (state.getMembers().size() + newMembers > MAX_MEMBERS) {
-            throw new AwsException("ServiceQuotaExceededException",
-                    "The behavior graph member quota has been exceeded.", 402);
-        }
-    }
-
-    public synchronized DetectiveMember startMonitoring(String region, String accountId, String graphArn) {
-        requireGraphArn(region, graphArn);
-        requireAccountId(accountId);
-        DetectiveState state = requireGraph(region);
-        DetectiveMember member = state.getMembers().get(accountId);
-        if (member == null) {
-            throw new AwsException("ResourceNotFoundException", "Member account not found.", 404);
-        }
-        if (ENABLED.equals(member.getStatus())) {
-            throw new AwsException("ConflictException",
-                    "The member account already has ENABLED status.", 409);
-        }
-        if (!ACCEPTED_BUT_DISABLED.equals(member.getStatus())) {
-            throw new AwsException("ConflictException",
-                    "The member account is not in a state that can start monitoring.", 409);
-        }
-        throw unsupported("member data ingestion");
-    }
-
-    public List<DetectiveMember> listMembers(String region, String graphArn) {
-        requireGraphArn(region, graphArn);
-        return requireGraph(region).getMembers().values().stream()
-                .sorted(java.util.Comparator.comparing(DetectiveMember::getAccountId))
-                .toList();
-    }
-
     public Map<String, DetectiveMember> getMembers(String region, String graphArn, List<String> accountIds) {
         requireGraphArn(region, graphArn);
         if (accountIds == null || accountIds.isEmpty() || accountIds.size() > 50) {
@@ -478,38 +488,5 @@ public class DetectiveService implements Resettable {
 
     static AwsException unsupported(String operation) {
         return new AwsException("ValidationException", "Floci does not support Detective " + operation + ".", 400);
-    }
-
-    @Override
-    public void clear() {
-        states.clear();
-    }
-
-    public DetectiveState requireGraph(String region) {
-        DetectiveState state = state(region);
-        if (!state.isGraph()) {
-            throw new AwsException("ResourceNotFoundException", "Behavior graph not found.", 404);
-        }
-        return state;
-    }
-
-    public void requireGraphArn(String region, String graphArn) {
-        if (graphArn == null || !graphArn.matches(GRAPH_ARN_PATTERN)) {
-            throw new AwsException("ValidationException", "GraphArn must be a valid Detective graph ARN.", 400);
-        }
-        String prefix = "arn:aws:detective:" + region + ":" + regionResolver.getAccountId() + ":graph:";
-        if (!graphArn.startsWith(prefix) || !graphArn.equals(requireGraph(region).getGraphArn())) {
-            throw new AwsException("ResourceNotFoundException", "Behavior graph not found.", 404);
-        }
-    }
-
-    private static String graphArnForAccount(String accountId, String region) {
-        return AwsArnUtils.Arn.of("detective", region, accountId, "graph:00000000000000000000000000000001").toString();
-    }
-
-    private static void requireAccountId(String accountId) {
-        if (accountId == null || !accountId.matches("\\d{12}")) {
-            throw new AwsException("ValidationException", "AccountId must be a 12 digit account ID.", 400);
-        }
     }
 }

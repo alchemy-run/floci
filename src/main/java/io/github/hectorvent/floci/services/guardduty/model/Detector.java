@@ -1,11 +1,11 @@
 package io.github.hectorvent.floci.services.guardduty.model;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.databind.JsonNode;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.List;
 import java.util.Map;
+import com.fasterxml.jackson.databind.JsonNode;
 
 /** A GuardDuty detector. Serialized with GuardDuty's lowerCamelCase member names. */
 @RegisterForReflection
@@ -20,9 +20,6 @@ public class Detector {
     private Map<String, String> tags;
     private List<DetectorFeature> features;
     private OrganizationConfiguration organizationConfiguration;
-    private Map<String, JsonNode> findings = Map.of();
-    private Map<String, JsonNode> resources = Map.of();
-    private JsonNode malwareScanSettings;
 
     public Detector() {
     }
@@ -112,6 +109,20 @@ public class Detector {
         this.features = features == null ? null : List.copyOf(features);
     }
 
+    public OrganizationConfiguration getOrganizationConfiguration() {
+        return organizationConfiguration;
+    }
+
+    public void setOrganizationConfiguration(OrganizationConfiguration organizationConfiguration) {
+        this.organizationConfiguration = organizationConfiguration;
+    }
+
+    private Map<String, JsonNode> findings = Map.of();
+
+    private Map<String, JsonNode> resources = Map.of();
+
+    private JsonNode malwareScanSettings;
+
     public Map<String, JsonNode> getFindings() {
         return findings;
     }
@@ -126,14 +137,6 @@ public class Detector {
 
     public void setResources(Map<String, JsonNode> resources) {
         this.resources = resources == null ? Map.of() : Map.copyOf(resources);
-    }
-
-    public OrganizationConfiguration getOrganizationConfiguration() {
-        return organizationConfiguration;
-    }
-
-    public void setOrganizationConfiguration(OrganizationConfiguration organizationConfiguration) {
-        this.organizationConfiguration = organizationConfiguration;
     }
 
     public JsonNode getMalwareScanSettings() {

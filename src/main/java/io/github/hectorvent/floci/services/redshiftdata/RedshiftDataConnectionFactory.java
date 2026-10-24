@@ -1,16 +1,14 @@
 package io.github.hectorvent.floci.services.redshiftdata;
 
 import jakarta.enterprise.context.ApplicationScoped;
-import org.postgresql.Driver;
 
 import java.sql.Connection;
+import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.Properties;
 
 @ApplicationScoped
 class RedshiftDataConnectionFactory {
-
-    private final Driver driver = new Driver();
 
     Connection open(RedshiftDataResourceResolver.DatabaseTarget target) throws SQLException {
         // stringtype=unspecified: Redshift Data API parameter values are always strings on the
@@ -24,6 +22,6 @@ class RedshiftDataConnectionFactory {
         props.setProperty("user", target.user());
         props.setProperty("password", target.password());
         props.setProperty("connectTimeout", "5");
-        return driver.connect(url, props);
+        return DriverManager.getConnection(url, props);
     }
 }

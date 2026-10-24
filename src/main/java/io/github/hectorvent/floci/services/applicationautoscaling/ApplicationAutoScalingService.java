@@ -6,13 +6,10 @@ import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.ServicePrincipals;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
-import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.Alarm;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.ScalableTarget;
-import io.github.hectorvent.floci.services.applicationautoscaling.model.ScalableTargetAction;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.ScalingActivity;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.ScalingPolicy;
-import io.github.hectorvent.floci.services.applicationautoscaling.model.ScheduledAction;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.StepScalingConfiguration;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.SuspendedState;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.TargetTrackingConfiguration;
@@ -33,12 +30,17 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import io.github.hectorvent.floci.core.storage.InMemoryStorage;
+import io.github.hectorvent.floci.services.applicationautoscaling.model.ScalableTargetAction;
+import io.github.hectorvent.floci.services.applicationautoscaling.model.ScheduledAction;
 
 /**
  * Application Auto Scaling control plane.
  *
- * <p>Scalable targets, policies, scheduled actions, and scaling activities share
- * the control-plane stores used by the capacity adjusters.</p>
+ * <p>Scalable targets and scaling policies are stored and described faithfully, but
+ * policies are <strong>inert</strong>: nothing evaluates them and no capacity is ever
+ * adjusted. This mirrors the existing EC2 Auto Scaling {@code PutScalingPolicy} behaviour
+ * and is documented in {@code docs/services/applicationautoscaling.md}.</p>
  *
  * @see <a href="https://docs.aws.amazon.com/autoscaling/application/APIReference/Welcome.html">Application Auto Scaling API Reference</a>
  */
@@ -83,7 +85,6 @@ public class ApplicationAutoScalingService {
 
     private final StorageBackend<String, ScalableTarget> targets;
     private final StorageBackend<String, ScalingPolicy> policies;
-    private final StorageBackend<String, ScheduledAction> scheduledActions;
     private final StorageBackend<String, ScalingActivity> activities;
     private final RegionResolver regionResolver;
     private final CloudWatchMetricsService cloudWatchMetricsService;
@@ -96,8 +97,6 @@ public class ApplicationAutoScalingService {
                         new TypeReference<Map<String, ScalableTarget>>() {}),
                 factory.create("applicationautoscaling", "application-autoscaling-policies.json",
                         new TypeReference<Map<String, ScalingPolicy>>() {}),
-                factory.create("applicationautoscaling", "application-autoscaling-scheduled-actions.json",
-                        new TypeReference<Map<String, ScheduledAction>>() {}),
                 factory.create("applicationautoscaling", "application-autoscaling-activities.json",
                         new TypeReference<Map<String, ScalingActivity>>() {}),
                 regionResolver,
@@ -109,19 +108,8 @@ public class ApplicationAutoScalingService {
                                   StorageBackend<String, ScalingActivity> activities,
                                   RegionResolver regionResolver,
                                   CloudWatchMetricsService cloudWatchMetricsService) {
-        this(targets, policies, new InMemoryStorage<>(), activities,
-                regionResolver, cloudWatchMetricsService);
-    }
-
-    ApplicationAutoScalingService(StorageBackend<String, ScalableTarget> targets,
-                                  StorageBackend<String, ScalingPolicy> policies,
-                                  StorageBackend<String, ScheduledAction> scheduledActions,
-                                  StorageBackend<String, ScalingActivity> activities,
-                                  RegionResolver regionResolver,
-                                  CloudWatchMetricsService cloudWatchMetricsService) {
         this.targets = targets;
         this.policies = policies;
-        this.scheduledActions = scheduledActions;
         this.activities = activities;
         this.regionResolver = regionResolver;
         this.cloudWatchMetricsService = cloudWatchMetricsService;
@@ -190,7 +178,7 @@ public class ApplicationAutoScalingService {
         requireNamespace(serviceNamespace);
         if (scalableDimension != null && (resourceIds == null || resourceIds.isEmpty())) {
             throw new AwsException("ValidationException",
-                    "Scalable dimension cannot be provided without a resource ID.", 400);
+                    "A resource ID must be specified when a scalable dimension is specified.", 400);
         }
         String prefix = region + "::" + serviceNamespace + "::";
         return targets.scan(k -> k.startsWith(prefix)).stream()
@@ -218,10 +206,6 @@ public class ApplicationAutoScalingService {
         for (ScalingPolicy policy : findPolicies(region, serviceNamespace, resourceId, scalableDimension)) {
             deleteAlarms(policy, region);
             policies.delete(policyKey(region, serviceNamespace, resourceId, scalableDimension, policy.getPolicyName()));
-        }
-        for (ScheduledAction action : findScheduledActions(region, serviceNamespace, resourceId, scalableDimension)) {
-            scheduledActions.delete(scheduledActionKey(region, serviceNamespace, resourceId, scalableDimension,
-                    action.getScheduledActionName()));
         }
         targets.delete(key);
         LOG.infov("DeregisterScalableTarget: {0} {1} {2} in {3}",
@@ -285,14 +269,9 @@ public class ApplicationAutoScalingService {
                                                        String scalableDimension, List<String> policyNames,
                                                        String region) {
         requireNamespace(serviceNamespace);
-        // AWS rejects ScalableDimension without ResourceId on a namespace listing.
-        // Lookup by PolicyNames is already unique; Alchemy's ScalingPolicy.read of a
-        // creating-state row (Output-valued ResourceId not yet persisted) sends
-        // PolicyNames + ScalableDimension with ResourceId omitted.
-        if (scalableDimension != null && (resourceId == null || resourceId.isBlank())
-                && (policyNames == null || policyNames.isEmpty())) {
+        if (scalableDimension != null && (resourceId == null || resourceId.isBlank())) {
             throw new AwsException("ValidationException",
-                    "Scalable dimension cannot be provided without a resource ID.", 400);
+                    "A resource ID must be specified when a scalable dimension is specified.", 400);
         }
         String prefix = region + "::" + serviceNamespace + "::";
         return policies.scan(k -> k.startsWith(prefix)).stream()
@@ -319,137 +298,6 @@ public class ApplicationAutoScalingService {
         policies.delete(key);
         LOG.infov("DeleteScalingPolicy: {0} for {1} {2} in {3}",
                 policyName, serviceNamespace, resourceId, region);
-    }
-
-    // ---------------------------------------------------------------- scheduled actions
-
-    public ScheduledAction putScheduledAction(String scheduledActionName, String serviceNamespace,
-                                              String resourceId, String scalableDimension,
-                                              String schedule, String timezone,
-                                              Double startTime, Double endTime,
-                                              ScalableTargetAction scalableTargetAction, String region) {
-        validateTriple(serviceNamespace, resourceId, scalableDimension);
-        if (scheduledActionName == null || scheduledActionName.isBlank()) {
-            throw new AwsException("ValidationException", "ScheduledActionName is required.", 400);
-        }
-        if (schedule == null || schedule.isBlank()) {
-            throw new AwsException("ValidationException", "Schedule is required.", 400);
-        }
-        String targetKey = targetKey(region, serviceNamespace, resourceId, scalableDimension);
-        if (targets.get(targetKey).isEmpty()) {
-            throw new AwsException("ObjectNotFoundException",
-                    "No scalable target found for service namespace: " + serviceNamespace
-                            + ", resource ID: " + resourceId
-                            + ", scalable dimension: " + scalableDimension, 400);
-        }
-
-        String key = scheduledActionKey(region, serviceNamespace, resourceId, scalableDimension, scheduledActionName);
-        ScheduledAction existing = scheduledActions.get(key).orElse(null);
-        ScheduledAction action = existing != null ? existing : new ScheduledAction();
-        action.setScheduledActionName(scheduledActionName);
-        action.setServiceNamespace(serviceNamespace);
-        action.setResourceId(resourceId);
-        action.setScalableDimension(scalableDimension);
-        action.setSchedule(schedule);
-        action.setTimezone(timezone);
-        // AWS deletes unspecified StartTime/EndTime on update.
-        action.setStartTime(startTime);
-        action.setEndTime(endTime);
-        action.setScalableTargetAction(scalableTargetAction);
-        if (existing == null) {
-            action.setCreationTime(nowEpochSeconds());
-            action.setScheduledActionArn(buildScheduledActionArn(region, serviceNamespace, resourceId,
-                    scheduledActionName));
-        }
-        scheduledActions.put(key, action);
-        LOG.infov("PutScheduledAction: {0} for {1} {2} in {3}",
-                scheduledActionName, serviceNamespace, resourceId, region);
-        return action;
-    }
-
-    public List<ScheduledAction> describeScheduledActions(String serviceNamespace, String resourceId,
-                                                          String scalableDimension,
-                                                          List<String> scheduledActionNames, String region) {
-        requireNamespace(serviceNamespace);
-        if (scalableDimension != null && (resourceId == null || resourceId.isBlank())) {
-            throw new AwsException("ValidationException",
-                    "Scalable dimension cannot be provided without a resource ID.", 400);
-        }
-        String prefix = region + "::" + serviceNamespace + "::";
-        return scheduledActions.scan(k -> k.startsWith(prefix)).stream()
-                .filter(a -> resourceId == null || resourceId.isBlank() || resourceId.equals(a.getResourceId()))
-                .filter(a -> scalableDimension == null || scalableDimension.equals(a.getScalableDimension()))
-                .filter(a -> scheduledActionNames == null || scheduledActionNames.isEmpty()
-                        || scheduledActionNames.contains(a.getScheduledActionName()))
-                .sorted(Comparator.comparing(ScheduledAction::getScheduledActionName))
-                .toList();
-    }
-
-    public void deleteScheduledAction(String scheduledActionName, String serviceNamespace, String resourceId,
-                                      String scalableDimension, String region) {
-        validateTriple(serviceNamespace, resourceId, scalableDimension);
-        if (scheduledActionName == null || scheduledActionName.isBlank()) {
-            throw new AwsException("ValidationException", "ScheduledActionName is required.", 400);
-        }
-        String key = scheduledActionKey(region, serviceNamespace, resourceId, scalableDimension, scheduledActionName);
-        if (scheduledActions.get(key).isEmpty()) {
-            throw new AwsException("ObjectNotFoundException",
-                    "No scheduled action found for service namespace: " + serviceNamespace
-                            + ", resource ID: " + resourceId
-                            + ", scalable dimension: " + scalableDimension
-                            + ", scheduled action name: " + scheduledActionName, 400);
-        }
-        scheduledActions.delete(key);
-        LOG.infov("DeleteScheduledAction: {0} for {1} {2} in {3}",
-                scheduledActionName, serviceNamespace, resourceId, region);
-    }
-
-    // ---------------------------------------------------------------- activities + forecast
-
-    public List<ScalingActivity> describeScalingActivities(String serviceNamespace, String resourceId,
-                                                           String scalableDimension, String region) {
-        requireNamespace(serviceNamespace);
-        if (scalableDimension != null && (resourceId == null || resourceId.isBlank())) {
-            throw new AwsException("ValidationException",
-                    "Scalable dimension cannot be provided without a resource ID.", 400);
-        }
-        String prefix = region + "::" + serviceNamespace + "::";
-        return activities.scan(k -> k.startsWith(prefix)).stream()
-                .filter(a -> resourceId == null || resourceId.isBlank() || resourceId.equals(a.getResourceId()))
-                .filter(a -> scalableDimension == null || scalableDimension.equals(a.getScalableDimension()))
-                .sorted(Comparator.comparing(ScalingActivity::getStartTime).reversed())
-                .toList();
-    }
-
-    /**
-     * Predictive scaling forecasts exist only for ECS services on AWS. A non-ECS
-     * namespace is rejected with the same {@code AccessDeniedException} message
-     * distilled maps to {@code PredictiveScalingForecastNotSupported}.
-     */
-    public void requirePredictiveScalingForecast(String serviceNamespace, String resourceId,
-                                                 String scalableDimension, String policyName, String region) {
-        requireNamespace(serviceNamespace);
-        if (!"ecs".equals(serviceNamespace)) {
-            throw new AwsException("AccessDeniedException",
-                    "GetPredictiveScalingForecast is not supported.", 400);
-        }
-        if (resourceId == null || resourceId.isBlank()) {
-            throw new AwsException("ValidationException", "ResourceId is required.", 400);
-        }
-        if (scalableDimension == null || scalableDimension.isBlank()) {
-            throw new AwsException("ValidationException", "ScalableDimension is required.", 400);
-        }
-        if (policyName == null || policyName.isBlank()) {
-            throw new AwsException("ValidationException", "PolicyName is required.", 400);
-        }
-        String key = policyKey(region, serviceNamespace, resourceId, scalableDimension, policyName);
-        if (policies.get(key).isEmpty()) {
-            throw new AwsException("ObjectNotFoundException",
-                    "No scaling policy found for service namespace: " + serviceNamespace
-                            + ", resource ID: " + resourceId
-                            + ", scalable dimension: " + scalableDimension
-                            + ", policy name: " + policyName, 400);
-        }
     }
 
     // ---------------------------------------------------------------- tagging
@@ -498,15 +346,6 @@ public class ApplicationAutoScalingService {
         return policies.scan(k -> k.startsWith(prefix)).stream()
                 .filter(p -> resourceId.equals(p.getResourceId()))
                 .filter(p -> scalableDimension.equals(p.getScalableDimension()))
-                .toList();
-    }
-
-    private List<ScheduledAction> findScheduledActions(String region, String serviceNamespace, String resourceId,
-                                                       String scalableDimension) {
-        String prefix = region + "::" + serviceNamespace + "::";
-        return scheduledActions.scan(k -> k.startsWith(prefix)).stream()
-                .filter(a -> resourceId.equals(a.getResourceId()))
-                .filter(a -> scalableDimension.equals(a.getScalableDimension()))
                 .toList();
     }
 
@@ -643,14 +482,6 @@ public class ApplicationAutoScalingService {
         return regionResolver.buildArn("autoscaling", region, resource);
     }
 
-    private String buildScheduledActionArn(String region, String serviceNamespace, String resourceId,
-                                           String scheduledActionName) {
-        String resource = "scheduledAction:" + UUID.randomUUID()
-                + ":resource/" + serviceNamespace + "/" + resourceId
-                + ":scheduledActionName/" + scheduledActionName;
-        return regionResolver.buildArn("autoscaling", region, resource);
-    }
-
     /**
      * AWS creates and returns a service-linked role when the caller supplies none, so the
      * emulator synthesizes one in the same shape to keep the Computed attribute stable.
@@ -693,11 +524,6 @@ public class ApplicationAutoScalingService {
     private static String policyKey(String region, String serviceNamespace, String resourceId,
                                     String scalableDimension, String policyName) {
         return targetKey(region, serviceNamespace, resourceId, scalableDimension) + "::" + policyName;
-    }
-
-    private static String scheduledActionKey(String region, String serviceNamespace, String resourceId,
-                                             String scalableDimension, String scheduledActionName) {
-        return targetKey(region, serviceNamespace, resourceId, scalableDimension) + "::" + scheduledActionName;
     }
 
     Optional<ScalableTarget> findTarget(String region, String serviceNamespace, String resourceId,
@@ -743,4 +569,150 @@ public class ApplicationAutoScalingService {
         LOG.infov("Scaling activity for policy {0}: {1}", policy.getPolicyName(), description);
     }
 
+    public List<ScalingActivity> describeScalingActivities(String serviceNamespace, String resourceId,
+                                                            String scalableDimension, String region) {
+        requireNamespace(serviceNamespace);
+        String prefix = region + "::" + serviceNamespace + "::";
+        return activities.scan(k -> k.startsWith(prefix)).stream()
+                .filter(a -> resourceId == null || resourceId.equals(a.getResourceId()))
+                .filter(a -> scalableDimension == null || scalableDimension.equals(a.getScalableDimension()))
+                .sorted(Comparator.comparingDouble(ScalingActivity::getStartTime).reversed())
+                .toList();
+    }
+
+    private final StorageBackend<String, ScheduledAction> scheduledActions;
+
+    public ScheduledAction putScheduledAction(String scheduledActionName, String serviceNamespace,
+                                              String resourceId, String scalableDimension,
+                                              String schedule, String timezone,
+                                              Double startTime, Double endTime,
+                                              ScalableTargetAction scalableTargetAction, String region) {
+        validateTriple(serviceNamespace, resourceId, scalableDimension);
+        if (scheduledActionName == null || scheduledActionName.isBlank()) {
+            throw new AwsException("ValidationException", "ScheduledActionName is required.", 400);
+        }
+        if (schedule == null || schedule.isBlank()) {
+            throw new AwsException("ValidationException", "Schedule is required.", 400);
+        }
+        String targetKey = targetKey(region, serviceNamespace, resourceId, scalableDimension);
+        if (targets.get(targetKey).isEmpty()) {
+            throw new AwsException("ObjectNotFoundException",
+                    "No scalable target found for service namespace: " + serviceNamespace
+                            + ", resource ID: " + resourceId
+                            + ", scalable dimension: " + scalableDimension, 400);
+        }
+
+        String key = scheduledActionKey(region, serviceNamespace, resourceId, scalableDimension, scheduledActionName);
+        ScheduledAction existing = scheduledActions.get(key).orElse(null);
+        ScheduledAction action = existing != null ? existing : new ScheduledAction();
+        action.setScheduledActionName(scheduledActionName);
+        action.setServiceNamespace(serviceNamespace);
+        action.setResourceId(resourceId);
+        action.setScalableDimension(scalableDimension);
+        action.setSchedule(schedule);
+        action.setTimezone(timezone);
+        // AWS deletes unspecified StartTime/EndTime on update.
+        action.setStartTime(startTime);
+        action.setEndTime(endTime);
+        action.setScalableTargetAction(scalableTargetAction);
+        if (existing == null) {
+            action.setCreationTime(nowEpochSeconds());
+            action.setScheduledActionArn(buildScheduledActionArn(region, serviceNamespace, resourceId,
+                    scheduledActionName));
+        }
+        scheduledActions.put(key, action);
+        LOG.infov("PutScheduledAction: {0} for {1} {2} in {3}",
+                scheduledActionName, serviceNamespace, resourceId, region);
+        return action;
+    }
+
+    public List<ScheduledAction> describeScheduledActions(String serviceNamespace, String resourceId,
+                                                          String scalableDimension,
+                                                          List<String> scheduledActionNames, String region) {
+        requireNamespace(serviceNamespace);
+        if (scalableDimension != null && (resourceId == null || resourceId.isBlank())) {
+            throw new AwsException("ValidationException",
+                    "Scalable dimension cannot be provided without a resource ID.", 400);
+        }
+        String prefix = region + "::" + serviceNamespace + "::";
+        return scheduledActions.scan(k -> k.startsWith(prefix)).stream()
+                .filter(a -> resourceId == null || resourceId.isBlank() || resourceId.equals(a.getResourceId()))
+                .filter(a -> scalableDimension == null || scalableDimension.equals(a.getScalableDimension()))
+                .filter(a -> scheduledActionNames == null || scheduledActionNames.isEmpty()
+                        || scheduledActionNames.contains(a.getScheduledActionName()))
+                .sorted(Comparator.comparing(ScheduledAction::getScheduledActionName))
+                .toList();
+    }
+
+    public void deleteScheduledAction(String scheduledActionName, String serviceNamespace, String resourceId,
+                                      String scalableDimension, String region) {
+        validateTriple(serviceNamespace, resourceId, scalableDimension);
+        if (scheduledActionName == null || scheduledActionName.isBlank()) {
+            throw new AwsException("ValidationException", "ScheduledActionName is required.", 400);
+        }
+        String key = scheduledActionKey(region, serviceNamespace, resourceId, scalableDimension, scheduledActionName);
+        if (scheduledActions.get(key).isEmpty()) {
+            throw new AwsException("ObjectNotFoundException",
+                    "No scheduled action found for service namespace: " + serviceNamespace
+                            + ", resource ID: " + resourceId
+                            + ", scalable dimension: " + scalableDimension
+                            + ", scheduled action name: " + scheduledActionName, 400);
+        }
+        scheduledActions.delete(key);
+        LOG.infov("DeleteScheduledAction: {0} for {1} {2} in {3}",
+                scheduledActionName, serviceNamespace, resourceId, region);
+    }
+
+    /**
+     * Predictive scaling forecasts exist only for ECS services on AWS. A non-ECS
+     * namespace is rejected with the same {@code AccessDeniedException} message
+     * distilled maps to {@code PredictiveScalingForecastNotSupported}.
+     */
+    public void requirePredictiveScalingForecast(String serviceNamespace, String resourceId,
+                                                 String scalableDimension, String policyName, String region) {
+        requireNamespace(serviceNamespace);
+        if (!"ecs".equals(serviceNamespace)) {
+            throw new AwsException("AccessDeniedException",
+                    "GetPredictiveScalingForecast is not supported.", 400);
+        }
+        if (resourceId == null || resourceId.isBlank()) {
+            throw new AwsException("ValidationException", "ResourceId is required.", 400);
+        }
+        if (scalableDimension == null || scalableDimension.isBlank()) {
+            throw new AwsException("ValidationException", "ScalableDimension is required.", 400);
+        }
+        if (policyName == null || policyName.isBlank()) {
+            throw new AwsException("ValidationException", "PolicyName is required.", 400);
+        }
+        String key = policyKey(region, serviceNamespace, resourceId, scalableDimension, policyName);
+        if (policies.get(key).isEmpty()) {
+            throw new AwsException("ObjectNotFoundException",
+                    "No scaling policy found for service namespace: " + serviceNamespace
+                            + ", resource ID: " + resourceId
+                            + ", scalable dimension: " + scalableDimension
+                            + ", policy name: " + policyName, 400);
+        }
+    }
+
+    private List<ScheduledAction> findScheduledActions(String region, String serviceNamespace, String resourceId,
+                                                       String scalableDimension) {
+        String prefix = region + "::" + serviceNamespace + "::";
+        return scheduledActions.scan(k -> k.startsWith(prefix)).stream()
+                .filter(a -> resourceId.equals(a.getResourceId()))
+                .filter(a -> scalableDimension.equals(a.getScalableDimension()))
+                .toList();
+    }
+
+    private String buildScheduledActionArn(String region, String serviceNamespace, String resourceId,
+                                           String scheduledActionName) {
+        String resource = "scheduledAction:" + UUID.randomUUID()
+                + ":resource/" + serviceNamespace + "/" + resourceId
+                + ":scheduledActionName/" + scheduledActionName;
+        return regionResolver.buildArn("autoscaling", region, resource);
+    }
+
+    private static String scheduledActionKey(String region, String serviceNamespace, String resourceId,
+                                             String scalableDimension, String scheduledActionName) {
+        return targetKey(region, serviceNamespace, resourceId, scalableDimension) + "::" + scheduledActionName;
+    }
 }

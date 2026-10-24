@@ -109,7 +109,7 @@ public class SigninController {
                     </body>
                     </html>
                     """.formatted(accountId, escapedRequestId);
-            return secureHtml(Response.ok(page), request.redirectUri()).build();
+            return secureHtml(Response.ok(page)).build();
         } catch (SigninException e) {
             return htmlError(e);
         }
@@ -292,18 +292,12 @@ public class SigninController {
     }
 
     private static Response.ResponseBuilder secureHtml(Response.ResponseBuilder response) {
-        return secureHtml(response, null);
-    }
-
-    private static Response.ResponseBuilder secureHtml(Response.ResponseBuilder response, String redirectUri) {
-        // Browsers apply form-action to redirects too; this URI was validated before storing the request.
-        String formAction = "'self'" + (redirectUri == null ? "" : " " + redirectUri);
         return response.type(MediaType.TEXT_HTML)
                 .header(HttpHeaders.CACHE_CONTROL, "no-store")
                 .header("Referrer-Policy", "no-referrer")
                 .header("X-Content-Type-Options", "nosniff")
                 .header("Content-Security-Policy", "default-src 'none'; img-src 'self'; style-src 'self'; "
-                        + "form-action " + formAction + "; base-uri 'none'; frame-ancestors 'none'");
+                        + "form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
     }
 
     private static String escape(String value) {

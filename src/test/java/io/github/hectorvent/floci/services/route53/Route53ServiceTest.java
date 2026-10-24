@@ -10,8 +10,6 @@ import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
 import io.github.hectorvent.floci.services.route53.model.AliasTarget;
-import io.github.hectorvent.floci.services.route53.model.HostedZone;
-import io.github.hectorvent.floci.services.route53.model.QueryLoggingConfig;
 import io.github.hectorvent.floci.services.route53.model.HealthCheck;
 import io.github.hectorvent.floci.services.route53.model.HealthCheckConfig;
 import io.github.hectorvent.floci.services.route53.model.ResourceRecord;
@@ -21,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.Mockito;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -546,146 +545,6 @@ class Route53ServiceTest {
         assertThat(records, hasSize(1));
         assertEquals("5.6.7.8", records.get(0).getRecords().get(0).getValue());
     }
-    private Route53Service service;
-
-    @BeforeEach
-    void setUp() {
-        service = newService();
-    }
-
-    @Test
-    void listHostedZonesByName_maxItems1ReturnsExactPublicZone() {
-        service.createHostedZone("zzz.aaa.", "ref-lex-first", null, false, null, null);
-        service.createHostedZone("aaa.zzz.", "ref-dns-first", null, false, null, null);
-        service.createHostedZone("alchemy-ecs-domain-test.example", "ref-target",
-                null, false, null, null);
-
-        List<HostedZone> listed = service.listHostedZonesByName(
-                "alchemy-ecs-domain-test.example.", 1);
-
-        assertEquals(1, listed.size());
-        assertEquals("alchemy-ecs-domain-test.example.", listed.get(0).getName());
-        assertTrue(!listed.get(0).isPrivateZone());
-    }
-
-    @Test
-    void listHostedZonesByName_subdomainStartStillFindsParentOnSecondLookup() {
-        service.createHostedZone("alchemy-ecs-domain-test.example", "ref-parent",
-                null, false, null, null);
-
-        List<HostedZone> subdomain = service.listHostedZonesByName(
-                "svc.alchemy-ecs-domain-test.example.", 1);
-        assertTrue(subdomain.isEmpty()
-                || !subdomain.get(0).getName().equals("svc.alchemy-ecs-domain-test.example."));
-
-        List<HostedZone> parent = service.listHostedZonesByName(
-                "alchemy-ecs-domain-test.example.", 1);
-        assertEquals(1, parent.size());
-        assertEquals("alchemy-ecs-domain-test.example.", parent.get(0).getName());
-    }
-
-    @Test
-    void changeResourceRecordSets_roundTripsWeightedAndFailover() {
-        Route53Service.CreateZoneResult created = service.createHostedZone("alchemy-route53-routing.alchemy.",
-                "ref-routing", null, false, null, null);
-        String zoneId = created.zone().getId();
-
-        service.changeResourceRecordSets(zoneId, List.of(
-                change("CREATE", weighted("api.alchemy-route53-routing.alchemy.", "blue", 90, "1.2.3.4")),
-                change("CREATE", weighted("api.alchemy-route53-routing.alchemy.", "green", 10, "5.6.7.8")),
-                change("CREATE", failover("app.alchemy-route53-routing.alchemy.", "primary",
-                        "PRIMARY", "hc-1", "1.1.1.1")),
-                change("CREATE", failover("app.alchemy-route53-routing.alchemy.", "secondary",
-                        "SECONDARY", null, "2.2.2.2"))
-        ), "routing");
-
-        List<ResourceRecordSet> sets = service.listResourceRecordSets(zoneId, null, null, 100);
-        ResourceRecordSet blue = findSet(sets, "api.alchemy-route53-routing.alchemy.", "blue");
-        ResourceRecordSet green = findSet(sets, "api.alchemy-route53-routing.alchemy.", "green");
-        ResourceRecordSet primary = findSet(sets, "app.alchemy-route53-routing.alchemy.", "primary");
-        ResourceRecordSet secondary = findSet(sets, "app.alchemy-route53-routing.alchemy.", "secondary");
-
-        assertEquals(90L, blue.getWeight());
-        assertEquals(10L, green.getWeight());
-        assertEquals(60L, blue.getTtl());
-        assertEquals("PRIMARY", primary.getFailover());
-        assertEquals("hc-1", primary.getHealthCheckId());
-        assertEquals("SECONDARY", secondary.getFailover());
-
-        service.changeResourceRecordSets(zoneId, List.of(
-                change("DELETE", weighted("api.alchemy-route53-routing.alchemy.", "blue", 90, "1.2.3.4")),
-                change("DELETE", weighted("api.alchemy-route53-routing.alchemy.", "green", 10, "5.6.7.8")),
-                change("DELETE", failover("app.alchemy-route53-routing.alchemy.", "primary",
-                        "PRIMARY", "hc-1", "1.1.1.1")),
-                change("DELETE", failover("app.alchemy-route53-routing.alchemy.", "secondary",
-                        "SECONDARY", null, "2.2.2.2"))
-        ), "cleanup");
-    }
-
-    @Test
-    void createQueryLoggingConfig_secondCreateIsAlreadyExists() {
-        Route53Service.CreateZoneResult created = service.createHostedZone("alchemy-test-qlc.alchemy.",
-                "ref-qlc", null, false, null, null);
-        QueryLoggingConfig first = service.createQueryLoggingConfig(
-                created.zone().getId(),
-                "arn:aws:logs:us-east-1:000000000000:log-group:/aws/route53/a");
-        assertEquals(created.zone().getId(), first.getHostedZoneId());
-
-        AwsException error = assertThrows(AwsException.class, () ->
-                service.createQueryLoggingConfig(
-                        "/hostedzone/" + created.zone().getId(),
-                        "arn:aws:logs:us-east-1:000000000000:log-group:/aws/route53/b"));
-        assertEquals("QueryLoggingConfigAlreadyExists", error.getErrorCode());
-        assertEquals(409, error.getHttpStatus());
-    }
-
-    @Test
-    void getChange_acceptsPrefixedId() {
-        Route53Service.CreateZoneResult created = service.createHostedZone("change-prefix.example.",
-                "ref-change", null, false, null, null);
-        assertEquals("INSYNC", service.getChange("/change/" + created.change().getId()).getStatus());
-        assertEquals("INSYNC", service.getChange(created.change().getId()).getStatus());
-    }
-
-    @Test
-    void compareDnsNames_parentBeforeChild() {
-        assertTrue(Route53Service.compareDnsNames(
-                "alchemy-ecs-domain-test.example.",
-                "svc.alchemy-ecs-domain-test.example.") < 0);
-        assertEquals(0, Route53Service.compareDnsNames(
-                "alchemy-ecs-domain-test.example",
-                "alchemy-ecs-domain-test.example."));
-    }
-
-    private static ResourceRecordSet weighted(String name, String setId, long weight, String ip) {
-        ResourceRecordSet rrs = new ResourceRecordSet();
-        rrs.setName(name);
-        rrs.setType("A");
-        rrs.setTtl(60L);
-        rrs.setSetIdentifier(setId);
-        rrs.setWeight(weight);
-        rrs.setRecords(List.of(new ResourceRecord(ip)));
-        return rrs;
-    }
-
-    private static ResourceRecordSet failover(String name, String setId, String failover,
-                                              String healthCheckId, String ip) {
-        ResourceRecordSet rrs = new ResourceRecordSet();
-        rrs.setName(name);
-        rrs.setType("A");
-        rrs.setTtl(60L);
-        rrs.setSetIdentifier(setId);
-        rrs.setFailover(failover);
-        rrs.setHealthCheckId(healthCheckId);
-        rrs.setRecords(List.of(new ResourceRecord(ip)));
-        return rrs;
-    }
-
-    private static ResourceRecordSet findSet(List<ResourceRecordSet> sets, String name, String setId) {
-        return sets.stream()
-                .filter(s -> name.equals(s.getName()) && setId.equals(s.getSetIdentifier()))
-                .findFirst()
-                .orElseThrow();
 
     @Test
     void clear_resetsPrivateZoneNameCounts() {

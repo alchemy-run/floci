@@ -21,12 +21,12 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Collections;
 
 @ApplicationScoped
 public class StepFunctionsJsonHandler {
@@ -56,14 +56,16 @@ public class StepFunctionsJsonHandler {
             case "UpdateStateMachineAlias" -> handleUpdateStateMachineAlias(request);
             case "DeleteStateMachineAlias" -> handleDeleteStateMachineAlias(request);
             case "ValidateStateMachineDefinition" -> handleValidateStateMachineDefinition(request);
-            case "TestState" -> handleTestState(request);
             case "RedriveExecution" -> handleRedriveExecution(request);
+            case "TestState" -> handleTestState(request);
             case "StartExecution" -> handleStartExecution(request, region);
             case "StartSyncExecution" -> handleStartSyncExecution(request, region);
             case "DescribeExecution" -> handleDescribeExecution(request);
             case "ListExecutions" -> handleListExecutions(request);
             case "StopExecution" -> handleStopExecution(request);
             case "GetExecutionHistory" -> handleGetExecutionHistory(request);
+            case "DescribeMapRun" -> handleDescribeMapRun(request);
+            case "UpdateMapRun" -> handleUpdateMapRun(request);
             case "SendTaskSuccess" -> handleSendTaskSuccess(request);
             case "SendTaskFailure" -> handleSendTaskFailure(request);
             case "SendTaskHeartbeat" -> handleSendTaskHeartbeat(request);
@@ -73,8 +75,6 @@ public class StepFunctionsJsonHandler {
             case "ListActivities" -> handleListActivities(request, region);
             case "GetActivityTask" -> handleGetActivityTask(request);
             case "ListMapRuns" -> handleListMapRuns(request);
-            case "DescribeMapRun" -> handleDescribeMapRun(request);
-            case "UpdateMapRun" -> handleUpdateMapRun(request);
             case "ListTagsForResource" -> handleListTagsForResource(request);
             case "TagResource" -> handleTagResource(request);
             case "UntagResource" -> handleUntagResource(request);
@@ -400,7 +400,7 @@ public class StepFunctionsJsonHandler {
      * PascalCase, so this is the one place the response is described.
      *
      * <p>The tolerances are the ones the Map state declared, and default to zero.
-     * {@code redriveCount} is zero because Map runs are not individually redriven, and
+     * {@code redriveCount} is zero because Floci does not implement redrive, and
      * {@code redriveDate} is absent until a run is redriven, which no run here ever is.
      */
     static ObjectNode describeMapRunResponse(ObjectMapper objectMapper, MapRun mapRun) {
@@ -409,29 +409,27 @@ public class StepFunctionsJsonHandler {
         response.put("executionArn", mapRun.getExecutionArn());
         response.put("status", mapRun.getStatus());
         response.put("startDate", mapRun.getStartDate());
-        if (mapRun.getStopDate() > 0) {
-            response.put("stopDate", mapRun.getStopDate());
-        }
+        response.put("stopDate", mapRun.getStopDate());
         response.put("maxConcurrency", mapRun.getMaxConcurrency());
         response.put("toleratedFailurePercentage", mapRun.getToleratedFailurePercentage());
         response.put("toleratedFailureCount", mapRun.getToleratedFailureCount());
         putMapRunCounts(response.putObject("itemCounts"), mapRun.getItemCount(),
-                mapRun.getSucceededCount(), mapRun.getFailedCount(), "RUNNING".equals(mapRun.getStatus()));
+                mapRun.getSucceededCount(), mapRun.getFailedCount());
         // An ItemBatcher run has one execution per batch, so the two blocks differ there.
         putMapRunCounts(response.putObject("executionCounts"), mapRun.getExecutionCount(),
-                mapRun.getSucceededExecutionCount(), mapRun.getFailedExecutionCount(), "RUNNING".equals(mapRun.getStatus()));
+                mapRun.getSucceededExecutionCount(), mapRun.getFailedExecutionCount());
         response.put("redriveCount", 0);
         return response;
     }
 
     /** A failed item's result counts as written, as on AWS. */
-    private static void putMapRunCounts(ObjectNode counts, int total, int succeeded, int failed, boolean running) {
-        counts.put("pending", running ? total - succeeded - failed : 0);
+    private static void putMapRunCounts(ObjectNode counts, int total, int succeeded, int failed) {
+        counts.put("pending", 0);
         counts.put("running", 0);
         counts.put("succeeded", succeeded);
         counts.put("failed", failed);
         counts.put("timedOut", 0);
-        counts.put("aborted", running ? 0 : total - succeeded - failed);
+        counts.put("aborted", total - succeeded - failed);
         counts.put("total", total);
         counts.put("resultsWritten", succeeded + failed);
         counts.put("failuresNotRedrivable", 0);
@@ -481,12 +479,6 @@ public class StepFunctionsJsonHandler {
         synchronized (live) {
             events = new ArrayList<>(live);
         }
-        if (reverseOrder) {
-            Collections.reverse(events);
-        }
-        if (maxResults != null && maxResults > 0 && events.size() > maxResults) {
-            events = events.subList(0, maxResults);
-        }
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode array = response.putArray("events");
         for (HistoryEvent e : events) {
@@ -519,59 +511,6 @@ public class StepFunctionsJsonHandler {
             return "stateExitedEventDetails";
         }
         return Character.toLowerCase(type.charAt(0)) + type.substring(1) + "EventDetails";
-    }
-
-    private Response handleTestState(JsonNode request) {
-        StepFunctionsService.TestStateResult result = service.testState(
-                request.path("definition").asText(null),
-                request.path("input").asText(null)
-        );
-        ObjectNode response = objectMapper.createObjectNode();
-        response.put("status", result.status());
-        if (result.output() != null) {
-            response.put("output", result.output());
-        }
-        if (result.error() != null) {
-            response.put("error", result.error());
-        }
-        if (result.cause() != null) {
-            response.put("cause", result.cause());
-        }
-        return Response.ok(response).build();
-    }
-
-    private Response handleRedriveExecution(JsonNode request) {
-        double redriveDate = service.redriveExecution(request.path("executionArn").asText());
-        ObjectNode response = objectMapper.createObjectNode();
-        response.put("redriveDate", redriveDate);
-        return Response.ok(response).build();
-    }
-
-    private Response handleListMapRuns(JsonNode request) {
-        List<MapRun> runs = service.listMapRuns(request.path("executionArn").asText());
-        ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode array = response.putArray("mapRuns");
-        for (MapRun run : runs) {
-            ObjectNode item = array.addObject();
-            item.put("mapRunArn", run.getMapRunArn());
-            item.put("executionArn", run.getExecutionArn());
-            item.put("status", run.getStatus());
-            item.put("startDate", run.getStartDate());
-            if (run.getStopDate() > 0) {
-                item.put("stopDate", run.getStopDate());
-            }
-        }
-        return Response.ok(response).build();
-    }
-
-    private Response handleUpdateMapRun(JsonNode request) {
-        service.updateMapRun(
-                request.path("mapRunArn").asText(),
-                parseOptionalInt(request, "maxConcurrency"),
-                parseOptionalLong(request, "toleratedFailureCount"),
-                parseOptionalDouble(request, "toleratedFailurePercentage")
-        );
-        return Response.ok(objectMapper.createObjectNode()).build();
     }
 
     private Response handleSendTaskSuccess(JsonNode request) {
@@ -784,6 +723,59 @@ public class StepFunctionsJsonHandler {
         return node.intValue();
     }
 
+    private Response handleTestState(JsonNode request) {
+        StepFunctionsService.TestStateResult result = service.testState(
+                request.path("definition").asText(null),
+                request.path("input").asText(null)
+        );
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("status", result.status());
+        if (result.output() != null) {
+            response.put("output", result.output());
+        }
+        if (result.error() != null) {
+            response.put("error", result.error());
+        }
+        if (result.cause() != null) {
+            response.put("cause", result.cause());
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleRedriveExecution(JsonNode request) {
+        double redriveDate = service.redriveExecution(request.path("executionArn").asText());
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("redriveDate", redriveDate);
+        return Response.ok(response).build();
+    }
+
+    private Response handleListMapRuns(JsonNode request) {
+        List<MapRun> runs = service.listMapRuns(request.path("executionArn").asText());
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode array = response.putArray("mapRuns");
+        for (MapRun run : runs) {
+            ObjectNode item = array.addObject();
+            item.put("mapRunArn", run.getMapRunArn());
+            item.put("executionArn", run.getExecutionArn());
+            item.put("status", run.getStatus());
+            item.put("startDate", run.getStartDate());
+            if (run.getStopDate() > 0) {
+                item.put("stopDate", run.getStopDate());
+            }
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleUpdateMapRun(JsonNode request) {
+        service.updateMapRun(
+                request.path("mapRunArn").asText(),
+                parseOptionalInt(request, "maxConcurrency"),
+                parseOptionalLong(request, "toleratedFailureCount"),
+                parseOptionalDouble(request, "toleratedFailurePercentage")
+        );
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
     private static Long parseOptionalLong(JsonNode request, String fieldName) {
         JsonNode node = request.get(fieldName);
         if (node == null || node.isNull()) {
@@ -809,5 +801,4 @@ public class StepFunctionsJsonHandler {
         }
         return node.doubleValue();
     }
-
 }

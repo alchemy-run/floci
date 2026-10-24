@@ -1,11 +1,6 @@
 package io.github.hectorvent.floci.services.aps;
 
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsEndpoints;
 import io.github.hectorvent.floci.core.common.AwsException;
@@ -15,21 +10,26 @@ import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.TagHandler;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
-import io.github.hectorvent.floci.services.aps.model.AnomalyDetector;
 import io.github.hectorvent.floci.services.aps.model.PrometheusWorkspace;
 import io.github.hectorvent.floci.services.aps.model.RuleGroupsNamespace;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
-import java.net.URI;
 import java.time.Instant;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.services.aps.model.AnomalyDetector;
+import java.net.URI;
+import java.util.HashMap;
+import java.util.Set;
 import java.util.stream.IntStream;
 
 @ApplicationScoped
@@ -41,42 +41,18 @@ public class ApsService implements TagHandler {
     private static final int MAX_PAGE = 1000;
     private static final int MAX_NAMESPACE_NAME_LENGTH = 128;
     private static final Pattern NAMESPACE_NAME = Pattern.compile(".*[0-9A-Za-z][-.0-9A-Z_a-z]*.*");
-    private static final Pattern SCRAPER_ID = Pattern.compile(
-            "s-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
-    private static final Set<String> SCRAPER_FILTER_KEYS = Set.of("status", "sourceArn", "destinationArn", "alias");
-    static final String SCRAPER_LIMITATION =
-            "Scraper configuration stored; the local emulator does not collect metrics from the source.";
 
     private final StorageBackend<String, PrometheusWorkspace> storage;
     private final StorageBackend<String, RuleGroupsNamespace> namespaceStorage;
-    private final StorageBackend<String, ObjectNode> scraperStorage;
-    private final StorageBackend<String, ObjectNode> scraperLoggingStorage;
     private final RegionResolver regionResolver;
-    private final ApsPrometheusBackend backend;
-    private final ApsScraperSources scraperSources;
-    private final URI endpointBase;
-    private final Object[] workspaceLocks = IntStream.range(0, 64).mapToObj(i -> new Object()).toArray();
-
-    public ApsService(StorageFactory storageFactory, RegionResolver regionResolver,
-                      EmulatorConfig config, ApsPrometheusBackend backend) {
-        this(storageFactory, regionResolver, config, backend, null);
-    }
 
     @Inject
-    public ApsService(StorageFactory storageFactory, RegionResolver regionResolver,
-                      EmulatorConfig config, ApsPrometheusBackend backend, ApsScraperSources scraperSources) {
+    public ApsService(StorageFactory storageFactory, RegionResolver regionResolver) {
         this.storage = storageFactory.create("aps", "aps-workspaces.json",
                 new TypeReference<Map<String, PrometheusWorkspace>>() {});
         this.namespaceStorage = storageFactory.create("aps", "aps-rule-groups-namespaces.json",
                 new TypeReference<Map<String, RuleGroupsNamespace>>() {});
-        this.scraperStorage = storageFactory.create("aps", "aps-scrapers.json",
-                new TypeReference<Map<String, ObjectNode>>() {});
-        this.scraperLoggingStorage = storageFactory.create("aps", "aps-scraper-logging.json",
-                new TypeReference<Map<String, ObjectNode>>() {});
         this.regionResolver = regionResolver;
-        this.backend = backend;
-        this.scraperSources = scraperSources;
-        this.endpointBase = URI.create(config.effectiveBaseUrl());
     }
 
     public PrometheusWorkspace createWorkspace(String region, String alias, Map<String, String> tags,
@@ -88,7 +64,9 @@ public class ApsService implements TagHandler {
         workspace.setWorkspaceId(workspaceId);
         workspace.setAlias(stripAlias(alias));
         workspace.setArn(arn);
-        // The data-plane backend starts lazily on its first authenticated request.
+        // Real AMP answers the create 202 with status CREATING; the emulator provisions nothing,
+        // so the workspace is ACTIVE from birth and the terraform/pulumi provider's create waiter
+        // (Pending CREATING, Target ACTIVE) completes on its first DescribeWorkspace poll.
         workspace.setStatus("ACTIVE");
         workspace.setPrometheusEndpoint(
                 "https://" + AwsEndpoints.host("aps-workspaces", region) + "/workspaces/" + workspaceId + "/");
@@ -104,11 +82,9 @@ public class ApsService implements TagHandler {
     }
 
     public PrometheusWorkspace describeWorkspace(String region, String workspaceId) {
-        PrometheusWorkspace workspace = storage.get(key(region, workspaceId))
+        return storage.get(key(region, workspaceId))
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException",
                         "Workspace not found: " + workspaceId, 404));
-        workspace.setPrometheusEndpoint(prometheusEndpoint(workspaceId));
-        return workspace;
     }
 
     // The alias parameter is a prefix filter, not an exact match: the terraform provider's
@@ -126,82 +102,48 @@ public class ApsService implements TagHandler {
     }
 
     public void deleteWorkspace(String region, String workspaceId) {
-        synchronized (workspaceLock(region, workspaceId)) {
-            PrometheusWorkspace workspace = describeWorkspace(region, workspaceId);
-            if (workspace.isPrometheusRuntimeOwned()) {
-                backend.remove(workspace.getArn());
-            }
-            String namespacePrefix = namespaceKeyPrefix(region, workspaceId);
-            for (RuleGroupsNamespace namespace : namespaceStorage.scan(k -> k.startsWith(namespacePrefix))) {
-                namespaceStorage.delete(namespaceKey(region, workspaceId, namespace.getName()));
-            }
-            storage.delete(key(region, workspaceId));
-            LOG.infov("Deleted AMP workspace: {0} in {1}", workspaceId, region);
+        describeWorkspace(region, workspaceId);
+        String namespacePrefix = namespaceKeyPrefix(region, workspaceId);
+        for (RuleGroupsNamespace namespace : namespaceStorage.scan(k -> k.startsWith(namespacePrefix))) {
+            namespaceStorage.delete(namespaceKey(region, workspaceId, namespace.getName()));
         }
-    }
-
-    public ApsPrometheusBackend.BackendResponse forward(String region, String workspaceId, String method,
-                                                        String path, String rawQuery,
-                                                        Map<String, String> headers, byte[] body) {
-        synchronized (workspaceLock(region, workspaceId)) {
-            PrometheusWorkspace workspace = describeWorkspace(region, workspaceId);
-            if (!workspace.isPrometheusRuntimeOwned()) {
-                // Persist cleanup ownership before Docker creates anything.
-                workspace.setPrometheusRuntimeOwned(true);
-                storage.put(key(region, workspaceId), workspace);
-            }
-            return backend.forward(workspace.getArn(), method, path, rawQuery, headers, body);
-        }
-    }
-
-    private Object workspaceLock(String region, String workspaceId) {
-        String identity = regionResolver.getAccountId() + ":" + key(region, workspaceId);
-        return workspaceLocks[Math.floorMod(identity.hashCode(), workspaceLocks.length)];
-    }
-
-    private String prometheusEndpoint(String workspaceId) {
-        String port = endpointBase.getPort() < 0 ? "" : ":" + endpointBase.getPort();
-        return endpointBase.getScheme() + "://aps-workspaces-" + workspaceId + ".localhost.floci.io" + port
-                + "/workspaces/" + workspaceId + "/";
+        storage.delete(key(region, workspaceId));
+        LOG.infov("Deleted AMP workspace: {0} in {1}", workspaceId, region);
     }
 
     public void updateWorkspaceAlias(String region, String workspaceId, String alias) {
-        synchronized (workspaceLock(region, workspaceId)) {
-            PrometheusWorkspace workspace = describeWorkspace(region, workspaceId);
-            workspace.setAlias(stripAlias(alias));
-            storage.put(key(region, workspaceId), workspace);
-        }
+        PrometheusWorkspace workspace = describeWorkspace(region, workspaceId);
+        workspace.setAlias(stripAlias(alias));
+        storage.put(key(region, workspaceId), workspace);
     }
 
     public RuleGroupsNamespace createRuleGroupsNamespace(String region, String workspaceId, String name,
                                                          String encodedData, Map<String, String> tags) {
-        synchronized (workspaceLock(region, workspaceId)) {
-            describeWorkspace(region, workspaceId);
-            requireNamespaceName(name);
-            requireNamespaceData(encodedData);
-            if (namespaceStorage.get(namespaceKey(region, workspaceId, name)).isPresent()) {
-                throw new AwsException("ConflictException",
-                        "Rule groups namespace already exists: " + name, 409);
-            }
-
-            RuleGroupsNamespace namespace = new RuleGroupsNamespace();
-            namespace.setName(name);
-            namespace.setWorkspaceId(workspaceId);
-            namespace.setArn(regionResolver.buildArn("aps", region,
-                    "rulegroupsnamespace/" + workspaceId + "/" + name));
-            namespace.setStatus("ACTIVE");
-            namespace.setEncodedData(encodedData);
-            Instant now = Instant.now();
-            namespace.setCreatedAt(now);
-            namespace.setModifiedAt(now);
-            if (tags != null) {
-                namespace.getTags().putAll(tags);
-            }
-
-            namespaceStorage.put(namespaceKey(region, workspaceId, name), namespace);
-            LOG.infov("Created AMP rule groups namespace: {0} in workspace {1}", name, workspaceId);
-            return namespace;
+        describeWorkspace(region, workspaceId);
+        requireNamespaceName(name);
+        requireNamespaceData(encodedData);
+        if (namespaceStorage.get(namespaceKey(region, workspaceId, name)).isPresent()) {
+            throw new AwsException("ConflictException",
+                    "Rule groups namespace already exists: " + name, 409);
         }
+
+        RuleGroupsNamespace namespace = new RuleGroupsNamespace();
+        namespace.setName(name);
+        namespace.setWorkspaceId(workspaceId);
+        namespace.setArn(regionResolver.buildArn("aps", region,
+                "rulegroupsnamespace/" + workspaceId + "/" + name));
+        namespace.setStatus("ACTIVE");
+        namespace.setEncodedData(encodedData);
+        Instant now = Instant.now();
+        namespace.setCreatedAt(now);
+        namespace.setModifiedAt(now);
+        if (tags != null) {
+            namespace.getTags().putAll(tags);
+        }
+
+        namespaceStorage.put(namespaceKey(region, workspaceId, name), namespace);
+        LOG.infov("Created AMP rule groups namespace: {0} in workspace {1}", name, workspaceId);
+        return namespace;
     }
 
     public RuleGroupsNamespace describeRuleGroupsNamespace(String region, String workspaceId, String name) {
@@ -226,22 +168,183 @@ public class ApsService implements TagHandler {
 
     public RuleGroupsNamespace putRuleGroupsNamespace(String region, String workspaceId, String name,
                                                       String encodedData) {
-        synchronized (workspaceLock(region, workspaceId)) {
-            requireNamespaceData(encodedData);
-            RuleGroupsNamespace namespace = describeRuleGroupsNamespace(region, workspaceId, name);
-            namespace.setEncodedData(encodedData);
-            namespace.setModifiedAt(Instant.now());
-            namespaceStorage.put(namespaceKey(region, workspaceId, name), namespace);
-            return namespace;
-        }
+        requireNamespaceData(encodedData);
+        RuleGroupsNamespace namespace = describeRuleGroupsNamespace(region, workspaceId, name);
+        namespace.setEncodedData(encodedData);
+        namespace.setModifiedAt(Instant.now());
+        namespaceStorage.put(namespaceKey(region, workspaceId, name), namespace);
+        return namespace;
     }
 
     public void deleteRuleGroupsNamespace(String region, String workspaceId, String name) {
-        synchronized (workspaceLock(region, workspaceId)) {
-            describeRuleGroupsNamespace(region, workspaceId, name);
-            namespaceStorage.delete(namespaceKey(region, workspaceId, name));
-            LOG.infov("Deleted AMP rule groups namespace: {0} in workspace {1}", name, workspaceId);
+        describeRuleGroupsNamespace(region, workspaceId, name);
+        namespaceStorage.delete(namespaceKey(region, workspaceId, name));
+        LOG.infov("Deleted AMP rule groups namespace: {0} in workspace {1}", name, workspaceId);
+    }
+
+    // ── TagHandler: the shared /tags/{resourceArn} dispatcher routes aps ARNs here ──
+
+    @Override
+    public String serviceKey() {
+        return "aps";
+    }
+
+    // AMP defines TagResource/UntagResource with a 200 response, not the dispatcher's default 204.
+    @Override
+    public int tagResourceSuccessStatus() {
+        return 200;
+    }
+
+    @Override
+    public int untagResourceSuccessStatus() {
+        return 200;
+    }
+
+    @Override
+    public Map<String, String> listTags(String region, String arn) {
+        return Map.copyOf(taggableByArn(region, arn).tags());
+    }
+
+    @Override
+    public void tagResource(String region, String arn, Map<String, String> tags) {
+        // Per AMP's TagResource: keys must not begin with the reserved "aws:" prefix
+        // (case-insensitive, matching the sibling checks in FisService and BatchService).
+        for (String tagKey : tags.keySet()) {
+            if (tagKey.regionMatches(true, 0, "aws:", 0, 4)) {
+                throw new AwsException("ValidationException",
+                        "Tag keys must not begin with aws:. Offending key: " + tagKey, 400);
+            }
         }
+        Taggable taggable = taggableByArn(region, arn);
+        taggable.tags().putAll(tags);
+        taggable.persist().run();
+    }
+
+    @Override
+    public void untagResource(String region, String arn, List<String> tagKeys) {
+        Taggable taggable = taggableByArn(region, arn);
+        tagKeys.forEach(taggable.tags()::remove);
+        taggable.persist().run();
+    }
+
+    private record Taggable(Map<String, String> tags, Runnable persist) {
+    }
+
+    private Taggable taggableByArn(String region, String arn) {
+        AwsArnUtils.Arn parsed;
+        try {
+            parsed = AwsArnUtils.parse(arn);
+        } catch (IllegalArgumentException e) {
+            throw new AwsException("ValidationException", "Invalid resource ARN: " + arn, 400);
+        }
+        if (!"aps".equals(parsed.service()) || !region.equals(parsed.region())
+                || !regionResolver.getAccountId().equals(parsed.accountId())) {
+            throw new AwsException("ValidationException",
+                    "The resource ARN does not belong to this AMP account and region: " + arn, 400);
+        }
+        String resource = parsed.resource();
+        String workspacePrefix = "workspace/";
+        if (resource.startsWith(workspacePrefix) && resource.length() > workspacePrefix.length()) {
+            PrometheusWorkspace workspace =
+                    describeWorkspace(region, resource.substring(workspacePrefix.length()));
+            return new Taggable(workspace.getTags(),
+                    () -> storage.put(key(region, workspace.getWorkspaceId()), workspace));
+        }
+        String namespacePrefix = "rulegroupsnamespace/";
+        if (resource.startsWith(namespacePrefix)) {
+            String[] parts = resource.substring(namespacePrefix.length()).split("/", 2);
+            if (parts.length == 2 && !parts[0].isEmpty() && !parts[1].isEmpty()) {
+                RuleGroupsNamespace namespace = describeRuleGroupsNamespace(region, parts[0], parts[1]);
+                return new Taggable(namespace.getTags(),
+                        () -> namespaceStorage.put(namespaceKey(region, parts[0], parts[1]), namespace));
+            }
+        }
+        throw new AwsException("ValidationException",
+                "Tags are only supported on AMP workspaces and rule groups namespaces: " + arn, 400);
+    }
+
+    // AMP is regional ("You can have one or more workspaces in each Region in your account"), so
+    // the store is partitioned by request region, like CloudWatchLogsService's groupKey.
+    private static String key(String region, String workspaceId) {
+        return keyPrefix(region) + workspaceId;
+    }
+
+    private static String keyPrefix(String region) {
+        return region + "::";
+    }
+
+    private static String namespaceKey(String region, String workspaceId, String name) {
+        return namespaceKeyPrefix(region, workspaceId) + name;
+    }
+
+    private static String namespaceKeyPrefix(String region, String workspaceId) {
+        return keyPrefix(region) + workspaceId + "::";
+    }
+
+    private static void requireNamespaceName(String name) {
+        if (name == null || name.isEmpty() || name.length() > MAX_NAMESPACE_NAME_LENGTH
+                || !NAMESPACE_NAME.matcher(name).matches() || name.indexOf('/') >= 0) {
+            throw new AwsException("ValidationException",
+                    "name must be 1 to " + MAX_NAMESPACE_NAME_LENGTH
+                            + " characters matching " + NAMESPACE_NAME.pattern()
+                            + " and must not contain '/'.", 400);
+        }
+    }
+
+    private static void requireNamespaceData(String encodedData) {
+        if (encodedData == null || encodedData.isEmpty()) {
+            throw new AwsException("ValidationException", "data must not be empty.", 400);
+        }
+    }
+
+    // AMP strips leading/trailing blanks from every alias it accepts, including the list filter.
+    private static String stripAlias(String alias) {
+        return alias == null ? null : alias.strip();
+    }
+
+    private static final Pattern SCRAPER_ID = Pattern.compile(
+            "s-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
+
+    private static final Set<String> SCRAPER_FILTER_KEYS = Set.of("status", "sourceArn", "destinationArn", "alias");
+
+    static final String SCRAPER_LIMITATION =
+            "Scraper configuration stored; the local emulator does not collect metrics from the source.";
+
+    private final StorageBackend<String, ObjectNode> scraperStorage;
+
+    private final StorageBackend<String, ObjectNode> scraperLoggingStorage;
+
+    private final ApsPrometheusBackend backend;
+
+    private final ApsScraperSources scraperSources;
+
+    private final URI endpointBase;
+
+    private final Object[] workspaceLocks = IntStream.range(0, 64).mapToObj(i -> new Object()).toArray();
+
+    public ApsPrometheusBackend.BackendResponse forward(String region, String workspaceId, String method,
+                                                        String path, String rawQuery,
+                                                        Map<String, String> headers, byte[] body) {
+        synchronized (workspaceLock(region, workspaceId)) {
+            PrometheusWorkspace workspace = describeWorkspace(region, workspaceId);
+            if (!workspace.isPrometheusRuntimeOwned()) {
+                // Persist cleanup ownership before Docker creates anything.
+                workspace.setPrometheusRuntimeOwned(true);
+                storage.put(key(region, workspaceId), workspace);
+            }
+            return backend.forward(workspace.getArn(), method, path, rawQuery, headers, body);
+        }
+    }
+
+    private Object workspaceLock(String region, String workspaceId) {
+        String identity = regionResolver.getAccountId() + ":" + key(region, workspaceId);
+        return workspaceLocks[Math.floorMod(identity.hashCode(), workspaceLocks.length)];
+    }
+
+    private String prometheusEndpoint(String workspaceId) {
+        String port = endpointBase.getPort() < 0 ? "" : ":" + endpointBase.getPort();
+        return endpointBase.getScheme() + "://aps-workspaces-" + workspaceId + ".localhost.floci.io" + port
+                + "/workspaces/" + workspaceId + "/";
     }
 
     public ObjectNode describeScraper(String region, String scraperId) {
@@ -788,57 +891,6 @@ public class ApsService implements TagHandler {
         return new AwsException("ConflictException", message, 409);
     }
 
-    // ── TagHandler: the shared /tags/{resourceArn} dispatcher routes aps ARNs here ──
-
-    @Override
-    public String serviceKey() {
-        return "aps";
-    }
-
-    // AMP defines TagResource/UntagResource with a 200 response, not the dispatcher's default 204.
-    @Override
-    public int tagResourceSuccessStatus() {
-        return 200;
-    }
-
-    @Override
-    public int untagResourceSuccessStatus() {
-        return 200;
-    }
-
-    @Override
-    public Map<String, String> listTags(String region, String arn) {
-        synchronized (tagLock(region, arn)) {
-            return Map.copyOf(taggableByArn(region, arn).tags());
-        }
-    }
-
-    @Override
-    public void tagResource(String region, String arn, Map<String, String> tags) {
-        // Per AMP's TagResource: keys must not begin with the reserved "aws:" prefix
-        // (case-insensitive, matching the sibling checks in FisService and BatchService).
-        for (String tagKey : tags.keySet()) {
-            if (tagKey.regionMatches(true, 0, "aws:", 0, 4)) {
-                throw new AwsException("ValidationException",
-                        "Tag keys must not begin with aws:. Offending key: " + tagKey, 400);
-            }
-        }
-        synchronized (tagLock(region, arn)) {
-            Taggable taggable = taggableByArn(region, arn);
-            taggable.tags().putAll(tags);
-            taggable.persist().run();
-        }
-    }
-
-    @Override
-    public void untagResource(String region, String arn, List<String> tagKeys) {
-        synchronized (tagLock(region, arn)) {
-            Taggable taggable = taggableByArn(region, arn);
-            tagKeys.forEach(taggable.tags()::remove);
-            taggable.persist().run();
-        }
-    }
-
     private Object tagLock(String region, String arn) {
         try {
             String[] parts = AwsArnUtils.parse(arn).resource().split("/", 3);
@@ -846,103 +898,5 @@ public class ApsService implements TagHandler {
         } catch (IllegalArgumentException e) {
             throw ApsConfigurationValidator.invalid("Invalid resource ARN: " + arn);
         }
-    }
-
-    private record Taggable(Map<String, String> tags, Runnable persist) {
-    }
-
-    private Taggable taggableByArn(String region, String arn) {
-        AwsArnUtils.Arn parsed;
-        try {
-            parsed = AwsArnUtils.parse(arn);
-        } catch (IllegalArgumentException e) {
-            throw new AwsException("ValidationException", "Invalid resource ARN: " + arn, 400);
-        }
-        if (!"aps".equals(parsed.service()) || !region.equals(parsed.region())
-                || !regionResolver.getAccountId().equals(parsed.accountId())) {
-            throw new AwsException("ValidationException",
-                    "The resource ARN does not belong to this AMP account and region: " + arn, 400);
-        }
-        String resource = parsed.resource();
-        String workspacePrefix = "workspace/";
-        if (resource.startsWith(workspacePrefix) && resource.length() > workspacePrefix.length()) {
-            PrometheusWorkspace workspace =
-                    describeWorkspace(region, resource.substring(workspacePrefix.length()));
-            return new Taggable(workspace.getTags(),
-                    () -> storage.put(key(region, workspace.getWorkspaceId()), workspace));
-        }
-        String namespacePrefix = "rulegroupsnamespace/";
-        if (resource.startsWith(namespacePrefix)) {
-            String[] parts = resource.substring(namespacePrefix.length()).split("/", 2);
-            if (parts.length == 2 && !parts[0].isEmpty() && !parts[1].isEmpty()) {
-                RuleGroupsNamespace namespace = describeRuleGroupsNamespace(region, parts[0], parts[1]);
-                return new Taggable(namespace.getTags(),
-                        () -> namespaceStorage.put(namespaceKey(region, parts[0], parts[1]), namespace));
-            }
-        }
-        String scraperPrefix = "scraper/";
-        if (resource.startsWith(scraperPrefix) && resource.length() > scraperPrefix.length()) {
-            String scraperId = resource.substring(scraperPrefix.length());
-            ObjectNode scraper = requireScraper(region, scraperId);
-            if (!arn.equals(scraper.path("arn").asText())) {
-                throw notFound("Scraper", scraperId);
-            }
-            Map<String, String> tags = new HashMap<>();
-            scraper.path("tags").fields().forEachRemaining(tag -> tags.put(tag.getKey(), tag.getValue().asText()));
-            return new Taggable(tags, () -> {
-                ObjectNode tagNode = scraper.putObject("tags");
-                tags.forEach(tagNode::put);
-                scraperStorage.put(key(region, scraperId), scraper);
-            });
-        }
-        String detectorPrefix = "anomalydetector/";
-        if (resource.startsWith(detectorPrefix)) {
-            String[] parts = resource.substring(detectorPrefix.length()).split("/", 2);
-            if (parts.length == 2 && !parts[0].isEmpty() && !parts[1].isEmpty()) {
-                PrometheusWorkspace workspace = describeWorkspace(region, parts[0]);
-                AnomalyDetector detector = requireDetector(workspace, parts[1]);
-                return new Taggable(detector.getTags(), () -> storage.put(key(region, parts[0]), workspace));
-            }
-        }
-        throw new AwsException("ValidationException",
-                "Tags are only supported on AMP workspaces, rule groups namespaces, anomaly detectors, and scrapers: "
-                        + arn, 400);
-    }
-
-    // AMP is regional ("You can have one or more workspaces in each Region in your account"), so
-    // the store is partitioned by request region, like CloudWatchLogsService's groupKey.
-    private static String key(String region, String workspaceId) {
-        return keyPrefix(region) + workspaceId;
-    }
-
-    private static String keyPrefix(String region) {
-        return region + "::";
-    }
-
-    private static String namespaceKey(String region, String workspaceId, String name) {
-        return namespaceKeyPrefix(region, workspaceId) + name;
-    }
-
-    private static String namespaceKeyPrefix(String region, String workspaceId) {
-        return keyPrefix(region) + workspaceId + "::";
-    }
-
-    private static void requireNamespaceName(String name) {
-        if (name == null || name.isEmpty() || name.length() > MAX_NAMESPACE_NAME_LENGTH
-                || !NAMESPACE_NAME.matcher(name).matches() || name.indexOf('/') >= 0) {
-            throw new AwsException("ValidationException",
-                    "name must be 1 to " + MAX_NAMESPACE_NAME_LENGTH
-                            + " characters matching " + NAMESPACE_NAME.pattern()
-                            + " and must not contain '/'.", 400);
-        }
-    }
-
-    private static void requireNamespaceData(String encodedData) {
-        ApsConfigurationValidator.ruleGroups(encodedData);
-    }
-
-    // AMP strips leading/trailing blanks from every alias it accepts, including the list filter.
-    private static String stripAlias(String alias) {
-        return alias == null ? null : alias.strip();
     }
 }

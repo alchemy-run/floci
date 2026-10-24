@@ -9,7 +9,6 @@ import io.github.hectorvent.floci.core.common.AwsPartitions;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
-import io.github.hectorvent.floci.services.wafv2.model.ApiKey;
 import io.github.hectorvent.floci.services.wafv2.model.IpSet;
 import io.github.hectorvent.floci.services.wafv2.model.RegexPatternSet;
 import io.github.hectorvent.floci.services.wafv2.model.RuleGroup;
@@ -17,17 +16,18 @@ import io.github.hectorvent.floci.services.wafv2.model.WebAcl;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
-import java.security.SecureRandom;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Base64;
 import java.net.Inet4Address;
 import java.net.InetAddress;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import io.github.hectorvent.floci.services.wafv2.model.ApiKey;
+import java.security.SecureRandom;
+import java.util.Base64;
 
 /**
  * WAF v2 management-plane business logic. Resources are stored by the
@@ -50,10 +50,8 @@ public class WafV2Service {
     private final StorageBackend<String, String> loggingStore;
     private final StorageBackend<String, String> associationStore;
     private final StorageBackend<String, String> policyStore;
-    private final StorageBackend<String, ApiKey> apiKeyStore;
     private final RegionResolver regionResolver;
     private final ObjectMapper objectMapper;
-    private final SecureRandom random = new SecureRandom();
 
     @Inject
     public WafV2Service(StorageFactory storageFactory, RegionResolver regionResolver,
@@ -72,8 +70,6 @@ public class WafV2Service {
                 new TypeReference<Map<String, String>>() {});
         this.policyStore = storageFactory.create("wafv2", "wafv2-policies.json",
                 new TypeReference<Map<String, String>>() {});
-        this.apiKeyStore = storageFactory.create("wafv2", "wafv2-api-keys.json",
-                new TypeReference<Map<String, ApiKey>>() {});
         this.regionResolver = regionResolver;
         this.objectMapper = objectMapper;
     }
@@ -347,105 +343,6 @@ public class WafV2Service {
 
     public void deletePermissionPolicy(String resourceArn) {
         policyStore.delete(resourceArn);
-    }
-
-    // ──────────────────────────── API keys ────────────────────────────
-
-    public ApiKey createApiKey(String scope, List<String> tokenDomains) {
-        validateScope(scope);
-        if (tokenDomains == null || tokenDomains.isEmpty()) {
-            throw new AwsException("WAFInvalidParameterException", "TokenDomains is required.", 400);
-        }
-        byte[] bytes = new byte[32];
-        random.nextBytes(bytes);
-        String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-        ApiKey key = new ApiKey();
-        key.setApiKey(token);
-        key.setScope(scope);
-        key.setTokenDomains(new ArrayList<>(tokenDomains));
-        key.setCreationTime(Instant.now());
-        key.setVersion(1);
-        apiKeyStore.put(key(scope, token), key);
-        return key;
-    }
-
-    public ApiKey getDecryptedApiKey(String scope, String apiKey) {
-        return requireApiKey(scope, apiKey);
-    }
-
-    public List<ApiKey> listApiKeys(String scope) {
-        validateScope(scope);
-        List<ApiKey> result = new ArrayList<>();
-        for (ApiKey key : apiKeyStore.scan(k -> true)) {
-            if (scope.equals(key.getScope())) {
-                result.add(key);
-            }
-        }
-        return result;
-    }
-
-    public void deleteApiKey(String scope, String apiKey) {
-        requireApiKey(scope, apiKey);
-        apiKeyStore.delete(key(scope, apiKey));
-    }
-
-    private ApiKey requireApiKey(String scope, String apiKey) {
-        validateScope(scope);
-        if (apiKey == null || apiKey.isBlank()) {
-            throw new AwsException("WAFInvalidParameterException", "APIKey is required.", 400);
-        }
-        return apiKeyStore.get(key(scope, apiKey)).orElseThrow(() -> new AwsException(
-                "WAFNonexistentItemException",
-                "AWS WAF couldn't perform the operation because your resource doesn't exist.",
-                404));
-    }
-
-    // ──────────────────────────── Managed catalog ────────────────────────────
-
-    public List<ManagedRuleCatalog.Group> listAvailableManagedRuleGroups(String scope) {
-        validateScope(scope);
-        return ManagedRuleCatalog.list(null);
-    }
-
-    public ManagedRuleCatalog.Group describeManagedRuleGroup(String vendorName, String name, String scope) {
-        validateScope(scope);
-        return ManagedRuleCatalog.require(vendorName, name);
-    }
-
-    public ManagedRuleCatalog.Group listAvailableManagedRuleGroupVersions(
-            String vendorName, String name, String scope) {
-        validateScope(scope);
-        return ManagedRuleCatalog.require(vendorName, name);
-    }
-
-    public List<ManagedRuleCatalog.Group> describeManagedProducts(String scope, String vendorName) {
-        validateScope(scope);
-        return ManagedRuleCatalog.list(vendorName);
-    }
-
-    // ──────────────────────────── Read-only analytics ────────────────────────────
-
-    public WebAcl requireWebAclByArn(String webAclArn) {
-        if (webAclArn == null || webAclArn.isBlank()) {
-            throw new AwsException("WAFInvalidParameterException", "WebACL ARN is required.", 400);
-        }
-        WebAcl acl = scanArn(webAclStore, webAclArn);
-        if (acl == null) {
-            throw new AwsException("WAFNonexistentItemException",
-                    "AWS WAF couldn't perform the operation because your resource doesn't exist.",
-                    404);
-        }
-        return acl;
-    }
-
-    public WebAcl requireWebAcl(String scope, String id) {
-        validateScope(scope);
-        if (id == null) {
-            throw new AwsException("WAFInvalidParameterException", "Id is required.", 400);
-        }
-        return webAclStore.get(key(scope, id)).orElseThrow(() -> new AwsException(
-                "WAFNonexistentItemException",
-                "AWS WAF couldn't perform the operation because your resource doesn't exist.", 404));
     }
 
     // ──────────────────────────── Tags ────────────────────────────
@@ -811,5 +708,102 @@ public class WafV2Service {
             }
         }
         return count;
+    }
+
+    private final StorageBackend<String, ApiKey> apiKeyStore;
+
+    private final SecureRandom random = new SecureRandom();
+
+    public ApiKey createApiKey(String scope, List<String> tokenDomains) {
+        validateScope(scope);
+        if (tokenDomains == null || tokenDomains.isEmpty()) {
+            throw new AwsException("WAFInvalidParameterException", "TokenDomains is required.", 400);
+        }
+        byte[] bytes = new byte[32];
+        random.nextBytes(bytes);
+        String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+        ApiKey key = new ApiKey();
+        key.setApiKey(token);
+        key.setScope(scope);
+        key.setTokenDomains(new ArrayList<>(tokenDomains));
+        key.setCreationTime(Instant.now());
+        key.setVersion(1);
+        apiKeyStore.put(key(scope, token), key);
+        return key;
+    }
+
+    public ApiKey getDecryptedApiKey(String scope, String apiKey) {
+        return requireApiKey(scope, apiKey);
+    }
+
+    public List<ApiKey> listApiKeys(String scope) {
+        validateScope(scope);
+        List<ApiKey> result = new ArrayList<>();
+        for (ApiKey key : apiKeyStore.scan(k -> true)) {
+            if (scope.equals(key.getScope())) {
+                result.add(key);
+            }
+        }
+        return result;
+    }
+
+    public void deleteApiKey(String scope, String apiKey) {
+        requireApiKey(scope, apiKey);
+        apiKeyStore.delete(key(scope, apiKey));
+    }
+
+    private ApiKey requireApiKey(String scope, String apiKey) {
+        validateScope(scope);
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new AwsException("WAFInvalidParameterException", "APIKey is required.", 400);
+        }
+        return apiKeyStore.get(key(scope, apiKey)).orElseThrow(() -> new AwsException(
+                "WAFNonexistentItemException",
+                "AWS WAF couldn't perform the operation because your resource doesn't exist.",
+                404));
+    }
+
+    public List<ManagedRuleCatalog.Group> listAvailableManagedRuleGroups(String scope) {
+        validateScope(scope);
+        return ManagedRuleCatalog.list(null);
+    }
+
+    public ManagedRuleCatalog.Group describeManagedRuleGroup(String vendorName, String name, String scope) {
+        validateScope(scope);
+        return ManagedRuleCatalog.require(vendorName, name);
+    }
+
+    public ManagedRuleCatalog.Group listAvailableManagedRuleGroupVersions(
+            String vendorName, String name, String scope) {
+        validateScope(scope);
+        return ManagedRuleCatalog.require(vendorName, name);
+    }
+
+    public List<ManagedRuleCatalog.Group> describeManagedProducts(String scope, String vendorName) {
+        validateScope(scope);
+        return ManagedRuleCatalog.list(vendorName);
+    }
+
+    public WebAcl requireWebAclByArn(String webAclArn) {
+        if (webAclArn == null || webAclArn.isBlank()) {
+            throw new AwsException("WAFInvalidParameterException", "WebACL ARN is required.", 400);
+        }
+        WebAcl acl = scanArn(webAclStore, webAclArn);
+        if (acl == null) {
+            throw new AwsException("WAFNonexistentItemException",
+                    "AWS WAF couldn't perform the operation because your resource doesn't exist.",
+                    404);
+        }
+        return acl;
+    }
+
+    public WebAcl requireWebAcl(String scope, String id) {
+        validateScope(scope);
+        if (id == null) {
+            throw new AwsException("WAFInvalidParameterException", "Id is required.", 400);
+        }
+        return webAclStore.get(key(scope, id)).orElseThrow(() -> new AwsException(
+                "WAFNonexistentItemException",
+                "AWS WAF couldn't perform the operation because your resource doesn't exist.", 404));
     }
 }

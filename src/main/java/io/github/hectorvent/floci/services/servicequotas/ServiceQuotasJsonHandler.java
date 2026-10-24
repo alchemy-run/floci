@@ -36,6 +36,14 @@ public class ServiceQuotasJsonHandler {
             case "GetRequestedServiceQuotaChange" ->
                     Response.ok(service.getRequestedServiceQuotaChange(
                             stringOrNull(request, "RequestId"), region)).build();
+            case "ListRequestedServiceQuotaChangeHistory" ->
+                    Response.ok(service.listRequestedServiceQuotaChangeHistory(
+                            stringOrNull(request, "ServiceCode"),
+                            stringOrNull(request, "Status"),
+                            stringOrNull(request, "QuotaRequestedAtLevel"),
+                            stringOrNull(request, "NextToken"),
+                            integerOrNull(request, "MaxResults"),
+                            region, accountId)).build();
             case "ListRequestedServiceQuotaChangeHistoryByQuota" ->
                     Response.ok(service.listRequestedServiceQuotaChangeHistoryByQuota(
                             stringOrNull(request, "ServiceCode"), stringOrNull(request, "QuotaCode"),
@@ -74,6 +82,15 @@ public class ServiceQuotasJsonHandler {
     private static Integer integerOrNull(JsonNode node, String field) {
         JsonNode value = node == null ? null : node.get(field);
         return (value != null && value.isNumber()) ? value.asInt() : null;
+    }
+
+    private Response handleRequestServiceQuotaIncrease(JsonNode request, String region, String accountId) {
+        return Response.ok(service.requestServiceQuotaIncrease(
+                stringOrNull(request, "ServiceCode"),
+                stringOrNull(request, "QuotaCode"),
+                doubleOrNull(request, "DesiredValue"),
+                stringOrNull(request, "ContextId"),
+                region, accountId)).build();
     }
 
     private static Double doubleOrNull(JsonNode node, String field) {

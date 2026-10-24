@@ -29,6 +29,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.time.temporal.ChronoUnit;
+import java.util.UUID;
 
 /**
  * Fires EventBridge Scheduler targets when schedules are due.
@@ -242,8 +244,6 @@ public class ScheduleDispatcher implements Resettable {
     }
 
     private void attempt(Schedule schedule, Occurrence occurrence, Delivery delivery, Instant now) {
-        delivery = delivery.withRequestBody(invoker.materializeRequest(schedule, occurrence.scheduledAt(),
-                delivery.retryAttempts() + 1, delivery.executionId()));
         String requestBody = invoker.materializeRequest(schedule, occurrence.scheduledAt(),
                 delivery.executionId(), delivery.attemptNumber());
         delivery = delivery.withRequestBody(requestBody);

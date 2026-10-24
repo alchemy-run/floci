@@ -13,7 +13,6 @@ import io.github.hectorvent.floci.services.securityhub.model.SecurityHubAssociat
 import io.github.hectorvent.floci.services.securityhub.model.SecurityHubState;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
-import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.PATCH;
 import jakarta.ws.rs.POST;
@@ -28,6 +27,7 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
 import java.time.Instant;
+import jakarta.ws.rs.DELETE;
 
 @Path("/")
 @Produces(MediaType.APPLICATION_JSON)
@@ -103,13 +103,6 @@ public class SecurityHubController {
         return empty();
     }
 
-    @DELETE
-    @Path("/accounts")
-    public Response disableSecurityHub(@Context HttpHeaders headers) {
-        securityHubService.disableSecurityHub(region(headers));
-        return empty();
-    }
-
     @PATCH
     @Path("/accounts")
     public Response updateSecurityHubConfiguration(@Context HttpHeaders headers, String body) {
@@ -123,7 +116,7 @@ public class SecurityHubController {
                                            @QueryParam("MaxResults") String maxResultsValue,
                                            @QueryParam("NextToken") String nextToken) {
         Integer maxResults = Pagination.parseMaxResults(maxResultsValue, "InvalidInputException");
-        if (maxResults != null && (maxResults < 1 || maxResults > 100)) {
+        if (maxResults != null && maxResults > 100) {
             throw new AwsException("InvalidInputException", "MaxResults must be between 1 and 100.", 400);
         }
         if (nextToken != null && !nextToken.isBlank()) {
@@ -158,7 +151,9 @@ public class SecurityHubController {
     public Response updateFindingAggregator(@Context HttpHeaders headers, String body) {
         String region = region(headers);
         SecurityHubState state = securityHubService.updateFindingAggregator(region, readTree(body));
-        return aggregator(state, region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("FindingAggregatorArn", state.getAggregatorArn());
+        return Response.ok(response).build();
     }
 
     @GET
@@ -259,6 +254,81 @@ public class SecurityHubController {
             response.put("NextToken", page.nextToken());
         }
         return Response.ok(response).build();
+    }
+
+    private Response aggregator(SecurityHubState state, String region) {
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("FindingAggregatorArn", state.getAggregatorArn());
+        response.put("FindingAggregationRegion", region);
+        response.put("RegionLinkingMode", state.getRegionLinkingMode());
+        if (state.getRegions() != null) {
+            response.set("Regions", state.getRegions());
+        }
+        return Response.ok(response).build();
+    }
+
+    private ObjectNode policySummary(String region, String id, JsonNode policy) {
+        int slash = id == null ? -1 : id.lastIndexOf('/');
+        String policyId = slash >= 0 ? id.substring(slash + 1) : id;
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("Arn", securityHubService.policyArn(region, policyId));
+        response.put("Id", policyId);
+        response.put("Name", policy.path("Name").asText());
+        if (policy.hasNonNull("Description")) {
+            response.put("Description", policy.path("Description").asText());
+        }
+        JsonNode securityHub = policy.path("ConfigurationPolicy").path("SecurityHub");
+        if (securityHub.path("ServiceEnabled").isBoolean()) {
+            response.put("ServiceEnabled", securityHub.path("ServiceEnabled").asBoolean());
+        }
+        response.put("UpdatedAt", policy.path("UpdatedAt").asText(Instant.now().toString()));
+        return response;
+    }
+
+    private ObjectNode policyDocument(String region, String id, JsonNode policy) {
+        ObjectNode response = policySummary(region, id, policy);
+        if (policy.has("ConfigurationPolicy")) {
+            response.set("ConfigurationPolicy", policy.get("ConfigurationPolicy"));
+        }
+        response.put("CreatedAt", policy.path("CreatedAt").asText(Instant.now().toString()));
+        return response;
+    }
+
+    private ObjectNode association(SecurityHubAssociation association) {
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("AssociationStatus", association.getStatus());
+        if (association.getStatusMessage() != null) {
+            response.put("AssociationStatusMessage", association.getStatusMessage());
+        }
+        response.put("AssociationType", "APPLIED");
+        response.put("ConfigurationPolicyId", association.getPolicyId());
+        response.put("TargetId", association.getTargetId());
+        response.put("TargetType", association.getTargetType());
+        response.put("UpdatedAt", association.getUpdatedAt());
+        return response;
+    }
+
+    private String region(HttpHeaders headers) {
+        return regionResolver.resolveRegion(headers);
+    }
+
+    private Response empty() {
+        return Response.ok().build();
+    }
+
+    private JsonNode readTree(String body) {
+        try {
+            return objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
+        } catch (Exception e) {
+            throw new WebApplicationException(JsonErrorResponseUtils.createSerializationErrorResponse());
+        }
+    }
+
+    @DELETE
+    @Path("/accounts")
+    public Response disableSecurityHub(@Context HttpHeaders headers) {
+        securityHubService.disableSecurityHub(region(headers));
+        return empty();
     }
 
     @POST
@@ -508,77 +578,5 @@ public class SecurityHubController {
             request.put("NextToken", nextToken);
         }
         return request;
-    }
-
-    private Response aggregator(SecurityHubState state, String region) {
-        ObjectNode response = objectMapper.createObjectNode();
-        response.put("FindingAggregatorArn", state.getAggregatorArn());
-        response.put("FindingAggregationRegion", region);
-        response.put("RegionLinkingMode", state.getRegionLinkingMode());
-        if (state.getRegions() != null) {
-            response.set("Regions", state.getRegions());
-        }
-        return Response.ok(response).build();
-    }
-
-    private ObjectNode policySummary(String region, String id, JsonNode policy) {
-        int slash = id == null ? -1 : id.lastIndexOf('/');
-        String policyId = slash >= 0 ? id.substring(slash + 1) : id;
-        ObjectNode response = objectMapper.createObjectNode();
-        response.put("Arn", securityHubService.policyArn(region, policyId));
-        response.put("Id", policyId);
-        response.put("Name", policy.path("Name").asText());
-        if (policy.hasNonNull("Description")) {
-            response.put("Description", policy.path("Description").asText());
-        }
-        JsonNode securityHub = policy.path("ConfigurationPolicy").path("SecurityHub");
-        if (securityHub.path("ServiceEnabled").isBoolean()) {
-            response.put("ServiceEnabled", securityHub.path("ServiceEnabled").asBoolean());
-        }
-        response.put("UpdatedAt", policy.path("UpdatedAt").asText(Instant.now().toString()));
-        return response;
-    }
-
-    private ObjectNode policyDocument(String region, String id, JsonNode policy) {
-        ObjectNode response = policySummary(region, id, policy);
-        if (policy.has("ConfigurationPolicy")) {
-            response.set("ConfigurationPolicy", policy.get("ConfigurationPolicy"));
-        }
-        response.put("CreatedAt", policy.path("CreatedAt").asText(Instant.now().toString()));
-        return response;
-    }
-
-    private ObjectNode association(SecurityHubAssociation association) {
-        ObjectNode response = objectMapper.createObjectNode();
-        response.put("AssociationStatus", association.getStatus());
-        if (association.getStatusMessage() != null) {
-            response.put("AssociationStatusMessage", association.getStatusMessage());
-        }
-        response.put("AssociationType", "APPLIED");
-        response.put("ConfigurationPolicyId", association.getPolicyId());
-        response.put("TargetId", association.getTargetId());
-        response.put("TargetType", association.getTargetType());
-        response.put("UpdatedAt", association.getUpdatedAt());
-        return response;
-    }
-
-    private String region(HttpHeaders headers) {
-        return regionResolver.resolveRegion(headers);
-    }
-
-    private Response empty() {
-        return Response.ok().build();
-    }
-
-    private JsonNode readTree(String body) {
-        try {
-            JsonNode request = objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
-            if (request == null || !request.isObject()) {
-                throw new WebApplicationException(JsonErrorResponseUtils.createSerializationErrorResponse());
-            }
-            return request;
-        } catch (Exception e) {
-            throw new WebApplicationException(JsonErrorResponseUtils.createSerializationErrorResponse());
-        }
     }
 }

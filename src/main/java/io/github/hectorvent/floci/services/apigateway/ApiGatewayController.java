@@ -19,13 +19,10 @@ import io.github.hectorvent.floci.services.apigateway.model.EndpointType;
 import io.github.hectorvent.floci.services.apigateway.model.GatewayResponse;
 import io.github.hectorvent.floci.services.apigateway.model.MethodConfig;
 import io.github.hectorvent.floci.services.apigateway.model.MethodResponse;
-import io.github.hectorvent.floci.services.apigateway.model.QuotaSettings;
 import io.github.hectorvent.floci.services.apigateway.model.RequestValidator;
 import io.github.hectorvent.floci.services.apigateway.model.RestApi;
-import io.github.hectorvent.floci.services.apigateway.model.ThrottleSettings;
 import io.github.hectorvent.floci.services.apigateway.model.UsagePlan;
 import io.github.hectorvent.floci.services.apigateway.model.UsagePlanKey;
-import io.github.hectorvent.floci.services.apigateway.model.V2DomainName;
 import io.github.hectorvent.floci.services.apigatewayv2.ApiGatewayV2OpenApiImporter;
 import io.github.hectorvent.floci.services.apigatewayv2.ApiGatewayV2Service;
 import io.github.hectorvent.floci.services.apigatewayv2.model.Api;
@@ -61,6 +58,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import io.github.hectorvent.floci.services.apigateway.model.QuotaSettings;
+import io.github.hectorvent.floci.services.apigateway.model.ThrottleSettings;
+import io.github.hectorvent.floci.services.apigateway.model.V2DomainName;
 
 /**
  * Unified AWS API Gateway management endpoints (v1 REST and v2 HTTP).
@@ -268,10 +268,6 @@ public class ApiGatewayController {
         return Response.ok(toAuthorizerNode(service.getAuthorizer(region, apiId, authorizerId)).toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
-
-
-
-
     @GET
     @Path("/restapis/{apiId}/authorizers")
     public Response getAuthorizers(@Context HttpHeaders headers, @PathParam("apiId") String apiId) {
@@ -458,7 +454,6 @@ public class ApiGatewayController {
                                  @QueryParam("embed") List<String> embed) {
         String region = regionResolver.resolveRegion(headers);
         List<ApiGatewayResource> resources = service.getResources(region, apiId);
-        boolean embedMethods = embedsMethods(embed);
         ObjectNode root = objectMapper.createObjectNode();
         ArrayNode items = root.putArray("item");
         boolean embedMethods = embed != null && embed.contains("methods");
@@ -682,8 +677,6 @@ public class ApiGatewayController {
         service.deleteDeployment(region, apiId, deploymentId);
         return Response.accepted().build();
     }
-
-
 
     @POST
     @Path("/restapis/{apiId}/stages")
@@ -1001,18 +994,6 @@ public class ApiGatewayController {
         return Response.accepted().build();
     }
 
-
-    @PATCH
-    @Path("/usageplans/{usagePlanId}/keys/{keyId}/usage")
-    public Response updateUsage(@Context HttpHeaders headers,
-                                @PathParam("usagePlanId") String usagePlanId,
-                                @PathParam("keyId") String keyId,
-                                String body) {
-        String region = regionResolver.resolveRegion(headers);
-        return Response.ok(toUsageNode(service.updateUsage(region, usagePlanId, keyId, parsePatchOperations(body))).toString())
-                .type(MediaType.APPLICATION_JSON).build();
-    }
-
     // ──────────────────────────── Gateway Responses (v1) ────────────────────────────
 
     @PUT
@@ -1234,38 +1215,11 @@ public class ApiGatewayController {
         return Response.ok(toDomainNode(region, domain).toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
-
-
     @DELETE
     @Path("/domainnames/{domainName}")
     public Response deleteDomainName(@Context HttpHeaders headers, @PathParam("domainName") String domainName) {
         String region = regionResolver.resolveRegion(headers);
         service.deleteDomainName(region, domainName);
-        return Response.accepted().build();
-    }
-
-    // ──────────────────────────── Gateway Responses (v1) ────────────────────────────
-
-
-    // ──────────────────────────── VPC Links (v1) ────────────────────────────
-
-    @DELETE
-    @Path("/restapis/{apiId}/stages/{stageName}/cache/data")
-    public Response flushStageCache(@Context HttpHeaders headers,
-                                    @PathParam("apiId") String apiId,
-                                    @PathParam("stageName") String stageName) {
-        String region = regionResolver.resolveRegion(headers);
-        service.flushStageCache(region, apiId, stageName);
-        return Response.accepted().build();
-    }
-
-    @DELETE
-    @Path("/restapis/{apiId}/stages/{stageName}/cache/authorizers")
-    public Response flushStageAuthorizersCache(@Context HttpHeaders headers,
-                                               @PathParam("apiId") String apiId,
-                                               @PathParam("stageName") String stageName) {
-        String region = regionResolver.resolveRegion(headers);
-        service.flushStageAuthorizersCache(region, apiId, stageName);
         return Response.accepted().build();
     }
 
@@ -1658,15 +1612,6 @@ public class ApiGatewayController {
 
     @PATCH
     @Path("/v2/vpclinks/{vpcLinkId}")
-    public Response updateVpcLink(@Context HttpHeaders headers, @PathParam("vpcLinkId") String vpcLinkId, String body) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> request = body == null || body.isBlank()
-                    ? Map.of()
-                    : objectMapper.readValue(body, Map.class);
-            return Response.ok(toV2VpcLinkNode(v2Service.updateVpcLink(region, vpcLinkId, request)).toString())
-                    .type(MediaType.APPLICATION_JSON).build();
     public Response updateVpcLink(@Context HttpHeaders headers,
                                   @PathParam("vpcLinkId") String vpcLinkId,
                                   String body) {
@@ -1711,7 +1656,7 @@ public class ApiGatewayController {
         String region = regionResolver.resolveRegion(headers);
         ObjectNode root = objectMapper.createObjectNode();
         ArrayNode items = root.putArray("items");
-        service.getV2DomainNames(region).forEach(d -> items.add(toV2DomainNode(d)));
+        service.getDomainNames(region).forEach(d -> items.add(toV2DomainNode(region, d)));
         return Response.ok(root.toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
@@ -1719,8 +1664,8 @@ public class ApiGatewayController {
     @Path("/v2/domainnames/{domainName}")
     public Response getV2DomainName(@Context HttpHeaders headers, @PathParam("domainName") String domainName) {
         String region = regionResolver.resolveRegion(headers);
-        return Response.ok(toV2DomainNode(service.getV2DomainName(region, domainName)).toString())
-                .type(MediaType.APPLICATION_JSON).build();
+        CustomDomain domain = service.getDomainName(region, domainName);
+        return Response.ok(toV2DomainNode(region, domain).toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
     /**
@@ -1788,17 +1733,6 @@ public class ApiGatewayController {
                 .type(MediaType.APPLICATION_JSON).build();
     }
 
-    @PATCH
-    @Path("/v2/domainnames/{domainName}/apimappings/{apiMappingId}")
-    public Response updateApiMapping(@Context HttpHeaders headers,
-                                     @PathParam("domainName") String domainName,
-                                     @PathParam("apiMappingId") String apiMappingId,
-                                     String body) {
-        String region = regionResolver.resolveRegion(headers);
-        StoredMapping updated = service.updateApiMapping(region, domainName, apiMappingId, readJsonBody(body),
-                (apiId, stage) -> requireApiAndStageExist(region, apiId, stage));
-        return Response.ok(toApiMappingNode(updated.storedPath(), updated.mapping()).toString())
-                .type(MediaType.APPLICATION_JSON).build();
     /**
      * {@code UpdateApiMapping}: what the body leaves out keeps its value, as on AWS, and the mapping
      * keeps its id through a change of key.
@@ -2246,52 +2180,6 @@ public class ApiGatewayController {
         return Response.ok(root.toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
-    @GET
-    @Path("/v2/apis/{apiId}/exports/{specification}")
-    public Response exportApi(@Context HttpHeaders headers,
-                              @PathParam("apiId") String apiId,
-                              @PathParam("specification") String specification) {
-        String region = regionResolver.resolveRegion(headers);
-        ObjectNode spec = exportOpenApi(region, apiId, specification);
-        return Response.ok(spec.toString()).type(MediaType.APPLICATION_JSON).build();
-    }
-
-
-
-    @DELETE
-    @Path("/v2/apis/{apiId}/stages/{stageName}/cache/authorizers")
-    public Response resetAuthorizersCache(@Context HttpHeaders headers,
-                                          @PathParam("apiId") String apiId,
-                                          @PathParam("stageName") String stageName) {
-        String region = regionResolver.resolveRegion(headers);
-        v2Service.getStage(region, apiId, stageName);
-        return Response.noContent().build();
-    }
-
-
-
-
-
-
-
-    @PATCH
-    @Path("/v2/domainnames/{domainName}")
-    public Response updateV2DomainName(@Context HttpHeaders headers, @PathParam("domainName") String domainName, String body) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> request = body == null || body.isBlank()
-                    ? Map.of()
-                    : objectMapper.readValue(body, Map.class);
-            return Response.ok(toV2DomainNode(service.updateV2DomainName(region, domainName, request)).toString())
-                    .type(MediaType.APPLICATION_JSON).build();
-        } catch (IOException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
-    }
-
-
-
     // ──────────────────────────── Helpers ────────────────────────────
 
     private ObjectNode toApiNode(String region, RestApi api) {
@@ -2357,17 +2245,6 @@ public class ApiGatewayController {
         return node;
     }
 
-    private static boolean embedsMethods(List<String> embed) {
-        if (embed == null) {
-            return false;
-        }
-        return embed.stream().anyMatch(value ->
-                value != null && (value.equalsIgnoreCase("methods")
-                        || value.contains("resourceMethods")
-                        || value.equalsIgnoreCase("item")));
-    }
-
-    // Policies are JSON strings, including escaped newlines in pretty-printed documents.
     // Full JSON string escaping, not just quotes: a pretty-printed policy carries newlines, and
     // those must be escaped too or the provider's quote-and-unquote step fails to parse it.
     private static String escapePolicy(String policy) {
@@ -2384,42 +2261,6 @@ public class ApiGatewayController {
         if (r.getParentId() != null) node.put("parentId", r.getParentId());
         if (r.getPathPart() != null) node.put("pathPart", r.getPathPart());
         node.put("path", r.getPath());
-        Map<String, MethodConfig> methods = r.getResourceMethods();
-        if (methods != null && !methods.isEmpty()) {
-            ObjectNode methodsNode = node.putObject("resourceMethods");
-            methods.forEach((verb, method) -> {
-                if (embedMethods && method != null) {
-                    methodsNode.set(verb, toMethodNode(method));
-                } else {
-                    methodsNode.set(verb, objectMapper.createObjectNode());
-                }
-            });
-        }
-        return node;
-    }
-
-    private ObjectNode toUsageNode(ApiGatewayService.UsageSnapshot usage) {
-        ObjectNode node = objectMapper.createObjectNode();
-        node.put("usagePlanId", usage.usagePlanId());
-        if (usage.startDate() != null) {
-            node.put("startDate", usage.startDate());
-        }
-        if (usage.endDate() != null) {
-            node.put("endDate", usage.endDate());
-        }
-        ObjectNode values = node.putObject("values");
-        if (usage.values() != null) {
-            usage.values().forEach((keyId, series) -> {
-                ArrayNode keyValues = values.putArray(keyId);
-                if (series != null) {
-                    series.forEach(point -> {
-                        ArrayNode pair = keyValues.addArray();
-                        if (point != null) {
-                            point.forEach(pair::add);
-                        }
-                    });
-                }
-            });
         if (!r.getResourceMethods().isEmpty()) {
             ObjectNode methods = node.putObject("resourceMethods");
             r.getResourceMethods().forEach((httpMethod, method) -> methods.set(httpMethod,
@@ -2556,10 +2397,6 @@ public class ApiGatewayController {
             ObjectNode vars = node.putObject("variables");
             s.getVariables().forEach(vars::put);
         }
-        if (s.getTags() != null && !s.getTags().isEmpty()) {
-            ObjectNode tags = node.putObject("tags");
-            s.getTags().forEach(tags::put);
-        }
         if (!s.getMethodSettings().isEmpty()) {
             ObjectNode methodSettings = node.putObject("methodSettings");
             s.getMethodSettings().forEach((key, setting) -> methodSettings.set(key, toMethodSettingNode(setting)));
@@ -2588,15 +2425,6 @@ public class ApiGatewayController {
         node.put("name", a.getName());
         node.put("type", a.getType());
         if (a.getAuthorizerUri() != null) node.put("authorizerUri", a.getAuthorizerUri());
-        if (a.getAuthType() != null) {
-            node.put("authType", a.getAuthType());
-        }
-        if (a.getAuthorizerCredentials() != null) {
-            node.put("authorizerCredentials", a.getAuthorizerCredentials());
-        }
-        if (a.getIdentityValidationExpression() != null) {
-            node.put("identityValidationExpression", a.getIdentityValidationExpression());
-        }
         if (a.getIdentitySource() != null) node.put("identitySource", a.getIdentitySource());
         node.put("authorizerResultTtlInSeconds", Integer.parseInt(a.getAuthorizerResultTtlInSeconds()));
         if (a.getProviderARNs() != null && !a.getProviderARNs().isEmpty()) {
@@ -2635,27 +2463,8 @@ public class ApiGatewayController {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("id", p.getId());
         node.put("name", p.getName());
-        if (p.getDescription() != null) node.put("description", p.getDescription());
-        if (p.getApiStages() != null && !p.getApiStages().isEmpty()) {
-            ArrayNode stages = node.putArray("apiStages");
-            p.getApiStages().forEach(stage -> {
-                ObjectNode item = stages.addObject();
-                if (stage.apiId() != null) item.put("apiId", stage.apiId());
-                if (stage.stage() != null) item.put("stage", stage.stage());
-            });
-        }
-        ThrottleSettings throttle = p.getThrottle();
-        if (throttle != null && (throttle.getBurstLimit() != null || throttle.getRateLimit() != null)) {
-            ObjectNode throttleNode = node.putObject("throttle");
-            if (throttle.getBurstLimit() != null) throttleNode.put("burstLimit", throttle.getBurstLimit());
-            if (throttle.getRateLimit() != null) throttleNode.put("rateLimit", throttle.getRateLimit());
-        }
-        QuotaSettings quota = p.getQuota();
-        if (quota != null) {
-            ObjectNode quotaNode = node.putObject("quota");
-            if (quota.getLimit() != null) quotaNode.put("limit", quota.getLimit());
-            if (quota.getOffset() != null) quotaNode.put("offset", quota.getOffset());
-            if (quota.getPeriod() != null) quotaNode.put("period", quota.getPeriod());
+        if (p.getDescription() != null) {
+            node.put("description", p.getDescription());
         }
         if (p.getTags() != null && !p.getTags().isEmpty()) {
             ObjectNode tags = node.putObject("tags");
@@ -2728,25 +2537,6 @@ public class ApiGatewayController {
         String canonical = ApiGatewayService.canonicalBasePath(storedPath);
         node.put("apiMappingKey", "(none)".equals(canonical) ? "" : canonical);
         return node;
-    }
-
-    /** Rejects a mapping whose API or stage does not exist, with the errors AWS gives for each. */
-    private void requireApiAndStageExist(String region, String apiId, String stage) {
-        try {
-            v2Service.getApi(region, apiId);
-        } catch (AwsException e) {
-            throw new AwsException("BadRequestException", "Invalid API identifier specified: " + apiId, 400);
-        }
-        try {
-            v2Service.getStage(region, apiId, stage);
-        } catch (AwsException e) {
-            throw new AwsException("BadRequestException", "Invalid stage identifier specified", 400);
-        }
-    }
-
-    /** Legacy records without a persisted ID retain their exact stored-path identity. */
-    static String apiMappingId(String storedPath) {
-        return ApiGatewayService.legacyApiMappingId(storedPath);
     }
 
     private ObjectNode toDomainNode(String region, CustomDomain d) {
@@ -2978,7 +2768,6 @@ public class ApiGatewayController {
         node.put("stageName", s.getStageName());
         if (s.getDeploymentId() != null) node.put("deploymentId", s.getDeploymentId());
         node.put("autoDeploy", s.isAutoDeploy());
-        if (s.getDescription() != null) node.put("description", s.getDescription());
         node.put("createdDate", java.time.Instant.ofEpochMilli(s.getCreatedDate()).toString());
         node.put("lastUpdatedDate", java.time.Instant.ofEpochMilli(s.getLastUpdatedDate()).toString());
         if (s.getStageVariables() != null) {
@@ -3123,30 +2912,100 @@ public class ApiGatewayController {
         return node;
     }
 
+    @PATCH
+    @Path("/usageplans/{usagePlanId}/keys/{keyId}/usage")
+    public Response updateUsage(@Context HttpHeaders headers,
+                                @PathParam("usagePlanId") String usagePlanId,
+                                @PathParam("keyId") String keyId,
+                                String body) {
+        String region = regionResolver.resolveRegion(headers);
+        return Response.ok(toUsageNode(service.updateUsage(region, usagePlanId, keyId, parsePatchOperations(body))).toString())
+                .type(MediaType.APPLICATION_JSON).build();
+    }
 
+    @DELETE
+    @Path("/restapis/{apiId}/stages/{stageName}/cache/data")
+    public Response flushStageCache(@Context HttpHeaders headers,
+                                    @PathParam("apiId") String apiId,
+                                    @PathParam("stageName") String stageName) {
+        String region = regionResolver.resolveRegion(headers);
+        service.flushStageCache(region, apiId, stageName);
+        return Response.accepted().build();
+    }
 
+    @GET
+    @Path("/v2/apis/{apiId}/exports/{specification}")
+    public Response exportApi(@Context HttpHeaders headers,
+                              @PathParam("apiId") String apiId,
+                              @PathParam("specification") String specification) {
+        String region = regionResolver.resolveRegion(headers);
+        ObjectNode spec = exportOpenApi(region, apiId, specification);
+        return Response.ok(spec.toString()).type(MediaType.APPLICATION_JSON).build();
+    }
 
+    @DELETE
+    @Path("/v2/apis/{apiId}/stages/{stageName}/cache/authorizers")
+    public Response resetAuthorizersCache(@Context HttpHeaders headers,
+                                          @PathParam("apiId") String apiId,
+                                          @PathParam("stageName") String stageName) {
+        String region = regionResolver.resolveRegion(headers);
+        v2Service.getStage(region, apiId, stageName);
+        return Response.noContent().build();
+    }
 
-    private ObjectNode toV2DomainNode(V2DomainName domain) {
+    private static boolean embedsMethods(List<String> embed) {
+        if (embed == null) {
+            return false;
+        }
+        return embed.stream().anyMatch(value ->
+                value != null && (value.equalsIgnoreCase("methods")
+                        || value.contains("resourceMethods")
+                        || value.equalsIgnoreCase("item")));
+    }
+
+    private ObjectNode toUsageNode(ApiGatewayService.UsageSnapshot usage) {
         ObjectNode node = objectMapper.createObjectNode();
-        node.put("domainName", domain.getDomainName());
-        if (domain.getDomainNameArn() != null) node.put("domainNameArn", domain.getDomainNameArn());
-        if (domain.getRoutingMode() != null) node.put("routingMode", domain.getRoutingMode());
-        if (domain.getApiMappingSelectionExpression() != null) {
-            node.put("apiMappingSelectionExpression", domain.getApiMappingSelectionExpression());
+        node.put("usagePlanId", usage.usagePlanId());
+        if (usage.startDate() != null) {
+            node.put("startDate", usage.startDate());
         }
-        ArrayNode configs = node.putArray("domainNameConfigurations");
-        for (Map<String, Object> config : domain.getDomainNameConfigurations()) {
-            configs.add(objectMapper.valueToTree(config));
+        if (usage.endDate() != null) {
+            node.put("endDate", usage.endDate());
         }
-        if (domain.getMutualTlsAuthentication() != null) {
-            node.set("mutualTlsAuthentication", objectMapper.valueToTree(domain.getMutualTlsAuthentication()));
-        }
-        if (domain.getTags() != null && !domain.getTags().isEmpty()) {
-            ObjectNode tags = node.putObject("tags");
-            domain.getTags().forEach(tags::put);
+        ObjectNode values = node.putObject("values");
+        if (usage.values() != null) {
+            usage.values().forEach((keyId, series) -> {
+                ArrayNode keyValues = values.putArray(keyId);
+                if (series != null) {
+                    series.forEach(point -> {
+                        ArrayNode pair = keyValues.addArray();
+                        if (point != null) {
+                            point.forEach(pair::add);
+                        }
+                    });
+                }
+            });
         }
         return node;
+    }
+
+    /** Rejects a mapping whose API or stage does not exist, with the errors AWS gives for each. */
+    private void requireApiAndStageExist(String region, String apiId, String stage) {
+        try {
+            v2Service.getApi(region, apiId);
+        } catch (AwsException e) {
+            throw new AwsException("BadRequestException", "Invalid API identifier specified: " + apiId, 400);
+        }
+        try {
+            v2Service.getStage(region, apiId, stage);
+        } catch (AwsException e) {
+            throw new AwsException("BadRequestException", "Invalid stage identifier specified", 400);
+        }
+    }
+
+    /** Legacy records without a persisted ID retain their exact stored-path identity. */
+    static String apiMappingId(String storedPath) {
+        return ApiGatewayService.legacyApiMappingId(storedPath);
     }
 
     private ObjectNode exportOpenApi(String region, String apiId, String specification) {
@@ -3180,5 +3039,4 @@ public class ApiGatewayController {
         }
         return spec;
     }
-
 }

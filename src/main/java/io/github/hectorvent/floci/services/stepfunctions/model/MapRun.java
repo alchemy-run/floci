@@ -4,7 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 /**
- * A distributed Map run, keyed by its Map run ARN. It is kept while running and after success or
+ * A distributed Map run that has finished, keyed by its Map run ARN. It is kept on success and on
  * failure, so the {@code mapRunArn} of a {@code MapRunStarted} event resolves through
  * {@code DescribeMapRun}. A Map cancels the remaining items on the first failure, so a failed run
  * reports those as aborted.
@@ -27,7 +27,7 @@ public class MapRun {
     private int succeededExecutionCount;
     private int failedExecutionCount;
 
-    private long toleratedFailureCount;
+    private int toleratedFailureCount;
     private double toleratedFailurePercentage;
 
     private int maxConcurrency;
@@ -54,8 +54,8 @@ public class MapRun {
     public int getFailedCount() { return failedCount; }
     public void setFailedCount(int failedCount) { this.failedCount = failedCount; }
 
-    public long getToleratedFailureCount() { return toleratedFailureCount; }
-    public void setToleratedFailureCount(long count) { this.toleratedFailureCount = count; }
+    public int getToleratedFailureCount() { return toleratedFailureCount; }
+    public void setToleratedFailureCount(int count) { this.toleratedFailureCount = count; }
     public double getToleratedFailurePercentage() { return toleratedFailurePercentage; }
     public void setToleratedFailurePercentage(double percentage) { this.toleratedFailurePercentage = percentage; }
 

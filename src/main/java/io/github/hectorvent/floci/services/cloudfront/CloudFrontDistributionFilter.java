@@ -22,7 +22,7 @@ import java.net.URI;
  * CloudFront domain name ({@code <id>.cloudfront.net}) or one of its alternate domain names
  * (CNAME aliases), this filter rewrites the request URI to
  * {@code /_cloudfront/{distributionId}{rawPath}} so {@link CloudFrontServingController} can resolve
- * the matching origin and return the content, mirroring how CloudFront fronts an S3 or custom
+ * the matching origin and return the content — mirroring how CloudFront fronts an S3 or custom
  * origin.
  *
  * <p>Runs at priority 15: after the Lambda function URL (5) and API Gateway custom domain (10)
@@ -38,7 +38,7 @@ public class CloudFrontDistributionFilter implements ContainerRequestFilter {
     private static final Logger LOG = Logger.getLogger(CloudFrontDistributionFilter.class);
 
     // A @PreMatching filter is wired into the request pipeline at build time, so holding the
-    // CloudFrontService proxy directly would place it in the native-image build heap, illegal because
+    // CloudFrontService proxy directly would place it in the native-image build heap — illegal because
     // CloudFrontService is initialized at image run time (it uses SecureRandom). Inject a lazy Instance
     // and resolve the bean per request instead.
     private final Instance<CloudFrontService> service;
@@ -50,12 +50,6 @@ public class CloudFrontDistributionFilter implements ContainerRequestFilter {
 
     @Override
     public void filter(ContainerRequestContext requestContext) {
-        URI originalUri = requestContext.getUriInfo().getRequestUri();
-        String path = originalUri.getRawPath();
-        if (path != null && (path.startsWith("/_floci/") || path.startsWith("/_cloudfront/")
-                || path.startsWith("/2020-05-31/"))) {
-            return;
-        }
         String host = RequestHost.of(requestContext);
         if (host == null) {
             return;
@@ -70,6 +64,7 @@ public class CloudFrontDistributionFilter implements ContainerRequestFilter {
             return;
         }
 
+        URI originalUri = requestContext.getUriInfo().getRequestUri();
         String rawPath = originalUri.getRawPath();
         if (rawPath == null || rawPath.isEmpty()) {
             rawPath = "/";

@@ -56,9 +56,6 @@ public class UserPool {
     private String clientIdOverride = null;
     private String clientSecretOverride = null;
 
-    private List<IdentityProvider> identityProviders = new ArrayList<>();
-    private List<UserPoolDomain> domains = new ArrayList<>();
-    private Map<String, Map<String, Object>> riskConfigurations = new HashMap<>();
     /** Empty until SetLogDeliveryConfiguration sets it; GetLogDeliveryConfiguration always returns it. */
     private List<Map<String, Object>> logConfigurations = new ArrayList<>();
 
@@ -201,12 +198,24 @@ public class UserPool {
     public String getClientSecretOverride() { return clientSecretOverride; }
     public void setClientSecretOverride(String clientSecretOverride) { this.clientSecretOverride = clientSecretOverride; }
 
+    public List<Map<String, Object>> getLogConfigurations() { return logConfigurations; }
+    public void setLogConfigurations(List<Map<String, Object>> logConfigurations) {
+        this.logConfigurations = logConfigurations;
+    }
+
+    private List<IdentityProvider> identityProviders = new ArrayList<>();
+
+    private List<UserPoolDomain> domains = new ArrayList<>();
+
+    private Map<String, Map<String, Object>> riskConfigurations = new HashMap<>();
+
     public List<IdentityProvider> getIdentityProviders() {
         if (identityProviders == null) {
             identityProviders = new ArrayList<>();
         }
         return identityProviders;
     }
+
     public void setIdentityProviders(List<IdentityProvider> identityProviders) {
         this.identityProviders = identityProviders == null ? new ArrayList<>() : identityProviders;
     }
@@ -217,6 +226,7 @@ public class UserPool {
         }
         return domains;
     }
+
     public void setDomains(List<UserPoolDomain> domains) {
         this.domains = domains == null ? new ArrayList<>() : domains;
     }
@@ -227,12 +237,8 @@ public class UserPool {
         }
         return riskConfigurations;
     }
+
     public void setRiskConfigurations(Map<String, Map<String, Object>> riskConfigurations) {
         this.riskConfigurations = riskConfigurations == null ? new HashMap<>() : riskConfigurations;
-    }
-
-    public List<Map<String, Object>> getLogConfigurations() { return logConfigurations; }
-    public void setLogConfigurations(List<Map<String, Object>> logConfigurations) {
-        this.logConfigurations = logConfigurations;
     }
 }

@@ -142,29 +142,12 @@ public class ApiGatewayTagHandler implements TagHandler {
         }
     }
 
-    private static TagTarget targetFromArn(String arn) {
-        AwsArnUtils.Arn parsed;
-        try {
-            parsed = AwsArnUtils.parse(arn);
-        } catch (IllegalArgumentException e) {
-            throw invalidArn(arn);
+    private static String apiIdFromArn(String arn) {
+        String[] parts = arn.split("/restapis/");
+        if (parts.length < 2) {
+            throw new AwsException("BadRequestException", "Invalid resource ARN: " + arn, 400);
         }
-        if (!"apigateway".equals(parsed.service()) || parsed.partition().isBlank()
-                || parsed.region().isBlank() || !parsed.accountId().isEmpty()) {
-            throw invalidArn(arn);
-        }
-        String[] parts = parsed.resource().split("/", -1);
-        if (parts.length < 3 || !parts[0].isEmpty() || !validSegment(parts[2])) {
-            throw invalidArn(arn);
-        }
-        if (parts.length == 3 && ("restapis".equals(parts[1]) || "domainnames".equals(parts[1]))) {
-            return new TagTarget(parts[1], parts[2], null);
-        }
-        if (parts.length == 5 && "restapis".equals(parts[1]) && "stages".equals(parts[3])
-                && validSegment(parts[4])) {
-            return new TagTarget(parts[1], parts[2], parts[4]);
-        }
-        throw invalidArn(arn);
+        return parts[1].split("/")[0];
     }
 
     /**
@@ -208,5 +191,41 @@ public class ApiGatewayTagHandler implements TagHandler {
         }
         String id = resource.substring(prefix.length());
         return id.isEmpty() || id.contains("/") ? null : id;
+    }
+
+    private record TagTarget(String resourceType, String resourceId, String stageName) {}
+
+    private static TagTarget targetFromArn(String arn) {
+        AwsArnUtils.Arn parsed;
+        try {
+            parsed = AwsArnUtils.parse(arn);
+        } catch (IllegalArgumentException e) {
+            throw invalidArn(arn);
+        }
+        if (!"apigateway".equals(parsed.service()) || parsed.partition().isBlank()
+                || parsed.region().isBlank() || !parsed.accountId().isEmpty()) {
+            throw invalidArn(arn);
+        }
+        String[] parts = parsed.resource().split("/", -1);
+        if (parts.length < 3 || !parts[0].isEmpty() || !validSegment(parts[2])) {
+            throw invalidArn(arn);
+        }
+        if (parts.length == 3 && ("restapis".equals(parts[1]) || "domainnames".equals(parts[1]))) {
+            return new TagTarget(parts[1], parts[2], null);
+        }
+        if (parts.length == 5 && "restapis".equals(parts[1]) && "stages".equals(parts[3])
+                && validSegment(parts[4])) {
+            return new TagTarget(parts[1], parts[2], parts[4]);
+        }
+        throw invalidArn(arn);
+    }
+
+    private static boolean validSegment(String value) {
+        return !value.isBlank() && !value.contains("?") && !value.contains("#")
+                && value.chars().noneMatch(c -> Character.isWhitespace(c) || Character.isISOControl(c));
+    }
+
+    private static AwsException invalidArn(String arn) {
+        return new AwsException("BadRequestException", "Invalid resource ARN: " + arn, 400);
     }
 }

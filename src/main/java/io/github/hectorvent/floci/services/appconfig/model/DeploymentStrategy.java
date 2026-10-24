@@ -1,10 +1,9 @@
 package io.github.hectorvent.floci.services.appconfig.model;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.quarkus.runtime.annotations.RegisterForReflection;
-
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -27,8 +26,6 @@ public class DeploymentStrategy {
     private String growthType; // LINEAR, EXPONENTIAL
     @JsonProperty("ReplicateTo")
     private String replicateTo; // NONE, SSM_DOCUMENT
-    @JsonIgnore
-    private Map<String, String> tags = new HashMap<>();
 
     public DeploymentStrategy() {}
 
@@ -56,6 +53,10 @@ public class DeploymentStrategy {
     public String getReplicateTo() { return replicateTo; }
     public void setReplicateTo(String replicateTo) { this.replicateTo = replicateTo; }
 
+    @JsonIgnore
+    private Map<String, String> tags = new HashMap<>();
+
     public Map<String, String> getTags() { return tags; }
+
     public void setTags(Map<String, String> tags) { this.tags = tags != null ? tags : new HashMap<>(); }
 }

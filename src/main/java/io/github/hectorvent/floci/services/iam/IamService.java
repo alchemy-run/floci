@@ -734,7 +734,7 @@ public class IamService implements SessionAccountLookup, ResourceProvider {
             return;
         }
         validateAccountAlias(seededAccountAlias);
-        Optional<String> stored = getAccountAlias();
+        Optional<String> stored = accountAliases.get(ACCOUNT_ALIAS_KEY);
         if (stored.isEmpty()) {
             accountAliases.put(ACCOUNT_ALIAS_KEY, seededAccountAlias);
             LOG.infov("Seeded IAM account alias: {0}", seededAccountAlias);
@@ -1002,34 +1002,6 @@ public class IamService implements SessionAccountLookup, ResourceProvider {
                 }
                 users.put(userName, user);
             }
-            List<AccessKey> keysToMove = userAccessKeys(userName);
-            users.delete(userName);
-            user.setUserName(newUserName);
-            if (newPath != null) user.setPath(normalizePath(newPath));
-            user.setArn(iamArn("user", user.getPath(), newUserName));
-            users.put(newUserName, user);
-            loginProfiles.get(userName).ifPresent(profile -> {
-                loginProfiles.delete(userName);
-                profile.setUserName(newUserName);
-                loginProfiles.put(newUserName, profile);
-            });
-            for (AccessKey key : keysToMove) {
-                key.setUserName(newUserName);
-                accessKeys.put(key.getAccessKeyId(), key);
-            }
-            for (String groupName : user.getGroupNames()) {
-                groups.get(groupName).ifPresent(group -> {
-                    group.getUserNames().remove(userName);
-                    group.getUserNames().add(newUserName);
-                    groups.put(groupName, group);
-                });
-            }
-        } else {
-            if (newPath != null) {
-                user.setPath(normalizePath(newPath));
-                user.setArn(iamArn("user", user.getPath(), userName));
-            }
-            users.put(userName, user);
         }
     }
 
@@ -1492,14 +1464,15 @@ public class IamService implements SessionAccountLookup, ResourceProvider {
         validateRoleName(roleName);
         validateRoleDescription(description);
         IamRole role = getRole(roleName);
-        // AWS lets UpdateRole change a service-linked role's description (the
-        // only SLR field IAM itself will edit). MaxSessionDuration on an SLR
-        // is service-owned — reject that the same way DeleteRole is rejected.
-        if (role.isServiceLinkedRole() && maxSessionDuration > 0) {
+        if (maxSessionDuration > 0) {
             requireNotServiceLinked(role, roleName);
         }
-        if (description != null) role.setDescription(description);
-        if (maxSessionDuration > 0) role.setMaxSessionDuration(maxSessionDuration);
+        if (description != null) {
+            role.setDescription(description);
+        }
+        if (maxSessionDuration > 0) {
+            role.setMaxSessionDuration(maxSessionDuration);
+        }
         roles.put(roleName, role);
         return role;
     }
@@ -2479,20 +2452,6 @@ public class IamService implements SessionAccountLookup, ResourceProvider {
             LOG.infov("Created instance profile: {0}", instanceProfileName);
             return profile;
         }
-        String profileId = "AIPA" + randomId(16);
-        String normalizedPath = normalizePath(path);
-        String arn = iamArn("instance-profile", normalizedPath, instanceProfileName);
-        InstanceProfile profile = new InstanceProfile(profileId, instanceProfileName, normalizedPath, arn);
-        if (tags != null) {
-            profile.getTags().putAll(tags);
-        }
-        instanceProfiles.put(instanceProfileName, profile);
-        LOG.infov("Created instance profile: {0}", instanceProfileName);
-        return profile;
-    }
-
-    public Map<String, String> listInstanceProfileTags(String instanceProfileName) {
-        return getInstanceProfile(instanceProfileName).getTags();
     }
 
     public Optional<InstanceProfile> findInstanceProfile(String accountId, String profileName) {
@@ -2599,18 +2558,7 @@ public class IamService implements SessionAccountLookup, ResourceProvider {
     // Account Aliases
     // ==================================================================
     public Optional<String> getAccountAlias() {
-        synchronized (accountAliasLock) {
-            Optional<String> alias = accountAliases.get(ACCOUNT_ALIAS_KEY);
-            Optional<String> legacy = accountAliases.get("current");
-            if (legacy.isPresent()) {
-                if (alias.isEmpty()) {
-                    alias = legacy;
-                    accountAliases.put(ACCOUNT_ALIAS_KEY, legacy.get());
-                }
-                accountAliases.delete("current");
-            }
-            return alias;
-        }
+        return accountAliases.get(ACCOUNT_ALIAS_KEY);
     }
 
     /**
@@ -2623,7 +2571,7 @@ public class IamService implements SessionAccountLookup, ResourceProvider {
     public void createAccountAlias(String alias) {
         validateAccountAlias(alias);
         synchronized (accountAliasLock) {
-            Optional<String> existing = getAccountAlias();
+            Optional<String> existing = accountAliases.get(ACCOUNT_ALIAS_KEY);
             if (existing.isPresent() && existing.get().equals(alias)) {
                 throw new AwsException("EntityAlreadyExists",
                         "The account alias " + alias + " already exists.", 409);
@@ -2642,7 +2590,7 @@ public class IamService implements SessionAccountLookup, ResourceProvider {
         // a ValidationError rather than a miss.
         validateAccountAlias(alias);
         synchronized (accountAliasLock) {
-            String existing = getAccountAlias()
+            String existing = accountAliases.get(ACCOUNT_ALIAS_KEY)
                     .orElseThrow(() -> new AwsException("NoSuchEntity",
                             "The account alias " + alias + " cannot be found.", 404));
             if (!existing.equals(alias)) {
@@ -2727,71 +2675,6 @@ public class IamService implements SessionAccountLookup, ResourceProvider {
     /** A user holds at most one login profile: creating a second is EntityAlreadyExists. */
     public LoginProfile createLoginProfile(String userName, String password, boolean passwordResetRequired) {
         getUser(userName);
-        if (loginProfiles.get(userName).isPresent()) {
-            throw new AwsException("EntityAlreadyExists",
-                    "Login Profile for User " + userName + " already exists.", 409);
-        }
-        validateLoginProfilePassword(password);
-        LoginProfile profile = new LoginProfile(userName, password, passwordResetRequired);
-        loginProfiles.put(userName, profile);
-        LOG.infov("Created IAM login profile for user: {0}", userName);
-        return profile;
-    }
-
-    boolean hasLoginProfile(String userName) {
-        return loginProfiles.get(userName).isPresent();
-    }
-
-    public LoginProfile getLoginProfile(String userName) {
-        getUser(userName);
-        return loginProfiles.get(userName)
-                .orElseThrow(() -> new AwsException("NoSuchEntity",
-                        "Login Profile for User " + userName + " cannot be found.", 404));
-    }
-
-    /**
-     * Replaces the fields the caller supplies; unlike {@link #updateAccountPasswordPolicy}, an
-     * omitted field here carries over its previous value rather than resetting to a default.
-     * {@code Password} and {@code PasswordResetRequired} are independently optional on AWS's
-     * {@code UpdateLoginProfile}, so a caller rotating only the password must not accidentally
-     * clear the reset-required flag, and vice versa.
-     */
-    public void updateLoginProfile(String userName, String password, Boolean passwordResetRequired) {
-        LoginProfile profile = getLoginProfile(userName);
-        if (password != null) {
-            validateLoginProfilePassword(password);
-            profile.setPassword(password);
-        }
-        if (passwordResetRequired != null) {
-            profile.setPasswordResetRequired(passwordResetRequired);
-        }
-        loginProfiles.put(userName, profile);
-        LOG.infov("Updated IAM login profile for user: {0}", userName);
-    }
-
-    public void deleteLoginProfile(String userName) {
-        getUser(userName);
-        if (loginProfiles.get(userName).isEmpty()) {
-            throw new AwsException("NoSuchEntity",
-                    "Login Profile for User " + userName + " cannot be found.", 404);
-        }
-        loginProfiles.delete(userName);
-        LOG.infov("Deleted IAM login profile for user: {0}", userName);
-    }
-
-    /**
-     * Base wire validation shared by Create/UpdateLoginProfile, then, only when the account has
-     * ever set one (matching {@link #getAccountPasswordPolicy}'s own NoSuchEntity-by-default
-     * semantics), the account's password policy.
-     */
-    private void validateLoginProfilePassword(String password) {
-        if (password == null || !LOGIN_PROFILE_PASSWORD_PATTERN.matcher(password).matches()) {
-            throw new AwsException("ValidationError",
-                    "1 validation error detected: Value at 'password' failed to satisfy constraint: "
-                            + "Member must have length less than or equal to 128 and greater than or "
-                            + "equal to 1", 400);
-        }
-        getAccountPasswordPolicy().ifPresent(policy -> checkPasswordAgainstPolicy(password, policy));
         LoginProfile profile;
         synchronized (loginProfileLock) {
             if (loginProfiles.get(userName).isPresent()) {
@@ -4739,45 +4622,6 @@ public class IamService implements SessionAccountLookup, ResourceProvider {
     // =========================================================================
 
     /**
-     * Temporary credentials minted for a Lambda (or other) execution role so the
-     * container signs as that role principal instead of the {@code test} root bypass.
-     */
-    public record RoleSessionCredentials(String accessKeyId, String secretAccessKey, String sessionToken) {}
-
-    /**
-     * Mints a non-expiring assumed-role session mapped to {@code roleArn}. The role
-     * need not exist yet — policy collection happens at evaluation time — so a
-     * subsequent {@code PutRolePolicy} is visible to the same credentials.
-     */
-    public RoleSessionCredentials mintRoleSession(String roleArn) {
-        if (roleArn == null || roleArn.isBlank()) {
-            throw new IllegalArgumentException("roleArn is required");
-        }
-        String accessKeyId = TEMPORARY_ACCESS_KEY_PREFIX + randomId(16);
-        String secretKey = randomSecret(40);
-        String sessionToken = randomSecret(200);
-        registerSession(accessKeyId, secretKey, sessionToken, roleArn, null, null);
-        LOG.infov("Minted execution-role session {0} for {1}", accessKeyId, roleArn);
-        return new RoleSessionCredentials(accessKeyId, secretKey, sessionToken);
-    }
-
-    /**
-     * {@code true} when {@code accessKeyId} is a live assumed-role session (has a
-     * role ARN and has not expired). User access keys and unknown keys are {@code false}.
-     */
-    public boolean isAssumedRoleSession(String accessKeyId) {
-        Optional<SessionCredential> sessionOpt = findSessionForCallerContext(accessKeyId);
-        if (sessionOpt.isEmpty()) {
-            return false;
-        }
-        SessionCredential session = sessionOpt.get();
-        if (session.getExpiration() != null && session.getExpiration().isBefore(Instant.now())) {
-            return false;
-        }
-        return session.getRoleArn() != null && !session.getRoleArn().isBlank();
-    }
-
-    /**
      * Stores an assumed-role session so the enforcement filter can resolve its policies.
      */
     public void registerSession(String sessionAccessKeyId, String roleArn, Instant expiration) {
@@ -6546,5 +6390,106 @@ public class IamService implements SessionAccountLookup, ResourceProvider {
 
     private String isoDate(Instant instant) {
         return instant == null ? "" : CREDENTIAL_REPORT_TIME.format(instant);
+    }
+
+    private static final String SERVICE_LINKED_ROLE_PATH = "/aws-service-role/";
+
+    private static final String SERVICE_LINKED_ROLE_NAME_PREFIX = "AWSServiceRoleFor";
+
+    private static final Map<String, String> SERVICE_LINKED_ROLE_NAMES = Map.of(
+            "autoscaling.amazonaws.com", "AutoScaling",
+            "cloud9.amazonaws.com", "AWSCloud9",
+            "lakeformation.amazonaws.com", "LakeFormationDataAccess",
+            "ram.amazonaws.com", "ResourceAccessManager"
+    );
+
+    private static final String AMAZONAWS_DOMAIN = ".amazonaws.com";
+
+    /** {@code tagListType} / {@code tagKeyListType} are both {@code max: 50}. */
+    private static final int MAX_TAGS_PER_INSTANCE_PROFILE = 50;
+
+    /**
+     * Every dot- and hyphen-separated label contributes, because the leading one alone is not unique:
+     * {@code rds.amazonaws.com} and {@code rds.application-autoscaling.amazonaws.com} are separate
+     * roles on AWS, and a config declaring both must not collide on one name here.
+     */
+    private static String derivedServiceName(String awsServiceName) {
+        String canonicalName = SERVICE_LINKED_ROLE_NAMES.get(awsServiceName);
+        if (canonicalName != null) {
+            return canonicalName;
+        }
+        String core = awsServiceName == null ? "" : awsServiceName;
+        if (core.endsWith(AMAZONAWS_DOMAIN)) {
+            core = core.substring(0, core.length() - AMAZONAWS_DOMAIN.length());
+        }
+        StringBuilder derived = new StringBuilder();
+        for (String segment : core.split("[.-]")) {
+            if (!segment.isEmpty()) {
+                derived.append(Character.toUpperCase(segment.charAt(0))).append(segment.substring(1));
+            }
+        }
+        if (derived.isEmpty()) {
+            throw new AwsException("InvalidInput",
+                    "The request must include a valid AWSServiceName, for example es.amazonaws.com.", 400);
+        }
+        return derived.toString();
+    }
+
+    boolean hasLoginProfile(String userName) {
+        return loginProfiles.get(userName).isPresent();
+    }
+
+    /**
+     * Base wire validation shared by Create/UpdateLoginProfile, then, only when the account has
+     * ever set one (matching {@link #getAccountPasswordPolicy}'s own NoSuchEntity-by-default
+     * semantics), the account's password policy.
+     */
+    private void validateLoginProfilePassword(String password) {
+        if (password == null || !LOGIN_PROFILE_PASSWORD_PATTERN.matcher(password).matches()) {
+            throw new AwsException("ValidationError",
+                    "1 validation error detected: Value at 'password' failed to satisfy constraint: "
+                            + "Member must have length less than or equal to 128 and greater than or "
+                            + "equal to 1", 400);
+        }
+        getAccountPasswordPolicy().ifPresent(policy -> checkPasswordAgainstPolicy(password, policy));
+    }
+
+    /**
+     * Temporary credentials minted for a Lambda (or other) execution role so the
+     * container signs as that role principal instead of the {@code test} root bypass.
+     */
+    public record RoleSessionCredentials(String accessKeyId, String secretAccessKey, String sessionToken) {}
+
+    /**
+     * Mints a non-expiring assumed-role session mapped to {@code roleArn}. The role
+     * need not exist yet — policy collection happens at evaluation time — so a
+     * subsequent {@code PutRolePolicy} is visible to the same credentials.
+     */
+    public RoleSessionCredentials mintRoleSession(String roleArn) {
+        if (roleArn == null || roleArn.isBlank()) {
+            throw new IllegalArgumentException("roleArn is required");
+        }
+        String accessKeyId = TEMPORARY_ACCESS_KEY_PREFIX + randomId(16);
+        String secretKey = randomSecret(40);
+        String sessionToken = randomSecret(200);
+        registerSession(accessKeyId, secretKey, sessionToken, roleArn, null, null);
+        LOG.infov("Minted execution-role session {0} for {1}", accessKeyId, roleArn);
+        return new RoleSessionCredentials(accessKeyId, secretKey, sessionToken);
+    }
+
+    /**
+     * {@code true} when {@code accessKeyId} is a live assumed-role session (has a
+     * role ARN and has not expired). User access keys and unknown keys are {@code false}.
+     */
+    public boolean isAssumedRoleSession(String accessKeyId) {
+        Optional<SessionCredential> sessionOpt = findSessionForCallerContext(accessKeyId);
+        if (sessionOpt.isEmpty()) {
+            return false;
+        }
+        SessionCredential session = sessionOpt.get();
+        if (session.getExpiration() != null && session.getExpiration().isBefore(Instant.now())) {
+            return false;
+        }
+        return session.getRoleArn() != null && !session.getRoleArn().isBlank();
     }
 }

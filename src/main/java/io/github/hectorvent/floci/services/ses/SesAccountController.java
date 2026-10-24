@@ -15,18 +15,13 @@ import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
-import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
-import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
-import java.time.Instant;
-import java.time.LocalTime;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -35,6 +30,14 @@ import static io.github.hectorvent.floci.services.ses.SesV2Json.coerceBooleanOrF
 import static io.github.hectorvent.floci.services.ses.SesV2Json.readOptionBody;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.remapV1Exception;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.stringMemberOrAbsent;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.QueryParam;
+import java.time.Instant;
+import java.time.LocalTime;
+import java.time.ZoneOffset;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.requireJsonObject;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.requireObjectOrAbsent;
 
 /**
  * SES V2 account-level endpoints ({@code /v2/email/account}). The settings live in
@@ -296,6 +299,7 @@ public class SesAccountController {
                 "Value at '" + path
                         + "' failed to satisfy constraint: Member must satisfy enum value set: [ENABLED, DISABLED]");
     }
+
     @GET
     @Path("/deliverability-dashboard/blacklist-report")
     public Response getBlacklistReports(@QueryParam("BlacklistItemNames") List<String> blacklistItemNames) {

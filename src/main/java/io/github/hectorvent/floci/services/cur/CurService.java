@@ -15,10 +15,10 @@ import org.jboss.logging.Logger;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.LinkedHashMap;
 
 /**
  * AWS CUR (Cost and Usage Report) management plane.
@@ -45,8 +45,15 @@ public class CurService {
             java.util.regex.Pattern.compile("[A-Za-z0-9_-]+");
 
     private static final Set<String> ALLOWED_TIME_UNITS = Set.of("HOURLY", "DAILY", "MONTHLY");
-    private static final Set<String> ALLOWED_FORMATS = Set.of("Parquet", "textORcsv");
-    private static final Set<String> ALLOWED_COMPRESSIONS = Set.of("Parquet", "GZIP", "ZIP");
+    /**
+     * Floci only emits Parquet at the moment. Real CUR also accepts
+     * {@code textORcsv} but Floci's emission engine writes Parquet
+     * unconditionally, so accepting {@code textORcsv} would let a definition
+     * persist that no consumer can read. Reject it explicitly until CSV
+     * support lands in a follow-up PR.
+     */
+    private static final Set<String> ALLOWED_FORMATS = Set.of("Parquet");
+    private static final Set<String> ALLOWED_COMPRESSIONS = Set.of("Parquet");
     private static final Set<String> ALLOWED_VERSIONING = Set.of("CREATE_NEW_REPORT", "OVERWRITE_REPORT");
     private static final Set<String> ALLOWED_ARTIFACTS = Set.of("REDSHIFT", "QUICKSIGHT", "ATHENA");
     private static final Set<String> ALLOWED_SCHEMA_ELEMENTS = Set.of("RESOURCES", "SPLIT_COST_ALLOCATION_DATA", "MANUAL_DISCOUNT_COMPATIBILITY");
@@ -106,7 +113,6 @@ public class CurService {
                 "ReportNotFoundException",
                 "Report " + reportName + " not found.", 400));
 
-        incoming.setTags(existing.getTags());
         incoming.setCreatedDate(existing.getCreatedDate());
         incoming.setLastUpdatedDate(Instant.now());
         incoming.setReportStatus(existing.getReportStatus() == null ? "PENDING" : existing.getReportStatus());
@@ -143,7 +149,7 @@ public class CurService {
         } else {
             all = store.scan(key -> true);
         }
-        Map<String, List<ReportDefinition>> result = new LinkedHashMap<>();
+        Map<String, List<ReportDefinition>> result = new java.util.LinkedHashMap<>();
         for (ReportDefinition def : all) {
             String accountId = def.getOwnerAccountId();
             if (accountId == null || accountId.isEmpty()) {
@@ -220,33 +226,6 @@ public class CurService {
         return existing;
     }
 
-    public Map<String, String> listTagsForResource(String reportName, String region) {
-        ReportDefinition definition = requireReport(reportName, region);
-        return definition.getTags() == null ? Map.of() : Map.copyOf(definition.getTags());
-    }
-
-    public void tagResource(String reportName, String region, Map<String, String> tags) {
-        ReportDefinition definition = requireReport(reportName, region);
-        Map<String, String> merged = new LinkedHashMap<>(listTagsForResource(reportName, region));
-        merged.putAll(tags);
-        definition.setTags(merged);
-        store.put(compositeKey(region, reportName), definition);
-    }
-
-    public void untagResource(String reportName, String region, List<String> tagKeys) {
-        ReportDefinition definition = requireReport(reportName, region);
-        Map<String, String> remaining = new LinkedHashMap<>(listTagsForResource(reportName, region));
-        tagKeys.forEach(remaining::remove);
-        definition.setTags(remaining);
-        store.put(compositeKey(region, reportName), definition);
-    }
-
-    private ReportDefinition requireReport(String reportName, String region) {
-        requireNonEmpty(reportName, "ReportName");
-        return store.get(compositeKey(region, reportName)).orElseThrow(() -> new AwsException(
-                "ResourceNotFoundException", "Report " + reportName + " not found.", 400));
-    }
-
     private long countForCurrentAccount() {
         return store.keys().size();
     }
@@ -267,10 +246,6 @@ public class CurService {
         requireOneOf(d.getTimeUnit(), ALLOWED_TIME_UNITS, "TimeUnit");
         requireOneOf(d.getFormat(), ALLOWED_FORMATS, "Format");
         requireOneOf(d.getCompression(), ALLOWED_COMPRESSIONS, "Compression");
-        if ("Parquet".equals(d.getFormat()) != "Parquet".equals(d.getCompression())) {
-            throw new AwsException("ValidationException",
-                    "Parquet format requires Parquet compression; textORcsv requires GZIP or ZIP.", 400);
-        }
         requireNonEmpty(d.getS3Bucket(), "S3Bucket");
         S3DestinationValidation.requireValidBucketName(d.getS3Bucket(), "S3Bucket");
         if (d.getS3Prefix() != null) {
@@ -321,4 +296,30 @@ public class CurService {
         }
     }
 
+    public Map<String, String> listTagsForResource(String reportName, String region) {
+        ReportDefinition definition = requireReport(reportName, region);
+        return definition.getTags() == null ? Map.of() : Map.copyOf(definition.getTags());
+    }
+
+    public void tagResource(String reportName, String region, Map<String, String> tags) {
+        ReportDefinition definition = requireReport(reportName, region);
+        Map<String, String> merged = new LinkedHashMap<>(listTagsForResource(reportName, region));
+        merged.putAll(tags);
+        definition.setTags(merged);
+        store.put(compositeKey(region, reportName), definition);
+    }
+
+    public void untagResource(String reportName, String region, List<String> tagKeys) {
+        ReportDefinition definition = requireReport(reportName, region);
+        Map<String, String> remaining = new LinkedHashMap<>(listTagsForResource(reportName, region));
+        tagKeys.forEach(remaining::remove);
+        definition.setTags(remaining);
+        store.put(compositeKey(region, reportName), definition);
+    }
+
+    private ReportDefinition requireReport(String reportName, String region) {
+        requireNonEmpty(reportName, "ReportName");
+        return store.get(compositeKey(region, reportName)).orElseThrow(() -> new AwsException(
+                "ResourceNotFoundException", "Report " + reportName + " not found.", 400));
+    }
 }

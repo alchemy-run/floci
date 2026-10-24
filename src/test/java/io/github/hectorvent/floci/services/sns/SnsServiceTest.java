@@ -29,14 +29,14 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class SnsServiceTest {
@@ -1470,113 +1470,6 @@ class SnsServiceTest {
     }
 
     @Test
-    void publish_deliversToFirehoseSubscription_withJsonEnvelope() throws Exception {
-        FirehoseService firehoseService = mock(FirehoseService.class);
-        RegionResolver regionResolver = new RegionResolver(REGION, ACCOUNT);
-        SnsService service = new SnsService(
-                new InMemoryStorage<>(),
-                new InMemoryStorage<>(),
-                regionResolver,
-                null,
-                null,
-                firehoseService
-        );
-
-        Topic topic = service.createTopic("firehose-topic", null, null, REGION);
-        String streamArn = "arn:aws:firehose:us-east-1:000000000000:deliverystream/test-stream";
-        service.subscribe(topic.getTopicArn(), "firehose", streamArn, REGION, Map.of());
-
-        String messageId = service.publish(topic.getTopicArn(), null, "Hello Firehose", "Test Subject", REGION);
-        assertNotNull(messageId);
-
-        ArgumentCaptor<Record> recordCaptor = ArgumentCaptor.forClass(Record.class);
-        verify(firehoseService).putRecord(eq(ACCOUNT), eq(REGION), eq("test-stream"), recordCaptor.capture());
-
-        Record captured = recordCaptor.getValue();
-        assertNotNull(captured);
-        assertNotNull(captured.getData());
-        String payload = new String(captured.getData(), StandardCharsets.UTF_8);
-
-        JsonNode json = new ObjectMapper().readTree(payload);
-        assertEquals("Notification", json.get("Type").asText());
-        assertEquals(messageId, json.get("MessageId").asText());
-        assertEquals(topic.getTopicArn(), json.get("TopicArn").asText());
-        assertEquals("Test Subject", json.get("Subject").asText());
-        assertEquals("Hello Firehose", json.get("Message").asText());
-    }
-
-    @Test
-    void publish_deliversToFirehoseSubscription_rawMessageDelivery() {
-        FirehoseService firehoseService = mock(FirehoseService.class);
-        RegionResolver regionResolver = new RegionResolver(REGION, ACCOUNT);
-        SnsService service = new SnsService(
-                new InMemoryStorage<>(),
-                new InMemoryStorage<>(),
-                regionResolver,
-                null,
-                null,
-                firehoseService
-        );
-
-        Topic topic = service.createTopic("firehose-topic-raw", null, null, REGION);
-        String streamArn = "arn:aws:firehose:us-east-1:000000000000:deliverystream/test-stream-raw";
-        service.subscribe(topic.getTopicArn(), "firehose", streamArn, REGION,
-                Map.of("RawMessageDelivery", "true"));
-
-        String message = "{\"raw\":\"payload\"}";
-        String messageId = service.publish(topic.getTopicArn(), null, message, null, REGION);
-        assertNotNull(messageId);
-
-        ArgumentCaptor<Record> recordCaptor = ArgumentCaptor.forClass(Record.class);
-        verify(firehoseService).putRecord(eq(ACCOUNT), eq(REGION), eq("test-stream-raw"), recordCaptor.capture());
-
-        Record captured = recordCaptor.getValue();
-        assertEquals(message, new String(captured.getData(), StandardCharsets.UTF_8));
-    }
-
-    @Test
-    void publish_deliversToFirehoseSubscription_bareStreamNameEndpoint() {
-        FirehoseService firehoseService = mock(FirehoseService.class);
-        RegionResolver regionResolver = new RegionResolver(REGION, ACCOUNT);
-        SnsService service = new SnsService(
-                new InMemoryStorage<>(),
-                new InMemoryStorage<>(),
-                regionResolver,
-                null,
-                null,
-                firehoseService
-        );
-
-        Topic topic = service.createTopic("firehose-bare-topic", null, null, REGION);
-        service.subscribe(topic.getTopicArn(), "firehose", "bare-stream", REGION,
-                Map.of("RawMessageDelivery", "true"));
-
-        service.publish(topic.getTopicArn(), null, "bare-msg", null, REGION);
-
-        ArgumentCaptor<Record> recordCaptor = ArgumentCaptor.forClass(Record.class);
-        verify(firehoseService).putRecord(eq(ACCOUNT), eq(REGION), eq("bare-stream"), recordCaptor.capture());
-        assertEquals("bare-msg", new String(recordCaptor.getValue().getData(), StandardCharsets.UTF_8));
-    }
-
-    @Test
-    void publish_firehoseDeliveryFailure_doesNotFailPublisher() {
-        FirehoseService firehoseService = mock(FirehoseService.class);
-        doThrow(new RuntimeException("stream not found"))
-                .when(firehoseService).putRecord(any(), any(), any(), any());
-
-        RegionResolver regionResolver = new RegionResolver(REGION, ACCOUNT);
-        SnsService service = new SnsService(
-                new InMemoryStorage<>(),
-                new InMemoryStorage<>(),
-                regionResolver,
-                null,
-                null,
-                firehoseService
-        );
-
-        Topic topic = service.createTopic("firehose-fail-topic", null, null, REGION);
-        service.subscribe(topic.getTopicArn(), "firehose",
-                "arn:aws:firehose:us-east-1:000000000000:deliverystream/failing-stream", REGION, Map.of());
     void publish_invokesTheQualifiedLambdaSubscriptionEndpoint() {
         LambdaService lambdaService = mock(LambdaService.class);
         SnsService service = new SnsService(

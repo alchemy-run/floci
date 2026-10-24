@@ -116,10 +116,6 @@ public class IamQueryHandler {
         LOG.debugv("IAM action: {0}", action);
 
         try {
-            var extended = extendedHandler.handle(action, params);
-            if (extended.isPresent()) {
-                return extended.get();
-            }
             return switch (action) {
             // Users
             case "CreateUser" -> handleCreateUser(params);
@@ -296,6 +292,7 @@ public class IamQueryHandler {
             case "DeleteAccessKey" -> handleDeleteAccessKey(params, authorization);
             case "ListAccessKeys" -> handleListAccessKeys(params, authorization);
             case "UpdateAccessKey" -> handleUpdateAccessKey(params, authorization);
+            case "GetAccessKeyLastUsed" -> handleGetAccessKeyLastUsed(params);
 
             case "ListOrganizationsFeatures" -> handleListOrganizationsFeatures(params);
             case "EnableOrganizationsRootCredentialsManagement" -> handleEnableOrganizationsRootCredentialsManagement(params);
@@ -649,10 +646,8 @@ public class IamQueryHandler {
         for (SAMLProvider provider : samlProviderService.list(accountResolver.resolve(authorization))) {
             xml.start("member").elem("Arn", provider.getArn()).end("member");
         }
-        boolean passwordResetRequired = getBooleanParam(params, "PasswordResetRequired", false);
-        LoginProfile profile = iamService.createLoginProfile(userName, password, passwordResetRequired);
-        String result = new XmlBuilder().start("LoginProfile").raw(loginProfileXml(profile)).end("LoginProfile").build();
-        return Response.ok(AwsQueryResponse.envelope("CreateLoginProfile", AwsNamespaces.IAM, result)).build();
+        xml.end("SAMLProviderList");
+        return Response.ok(AwsQueryResponse.envelope("ListSAMLProviders", AwsNamespaces.IAM, xml.build())).build();
     }
 
     private Response handleCreateSAMLProvider(MultivaluedMap<String, String> params, String authorization) {
@@ -2082,8 +2077,7 @@ public class IamQueryHandler {
     private Response handleCreateInstanceProfile(MultivaluedMap<String, String> params) {
         Map<String, String> tags = extractTags(params, false);
         InstanceProfile profile = iamService.createInstanceProfile(
-                getParam(params, "InstanceProfileName"), getParam(params, "Path"),
-                extractTags(params));
+                getParam(params, "InstanceProfileName"), getParam(params, "Path"));
         if (!tags.isEmpty()) {
             iamService.tagInstanceProfile(profile.getInstanceProfileName(), tags);
             profile = iamService.getInstanceProfile(profile.getInstanceProfileName());
@@ -3555,4 +3549,6 @@ public class IamQueryHandler {
                 .elem("IsTruncated", false).build();
         return Response.ok(AwsQueryResponse.envelope("ListInstanceProfileTags", AwsNamespaces.IAM, result)).build();
     }
+
+    private final IamExtendedQueryHandler extendedHandler;
 }

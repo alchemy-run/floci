@@ -28,12 +28,6 @@ public class LambdaFunction {
     private long codeSizeBytes;
     private String packageType = "Zip";
     private String imageUri;
-    /**
-     * The digest-pinned {@code repository@sha256:...} form of {@link #imageUri}, resolved when the
-     * image is deployed. Lambda runs this digest until the next UpdateFunctionCode, so retagging
-     * the source image does not change what the function executes.
-     */
-    private String resolvedImageUri;
     private List<String> imageConfigCommand;
     private List<String> imageConfigEntryPoint;
     private String imageConfigWorkingDirectory;
@@ -63,8 +57,6 @@ public class LambdaFunction {
     private List<String> layers = new ArrayList<>();
     private String kmsKeyArn;
     private Map<String, Object> vpcConfig;
-    /** Hyperplane ENIs created for this function's VpcConfig; released on delete. */
-    private List<String> vpcEniIds = new ArrayList<>();
     /**
      * Resolved at attach time from the first VpcConfig subnet. Response-only: the AWS model's
      * VpcConfigResponse carries VpcId, while the VpcConfig request shape does not.
@@ -136,9 +128,6 @@ public class LambdaFunction {
     public String getImageUri() { return imageUri; }
     public void setImageUri(String imageUri) { this.imageUri = imageUri; }
 
-    public String getResolvedImageUri() { return resolvedImageUri; }
-    public void setResolvedImageUri(String resolvedImageUri) { this.resolvedImageUri = resolvedImageUri; }
-
     public List<String> getImageConfigCommand() { return imageConfigCommand; }
     public void setImageConfigCommand(List<String> imageConfigCommand) { this.imageConfigCommand = imageConfigCommand; }
 
@@ -204,11 +193,6 @@ public class LambdaFunction {
     public Map<String, Object> getVpcConfig() { return vpcConfig; }
     public void setVpcConfig(Map<String, Object> vpcConfig) { this.vpcConfig = vpcConfig; }
 
-    public List<String> getVpcEniIds() { return vpcEniIds; }
-    public void setVpcEniIds(List<String> vpcEniIds) {
-        this.vpcEniIds = vpcEniIds != null ? vpcEniIds : new ArrayList<>();
-    }
-
     public String getVpcId() { return vpcId; }
     public void setVpcId(String vpcId) { this.vpcId = vpcId; }
 
@@ -261,4 +245,24 @@ public class LambdaFunction {
     public ContainerState getContainerState() { return containerState; }
     @JsonIgnore
     public void setContainerState(ContainerState containerState) { this.containerState = containerState; }
+
+    /**
+     * The digest-pinned {@code repository@sha256:...} form of {@link #imageUri}, resolved when the
+     * image is deployed. Lambda runs this digest until the next UpdateFunctionCode, so retagging
+     * the source image does not change what the function executes.
+     */
+    private String resolvedImageUri;
+
+    /** Hyperplane ENIs created for this function's VpcConfig; released on delete. */
+    private List<String> vpcEniIds = new ArrayList<>();
+
+    public String getResolvedImageUri() { return resolvedImageUri; }
+
+    public void setResolvedImageUri(String resolvedImageUri) { this.resolvedImageUri = resolvedImageUri; }
+
+    public List<String> getVpcEniIds() { return vpcEniIds; }
+
+    public void setVpcEniIds(List<String> vpcEniIds) {
+        this.vpcEniIds = vpcEniIds != null ? vpcEniIds : new ArrayList<>();
+    }
 }

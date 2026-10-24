@@ -1,23 +1,21 @@
 package io.github.hectorvent.floci.services.ses;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.services.ses.model.BulkEmailEntry;
-import io.github.hectorvent.floci.services.ses.model.BulkEmailEntryResult;
-import io.github.hectorvent.floci.services.ses.model.EmailTemplate;
-import io.github.hectorvent.floci.services.ses.model.ListManagementOptions;
-import io.github.hectorvent.floci.services.ses.model.MessageHeader;
-import io.github.hectorvent.floci.services.ses.model.MessageTag;
-import io.github.hectorvent.floci.services.ses.model.MultiRegionEndpoint;
 import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.services.ses.address.SesAddressSyntax;
+import io.github.hectorvent.floci.services.ses.model.BulkEmailEntry;
+import io.github.hectorvent.floci.services.ses.model.BulkEmailEntryResult;
 import io.github.hectorvent.floci.services.ses.model.EmailContent;
+import io.github.hectorvent.floci.services.ses.model.EmailTemplate;
+import io.github.hectorvent.floci.services.ses.model.ListManagementOptions;
 import io.github.hectorvent.floci.services.ses.model.MessageAttachment;
+import io.github.hectorvent.floci.services.ses.model.MessageHeader;
+import io.github.hectorvent.floci.services.ses.model.MessageTag;
 import io.github.hectorvent.floci.services.ses.model.SendBulkEmailRequest;
 import io.github.hectorvent.floci.services.ses.model.SendEmailRequest;
 import io.github.hectorvent.floci.services.ses.model.Tag;
@@ -42,10 +40,16 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
-import static io.github.hectorvent.floci.services.ses.SesV2Json.parseTagsArray;
-import static io.github.hectorvent.floci.services.ses.SesV2Json.readRequiredStringField;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.readOptionBody;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.remapV1Exception;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import io.github.hectorvent.floci.services.ses.model.MultiRegionEndpoint;
+import java.util.Collections;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.parseTagsArray;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.readRequiredStringField;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.requireJsonObject;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.requireObjectOrAbsent;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.stringMemberOrAbsent;
 
 /**
  * REST JSON controller for the three SES V2 send endpoints:
@@ -341,7 +345,7 @@ public class SesSendController {
             }
 
             // The tenant gate runs only after every part of the request has been parsed and
-            // validated, AWS reports malformed content before a missing tenant (probe-confirmed).
+            // validated — AWS reports malformed content before a missing tenant (probe-confirmed).
             sesService.checkTenantSendAccess(tenantName, fromEmailAddress, configurationSetName,
                     gateTemplateName, regionResolver.getAccountId(), region);
 
@@ -411,8 +415,6 @@ public class SesSendController {
                         "Custom verification email template <" + templateName + "> does not exist", 404);
             }
             throw remapV1Exception(e);
-        } catch (JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
         }
     }
 
@@ -662,6 +664,22 @@ public class SesSendController {
             out.add(new MessageTag(name, value));
         }
         return out;
+    }
+
+    private List<String> jsonArrayToList(JsonNode arrayNode) {
+        if (arrayNode == null || arrayNode.isMissingNode() || !arrayNode.isArray()) {
+            return Collections.emptyList();
+        }
+        List<String> list = new ArrayList<>();
+        arrayNode.forEach(node -> list.add(node.asText()));
+        return list;
+    }
+
+    private List<String> mergeLists(List<String> to, List<String> cc, List<String> bcc) {
+        List<String> all = new ArrayList<>(to);
+        all.addAll(cc);
+        all.addAll(bcc);
+        return all;
     }
 
     @POST

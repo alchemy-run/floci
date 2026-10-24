@@ -118,7 +118,7 @@ public class ElbClassicService implements ServerCertificateReferenceProvider {
 
     /**
      * Restarts health checking for load balancers restored from disk. Called from
-     * {@code EmulatorLifecycle} once the bean is constructed, like {@code ElbV2Service} does -
+     * {@code EmulatorLifecycle} once the bean is constructed, like {@code ElbV2Service} does —
      * nothing reachable from {@link #initializeStorage()} may touch an injected collaborator.
      */
     public void restorePersistedRuntime() {
@@ -154,7 +154,7 @@ public class ElbClassicService implements ServerCertificateReferenceProvider {
         validateName(name);
         if (listeners == null || listeners.isEmpty()) {
             // Listeners is a required member of CreateAccessPointInput, and unlike LoadBalancerName
-            // the model gives its member shape required fields, an empty list cannot be honoured.
+            // the model gives its member shape required fields — an empty list cannot be honoured.
             throw new AwsException("ValidationError",
                     "At least one listener must be specified.", 400);
         }
@@ -243,22 +243,9 @@ public class ElbClassicService implements ServerCertificateReferenceProvider {
             return;
         }
 
-        List<SecurityGroup> matches;
-        try {
-            matches = ec2Service.describeSecurityGroups(
-                    region, List.copyOf(lb.getSecurityGroups()), List.of(), Map.of());
-        } catch (AwsException e) {
-            if ("InvalidGroup.NotFound".equals(e.getErrorCode())
-                    || "InvalidGroupId.Malformed".equals(e.getErrorCode())) {
-                throw new AwsException("InvalidSecurityGroup",
-                        "One or more of the specified security groups do not exist.", 400);
-            }
-            throw e;
-        }
         String sourceGroupId = lb.getSecurityGroups().getFirst();
-        matches = matches.stream()
-                .filter(sg -> sourceGroupId.equals(sg.getGroupId()))
-                .toList();
+        List<SecurityGroup> matches = ec2Service.describeSecurityGroups(
+                region, List.of(sourceGroupId), List.of(), Map.of());
         if (matches.isEmpty()) {
             lb.setSourceSecurityGroupOwnerAlias(null);
             lb.setSourceSecurityGroupName(null);
@@ -433,14 +420,8 @@ public class ElbClassicService implements ServerCertificateReferenceProvider {
 
     public List<String> applySecurityGroups(String region, String name, List<String> securityGroups) {
         ClassicLoadBalancer lb = requireLoadBalancer(region, name);
-        List<String> previous = lb.getSecurityGroups();
         lb.setSecurityGroups(new ArrayList<>(securityGroups));
-        try {
-            populateSourceSecurityGroup(region, lb);
-        } catch (AwsException e) {
-            lb.setSecurityGroups(previous);
-            throw e;
-        }
+        populateSourceSecurityGroup(region, lb);
         persist(region);
         return List.copyOf(lb.getSecurityGroups());
     }
@@ -576,7 +557,7 @@ public class ElbClassicService implements ServerCertificateReferenceProvider {
     /**
      * Rejects a load balancer name AWS would reject.
      *
-     * <p>{@code LoadBalancerName} is a required member, and required means present, the model
+     * <p>{@code LoadBalancerName} is a required member, and required means present — the model
      * declares no {@code min} on {@code AccessPointName}, so an empty string is a missing name
      * only in the sense that the member was not supplied. The 32-character ceiling and the
      * alphanumeric-and-hyphen rule are AWS's documented constraints for Classic names.
@@ -679,8 +660,8 @@ public class ElbClassicService implements ServerCertificateReferenceProvider {
     }
 
     /**
-     * Rejects a health check outside the ranges the model declares, {@code Interval} 5–300,
-     * {@code Timeout} 2–60, both thresholds 2–10, and one with no {@code Target}, which the model
+     * Rejects a health check outside the ranges the model declares — {@code Interval} 5–300,
+     * {@code Timeout} 2–60, both thresholds 2–10 — and one with no {@code Target}, which the model
      * marks required.
      */
     private static void validateHealthCheck(ClassicHealthCheck hc) {
@@ -710,4 +691,7 @@ public class ElbClassicService implements ServerCertificateReferenceProvider {
                 && java.util.Objects.equals(a.getInstanceProtocol(), b.getInstanceProtocol())
                 && java.util.Objects.equals(a.getSslCertificateId(), b.getSslCertificateId());
     }
+
+    /** The hosted zone ID AWS reports for Classic load balancers; fixed per region on AWS too. */
+    private static final String CANONICAL_HOSTED_ZONE_ID = "Z35SXDOTRQ7X7K";
 }

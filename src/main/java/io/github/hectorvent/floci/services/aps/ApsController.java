@@ -6,14 +6,12 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.services.aps.ApsService.ConfigurationKind;
 import io.github.hectorvent.floci.services.aps.model.PrometheusWorkspace;
 import io.github.hectorvent.floci.services.aps.model.RuleGroupsNamespace;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
-import jakarta.ws.rs.PATCH;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
@@ -24,19 +22,20 @@ import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
-import jakarta.ws.rs.core.UriInfo;
 
+import java.util.HashMap;
+import java.util.Map;
+import io.github.hectorvent.floci.services.aps.ApsService.ConfigurationKind;
+import jakarta.ws.rs.PATCH;
+import jakarta.ws.rs.core.UriInfo;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
- * Amazon Managed Service for Prometheus (Smithy restJson1, SigV4 scope {@code aps}), the
- * workspace lifecycle, rule and alert definitions, logging, policies, and anomaly detector metadata.
- * Configuration storage does not enable rule evaluation, alert delivery, or anomaly execution.
- * Tagging goes through the shared
+ * Amazon Managed Service for Prometheus (Smithy restJson1, SigV4 scope {@code aps}) — the
+ * workspace lifecycle (create/describe/list/delete plus alias update) and rule groups namespaces
+ * (create/describe/list/put/delete). Tagging goes through the shared
  * {@code /tags/{resourceArn}} dispatcher, which routes {@code arn:aws:aps:...} to
  * {@link ApsService}'s TagHandler implementation.
  *
@@ -58,29 +57,6 @@ public class ApsController {
         this.service = service;
         this.regionResolver = regionResolver;
         this.objectMapper = objectMapper;
-    }
-
-    @GET
-    @Path("/scraperconfiguration")
-    public Response getDefaultScraperConfiguration() {
-        String configuration = """
-                global:
-                  scrape_interval: 30s
-                scrape_configs:
-                  - job_name: kubernetes-apiservers
-                    kubernetes_sd_configs:
-                      - role: endpoints
-                    scheme: https
-                    tls_config:
-                      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-                    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
-                    relabel_configs:
-                      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
-                        action: keep
-                        regex: default;kubernetes;https
-                """;
-        return Response.ok(Map.of("configuration",
-                Base64.getEncoder().encodeToString(configuration.getBytes(StandardCharsets.UTF_8)))).build();
     }
 
     @POST
@@ -221,6 +197,110 @@ public class ApsController {
                                               @PathParam("name") String name) {
         service.deleteRuleGroupsNamespace(regionResolver.resolveRegion(headers), workspaceId, name);
         return Response.status(202).build();
+    }
+
+    private ObjectNode toNamespaceMutationResponse(RuleGroupsNamespace namespace) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("name", namespace.getName());
+        node.put("arn", namespace.getArn());
+        node.set("status", namespaceStatusNode(namespace));
+        node.set("tags", objectMapper.valueToTree(namespace.getTags()));
+        return node;
+    }
+
+    private ObjectNode toNamespaceSummary(RuleGroupsNamespace namespace) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("arn", namespace.getArn());
+        node.put("name", namespace.getName());
+        node.set("status", namespaceStatusNode(namespace));
+        node.set("tags", objectMapper.valueToTree(namespace.getTags()));
+        node.put("createdAt", namespace.getCreatedAt().toEpochMilli() / 1000.0);
+        node.put("modifiedAt", namespace.getModifiedAt().toEpochMilli() / 1000.0);
+        return node;
+    }
+
+    private ObjectNode namespaceStatusNode(RuleGroupsNamespace namespace) {
+        ObjectNode status = objectMapper.createObjectNode();
+        status.put("statusCode", namespace.getStatus());
+        return status;
+    }
+
+    private ObjectNode toWorkspaceDescription(PrometheusWorkspace workspace) {
+        ObjectNode node = toWorkspaceSummary(workspace);
+        node.put("prometheusEndpoint", workspace.getPrometheusEndpoint());
+        return node;
+    }
+
+    // AWS's WorkspaceSummary shape (ListWorkspaces) carries every WorkspaceDescription member
+    // except prometheusEndpoint.
+    private ObjectNode toWorkspaceSummary(PrometheusWorkspace workspace) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("workspaceId", workspace.getWorkspaceId());
+        if (workspace.getAlias() != null) {
+            node.put("alias", workspace.getAlias());
+        }
+        node.put("arn", workspace.getArn());
+        node.set("status", statusNode(workspace));
+        // Smithy restJson1 timestamps with no timestampFormat trait are epoch-seconds; an ISO
+        // string here fails deserialization inside the AWS SDKs.
+        node.put("createdAt", workspace.getCreatedAt().toEpochMilli() / 1000.0);
+        node.set("tags", objectMapper.valueToTree(workspace.getTags()));
+        if (workspace.getKmsKeyArn() != null) {
+            node.put("kmsKeyArn", workspace.getKmsKeyArn());
+        }
+        return node;
+    }
+
+    private ObjectNode statusNode(PrometheusWorkspace workspace) {
+        ObjectNode status = objectMapper.createObjectNode();
+        status.put("statusCode", workspace.getStatus());
+        return status;
+    }
+
+    private String asString(Object value, String fieldName) {
+        if (value == null) {
+            return null;
+        }
+        if (!(value instanceof String s)) {
+            throw new AwsException("ValidationException", fieldName + " must be a string.", 400);
+        }
+        return s;
+    }
+
+    private Map<String, String> asStringMap(Object value, String fieldName) {
+        if (value == null) {
+            return null;
+        }
+        if (!(value instanceof Map<?, ?> map)
+                || map.entrySet().stream().anyMatch(e -> !(e.getKey() instanceof String) || !(e.getValue() instanceof String))) {
+            throw new AwsException("ValidationException", fieldName + " must be a map of strings.", 400);
+        }
+        Map<String, String> result = new HashMap<>();
+        map.forEach((k, v) -> result.put((String) k, (String) v));
+        return result;
+    }
+
+    @GET
+    @Path("/scraperconfiguration")
+    public Response getDefaultScraperConfiguration() {
+        String configuration = """
+                global:
+                  scrape_interval: 30s
+                scrape_configs:
+                  - job_name: kubernetes-apiservers
+                    kubernetes_sd_configs:
+                      - role: endpoints
+                    scheme: https
+                    tls_config:
+                      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+                    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+                    relabel_configs:
+                      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+                        action: keep
+                        regex: default;kubernetes;https
+                """;
+        return Response.ok(Map.of("configuration",
+                Base64.getEncoder().encodeToString(configuration.getBytes(StandardCharsets.UTF_8)))).build();
     }
 
     @POST
@@ -433,87 +513,5 @@ public class ApsController {
             case "logging/query" -> ConfigurationKind.QUERY_LOGGING;
             default -> throw new AwsException("ValidationException", "Unknown workspace configuration", 400);
         };
-    }
-
-    private ObjectNode toNamespaceMutationResponse(RuleGroupsNamespace namespace) {
-        ObjectNode node = objectMapper.createObjectNode();
-        node.put("name", namespace.getName());
-        node.put("arn", namespace.getArn());
-        node.set("status", namespaceStatusNode(namespace));
-        node.set("tags", objectMapper.valueToTree(namespace.getTags()));
-        return node;
-    }
-
-    private ObjectNode toNamespaceSummary(RuleGroupsNamespace namespace) {
-        ObjectNode node = objectMapper.createObjectNode();
-        node.put("arn", namespace.getArn());
-        node.put("name", namespace.getName());
-        node.set("status", namespaceStatusNode(namespace));
-        node.set("tags", objectMapper.valueToTree(namespace.getTags()));
-        node.put("createdAt", namespace.getCreatedAt().toEpochMilli() / 1000.0);
-        node.put("modifiedAt", namespace.getModifiedAt().toEpochMilli() / 1000.0);
-        return node;
-    }
-
-    private ObjectNode namespaceStatusNode(RuleGroupsNamespace namespace) {
-        ObjectNode status = objectMapper.createObjectNode();
-        status.put("statusCode", namespace.getStatus());
-        status.put("statusReason", "Rule definition stored only; local Prometheus does not evaluate these rules.");
-        return status;
-    }
-
-    private ObjectNode toWorkspaceDescription(PrometheusWorkspace workspace) {
-        ObjectNode node = toWorkspaceSummary(workspace);
-        node.put("prometheusEndpoint", workspace.getPrometheusEndpoint());
-        return node;
-    }
-
-    // AWS's WorkspaceSummary shape (ListWorkspaces) carries every WorkspaceDescription member
-    // except prometheusEndpoint.
-    private ObjectNode toWorkspaceSummary(PrometheusWorkspace workspace) {
-        ObjectNode node = objectMapper.createObjectNode();
-        node.put("workspaceId", workspace.getWorkspaceId());
-        if (workspace.getAlias() != null) {
-            node.put("alias", workspace.getAlias());
-        }
-        node.put("arn", workspace.getArn());
-        node.set("status", statusNode(workspace));
-        // Smithy restJson1 timestamps with no timestampFormat trait are epoch-seconds; an ISO
-        // string here fails deserialization inside the AWS SDKs.
-        node.put("createdAt", workspace.getCreatedAt().toEpochMilli() / 1000.0);
-        node.set("tags", objectMapper.valueToTree(workspace.getTags()));
-        if (workspace.getKmsKeyArn() != null) {
-            node.put("kmsKeyArn", workspace.getKmsKeyArn());
-        }
-        return node;
-    }
-
-    private ObjectNode statusNode(PrometheusWorkspace workspace) {
-        ObjectNode status = objectMapper.createObjectNode();
-        status.put("statusCode", workspace.getStatus());
-        return status;
-    }
-
-    private String asString(Object value, String fieldName) {
-        if (value == null) {
-            return null;
-        }
-        if (!(value instanceof String s)) {
-            throw new AwsException("ValidationException", fieldName + " must be a string.", 400);
-        }
-        return s;
-    }
-
-    private Map<String, String> asStringMap(Object value, String fieldName) {
-        if (value == null) {
-            return null;
-        }
-        if (!(value instanceof Map<?, ?> map)
-                || map.entrySet().stream().anyMatch(e -> !(e.getKey() instanceof String) || !(e.getValue() instanceof String))) {
-            throw new AwsException("ValidationException", fieldName + " must be a map of strings.", 400);
-        }
-        Map<String, String> result = new HashMap<>();
-        map.forEach((k, v) -> result.put((String) k, (String) v));
-        return result;
     }
 }

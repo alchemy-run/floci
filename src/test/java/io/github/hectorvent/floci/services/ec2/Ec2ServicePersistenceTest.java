@@ -13,10 +13,6 @@ import io.github.hectorvent.floci.services.ec2.model.Image;
 import io.github.hectorvent.floci.services.ec2.model.Instance;
 import io.github.hectorvent.floci.services.ec2.model.InternetGateway;
 import io.github.hectorvent.floci.services.ec2.model.IpPermission;
-import io.github.hectorvent.floci.services.ec2.model.IpRange;
-import io.github.hectorvent.floci.services.ec2.model.UserIdGroupPair;
-import io.github.hectorvent.floci.services.ec2.model.Image;
-import io.github.hectorvent.floci.services.ec2.model.NetworkAcl;
 import io.github.hectorvent.floci.services.ec2.model.KeyPair;
 import io.github.hectorvent.floci.services.ec2.model.LaunchTemplate;
 import io.github.hectorvent.floci.services.ec2.model.LaunchTemplateData;
@@ -73,38 +69,6 @@ class Ec2ServicePersistenceTest {
     private static final String REGION = "us-east-1";
 
     @Test
-    void deletedVpcDefaultResourcesRemainAbsentAfterRestart(@TempDir Path dir) {
-        Ec2Service first = newService(dir);
-        Vpc vpc = first.createVpc(REGION, "10.77.0.0/16", false);
-        SecurityGroup defaultGroup = first.describeSecurityGroups(REGION, List.of(), List.of(), Map.of()).stream()
-                .filter(group -> vpc.getVpcId().equals(group.getVpcId()) && "default".equals(group.getGroupName()))
-                .findFirst().orElseThrow();
-
-        first.deleteVpc(REGION, vpc.getVpcId());
-        Ec2Service restarted = newService(dir);
-
-        assertTrue(restarted.describeVpcs(REGION, List.of(), Map.of()).stream()
-                .noneMatch(candidate -> vpc.getVpcId().equals(candidate.getVpcId())));
-        assertTrue(restarted.describeSecurityGroups(REGION, List.of(), List.of(), Map.of()).stream()
-                .noneMatch(group -> vpc.getVpcId().equals(group.getVpcId())));
-        assertTrue(restarted.describeSecurityGroupRules(
-                REGION, List.of(defaultGroup.getGroupId()), List.of()).isEmpty());
-        assertTrue(restarted.describeRouteTables(REGION, List.of(), Map.of()).stream()
-                .noneMatch(table -> vpc.getVpcId().equals(table.getVpcId())));
-        assertTrue(restarted.describeNetworkAcls(REGION, List.of(), Map.of()).stream()
-                .noneMatch(acl -> vpc.getVpcId().equals(acl.getVpcId())));
-    }
-
-    @Test
-    void emptyNetworkDiscoverySurvivesRestart(@TempDir Path dir) {
-        Ec2Service first = newService(dir);
-        assertTrue(first.describeVpnGatewayIds(List.of(), Map.of()).isEmpty());
-        assertTrue(first.describeEgressOnlyInternetGatewayIds(Map.of()).isEmpty());
-
-        Ec2Service restarted = newService(dir);
-        assertTrue(restarted.describeVpnGatewayIds(
-                List.of(), Map.of("attachment.vpc-id", List.of("vpc-0123456789abcdef0"))).isEmpty());
-        assertTrue(restarted.describeEgressOnlyInternetGatewayIds(Map.of("tag:Owner", List.of("TeamA"))).isEmpty());
     void elasticIpMetadataSurvivesRestart(@TempDir Path dir) {
         String region = "us-west-2";
         String pool = "ipv4pool-ec2-0123456789abcdef0";

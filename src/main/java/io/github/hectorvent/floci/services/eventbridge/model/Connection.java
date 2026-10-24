@@ -1,22 +1,20 @@
 package io.github.hectorvent.floci.services.eventbridge.model;
 
-import com.fasterxml.jackson.annotation.JsonAlias;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
+import com.fasterxml.jackson.annotation.JsonAlias;
 
 @RegisterForReflection
 public class Connection {
 
     private String name;
-    private String connectionId;
     private String connectionArn;
     private String description;
     private String authorizationType;
     private ConnectionState connectionState;
     private String stateReason;
     // Raw request JSON, including secret values; responses must sanitize before returning.
-    @JsonAlias("authParametersJson")
     private String authParameters;
     private String invocationConnectivityParameters;
     private String secretArn;
@@ -32,9 +30,6 @@ public class Connection {
 
     public String getConnectionArn() { return connectionArn; }
     public void setConnectionArn(String connectionArn) { this.connectionArn = connectionArn; }
-
-    public String getConnectionId() { return connectionId; }
-    public void setConnectionId(String connectionId) { this.connectionId = connectionId; }
 
     public String getDescription() { return description; }
     public void setDescription(String description) { this.description = description; }
@@ -70,4 +65,10 @@ public class Connection {
 
     public Instant getLastAuthorizedTime() { return lastAuthorizedTime; }
     public void setLastAuthorizedTime(Instant lastAuthorizedTime) { this.lastAuthorizedTime = lastAuthorizedTime; }
+
+    private String connectionId;
+
+    public String getConnectionId() { return connectionId; }
+
+    public void setConnectionId(String connectionId) { this.connectionId = connectionId; }
 }

@@ -16,9 +16,9 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
 
 /**
  * MWAA REST-JSON controller.
@@ -34,12 +34,10 @@ import java.util.Map;
 public class MwaaController {
 
     private final MwaaService mwaaService;
-    private final MwaaRestApiInvoker restApiInvoker;
 
     @Inject
-    public MwaaController(MwaaService mwaaService, MwaaRestApiInvoker restApiInvoker) {
+    public MwaaController(MwaaService mwaaService) {
         this.mwaaService = mwaaService;
-        this.restApiInvoker = restApiInvoker;
     }
 
     @PUT
@@ -88,6 +86,8 @@ public class MwaaController {
     public Response createCliToken(@PathParam("name") String name) {
         return Response.ok(mwaaService.createCliToken(name)).build();
     }
+
+    private final MwaaRestApiInvoker restApiInvoker;
 
     @POST
     @Path("/restapi/{name}")

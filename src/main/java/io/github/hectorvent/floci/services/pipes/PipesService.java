@@ -68,16 +68,6 @@ public class PipesService implements TagHandler, ResourceProvider {
                            JsonNode sourceParameters, JsonNode targetParameters,
                            JsonNode enrichmentParameters, Map<String, String> tags,
                            String region) {
-        return createPipe(name, source, target, roleArn, description, desiredState, enrichment,
-                sourceParameters, targetParameters, enrichmentParameters, tags, null, null, region);
-    }
-
-    public Pipe createPipe(String name, String source, String target, String roleArn,
-                           String description, DesiredState desiredState, String enrichment,
-                           JsonNode sourceParameters, JsonNode targetParameters,
-                           JsonNode enrichmentParameters, Map<String, String> tags,
-                           JsonNode logConfiguration, String kmsKeyIdentifier,
-                           String region) {
         if (name == null || name.isBlank()) {
             throw new AwsException("ValidationException", "Name is required", 400);
         }
@@ -117,8 +107,6 @@ public class PipesService implements TagHandler, ResourceProvider {
         pipe.setTargetParameters(targetParameters);
         pipe.setEnrichmentParameters(enrichmentParameters);
         pipe.setTags(tags != null ? new HashMap<>(tags) : new HashMap<>());
-        pipe.setLogConfiguration(logConfiguration);
-        pipe.setKmsKeyIdentifier(kmsKeyIdentifier);
         pipe.setCreationTime(now);
         pipe.setLastModifiedTime(now);
         pipe.setAccountId(regionResolver.getAccountId());
@@ -147,17 +135,7 @@ public class PipesService implements TagHandler, ResourceProvider {
                            JsonNode sourceParameters, JsonNode targetParameters,
                            JsonNode enrichmentParameters, String region) {
         return writePipeConfiguration(name, target, roleArn, description, desiredState, enrichment,
-                sourceParameters, targetParameters, enrichmentParameters, null, null, region, false);
-    }
-
-    public Pipe updatePipe(String name, String target, String roleArn, String description,
-                           DesiredState desiredState, String enrichment,
-                           JsonNode sourceParameters, JsonNode targetParameters,
-                           JsonNode enrichmentParameters, JsonNode logConfiguration,
-                           String kmsKeyIdentifier, String region) {
-        return writePipeConfiguration(name, target, roleArn, description, desiredState, enrichment,
-                sourceParameters, targetParameters, enrichmentParameters, logConfiguration,
-                kmsKeyIdentifier, region, false);
+                sourceParameters, targetParameters, enrichmentParameters, region, false);
     }
 
     /**
@@ -173,7 +151,7 @@ public class PipesService implements TagHandler, ResourceProvider {
                             JsonNode sourceParameters, JsonNode targetParameters,
                             JsonNode enrichmentParameters, String region) {
         return writePipeConfiguration(name, target, roleArn, description, desiredState, enrichment,
-                sourceParameters, targetParameters, enrichmentParameters, null, null, region, true);
+                sourceParameters, targetParameters, enrichmentParameters, region, true);
     }
 
     /**
@@ -190,8 +168,8 @@ public class PipesService implements TagHandler, ResourceProvider {
     private Pipe writePipeConfiguration(String name, String target, String roleArn, String description,
                                         DesiredState desiredState, String enrichment,
                                         JsonNode sourceParameters, JsonNode targetParameters,
-                                        JsonNode enrichmentParameters, JsonNode logConfiguration,
-                                        String kmsKeyIdentifier, String region, boolean clearUnsetProperties) {
+                                        JsonNode enrichmentParameters, String region,
+                                        boolean clearUnsetProperties) {
         String key = region + "::" + name;
         Pipe pipe = storage.get(key)
                 .orElseThrow(() -> new AwsException("NotFoundException",
@@ -209,8 +187,6 @@ public class PipesService implements TagHandler, ResourceProvider {
         writeProperty(sourceParameters, clearUnsetProperties, pipe::setSourceParameters);
         writeProperty(targetParameters, clearUnsetProperties, pipe::setTargetParameters);
         writeProperty(enrichmentParameters, clearUnsetProperties, pipe::setEnrichmentParameters);
-        writeProperty(logConfiguration, false, pipe::setLogConfiguration);
-        writeProperty(kmsKeyIdentifier, false, pipe::setKmsKeyIdentifier);
         // A pipe always has a desired state: createPipe defaults it to RUNNING and currentState is
         // read off it. A null therefore leaves both alone on either path, rather than clearing a
         // state the poller and currentState would then contradict.

@@ -3,8 +3,6 @@ package io.github.hectorvent.floci.services.ec2;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.core.common.PaginatedResult;
-import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.AwsNamespaces;
 import io.github.hectorvent.floci.core.common.AwsPartition;
 import io.github.hectorvent.floci.core.common.AwsPartitions;
@@ -14,7 +12,6 @@ import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.SshPublicKeys;
 import io.github.hectorvent.floci.core.common.XmlBuilder;
 import io.github.hectorvent.floci.services.ec2.model.*;
-import io.github.hectorvent.floci.services.kms.KmsService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.MediaType;
@@ -28,6 +25,11 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.function.Consumer;
+import io.github.hectorvent.floci.core.common.Pagination;
+import io.github.hectorvent.floci.services.kms.KmsService;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.util.zip.GZIPInputStream;
 
 @ApplicationScoped
 public class Ec2QueryHandler {
@@ -48,11 +50,9 @@ public class Ec2QueryHandler {
     private final Ec2Service service;
     private final EmulatorConfig config;
     private final FlowLogService flowLogService;
-    private final KmsService kmsService;
     private final Ec2EbsEncryptionService ebsEncryptionService;
     private final Ec2SnapshotBlockPublicAccessService snapshotBlockPublicAccessService;
     private final Ec2IpamService ipamService;
-    private final Ec2ClientVpnService clientVpnService;
     private final RegionResolver regionResolver;
 
     @Inject
@@ -67,30 +67,9 @@ public class Ec2QueryHandler {
         this.ebsEncryptionService = ebsEncryptionService;
         this.snapshotBlockPublicAccessService = snapshotBlockPublicAccessService;
         this.ipamService = ipamService;
+        this.regionResolver = regionResolver;
         this.kmsService = kmsService;
         this.clientVpnService = clientVpnService;
-    }
-
-    public Ec2QueryHandler(Ec2Service service, EmulatorConfig config, FlowLogService flowLogService,
-                           Ec2EbsEncryptionService ebsEncryptionService,
-                           Ec2SnapshotBlockPublicAccessService snapshotBlockPublicAccessService,
-                           Ec2IpamService ipamService, KmsService kmsService) {
-        this(service, config, flowLogService, ebsEncryptionService, snapshotBlockPublicAccessService,
-                ipamService, kmsService, null);
-    }
-
-    public Ec2QueryHandler(Ec2Service service, EmulatorConfig config, FlowLogService flowLogService,
-                           Ec2EbsEncryptionService ebsEncryptionService,
-                           Ec2SnapshotBlockPublicAccessService snapshotBlockPublicAccessService,
-                           Ec2IpamService ipamService) {
-        this(service, config, flowLogService, ebsEncryptionService, snapshotBlockPublicAccessService,
-                ipamService, null);
-    }
-
-    public Ec2QueryHandler(Ec2Service service, EmulatorConfig config, FlowLogService flowLogService,
-                           KmsService kmsService) {
-        this(service, config, flowLogService, null, null, null, kmsService);
-        this.regionResolver = regionResolver;
     }
 
     public Response handle(String action, MultivaluedMap<String, String> params, String region) {
@@ -140,27 +119,16 @@ public class Ec2QueryHandler {
                 case "DescribeVpcEndpoints" -> handleDescribeVpcEndpoints(params, region);
                 case "ModifyVpcEndpoint" -> handleModifyVpcEndpoint(params, region);
                 case "DeleteVpcEndpoints" -> handleDeleteVpcEndpoints(params, region);
-                case "CreateVpcPeeringConnection" -> handleCreateVpcPeeringConnection(params, region);
-                case "AcceptVpcPeeringConnection" -> handleAcceptVpcPeeringConnection(params, region);
-                case "DeleteVpcPeeringConnection" -> handleDeleteVpcPeeringConnection(params, region);
-                case "DescribeVpcPeeringConnections" -> handleDescribeVpcPeeringConnections(params, region);
-                case "CreateEgressOnlyInternetGateway" -> handleCreateEgressOnlyInternetGateway(params, region);
-                case "DeleteEgressOnlyInternetGateway" -> handleDeleteEgressOnlyInternetGateway(params, region);
-                case "DescribeEgressOnlyInternetGateways" -> handleDescribeEgressOnlyInternetGateways(params, region);
-                case "CreateDhcpOptions" -> handleCreateDhcpOptions(params, region);
-                case "AssociateDhcpOptions" -> handleAssociateDhcpOptions(params, region);
-                case "DeleteDhcpOptions" -> handleDeleteDhcpOptions(params, region);
-                case "DescribeDhcpOptions" -> handleDescribeDhcpOptions(params, region);
-                case "CreateManagedPrefixList" -> handleCreateManagedPrefixList(params, region);
-                case "ModifyManagedPrefixList" -> handleModifyManagedPrefixList(params, region);
-                case "DeleteManagedPrefixList" -> handleDeleteManagedPrefixList(params, region);
-                case "DescribeManagedPrefixLists" -> handleDescribeManagedPrefixLists(params, region);
-                case "GetManagedPrefixListEntries" -> handleGetManagedPrefixListEntries(params, region);
                 // Flow Logs
                 case "CreateFlowLogs" -> handleCreateFlowLogs(params, region);
                 case "DescribeFlowLogs" -> handleDescribeFlowLogs(params, region);
                 case "DeleteFlowLogs" -> handleDeleteFlowLogs(params, region);
                 case "DescribePrefixLists" -> handleDescribePrefixLists(params, region);
+                case "CreateManagedPrefixList" -> handleCreateManagedPrefixList(params, region);
+                case "DescribeManagedPrefixLists" -> handleDescribeManagedPrefixLists(params, region);
+                case "GetManagedPrefixListEntries" -> handleGetManagedPrefixListEntries(params, region);
+                case "ModifyManagedPrefixList" -> handleModifyManagedPrefixList(params, region);
+                case "DeleteManagedPrefixList" -> handleDeleteManagedPrefixList(params, region);
                 // Transit Gateways
                 case "CreateTransitGateway" -> handleCreateTransitGateway(params, region);
                 case "DescribeTransitGateways" -> handleDescribeTransitGateways(params, region);
@@ -212,6 +180,10 @@ public class Ec2QueryHandler {
                 case "CreateEgressOnlyInternetGateway" -> handleCreateEgressOnlyInternetGateway(params, region);
                 case "DescribeEgressOnlyInternetGateways" ->
                         handleDescribeEgressOnlyInternetGateways(params, region);
+                case "DescribeDhcpOptions" -> handleDescribeDhcpOptions(params, region);
+                case "DeleteDhcpOptions" -> handleDeleteDhcpOptions(params, region);
+                case "AssociateDhcpOptions" -> handleAssociateDhcpOptions(params, region);
+                case "CreateDhcpOptions" -> handleCreateDhcpOptions(params, region);
                 case "DeleteEgressOnlyInternetGateway" -> handleDeleteEgressOnlyInternetGateway(params, region);
                 case "CreateDefaultVpc" -> handleCreateDefaultVpc(params, region);
                 case "AssociateVpcCidrBlock" -> handleAssociateVpcCidrBlock(params, region);
@@ -270,7 +242,11 @@ public class Ec2QueryHandler {
                 case "AssociateRouteTable" -> handleAssociateRouteTable(params, region);
                 case "DisassociateRouteTable" -> handleDisassociateRouteTable(params, region);
                 case "ReplaceRouteTableAssociation" -> handleReplaceRouteTableAssociation(params, region);
+                case "CreateVpcPeeringConnection" -> handleCreateVpcPeeringConnection(params, region);
+                case "AcceptVpcPeeringConnection" -> handleAcceptVpcPeeringConnection(params, region);
+                case "DescribeVpcPeeringConnections" -> handleDescribeVpcPeeringConnections(params, region);
                 case "ModifyVpcPeeringConnectionOptions" -> handleModifyVpcPeeringConnectionOptions(params, region);
+                case "DeleteVpcPeeringConnection" -> handleDeleteVpcPeeringConnection(params, region);
 
                 case "CreateRoute" -> handleCreateRoute(params, region);
                 case "ReplaceRoute" -> handleReplaceRoute(params, region);
@@ -333,10 +309,10 @@ public class Ec2QueryHandler {
                 case "DescribeVolumesModifications" -> handleDescribeVolumesModifications(params, region);
                 case "AttachVolume" -> handleAttachVolume(params, region);
                 case "DetachVolume" -> handleDetachVolume(params, region);
-                case "CreateSnapshot" -> handleCreateSnapshot(params, region);
-                case "DeleteSnapshot" -> handleDeleteSnapshot(params, region);
-                case "GetConsoleOutput" -> handleGetConsoleOutput(params, region);
                 case "GetPasswordData" -> handleGetPasswordData(params, region);
+                case "GetConsoleOutput" -> handleGetConsoleOutput(params, region);
+                case "DeleteSnapshot" -> handleDeleteSnapshot(params, region);
+                case "CreateSnapshot" -> handleCreateSnapshot(params, region);
                 // Spot Instances
                 case "RequestSpotInstances" -> handleRequestSpotInstances(params, region);
                 case "DescribeSpotInstanceRequests" -> handleDescribeSpotInstanceRequests(params, region);
@@ -362,20 +338,21 @@ public class Ec2QueryHandler {
                 case "AllocateIpamPoolCidr" -> handleAllocateIpamPoolCidr(params, region);
                 case "ReleaseIpamPoolAllocation" -> handleReleaseIpamPoolAllocation(params, region);
                 case "GetIpamPoolAllocations" -> handleGetIpamPoolAllocations(params, region);
-                // Client VPN
-                case "CreateClientVpnEndpoint" -> handleCreateClientVpnEndpoint(params, region);
-                case "DescribeClientVpnEndpoints" -> handleDescribeClientVpnEndpoints(params, region);
-                case "ModifyClientVpnEndpoint" -> handleModifyClientVpnEndpoint(params, region);
-                case "DeleteClientVpnEndpoint" -> handleDeleteClientVpnEndpoint(params, region);
-                case "AssociateClientVpnTargetNetwork" -> handleAssociateClientVpnTargetNetwork(params, region);
-                case "DisassociateClientVpnTargetNetwork" -> handleDisassociateClientVpnTargetNetwork(params, region);
-                case "DescribeClientVpnTargetNetworks" -> handleDescribeClientVpnTargetNetworks(params, region);
-                case "AuthorizeClientVpnIngress" -> handleAuthorizeClientVpnIngress(params, region);
-                case "RevokeClientVpnIngress" -> handleRevokeClientVpnIngress(params, region);
-                case "DescribeClientVpnAuthorizationRules" -> handleDescribeClientVpnAuthorizationRules(params, region);
-                case "CreateClientVpnRoute" -> handleCreateClientVpnRoute(params, region);
-                case "DeleteClientVpnRoute" -> handleDeleteClientVpnRoute(params, region);
+                case "network-interface" -> networkInterfaceTags;
+                case "instance" -> instanceTags;
                 case "DescribeClientVpnRoutes" -> handleDescribeClientVpnRoutes(params, region);
+                case "DeleteClientVpnRoute" -> handleDeleteClientVpnRoute(params, region);
+                case "CreateClientVpnRoute" -> handleCreateClientVpnRoute(params, region);
+                case "DescribeClientVpnAuthorizationRules" -> handleDescribeClientVpnAuthorizationRules(params, region);
+                case "RevokeClientVpnIngress" -> handleRevokeClientVpnIngress(params, region);
+                case "AuthorizeClientVpnIngress" -> handleAuthorizeClientVpnIngress(params, region);
+                case "DescribeClientVpnTargetNetworks" -> handleDescribeClientVpnTargetNetworks(params, region);
+                case "DisassociateClientVpnTargetNetwork" -> handleDisassociateClientVpnTargetNetwork(params, region);
+                case "AssociateClientVpnTargetNetwork" -> handleAssociateClientVpnTargetNetwork(params, region);
+                case "DeleteClientVpnEndpoint" -> handleDeleteClientVpnEndpoint(params, region);
+                case "ModifyClientVpnEndpoint" -> handleModifyClientVpnEndpoint(params, region);
+                case "DescribeClientVpnEndpoints" -> handleDescribeClientVpnEndpoints(params, region);
+                case "CreateClientVpnEndpoint" -> handleCreateClientVpnEndpoint(params, region);
                 default -> ec2Error("UnsupportedOperation",
                         "Operation " + action + " is not supported.", 400);
             };
@@ -424,108 +401,11 @@ public class Ec2QueryHandler {
         return result;
     }
 
-    /**
-     * Alchemy (and the AWS SDKs) send the primary ENI as
-     * {@code NetworkInterface.1.*} instead of top-level {@code SubnetId} /
-     * {@code SecurityGroupId} / {@code AssociatePublicIpAddress}.
-     */
-    static PrimaryNetworkInterface parsePrimaryNetworkInterface(MultivaluedMap<String, String> p) {
-        PrimaryNetworkInterface first = null;
-        for (int i = 1; ; i++) {
-            String prefix = "NetworkInterface." + i + ".";
-            String deviceIndex = p.getFirst(prefix + "DeviceIndex");
-            String subnetId = p.getFirst(prefix + "SubnetId");
-            Boolean associate = parseOptionalBoolean(p.getFirst(prefix + "AssociatePublicIpAddress"));
-            String privateIp = p.getFirst(prefix + "PrivateIpAddress");
-            for (int j = 1; p.getFirst(prefix + "PrivateIpAddresses." + j + ".PrivateIpAddress") != null; j++) {
-                if (Boolean.TRUE.equals(parseOptionalBoolean(p.getFirst(prefix + "PrivateIpAddresses." + j + ".Primary")))) {
-                    String primary = p.getFirst(prefix + "PrivateIpAddresses." + j + ".PrivateIpAddress");
-                    if (privateIp != null && !privateIp.equals(primary)) {
-                        throw new AwsException("InvalidParameterCombination", "Conflicting primary private addresses", 400);
-                    }
-                    privateIp = primary;
-                }
-            }
-            String interfaceId = p.getFirst(prefix + "NetworkInterfaceId");
-            List<String> groups = new ArrayList<>();
-            groups.addAll(getStaticList(p, prefix + "SecurityGroupId"));
-            groups.addAll(getStaticList(p, prefix + "GroupId"));
-            groups.addAll(getStaticList(p, prefix + "Groups"));
-            if (deviceIndex == null && subnetId == null && associate == null && groups.isEmpty()
-                    && privateIp == null && interfaceId == null) {
-                break;
-            }
-            int index;
-            try {
-                index = deviceIndex == null ? 0 : Integer.parseInt(deviceIndex);
-                if (index < 0) {
-                    throw new NumberFormatException("negative device index");
-                }
-            } catch (NumberFormatException e) {
-                throw new AwsException("InvalidParameterValue", "Invalid network interface DeviceIndex", 400);
-            }
-            PrimaryNetworkInterface parsed = new PrimaryNetworkInterface(subnetId, groups, associate,
-                    privateIp, interfaceId, index);
-            if (first == null) {
-                first = parsed;
-            }
-            if ("0".equals(deviceIndex)) {
-                return parsed;
-            }
-        }
-        return first != null ? first : PrimaryNetworkInterface.empty();
-    }
-
-    private static List<String> getStaticList(MultivaluedMap<String, String> p, String prefix) {
-        List<String> result = new ArrayList<>();
-        for (int i = 1; ; i++) {
-            String v = p.getFirst(prefix + "." + i);
-            if (v == null) {
-                break;
-            }
-            result.add(v);
-        }
-        String single = p.getFirst(prefix);
-        if (result.isEmpty() && single != null && !single.isBlank()) {
-            result.add(single);
-        }
-        return result;
-    }
-
-    static Boolean parseOptionalBoolean(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        return "true".equalsIgnoreCase(value) || "1".equals(value);
-    }
-
-    record PrimaryNetworkInterface(String subnetId, List<String> securityGroupIds, Boolean associatePublicIpAddress,
-                                   String privateIpAddress, String networkInterfaceId, int deviceIndex) {
-        static PrimaryNetworkInterface empty() {
-            return new PrimaryNetworkInterface(null, List.of(), null, null, null, 0);
-        }
-    }
-
     private String firstPresent(MultivaluedMap<String, String> p, String first, String second) {
         String value = p.getFirst(first);
         return value != null && !value.isBlank() ? value : p.getFirst(second);
     }
 
-    /**
-     * AWS CreateVolume stores the CMK ARN even when the request passed an alias
-     * name ({@code alias/...}) or key id. Resolve through KMS so DescribeVolumes
-     * matches live EC2.
-     */
-    private String resolveVolumeKmsKeyId(String kmsKeyId, String region) {
-        if (kmsKeyId == null || kmsKeyId.isBlank()) {
-            return null;
-        }
-        try {
-            return kmsService.describeKey(kmsKeyId, region).getArn();
-        } catch (AwsException e) {
-            throw new AwsException("InvalidParameterValue",
-                    "The KMS key " + kmsKeyId + " does not exist, is disabled, or is not usable.", 400);
-        }
     private List<String> getListOrSingle(MultivaluedMap<String, String> p, String prefix) {
         List<String> result = getList(p, prefix);
         if (result.isEmpty()) {
@@ -908,6 +788,11 @@ public class Ec2QueryHandler {
         // associate_public_ip_address sends) or as the legacy top-level
         // parameter. AWS rejects both at once, so the interface spec wins when
         // present. Absent means "use the subnet's MapPublicIpOnLaunch default".
+        String assocParam = p.getFirst("NetworkInterface.1.AssociatePublicIpAddress");
+        if (assocParam == null) {
+            assocParam = p.getFirst("AssociatePublicIpAddress");
+        }
+        Boolean associatePublicIp = assocParam == null ? null : Boolean.parseBoolean(assocParam);
         if (subnetId == null) {
             subnetId = p.getFirst("NetworkInterface.1.SubnetId");
         }
@@ -925,29 +810,10 @@ public class Ec2QueryHandler {
         }
         // floci-kt9: override-default-eni hands RunInstances a pre-existing standalone ENI as
         // the instance's primary interface (network_interface { network_interface_id = ... }).
+        String networkInterfaceId = p.getFirst("NetworkInterface.1.NetworkInterfaceId");
+        int networkInterfaceDeviceIndex = parseIntParam(p, "NetworkInterface.1.DeviceIndex", 0);
         String clientToken = p.getFirst("ClientToken");
         List<String> sgIds = getList(p, "SecurityGroupId");
-        Boolean associatePublicIpAddress = parseOptionalBoolean(p.getFirst("AssociatePublicIpAddress"));
-        PrimaryNetworkInterface primaryInterface = parsePrimaryNetworkInterface(p);
-        String networkInterfaceId = primaryInterface.networkInterfaceId();
-        int networkInterfaceDeviceIndex = primaryInterface.deviceIndex();
-        String privateIpAddress = p.getFirst("PrivateIpAddress");
-        if (privateIpAddress != null && primaryInterface.privateIpAddress() != null) {
-            throw new AwsException("InvalidParameterCombination",
-                    "PrivateIpAddress cannot be combined with a network interface private address", 400);
-        }
-        if (privateIpAddress == null) {
-            privateIpAddress = primaryInterface.privateIpAddress();
-        }
-        if (primaryInterface.subnetId() != null) {
-            subnetId = primaryInterface.subnetId();
-        }
-        if (!primaryInterface.securityGroupIds().isEmpty()) {
-            sgIds = new ArrayList<>(primaryInterface.securityGroupIds());
-        }
-        if (primaryInterface.associatePublicIpAddress() != null) {
-            associatePublicIpAddress = primaryInterface.associatePublicIpAddress();
-        }
 
         // UserData is base64-encoded in the wire format
         String userDataEncoded = p.getFirst("UserData");
@@ -1847,7 +1713,6 @@ public class Ec2QueryHandler {
     }
 
     private Response handleDeleteVpc(MultivaluedMap<String, String> p, String region) {
-        requireNoClientVpnDependents(region, p.getFirst("VpcId"), "vpc");
         service.deleteVpc(region, p.getFirst("VpcId"));
         return booleanResponse("DeleteVpc");
     }
@@ -1970,17 +1835,12 @@ public class Ec2QueryHandler {
         if (logDestination == null) {
             logDestination = p.getFirst("LogDestinationArn");
         }
-        String logFormat = p.getFirst("LogFormat");
-        String logGroupName = p.getFirst("LogGroupName");
         String deliverLogsPermissionArn = p.getFirst("DeliverLogsPermissionArn");
+        String logFormat = p.getFirst("LogFormat");
         int maxAgg = parseIntParam(p, "MaxAggregationInterval", 600);
-        List<Tag> flowLogTags = parseTagsForResource(p, "vpc-flow-log");
 
         if (resourceIds.isEmpty()) {
-            // Some SDKs send ResourceIds.N or ResourceIds.member.N — fall back.
-            resourceIds = getList(p, "ResourceIds");
-        }
-        if (resourceIds.isEmpty()) {
+            // Some SDKs send ResourceIds.member.N — fall back to that prefix.
             resourceIds = getList(p, "ResourceIds.member");
         }
         if (resourceIds.isEmpty()) {
@@ -1993,11 +1853,7 @@ public class Ec2QueryHandler {
                 .start("flowLogIdSet");
         for (String resourceId : resourceIds) {
             FlowLog fl = flowLogService.createFlowLog(region, resourceId, resourceType, trafficType,
-                    logDestinationType, logDestination, logFormat, maxAgg,
-                    logGroupName, deliverLogsPermissionArn, flowLogTags);
-            if (!flowLogTags.isEmpty()) {
-                service.createTags(region, List.of(fl.getFlowLogId()), flowLogTags);
-            }
+                    logDestinationType, logDestination, deliverLogsPermissionArn, logFormat, maxAgg);
             xml.elem("item", fl.getFlowLogId());
         }
         xml.end("flowLogIdSet")
@@ -2009,16 +1865,9 @@ public class Ec2QueryHandler {
     private Response handleDescribeFlowLogs(MultivaluedMap<String, String> p, String region) {
         List<String> ids = getList(p, "FlowLogId");
         if (ids.isEmpty()) {
-            ids = getList(p, "FlowLogIds");
-        }
-        if (ids.isEmpty()) {
             ids = getList(p, "FlowLogIds.member");
         }
-        Map<String, List<String>> filters = getFilters(p);
-        int maxResults = parseIntParam(p, "MaxResults", 0);
-        FlowLogService.FlowLogListResult page = flowLogService.describeFlowLogs(
-                region, ids, filters, maxResults, p.getFirst("NextToken"));
-        List<FlowLog> logs = page.logs();
+        List<FlowLog> logs = flowLogService.describeFlowLogs(region, ids);
         XmlBuilder xml = new XmlBuilder()
                 .start("DescribeFlowLogsResponse", AwsNamespaces.EC2)
                 .elem("requestId", UUID.randomUUID().toString())
@@ -2029,44 +1878,22 @@ public class Ec2QueryHandler {
                     .elem("resourceId", fl.getResourceId())
                     .elem("trafficType", fl.getTrafficType())
                     .elem("logDestinationType", fl.getLogDestinationType())
+                    .elem("logDestination", fl.getLogDestination())
+                    .elem("deliverLogsPermissionArn", fl.getDeliverLogsPermissionArn())
                     .elem("flowLogStatus", fl.getFlowLogStatus())
                     .elem("logFormat", fl.getLogFormat() != null
                             ? fl.getLogFormat() : FlowLogService.DEFAULT_LOG_FORMAT)
                     .elem("deliverLogsStatus", fl.getDeliverLogsStatus())
                     .elem("maxAggregationInterval", String.valueOf(fl.getMaxAggregationInterval()))
-                    .elem("creationTime", ISO_FMT.format(fl.getCreationTime()));
-            if (fl.getLogDestination() != null) {
-                xml.elem("logDestination", fl.getLogDestination());
-            }
-            if (fl.getLogGroupName() != null) {
-                xml.elem("logGroupName", fl.getLogGroupName());
-            }
-            if (fl.getDeliverLogsPermissionArn() != null) {
-                xml.elem("deliverLogsPermissionArn", fl.getDeliverLogsPermissionArn());
-            }
-            if (fl.getLogFormat() != null) {
-                xml.elem("logFormat", fl.getLogFormat());
-            }
-            List<Tag> tags = service.getResourceTags(fl.getFlowLogId());
-            if (tags.isEmpty() && fl.getTags() != null) {
-                tags = fl.getTags();
-            }
-            xml.raw(tagSetXml(tags));
-            xml.end("item");
+                    .elem("creationTime", ISO_FMT.format(fl.getCreationTime()))
+                    .end("item");
         }
-        xml.end("flowLogSet");
-        if (page.nextToken() != null) {
-            xml.elem("nextToken", page.nextToken());
-        }
-        xml.end("DescribeFlowLogsResponse");
+        xml.end("flowLogSet").end("DescribeFlowLogsResponse");
         return xmlResponse(xml.build());
     }
 
     private Response handleDeleteFlowLogs(MultivaluedMap<String, String> p, String region) {
         List<String> ids = getList(p, "FlowLogId");
-        if (ids.isEmpty()) {
-            ids = getList(p, "FlowLogIds");
-        }
         if (ids.isEmpty()) {
             ids = getList(p, "FlowLogIds.member");
         }
@@ -3309,89 +3136,6 @@ public class Ec2QueryHandler {
         return xmlResponse(xml.build());
     }
 
-    private Response handleCreateEgressOnlyInternetGateway(MultivaluedMap<String, String> p, String region) {
-        EgressOnlyInternetGateway eigw = service.createEgressOnlyInternetGateway(
-                region, p.getFirst("VpcId"), parseTagsForResource(p, "egress-only-internet-gateway"));
-        XmlBuilder xml = new XmlBuilder()
-                .start("CreateEgressOnlyInternetGatewayResponse", AwsNamespaces.EC2)
-                .elem("requestId", UUID.randomUUID().toString())
-                .start("egressOnlyInternetGateway").raw(eigwXml(eigw)).end("egressOnlyInternetGateway")
-                .end("CreateEgressOnlyInternetGatewayResponse");
-        return xmlResponse(xml.build());
-    }
-
-    private Response handleDeleteEgressOnlyInternetGateway(MultivaluedMap<String, String> p, String region) {
-        service.deleteEgressOnlyInternetGateway(region, p.getFirst("EgressOnlyInternetGatewayId"));
-        return booleanResponse("DeleteEgressOnlyInternetGateway");
-    }
-
-    private Response handleDescribeEgressOnlyInternetGateways(MultivaluedMap<String, String> p, String region) {
-        Integer maxResults = p.getFirst("MaxResults") == null ? null : parseIntParam(p, "MaxResults", 0);
-        if (maxResults != null && (maxResults < 5 || maxResults > 255)) {
-            throw new AwsException("InvalidMaxResults", "The specified value for MaxResults is not valid.", 400);
-        }
-        List<EgressOnlyInternetGateway> gateways = service.describeEgressOnlyInternetGateways(
-                region, getList(p, "EgressOnlyInternetGatewayId"), getFilters(p));
-        if (gateways.isEmpty() && p.getFirst("NextToken") != null) {
-            throw new AwsException("InvalidParameterValue", "Invalid NextToken", 400);
-        }
-        PaginatedResult<EgressOnlyInternetGateway> page = Pagination.paginate(gateways,
-                EgressOnlyInternetGateway::getEgressOnlyInternetGatewayId, maxResults,
-                p.getFirst("NextToken"), 255, "InvalidParameterValue");
-        XmlBuilder xml = new XmlBuilder()
-                .start("DescribeEgressOnlyInternetGatewaysResponse", AwsNamespaces.EC2)
-                .elem("requestId", UUID.randomUUID().toString())
-                .start("egressOnlyInternetGatewaySet");
-        for (EgressOnlyInternetGateway gateway : page.items()) {
-            xml.start("item").raw(eigwXml(gateway)).end("item");
-        }
-        xml.end("egressOnlyInternetGatewaySet");
-        if (page.nextToken() != null) {
-            xml.elem("nextToken", page.nextToken());
-        }
-        xml.end("DescribeEgressOnlyInternetGatewaysResponse");
-        return xmlResponse(xml.build());
-    }
-
-    private Response handleCreateDhcpOptions(MultivaluedMap<String, String> p, String region) {
-        Map<String, List<String>> configurations = new LinkedHashMap<>();
-        for (int i = 1; ; i++) {
-            String key = p.getFirst("DhcpConfiguration." + i + ".Key");
-            if (key == null) break;
-            configurations.put(key, getList(p, "DhcpConfiguration." + i + ".Value"));
-        }
-        DhcpOptions options = service.createDhcpOptions(
-                region, configurations, parseTagsForResource(p, "dhcp-options"));
-        XmlBuilder xml = new XmlBuilder()
-                .start("CreateDhcpOptionsResponse", AwsNamespaces.EC2)
-                .elem("requestId", UUID.randomUUID().toString())
-                .start("dhcpOptions").raw(dhcpOptionsXml(options)).end("dhcpOptions")
-                .end("CreateDhcpOptionsResponse");
-        return xmlResponse(xml.build());
-    }
-
-    private Response handleAssociateDhcpOptions(MultivaluedMap<String, String> p, String region) {
-        service.associateDhcpOptions(region, p.getFirst("DhcpOptionsId"), p.getFirst("VpcId"));
-        return booleanResponse("AssociateDhcpOptions");
-    }
-
-    private Response handleDeleteDhcpOptions(MultivaluedMap<String, String> p, String region) {
-        service.deleteDhcpOptions(region, p.getFirst("DhcpOptionsId"));
-        return booleanResponse("DeleteDhcpOptions");
-    }
-
-    private Response handleDescribeDhcpOptions(MultivaluedMap<String, String> p, String region) {
-        List<DhcpOptions> options = service.describeDhcpOptions(region, getList(p, "DhcpOptionsId"));
-        XmlBuilder xml = new XmlBuilder()
-                .start("DescribeDhcpOptionsResponse", AwsNamespaces.EC2)
-                .elem("requestId", UUID.randomUUID().toString())
-                .start("dhcpOptionsSet");
-        for (DhcpOptions option : options) {
-            xml.start("item").raw(dhcpOptionsXml(option)).end("item");
-        }
-        xml.end("dhcpOptionsSet").end("DescribeDhcpOptionsResponse");
-        return xmlResponse(xml.build());
-    }
 
     private Response handleCreateDefaultVpc(MultivaluedMap<String, String> p, String region) {
         Vpc vpc = service.createDefaultVpc(region);
@@ -3507,7 +3251,6 @@ public class Ec2QueryHandler {
     }
 
     private Response handleDeleteSubnet(MultivaluedMap<String, String> p, String region) {
-        requireNoClientVpnDependents(region, p.getFirst("SubnetId"), "subnet");
         service.deleteSubnet(region, p.getFirst("SubnetId"));
         return booleanResponse("DeleteSubnet");
     }
@@ -3518,9 +3261,7 @@ public class Ec2QueryHandler {
                 "MapPublicIpOnLaunch",
                 "AssignIpv6AddressOnCreation",
                 "EnableDns64",
-                "MapCustomerOwnedIpOnLaunch",
-                "EnableResourceNameDnsARecordOnLaunch",
-                "EnableResourceNameDnsAAAARecordOnLaunch")) {
+                "MapCustomerOwnedIpOnLaunch")) {
             String val = p.getFirst(attr + ".Value");
             if (val != null) {
                 String camel = Character.toLowerCase(attr.charAt(0)) + attr.substring(1);
@@ -3601,7 +3342,6 @@ public class Ec2QueryHandler {
     private Response handleDeleteSecurityGroup(MultivaluedMap<String, String> p, String region) {
         String groupId = p.getFirst("GroupId");
         if (groupId == null) groupId = p.getFirst("GroupName");
-        requireNoClientVpnDependents(region, groupId, "security group");
         service.deleteSecurityGroup(region, groupId);
         return booleanResponse("DeleteSecurityGroup");
     }
@@ -3697,28 +3437,12 @@ public class Ec2QueryHandler {
         String groupId = p.getFirst("GroupId");
         List<Map<String, String>> updates = new ArrayList<>();
         for (int i = 1; ; i++) {
-            String prefix = "SecurityGroupRule." + i + ".";
-            String ruleId = p.getFirst(prefix + "SecurityGroupRuleId");
-            if (ruleId == null) {
-                if (p.keySet().stream().anyMatch(name -> name.startsWith(prefix))) {
-                    throw new AwsException("MissingParameter", "SecurityGroupRuleId is required", 400);
-                }
-                break;
-            }
+            String ruleId = p.getFirst("SecurityGroupRule." + i + ".SecurityGroupRuleId");
+            if (ruleId == null) break;
             Map<String, String> update = new LinkedHashMap<>();
             update.put("SecurityGroupRuleId", ruleId);
-            // AWS wire name: SecurityGroupRuleUpdate.SecurityGroupRule (a SecurityGroupRuleRequest);
-            // older clients send SecurityGroupRuleRequest.
-            for (String field : List.of("Description", "IpProtocol", "FromPort", "ToPort",
-                    "CidrIpv4", "CidrIpv6", "PrefixListId", "ReferencedGroupId")) {
-                String value = p.getFirst("SecurityGroupRule." + i + ".SecurityGroupRule." + field);
-                if (value == null) {
-                    value = p.getFirst("SecurityGroupRule." + i + ".SecurityGroupRuleRequest." + field);
-                }
-                if (value != null) {
-                    update.put(field, value);
-                }
-            }
+            String desc = p.getFirst("SecurityGroupRule." + i + ".SecurityGroupRuleRequest.Description");
+            if (desc != null) update.put("Description", desc);
             updates.add(update);
         }
         service.modifySecurityGroupRules(region, groupId, updates);
@@ -3735,391 +3459,6 @@ public class Ec2QueryHandler {
         String groupId = p.getFirst("GroupId");
         service.updateSecurityGroupRuleDescriptionsEgress(region, groupId, Collections.emptyList());
         return booleanResponse("UpdateSecurityGroupRuleDescriptionsEgress");
-    }
-
-    // ─── Client VPN handlers ──────────────────────────────────────────────────
-
-    private Ec2ClientVpnService clientVpn() {
-        if (clientVpnService == null) {
-            throw new AwsException("UnsupportedOperation", "Client VPN is not available in this configuration.", 400);
-        }
-        return clientVpnService;
-    }
-
-    /** AWS refuses to delete a subnet, security group or VPC a Client VPN endpoint still uses. */
-    private void requireNoClientVpnDependents(String region, String resourceId, String kind) {
-        if (clientVpnService == null) {
-            return;
-        }
-        clientVpnService.dependentEndpoint(region, resourceId).ifPresent(endpointId -> {
-            throw new AwsException("DependencyViolation", "The " + kind + " '" + resourceId
-                    + "' has dependencies and cannot be deleted: it is used by Client VPN endpoint " + endpointId, 400);
-        });
-    }
-
-    private void requireKnownClientVpnEndpoints(String region, List<String> resourceIds) {
-        if (clientVpnService == null) {
-            return;
-        }
-        for (String resourceId : resourceIds) {
-            if (resourceId != null && resourceId.startsWith(Ec2ClientVpnService.ENDPOINT_PREFIX)) {
-                clientVpnService.requireEndpoint(region, resourceId);
-            }
-        }
-    }
-
-    private static boolean hasParameterPrefix(MultivaluedMap<String, String> p, String prefix) {
-        return p.keySet().stream().anyMatch(name -> name.startsWith(prefix));
-    }
-
-    private Ec2ClientVpnService.EndpointSettings parseClientVpnSettings(MultivaluedMap<String, String> p,
-                                                                       boolean modify) {
-        Ec2ClientVpnService.EndpointSettings settings = new Ec2ClientVpnService.EndpointSettings();
-        settings.clientCidrBlock = p.getFirst("ClientCidrBlock");
-        settings.serverCertificateArn = p.getFirst("ServerCertificateArn");
-        for (int i = 1; hasParameterPrefix(p, "Authentication." + i + "."); i++) {
-            String base = "Authentication." + i + ".";
-            ClientVpnAuthentication option = new ClientVpnAuthentication();
-            option.setType(p.getFirst(base + "Type"));
-            option.setDirectoryId(p.getFirst(base + "ActiveDirectory.DirectoryId"));
-            option.setClientRootCertificateChainArn(
-                    p.getFirst(base + "MutualAuthentication.ClientRootCertificateChainArn"));
-            option.setSamlProviderArn(p.getFirst(base + "FederatedAuthentication.SAMLProviderArn"));
-            option.setSelfServiceSamlProviderArn(
-                    p.getFirst(base + "FederatedAuthentication.SelfServiceSAMLProviderArn"));
-            settings.authenticationOptions.add(option);
-        }
-        settings.connectionLogEnabled = parseOptionalBoolean(p.getFirst("ConnectionLogOptions.Enabled"),
-                "ConnectionLogOptions.Enabled");
-        settings.connectionLogGroup = p.getFirst("ConnectionLogOptions.CloudwatchLogGroup");
-        settings.connectionLogStream = p.getFirst("ConnectionLogOptions.CloudwatchLogStream");
-        if (modify) {
-            settings.dnsServers = getList(p, "DnsServers.CustomDnsServers");
-            settings.dnsServersEnabled = parseOptionalBoolean(p.getFirst("DnsServers.Enabled"), "DnsServers.Enabled");
-            if (settings.dnsServersEnabled == null && !settings.dnsServers.isEmpty()) {
-                settings.dnsServersEnabled = true;
-            }
-        } else {
-            settings.dnsServers = getList(p, "DnsServers");
-        }
-        settings.transportProtocol = p.getFirst("TransportProtocol");
-        settings.vpnPort = parseOptionalInt(p.getFirst("VpnPort"), "VpnPort");
-        settings.description = p.getFirst("Description");
-        settings.splitTunnel = parseOptionalBoolean(p.getFirst("SplitTunnel"), "SplitTunnel");
-        settings.securityGroupIds = getList(p, "SecurityGroupId");
-        settings.vpcId = p.getFirst("VpcId");
-        settings.selfServicePortal = p.getFirst("SelfServicePortal");
-        settings.clientConnectEnabled = parseOptionalBoolean(p.getFirst("ClientConnectOptions.Enabled"),
-                "ClientConnectOptions.Enabled");
-        settings.clientConnectLambdaFunctionArn = p.getFirst("ClientConnectOptions.LambdaFunctionArn");
-        settings.sessionTimeoutHours = parseOptionalInt(p.getFirst("SessionTimeoutHours"), "SessionTimeoutHours");
-        settings.clientLoginBannerEnabled = parseOptionalBoolean(p.getFirst("ClientLoginBannerOptions.Enabled"),
-                "ClientLoginBannerOptions.Enabled");
-        settings.clientLoginBannerText = p.getFirst("ClientLoginBannerOptions.BannerText");
-        settings.clientRouteEnforced = parseOptionalBoolean(p.getFirst("ClientRouteEnforcementOptions.Enforced"),
-                "ClientRouteEnforcementOptions.Enforced");
-        settings.disconnectOnSessionTimeout = parseOptionalBoolean(p.getFirst("DisconnectOnSessionTimeout"),
-                "DisconnectOnSessionTimeout");
-        settings.endpointIpAddressType = p.getFirst("EndpointIpAddressType");
-        settings.trafficIpAddressType = p.getFirst("TrafficIpAddressType");
-        settings.transitGatewayConfiguration = hasParameterPrefix(p, "TransitGatewayConfiguration.");
-        settings.clientToken = p.getFirst("ClientToken");
-        return settings;
-    }
-
-    private Response handleCreateClientVpnEndpoint(MultivaluedMap<String, String> p, String region) {
-        checkDryRun(p);
-        ClientVpnEndpoint endpoint = clientVpn().createEndpoint(region, parseClientVpnSettings(p, false));
-        applyResourceTags(p, region, "client-vpn-endpoint", endpoint.getClientVpnEndpointId());
-        XmlBuilder xml = new XmlBuilder()
-                .start("CreateClientVpnEndpointResponse", AwsNamespaces.EC2)
-                .elem("requestId", UUID.randomUUID().toString())
-                .elem("clientVpnEndpointId", endpoint.getClientVpnEndpointId())
-                .start("status").elem("code", endpoint.getStatus()).end("status")
-                .elem("dnsName", endpoint.getDnsName())
-                .end("CreateClientVpnEndpointResponse");
-        return xmlResponse(xml.build());
-    }
-
-    private Response handleDescribeClientVpnEndpoints(MultivaluedMap<String, String> p, String region) {
-        checkDryRun(p);
-        List<ClientVpnEndpoint> endpoints = clientVpn().describeEndpoints(region,
-                getList(p, "ClientVpnEndpointId"), getFilters(p));
-        PaginatedResult<ClientVpnEndpoint> page = clientVpnPage(p, endpoints, ClientVpnEndpoint::getClientVpnEndpointId);
-        XmlBuilder xml = new XmlBuilder()
-                .start("DescribeClientVpnEndpointsResponse", AwsNamespaces.EC2)
-                .elem("requestId", UUID.randomUUID().toString())
-                .start("clientVpnEndpoint");
-        for (ClientVpnEndpoint endpoint : page.items()) {
-            xml.start("item").raw(clientVpnEndpointXml(endpoint)).end("item");
-        }
-        xml.end("clientVpnEndpoint").elem("nextToken", page.nextToken())
-                .end("DescribeClientVpnEndpointsResponse");
-        return xmlResponse(xml.build());
-    }
-
-    private Response handleModifyClientVpnEndpoint(MultivaluedMap<String, String> p, String region) {
-        checkDryRun(p);
-        clientVpn().modifyEndpoint(region, p.getFirst("ClientVpnEndpointId"), parseClientVpnSettings(p, true));
-        return booleanResponse("ModifyClientVpnEndpoint");
-    }
-
-    private Response handleDeleteClientVpnEndpoint(MultivaluedMap<String, String> p, String region) {
-        checkDryRun(p);
-        clientVpn().deleteEndpoint(region, p.getFirst("ClientVpnEndpointId"));
-        XmlBuilder xml = new XmlBuilder()
-                .start("DeleteClientVpnEndpointResponse", AwsNamespaces.EC2)
-                .elem("requestId", UUID.randomUUID().toString())
-                .start("status").elem("code", "deleting").end("status")
-                .end("DeleteClientVpnEndpointResponse");
-        return xmlResponse(xml.build());
-    }
-
-    private Response handleAssociateClientVpnTargetNetwork(MultivaluedMap<String, String> p, String region) {
-        checkDryRun(p);
-        if (p.getFirst("AvailabilityZone") != null || p.getFirst("AvailabilityZoneId") != null) {
-            throw new AwsException("InvalidParameterValue",
-                    "Transit gateway Availability Zone associations are not supported by this emulator", 400);
-        }
-        ClientVpnTargetNetwork network = clientVpn().associateTargetNetwork(region,
-                p.getFirst("ClientVpnEndpointId"), p.getFirst("SubnetId"), p.getFirst("ClientToken"));
-        return clientVpnAssociationResponse("AssociateClientVpnTargetNetworkResponse", network, "associating");
-    }
-
-    private Response handleDisassociateClientVpnTargetNetwork(MultivaluedMap<String, String> p, String region) {
-        checkDryRun(p);
-        ClientVpnTargetNetwork network = clientVpn().disassociateTargetNetwork(region,
-                p.getFirst("ClientVpnEndpointId"), p.getFirst("AssociationId"));
-        return clientVpnAssociationResponse("DisassociateClientVpnTargetNetworkResponse", network, "disassociating");
-    }
-
-    private Response clientVpnAssociationResponse(String root, ClientVpnTargetNetwork network, String status) {
-        XmlBuilder xml = new XmlBuilder()
-                .start(root, AwsNamespaces.EC2)
-                .elem("requestId", UUID.randomUUID().toString())
-                .elem("associationId", network.getAssociationId())
-                .start("status").elem("code", status).end("status")
-                .end(root);
-        return xmlResponse(xml.build());
-    }
-
-    private Response handleDescribeClientVpnTargetNetworks(MultivaluedMap<String, String> p, String region) {
-        checkDryRun(p);
-        String endpointId = p.getFirst("ClientVpnEndpointId");
-        ClientVpnEndpoint endpoint = clientVpn().requireEndpoint(region, endpointId);
-        List<ClientVpnTargetNetwork> networks = clientVpn().describeTargetNetworks(region, endpointId,
-                getList(p, "AssociationIds"), getFilters(p));
-        PaginatedResult<ClientVpnTargetNetwork> page = clientVpnPage(p, networks,
-                ClientVpnTargetNetwork::getAssociationId);
-        XmlBuilder xml = new XmlBuilder()
-                .start("DescribeClientVpnTargetNetworksResponse", AwsNamespaces.EC2)
-                .elem("requestId", UUID.randomUUID().toString())
-                .start("clientVpnTargetNetworks");
-        for (ClientVpnTargetNetwork network : page.items()) {
-            xml.start("item")
-                    .elem("associationId", network.getAssociationId())
-                    .elem("vpcId", network.getVpcId())
-                    .elem("targetNetworkId", network.getSubnetId())
-                    .elem("clientVpnEndpointId", endpointId)
-                    .start("status").elem("code", network.getStatus()).end("status")
-                    .raw(stringSetXml("securityGroups", endpoint.getSecurityGroupIds()))
-                    .end("item");
-        }
-        xml.end("clientVpnTargetNetworks").elem("nextToken", page.nextToken())
-                .end("DescribeClientVpnTargetNetworksResponse");
-        return xmlResponse(xml.build());
-    }
-
-    private Response handleAuthorizeClientVpnIngress(MultivaluedMap<String, String> p, String region) {
-        checkDryRun(p);
-        clientVpn().authorizeIngress(region, p.getFirst("ClientVpnEndpointId"), p.getFirst("TargetNetworkCidr"),
-                p.getFirst("AccessGroupId"),
-                parseOptionalBoolean(p.getFirst("AuthorizeAllGroups"), "AuthorizeAllGroups"),
-                p.getFirst("Description"), p.getFirst("ClientToken"));
-        return clientVpnStatusResponse("AuthorizeClientVpnIngressResponse", "authorizing");
-    }
-
-    private Response handleRevokeClientVpnIngress(MultivaluedMap<String, String> p, String region) {
-        checkDryRun(p);
-        clientVpn().revokeIngress(region, p.getFirst("ClientVpnEndpointId"), p.getFirst("TargetNetworkCidr"),
-                p.getFirst("AccessGroupId"),
-                parseOptionalBoolean(p.getFirst("RevokeAllGroups"), "RevokeAllGroups"));
-        return clientVpnStatusResponse("RevokeClientVpnIngressResponse", "revoking");
-    }
-
-    private Response clientVpnStatusResponse(String root, String status) {
-        XmlBuilder xml = new XmlBuilder()
-                .start(root, AwsNamespaces.EC2)
-                .elem("requestId", UUID.randomUUID().toString())
-                .start("status").elem("code", status).end("status")
-                .end(root);
-        return xmlResponse(xml.build());
-    }
-
-    private Response handleDescribeClientVpnAuthorizationRules(MultivaluedMap<String, String> p, String region) {
-        checkDryRun(p);
-        String endpointId = p.getFirst("ClientVpnEndpointId");
-        List<ClientVpnAuthorizationRule> rules = clientVpn().describeAuthorizationRules(region, endpointId,
-                getFilters(p));
-        PaginatedResult<ClientVpnAuthorizationRule> page = clientVpnPage(p, rules,
-                rule -> rule.getDestinationCidr() + "|" + (rule.isAccessAll() ? "*" : rule.getGroupId()));
-        XmlBuilder xml = new XmlBuilder()
-                .start("DescribeClientVpnAuthorizationRulesResponse", AwsNamespaces.EC2)
-                .elem("requestId", UUID.randomUUID().toString())
-                .start("authorizationRule");
-        for (ClientVpnAuthorizationRule rule : page.items()) {
-            xml.start("item")
-                    .elem("clientVpnEndpointId", endpointId)
-                    .elem("description", rule.getDescription())
-                    .elem("groupId", rule.getGroupId())
-                    .elem("accessAll", rule.isAccessAll())
-                    .elem("destinationCidr", rule.getDestinationCidr())
-                    .start("status").elem("code", rule.getStatus()).end("status")
-                    .end("item");
-        }
-        xml.end("authorizationRule").elem("nextToken", page.nextToken())
-                .end("DescribeClientVpnAuthorizationRulesResponse");
-        return xmlResponse(xml.build());
-    }
-
-    private Response handleCreateClientVpnRoute(MultivaluedMap<String, String> p, String region) {
-        checkDryRun(p);
-        clientVpn().createRoute(region, p.getFirst("ClientVpnEndpointId"), p.getFirst("DestinationCidrBlock"),
-                p.getFirst("TargetVpcSubnetId"), p.getFirst("Description"), p.getFirst("ClientToken"));
-        return clientVpnStatusResponse("CreateClientVpnRouteResponse", "creating");
-    }
-
-    private Response handleDeleteClientVpnRoute(MultivaluedMap<String, String> p, String region) {
-        checkDryRun(p);
-        clientVpn().deleteRoute(region, p.getFirst("ClientVpnEndpointId"), p.getFirst("DestinationCidrBlock"),
-                p.getFirst("TargetVpcSubnetId"));
-        return clientVpnStatusResponse("DeleteClientVpnRouteResponse", "deleting");
-    }
-
-    private Response handleDescribeClientVpnRoutes(MultivaluedMap<String, String> p, String region) {
-        checkDryRun(p);
-        String endpointId = p.getFirst("ClientVpnEndpointId");
-        List<ClientVpnRoute> routes = clientVpn().describeRoutes(region, endpointId, getFilters(p));
-        PaginatedResult<ClientVpnRoute> page = clientVpnPage(p, routes,
-                route -> route.getDestinationCidr() + "|" + route.getTargetSubnet());
-        XmlBuilder xml = new XmlBuilder()
-                .start("DescribeClientVpnRoutesResponse", AwsNamespaces.EC2)
-                .elem("requestId", UUID.randomUUID().toString())
-                .start("routes");
-        for (ClientVpnRoute route : page.items()) {
-            xml.start("item")
-                    .elem("clientVpnEndpointId", endpointId)
-                    .elem("destinationCidr", route.getDestinationCidr())
-                    .elem("targetSubnet", route.getTargetSubnet())
-                    .elem("type", route.getType())
-                    .elem("origin", route.getOrigin())
-                    .start("status").elem("code", route.getStatus()).end("status")
-                    .elem("description", route.getDescription())
-                    .end("item");
-        }
-        xml.end("routes").elem("nextToken", page.nextToken()).end("DescribeClientVpnRoutesResponse");
-        return xmlResponse(xml.build());
-    }
-
-    /** Client VPN describes accept MaxResults 5-1000. */
-    private <T> PaginatedResult<T> clientVpnPage(MultivaluedMap<String, String> p, List<T> items,
-                                                 java.util.function.Function<T, String> cursor) {
-        Integer maxResults = p.getFirst("MaxResults") == null ? null : parseIntParam(p, "MaxResults", 0);
-        if (maxResults != null && (maxResults < 5 || maxResults > 1000)) {
-            throw new AwsException("InvalidParameterValue", "MaxResults must be between 5 and 1000", 400);
-        }
-        return Pagination.paginate(items, cursor, maxResults, p.getFirst("NextToken"), 1000, "InvalidParameterValue");
-    }
-
-    private static String stringSetXml(String element, List<String> values) {
-        if (values == null || values.isEmpty()) {
-            return "<" + element + "/>";
-        }
-        XmlBuilder xml = new XmlBuilder().start(element);
-        for (String value : values) {
-            xml.elem("item", value);
-        }
-        return xml.end(element).build();
-    }
-
-    private String clientVpnEndpointXml(ClientVpnEndpoint endpoint) {
-        XmlBuilder xml = new XmlBuilder()
-                .elem("clientVpnEndpointId", endpoint.getClientVpnEndpointId());
-        if (endpoint.getDescription() != null && !endpoint.getDescription().isEmpty()) {
-            xml.elem("description", endpoint.getDescription());
-        }
-        xml.start("status").elem("code", endpoint.getStatus()).end("status")
-                .elem("creationTime", endpoint.getCreationTime())
-                .elem("dnsName", endpoint.getDnsName())
-                .elem("clientCidrBlock", endpoint.getClientCidrBlock())
-                .raw(stringSetXml("dnsServer", endpoint.getDnsServers()))
-                .elem("splitTunnel", endpoint.isSplitTunnel())
-                .elem("vpnProtocol", "openvpn")
-                .elem("transportProtocol", endpoint.getTransportProtocol())
-                .elem("vpnPort", endpoint.getVpnPort());
-        if (endpoint.getTargetNetworks().isEmpty()) {
-            xml.raw("<associatedTargetNetwork/>");
-        } else {
-            xml.start("associatedTargetNetwork");
-            for (ClientVpnTargetNetwork network : endpoint.getTargetNetworks()) {
-                xml.start("item")
-                        .elem("networkId", network.getSubnetId())
-                        .elem("networkType", "vpc")
-                        .end("item");
-            }
-            xml.end("associatedTargetNetwork");
-        }
-        xml.elem("serverCertificateArn", endpoint.getServerCertificateArn())
-                .start("authenticationOptions");
-        for (ClientVpnAuthentication option : endpoint.getAuthenticationOptions()) {
-            xml.start("item").elem("type", option.getType());
-            if (option.getDirectoryId() != null) {
-                xml.start("activeDirectory").elem("directoryId", option.getDirectoryId()).end("activeDirectory");
-            }
-            if (option.getClientRootCertificateChainArn() != null) {
-                xml.start("mutualAuthentication")
-                        .elem("clientRootCertificateChain", option.getClientRootCertificateChainArn())
-                        .end("mutualAuthentication");
-            }
-            if (option.getSamlProviderArn() != null) {
-                xml.start("federatedAuthentication")
-                        .elem("samlProviderArn", option.getSamlProviderArn())
-                        .elem("selfServiceSamlProviderArn", option.getSelfServiceSamlProviderArn())
-                        .end("federatedAuthentication");
-            }
-            xml.end("item");
-        }
-        // ConnectionLogResponseOptions is the one Client VPN shape AWS serializes with PascalCase members.
-        xml.end("authenticationOptions")
-                .start("connectionLogOptions")
-                .elem("Enabled", endpoint.isConnectionLogEnabled())
-                .elem("CloudwatchLogGroup", endpoint.getConnectionLogGroup())
-                .elem("CloudwatchLogStream", endpoint.getConnectionLogStream())
-                .end("connectionLogOptions")
-                .raw(tagSetXml(clientVpn().tags(endpoint)))
-                .raw(stringSetXml("securityGroupIdSet", endpoint.getSecurityGroupIds()))
-                .elem("vpcId", endpoint.getVpcId());
-        if ("enabled".equals(endpoint.getSelfServicePortal())) {
-            xml.elem("selfServicePortalUrl",
-                    "https://self-service.clientvpn.amazonaws.com/endpoints/" + endpoint.getClientVpnEndpointId());
-        }
-        xml.start("clientConnectOptions")
-                .elem("enabled", endpoint.isClientConnectEnabled())
-                .elem("lambdaFunctionArn", endpoint.getClientConnectLambdaFunctionArn())
-                .start("status").elem("code", "applied").end("status")
-                .end("clientConnectOptions")
-                .elem("sessionTimeoutHours", endpoint.getSessionTimeoutHours())
-                .start("clientLoginBannerOptions")
-                .elem("enabled", endpoint.isClientLoginBannerEnabled())
-                .elem("bannerText", endpoint.getClientLoginBannerText())
-                .end("clientLoginBannerOptions")
-                .start("clientRouteEnforcementOptions")
-                .elem("enforced", endpoint.isClientRouteEnforced())
-                .end("clientRouteEnforcementOptions")
-                .elem("disconnectOnSessionTimeout", endpoint.isDisconnectOnSessionTimeout())
-                .elem("endpointIpAddressType", endpoint.getEndpointIpAddressType())
-                .elem("trafficIpAddressType", endpoint.getTrafficIpAddressType());
-        return xml.build();
     }
 
     // ─── Key Pair handlers ────────────────────────────────────────────────────
@@ -4139,7 +3478,6 @@ public class Ec2QueryHandler {
         checkDryRun(p);
         String keyName = requireKeyName(p);
         KeyPair kp = service.createKeyPair(region, keyName, p.getFirst("KeyType"), p.getFirst("KeyFormat"));
-        applyResourceTags(p, region, "key-pair", kp.getKeyPairId());
         XmlBuilder xml = new XmlBuilder()
                 .start("CreateKeyPairResponse", AwsNamespaces.EC2)
                 .elem("requestId", UUID.randomUUID().toString())
@@ -4147,7 +3485,6 @@ public class Ec2QueryHandler {
                 .elem("keyFingerprint", kp.getKeyFingerprint())
                 .elem("keyMaterial", kp.getKeyMaterial())
                 .elem("keyPairId", kp.getKeyPairId())
-                .elem("keyType", kp.getKeyType())
                 .end("CreateKeyPairResponse");
         return xmlResponse(xml.build());
     }
@@ -4167,8 +3504,7 @@ public class Ec2QueryHandler {
                     .elem("keyType", Ec2Service.keyTypeOf(kp))
                     .elem("createTime", kp.getCreateTime() != null ? ISO_FMT.format(kp.getCreateTime()) : null)
                     .elem("keyName", kp.getKeyName())
-                    .elem("keyFingerprint", kp.getKeyFingerprint())
-                    .elem("keyType", kp.getKeyType());
+                    .elem("keyFingerprint", kp.getKeyFingerprint());
             if (includePublicKey) {
                 xml.elem("publicKey", openSshPublicKeyNamedFor(kp));
             }
@@ -4243,7 +3579,6 @@ public class Ec2QueryHandler {
             throw new AwsException("InvalidKey.Format", "Key is not in valid OpenSSH public key format", 400);
         }
         KeyPair kp = service.importKeyPair(region, keyName, publicKeyMaterial);
-        applyResourceTags(p, region, "key-pair", kp.getKeyPairId());
         XmlBuilder xml = new XmlBuilder()
                 .start("ImportKeyPairResponse", AwsNamespaces.EC2)
                 .elem("requestId", UUID.randomUUID().toString())
@@ -4539,7 +3874,6 @@ public class Ec2QueryHandler {
             String v = p.getFirst("Tag." + i + ".Value");
             tagList.add(creationTag(k, v));
         }
-        requireKnownClientVpnEndpoints(region, resourceIds);
         service.createTags(region, resourceIds, tagList);
         return booleanResponse("CreateTags");
     }
@@ -4553,7 +3887,6 @@ public class Ec2QueryHandler {
             String v = p.getFirst("Tag." + i + ".Value");
             tagList.add(new Tag(k, v));
         }
-        requireKnownClientVpnEndpoints(region, resourceIds);
         service.deleteTags(region, resourceIds, tagList);
         return booleanResponse("DeleteTags");
     }
@@ -4669,8 +4002,7 @@ public class Ec2QueryHandler {
     private Response handleAssociateRouteTable(MultivaluedMap<String, String> p, String region) {
         String rtId = p.getFirst("RouteTableId");
         String subnetId = p.getFirst("SubnetId");
-        String gatewayId = p.getFirst("GatewayId");
-        RouteTableAssociation assoc = service.associateRouteTable(region, rtId, subnetId, gatewayId);
+        RouteTableAssociation assoc = service.associateRouteTable(region, rtId, subnetId);
         XmlBuilder xml = new XmlBuilder()
                 .start("AssociateRouteTableResponse", AwsNamespaces.EC2)
                 .elem("requestId", UUID.randomUUID().toString())
@@ -4685,20 +4017,6 @@ public class Ec2QueryHandler {
     private Response handleDisassociateRouteTable(MultivaluedMap<String, String> p, String region) {
         service.disassociateRouteTable(region, p.getFirst("AssociationId"));
         return booleanResponse("DisassociateRouteTable");
-    }
-
-    private Response handleReplaceRouteTableAssociation(MultivaluedMap<String, String> p, String region) {
-        RouteTableAssociation assoc = service.replaceRouteTableAssociation(
-                region, p.getFirst("AssociationId"), p.getFirst("RouteTableId"));
-        XmlBuilder xml = new XmlBuilder()
-                .start("ReplaceRouteTableAssociationResponse", AwsNamespaces.EC2)
-                .elem("requestId", UUID.randomUUID().toString())
-                .elem("newAssociationId", assoc.getRouteTableAssociationId())
-                .start("associationState")
-                .elem("state", assoc.getAssociationState())
-                .end("associationState")
-                .end("ReplaceRouteTableAssociationResponse");
-        return xmlResponse(xml.build());
     }
 
     private Response handleCreateRoute(MultivaluedMap<String, String> p, String region) {
@@ -4723,21 +4041,32 @@ public class Ec2QueryHandler {
     }
 
     private Response handleReplaceRoute(MultivaluedMap<String, String> p, String region) {
-        // Targets floci cannot model keep UnsupportedOperation rather than being accepted
-        // and quietly clearing the route they were meant to repoint.
+        // A route holds only a gateway or a NAT gateway here. Every other AWS target keeps the
+        // UnsupportedOperation it returned before this action existed, rather than being accepted
+        // and quietly clearing the route it was meant to repoint.
         for (String target : UNSUPPORTED_ROUTE_TARGETS) {
             if (p.getFirst(target) != null) {
                 throw new AwsException("UnsupportedOperation",
                         "ReplaceRoute with " + target + " is not supported.", 400);
             }
         }
-        Route replacement = routeFromParams(p, null);
+        String rtId = p.getFirst("RouteTableId");
+        String dest = p.getFirst("DestinationCidrBlock");
+        String destIpv6 = p.getFirst("DestinationIpv6CidrBlock");
+        String destPrefixList = p.getFirst("DestinationPrefixListId");
+        String gwId = p.getFirst("GatewayId");
+        String natGwId = p.getFirst("NatGatewayId");
+        String pcxId = p.getFirst("VpcPeeringConnectionId");
+        String instanceId = p.getFirst("InstanceId");
+        String networkInterfaceId = p.getFirst("NetworkInterfaceId");
+        // Resetting a route to the local target is expressible: `local` is the gateway id the
+        // route table's built-in route already carries, so it needs no new field on Route.
         if (Boolean.parseBoolean(p.getFirst("LocalTarget"))) {
             if (gwId != null || natGwId != null || pcxId != null || instanceId != null || networkInterfaceId != null) {
                 throw new AwsException("InvalidParameterCombination",
                         "ReplaceRoute takes exactly one target.", 400);
             }
-            replacement.setGatewayId(LOCAL_GATEWAY_ID);
+            gwId = LOCAL_GATEWAY_ID;
         }
         service.replaceRoute(region, rtId, dest, destIpv6, destPrefixList, gwId, natGwId, pcxId,
                 instanceId, networkInterfaceId,
@@ -4746,40 +4075,12 @@ public class Ec2QueryHandler {
     }
 
     private Response handleDeleteRoute(MultivaluedMap<String, String> p, String region) {
-        Route dest = new Route();
-        dest.setDestinationCidrBlock(p.getFirst("DestinationCidrBlock"));
-        dest.setDestinationIpv6CidrBlock(p.getFirst("DestinationIpv6CidrBlock"));
-        dest.setDestinationPrefixListId(p.getFirst("DestinationPrefixListId"));
-        service.deleteRoute(region, p.getFirst("RouteTableId"), dest);
+        String rtId = p.getFirst("RouteTableId");
+        String dest = p.getFirst("DestinationCidrBlock");
+        String destIpv6 = p.getFirst("DestinationIpv6CidrBlock");
+        String destPrefixList = p.getFirst("DestinationPrefixListId");
+        service.deleteRoute(region, rtId, dest, destIpv6, destPrefixList);
         return booleanResponse("DeleteRoute");
-    }
-
-    private Route routeFromParams(MultivaluedMap<String, String> p, String origin) {
-        Route route = new Route();
-        route.setDestinationCidrBlock(p.getFirst("DestinationCidrBlock"));
-        route.setDestinationIpv6CidrBlock(p.getFirst("DestinationIpv6CidrBlock"));
-        route.setDestinationPrefixListId(p.getFirst("DestinationPrefixListId"));
-        route.setGatewayId(p.getFirst("GatewayId"));
-        route.setNatGatewayId(p.getFirst("NatGatewayId"));
-        route.setEgressOnlyInternetGatewayId(p.getFirst("EgressOnlyInternetGatewayId"));
-        route.setVpcPeeringConnectionId(p.getFirst("VpcPeeringConnectionId"));
-        route.setNetworkInterfaceId(p.getFirst("NetworkInterfaceId"));
-        route.setInstanceId(p.getFirst("InstanceId"));
-        route.setVpcEndpointId(p.getFirst("VpcEndpointId"));
-        route.setOrigin(origin);
-        return route;
-    }
-
-    private static int countRouteTargets(Route route) {
-        int n = 0;
-        if (route.getGatewayId() != null) n++;
-        if (route.getNatGatewayId() != null) n++;
-        if (route.getEgressOnlyInternetGatewayId() != null) n++;
-        if (route.getVpcPeeringConnectionId() != null) n++;
-        if (route.getNetworkInterfaceId() != null) n++;
-        if (route.getInstanceId() != null) n++;
-        if (route.getVpcEndpointId() != null) n++;
-        return n;
     }
 
     // ─── VPC Peering Connection handlers ────────────────────────────────────────
@@ -5652,14 +4953,14 @@ public class Ec2QueryHandler {
             }
             privateIpAddresses.add(addr);
         }
-        List<String> securityGroupIds = getList(p, "SecurityGroupId", "GroupId");
+        List<String> securityGroupIds = getList(p, "SecurityGroupId");
         if (securityGroupIds.isEmpty()) {
             securityGroupIds = getList(p, "Groups.SecurityGroupId");
         }
         List<Tag> tagList = parseTagsForResource(p, "network-interface");
 
         NetworkInterface ni = service.createNetworkInterface(region, subnetId, description,
-                privateIpAddress, privateIpAddresses, securityGroupIds, tagList, p.getFirst("InterfaceType"));
+                privateIpAddress, privateIpAddresses, securityGroupIds, tagList);
 
         XmlBuilder xml = new XmlBuilder()
                 .start("CreateNetworkInterfaceResponse", AwsNamespaces.EC2)
@@ -5776,15 +5077,8 @@ public class Ec2QueryHandler {
                 xml.elem("attachTime", eni.getAttachTime());
             }
             xml.elem("deleteOnTermination", "true")
-                    .end("attachment");
-            if (inst.getPublicIpAddress() != null) {
-                xml.start("association")
-                        .elem("publicIp", inst.getPublicIpAddress())
-                        .elem("publicDnsName", inst.getPublicDnsName())
-                        .elem("ipOwnerId", "amazon")
-                        .end("association");
-            }
-            xml.start("privateIpAddressesSet")
+                    .end("attachment")
+                    .start("privateIpAddressesSet")
                     .start("item")
                     .elem("privateIpAddress", eni.getPrivateIpAddress())
                     .elem("privateDnsName", eni.getPrivateDnsName())
@@ -5905,10 +5199,6 @@ public class Ec2QueryHandler {
                 .elem("assignIpv6AddressOnCreation", String.valueOf(s.isAssignIpv6AddressOnCreation()))
                 .elem("enableDns64", String.valueOf(s.isEnableDns64()))
                 .elem("mapCustomerOwnedIpOnLaunch", String.valueOf(s.isMapCustomerOwnedIpOnLaunch()))
-                .start("privateDnsNameOptionsOnLaunch")
-                .elem("enableResourceNameDnsARecord", String.valueOf(s.isEnableResourceNameDnsARecordOnLaunch()))
-                .elem("enableResourceNameDnsAAAARecord", String.valueOf(s.isEnableResourceNameDnsAAAARecordOnLaunch()))
-                .end("privateDnsNameOptionsOnLaunch")
                 .start("ipv6CidrBlockAssociationSet");
         for (VpcIpv6CidrBlockAssociation assoc : s.getIpv6CidrBlockAssociationSet()) {
             xml.start("item").raw(subnetIpv6AssociationXml(assoc)).end("item");
@@ -6020,9 +5310,6 @@ public class Ec2QueryHandler {
                     .elem("networkInterfaceId", r.getNetworkInterfaceId())
                     .elem("egressOnlyInternetGatewayId", r.getEgressOnlyInternetGatewayId())
                     .elem("vpcPeeringConnectionId", r.getVpcPeeringConnectionId())
-                    .elem("networkInterfaceId", r.getNetworkInterfaceId())
-                    .elem("instanceId", r.getInstanceId())
-                    .elem("vpcEndpointId", r.getVpcEndpointId())
                     .elem("state", r.getState())
                     .elem("origin", r.getOrigin())
                     .end("item");
@@ -6033,7 +5320,6 @@ public class Ec2QueryHandler {
                     .elem("routeTableAssociationId", assoc.getRouteTableAssociationId())
                     .elem("routeTableId", assoc.getRouteTableId())
                     .elem("subnetId", assoc.getSubnetId())
-                    .elem("gatewayId", assoc.getGatewayId())
                     .elem("main", String.valueOf(assoc.isMain()))
                     .start("associationState").elem("state", assoc.getAssociationState()).end("associationState")
                     .end("item");
@@ -6848,20 +6134,6 @@ public class Ec2QueryHandler {
             xml.start("item").elem("groupId", securityGroupId).end("item");
         }
         xml.end("groupSet");
-        if (endpoint.getIpAddressType() != null) {
-            xml.elem("ipAddressType", endpoint.getIpAddressType());
-        }
-        if (endpoint.getDnsRecordIpType() != null
-                || endpoint.getPrivateDnsOnlyForInboundResolverEndpoint() != null) {
-            xml.start("dnsOptions");
-            if (endpoint.getDnsRecordIpType() != null) {
-                xml.elem("dnsRecordIpType", endpoint.getDnsRecordIpType());
-            }
-            if (endpoint.getPrivateDnsOnlyForInboundResolverEndpoint() != null) {
-                xml.elem("privateDnsOnlyForInboundResolverEndpoint",
-                        String.valueOf(endpoint.getPrivateDnsOnlyForInboundResolverEndpoint()));
-            }
-            xml.end("dnsOptions");
         // AWS reports an interface endpoint's ENIs here, and the Terraform provider
         // surfaces them as aws_vpc_endpoint.network_interface_ids. Floci already
         // synthesizes those interfaces deterministically for flow-log attribution; until
@@ -6901,38 +6173,7 @@ public class Ec2QueryHandler {
                 .elem("associationId", addr.getAssociationId())
                 .elem("networkInterfaceId", addr.getNetworkInterfaceId())
                 .elem("privateIpAddress", addr.getPrivateIpAddress())
-                .elem("publicIpv4Pool", addr.getPublicIpv4Pool())
-                .elem("networkBorderGroup", addr.getNetworkBorderGroup())
                 .raw(tagSetXml(addr.getTags()));
-        return xml.build();
-    }
-
-    private String eigwXml(EgressOnlyInternetGateway eigw) {
-        return new XmlBuilder()
-                .elem("egressOnlyInternetGatewayId", eigw.getEgressOnlyInternetGatewayId())
-                .start("attachmentSet")
-                .start("item")
-                .elem("state", eigw.getAttachmentState())
-                .elem("vpcId", eigw.getVpcId())
-                .end("item")
-                .end("attachmentSet")
-                .raw(tagSetXml(eigw.getTags()))
-                .build();
-    }
-
-    private String dhcpOptionsXml(DhcpOptions options) {
-        XmlBuilder xml = new XmlBuilder()
-                .elem("dhcpOptionsId", options.getDhcpOptionsId())
-                .elem("ownerId", options.getOwnerId())
-                .start("dhcpConfigurationSet");
-        for (Map.Entry<String, List<String>> entry : options.getConfigurations().entrySet()) {
-            xml.start("item").elem("key", entry.getKey()).start("valueSet");
-            for (String value : entry.getValue()) {
-                xml.start("item").elem("value", value).end("item");
-            }
-            xml.end("valueSet").end("item");
-        }
-        xml.end("dhcpConfigurationSet").raw(tagSetXml(options.getTags()));
         return xml.build();
     }
 
@@ -7028,12 +6269,11 @@ public class Ec2QueryHandler {
         }
 
         String snapshotId = p.getFirst("SnapshotId");
-        String kmsKeyId = resolveVolumeKmsKeyId(p.getFirst("KmsKeyId"), region);
 
         List<Tag> volumeTags = parseTagsForResource(p, "volume");
 
         Volume vol = service.createVolume(region, availabilityZone, volumeType, size,
-                encrypted, iops, throughput, snapshotId, kmsKeyId, volumeTags);
+                encrypted, iops, throughput, snapshotId, volumeTags);
         XmlBuilder xml = new XmlBuilder()
                 .start("CreateVolumeResponse", AwsNamespaces.EC2)
                 .elem("requestId", UUID.randomUUID().toString())
@@ -7065,79 +6305,6 @@ public class Ec2QueryHandler {
     }
 
     private Response handleModifyVolume(MultivaluedMap<String, String> p, String region) {
-        Integer size = p.getFirst("Size") != null ? Integer.valueOf(p.getFirst("Size")) : null;
-        Integer iops = p.getFirst("Iops") != null ? Integer.valueOf(p.getFirst("Iops")) : null;
-        Integer throughput = p.getFirst("Throughput") != null ? Integer.valueOf(p.getFirst("Throughput")) : null;
-        Volume vol = service.modifyVolume(region, p.getFirst("VolumeId"), size, p.getFirst("VolumeType"), iops, throughput);
-        XmlBuilder xml = new XmlBuilder()
-                .start("ModifyVolumeResponse", AwsNamespaces.EC2)
-                .elem("requestId", UUID.randomUUID().toString())
-                .start("volumeModification")
-                .elem("volumeId", vol.getVolumeId())
-                .elem("targetSize", String.valueOf(vol.getSize()))
-                .elem("targetVolumeType", vol.getVolumeType())
-                .elem("modificationState", "completed")
-                .end("volumeModification")
-                .end("ModifyVolumeResponse");
-        return xmlResponse(xml.build());
-    }
-
-    private Response handleCreateSnapshot(MultivaluedMap<String, String> p, String region) {
-        Snapshot snapshot = service.createSnapshot(
-                region,
-                p.getFirst("VolumeId"),
-                p.getFirst("Description"),
-                parseTagsForResource(p, "snapshot"));
-        XmlBuilder xml = new XmlBuilder()
-                .start("CreateSnapshotResponse", AwsNamespaces.EC2)
-                .elem("requestId", UUID.randomUUID().toString())
-                .raw(snapshotXml(snapshot))
-                .end("CreateSnapshotResponse");
-        return xmlResponse(xml.build());
-    }
-
-    private Response handleDeleteSnapshot(MultivaluedMap<String, String> p, String region) {
-        service.deleteSnapshot(region, p.getFirst("SnapshotId"));
-        return booleanResponse("DeleteSnapshot");
-    }
-
-    private Response handleGetConsoleOutput(MultivaluedMap<String, String> p, String region) {
-        String instanceId = p.getFirst("InstanceId");
-        service.describeInstanceAttribute(region, instanceId, "instanceType");
-        String encoded = Base64.getEncoder().encodeToString("floci console output\n".getBytes(StandardCharsets.UTF_8));
-        XmlBuilder xml = new XmlBuilder()
-                .start("GetConsoleOutputResponse", AwsNamespaces.EC2)
-                .elem("requestId", UUID.randomUUID().toString())
-                .elem("instanceId", instanceId)
-                .elem("timestamp", ISO_FMT.format(java.time.Instant.now()))
-                .elem("output", encoded)
-                .end("GetConsoleOutputResponse");
-        return xmlResponse(xml.build());
-    }
-
-    private Response handleGetPasswordData(MultivaluedMap<String, String> p, String region) {
-        String instanceId = p.getFirst("InstanceId");
-        service.describeInstanceAttribute(region, instanceId, "instanceType");
-        XmlBuilder xml = new XmlBuilder()
-                .start("GetPasswordDataResponse", AwsNamespaces.EC2)
-                .elem("requestId", UUID.randomUUID().toString())
-                .elem("instanceId", instanceId)
-                .elem("timestamp", ISO_FMT.format(java.time.Instant.now()))
-                .elem("passwordData", "")
-                .end("GetPasswordDataResponse");
-        return xmlResponse(xml.build());
-    }
-
-    private Response handleModifyNetworkInterfaceAttribute(MultivaluedMap<String, String> p, String region) {
-        Boolean sourceDestCheck = p.getFirst("SourceDestCheck.Value") != null
-                ? Boolean.valueOf(p.getFirst("SourceDestCheck.Value")) : null;
-        service.modifyNetworkInterfaceAttribute(
-                region,
-                p.getFirst("NetworkInterfaceId"),
-                p.getFirst("Description.Value") != null ? p.getFirst("Description.Value") : p.getFirst("Description"),
-                sourceDestCheck,
-                getList(p, "GroupId", "SecurityGroupId").isEmpty() ? null : getList(p, "GroupId", "SecurityGroupId"));
-        return booleanResponse("ModifyNetworkInterfaceAttribute");
         String volumeId = p.getFirst("VolumeId");
         if (volumeId == null || volumeId.isBlank()) {
             throw new AwsException("MissingParameter", "The parameter VolumeId is missing", 400);
@@ -7267,8 +6434,6 @@ public class Ec2QueryHandler {
                 .elem("status", vol.getState())
                 .elem("availabilityZone", vol.getAvailabilityZone())
                 .elem("encrypted", String.valueOf(vol.isEncrypted()));
-        if (vol.getKmsKeyId() != null) {
-            xml.elem("kmsKeyId", vol.getKmsKeyId());
         if (vol.getMultiAttachEnabled() != null) {
             xml.elem("multiAttachEnabled", String.valueOf(vol.getMultiAttachEnabled()));
         }
@@ -7545,5 +6710,704 @@ public class Ec2QueryHandler {
         }
 
         return xml.build();
+    }
+
+    private final KmsService kmsService;
+
+    private final Ec2ClientVpnService clientVpnService;
+
+    /**
+     * Alchemy (and the AWS SDKs) send the primary ENI as
+     * {@code NetworkInterface.1.*} instead of top-level {@code SubnetId} /
+     * {@code SecurityGroupId} / {@code AssociatePublicIpAddress}.
+     */
+    static PrimaryNetworkInterface parsePrimaryNetworkInterface(MultivaluedMap<String, String> p) {
+        PrimaryNetworkInterface first = null;
+        for (int i = 1; ; i++) {
+            String prefix = "NetworkInterface." + i + ".";
+            String deviceIndex = p.getFirst(prefix + "DeviceIndex");
+            String subnetId = p.getFirst(prefix + "SubnetId");
+            Boolean associate = parseOptionalBoolean(p.getFirst(prefix + "AssociatePublicIpAddress"));
+            String privateIp = p.getFirst(prefix + "PrivateIpAddress");
+            for (int j = 1; p.getFirst(prefix + "PrivateIpAddresses." + j + ".PrivateIpAddress") != null; j++) {
+                if (Boolean.TRUE.equals(parseOptionalBoolean(p.getFirst(prefix + "PrivateIpAddresses." + j + ".Primary")))) {
+                    String primary = p.getFirst(prefix + "PrivateIpAddresses." + j + ".PrivateIpAddress");
+                    if (privateIp != null && !privateIp.equals(primary)) {
+                        throw new AwsException("InvalidParameterCombination", "Conflicting primary private addresses", 400);
+                    }
+                    privateIp = primary;
+                }
+            }
+            String interfaceId = p.getFirst(prefix + "NetworkInterfaceId");
+            List<String> groups = new ArrayList<>();
+            groups.addAll(getStaticList(p, prefix + "SecurityGroupId"));
+            groups.addAll(getStaticList(p, prefix + "GroupId"));
+            groups.addAll(getStaticList(p, prefix + "Groups"));
+            if (deviceIndex == null && subnetId == null && associate == null && groups.isEmpty()
+                    && privateIp == null && interfaceId == null) {
+                break;
+            }
+            int index;
+            try {
+                index = deviceIndex == null ? 0 : Integer.parseInt(deviceIndex);
+                if (index < 0) {
+                    throw new NumberFormatException("negative device index");
+                }
+            } catch (NumberFormatException e) {
+                throw new AwsException("InvalidParameterValue", "Invalid network interface DeviceIndex", 400);
+            }
+            PrimaryNetworkInterface parsed = new PrimaryNetworkInterface(subnetId, groups, associate,
+                    privateIp, interfaceId, index);
+            if (first == null) {
+                first = parsed;
+            }
+            if ("0".equals(deviceIndex)) {
+                return parsed;
+            }
+        }
+        return first != null ? first : PrimaryNetworkInterface.empty();
+    }
+
+    private static List<String> getStaticList(MultivaluedMap<String, String> p, String prefix) {
+        List<String> result = new ArrayList<>();
+        for (int i = 1; ; i++) {
+            String v = p.getFirst(prefix + "." + i);
+            if (v == null) {
+                break;
+            }
+            result.add(v);
+        }
+        String single = p.getFirst(prefix);
+        if (result.isEmpty() && single != null && !single.isBlank()) {
+            result.add(single);
+        }
+        return result;
+    }
+
+    record PrimaryNetworkInterface(String subnetId, List<String> securityGroupIds, Boolean associatePublicIpAddress,
+                                   String privateIpAddress, String networkInterfaceId, int deviceIndex) {
+        static PrimaryNetworkInterface empty() {
+            return new PrimaryNetworkInterface(null, List.of(), null, null, null, 0);
+        }
+    }
+
+    /**
+     * AWS CreateVolume stores the CMK ARN even when the request passed an alias
+     * name ({@code alias/...}) or key id. Resolve through KMS so DescribeVolumes
+     * matches live EC2.
+     */
+    private String resolveVolumeKmsKeyId(String kmsKeyId, String region) {
+        if (kmsKeyId == null || kmsKeyId.isBlank()) {
+            return null;
+        }
+        try {
+            return kmsService.describeKey(kmsKeyId, region).getArn();
+        } catch (AwsException e) {
+            throw new AwsException("InvalidParameterValue",
+                    "The KMS key " + kmsKeyId + " does not exist, is disabled, or is not usable.", 400);
+        }
+    }
+
+    private Map<String, List<String>> getFilters(MultivaluedMap<String, String> p) {
+        Map<String, List<String>> filters = new LinkedHashMap<>();
+        for (int i = 1; ; i++) {
+            String name = p.getFirst("Filter." + i + ".Name");
+            if (name == null) break;
+            List<String> values = new ArrayList<>();
+            for (int j = 1; ; j++) {
+                String v = p.getFirst("Filter." + i + ".Value." + j);
+                if (v == null) break;
+                values.add(v);
+            }
+            filters.put(name, values);
+        }
+        return filters;
+    }
+
+    /**
+     * Deterministic instance-profile id derived from the instance id so repeated describes are stable.
+     */
+    private static String iamInstanceProfileId(String instanceId) {
+        return "AIPA" + stableSuffix(instanceId, 17).toUpperCase();
+    }
+
+    /**
+     * Deterministic association id derived from the instance id so repeated describes are stable.
+     */
+    private static String iamInstanceProfileAssociationId(String instanceId) {
+        return "iip-assoc-" + stableSuffix(instanceId, 17);
+    }
+
+    private static String stableSuffix(String seed, int length) {
+        StringBuilder sb = new StringBuilder();
+        int h = seed.hashCode();
+        String alphabet = "0123456789abcdefghijklmnopqrstuvwxyz";
+        long v = ((long) h) & 0xFFFFFFFFL;
+        for (int i = 0; i < length; i++) {
+            sb.append(alphabet.charAt((int) (v % alphabet.length())));
+            v = v * 1103515245L + 12345L + i;
+            v &= 0xFFFFFFFFL;
+        }
+        return sb.toString();
+    }
+
+    private Response handleCreateDhcpOptions(MultivaluedMap<String, String> p, String region) {
+        Map<String, List<String>> configurations = new LinkedHashMap<>();
+        for (int i = 1; ; i++) {
+            String key = p.getFirst("DhcpConfiguration." + i + ".Key");
+            if (key == null) break;
+            configurations.put(key, getList(p, "DhcpConfiguration." + i + ".Value"));
+        }
+        DhcpOptions options = service.createDhcpOptions(
+                region, configurations, parseTagsForResource(p, "dhcp-options"));
+        XmlBuilder xml = new XmlBuilder()
+                .start("CreateDhcpOptionsResponse", AwsNamespaces.EC2)
+                .elem("requestId", UUID.randomUUID().toString())
+                .start("dhcpOptions").raw(dhcpOptionsXml(options)).end("dhcpOptions")
+                .end("CreateDhcpOptionsResponse");
+        return xmlResponse(xml.build());
+    }
+
+    private Response handleAssociateDhcpOptions(MultivaluedMap<String, String> p, String region) {
+        service.associateDhcpOptions(region, p.getFirst("DhcpOptionsId"), p.getFirst("VpcId"));
+        return booleanResponse("AssociateDhcpOptions");
+    }
+
+    private Response handleDeleteDhcpOptions(MultivaluedMap<String, String> p, String region) {
+        service.deleteDhcpOptions(region, p.getFirst("DhcpOptionsId"));
+        return booleanResponse("DeleteDhcpOptions");
+    }
+
+    private Response handleDescribeDhcpOptions(MultivaluedMap<String, String> p, String region) {
+        List<DhcpOptions> options = service.describeDhcpOptions(region, getList(p, "DhcpOptionsId"));
+        XmlBuilder xml = new XmlBuilder()
+                .start("DescribeDhcpOptionsResponse", AwsNamespaces.EC2)
+                .elem("requestId", UUID.randomUUID().toString())
+                .start("dhcpOptionsSet");
+        for (DhcpOptions option : options) {
+            xml.start("item").raw(dhcpOptionsXml(option)).end("item");
+        }
+        xml.end("dhcpOptionsSet").end("DescribeDhcpOptionsResponse");
+        return xmlResponse(xml.build());
+    }
+
+    private Ec2ClientVpnService clientVpn() {
+        if (clientVpnService == null) {
+            throw new AwsException("UnsupportedOperation", "Client VPN is not available in this configuration.", 400);
+        }
+        return clientVpnService;
+    }
+
+    /** AWS refuses to delete a subnet, security group or VPC a Client VPN endpoint still uses. */
+    private void requireNoClientVpnDependents(String region, String resourceId, String kind) {
+        if (clientVpnService == null) {
+            return;
+        }
+        clientVpnService.dependentEndpoint(region, resourceId).ifPresent(endpointId -> {
+            throw new AwsException("DependencyViolation", "The " + kind + " '" + resourceId
+                    + "' has dependencies and cannot be deleted: it is used by Client VPN endpoint " + endpointId, 400);
+        });
+    }
+
+    private void requireKnownClientVpnEndpoints(String region, List<String> resourceIds) {
+        if (clientVpnService == null) {
+            return;
+        }
+        for (String resourceId : resourceIds) {
+            if (resourceId != null && resourceId.startsWith(Ec2ClientVpnService.ENDPOINT_PREFIX)) {
+                clientVpnService.requireEndpoint(region, resourceId);
+            }
+        }
+    }
+
+    private static boolean hasParameterPrefix(MultivaluedMap<String, String> p, String prefix) {
+        return p.keySet().stream().anyMatch(name -> name.startsWith(prefix));
+    }
+
+    private Ec2ClientVpnService.EndpointSettings parseClientVpnSettings(MultivaluedMap<String, String> p,
+                                                                       boolean modify) {
+        Ec2ClientVpnService.EndpointSettings settings = new Ec2ClientVpnService.EndpointSettings();
+        settings.clientCidrBlock = p.getFirst("ClientCidrBlock");
+        settings.serverCertificateArn = p.getFirst("ServerCertificateArn");
+        for (int i = 1; hasParameterPrefix(p, "Authentication." + i + "."); i++) {
+            String base = "Authentication." + i + ".";
+            ClientVpnAuthentication option = new ClientVpnAuthentication();
+            option.setType(p.getFirst(base + "Type"));
+            option.setDirectoryId(p.getFirst(base + "ActiveDirectory.DirectoryId"));
+            option.setClientRootCertificateChainArn(
+                    p.getFirst(base + "MutualAuthentication.ClientRootCertificateChainArn"));
+            option.setSamlProviderArn(p.getFirst(base + "FederatedAuthentication.SAMLProviderArn"));
+            option.setSelfServiceSamlProviderArn(
+                    p.getFirst(base + "FederatedAuthentication.SelfServiceSAMLProviderArn"));
+            settings.authenticationOptions.add(option);
+        }
+        settings.connectionLogEnabled = parseOptionalBoolean(p.getFirst("ConnectionLogOptions.Enabled"),
+                "ConnectionLogOptions.Enabled");
+        settings.connectionLogGroup = p.getFirst("ConnectionLogOptions.CloudwatchLogGroup");
+        settings.connectionLogStream = p.getFirst("ConnectionLogOptions.CloudwatchLogStream");
+        if (modify) {
+            settings.dnsServers = getList(p, "DnsServers.CustomDnsServers");
+            settings.dnsServersEnabled = parseOptionalBoolean(p.getFirst("DnsServers.Enabled"), "DnsServers.Enabled");
+            if (settings.dnsServersEnabled == null && !settings.dnsServers.isEmpty()) {
+                settings.dnsServersEnabled = true;
+            }
+        } else {
+            settings.dnsServers = getList(p, "DnsServers");
+        }
+        settings.transportProtocol = p.getFirst("TransportProtocol");
+        settings.vpnPort = parseOptionalInt(p.getFirst("VpnPort"), "VpnPort");
+        settings.description = p.getFirst("Description");
+        settings.splitTunnel = parseOptionalBoolean(p.getFirst("SplitTunnel"), "SplitTunnel");
+        settings.securityGroupIds = getList(p, "SecurityGroupId");
+        settings.vpcId = p.getFirst("VpcId");
+        settings.selfServicePortal = p.getFirst("SelfServicePortal");
+        settings.clientConnectEnabled = parseOptionalBoolean(p.getFirst("ClientConnectOptions.Enabled"),
+                "ClientConnectOptions.Enabled");
+        settings.clientConnectLambdaFunctionArn = p.getFirst("ClientConnectOptions.LambdaFunctionArn");
+        settings.sessionTimeoutHours = parseOptionalInt(p.getFirst("SessionTimeoutHours"), "SessionTimeoutHours");
+        settings.clientLoginBannerEnabled = parseOptionalBoolean(p.getFirst("ClientLoginBannerOptions.Enabled"),
+                "ClientLoginBannerOptions.Enabled");
+        settings.clientLoginBannerText = p.getFirst("ClientLoginBannerOptions.BannerText");
+        settings.clientRouteEnforced = parseOptionalBoolean(p.getFirst("ClientRouteEnforcementOptions.Enforced"),
+                "ClientRouteEnforcementOptions.Enforced");
+        settings.disconnectOnSessionTimeout = parseOptionalBoolean(p.getFirst("DisconnectOnSessionTimeout"),
+                "DisconnectOnSessionTimeout");
+        settings.endpointIpAddressType = p.getFirst("EndpointIpAddressType");
+        settings.trafficIpAddressType = p.getFirst("TrafficIpAddressType");
+        settings.transitGatewayConfiguration = hasParameterPrefix(p, "TransitGatewayConfiguration.");
+        settings.clientToken = p.getFirst("ClientToken");
+        return settings;
+    }
+
+    private Response handleCreateClientVpnEndpoint(MultivaluedMap<String, String> p, String region) {
+        checkDryRun(p);
+        ClientVpnEndpoint endpoint = clientVpn().createEndpoint(region, parseClientVpnSettings(p, false));
+        applyResourceTags(p, region, "client-vpn-endpoint", endpoint.getClientVpnEndpointId());
+        XmlBuilder xml = new XmlBuilder()
+                .start("CreateClientVpnEndpointResponse", AwsNamespaces.EC2)
+                .elem("requestId", UUID.randomUUID().toString())
+                .elem("clientVpnEndpointId", endpoint.getClientVpnEndpointId())
+                .start("status").elem("code", endpoint.getStatus()).end("status")
+                .elem("dnsName", endpoint.getDnsName())
+                .end("CreateClientVpnEndpointResponse");
+        return xmlResponse(xml.build());
+    }
+
+    private Response handleDescribeClientVpnEndpoints(MultivaluedMap<String, String> p, String region) {
+        checkDryRun(p);
+        List<ClientVpnEndpoint> endpoints = clientVpn().describeEndpoints(region,
+                getList(p, "ClientVpnEndpointId"), getFilters(p));
+        PaginatedResult<ClientVpnEndpoint> page = clientVpnPage(p, endpoints, ClientVpnEndpoint::getClientVpnEndpointId);
+        XmlBuilder xml = new XmlBuilder()
+                .start("DescribeClientVpnEndpointsResponse", AwsNamespaces.EC2)
+                .elem("requestId", UUID.randomUUID().toString())
+                .start("clientVpnEndpoint");
+        for (ClientVpnEndpoint endpoint : page.items()) {
+            xml.start("item").raw(clientVpnEndpointXml(endpoint)).end("item");
+        }
+        xml.end("clientVpnEndpoint").elem("nextToken", page.nextToken())
+                .end("DescribeClientVpnEndpointsResponse");
+        return xmlResponse(xml.build());
+    }
+
+    private Response handleModifyClientVpnEndpoint(MultivaluedMap<String, String> p, String region) {
+        checkDryRun(p);
+        clientVpn().modifyEndpoint(region, p.getFirst("ClientVpnEndpointId"), parseClientVpnSettings(p, true));
+        return booleanResponse("ModifyClientVpnEndpoint");
+    }
+
+    private Response handleDeleteClientVpnEndpoint(MultivaluedMap<String, String> p, String region) {
+        checkDryRun(p);
+        clientVpn().deleteEndpoint(region, p.getFirst("ClientVpnEndpointId"));
+        XmlBuilder xml = new XmlBuilder()
+                .start("DeleteClientVpnEndpointResponse", AwsNamespaces.EC2)
+                .elem("requestId", UUID.randomUUID().toString())
+                .start("status").elem("code", "deleting").end("status")
+                .end("DeleteClientVpnEndpointResponse");
+        return xmlResponse(xml.build());
+    }
+
+    private Response handleAssociateClientVpnTargetNetwork(MultivaluedMap<String, String> p, String region) {
+        checkDryRun(p);
+        if (p.getFirst("AvailabilityZone") != null || p.getFirst("AvailabilityZoneId") != null) {
+            throw new AwsException("InvalidParameterValue",
+                    "Transit gateway Availability Zone associations are not supported by this emulator", 400);
+        }
+        ClientVpnTargetNetwork network = clientVpn().associateTargetNetwork(region,
+                p.getFirst("ClientVpnEndpointId"), p.getFirst("SubnetId"), p.getFirst("ClientToken"));
+        return clientVpnAssociationResponse("AssociateClientVpnTargetNetworkResponse", network, "associating");
+    }
+
+    private Response handleDisassociateClientVpnTargetNetwork(MultivaluedMap<String, String> p, String region) {
+        checkDryRun(p);
+        ClientVpnTargetNetwork network = clientVpn().disassociateTargetNetwork(region,
+                p.getFirst("ClientVpnEndpointId"), p.getFirst("AssociationId"));
+        return clientVpnAssociationResponse("DisassociateClientVpnTargetNetworkResponse", network, "disassociating");
+    }
+
+    private Response clientVpnAssociationResponse(String root, ClientVpnTargetNetwork network, String status) {
+        XmlBuilder xml = new XmlBuilder()
+                .start(root, AwsNamespaces.EC2)
+                .elem("requestId", UUID.randomUUID().toString())
+                .elem("associationId", network.getAssociationId())
+                .start("status").elem("code", status).end("status")
+                .end(root);
+        return xmlResponse(xml.build());
+    }
+
+    private Response handleDescribeClientVpnTargetNetworks(MultivaluedMap<String, String> p, String region) {
+        checkDryRun(p);
+        String endpointId = p.getFirst("ClientVpnEndpointId");
+        ClientVpnEndpoint endpoint = clientVpn().requireEndpoint(region, endpointId);
+        List<ClientVpnTargetNetwork> networks = clientVpn().describeTargetNetworks(region, endpointId,
+                getList(p, "AssociationIds"), getFilters(p));
+        PaginatedResult<ClientVpnTargetNetwork> page = clientVpnPage(p, networks,
+                ClientVpnTargetNetwork::getAssociationId);
+        XmlBuilder xml = new XmlBuilder()
+                .start("DescribeClientVpnTargetNetworksResponse", AwsNamespaces.EC2)
+                .elem("requestId", UUID.randomUUID().toString())
+                .start("clientVpnTargetNetworks");
+        for (ClientVpnTargetNetwork network : page.items()) {
+            xml.start("item")
+                    .elem("associationId", network.getAssociationId())
+                    .elem("vpcId", network.getVpcId())
+                    .elem("targetNetworkId", network.getSubnetId())
+                    .elem("clientVpnEndpointId", endpointId)
+                    .start("status").elem("code", network.getStatus()).end("status")
+                    .raw(stringSetXml("securityGroups", endpoint.getSecurityGroupIds()))
+                    .end("item");
+        }
+        xml.end("clientVpnTargetNetworks").elem("nextToken", page.nextToken())
+                .end("DescribeClientVpnTargetNetworksResponse");
+        return xmlResponse(xml.build());
+    }
+
+    private Response handleAuthorizeClientVpnIngress(MultivaluedMap<String, String> p, String region) {
+        checkDryRun(p);
+        clientVpn().authorizeIngress(region, p.getFirst("ClientVpnEndpointId"), p.getFirst("TargetNetworkCidr"),
+                p.getFirst("AccessGroupId"),
+                parseOptionalBoolean(p.getFirst("AuthorizeAllGroups"), "AuthorizeAllGroups"),
+                p.getFirst("Description"), p.getFirst("ClientToken"));
+        return clientVpnStatusResponse("AuthorizeClientVpnIngressResponse", "authorizing");
+    }
+
+    private Response handleRevokeClientVpnIngress(MultivaluedMap<String, String> p, String region) {
+        checkDryRun(p);
+        clientVpn().revokeIngress(region, p.getFirst("ClientVpnEndpointId"), p.getFirst("TargetNetworkCidr"),
+                p.getFirst("AccessGroupId"),
+                parseOptionalBoolean(p.getFirst("RevokeAllGroups"), "RevokeAllGroups"));
+        return clientVpnStatusResponse("RevokeClientVpnIngressResponse", "revoking");
+    }
+
+    private Response clientVpnStatusResponse(String root, String status) {
+        XmlBuilder xml = new XmlBuilder()
+                .start(root, AwsNamespaces.EC2)
+                .elem("requestId", UUID.randomUUID().toString())
+                .start("status").elem("code", status).end("status")
+                .end(root);
+        return xmlResponse(xml.build());
+    }
+
+    private Response handleDescribeClientVpnAuthorizationRules(MultivaluedMap<String, String> p, String region) {
+        checkDryRun(p);
+        String endpointId = p.getFirst("ClientVpnEndpointId");
+        List<ClientVpnAuthorizationRule> rules = clientVpn().describeAuthorizationRules(region, endpointId,
+                getFilters(p));
+        PaginatedResult<ClientVpnAuthorizationRule> page = clientVpnPage(p, rules,
+                rule -> rule.getDestinationCidr() + "|" + (rule.isAccessAll() ? "*" : rule.getGroupId()));
+        XmlBuilder xml = new XmlBuilder()
+                .start("DescribeClientVpnAuthorizationRulesResponse", AwsNamespaces.EC2)
+                .elem("requestId", UUID.randomUUID().toString())
+                .start("authorizationRule");
+        for (ClientVpnAuthorizationRule rule : page.items()) {
+            xml.start("item")
+                    .elem("clientVpnEndpointId", endpointId)
+                    .elem("description", rule.getDescription())
+                    .elem("groupId", rule.getGroupId())
+                    .elem("accessAll", rule.isAccessAll())
+                    .elem("destinationCidr", rule.getDestinationCidr())
+                    .start("status").elem("code", rule.getStatus()).end("status")
+                    .end("item");
+        }
+        xml.end("authorizationRule").elem("nextToken", page.nextToken())
+                .end("DescribeClientVpnAuthorizationRulesResponse");
+        return xmlResponse(xml.build());
+    }
+
+    private Response handleCreateClientVpnRoute(MultivaluedMap<String, String> p, String region) {
+        checkDryRun(p);
+        clientVpn().createRoute(region, p.getFirst("ClientVpnEndpointId"), p.getFirst("DestinationCidrBlock"),
+                p.getFirst("TargetVpcSubnetId"), p.getFirst("Description"), p.getFirst("ClientToken"));
+        return clientVpnStatusResponse("CreateClientVpnRouteResponse", "creating");
+    }
+
+    private Response handleDeleteClientVpnRoute(MultivaluedMap<String, String> p, String region) {
+        checkDryRun(p);
+        clientVpn().deleteRoute(region, p.getFirst("ClientVpnEndpointId"), p.getFirst("DestinationCidrBlock"),
+                p.getFirst("TargetVpcSubnetId"));
+        return clientVpnStatusResponse("DeleteClientVpnRouteResponse", "deleting");
+    }
+
+    private Response handleDescribeClientVpnRoutes(MultivaluedMap<String, String> p, String region) {
+        checkDryRun(p);
+        String endpointId = p.getFirst("ClientVpnEndpointId");
+        List<ClientVpnRoute> routes = clientVpn().describeRoutes(region, endpointId, getFilters(p));
+        PaginatedResult<ClientVpnRoute> page = clientVpnPage(p, routes,
+                route -> route.getDestinationCidr() + "|" + route.getTargetSubnet());
+        XmlBuilder xml = new XmlBuilder()
+                .start("DescribeClientVpnRoutesResponse", AwsNamespaces.EC2)
+                .elem("requestId", UUID.randomUUID().toString())
+                .start("routes");
+        for (ClientVpnRoute route : page.items()) {
+            xml.start("item")
+                    .elem("clientVpnEndpointId", endpointId)
+                    .elem("destinationCidr", route.getDestinationCidr())
+                    .elem("targetSubnet", route.getTargetSubnet())
+                    .elem("type", route.getType())
+                    .elem("origin", route.getOrigin())
+                    .start("status").elem("code", route.getStatus()).end("status")
+                    .elem("description", route.getDescription())
+                    .end("item");
+        }
+        xml.end("routes").elem("nextToken", page.nextToken()).end("DescribeClientVpnRoutesResponse");
+        return xmlResponse(xml.build());
+    }
+
+    /** Client VPN describes accept MaxResults 5-1000. */
+    private <T> PaginatedResult<T> clientVpnPage(MultivaluedMap<String, String> p, List<T> items,
+                                                 java.util.function.Function<T, String> cursor) {
+        Integer maxResults = p.getFirst("MaxResults") == null ? null : parseIntParam(p, "MaxResults", 0);
+        if (maxResults != null && (maxResults < 5 || maxResults > 1000)) {
+            throw new AwsException("InvalidParameterValue", "MaxResults must be between 5 and 1000", 400);
+        }
+        return Pagination.paginate(items, cursor, maxResults, p.getFirst("NextToken"), 1000, "InvalidParameterValue");
+    }
+
+    private static String stringSetXml(String element, List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return "<" + element + "/>";
+        }
+        XmlBuilder xml = new XmlBuilder().start(element);
+        for (String value : values) {
+            xml.elem("item", value);
+        }
+        return xml.end(element).build();
+    }
+
+    private String clientVpnEndpointXml(ClientVpnEndpoint endpoint) {
+        XmlBuilder xml = new XmlBuilder()
+                .elem("clientVpnEndpointId", endpoint.getClientVpnEndpointId());
+        if (endpoint.getDescription() != null && !endpoint.getDescription().isEmpty()) {
+            xml.elem("description", endpoint.getDescription());
+        }
+        xml.start("status").elem("code", endpoint.getStatus()).end("status")
+                .elem("creationTime", endpoint.getCreationTime())
+                .elem("dnsName", endpoint.getDnsName())
+                .elem("clientCidrBlock", endpoint.getClientCidrBlock())
+                .raw(stringSetXml("dnsServer", endpoint.getDnsServers()))
+                .elem("splitTunnel", endpoint.isSplitTunnel())
+                .elem("vpnProtocol", "openvpn")
+                .elem("transportProtocol", endpoint.getTransportProtocol())
+                .elem("vpnPort", endpoint.getVpnPort());
+        if (endpoint.getTargetNetworks().isEmpty()) {
+            xml.raw("<associatedTargetNetwork/>");
+        } else {
+            xml.start("associatedTargetNetwork");
+            for (ClientVpnTargetNetwork network : endpoint.getTargetNetworks()) {
+                xml.start("item")
+                        .elem("networkId", network.getSubnetId())
+                        .elem("networkType", "vpc")
+                        .end("item");
+            }
+            xml.end("associatedTargetNetwork");
+        }
+        xml.elem("serverCertificateArn", endpoint.getServerCertificateArn())
+                .start("authenticationOptions");
+        for (ClientVpnAuthentication option : endpoint.getAuthenticationOptions()) {
+            xml.start("item").elem("type", option.getType());
+            if (option.getDirectoryId() != null) {
+                xml.start("activeDirectory").elem("directoryId", option.getDirectoryId()).end("activeDirectory");
+            }
+            if (option.getClientRootCertificateChainArn() != null) {
+                xml.start("mutualAuthentication")
+                        .elem("clientRootCertificateChain", option.getClientRootCertificateChainArn())
+                        .end("mutualAuthentication");
+            }
+            if (option.getSamlProviderArn() != null) {
+                xml.start("federatedAuthentication")
+                        .elem("samlProviderArn", option.getSamlProviderArn())
+                        .elem("selfServiceSamlProviderArn", option.getSelfServiceSamlProviderArn())
+                        .end("federatedAuthentication");
+            }
+            xml.end("item");
+        }
+        // ConnectionLogResponseOptions is the one Client VPN shape AWS serializes with PascalCase members.
+        xml.end("authenticationOptions")
+                .start("connectionLogOptions")
+                .elem("Enabled", endpoint.isConnectionLogEnabled())
+                .elem("CloudwatchLogGroup", endpoint.getConnectionLogGroup())
+                .elem("CloudwatchLogStream", endpoint.getConnectionLogStream())
+                .end("connectionLogOptions")
+                .raw(tagSetXml(clientVpn().tags(endpoint)))
+                .raw(stringSetXml("securityGroupIdSet", endpoint.getSecurityGroupIds()))
+                .elem("vpcId", endpoint.getVpcId());
+        if ("enabled".equals(endpoint.getSelfServicePortal())) {
+            xml.elem("selfServicePortalUrl",
+                    "https://self-service.clientvpn.amazonaws.com/endpoints/" + endpoint.getClientVpnEndpointId());
+        }
+        xml.start("clientConnectOptions")
+                .elem("enabled", endpoint.isClientConnectEnabled())
+                .elem("lambdaFunctionArn", endpoint.getClientConnectLambdaFunctionArn())
+                .start("status").elem("code", "applied").end("status")
+                .end("clientConnectOptions")
+                .elem("sessionTimeoutHours", endpoint.getSessionTimeoutHours())
+                .start("clientLoginBannerOptions")
+                .elem("enabled", endpoint.isClientLoginBannerEnabled())
+                .elem("bannerText", endpoint.getClientLoginBannerText())
+                .end("clientLoginBannerOptions")
+                .start("clientRouteEnforcementOptions")
+                .elem("enforced", endpoint.isClientRouteEnforced())
+                .end("clientRouteEnforcementOptions")
+                .elem("disconnectOnSessionTimeout", endpoint.isDisconnectOnSessionTimeout())
+                .elem("endpointIpAddressType", endpoint.getEndpointIpAddressType())
+                .elem("trafficIpAddressType", endpoint.getTrafficIpAddressType());
+        return xml.build();
+    }
+
+    private Response handleReplaceRouteTableAssociation(MultivaluedMap<String, String> p, String region) {
+        RouteTableAssociation assoc = service.replaceRouteTableAssociation(
+                region, p.getFirst("AssociationId"), p.getFirst("RouteTableId"));
+        XmlBuilder xml = new XmlBuilder()
+                .start("ReplaceRouteTableAssociationResponse", AwsNamespaces.EC2)
+                .elem("requestId", UUID.randomUUID().toString())
+                .elem("newAssociationId", assoc.getRouteTableAssociationId())
+                .start("associationState")
+                .elem("state", assoc.getAssociationState())
+                .end("associationState")
+                .end("ReplaceRouteTableAssociationResponse");
+        return xmlResponse(xml.build());
+    }
+
+    private Route routeFromParams(MultivaluedMap<String, String> p, String origin) {
+        Route route = new Route();
+        route.setDestinationCidrBlock(p.getFirst("DestinationCidrBlock"));
+        route.setDestinationIpv6CidrBlock(p.getFirst("DestinationIpv6CidrBlock"));
+        route.setDestinationPrefixListId(p.getFirst("DestinationPrefixListId"));
+        route.setGatewayId(p.getFirst("GatewayId"));
+        route.setNatGatewayId(p.getFirst("NatGatewayId"));
+        route.setEgressOnlyInternetGatewayId(p.getFirst("EgressOnlyInternetGatewayId"));
+        route.setVpcPeeringConnectionId(p.getFirst("VpcPeeringConnectionId"));
+        route.setNetworkInterfaceId(p.getFirst("NetworkInterfaceId"));
+        route.setInstanceId(p.getFirst("InstanceId"));
+        route.setVpcEndpointId(p.getFirst("VpcEndpointId"));
+        route.setOrigin(origin);
+        return route;
+    }
+
+    private static int countRouteTargets(Route route) {
+        int n = 0;
+        if (route.getGatewayId() != null) n++;
+        if (route.getNatGatewayId() != null) n++;
+        if (route.getEgressOnlyInternetGatewayId() != null) n++;
+        if (route.getVpcPeeringConnectionId() != null) n++;
+        if (route.getNetworkInterfaceId() != null) n++;
+        if (route.getInstanceId() != null) n++;
+        if (route.getVpcEndpointId() != null) n++;
+        return n;
+    }
+
+    private String decodeUserData(String userDataEncoded) {
+        if (userDataEncoded == null || userDataEncoded.isBlank()) {
+            return null;
+        }
+        byte[] decoded;
+        try {
+            decoded = Base64.getDecoder().decode(userDataEncoded);
+        } catch (IllegalArgumentException e) {
+            throw new AwsException("InvalidParameterValue", "UserData is not valid base64 content.", 400);
+        }
+        if (decoded.length >= 2 && (decoded[0] & 0xff) == 0x1f && (decoded[1] & 0xff) == 0x8b) {
+            try (GZIPInputStream gzip = new GZIPInputStream(new ByteArrayInputStream(decoded))) {
+                decoded = gzip.readAllBytes();
+            }
+            catch (IOException e) {
+                throw new AwsException("InvalidParameterValue", "UserData is not valid gzip content.", 400);
+            }
+        }
+        return new String(decoded, StandardCharsets.UTF_8);
+    }
+
+    private String dhcpOptionsXml(DhcpOptions options) {
+        XmlBuilder xml = new XmlBuilder()
+                .elem("dhcpOptionsId", options.getDhcpOptionsId())
+                .elem("ownerId", options.getOwnerId())
+                .start("dhcpConfigurationSet");
+        for (Map.Entry<String, List<String>> entry : options.getConfigurations().entrySet()) {
+            xml.start("item").elem("key", entry.getKey()).start("valueSet");
+            for (String value : entry.getValue()) {
+                xml.start("item").elem("value", value).end("item");
+            }
+            xml.end("valueSet").end("item");
+        }
+        xml.end("dhcpConfigurationSet").raw(tagSetXml(options.getTags()));
+        return xml.build();
+    }
+
+    private Response handleCreateSnapshot(MultivaluedMap<String, String> p, String region) {
+        Snapshot snapshot = service.createSnapshot(
+                region,
+                p.getFirst("VolumeId"),
+                p.getFirst("Description"),
+                parseTagsForResource(p, "snapshot"));
+        XmlBuilder xml = new XmlBuilder()
+                .start("CreateSnapshotResponse", AwsNamespaces.EC2)
+                .elem("requestId", UUID.randomUUID().toString())
+                .raw(snapshotXml(snapshot))
+                .end("CreateSnapshotResponse");
+        return xmlResponse(xml.build());
+    }
+
+    private Response handleDeleteSnapshot(MultivaluedMap<String, String> p, String region) {
+        service.deleteSnapshot(region, p.getFirst("SnapshotId"));
+        return booleanResponse("DeleteSnapshot");
+    }
+
+    private Response handleGetConsoleOutput(MultivaluedMap<String, String> p, String region) {
+        String instanceId = p.getFirst("InstanceId");
+        service.describeInstanceAttribute(region, instanceId, "instanceType");
+        String encoded = Base64.getEncoder().encodeToString("floci console output\n".getBytes(StandardCharsets.UTF_8));
+        XmlBuilder xml = new XmlBuilder()
+                .start("GetConsoleOutputResponse", AwsNamespaces.EC2)
+                .elem("requestId", UUID.randomUUID().toString())
+                .elem("instanceId", instanceId)
+                .elem("timestamp", ISO_FMT.format(java.time.Instant.now()))
+                .elem("output", encoded)
+                .end("GetConsoleOutputResponse");
+        return xmlResponse(xml.build());
+    }
+
+    private Response handleGetPasswordData(MultivaluedMap<String, String> p, String region) {
+        String instanceId = p.getFirst("InstanceId");
+        service.describeInstanceAttribute(region, instanceId, "instanceType");
+        XmlBuilder xml = new XmlBuilder()
+                .start("GetPasswordDataResponse", AwsNamespaces.EC2)
+                .elem("requestId", UUID.randomUUID().toString())
+                .elem("instanceId", instanceId)
+                .elem("timestamp", ISO_FMT.format(java.time.Instant.now()))
+                .elem("passwordData", "")
+                .end("GetPasswordDataResponse");
+        return xmlResponse(xml.build());
+    }
+
+    private Response handleModifyNetworkInterfaceAttribute(MultivaluedMap<String, String> p, String region) {
+        Boolean sourceDestCheck = p.getFirst("SourceDestCheck.Value") != null
+                ? Boolean.valueOf(p.getFirst("SourceDestCheck.Value")) : null;
+        service.modifyNetworkInterfaceAttribute(
+                region,
+                p.getFirst("NetworkInterfaceId"),
+                p.getFirst("Description.Value") != null ? p.getFirst("Description.Value") : p.getFirst("Description"),
+                sourceDestCheck,
+                getList(p, "GroupId", "SecurityGroupId").isEmpty() ? null : getList(p, "GroupId", "SecurityGroupId"));
+        return booleanResponse("ModifyNetworkInterfaceAttribute");
     }
 }

@@ -39,8 +39,6 @@ public class CodePipelineExecution {
     private volatile boolean abandon;
     private volatile boolean artifactsReleased;
     private String rollbackTargetPipelineExecutionId;
-    private String resumeStageName;
-    private boolean retryFailedActionsOnly;
     private String rollbackStageName;
     private List<Map<String, Object>> ruleExecutions = new ArrayList<>();
     /** Overridden stage conditions, keyed {@code <stageName>/<conditionType>}. */
@@ -255,20 +253,6 @@ public class CodePipelineExecution {
         this.rollbackTargetPipelineExecutionId = rollbackTargetPipelineExecutionId;
     }
 
-    public String getResumeStageName() {
-        return resumeStageName;
-    }
-
-    public void setResumeStageName(String resumeStageName) {
-        this.resumeStageName = resumeStageName;
-    }
-
-    public boolean isRetryFailedActionsOnly() {
-        return retryFailedActionsOnly;
-    }
-
-    public void setRetryFailedActionsOnly(boolean retryFailedActionsOnly) {
-        this.retryFailedActionsOnly = retryFailedActionsOnly;
     public List<Map<String, Object>> getRuleExecutions() {
         return ruleExecutions;
     }

@@ -5,7 +5,6 @@ import io.github.hectorvent.floci.services.rds.proxy.PasswordValidator;
 import io.github.hectorvent.floci.services.rds.proxy.PostgresProtocolHandler;
 import io.github.hectorvent.floci.services.rds.proxy.RdsProxyTlsCertificates;
 import io.github.hectorvent.floci.services.rds.proxy.RdsSigV4Validator;
-import io.github.hectorvent.floci.services.redshift.spectrum.SpectrumInterceptor;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import org.jboss.logging.Logger;
 
@@ -41,15 +40,6 @@ public class RedshiftAuthProxy {
     private final IamService iamService;
     private final String clusterAccountId;
     private volatile List<String> iamRoleArns;
-    private final SpectrumInterceptor spectrumInterceptor;
-    private final String clusterAccountId;
-    private volatile RoleConfiguration roleConfiguration;
-
-    record RoleConfiguration(List<String> iamRoleArns, String defaultIamRoleArn) {
-        RoleConfiguration {
-            iamRoleArns = iamRoleArns == null ? List.of() : List.copyOf(iamRoleArns);
-        }
-    }
     private final int handshakeTimeoutMillis;
     private final int backendConnectTimeoutMillis;
     private final Semaphore connectionPermits;
@@ -80,35 +70,6 @@ public class RedshiftAuthProxy {
                              List<String> iamRoleArns,
                              int handshakeTimeoutMillis, int backendConnectTimeoutMillis,
                              int maxConnections) {
-        this(clusterKey, backendHost, backendPort, masterUsername, masterPassword, dbName, sigV4,
-                tlsCertificates, passwordValidator, s3Service, iamService, null,
-                List.of(),
-                handshakeTimeoutMillis, backendConnectTimeoutMillis, maxConnections, null);
-    }
-
-    public RedshiftAuthProxy(String clusterKey, String backendHost, int backendPort,
-                             String masterUsername, String masterPassword, String dbName,
-                             RdsSigV4Validator sigV4, RdsProxyTlsCertificates tlsCertificates,
-                             PasswordValidator passwordValidator,
-                             S3Service s3Service, IamService iamService,
-                             String clusterAccountId,
-                             List<String> iamRoleArns,
-                             int handshakeTimeoutMillis, int backendConnectTimeoutMillis,
-                             int maxConnections) {
-        this(clusterKey, backendHost, backendPort, masterUsername, masterPassword, dbName, sigV4,
-                tlsCertificates, passwordValidator, s3Service, iamService, clusterAccountId, iamRoleArns,
-                handshakeTimeoutMillis, backendConnectTimeoutMillis, maxConnections, null);
-    }
-
-    public RedshiftAuthProxy(String clusterKey, String backendHost, int backendPort,
-                             String masterUsername, String masterPassword, String dbName,
-                             RdsSigV4Validator sigV4, RdsProxyTlsCertificates tlsCertificates,
-                             PasswordValidator passwordValidator,
-                             S3Service s3Service, IamService iamService,
-                             String clusterAccountId,
-                             List<String> iamRoleArns,
-                             int handshakeTimeoutMillis, int backendConnectTimeoutMillis,
-                             int maxConnections, SpectrumInterceptor spectrumInterceptor) {
         this.clusterKey = clusterKey;
         this.backendHost = backendHost;
         this.backendPort = backendPort;
@@ -122,9 +83,6 @@ public class RedshiftAuthProxy {
         this.iamService = iamService;
         this.clusterAccountId = clusterAccountId;
         this.iamRoleArns = iamRoleArns == null ? List.of() : List.copyOf(iamRoleArns);
-        this.spectrumInterceptor = spectrumInterceptor;
-        this.clusterAccountId = clusterAccountId;
-        this.roleConfiguration = new RoleConfiguration(iamRoleArns, null);
         this.handshakeTimeoutMillis = handshakeTimeoutMillis;
         this.backendConnectTimeoutMillis = backendConnectTimeoutMillis;
         this.connectionPermits = new Semaphore(Math.max(1, maxConnections));
@@ -193,16 +151,6 @@ public class RedshiftAuthProxy {
     /** Swap the associated-role snapshot; new connections authorize COPY and UNLOAD against it. */
     public void updateIamRoles(List<String> newIamRoleArns) {
         this.iamRoleArns = newIamRoleArns == null ? List.of() : List.copyOf(newIamRoleArns);
-    public synchronized void updateIamRoles(List<String> newIamRoleArns) {
-        updateIamRoles(newIamRoleArns, roleConfiguration.defaultIamRoleArn());
-    }
-
-    public synchronized void updateIamRoles(List<String> newIamRoleArns, String defaultIamRoleArn) {
-        this.roleConfiguration = new RoleConfiguration(newIamRoleArns, defaultIamRoleArn);
-    }
-
-    RoleConfiguration roleConfiguration() {
-        return roleConfiguration;
     }
 
     public void stop() {
@@ -254,11 +202,10 @@ public class RedshiftAuthProxy {
                 backendSocket.setTcpNoDelay(true);
                 return backendSocket;
             };
-            // iamEnabled = false: the SigV4 branch inside authenticate is never taken, so no
-            // token binding is needed.
+            // iamEnabled = false: the SigV4 branch inside authenticate is never taken.
             session = PostgresProtocolHandler.authenticate(
                             client, connector, masterUsername, masterPassword, dbName,
-                            false, sigV4, null, tlsCertificates, passwordValidator,
+                            false, sigV4, tlsCertificates, passwordValidator,
                             handshakeTimeoutMillis);
             if (session != null) {
                 // Redshift-only DDL (DISTKEY/SORTKEY/ENCODE/...) is rewritten for the plain

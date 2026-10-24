@@ -4,17 +4,15 @@ import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.Digests;
 import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.services.lambda.durable.LambdaDurableService;
-import io.github.hectorvent.floci.services.lambda.durable.model.DurableExecution;
 import io.github.hectorvent.floci.services.lambda.model.EventSourceMapping;
 import io.github.hectorvent.floci.services.lambda.model.InvocationType;
 import io.github.hectorvent.floci.services.lambda.model.InvokeResult;
 import io.github.hectorvent.floci.services.lambda.model.LambdaAlias;
 import io.github.hectorvent.floci.services.lambda.model.LambdaFunction;
-import io.github.hectorvent.floci.core.common.AwsArnUtils;
-import io.github.hectorvent.floci.core.common.Digests;
 import io.github.hectorvent.floci.services.s3.PreSignedUrlGenerator;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
@@ -40,6 +38,13 @@ import java.time.format.DateTimeFormatter;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import io.github.hectorvent.floci.services.lambda.durable.LambdaDurableService;
+import io.github.hectorvent.floci.services.lambda.durable.model.DurableExecution;
+import jakarta.ws.rs.core.UriBuilder;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 
 /**
  * AWS Lambda API REST endpoints.
@@ -53,7 +58,6 @@ public class LambdaController {
     private static final Logger LOG = Logger.getLogger(LambdaController.class);
 
     private final LambdaService lambdaService;
-    private final LambdaDurableService durableService;
     private final RegionResolver regionResolver;
     private final ObjectMapper objectMapper;
     private final PreSignedUrlGenerator presignGenerator;
@@ -62,7 +66,6 @@ public class LambdaController {
     public LambdaController(LambdaService lambdaService, RegionResolver regionResolver, ObjectMapper objectMapper,
                             PreSignedUrlGenerator presignGenerator) {
         this.lambdaService = lambdaService;
-        this.durableService = durableService;
         this.regionResolver = regionResolver;
         this.objectMapper = objectMapper;
         this.presignGenerator = presignGenerator;
@@ -107,8 +110,7 @@ public class LambdaController {
         if ("Image".equals(fn.getPackageType()) && fn.getImageUri() != null) {
             code.put("RepositoryType", "ECR");
             code.put("ImageUri", fn.getImageUri());
-            code.put("ResolvedImageUri", fn.getResolvedImageUri() != null
-                    ? fn.getResolvedImageUri() : fn.getImageUri());
+            code.put("ResolvedImageUri", fn.getImageUri());
         } else {
             String base = uriInfo.getBaseUri().toString();
             if (base.endsWith("/")) {
@@ -250,7 +252,6 @@ public class LambdaController {
     public Response invoke(@Context HttpHeaders headers,
                            @Context UriInfo uriInfo,
                            @PathParam("functionName") String functionName,
-                           @QueryParam("Qualifier") String qualifier,
                            byte[] payload) {
         // Read from the query itself: @QueryParam reports a present but empty Qualifier as null, which
         // would hide it from the Qualifier validation.
@@ -258,17 +259,6 @@ public class LambdaController {
         String region = regionResolver.resolveRegion(headers);
         String invocationTypeHeader = headers.getHeaderString("X-Amz-Invocation-Type");
         InvocationType type = InvocationType.parse(invocationTypeHeader);
-
-        // A durable Invoke (X-Amz-Durable-Execution-Name) starts or reattaches
-        // to a named durable execution instead of invoking directly.
-        String durableExecutionName = headers.getHeaderString("X-Amz-Durable-Execution-Name");
-        if (durableExecutionName != null && !durableExecutionName.isBlank()) {
-            DurableExecution execution = durableService.startExecution(
-                    region, functionName, qualifier, durableExecutionName, payload);
-            return Response.status(202)
-                    .header("X-Amz-Durable-Execution-Arn", execution.getExecutionArn())
-                    .build();
-        }
 
         int payloadSize = payload != null ? payload.length : 0;
         if (type == InvocationType.Event && payloadSize > ASYNC_REQUEST_LIMIT) {
@@ -369,10 +359,6 @@ public class LambdaController {
         ObjectNode root = objectMapper.createObjectNode();
         ArrayNode items = root.putArray("EventSourceMappings");
         for (EventSourceMapping esm : esms) {
-            if (eventSourceArn != null && !eventSourceArn.isBlank()
-                    && !eventSourceArn.equals(esm.getEventSourceArn())) {
-                continue;
-            }
             items.add(objectMapper.valueToTree(buildEsmResponse(esm)));
         }
         return Response.ok(root).build();
@@ -404,10 +390,6 @@ public class LambdaController {
     Map<String, Object> buildEsmResponse(EventSourceMapping esm) {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("UUID", esm.getUuid());
-        if (esm.getRegion() != null && esm.getAccountId() != null) {
-            node.put("EventSourceMappingArn", "arn:aws:lambda:" + esm.getRegion() + ":"
-                    + esm.getAccountId() + ":event-source-mapping:" + esm.getUuid());
-        }
         node.put("EventSourceMappingArn",
                 LambdaArnUtils.eventSourceMappingArn(esm.getRegion(), esm.getAccountId(), esm.getUuid()));
         node.put("FunctionArn", esm.getFunctionArn());
@@ -450,11 +432,6 @@ public class LambdaController {
 
         if (esm.getSelfManagedEventSource() != null) {
             node.set("SelfManagedEventSource", objectMapper.valueToTree(esm.getSelfManagedEventSource()));
-        }
-
-        if (esm.getAmazonManagedKafkaEventSourceConfig() != null) {
-            node.set("AmazonManagedKafkaEventSourceConfig",
-                    objectMapper.valueToTree(esm.getAmazonManagedKafkaEventSourceConfig()));
         }
 
         if (esm.getTopics() != null && !esm.getTopics().isEmpty()) {
@@ -719,14 +696,11 @@ public class LambdaController {
 
     @SuppressWarnings("unchecked")
     private Map<String, Double> extractRoutingConfig(Map<String, Object> rc) {
-        // AWS UpdateAlias REPLACES routing when RoutingConfig is present:
-        // an empty object (or empty AdditionalVersionWeights) CLEARS it.
-        // Return null only when the key is absent ("leave unchanged"); an
-        // empty map signals the service to clear.
         if (rc == null) return null;
         Object weights = rc.get("AdditionalVersionWeights");
-        if (!(weights instanceof Map)) return new java.util.HashMap<>();
+        if (!(weights instanceof Map)) return null;
         Map<String, Object> raw = (Map<String, Object>) weights;
+        if (raw.isEmpty()) return null;
         java.util.Map<String, Double> result = new java.util.HashMap<>();
         raw.forEach((k, v) -> result.put(k, ((Number) v).doubleValue()));
         return result;
@@ -936,4 +910,6 @@ public class LambdaController {
         }
         return values.stream().filter(java.util.Objects::nonNull).map(Object::toString).toList();
     }
+
+    private final LambdaDurableService durableService;
 }

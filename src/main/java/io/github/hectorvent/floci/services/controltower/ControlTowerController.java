@@ -23,7 +23,7 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * AWS Control Tower (Smithy restJson1), the operations that unblock LZA's Prepare stage with
+ * AWS Control Tower (Smithy restJson1) — the operations that unblock LZA's Prepare stage with
  * {@code controlTower.enable: true}: the landing-zone lifecycle (list/get/create/update/delete/reset),
  * operation polling for both landing zones and baselines, and the baseline surface
  * (list, list/get enabled, enable, reset, update).
@@ -37,7 +37,7 @@ import java.util.List;
  * (see {@link io.github.hectorvent.floci.services.rum.RumController}).
  *
  * <p>Note that every landing-zone URI spells "landingzone" as ONE word, {@code /create-landingzone}
- * included, that is how the AWS Control Tower model defines them.
+ * included — that is how the AWS Control Tower model defines them.
  */
 @Path("/")
 @Produces(MediaType.APPLICATION_JSON)
@@ -76,13 +76,6 @@ public class ControlTowerController {
         } catch (Exception e) {
             throw new AwsException("ValidationException", "Request body is not valid JSON.", 400);
         }
-    }
-
-    @POST
-    @Path("/get-baseline")
-    public Response getBaseline(@Context HttpHeaders headers, String body) {
-        String identifier = requireText(parse(body), "baselineIdentifier");
-        return Response.ok(service.getBaseline(regionResolver.resolveRegion(headers), identifier)).build();
     }
 
     @POST
@@ -238,17 +231,6 @@ public class ControlTowerController {
     }
 
     @POST
-    @Path("/disable-baseline")
-    public Response disableBaseline(@Context HttpHeaders headers, String body) {
-        String identifier = requireText(parse(body), "enabledBaselineIdentifier");
-        String opId = service.disableBaseline(
-                requestContext.getAccountId(), regionResolver.resolveRegion(headers), identifier);
-        ObjectNode response = objectMapper.createObjectNode();
-        response.put("operationIdentifier", opId);
-        return Response.ok(response).build();
-    }
-
-    @POST
     @Path("/reset-enabled-baseline")
     public Response resetEnabledBaseline(@Context HttpHeaders headers, String body) {
         JsonNode request = parse(body);
@@ -355,5 +337,23 @@ public class ControlTowerController {
             throw new AwsException("ValidationException", field + " must be a string.", 400);
         }
         return value.textValue();
+    }
+
+    @POST
+    @Path("/get-baseline")
+    public Response getBaseline(@Context HttpHeaders headers, String body) {
+        String identifier = requireText(parse(body), "baselineIdentifier");
+        return Response.ok(service.getBaseline(regionResolver.resolveRegion(headers), identifier)).build();
+    }
+
+    @POST
+    @Path("/disable-baseline")
+    public Response disableBaseline(@Context HttpHeaders headers, String body) {
+        String identifier = requireText(parse(body), "enabledBaselineIdentifier");
+        String opId = service.disableBaseline(
+                requestContext.getAccountId(), regionResolver.resolveRegion(headers), identifier);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("operationIdentifier", opId);
+        return Response.ok(response).build();
     }
 }

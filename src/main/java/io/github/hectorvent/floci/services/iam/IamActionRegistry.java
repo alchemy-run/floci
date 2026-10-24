@@ -1,12 +1,5 @@
 package io.github.hectorvent.floci.services.iam;
 
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.ws.rs.container.ContainerRequestContext;
-import jakarta.ws.rs.core.MultivaluedMap;
-import org.jboss.logging.Logger;
-
-import java.util.List;
-import java.util.Set;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsProtocolClaimFilter;
 import io.github.hectorvent.floci.core.common.AwsQueryServiceResolver;
@@ -14,9 +7,16 @@ import io.github.hectorvent.floci.core.common.ProtocolClaim;
 import io.github.hectorvent.floci.core.common.WireProtocol;
 import io.github.hectorvent.floci.services.dynamodb.DynamoDbPartiQLParser;
 import io.github.hectorvent.floci.services.s3.S3ObjectActions;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.UriInfo;
+import org.jboss.logging.Logger;
+
+import java.util.List;
 import java.util.regex.Pattern;
+import java.util.Set;
 
 /**
  * Maps (credentialScope, httpMethod, requestPath) → IAM action string.
@@ -505,142 +505,9 @@ public class IamActionRegistry {
         rule("resource-groups", "POST", "^/_rg/group-resources/?$", "resource-groups:GroupResources"),
         rule("resource-groups", "POST", "^/_rg/list-group-resources/?$", "resource-groups:ListGroupResources"),
 
-        // ── EMR Serverless ─────────────────────────────────────────────────────
-        rule("emr-serverless", "GET", ".*/applications$", "emr-serverless:ListApplications"),
-        rule("emr-serverless", "POST", ".*/applications$", "emr-serverless:CreateApplication"),
-        rule("emr-serverless", "GET", ".*/applications/[^/]+$", "emr-serverless:GetApplication"),
-        rule("emr-serverless", "PATCH", ".*/applications/[^/]+$", "emr-serverless:UpdateApplication"),
-        rule("emr-serverless", "DELETE", ".*/applications/[^/]+$", "emr-serverless:DeleteApplication"),
-        rule("emr-serverless", "POST", ".*/applications/[^/]+/start$", "emr-serverless:StartApplication"),
-        rule("emr-serverless", "POST", ".*/applications/[^/]+/stop$", "emr-serverless:StopApplication"),
-        rule("emr-serverless", "GET", ".*/applications/[^/]+/dashboard$", "emr-serverless:GetResourceDashboard"),
-        rule("emr-serverless", "GET", ".*/applications/[^/]+/jobruns$", "emr-serverless:ListJobRuns"),
-        rule("emr-serverless", "POST", ".*/applications/[^/]+/jobruns$", "emr-serverless:StartJobRun"),
-        rule("emr-serverless", "GET", ".*/applications/[^/]+/jobruns/[^/]+$", "emr-serverless:GetJobRun"),
-        rule("emr-serverless", "DELETE", ".*/applications/[^/]+/jobruns/[^/]+$", "emr-serverless:CancelJobRun"),
-        rule("emr-serverless", "GET", ".*/applications/[^/]+/jobruns/[^/]+/attempts$", "emr-serverless:ListJobRunAttempts"),
-        rule("emr-serverless", "GET", ".*/applications/[^/]+/jobruns/[^/]+/dashboard$", "emr-serverless:GetDashboardForJobRun"),
-        rule("emr-serverless", "GET", ".*/applications/[^/]+/sessions$", "emr-serverless:ListSessions"),
-        rule("emr-serverless", "POST", ".*/applications/[^/]+/sessions$", "emr-serverless:StartSession"),
-        rule("emr-serverless", "GET", ".*/applications/[^/]+/sessions/[^/]+$", "emr-serverless:GetSession"),
-        rule("emr-serverless", "DELETE", ".*/applications/[^/]+/sessions/[^/]+$", "emr-serverless:TerminateSession"),
-        rule("emr-serverless", "GET", ".*/applications/[^/]+/sessions/[^/]+/endpoint$", "emr-serverless:GetSessionEndpoint"),
-        rule("emr-serverless", "GET", ".*/tags/.+$", "emr-serverless:ListTagsForResource"),
-        rule("emr-serverless", "POST", ".*/tags/.+$", "emr-serverless:TagResource"),
-        rule("emr-serverless", "DELETE", ".*/tags/.+$", "emr-serverless:UntagResource"),
-
-        // GuardDuty REST-JSON operations.
-        rule("guardduty", "GET", "^/detector$", "guardduty:ListDetectors"),
-        rule("guardduty", "POST", "^/detector$", "guardduty:CreateDetector"),
-        rule("guardduty", "GET", "^/detector/[^/]+$", "guardduty:GetDetector"),
-        rule("guardduty", "POST", "^/detector/[^/]+$", "guardduty:UpdateDetector"),
-        rule("guardduty", "DELETE", "^/detector/[^/]+$", "guardduty:DeleteDetector"),
-        rule("guardduty", "POST", "^/detector/[^/]+/filter$", "guardduty:CreateFilter"),
-        rule("guardduty", "GET", "^/detector/[^/]+/filter$", "guardduty:ListFilters"),
-        rule("guardduty", "GET", "^/detector/[^/]+/filter/[^/]+$", "guardduty:GetFilter"),
-        rule("guardduty", "POST", "^/detector/[^/]+/filter/[^/]+$", "guardduty:UpdateFilter"),
-        rule("guardduty", "DELETE", "^/detector/[^/]+/filter/[^/]+$", "guardduty:DeleteFilter"),
-        rule("guardduty", "POST", "^/detector/[^/]+/ipset$", "guardduty:CreateIPSet"),
-        rule("guardduty", "GET", "^/detector/[^/]+/ipset$", "guardduty:ListIPSets"),
-        rule("guardduty", "GET", "^/detector/[^/]+/ipset/[^/]+$", "guardduty:GetIPSet"),
-        rule("guardduty", "POST", "^/detector/[^/]+/ipset/[^/]+$", "guardduty:UpdateIPSet"),
-        rule("guardduty", "DELETE", "^/detector/[^/]+/ipset/[^/]+$", "guardduty:DeleteIPSet"),
-        rule("guardduty", "POST", "^/detector/[^/]+/threatintelset$", "guardduty:CreateThreatIntelSet"),
-        rule("guardduty", "GET", "^/detector/[^/]+/threatintelset$", "guardduty:ListThreatIntelSets"),
-        rule("guardduty", "GET", "^/detector/[^/]+/threatintelset/[^/]+$", "guardduty:GetThreatIntelSet"),
-        rule("guardduty", "POST", "^/detector/[^/]+/threatintelset/[^/]+$", "guardduty:UpdateThreatIntelSet"),
-        rule("guardduty", "DELETE", "^/detector/[^/]+/threatintelset/[^/]+$", "guardduty:DeleteThreatIntelSet"),
-        rule("guardduty", "POST", "^/detector/[^/]+/findings/create$", "guardduty:CreateSampleFindings"),
-        rule("guardduty", "POST", "^/detector/[^/]+/findings$", "guardduty:ListFindings"),
-        rule("guardduty", "POST", "^/detector/[^/]+/findings/get$", "guardduty:GetFindings"),
-        rule("guardduty", "POST", "^/detector/[^/]+/findings/statistics$", "guardduty:GetFindingsStatistics"),
-        rule("guardduty", "POST", "^/detector/[^/]+/findings/archive$", "guardduty:ArchiveFindings"),
-        rule("guardduty", "POST", "^/detector/[^/]+/findings/unarchive$", "guardduty:UnarchiveFindings"),
-        rule("guardduty", "POST", "^/detector/[^/]+/findings/feedback$", "guardduty:UpdateFindingsFeedback"),
-        rule("guardduty", "POST", "^/detector/[^/]+/usage/statistics$", "guardduty:GetUsageStatistics"),
-        rule("guardduty", "POST", "^/detector/[^/]+/coverage$", "guardduty:ListCoverage"),
-        rule("guardduty", "POST", "^/detector/[^/]+/freeTrial/daysRemaining$", "guardduty:GetRemainingFreeTrialDays"),
-        rule("guardduty", "GET", "^/detector/[^/]+/member$", "guardduty:ListMembers"),
-        rule("guardduty", "POST", "^/detector/[^/]+/member$", "guardduty:CreateMembers"),
-        rule("guardduty", "POST", "^/detector/[^/]+/member/invite$", "guardduty:InviteMembers"),
-        rule("guardduty", "GET", "^/detector/[^/]+/admin$", "guardduty:DescribeOrganizationConfiguration"),
-        rule("guardduty", "POST", "^/detector/[^/]+/admin$", "guardduty:UpdateOrganizationConfiguration"),
-        rule("guardduty", "GET", "^/invitation$", "guardduty:ListInvitations"),
-        rule("guardduty", "GET", "^/invitation/count$", "guardduty:GetInvitationsCount"),
-        rule("guardduty", "POST", "^/admin/enable$", "guardduty:EnableOrganizationAdminAccount"),
-        rule("guardduty", "POST", "^/admin/disable$", "guardduty:DisableOrganizationAdminAccount"),
-        rule("guardduty", "GET", "^/admin$", "guardduty:ListOrganizationAdminAccounts"),
-        rule("guardduty", "GET", "^/organization/statistics$", "guardduty:GetOrganizationStatistics"),
-        rule("guardduty", "GET", "^/detector/[^/]+/administrator$", "guardduty:GetAdministratorAccount"),
-        rule("guardduty", "GET", "^/detector/[^/]+/malware-scan-settings$", "guardduty:GetMalwareScanSettings"),
-        rule("guardduty", "POST", "^/detector/[^/]+/malware-scan-settings$", "guardduty:UpdateMalwareScanSettings"),
-        rule("guardduty", "POST", "^/detector/[^/]+/investigation/list$", "guardduty:ListInvestigations"),
-        rule("guardduty", "GET", "^/tags/.+$", "guardduty:ListTagsForResource"),
-        rule("guardduty", "POST", "^/tags/.+$", "guardduty:TagResource"),
-        rule("guardduty", "DELETE", "^/tags/.+$", "guardduty:UntagResource"),
-
-        // Inspector2 REST-JSON operations.
-        rule("inspector2", "POST", "^/filters/create$", "inspector2:CreateFilter"),
-        rule("inspector2", "POST", "^/filters/update$", "inspector2:UpdateFilter"),
-        rule("inspector2", "POST", "^/filters/delete$", "inspector2:DeleteFilter"),
-        rule("inspector2", "POST", "^/filters/list$", "inspector2:ListFilters"),
-        rule("inspector2", "POST", "^/ec2deepinspectionconfiguration/get$", "inspector2:GetEc2DeepInspectionConfiguration"),
-        rule("inspector2", "POST", "^/cis/scan-configuration/list$", "inspector2:ListCisScanConfigurations"),
-        rule("inspector2", "POST", "^/cis/scan-configuration/create$", "inspector2:CreateCisScanConfiguration"),
-        rule("inspector2", "POST", "^/cis/scan-configuration/update$", "inspector2:UpdateCisScanConfiguration"),
-        rule("inspector2", "POST", "^/cis/scan-configuration/delete$", "inspector2:DeleteCisScanConfiguration"),
-        rule("inspector2", "POST", "^/disable$", "inspector2:Disable"),
-        rule("inspector2", "POST", "^/delegatedadminaccounts/list$", "inspector2:ListDelegatedAdminAccounts"),
-        rule("inspector2", "POST", "^/delegatedadminaccounts/enable$", "inspector2:EnableDelegatedAdminAccount"),
-        rule("inspector2", "POST", "^/delegatedadminaccounts/disable$", "inspector2:DisableDelegatedAdminAccount"),
-        rule("inspector2", "POST", "^/status/batch/get$", "inspector2:BatchGetAccountStatus"),
-        rule("inspector2", "POST", "^/enable$", "inspector2:Enable"),
-        rule("inspector2", "POST", "^/organizationconfiguration/update$", "inspector2:UpdateOrganizationConfiguration"),
-        rule("inspector2", "POST", "^/organizationconfiguration/describe$", "inspector2:DescribeOrganizationConfiguration"),
-        rule("inspector2", "POST", "^/findings/list$", "inspector2:ListFindings"),
-        rule("inspector2", "POST", "^/coverage/list$", "inspector2:ListCoverage"),
-        rule("inspector2", "POST", "^/vulnerabilities/search$", "inspector2:SearchVulnerabilities"),
-        rule("inspector2", "POST", "^/usage/list$", "inspector2:ListUsageTotals"),
-        rule("inspector2", "POST", "^/accountpermissions/list$", "inspector2:ListAccountPermissions"),
-        rule("inspector2", "POST", "^/freetrialinfo/batchget$", "inspector2:BatchGetFreeTrialInfo"),
-        rule("inspector2", "POST", "^/configuration/get$", "inspector2:GetConfiguration"),
-        rule("inspector2", "GET", "^/encryptionkey/get$", "inspector2:GetEncryptionKey"),
-        rule("inspector2", "POST", "^/cis/scan/list$", "inspector2:ListCisScans"),
-        rule("inspector2", "POST", "^/members/list$", "inspector2:ListMembers"),
-        rule("inspector2", "POST", "^/delegatedadminaccounts/get$", "inspector2:GetDelegatedAdminAccount"),
-        rule("inspector2", "POST", "^/reporting/status/get$", "inspector2:GetFindingsReportStatus"),
-        rule("inspector2", "GET", "^/tags/.+$", "inspector2:ListTagsForResource"),
-        rule("inspector2", "POST", "^/tags/.+$", "inspector2:TagResource"),
-        rule("inspector2", "DELETE", "^/tags/.+$", "inspector2:UntagResource"),
-
         // ── Kinesis ────────────────────────────────────────────────────────────
-        rule("kinesis", "POST", ".*", "kinesis:*"),
-
-        // ── SES v2 (REST-JSON). Bulk is authorized as ses:SendEmail (Alchemy and
-        // AWS both grant that action on the From identity, not ses:SendBulkEmail).
-        rule("ses", "POST", ".*/outbound-emails$",      "ses:SendEmail"),
-        rule("ses", "POST", ".*/outbound-bulk-emails$", "ses:SendEmail")
+        rule("kinesis", "POST", ".*", "kinesis:*")
     );
-
-    /**
-     * Actions evaluated for assumed-role callers even when global IAM
-     * enforcement is off. Keep this set small: JSON 1.1 / Query auto-resolve
-     * every operation, and evaluating those would deny DynamoDB/AutoScaling/…
-     * Lambdas whose resource ARNs or condition keys we do not yet model.
-     */
-    private static final Set<String> ROLE_ENFORCED_ACTIONS = Set.of(
-            "ses:SendEmail",
-            "ses:SendRawEmail",
-            "ses:SendBulkEmail",
-            "kms:GetKeyRotationStatus"
-    );
-
-    /**
-     * Every Secrets Manager operation: requests name a secret (or {@code *}) that
-     * {@link ResourceArnBuilder} resolves to the stored secret's ARN, so a least-privilege
-     * execution role is denied the operations its policy does not grant, as on AWS.
-     */
-    private static final String ROLE_ENFORCED_SECRETS_MANAGER_PREFIX = "secretsmanager:";
 
     private static ActionRule rule(String service, String method, String path, String action) {
         return rule(service, method, path, null, null, action);
@@ -876,23 +743,6 @@ public class IamActionRegistry {
             sub("analytics",         "s3:PutAnalyticsConfiguration"),
             sub("inventory",         "s3:PutInventoryConfiguration"));
 
-    /**
-     * {@code true} when {@code action} is one of the few operations evaluated
-     * for assumed-role callers while global enforcement is off.
-     */
-    public boolean isRoleEnforcedAction(String action) {
-        return action != null && (ROLE_ENFORCED_ACTIONS.contains(action)
-                || action.startsWith(ROLE_ENFORCED_SECRETS_MANAGER_PREFIX)
-                || RULES.stream().anyMatch(rule -> Set.of("emr-serverless", "guardduty", "inspector2")
-                        .contains(rule.service()) && rule.action().equals(action)));
-    }
-
-    /**
-     * Resolves S3 sub-resource ops (ACL, tagging, retention, etc.) that
-     * cannot be distinguished from the parent op by HTTP method + path alone.
-     * Returns null when no sub-resource is present so the caller falls back
-     * to the standard rule table.
-     */
     private static String resolveS3SubResourceAction(String method, ContainerRequestContext ctx) {
         MultivaluedMap<String, String> params = ctx.getUriInfo().getQueryParameters();
         // /{bucket}?acl -> bucket-level; /{bucket}/{key}?acl -> object-level.
@@ -920,9 +770,6 @@ public class IamActionRegistry {
     }
 
     /**
-     * Object-level S3 actions. A request naming a {@code versionId} is authorized as the
-     * {@code *Version*} variant of its action, as on AWS (s3:GetObjectVersion,
-     * s3:GetObjectVersionTagging, ...); retention and legal hold have no such variant.
      * The operation an object sub-resource selects, checked in the order S3Controller dispatches
      * them: a request naming several runs the first, so it is checked as that one. A
      * {@code versionId} selects the version action AWS checks in place of an action that has one
@@ -1013,4 +860,48 @@ public class IamActionRegistry {
         return name != null && !name.isEmpty() ? "s3:GetObjectAnnotation" : "s3:ListObjectAnnotations";
     }
 
+    /**
+     * Actions evaluated for assumed-role callers even when global IAM
+     * enforcement is off. Keep this set small: JSON 1.1 / Query auto-resolve
+     * every operation, and evaluating those would deny DynamoDB/AutoScaling/…
+     * Lambdas whose resource ARNs or condition keys we do not yet model.
+     */
+    private static final Set<String> ROLE_ENFORCED_ACTIONS = Set.of(
+            "ses:SendEmail",
+            "ses:SendRawEmail",
+            "ses:SendBulkEmail",
+            "kms:GetKeyRotationStatus"
+    );
+
+    /**
+     * Every Secrets Manager operation: requests name a secret (or {@code *}) that
+     * {@link ResourceArnBuilder} resolves to the stored secret's ARN, so a least-privilege
+     * execution role is denied the operations its policy does not grant, as on AWS.
+     */
+    private static final String ROLE_ENFORCED_SECRETS_MANAGER_PREFIX = "secretsmanager:";
+
+    /**
+     * {@code true} when {@code action} is one of the few operations evaluated
+     * for assumed-role callers while global enforcement is off.
+     */
+    public boolean isRoleEnforcedAction(String action) {
+        return action != null && (ROLE_ENFORCED_ACTIONS.contains(action)
+                || action.startsWith(ROLE_ENFORCED_SECRETS_MANAGER_PREFIX)
+                || RULES.stream().anyMatch(rule -> Set.of("emr-serverless", "guardduty", "inspector2")
+                        .contains(rule.service()) && rule.action().equals(action)));
+    }
+
+    /**
+     * Reads {@code Action} from a {@code application/x-www-form-urlencoded}
+     * request body and restores the entity stream so downstream consumers
+     * (e.g. {@code AwsQueryController}'s {@code MultivaluedMap} injection)
+     * can still parse the form themselves. Returns {@code null} if the
+     * request is not form-encoded or the body has no {@code Action} field.
+     */
+    private static String readFormAction(ContainerRequestContext ctx) {
+        // Delegates to RequestBodyReader so this and ResourceArnBuilder's per-service resource
+        // lookups share one buffered copy of the body per request instead of each independently
+        // reading (and needing to reset) the live entity stream.
+        return RequestBodyReader.formField(ctx, "Action");
+    }
 }

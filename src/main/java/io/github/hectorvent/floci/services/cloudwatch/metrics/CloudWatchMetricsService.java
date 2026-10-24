@@ -21,9 +21,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.concurrent.ConcurrentHashMap;
 
 @ApplicationScoped
 public class CloudWatchMetricsService {
@@ -32,7 +32,6 @@ public class CloudWatchMetricsService {
 
     private final StorageBackend<String, MetricDatum> metricStore;
     private final StorageBackend<String, MetricAlarm> alarmStore;
-    private final Map<String, Instant> manualStateHeldUntil = new ConcurrentHashMap<>();
     private final RegionResolver regionResolver;
     private final AlarmSnsNotifier alarmSnsNotifier;
 
@@ -213,7 +212,6 @@ public class CloudWatchMetricsService {
                                                 int periodSeconds,
                                                 List<String> statistics,
                                                 String unit, String region) {
-        if (periodSeconds < 1) throw CloudWatchMetadataService.invalid("Period must be positive");
         String dimKey = dimensions != null ? buildDimKey(dimensions) : "";
         String prefix = region + "::" + namespace + "::" + metricName + "::" + dimKey + "::";
 
@@ -323,13 +321,6 @@ public class CloudWatchMetricsService {
         if (alarm.getAlarmArn() == null) {
             alarm.setAlarmArn(regionResolver.buildArn("cloudwatch", region, "alarm:" + alarm.getAlarmName()));
         }
-        alarmStore.get(region + "::" + alarm.getAlarmName()).ifPresent(existing -> {
-            alarm.setTags(new LinkedHashMap<>(existing.getTags()));
-            alarm.setStateValue(existing.getStateValue());
-            alarm.setStateReason(existing.getStateReason());
-            alarm.setStateReasonData(existing.getStateReasonData());
-            alarm.setStateUpdatedTimestamp(existing.getStateUpdatedTimestamp());
-        });
         alarm.setRegion(region);
         alarm.setAlarmConfigurationUpdatedTimestamp(Instant.now().getEpochSecond());
         alarmStore.put(region + "::" + alarm.getAlarmName(), alarm);
@@ -403,38 +394,6 @@ public class CloudWatchMetricsService {
                         "No CloudWatch resource matches the ARN " + resourceArn + ".", 404));
     }
 
-    /**
-     * Records a SetAlarmState API call. AWS keeps the requested state until the alarm's next
-     * period evaluation, so the evaluator must not overwrite it on its (shorter) tick.
-     */
-    public void holdManualAlarmState(String alarmName, String region) {
-        String key = region + "::" + alarmName;
-        alarmStore.get(key).ifPresent(alarm -> manualStateHeldUntil.put(key,
-                Instant.now().plusSeconds(Math.max(1, alarm.getPeriod()))));
-    }
-
-    /** Whether a SetAlarmState call is still holding this alarm's state. */
-    public boolean isManualAlarmStateHeld(String alarmName, String region) {
-        String key = region + "::" + alarmName;
-        Instant until = manualStateHeldUntil.get(key);
-        if (until == null) {
-            return false;
-        }
-        if (Instant.now().isBefore(until)) {
-            return true;
-        }
-        manualStateHeldUntil.remove(key, until);
-        return false;
-    }
-
-    public void setAlarmActions(String alarmName, boolean enabled, String region) {
-        String key = region + "::" + alarmName;
-        MetricAlarm alarm = alarmStore.get(key)
-                .orElseThrow(() -> CloudWatchMetadataService.notFound(alarmName));
-        alarm.setActionsEnabled(enabled);
-        alarmStore.put(key, alarm);
-    }
-
     public Map<String, String> listTagsForResource(String resourceArn, String region) {
         return requireAlarm(resourceArn, region).getTags();
     }
@@ -467,5 +426,39 @@ public class CloudWatchMetricsService {
         String requiredKey = buildDimKey(required);
         String actualKey = buildDimKey(actual);
         return actualKey.contains(requiredKey);
+    }
+
+    private final Map<String, Instant> manualStateHeldUntil = new ConcurrentHashMap<>();
+
+    /**
+     * Records a SetAlarmState API call. AWS keeps the requested state until the alarm's next
+     * period evaluation, so the evaluator must not overwrite it on its (shorter) tick.
+     */
+    public void holdManualAlarmState(String alarmName, String region) {
+        String key = region + "::" + alarmName;
+        alarmStore.get(key).ifPresent(alarm -> manualStateHeldUntil.put(key,
+                Instant.now().plusSeconds(Math.max(1, alarm.getPeriod()))));
+    }
+
+    /** Whether a SetAlarmState call is still holding this alarm's state. */
+    public boolean isManualAlarmStateHeld(String alarmName, String region) {
+        String key = region + "::" + alarmName;
+        Instant until = manualStateHeldUntil.get(key);
+        if (until == null) {
+            return false;
+        }
+        if (Instant.now().isBefore(until)) {
+            return true;
+        }
+        manualStateHeldUntil.remove(key, until);
+        return false;
+    }
+
+    public void setAlarmActions(String alarmName, boolean enabled, String region) {
+        String key = region + "::" + alarmName;
+        MetricAlarm alarm = alarmStore.get(key)
+                .orElseThrow(() -> CloudWatchMetadataService.notFound(alarmName));
+        alarm.setActionsEnabled(enabled);
+        alarmStore.put(key, alarm);
     }
 }

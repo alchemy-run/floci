@@ -7,10 +7,10 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
 
 @RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -94,9 +94,6 @@ public class Domain {
     @JsonProperty("CreatedAt")
     @JsonFormat(shape = JsonFormat.Shape.NUMBER)
     private Instant createdAt;
-
-    @JsonProperty("Maintenances")
-    private List<DomainMaintenance> maintenances = new ArrayList<>();
 
     public Domain() {}
 
@@ -283,6 +280,9 @@ public class Domain {
     public void setAccountId(String accountId) {
         this.accountId = accountId;
     }
+
+    @JsonProperty("Maintenances")
+    private List<DomainMaintenance> maintenances = new ArrayList<>();
 
     public List<DomainMaintenance> getMaintenances() {
         return maintenances;

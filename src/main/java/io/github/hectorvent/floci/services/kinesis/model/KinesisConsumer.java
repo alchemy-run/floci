@@ -15,7 +15,6 @@ public class KinesisConsumer {
     private String consumerStatus;
     private Instant consumerCreationTimestamp;
     private String streamArn;
-    private Map<String, String> tags = new HashMap<>();
 
     public KinesisConsumer() {}
 
@@ -42,6 +41,9 @@ public class KinesisConsumer {
     public String getStreamArn() { return streamArn; }
     public void setStreamArn(String streamArn) { this.streamArn = streamArn; }
 
+    private Map<String, String> tags = new HashMap<>();
+
     public Map<String, String> getTags() { return tags; }
+
     public void setTags(Map<String, String> tags) { this.tags = tags; }
 }

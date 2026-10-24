@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.lambdamicrovms.LambdaMicrovmsService.Microvm;
@@ -54,15 +53,6 @@ public class LambdaMicrovmsController {
     private static final long CODE_INSTALL_SIZE_BYTES = 186400768L;
     private static final long DISK_SNAPSHOT_SIZE_BYTES = 25600000L;
     private static final long MEMORY_SNAPSHOT_SIZE_BYTES = 609087488L;
-
-    /**
-     * Every image carries a managed default egress connector, attached by the
-     * service rather than by the caller. The account segment is the literal
-     * {@code aws} because the connector is AWS-owned, not the caller's.
-     */
-    private static String managedEgressConnector(String region) {
-        return AwsArnUtils.Arn.of("lambda", region, "aws", "network-connector:aws-network-connector:INTERNET_EGRESS").toString();
-    }
 
     private final LambdaMicrovmsService service;
     private final RegionResolver regionResolver;

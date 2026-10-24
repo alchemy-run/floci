@@ -1,51 +1,5 @@
 package io.github.hectorvent.floci.services.ecs;
 
-import io.github.hectorvent.floci.core.common.AwsErrorResponse;
-import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.services.ecs.container.HostVolumePolicy;
-import io.github.hectorvent.floci.services.ecs.model.Attribute;
-import io.github.hectorvent.floci.services.ecs.model.AwsVpcConfiguration;
-import io.github.hectorvent.floci.services.ecs.model.CapacityProvider;
-import io.github.hectorvent.floci.services.ecs.model.CapacityProviderStrategyItem;
-import io.github.hectorvent.floci.services.ecs.model.ClusterSetting;
-import io.github.hectorvent.floci.services.ecs.model.ContainerDefinition;
-import io.github.hectorvent.floci.services.ecs.model.ContainerDependency;
-import io.github.hectorvent.floci.services.ecs.model.ContainerInstance;
-import io.github.hectorvent.floci.services.ecs.model.ContainerOverride;
-import io.github.hectorvent.floci.services.ecs.model.CreateClusterRequest;
-import io.github.hectorvent.floci.services.ecs.model.CreateServiceRequest;
-import io.github.hectorvent.floci.services.ecs.model.CreateTaskSetRequest;
-import io.github.hectorvent.floci.services.ecs.model.RegisterContainerInstanceRequest;
-import io.github.hectorvent.floci.services.ecs.model.EnvironmentFile;
-import io.github.hectorvent.floci.services.ecs.model.Failure;
-import io.github.hectorvent.floci.services.ecs.model.EphemeralStorage;
-import io.github.hectorvent.floci.services.ecs.model.FirelensConfiguration;
-import io.github.hectorvent.floci.services.ecs.model.HealthCheck;
-import io.github.hectorvent.floci.services.ecs.model.EcsCluster;
-import io.github.hectorvent.floci.services.ecs.model.EcsLoadBalancer;
-import io.github.hectorvent.floci.services.ecs.model.EcsServiceModel;
-import io.github.hectorvent.floci.services.ecs.model.EcsTask;
-import io.github.hectorvent.floci.services.ecs.model.KeyValuePair;
-import io.github.hectorvent.floci.services.ecs.model.LaunchType;
-import io.github.hectorvent.floci.services.ecs.model.ListTasksRequest;
-import io.github.hectorvent.floci.services.ecs.model.LogConfiguration;
-import io.github.hectorvent.floci.services.ecs.model.MountPoint;
-import io.github.hectorvent.floci.services.ecs.model.NetworkConfiguration;
-import io.github.hectorvent.floci.services.ecs.model.NetworkMode;
-import io.github.hectorvent.floci.services.ecs.model.PortMapping;
-import io.github.hectorvent.floci.services.ecs.model.RegisterTaskDefinitionRequest;
-import io.github.hectorvent.floci.services.ecs.model.RunTaskRequest;
-import io.github.hectorvent.floci.services.ecs.model.RuntimePlatform;
-import io.github.hectorvent.floci.services.ecs.model.ServiceDeployment;
-import io.github.hectorvent.floci.services.ecs.model.ServiceRevision;
-import io.github.hectorvent.floci.services.ecs.model.Secret;
-import io.github.hectorvent.floci.services.ecs.model.TaskDefinition;
-import io.github.hectorvent.floci.services.ecs.model.TaskOverride;
-import io.github.hectorvent.floci.services.ecs.model.TaskSet;
-import io.github.hectorvent.floci.services.ecs.model.EfsVolumeConfiguration;
-import io.github.hectorvent.floci.services.ecs.model.UpdateServiceRequest;
-import io.github.hectorvent.floci.services.ecs.model.Volume;
-import io.github.hectorvent.floci.services.ecs.model.VolumeFrom;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -369,9 +323,10 @@ public class EcsJsonHandler {
         TaskDefinition td = service.describeTaskDefinition(tdRef, region);
         ObjectNode resp = objectMapper.createObjectNode();
         resp.set("taskDefinition", writer.taskDefinitionNode(td));
-        List<String> include = jsonArrayToList(req.path("include"));
-        if (include.stream().anyMatch("TAGS"::equalsIgnoreCase)) {
-            resp.set("tags", writer.tagsNode(td.getTags() != null ? td.getTags() : Map.of()));
+        // DescribeTaskDefinition reports tags at the top level, and only when asked for them.
+        if (jsonArrayToList(req.path("include")).contains("TAGS")
+                && td.getTags() != null && !td.getTags().isEmpty()) {
+            resp.set("tags", writer.tagsNode(td.getTags()));
         }
         return Response.ok(resp).build();
     }
@@ -541,16 +496,14 @@ public class EcsJsonHandler {
         boolean protectionEnabled = req.path("protectionEnabled").asBoolean(false);
         Integer expiresInMinutes = req.has("expiresInMinutes") ? req.path("expiresInMinutes").asInt() : null;
 
-        EcsService.TaskProtectionResult result = service.updateTaskProtectionDetailed(
-                cluster, taskRefs, protectionEnabled, expiresInMinutes, region);
+        List<ProtectedTask> result = service.updateTaskProtection(cluster, taskRefs, protectionEnabled,
+                expiresInMinutes, region);
 
         ObjectNode resp = objectMapper.createObjectNode();
         ArrayNode arr = objectMapper.createArrayNode();
         result.forEach(pt -> arr.add(writer.protectedTaskNode(pt)));
         resp.set("protectedTasks", arr);
-        ArrayNode failures = objectMapper.createArrayNode();
-        result.failures().forEach(f -> failures.add(writer.failureNode(f)));
-        resp.set("failures", failures);
+        resp.set("failures", objectMapper.createArrayNode());
         return Response.ok(resp).build();
     }
 
@@ -558,15 +511,13 @@ public class EcsJsonHandler {
         String cluster = req.has("cluster") ? req.path("cluster").asText() : null;
         List<String> taskRefs = jsonArrayToList(req.path("tasks"));
 
-        EcsService.TaskProtectionResult result = service.getTaskProtectionDetailed(cluster, taskRefs, region);
+        List<ProtectedTask> result = service.getTaskProtection(cluster, taskRefs, region);
 
         ObjectNode resp = objectMapper.createObjectNode();
         ArrayNode arr = objectMapper.createArrayNode();
         result.forEach(pt -> arr.add(writer.protectedTaskNode(pt)));
         resp.set("protectedTasks", arr);
-        ArrayNode failures = objectMapper.createArrayNode();
-        result.failures().forEach(f -> failures.add(writer.failureNode(f)));
-        resp.set("failures", failures);
+        resp.set("failures", objectMapper.createArrayNode());
         return Response.ok(resp).build();
     }
 
@@ -1305,43 +1256,6 @@ public class EcsJsonHandler {
             if (item.has("entryPoint") && item.path("entryPoint").isArray()) {
                 def.setEntryPoint(jsonArrayToList(item.path("entryPoint")));
             }
-            if (item.hasNonNull("startTimeout")) { def.setStartTimeout(item.path("startTimeout").asInt()); }
-            if (item.hasNonNull("stopTimeout")) { def.setStopTimeout(item.path("stopTimeout").asInt()); }
-            if (item.hasNonNull("user")) { def.setUser(item.path("user").asText()); }
-            if (item.hasNonNull("workingDirectory")) {
-                def.setWorkingDirectory(item.path("workingDirectory").asText());
-            }
-            if (item.hasNonNull("hostname")) { def.setHostname(item.path("hostname").asText()); }
-            if (item.hasNonNull("readonlyRootFilesystem")) {
-                def.setReadonlyRootFilesystem(item.path("readonlyRootFilesystem").asBoolean());
-            }
-            if (item.hasNonNull("privileged")) { def.setPrivileged(item.path("privileged").asBoolean()); }
-            if (item.hasNonNull("disableNetworking")) {
-                def.setDisableNetworking(item.path("disableNetworking").asBoolean());
-            }
-            if (item.hasNonNull("interactive")) { def.setInteractive(item.path("interactive").asBoolean()); }
-            if (item.hasNonNull("pseudoTerminal")) {
-                def.setPseudoTerminal(item.path("pseudoTerminal").asBoolean());
-            }
-            if (item.has("links")) { def.setLinks(jsonArrayToList(item.path("links"))); }
-            if (item.has("dnsServers")) { def.setDnsServers(jsonArrayToList(item.path("dnsServers"))); }
-            if (item.has("dnsSearchDomains")) {
-                def.setDnsSearchDomains(jsonArrayToList(item.path("dnsSearchDomains")));
-            }
-            if (item.has("dockerSecurityOptions")) {
-                def.setDockerSecurityOptions(jsonArrayToList(item.path("dockerSecurityOptions")));
-            }
-            if (item.path("dockerLabels").isObject()) {
-                Map<String, String> labels = new LinkedHashMap<>();
-                item.path("dockerLabels").fields()
-                        .forEachRemaining(entry -> labels.put(entry.getKey(), entry.getValue().asText()));
-                def.setDockerLabels(labels);
-            }
-            if (item.path("repositoryCredentials").hasNonNull("credentialsParameter")) {
-                def.setRepositoryCredentialsParameter(
-                        item.path("repositoryCredentials").path("credentialsParameter").asText());
-            }
-            def.setUnparsed(EcsJsonPassthrough.capture(item, objectMapper, CONTAINER_DEFINITION_CONSUMED));
 
             if (item.hasNonNull("startTimeout")) { def.setStartTimeout(item.path("startTimeout").asInt()); }
             if (item.hasNonNull("stopTimeout")) { def.setStopTimeout(item.path("stopTimeout").asInt()); }
@@ -1547,18 +1461,6 @@ public class EcsJsonHandler {
             return null;
         }
         if (!node.hasNonNull("type")) {
-            throw new AwsException("ClientException",
-                    "1 validation error detected: Value null at 'containerDefinitions." + containerIndex
-                            + ".member.firelensConfiguration.type' failed to satisfy constraint: Member must not be null",
-                    400);
-        }
-        String type = node.path("type").asText();
-        if (!"fluentd".equals(type) && !"fluentbit".equals(type)) {
-            throw new AwsException("ClientException",
-                    "1 validation error detected: Value '" + type + "' at 'containerDefinitions." + containerIndex
-                            + ".member.firelensConfiguration.type' failed to satisfy constraint: "
-                            + "Member must satisfy enum value set: [fluentd, fluentbit]",
-                    400);
             throw SmithyValidationErrors.exception("ClientException",
                     "Value null at 'containerDefinitions." + containerIndex
                             + ".member.firelensConfiguration.type' failed to satisfy constraint: Member must not be null");

@@ -1,5 +1,9 @@
 package io.github.hectorvent.floci.services.lakeformation;
 
+import io.github.hectorvent.floci.services.lakeformation.model.*;
+
+import java.util.List;
+import java.util.Optional;
 import io.github.hectorvent.floci.services.lakeformation.model.DataLakePrincipal;
 import io.github.hectorvent.floci.services.lakeformation.model.DataLakeSettings;
 import io.github.hectorvent.floci.services.lakeformation.model.FilterCondition;
@@ -8,10 +12,6 @@ import io.github.hectorvent.floci.services.lakeformation.model.LFTagPair;
 import io.github.hectorvent.floci.services.lakeformation.model.PrincipalResourcePermissions;
 import io.github.hectorvent.floci.services.lakeformation.model.Resource;
 import io.github.hectorvent.floci.services.lakeformation.model.ResourceInfo;
-import io.github.hectorvent.floci.services.lakeformation.model.*;
-
-import java.util.List;
-import java.util.Optional;
 
 public interface LakeFormationStorage {
 
@@ -19,7 +19,6 @@ public interface LakeFormationStorage {
     Optional<DataLakeSettings> getDataLakeSettings(String region, String catalogId);
 
     void registerResource(String region, String resourceArn, String roleArn, boolean useServiceLinkedRole, Boolean withFederation);
-    void registerResource(String region, ResourceInfo info);
     void updateResource(String region, String resourceArn, String roleArn, String expectedResourceOwnerAccount,
                         Boolean hybridAccessEnabled, Boolean withFederation);
     void deregisterResource(String region, String resourceArn);
@@ -38,7 +37,8 @@ public interface LakeFormationStorage {
     void deleteLFTag(String region, String catalogId, String tagKey);
     List<LFTagPair> listLFTags(String region, String catalogId, String resourceShareType, Integer maxResults, String nextToken);
 
-    List<LFTagPair> getResourceLFTags(String region, String catalogId, Resource resource);
     void addLFTagsToResource(String region, String catalogId, Resource resource, List<LFTagPair> lfTags);
     void removeLFTagsFromResource(String region, String catalogId, Resource resource, List<LFTagPair> lfTags);
+
+    List<LFTagPair> getResourceLFTags(String region, String catalogId, Resource resource);
 }

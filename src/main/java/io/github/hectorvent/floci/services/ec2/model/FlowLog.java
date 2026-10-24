@@ -27,8 +27,7 @@ public class FlowLog {
     private String trafficType;      // ALL | ACCEPT | REJECT
     private String logDestinationType; // s3 | cloud-watch-logs
     private String logDestination;   // S3 bucket ARN, e.g. arn:aws:s3:::flow-logs-bucket
-    private String logGroupName;     // CloudWatch Logs group (cloud-watch-logs destination)
-    private String deliverLogsPermissionArn; // IAM role ARN for CloudWatch Logs delivery
+    private String deliverLogsPermissionArn; // IAM role ARN used for cloud-watch-logs delivery
     private String bucketName;       // resolved bucket name from the ARN
     private String logFormat;        // optional custom format string (default format used if null)
     private int maxAggregationInterval = 600; // seconds (60 or 600)
@@ -37,7 +36,6 @@ public class FlowLog {
     private String flowLogStatus = "ACTIVE";
     private String deliverLogsStatus = "SUCCESS";
     private Instant creationTime = Instant.now();
-    private List<Tag> tags = new ArrayList<>();
 
     public String getFlowLogId() { return flowLogId; }
     public void setFlowLogId(String flowLogId) { this.flowLogId = flowLogId; }
@@ -58,6 +56,9 @@ public class FlowLog {
     public void setLogDestination(String logDestination) { this.logDestination = logDestination; }
 
     public String getDeliverLogsPermissionArn() { return deliverLogsPermissionArn; }
+    public void setDeliverLogsPermissionArn(String deliverLogsPermissionArn) {
+        this.deliverLogsPermissionArn = deliverLogsPermissionArn;
+    }
 
     public String getBucketName() { return bucketName; }
     public void setBucketName(String bucketName) { this.bucketName = bucketName; }
@@ -83,14 +84,16 @@ public class FlowLog {
     public Instant getCreationTime() { return creationTime; }
     public void setCreationTime(Instant creationTime) { this.creationTime = creationTime; }
 
+    private String logGroupName;     // CloudWatch Logs group (cloud-watch-logs destination)
+
+    private List<Tag> tags = new ArrayList<>();
+
     public String getLogGroupName() { return logGroupName; }
+
     public void setLogGroupName(String logGroupName) { this.logGroupName = logGroupName; }
 
-    public void setDeliverLogsPermissionArn(String deliverLogsPermissionArn) {
-        this.deliverLogsPermissionArn = deliverLogsPermissionArn;
-    }
-
     public List<Tag> getTags() { return tags; }
+
     public void setTags(List<Tag> tags) {
         this.tags = tags != null ? tags : new ArrayList<>();
     }

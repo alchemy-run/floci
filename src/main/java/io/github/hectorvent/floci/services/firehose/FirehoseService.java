@@ -49,6 +49,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.*;
 
 @ApplicationScoped
 public class FirehoseService implements ResourceProvider {
@@ -382,21 +383,6 @@ public class FirehoseService implements ResourceProvider {
     public String createDeliveryStream(String region, String accountId, String name, S3Destination s3Config,
                                        List<DeliveryStreamDescription.Tag> tags, String deliveryStreamType,
                                        KinesisStreamSource source) {
-        return createDeliveryStream(region, accountId, name, s3Config, tags, deliveryStreamType, source, null);
-    }
-
-    public String createDeliveryStream(String region, String name, S3Destination s3Config,
-                                       List<DeliveryStreamDescription.Tag> tags, String deliveryStreamType,
-                                       KinesisStreamSource source,
-                                       DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration encryption) {
-        return createDeliveryStream(region, regionResolver.getAccountId(), name, s3Config, tags,
-                deliveryStreamType, source, encryption);
-    }
-
-    public String createDeliveryStream(String region, String accountId, String name, S3Destination s3Config,
-                                       List<DeliveryStreamDescription.Tag> tags, String deliveryStreamType,
-                                       KinesisStreamSource source,
-                                       DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration encryption) {
         return createDeliveryStream(region, accountId, name, s3Config, null, tags, deliveryStreamType, source);
     }
 
@@ -423,30 +409,6 @@ public class FirehoseService implements ResourceProvider {
 
         validateLogging(null, s3Config);
         validateBufferingHints(s3Config);
-        boolean hasKinesisSource = source != null
-                && source.getKinesisStreamArn() != null
-                && !source.getKinesisStreamArn().isBlank();
-        if ("KinesisStreamAsSource".equals(deliveryStreamType) && !hasKinesisSource) {
-            throw new AwsException("InvalidArgumentException",
-                    "KinesisStreamSourceConfiguration is required when DeliveryStreamType is KinesisStreamAsSource.", 400);
-        }
-        if (hasKinesisSource && "DirectPut".equals(deliveryStreamType)) {
-            throw new AwsException("InvalidArgumentException",
-                    "KinesisStreamSourceConfiguration cannot be set when DeliveryStreamType is DirectPut.", 400);
-        }
-        if (hasKinesisSource && (source.getRoleArn() == null || source.getRoleArn().isBlank())) {
-            throw new AwsException("InvalidArgumentException",
-                    "KinesisStreamSourceConfiguration.RoleARN must not be null or empty.", 400);
-        }
-
-        String resolvedType = hasKinesisSource
-                ? "KinesisStreamAsSource"
-                : (deliveryStreamType != null && !deliveryStreamType.isBlank() ? deliveryStreamType : "DirectPut");
-        if (encryption != null && "KinesisStreamAsSource".equals(resolvedType)) {
-            throw new AwsException("InvalidArgumentException",
-                    "Server-side encryption is not supported for delivery streams with a Kinesis stream as source.", 400);
-        }
-
         if (redshift != null) {
             validateLogging(null, redshift.getS3());
             validateLogging(null, redshift.getS3Backup());
@@ -472,12 +434,8 @@ public class FirehoseService implements ResourceProvider {
         DeliveryStreamDescription description = new DeliveryStreamDescription(name, arn, s3Config, redshift, source);
         description.setAccountId(accountId);
         description.setTags(tags);
-        description.setDeliveryStreamType(resolvedType);
-        if (encryption != null) {
-            applyEncryptionInput(description, encryption);
-        } else {
-            description.setDeliveryStreamEncryptionConfiguration(
-                    DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration.disabled());
+        if (deliveryStreamType != null && !deliveryStreamType.isBlank()) {
+            description.setDeliveryStreamType(deliveryStreamType);
         }
         streamPut(streamKey, description);
         buffers.put(streamKey, Collections.synchronizedList(new ArrayList<>()));
@@ -647,24 +605,6 @@ public class FirehoseService implements ResourceProvider {
 
     public void startDeliveryStreamEncryption(String name, String keyType, String keyArn) {
         DeliveryStreamDescription stream = describeDeliveryStream(name);
-        applyEncryption(stream, keyType, keyArn);
-        stream.setLastUpdateTimestamp(clock.instant());
-        streamPut(scopedKey(name), stream);
-    }
-
-    private static void applyEncryptionInput(DeliveryStreamDescription stream,
-                                             DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration encryption) {
-        if (encryption.getKeyType() == null || encryption.getKeyType().isBlank()) {
-            throw new AwsException("InvalidArgumentException", "KeyType is required.", 400);
-        }
-        applyEncryption(stream, encryption.getKeyType(), encryption.getKeyArn());
-    }
-
-    private static void applyEncryption(DeliveryStreamDescription stream, String keyType, String keyArn) {
-        if ("KinesisStreamAsSource".equals(stream.getDeliveryStreamType())) {
-            throw new AwsException("InvalidArgumentException",
-                    "Server-side encryption is not supported for delivery streams with a Kinesis stream as source.", 400);
-        }
         String effectiveKeyType = keyType == null ? "AWS_OWNED_CMK" : keyType;
         if (!effectiveKeyType.equals("AWS_OWNED_CMK") && !effectiveKeyType.equals("CUSTOMER_MANAGED_CMK")) {
             throw new AwsException("InvalidArgumentException",
@@ -684,6 +624,7 @@ public class FirehoseService implements ResourceProvider {
                         effectiveKeyType,
                         effectiveKeyType.equals("CUSTOMER_MANAGED_CMK") ? keyArn : null,
                         "ENABLED"));
+        streamPut(scopedKey(name), stream);
     }
 
     public void stopDeliveryStreamEncryption(String name) {
@@ -698,7 +639,6 @@ public class FirehoseService implements ResourceProvider {
         stream.setDeliveryStreamEncryptionConfiguration(
                 new DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration(
                         keyType, keyArn, "DISABLED"));
-        stream.setLastUpdateTimestamp(clock.instant());
         streamPut(scopedKey(name), stream);
     }
 
@@ -978,32 +918,6 @@ public class FirehoseService implements ResourceProvider {
                 .toList();
         return new DeliveryStreamPage(names.subList(0, Math.min(limit, names.size())), names.size() > limit);
     }
-
-    /**
-     * AWS-shaped list: names are alphabetical and {@code ExclusiveStartDeliveryStreamName}
-     * is exclusive. When {@code Limit} is set, the page is capped (AWS max 10000).
-     * When omitted, every matching name is returned — AWS defaults to 10, but
-     * callers that do not paginate (SDK compat + Alchemy bindings) expect a
-     * complete list on a shared emulator.
-     */
-    public DeliveryStreamList listDeliveryStreams(String exclusiveStart, Integer limit, String type) {
-        List<String> names = streamStore.scan(k -> k.startsWith(currentRegion() + "/")).stream()
-                .filter(s -> type == null || type.isBlank() || type.equals(s.getDeliveryStreamType()))
-                .map(DeliveryStreamDescription::getDeliveryStreamName)
-                .sorted()
-                .toList();
-        int start = 0;
-        if (exclusiveStart != null && !exclusiveStart.isEmpty()) {
-            while (start < names.size() && names.get(start).compareTo(exclusiveStart) <= 0) {
-                start++;
-            }
-        }
-        int effectiveLimit = (limit == null || limit < 1) ? Integer.MAX_VALUE : Math.min(limit, 10_000);
-        int end = (int) Math.min((long) start + effectiveLimit, names.size());
-        return new DeliveryStreamList(new ArrayList<>(names.subList(start, end)), end < names.size());
-    }
-
-    public record DeliveryStreamList(List<String> names, boolean hasMore) {}
 
     /**
      * Ingests records written to a delivery stream's Kinesis source.
@@ -1579,4 +1493,40 @@ public class FirehoseService implements ResourceProvider {
     public Set<SupportedResourceType> getSupportedResourceTypes() {
         return Set.of(new SupportedResourceType("firehose:deliverystream", "firehose", true));
     }
+
+    private static void applyEncryptionInput(DeliveryStreamDescription stream,
+                                             DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration encryption) {
+        if (encryption.getKeyType() == null || encryption.getKeyType().isBlank()) {
+            throw new AwsException("InvalidArgumentException", "KeyType is required.", 400);
+        }
+        applyEncryption(stream, encryption.getKeyType(), encryption.getKeyArn());
+    }
+
+    private static void applyEncryption(DeliveryStreamDescription stream, String keyType, String keyArn) {
+        if ("KinesisStreamAsSource".equals(stream.getDeliveryStreamType())) {
+            throw new AwsException("InvalidArgumentException",
+                    "Server-side encryption is not supported for delivery streams with a Kinesis stream as source.", 400);
+        }
+        String effectiveKeyType = keyType == null ? "AWS_OWNED_CMK" : keyType;
+        if (!effectiveKeyType.equals("AWS_OWNED_CMK") && !effectiveKeyType.equals("CUSTOMER_MANAGED_CMK")) {
+            throw new AwsException("InvalidArgumentException",
+                    "KeyType must be AWS_OWNED_CMK or CUSTOMER_MANAGED_CMK.", 400);
+        }
+        if (effectiveKeyType.equals("CUSTOMER_MANAGED_CMK") && (keyArn == null || keyArn.isBlank())) {
+            throw new AwsException("InvalidArgumentException",
+                    "KeyARN is required for CUSTOMER_MANAGED_CMK.", 400);
+        }
+        if (keyArn != null && !keyArn.isBlank()
+                && (keyArn.length() > SSE_KEY_ARN_MAX_LENGTH || !SSE_KEY_ARN_PATTERN.matcher(keyArn).matches())) {
+            throw new AwsException("InvalidArgumentException",
+                    "KeyARN is not a valid KMS key ARN: " + keyArn, 400);
+        }
+        stream.setDeliveryStreamEncryptionConfiguration(
+                new DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration(
+                        effectiveKeyType,
+                        effectiveKeyType.equals("CUSTOMER_MANAGED_CMK") ? keyArn : null,
+                        "ENABLED"));
+    }
+
+    public record DeliveryStreamList(List<String> names, boolean hasMore) {}
 }

@@ -22,7 +22,6 @@ import io.github.hectorvent.floci.services.cloudfront.model.FieldLevelEncryption
 import io.github.hectorvent.floci.services.cloudfront.model.FieldLevelEncryptionProfile;
 import io.github.hectorvent.floci.services.cloudfront.model.Invalidation;
 import io.github.hectorvent.floci.services.cloudfront.model.KeyGroup;
-import io.github.hectorvent.floci.services.cloudfront.model.KeyValueStore;
 import io.github.hectorvent.floci.services.cloudfront.model.MonitoringSubscription;
 import io.github.hectorvent.floci.services.cloudfront.model.Origin;
 import io.github.hectorvent.floci.services.cloudfront.model.OriginAccessControl;
@@ -31,10 +30,6 @@ import io.github.hectorvent.floci.services.cloudfront.model.PublicKey;
 import io.github.hectorvent.floci.services.cloudfront.model.RealtimeLogConfig;
 import io.github.hectorvent.floci.services.cloudfront.model.ResponseHeadersPolicy;
 import io.github.hectorvent.floci.services.cloudfront.model.StreamingDistribution;
-import io.github.hectorvent.floci.services.cloudfront.model.VpcOrigin;
-import io.github.hectorvent.floci.services.cloudfront.edge.CloudFrontEdgePorts;
-import io.github.hectorvent.floci.services.elbv2.ElbV2Service;
-import io.github.hectorvent.floci.services.elbv2.model.LoadBalancer;
 import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.iam.ServerCertificateReferenceProvider;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -44,7 +39,6 @@ import java.net.URI;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -61,6 +55,13 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
+import io.github.hectorvent.floci.services.cloudfront.model.KeyValueStore;
+import io.github.hectorvent.floci.services.cloudfront.model.VpcOrigin;
+import io.github.hectorvent.floci.services.cloudfront.edge.CloudFrontEdgePorts;
+import io.github.hectorvent.floci.services.elbv2.ElbV2Service;
+import io.github.hectorvent.floci.services.elbv2.model.LoadBalancer;
+import java.util.HashMap;
 
 @ApplicationScoped
 public class CloudFrontService implements ServerCertificateReferenceProvider {
@@ -136,10 +137,6 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
     private final StorageBackend<String, FieldLevelEncryptionConfig> fleConfigStore;
     private final StorageBackend<String, FieldLevelEncryptionProfile> fleProfileStore;
     private final StorageBackend<String, MonitoringSubscription> monitoringStore;
-    private final StorageBackend<String, VpcOrigin> vpcOriginStore;
-    private final StorageBackend<String, KeyValueStore> kvsStore;
-    /** KVS data-plane keys, keyed by store id → (key → value). */
-    private final StorageBackend<String, Map<String, String>> kvsKeysStore;
     private final String accountId;
     private final RegionResolver regionResolver;
     private final IamService iamService;
@@ -198,12 +195,6 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
                 new TypeReference<Map<String, FieldLevelEncryptionProfile>>() {});
         this.monitoringStore = factory.create("cloudfront", "cloudfront-monitoring-subscriptions.json",
                 new TypeReference<Map<String, MonitoringSubscription>>() {});
-        this.vpcOriginStore = factory.create("cloudfront", "cloudfront-vpc-origins.json",
-                new TypeReference<Map<String, VpcOrigin>>() {});
-        this.kvsStore = factory.create("cloudfront", "cloudfront-key-value-stores.json",
-                new TypeReference<Map<String, KeyValueStore>>() {});
-        this.kvsKeysStore = factory.create("cloudfront", "cloudfront-kvs-keys.json",
-                new TypeReference<Map<String, Map<String, String>>>() {});
         this.accountId = config.defaultAccountId();
         this.regionResolver = regionResolver;
         this.configuredDomainSuffix = config.services().cloudfront().domainSuffix().orElse(null);
@@ -429,34 +420,6 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
         distStore.delete(id);
         invalidationStore.delete(id);
         tagStore.delete("distribution/" + id);
-        if (edgePorts != null) {
-            edgePorts.release(id);
-        }
-    }
-
-    /**
-     * Serve this distribution's emulated edge on its own local port, so it is
-     * reachable at {@code http://localhost:<port>} without a hosts entry. Never
-     * fails the control-plane call — {@link CloudFrontEdgePorts#bind} reports and
-     * swallows the failure, leaving the distribution Host-addressable.
-     */
-    public Integer bindEdgePort(String id) {
-        return edgePorts == null ? null : edgePorts.bind(id);
-    }
-
-    /** The local URL this distribution's edge is served on, or {@code null}. */
-    public String edgeUrl(String id) {
-        return edgePorts == null ? null : edgePorts.urlOf(id);
-    }
-
-    /**
-     * Find the distribution serving {@code host} — its CloudFront domain name or
-     * one of its alternate domain names. Returns {@code null} when no
-     * distribution claims the host, so the emulated edge can leave the request
-     * alone. Hostnames are case-insensitive.
-     */
-    public Distribution findDistributionByHost(String host) {
-        return findByHost(host);
     }
 
     /**
@@ -568,18 +531,6 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
     /**
      * The domain name a new distribution is served under. AWS assigns a lower-case host, and a
      * browser lower-cases the authority it sends, so an upper-case id in the host would never match
-     * the resource a signed URL was signed for.
-     */
-    private String domainNameFor(String id) {
-        return id.toLowerCase(Locale.ROOT) + "." + domainSuffix;
-    }
-
-    private static List<String> localDeliverySuffixes(EmulatorConfig config) {
-        SequencedSet<String> endpointHosts = new LinkedHashSet<>();
-        endpointHosts.add("localhost");
-        EmbeddedDnsServer.BUILTIN_SUFFIXES.forEach(endpointHosts::add);
-        config.hostname().ifPresent(endpointHosts::add);
-        config.dns().extraSuffixes().ifPresent(endpointHosts::addAll);
      * the resource a signed URL was signed for. The suffix is the request partition's unless one
      * is configured.
      */
@@ -1556,17 +1507,6 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
 
     // ── CloudFront Functions ──────────────────────────────────────────────────
 
-    private static final String FUNCTION_STAGE_DEVELOPMENT = "DEVELOPMENT";
-    private static final String FUNCTION_STAGE_LIVE = "LIVE";
-
-    private static String functionKey(String name, String stage) {
-        return switch (stage) {
-            case FUNCTION_STAGE_DEVELOPMENT -> name;
-            case FUNCTION_STAGE_LIVE -> name + "::LIVE";
-            default -> throw invalidFunctionStage(stage);
-        };
-    }
-
     public synchronized CloudFrontFunction createFunction(CloudFrontFunction fn) {
         validateFunctionRuntime(fn.getRuntime());
         // The bare name holds the DEVELOPMENT stage, and the LIVE stage of releases before
@@ -1581,25 +1521,21 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
         fn.setEtag(UUID.randomUUID().toString());
         fn.setCreatedTime(Instant.now());
         fn.setLastModifiedTime(Instant.now());
-        functionStore.put(functionKey(fn.getName(), FUNCTION_STAGE_DEVELOPMENT), fn);
+        functionStore.put(fn.getName(), fn);
         return fn;
     }
 
     public CloudFrontFunction describeFunction(String name, String stage) {
-        return findFunction(name, normalizeFunctionStage(stage)).orElseThrow(() ->
+        String effectiveStage = normalizeFunctionStage(stage);
+        Optional<CloudFrontFunction> function = functionStore.get(functionKey(name, effectiveStage));
+        if (function.isEmpty() && "LIVE".equals(effectiveStage)) {
+            // Releases before stage-aware keys stored a published LIVE function under
+            // the bare name. Keep that state readable without exposing it as DEVELOPMENT.
+            function = functionStore.get(name).filter(fn -> "LIVE".equals(fn.getStage()));
+        }
+        return function.filter(fn -> effectiveStage.equals(fn.getStage())).orElseThrow(() ->
                 new AwsException("NoSuchFunctionExists",
                         "The specified function does not exist.", 404));
-    }
-
-    private Optional<CloudFrontFunction> findFunction(String name, String stage) {
-        if (stage == null || stage.isEmpty()) {
-            return findFunction(name, FUNCTION_STAGE_DEVELOPMENT)
-                    .or(() -> findFunction(name, FUNCTION_STAGE_LIVE));
-        }
-        return functionStore.get(functionKey(name, stage))
-                .filter(fn -> stage.equals(fn.getStage()))
-                .or(() -> functionStore.get(name + ":" + stage).filter(fn -> stage.equals(fn.getStage())))
-                .or(() -> functionStore.get(name).filter(fn -> stage.equals(fn.getStage())));
     }
 
     public synchronized CloudFrontFunction updateFunction(String name, String ifMatch,
@@ -1611,54 +1547,41 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
                     "The If-Match version is missing or not valid for the resource.", 400);
         }
         updated.setName(name);
-        updated.setStage(FUNCTION_STAGE_DEVELOPMENT);
+        updated.setStage(existing.getStage());
         updated.setStatus(existing.getStatus());
         updated.setEtag(UUID.randomUUID().toString());
         updated.setCreatedTime(existing.getCreatedTime());
         updated.setLastModifiedTime(Instant.now());
-        if (updated.getKeyValueStoreArns() == null || updated.getKeyValueStoreArns().isEmpty()) {
-            updated.setKeyValueStoreArns(existing.getKeyValueStoreArns());
-        }
-        functionStore.put(functionKey(name, FUNCTION_STAGE_DEVELOPMENT), updated);
-        functionStore.delete(name + ":" + FUNCTION_STAGE_DEVELOPMENT);
+        functionStore.put(name, updated);
         return updated;
     }
 
     public synchronized CloudFrontFunction publishFunction(String name, String ifMatch) {
-        CloudFrontFunction development = describeFunction(name, FUNCTION_STAGE_DEVELOPMENT);
+        CloudFrontFunction development = describeFunction(name, "DEVELOPMENT");
         if (!development.getEtag().equals(ifMatch)) {
             throw new AwsException("InvalidIfMatchVersion",
                     "The If-Match version is missing or not valid for the resource.", 400);
         }
-        CloudFrontFunction live = development.copy();
-        live.setStage(FUNCTION_STAGE_LIVE);
+        CloudFrontFunction live = copyFunction(development);
+        live.setStage("LIVE");
         live.setStatus("DEPLOYED");
         live.setEtag(UUID.randomUUID().toString());
         live.setLastModifiedTime(Instant.now());
-        functionStore.put(functionKey(name, FUNCTION_STAGE_LIVE), live);
-        functionStore.delete(name + ":" + FUNCTION_STAGE_LIVE);
+        functionStore.put(functionKey(name, "LIVE"), live);
         return live;
     }
 
     public synchronized void deleteFunction(String name, String ifMatch) {
-        Optional<CloudFrontFunction> development = findFunction(name, FUNCTION_STAGE_DEVELOPMENT);
-        Optional<CloudFrontFunction> live = findFunction(name, FUNCTION_STAGE_LIVE);
-        Optional<CloudFrontFunction> legacy = functionStore.get(name);
-        if (development.isEmpty() && live.isEmpty() && legacy.isEmpty()) {
-            throw new AwsException("NoSuchFunctionExists",
-                    "The specified function does not exist.", 404);
-        }
-        boolean match = development.map(CloudFrontFunction::getEtag).filter(ifMatch::equals).isPresent()
-                || live.map(CloudFrontFunction::getEtag).filter(ifMatch::equals).isPresent()
-                || legacy.map(CloudFrontFunction::getEtag).filter(ifMatch::equals).isPresent();
-        if (!match) {
+        CloudFrontFunction existing = functionStore.get(name)
+                .or(() -> functionStore.get(functionKey(name, "LIVE")))
+                .orElseThrow(() -> new AwsException("NoSuchFunctionExists",
+                        "The specified function does not exist.", 404));
+        if (!existing.getEtag().equals(ifMatch)) {
             throw new AwsException("InvalidIfMatchVersion",
                     "The If-Match version is missing or not valid for the resource.", 400);
         }
-        functionStore.delete(functionKey(name, FUNCTION_STAGE_DEVELOPMENT));
-        functionStore.delete(functionKey(name, FUNCTION_STAGE_LIVE));
-        functionStore.delete(name + ":" + FUNCTION_STAGE_DEVELOPMENT);
-        functionStore.delete(name + ":" + FUNCTION_STAGE_LIVE);
+        functionStore.delete(name);
+        functionStore.delete(functionKey(name, "LIVE"));
     }
 
     public List<CloudFrontFunction> listFunctions(String stage, String marker, int maxItems) {
@@ -1672,6 +1595,14 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
         all.sort(Comparator.comparing(CloudFrontFunction::getName)
                 .thenComparing(CloudFrontFunction::getStage));
         return paginate(all, marker, maxItems, CloudFrontFunction::getName);
+    }
+
+    private static String functionKey(String name, String stage) {
+        return switch (stage) {
+            case "DEVELOPMENT" -> name;
+            case "LIVE" -> name + "::LIVE";
+            default -> throw invalidFunctionStage(stage);
+        };
     }
 
     private static String normalizeFunctionStage(String stage) {
@@ -1695,7 +1626,17 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
     }
 
     private static CloudFrontFunction copyFunction(CloudFrontFunction source) {
-        return source.copy();
+        CloudFrontFunction copy = new CloudFrontFunction();
+        copy.setName(source.getName());
+        copy.setStage(source.getStage());
+        copy.setStatus(source.getStatus());
+        copy.setFunctionCode(source.getFunctionCode());
+        copy.setRuntime(source.getRuntime());
+        copy.setComment(source.getComment());
+        copy.setEtag(source.getEtag());
+        copy.setCreatedTime(source.getCreatedTime());
+        copy.setLastModifiedTime(source.getLastModifiedTime());
+        return copy;
     }
 
     // ── Tags ──────────────────────────────────────────────────────────────────
@@ -2314,7 +2255,109 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
         monitoringStore.delete(distributionId);
     }
 
-    // ── VPC Origins ───────────────────────────────────────────────────────────
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /** A CloudFront ARN: global, so it carries no region and takes the request's partition. */
+    public String arn(String resource) {
+        return regionResolver.buildGlobalArn("cloudfront", accountId, resource);
+    }
+
+    private static String generateDistributionId() {
+        StringBuilder sb = new StringBuilder("E");
+        for (int i = 0; i < 13; i++) {
+            sb.append(CHARS.charAt(RANDOM.nextInt(CHARS.length())));
+        }
+        return sb.toString();
+    }
+
+    /** AWS issues public key ids as K + 13 characters; the value travels in Key-Pair-Id. */
+    private static String generatePublicKeyId() {
+        StringBuilder sb = new StringBuilder("K");
+        for (int i = 0; i < 13; i++) {
+            sb.append(CHARS.charAt(RANDOM.nextInt(CHARS.length())));
+        }
+        return sb.toString();
+    }
+
+    private static String generateInvalidationId() {
+        StringBuilder sb = new StringBuilder("I");
+        for (int i = 0; i < 13; i++) {
+            sb.append(CHARS.charAt(RANDOM.nextInt(CHARS.length())));
+        }
+        return sb.toString();
+    }
+
+    private <T> List<T> paginate(List<T> all, String marker, int maxItems,
+                                  Function<T, String> keyFn) {
+        if (marker != null && !marker.isEmpty()) {
+            int idx = 0;
+            for (int i = 0; i < all.size(); i++) {
+                if (marker.equals(keyFn.apply(all.get(i)))) {
+                    idx = i + 1;
+                    break;
+                }
+            }
+            all = all.subList(idx, all.size());
+        }
+        if (maxItems > 0 && all.size() > maxItems) {
+            return all.subList(0, maxItems);
+        }
+        return all;
+    }
+
+    private final StorageBackend<String, VpcOrigin> vpcOriginStore;
+
+    private final StorageBackend<String, KeyValueStore> kvsStore;
+
+    /** KVS data-plane keys, keyed by store id → (key → value). */
+    private final StorageBackend<String, Map<String, String>> kvsKeysStore;
+
+    private final String domainSuffix;
+
+    private final ElbV2Service elbV2;
+
+    /** Null in unit tests: a distribution without a local port is still Host-addressable. */
+    private final CloudFrontEdgePorts edgePorts;
+
+    /**
+     * Serve this distribution's emulated edge on its own local port, so it is
+     * reachable at {@code http://localhost:<port>} without a hosts entry. Never
+     * fails the control-plane call — {@link CloudFrontEdgePorts#bind} reports and
+     * swallows the failure, leaving the distribution Host-addressable.
+     */
+    public Integer bindEdgePort(String id) {
+        return edgePorts == null ? null : edgePorts.bind(id);
+    }
+
+    /** The local URL this distribution's edge is served on, or {@code null}. */
+    public String edgeUrl(String id) {
+        return edgePorts == null ? null : edgePorts.urlOf(id);
+    }
+
+    /**
+     * Find the distribution serving {@code host} — its CloudFront domain name or
+     * one of its alternate domain names. Returns {@code null} when no
+     * distribution claims the host, so the emulated edge can leave the request
+     * alone. Hostnames are case-insensitive.
+     */
+    public Distribution findDistributionByHost(String host) {
+        return findByHost(host);
+    }
+
+    private static final String FUNCTION_STAGE_DEVELOPMENT = "DEVELOPMENT";
+
+    private static final String FUNCTION_STAGE_LIVE = "LIVE";
+
+    private Optional<CloudFrontFunction> findFunction(String name, String stage) {
+        if (stage == null || stage.isEmpty()) {
+            return findFunction(name, FUNCTION_STAGE_DEVELOPMENT)
+                    .or(() -> findFunction(name, FUNCTION_STAGE_LIVE));
+        }
+        return functionStore.get(functionKey(name, stage))
+                .filter(fn -> stage.equals(fn.getStage()))
+                .or(() -> functionStore.get(name + ":" + stage).filter(fn -> stage.equals(fn.getStage())))
+                .or(() -> functionStore.get(name).filter(fn -> stage.equals(fn.getStage())));
+    }
 
     public synchronized VpcOrigin createVpcOrigin(VpcOrigin origin, Map<String, String> tags) {
         validateVpcOriginArn(origin.getOriginEndpointArn());
@@ -2384,8 +2427,6 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
         return paginate(all, marker, maxItems, VpcOrigin::getId);
     }
 
-    // ── Key Value Stores ──────────────────────────────────────────────────────
-
     public synchronized KeyValueStore createKeyValueStore(KeyValueStore store, Map<String, String> tags) {
         if (store.getName() == null || store.getName().isBlank()) {
             throw new AwsException("InvalidArgument", "KeyValueStore Name is required.", 400);
@@ -2452,8 +2493,6 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
         all.sort((a, b) -> a.getName().compareTo(b.getName()));
         return paginate(all, marker, maxItems, KeyValueStore::getName);
     }
-
-    // ── Key Value Store data plane (cloudfront-keyvaluestore) ────────────────
 
     /**
      * Resolves a store by its data-plane ARN
@@ -2542,36 +2581,8 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
         return value == null ? 0 : value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    /** A CloudFront ARN: global, so it carries no region and takes the request's partition. */
-    public String arn(String resource) {
-        return regionResolver.buildGlobalArn("cloudfront", accountId, resource);
-    }
-
-    private static String generateDistributionId() {
-        StringBuilder sb = new StringBuilder("E");
-        for (int i = 0; i < 13; i++) {
-            sb.append(CHARS.charAt(RANDOM.nextInt(CHARS.length())));
-        }
-        return sb.toString();
-    }
-
-    /** AWS issues public key ids as K + 13 characters; the value travels in Key-Pair-Id. */
-    private static String generatePublicKeyId() {
-        StringBuilder sb = new StringBuilder("K");
-        for (int i = 0; i < 13; i++) {
-            sb.append(CHARS.charAt(RANDOM.nextInt(CHARS.length())));
-        }
-        return sb.toString();
-    }
-
-    private static String generateInvalidationId() {
-        StringBuilder sb = new StringBuilder("I");
-        for (int i = 0; i < 13; i++) {
-            sb.append(CHARS.charAt(RANDOM.nextInt(CHARS.length())));
-        }
-        return sb.toString();
+    public String getAccountId() {
+        return accountId;
     }
 
     private static String generateVpcOriginId() {
@@ -2622,23 +2633,5 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
             return;
         }
         throw new AwsException("InvalidArgument", "The specified origin ARN is not valid.", 400);
-    }
-
-    private <T> List<T> paginate(List<T> all, String marker, int maxItems,
-                                  Function<T, String> keyFn) {
-        if (marker != null && !marker.isEmpty()) {
-            int idx = 0;
-            for (int i = 0; i < all.size(); i++) {
-                if (marker.equals(keyFn.apply(all.get(i)))) {
-                    idx = i + 1;
-                    break;
-                }
-            }
-            all = all.subList(idx, all.size());
-        }
-        if (maxItems > 0 && all.size() > maxItems) {
-            return all.subList(0, maxItems);
-        }
-        return all;
     }
 }

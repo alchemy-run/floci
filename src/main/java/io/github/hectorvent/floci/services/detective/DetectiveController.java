@@ -20,8 +20,8 @@ import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
-import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Path("/")
@@ -62,53 +62,15 @@ public class DetectiveController {
     }
 
     @POST
-    @Path("/graph")
-    public Response createGraph(@Context HttpHeaders headers, String body) {
-        JsonNode request = parse(body);
-        Map<String, String> tags = new LinkedHashMap<>();
-        JsonNode value = request.get("Tags");
-        if (value != null && !value.isNull()) {
-            if (!value.isObject()) {
-                throw new AwsException("ValidationException", "Tags must be an object.", 400);
-            }
-            value.fields().forEachRemaining(entry -> {
-                if (!entry.getValue().isTextual()) {
-                    throw new AwsException("ValidationException", "Tag values must be strings.", 400);
-                }
-                tags.put(entry.getKey(), entry.getValue().textValue());
-            });
-        }
-        ObjectNode response = objectMapper.createObjectNode();
-        response.put("GraphArn", service.createGraph(region(headers), tags));
-        return Response.ok(response).build();
-    }
-
-    @POST
-    @Path("/graph/removal")
-    public Response deleteGraph(@Context HttpHeaders headers, String body) {
-        service.deleteGraph(region(headers), parse(body).path("GraphArn").asText(null));
-        return Response.ok(objectMapper.createObjectNode()).build();
-    }
-
-    @POST
     @Path("/graphs/list")
     public Response listGraphs(@Context HttpHeaders headers, String body) {
         String region = region(headers);
-        JsonNode request = parse(body);
-        validatePageRequest(request);
-        if (request.hasNonNull("NextToken")) {
-            throw new AwsException("ValidationException", "NextToken is invalid.", 400);
-        }
+        validatePageRequest(parse(body));
         DetectiveState state = service.state(region);
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode graphs = response.putArray("GraphList");
         if (state.isGraph()) {
-            ObjectNode graph = response.putArray("GraphList").addObject().put("Arn", state.getGraphArn());
-            if (state.getCreatedTime() != null) {
-                graph.put("CreatedTime", state.getCreatedTime());
-            }
-        } else {
-            response.putArray("GraphList");
+            graphs.addObject().put("Arn", service.graphArn(region));
         }
         return Response.ok(response).build();
     }
@@ -162,6 +124,143 @@ public class DetectiveController {
             response.put("NextToken", Integer.toString(end));
         }
         return Response.ok(response).build();
+    }
+
+    @POST
+    @Path("/graph/members")
+    public Response createMembers(@Context HttpHeaders headers, String body) {
+        String region = region(headers);
+        JsonNode request = parse(body);
+        String graphArn = request.path("GraphArn").asText(null);
+        JsonNode accounts = request.get("Accounts");
+        if (accounts == null || !accounts.isArray() || accounts.isEmpty() || accounts.size() > 50) {
+            throw new AwsException("ValidationException", "Accounts must contain between 1 and 50 members.", 400);
+        }
+        List<String> accountIds = new java.util.ArrayList<>(accounts.size());
+        for (JsonNode account : accounts) {
+            accountIds.add(account.path("AccountId").asText(null));
+        }
+        service.validateCreateMembers(region, graphArn, accountIds);
+
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode members = response.putArray("Members");
+        ArrayNode unprocessed = response.putArray("UnprocessedAccounts");
+        for (JsonNode account : accounts) {
+            String accountId = account.path("AccountId").asText(null);
+            try {
+                DetectiveMember member = service.createMember(region, graphArn,
+                        accountId, account.path("EmailAddress").asText(null));
+                members.add(memberNode(region, member));
+            } catch (AwsException e) {
+                if (!"ConflictException".equals(e.getErrorCode())) {
+                    throw e;
+                }
+                unprocessed.addObject()
+                        .put("AccountId", accountId)
+                        .put("Reason", "The account is already a member of the behavior graph.");
+            }
+        }
+        return Response.ok(response).build();
+    }
+
+    @POST
+    @Path("/graph/member/monitoringstate")
+    public Response startMonitoringMember(@Context HttpHeaders headers, String body) {
+        JsonNode request = parse(body);
+        service.startMonitoring(region(headers), request.path("AccountId").asText(null),
+                request.path("GraphArn").asText(null));
+        return Response.ok().build();
+    }
+
+    private com.fasterxml.jackson.databind.node.ObjectNode memberNode(String region, DetectiveMember member) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("AccountId", member.getAccountId());
+        node.put("EmailAddress", member.getEmailAddress());
+        node.put("Status", member.getStatus());
+        node.put("GraphArn", service.graphArn(region));
+        node.put("AdministratorId", regionResolver.getAccountId());
+        node.put("InvitationType", "ORGANIZATION");
+        return node;
+    }
+
+    private static Integer integer(JsonNode request, String field) {
+        JsonNode value = request.get(field);
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (!value.isIntegralNumber()) {
+            throw new AwsException("ValidationException", field + " must be an integer.", 400);
+        }
+        return value.intValue();
+    }
+
+    private static int offset(String nextToken, int size) {
+        if (nextToken == null || nextToken.isBlank()) {
+            return 0;
+        }
+        try {
+            int value = Integer.parseInt(nextToken);
+            if (value < 0 || value > size) {
+                throw new NumberFormatException();
+            }
+            return value;
+        } catch (NumberFormatException e) {
+            throw new AwsException("ValidationException", "NextToken is invalid.", 400);
+        }
+    }
+
+    private static void validatePageRequest(JsonNode request) {
+        Integer maxResults = integer(request, "MaxResults");
+        if (maxResults != null && (maxResults < 1 || maxResults > 200)) {
+            throw new AwsException("ValidationException", "MaxResults must be between 1 and 200.", 400);
+        }
+        JsonNode token = request.get("NextToken");
+        if (token != null && !token.isNull()) {
+            if (!token.isTextual() || token.textValue().isEmpty() || token.textValue().length() > 1024) {
+                throw new AwsException("ValidationException", "NextToken is invalid.", 400);
+            }
+        }
+    }
+
+    private String region(HttpHeaders headers) {
+        return regionResolver.resolveRegion(headers);
+    }
+
+    private JsonNode parse(String body) {
+        try {
+            return objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
+        } catch (Exception e) {
+            throw new WebApplicationException(JsonErrorResponseUtils.createSerializationErrorResponse());
+        }
+    }
+
+    @POST
+    @Path("/graph")
+    public Response createGraph(@Context HttpHeaders headers, String body) {
+        JsonNode request = parse(body);
+        Map<String, String> tags = new LinkedHashMap<>();
+        JsonNode value = request.get("Tags");
+        if (value != null && !value.isNull()) {
+            if (!value.isObject()) {
+                throw new AwsException("ValidationException", "Tags must be an object.", 400);
+            }
+            value.fields().forEachRemaining(entry -> {
+                if (!entry.getValue().isTextual()) {
+                    throw new AwsException("ValidationException", "Tag values must be strings.", 400);
+                }
+                tags.put(entry.getKey(), entry.getValue().textValue());
+            });
+        }
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("GraphArn", service.createGraph(region(headers), tags));
+        return Response.ok(response).build();
+    }
+
+    @POST
+    @Path("/graph/removal")
+    public Response deleteGraph(@Context HttpHeaders headers, String body) {
+        service.deleteGraph(region(headers), parse(body).path("GraphArn").asText(null));
+        return Response.ok(objectMapper.createObjectNode()).build();
     }
 
     @POST
@@ -322,127 +421,5 @@ public class DetectiveController {
             result.add(account.textValue());
         }
         return result;
-    }
-
-    @POST
-    @Path("/graph/members")
-    public Response createMembers(@Context HttpHeaders headers, String body) {
-        String region = region(headers);
-        JsonNode request = parse(body);
-        String graphArn = request.path("GraphArn").asText(null);
-        JsonNode accounts = request.get("Accounts");
-        if (accounts == null || !accounts.isArray() || accounts.isEmpty() || accounts.size() > 50) {
-            throw new AwsException("ValidationException", "Accounts must contain between 1 and 50 members.", 400);
-        }
-        List<String> accountIds = new java.util.ArrayList<>(accounts.size());
-        for (JsonNode account : accounts) {
-            accountIds.add(account.path("AccountId").asText(null));
-        }
-        service.validateCreateMembers(region, graphArn, accountIds);
-
-        ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode members = response.putArray("Members");
-        ArrayNode unprocessed = response.putArray("UnprocessedAccounts");
-        for (JsonNode account : accounts) {
-            String accountId = account.path("AccountId").asText(null);
-            try {
-                DetectiveMember member = service.createMember(region, graphArn,
-                        accountId, account.path("EmailAddress").asText(null));
-                members.add(memberNode(region, member));
-            } catch (AwsException e) {
-                if (!"ConflictException".equals(e.getErrorCode())) {
-                    throw e;
-                }
-                unprocessed.addObject()
-                        .put("AccountId", accountId)
-                        .put("Reason", "The account is already a member of the behavior graph.");
-            }
-        }
-        return Response.ok(response).build();
-    }
-
-    @POST
-    @Path("/graph/member/monitoringstate")
-    public Response startMonitoringMember(@Context HttpHeaders headers, String body) {
-        JsonNode request = parse(body);
-        service.startMonitoring(region(headers), request.path("AccountId").asText(null),
-                request.path("GraphArn").asText(null));
-        return Response.ok().build();
-    }
-
-    private ObjectNode memberNode(String region, DetectiveMember member) {
-        return memberNode(service.graphArn(region), regionResolver.getAccountId(), member);
-    }
-
-    private ObjectNode memberNode(String graphArn, String administratorId, DetectiveMember member) {
-        ObjectNode node = objectMapper.createObjectNode();
-        node.put("AccountId", member.getAccountId());
-        if (member.getEmailAddress() != null) {
-            node.put("EmailAddress", member.getEmailAddress());
-        }
-        node.put("Status", member.getStatus());
-        node.put("GraphArn", graphArn);
-        node.put("AdministratorId", administratorId);
-        node.put("InvitationType", member.getInvitationType());
-        if (member.getInvitedTime() != null) {
-            node.put("InvitedTime", member.getInvitedTime());
-        }
-        return node;
-    }
-
-    private static Integer integer(JsonNode request, String field) {
-        JsonNode value = request.get(field);
-        if (value == null || value.isNull()) {
-            return null;
-        }
-        if (!value.isIntegralNumber() || !value.canConvertToInt()) {
-            throw new AwsException("ValidationException", field + " must be an integer.", 400);
-        }
-        return value.intValue();
-    }
-
-    private static int offset(String nextToken, int size) {
-        if (nextToken == null || nextToken.isBlank()) {
-            return 0;
-        }
-        try {
-            int value = Integer.parseInt(nextToken);
-            if (value < 0 || value > size) {
-                throw new NumberFormatException();
-            }
-            return value;
-        } catch (NumberFormatException e) {
-            throw new AwsException("ValidationException", "NextToken is invalid.", 400);
-        }
-    }
-
-    private static void validatePageRequest(JsonNode request) {
-        Integer maxResults = integer(request, "MaxResults");
-        if (maxResults != null && (maxResults < 1 || maxResults > 200)) {
-            throw new AwsException("ValidationException", "MaxResults must be between 1 and 200.", 400);
-        }
-        JsonNode token = request.get("NextToken");
-        if (token != null && !token.isNull()) {
-            if (!token.isTextual() || token.textValue().isEmpty() || token.textValue().length() > 1024) {
-                throw new AwsException("ValidationException", "NextToken is invalid.", 400);
-            }
-        }
-    }
-
-    private String region(HttpHeaders headers) {
-        return regionResolver.resolveRegion(headers);
-    }
-
-    private JsonNode parse(String body) {
-        JsonNode request;
-        try {
-            request = objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
-        } catch (Exception e) {
-            throw new WebApplicationException(JsonErrorResponseUtils.createSerializationErrorResponse());
-        }
-        if (request == null || !request.isObject()) {
-            throw new AwsException("ValidationException", "Request must be a JSON object.", 400);
-        }
-        return request;
     }
 }

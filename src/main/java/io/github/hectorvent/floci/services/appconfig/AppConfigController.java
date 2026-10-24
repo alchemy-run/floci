@@ -3,7 +3,6 @@ package io.github.hectorvent.floci.services.appconfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.services.appconfig.AppConfigDataService.LegacyConfiguration;
 import io.github.hectorvent.floci.services.appconfig.model.Application;
@@ -18,7 +17,6 @@ import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.HeaderParam;
-import jakarta.ws.rs.PATCH;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
@@ -32,6 +30,8 @@ import jakarta.ws.rs.core.UriInfo;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import io.github.hectorvent.floci.core.common.AwsException;
+import jakarta.ws.rs.PATCH;
 
 @Path("/")
 @Produces(MediaType.APPLICATION_JSON)
@@ -76,14 +76,6 @@ public class AppConfigController {
         return Response.ok(root).build();
     }
 
-    @PATCH
-    @Path("/applications/{id}")
-    public Response updateApplication(@PathParam("id") String id, String body) throws IOException {
-        @SuppressWarnings("unchecked")
-        Map<String, Object> request = objectMapper.readValue(body, Map.class);
-        return Response.ok(service.updateApplication(id, request)).build();
-    }
-
     @DELETE
     @Path("/applications/{id}")
     public Response deleteApplication(@PathParam("id") String id) {
@@ -125,21 +117,6 @@ public class AppConfigController {
         return Response.ok(root).build();
     }
 
-    @PATCH
-    @Path("/applications/{appId}/environments/{envId}")
-    public Response updateEnvironment(@PathParam("appId") String appId, @PathParam("envId") String envId, String body) throws IOException {
-        @SuppressWarnings("unchecked")
-        Map<String, Object> request = objectMapper.readValue(body, Map.class);
-        return Response.ok(service.updateEnvironment(appId, envId, request)).build();
-    }
-
-    @DELETE
-    @Path("/applications/{appId}/environments/{envId}")
-    public Response deleteEnvironment(@PathParam("appId") String appId, @PathParam("envId") String envId) {
-        service.deleteEnvironment(appId, envId);
-        return Response.noContent().build();
-    }
-
     // ──────────────────────────── Configuration Profile ────────────────────────────
 
     @POST
@@ -167,30 +144,11 @@ public class AppConfigController {
         return Response.ok(root).build();
     }
 
-    @PATCH
-    @Path("/applications/{appId}/configurationprofiles/{profileId}")
-    public Response updateConfigurationProfile(@PathParam("appId") String appId,
-                                               @PathParam("profileId") String profileId,
-                                               String body) throws IOException {
-        @SuppressWarnings("unchecked")
-        Map<String, Object> request = objectMapper.readValue(body, Map.class);
-        return Response.ok(service.updateConfigurationProfile(appId, profileId, request)).build();
-    }
-
     @DELETE
     @Path("/applications/{appId}/configurationprofiles/{profileId}")
     public Response deleteConfigurationProfile(@PathParam("appId") String appId, @PathParam("profileId") String profileId) {
         service.deleteConfigurationProfile(appId, profileId);
         return Response.noContent().build();
-    }
-
-    @POST
-    @Path("/applications/{appId}/configurationprofiles/{profileId}/validators")
-    public Response validateConfiguration(@PathParam("appId") String appId,
-                                          @PathParam("profileId") String profileId,
-                                          @QueryParam("configuration_version") String configurationVersion) {
-        service.validateConfiguration(appId, profileId, configurationVersion);
-        return Response.ok().build();
     }
 
     // ──────────────────────────── Hosted Configuration Version ────────────────────────────
@@ -213,10 +171,8 @@ public class AppConfigController {
                                                      @PathParam("profileId") String profileId,
                                                      @HeaderParam("Content-Type") String contentType,
                                                      @HeaderParam("Description") String description,
-                                                     @HeaderParam("VersionLabel") String versionLabel,
                                                      byte[] content) {
-        HostedConfigurationVersion version = service.createHostedConfigurationVersion(
-                appId, profileId, content, contentType, description, versionLabel);
+        HostedConfigurationVersion version = service.createHostedConfigurationVersion(appId, profileId, content, contentType, description);
         return versionResponse(version, 201);
     }
 
@@ -245,7 +201,6 @@ public class AppConfigController {
         rb.header("Version-Number", v.getVersionNumber());
         rb.header("Content-Type", v.getContentType());
         if (v.getDescription() != null) rb.header("Description", v.getDescription());
-        if (v.getVersionLabel() != null) rb.header("VersionLabel", v.getVersionLabel());
         return rb.build();
     }
 
@@ -269,31 +224,21 @@ public class AppConfigController {
     @GET
     @Path("/deploymentstrategies")
     public Response listDeploymentStrategies() {
+        List<DeploymentStrategy> items = service.listDeploymentStrategies();
         ObjectNode root = objectMapper.createObjectNode();
-        ArrayNode items = root.putArray("Items");
-        service.listDeploymentStrategies().forEach(items::addPOJO);
+        ArrayNode arr = root.putArray("Items");
+        items.forEach(arr::addPOJO);
         return Response.ok(root).build();
     }
 
-    @PATCH
-    @Path("/deploymentstrategies/{id}")
-    public Response updateDeploymentStrategy(@PathParam("id") String id, String body) throws IOException {
-        @SuppressWarnings("unchecked")
-        Map<String, Object> request = objectMapper.readValue(body, Map.class);
-        return Response.ok(service.updateDeploymentStrategy(id, request)).build();
-    }
-
-    @DELETE
-    @Path("/deploymentstrategies/{id}")
-    public Response deleteDeploymentStrategy(@PathParam("id") String id) {
-        service.deleteDeploymentStrategy(id);
-        return Response.noContent().build();
-    }
-
-    // AWS Smithy models this path with the historical "deployement" typo.
+    // AWS's own API model spells this path "deployementstrategies" (extra "e") - every other
+    // deployment-strategy operation correctly uses "deploymentstrategies". Confirmed against the
+    // real API reference (both the Request Syntax and Sample Request sections agree) and
+    // reproduced against the real AWS SDK for Java v2, which sends the misspelled path literally -
+    // matching that typo, not "fixing" it, is what real AWS wire-protocol compatibility means here.
     @DELETE
     @Path("/deployementstrategies/{id}")
-    public Response deleteDeploymentStrategyTypo(@PathParam("id") String id) {
+    public Response deleteDeploymentStrategy(@PathParam("id") String id) {
         service.deleteDeploymentStrategy(id);
         return Response.noContent().build();
     }
@@ -332,14 +277,88 @@ public class AppConfigController {
         return Response.ok(service.getDeployment(appId, envId, deploymentNumber)).build();
     }
 
+    // ──────────────────────────── Configuration ────────────────────────────
+
+    // The deprecated GetConfiguration: superseded by AppConfigData, but still an AppConfig operation.
+    // The response type comes from the stored version (Ion for variant flags when Accept asks for it),
+    // never from negotiation, so a non-JSON Accept header is not refused.
+    @GET
+    @Path("/applications/{appId}/environments/{envId}/configurations/{configuration}")
+    @Produces(MediaType.WILDCARD)
+    public Response getConfiguration(@PathParam("appId") String appId,
+                                     @PathParam("envId") String envId,
+                                     @PathParam("configuration") String configuration,
+                                     @QueryParam("client_id") String clientId,
+                                     @HeaderParam("Accept") String accept,
+                                     @Context UriInfo uriInfo) {
+        // Read raw: @QueryParam turns an empty value into null, but AWS rejects an empty version.
+        String clientVersion = uriInfo.getQueryParameters().getFirst("client_configuration_version");
+        LegacyConfiguration data = dataService.getConfiguration(
+                appId, envId, configuration, clientId, clientVersion, accept);
+        // A version stored without a content type would otherwise go out as the */* of @Produces.
+        String contentType = data.contentType() != null ? data.contentType() : MediaType.APPLICATION_OCTET_STREAM;
+        return Response.ok(data.content())
+                .header("Content-Type", contentType)
+                .header("Configuration-Version", data.configurationVersion())
+                .build();
+    }
+
+    @PATCH
+    @Path("/applications/{id}")
+    public Response updateApplication(@PathParam("id") String id, String body) throws IOException {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> request = objectMapper.readValue(body, Map.class);
+        return Response.ok(service.updateApplication(id, request)).build();
+    }
+
+    @PATCH
+    @Path("/applications/{appId}/environments/{envId}")
+    public Response updateEnvironment(@PathParam("appId") String appId, @PathParam("envId") String envId, String body) throws IOException {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> request = objectMapper.readValue(body, Map.class);
+        return Response.ok(service.updateEnvironment(appId, envId, request)).build();
+    }
+
+    @PATCH
+    @Path("/applications/{appId}/configurationprofiles/{profileId}")
+    public Response updateConfigurationProfile(@PathParam("appId") String appId,
+                                               @PathParam("profileId") String profileId,
+                                               String body) throws IOException {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> request = objectMapper.readValue(body, Map.class);
+        return Response.ok(service.updateConfigurationProfile(appId, profileId, request)).build();
+    }
+
+    @POST
+    @Path("/applications/{appId}/configurationprofiles/{profileId}/validators")
+    public Response validateConfiguration(@PathParam("appId") String appId,
+                                          @PathParam("profileId") String profileId,
+                                          @QueryParam("configuration_version") String configurationVersion) {
+        service.validateConfiguration(appId, profileId, configurationVersion);
+        return Response.ok().build();
+    }
+
+    @PATCH
+    @Path("/deploymentstrategies/{id}")
+    public Response updateDeploymentStrategy(@PathParam("id") String id, String body) throws IOException {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> request = objectMapper.readValue(body, Map.class);
+        return Response.ok(service.updateDeploymentStrategy(id, request)).build();
+    }
+
+    @DELETE
+    @Path("/deployementstrategies/{id}")
+    public Response deleteDeploymentStrategyTypo(@PathParam("id") String id) {
+        service.deleteDeploymentStrategy(id);
+        return Response.noContent().build();
+    }
+
     @DELETE
     @Path("/applications/{appId}/environments/{envId}/deployments/{deploymentNumber}")
     public Response stopDeployment(@PathParam("appId") String appId, @PathParam("envId") String envId,
                                    @PathParam("deploymentNumber") int deploymentNumber) {
         return Response.ok(service.stopDeployment(appId, envId, deploymentNumber)).build();
     }
-
-    // ──────────────────────────── Extensions ────────────────────────────
 
     @POST
     @Path("/extensions")
@@ -430,29 +449,5 @@ public class AppConfigController {
     public Response deleteExtensionAssociation(@PathParam("id") String id) {
         service.deleteExtensionAssociation(id);
         return Response.noContent().build();
-    // ──────────────────────────── Configuration ────────────────────────────
-
-    // The deprecated GetConfiguration: superseded by AppConfigData, but still an AppConfig operation.
-    // The response type comes from the stored version (Ion for variant flags when Accept asks for it),
-    // never from negotiation, so a non-JSON Accept header is not refused.
-    @GET
-    @Path("/applications/{appId}/environments/{envId}/configurations/{configuration}")
-    @Produces(MediaType.WILDCARD)
-    public Response getConfiguration(@PathParam("appId") String appId,
-                                     @PathParam("envId") String envId,
-                                     @PathParam("configuration") String configuration,
-                                     @QueryParam("client_id") String clientId,
-                                     @HeaderParam("Accept") String accept,
-                                     @Context UriInfo uriInfo) {
-        // Read raw: @QueryParam turns an empty value into null, but AWS rejects an empty version.
-        String clientVersion = uriInfo.getQueryParameters().getFirst("client_configuration_version");
-        LegacyConfiguration data = dataService.getConfiguration(
-                appId, envId, configuration, clientId, clientVersion, accept);
-        // A version stored without a content type would otherwise go out as the */* of @Produces.
-        String contentType = data.contentType() != null ? data.contentType() : MediaType.APPLICATION_OCTET_STREAM;
-        return Response.ok(data.content())
-                .header("Content-Type", contentType)
-                .header("Configuration-Version", data.configurationVersion())
-                .build();
     }
 }

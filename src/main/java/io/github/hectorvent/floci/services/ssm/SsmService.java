@@ -19,8 +19,6 @@ import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.ec2.Ec2ImageCatalog;
-import io.github.hectorvent.floci.services.kms.KmsService;
-import io.github.hectorvent.floci.services.kms.model.KmsKey;
 import io.github.hectorvent.floci.services.secretsmanager.SecretsManagerService;
 import io.github.hectorvent.floci.services.secretsmanager.model.Secret;
 import io.github.hectorvent.floci.services.secretsmanager.model.SecretVersion;
@@ -41,6 +39,12 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.ArrayList;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
+import io.github.hectorvent.floci.services.kms.KmsService;
+import io.github.hectorvent.floci.services.kms.model.KmsKey;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
@@ -53,17 +57,12 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
-import java.util.regex.Pattern;
-import java.util.regex.PatternSyntaxException;
 
 @ApplicationScoped
 public class SsmService implements ResourceProvider {
 
     private static final Logger LOG = Logger.getLogger(SsmService.class);
-    static final String AWS_MANAGED_SSM_ALIAS = "alias/aws/ssm";
 
     private static final String PUBLIC_PARAMETER_PREFIX = "/aws/service/";
     private static final DateTimeFormatter SOURCE_RESULT_DATE =
@@ -107,7 +106,6 @@ public class SsmService implements ResourceProvider {
     private final StorageBackend<String, SsmAssociation> associationStore;
     private final int maxParameterHistory;
     private final RegionResolver regionResolver;
-    private final KmsService kmsService;
     private final Ec2ImageCatalog imageCatalog;
     private final SecretsManagerService secretsManager;
     private final SsmEventPublisher eventPublisher;
@@ -221,7 +219,6 @@ public class SsmService implements ResourceProvider {
         this.associationStore = associationStore;
         this.maxParameterHistory = maxParameterHistory;
         this.regionResolver = regionResolver;
-        this.kmsService = kmsService;
         this.imageCatalog = imageCatalog;
         this.secretsManager = secretsManager;
         this.eventPublisher = eventPublisher;
@@ -261,20 +258,6 @@ public class SsmService implements ResourceProvider {
                     400);
         }
 
-        String resolvedType = type != null ? type : (existing != null ? existing.getType() : "String");
-        if (allowedPattern != null && !allowedPattern.isBlank() && value != null) {
-            try {
-                if (!value.matches(allowedPattern)) {
-                    throw new AwsException("ParameterPatternMismatchException",
-                            "The parameter value does not match the allowed pattern.",
-                            400);
-                }
-            } catch (PatternSyntaxException e) {
-                throw new AwsException("ValidationException",
-                        "The allowed pattern is not a valid regular expression.",
-                        400);
-            }
-        }
         // Terraform sends an empty AllowedPattern for every parameter; AWS treats it as no pattern.
         if (allowedPattern != null && allowedPattern.isEmpty()) {
             allowedPattern = null;
@@ -332,7 +315,7 @@ public class SsmService implements ResourceProvider {
 
         long version = (existing != null) ? existing.getVersion() + 1 : 1;
 
-        Parameter parameter = new Parameter(name, value, resolvedType);
+        Parameter parameter = new Parameter(name, value, type != null ? type : "String");
         parameter.setVersion(version);
         parameter.setDescription(description);
         if ("SecureString".equals(parameter.getType())) {
@@ -356,28 +339,12 @@ public class SsmService implements ResourceProvider {
         parameter.setTier(tier != null ? tier : existing != null ? tierOf(existing) : "Standard");
         parameter.setArn(regionResolver.buildArn("ssm", region, parameterResource(name)));
         parameter.setLastModifiedDate(Instant.now());
-        parameter.setTier(tier != null ? tier : (existing != null && existing.getTier() != null ? existing.getTier() : "Standard"));
-        parameter.setAllowedPattern(allowedPattern != null ? allowedPattern
-                : (existing != null ? existing.getAllowedPattern() : null));
-        parameter.setDataType(dataType != null ? dataType
-                : (existing != null && existing.getDataType() != null ? existing.getDataType() : "text"));
-        if ("SecureString".equals(resolvedType)) {
-            String resolvedKeyId = keyId != null ? keyId
-                    : (existing != null && existing.getKeyId() != null ? existing.getKeyId() : AWS_MANAGED_SSM_ALIAS);
-            parameter.setKeyId(resolvedKeyId);
-            ensureAwsManagedSsmKey(resolvedKeyId, region);
-        } else {
-            parameter.setKeyId(null);
-        }
 
-        Map<String, String> resolvedTags = new HashMap<>();
         if (existing != null && existing.getTags() != null) {
-            resolvedTags.putAll(existing.getTags());
+            parameter.setTags(new HashMap<>(existing.getTags()));
+        } else if (tags != null && !tags.isEmpty()) {
+            parameter.setTags(new HashMap<>(tags));
         }
-        if (tags != null) {
-            resolvedTags.putAll(tags);
-        }
-        parameter.setTags(resolvedTags);
 
         parameterStore.put(storageKey, parameter);
         addHistory(storageKey, parameter);
@@ -1151,12 +1118,6 @@ public class SsmService implements ResourceProvider {
     }
 
     public synchronized SsmDocument createDocument(String name, String content, String documentType, String region) {
-        return createDocument(name, content, documentType, null, null, Map.of(), region);
-    }
-
-    public synchronized SsmDocument createDocument(String name, String content, String documentType,
-                                                   String documentFormat, String targetType,
-                                                   Map<String, String> tags, String region) {
         String storageKey = regionKey(region, name);
         if (documentStore.get(storageKey).isPresent()) {
             throw new AwsException("DocumentAlreadyExists",
@@ -1164,30 +1125,6 @@ public class SsmService implements ResourceProvider {
         }
         SsmDocument document = new SsmDocument(name, content, documentType);
         document.setOwner(regionResolver.getAccountId());
-        if (documentFormat != null && !documentFormat.isBlank()) {
-            document.setDocumentFormat(documentFormat);
-        }
-        document.setTargetType(targetType);
-        document.setTags(tags);
-        documentStore.put(storageKey, document);
-        return document;
-    }
-
-    /** Adds and removes a document's tags (AddTagsToResource/RemoveTagsFromResource with ResourceType=Document). */
-    public synchronized SsmDocument tagDocument(String name, Map<String, String> tagsToAdd,
-                                                List<String> tagKeysToRemove, String region) {
-        String storageKey = regionKey(region, name);
-        SsmDocument document = documentStore.get(storageKey)
-                .orElseThrow(() -> new AwsException("InvalidResourceId",
-                        "Resource " + name + " not found.", 400));
-        Map<String, String> tags = new LinkedHashMap<>(document.getTags());
-        if (tagKeysToRemove != null) {
-            tagKeysToRemove.forEach(tags::remove);
-        }
-        if (tagsToAdd != null) {
-            tags.putAll(tagsToAdd);
-        }
-        document.setTags(tags);
         documentStore.put(storageKey, document);
         return document;
     }
@@ -1583,38 +1520,6 @@ public class SsmService implements ResourceProvider {
     }
 
     /**
-     * AWS lazily creates {@code alias/aws/ssm} on the first SecureString that
-     * uses the default key. Seed that alias in KMS so DescribeKey resolves a
-     * real {@code arn:aws:kms:...:key/...}.
-     */
-    void ensureAwsManagedSsmKey(String keyId, String region) {
-        if (kmsService == null || keyId == null) {
-            return;
-        }
-        if (!AWS_MANAGED_SSM_ALIAS.equals(keyId) && !keyId.endsWith(":" + AWS_MANAGED_SSM_ALIAS)) {
-            return;
-        }
-        try {
-            kmsService.describeKey(AWS_MANAGED_SSM_ALIAS, region);
-            return;
-        } catch (AwsException e) {
-            if (!"NotFoundException".equals(e.getErrorCode())) {
-                throw e;
-            }
-        }
-        try {
-            KmsKey key = kmsService.createKey(
-                    "Default key that protects my SSM SecureString parameters when no other key is defined",
-                    region);
-            kmsService.createAlias(AWS_MANAGED_SSM_ALIAS, key.getKeyId(), region);
-        } catch (AwsException e) {
-            if (!"AlreadyExistsException".equals(e.getErrorCode())) {
-                throw e;
-            }
-        }
-    }
-
-    /**
      * Read a service setting for the calling account. Never-customized settings
      * report their account default with status "Default".
      */
@@ -1669,33 +1574,6 @@ public class SsmService implements ResourceProvider {
         return region + "::" + name;
     }
 
-    /**
-     * AWS GetParameter treats {@code MyParam} and {@code /MyParam} as the same
-     * name. ECS secret {@code valueFrom} ARNs always extract a leading slash
-     * ({@code arn:...:parameter/MyParam} → {@code /MyParam}), so a PutParameter
-     * of the unrooted name must still resolve.
-     */
-    private Optional<Parameter> findParameter(String name, String region) {
-        if (name == null || name.isBlank()) {
-            return Optional.empty();
-        }
-        Optional<Parameter> found = parameterStore.get(regionKey(region, name));
-        if (found.isPresent()) {
-            return found;
-        }
-        String aliased = name.startsWith("/") ? name.substring(1) : "/" + name;
-        if (aliased.isBlank() || aliased.equals(name)) {
-            return Optional.empty();
-        }
-        return parameterStore.get(regionKey(region, aliased))
-                .or(() -> publicParameter(name.startsWith("/") ? name : aliased, region));
-    }
-
-    /** AWS ARN resource is always {@code parameter/<name-without-leading-slash>}. */
-    static String parameterResource(String name) {
-        return name.startsWith("/") ? "parameter" + name : "parameter/" + name;
-    }
-
     private void addHistory(String storageKey, Parameter parameter) {
         List<ParameterHistory> history = historyStore.get(storageKey)
                 .orElse(new ArrayList<>());
@@ -1743,5 +1621,85 @@ public class SsmService implements ResourceProvider {
     @Override
     public Set<SupportedResourceType> getSupportedResourceTypes() {
         return Set.of(new SupportedResourceType("ssm:parameter", "ssm", true));
+    }
+
+    static final String AWS_MANAGED_SSM_ALIAS = "alias/aws/ssm";
+
+    private final KmsService kmsService;
+
+    public record UnlabelResult(List<String> removedLabels, List<String> invalidLabels) {
+    }
+
+    private static String normalizeResourceId(String resourceId) {
+        if (resourceId != null && resourceId.startsWith("arn:")) {
+            try {
+                AwsArnUtils.Arn arn = AwsArnUtils.parse(resourceId);
+                if ("ssm".equals(arn.service())) {
+                    String resource = arn.resource();
+                    if (resource.startsWith("parameter/")) {
+                        return resource.substring("parameter".length());
+                    }
+                    if (resource.startsWith("parameter")) {
+                        return resource.substring("parameter".length());
+                    }
+                }
+            } catch (IllegalArgumentException e) {
+                // Not a valid ARN; fall through and use resourceId directly so callers
+                // querying parameterStore produce the standard InvalidResourceId error.
+                LOG.debugv("Failed to parse resourceId as ARN: {0}", resourceId);
+            }
+        }
+        return resourceId;
+    }
+
+    /** Adds and removes a document's tags (AddTagsToResource/RemoveTagsFromResource with ResourceType=Document). */
+    public synchronized SsmDocument tagDocument(String name, Map<String, String> tagsToAdd,
+                                                List<String> tagKeysToRemove, String region) {
+        String storageKey = regionKey(region, name);
+        SsmDocument document = documentStore.get(storageKey)
+                .orElseThrow(() -> new AwsException("InvalidResourceId",
+                        "Resource " + name + " not found.", 400));
+        Map<String, String> tags = new LinkedHashMap<>(document.getTags());
+        if (tagKeysToRemove != null) {
+            tagKeysToRemove.forEach(tags::remove);
+        }
+        if (tagsToAdd != null) {
+            tags.putAll(tagsToAdd);
+        }
+        document.setTags(tags);
+        documentStore.put(storageKey, document);
+        return document;
+    }
+
+    /**
+     * AWS lazily creates {@code alias/aws/ssm} on the first SecureString that
+     * uses the default key. Seed that alias in KMS so DescribeKey resolves a
+     * real {@code arn:aws:kms:...:key/...}.
+     */
+    void ensureAwsManagedSsmKey(String keyId, String region) {
+        if (kmsService == null || keyId == null) {
+            return;
+        }
+        if (!AWS_MANAGED_SSM_ALIAS.equals(keyId) && !keyId.endsWith(":" + AWS_MANAGED_SSM_ALIAS)) {
+            return;
+        }
+        try {
+            kmsService.describeKey(AWS_MANAGED_SSM_ALIAS, region);
+            return;
+        } catch (AwsException e) {
+            if (!"NotFoundException".equals(e.getErrorCode())) {
+                throw e;
+            }
+        }
+        try {
+            KmsKey key = kmsService.createKey(
+                    "Default key that protects my SSM SecureString parameters when no other key is defined",
+                    region);
+            kmsService.createAlias(AWS_MANAGED_SSM_ALIAS, key.getKeyId(), region);
+        } catch (AwsException e) {
+            if (!"AlreadyExistsException".equals(e.getErrorCode())) {
+                throw e;
+            }
+        }
     }
 }

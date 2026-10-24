@@ -6,8 +6,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
+import java.util.List;
 
 @RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -35,21 +35,6 @@ public class BackupVault {
     @JsonProperty("Tags")
     private Map<String, String> tags = new HashMap<>();
 
-    @JsonProperty("AccessPolicy")
-    private String accessPolicy;
-
-    @JsonProperty("SNSTopicArn")
-    private String snsTopicArn;
-
-    @JsonProperty("BackupVaultEvents")
-    private List<String> backupVaultEvents;
-
-    public String getAccessPolicy() { return accessPolicy; }
-    public void setAccessPolicy(String accessPolicy) { this.accessPolicy = accessPolicy; }
-    public String getSnsTopicArn() { return snsTopicArn; }
-    public void setSnsTopicArn(String snsTopicArn) { this.snsTopicArn = snsTopicArn; }
-    public List<String> getBackupVaultEvents() { return backupVaultEvents; }
-    public void setBackupVaultEvents(List<String> events) { this.backupVaultEvents = events; }
     // Vault Lock. These four ARE part of the DescribeBackupVault response in AWS, unlike
     // the access policy and the notification configuration, which have their own Get
     // operations and are stored separately.
@@ -132,4 +117,25 @@ public class BackupVault {
 
     public String getVaultState() { return vaultState; }
     public void setVaultState(String vaultState) { this.vaultState = vaultState; }
+
+    @JsonProperty("AccessPolicy")
+    private String accessPolicy;
+
+    @JsonProperty("SNSTopicArn")
+    private String snsTopicArn;
+
+    @JsonProperty("BackupVaultEvents")
+    private List<String> backupVaultEvents;
+
+    public String getAccessPolicy() { return accessPolicy; }
+
+    public void setAccessPolicy(String accessPolicy) { this.accessPolicy = accessPolicy; }
+
+    public String getSnsTopicArn() { return snsTopicArn; }
+
+    public void setSnsTopicArn(String snsTopicArn) { this.snsTopicArn = snsTopicArn; }
+
+    public List<String> getBackupVaultEvents() { return backupVaultEvents; }
+
+    public void setBackupVaultEvents(List<String> events) { this.backupVaultEvents = events; }
 }
