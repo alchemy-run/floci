@@ -675,7 +675,9 @@ public class VpcNetworkManager {
     private String materialise(VpcBinding vpc) {
         synchronized (vpc) {
             if (vpc.created) {
-                attachCurrentContainer(vpc, null);
+                // A network retained across restarts is marked created at plan time, so its
+                // endpoints have not been read yet; Docker rejects a duplicate connect.
+                attachCurrentContainer(vpc, vpc.flociContainerId == null ? inspectQuietly(vpc) : null);
                 return vpc.networkName;
             }
             Network existing = null;
