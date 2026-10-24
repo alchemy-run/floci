@@ -5490,7 +5490,7 @@ public class S3Service implements Resettable, ResourceProvider {
             LOG.debugv("BlockPublicPolicy rejected a public bucket policy on bucket {0}", bucketName);
             throw accessDeniedException(bucketName, null);
         }
-        mutateBucket(bucketName, bucket -> bucket.setPolicy(policy));
+        mutateBucket(bucketName, bucket -> bucket.setPolicy(normalizeBucketPolicy(policy)));
     }
 
     public void deleteBucketPolicy(String bucketName) {
@@ -8201,5 +8201,151 @@ public class S3Service implements Resettable, ResourceProvider {
         if (!expectedOwner.equals(bucket.account())) {
             throw new AwsException("AccessDenied", "Access Denied", 403);
         }
+    }
+
+    /**
+     * Real S3 collapses singleton {@code Action}/{@code Resource} (and Not*) arrays
+     * to a bare string when storing a bucket policy. Clients that PUT
+     * {@code ["s3:GetObject"]} therefore GET {@code "s3:GetObject"}.
+     */
+    private String normalizeBucketPolicy(String policy) {
+        if (policy == null || policy.isBlank()) {
+            return policy;
+        }
+        try {
+            var root = objectMapper.readTree(policy);
+            if (!root.isObject()) {
+                return policy;
+            }
+            var statements = root.get("Statement");
+            if (statements == null || statements.isNull()) {
+                return policy;
+            }
+            if (statements.isArray()) {
+                for (var statement : statements) {
+                    collapseSingletonPolicyFields(statement);
+                }
+            } else {
+                collapseSingletonPolicyFields(statements);
+            }
+            return objectMapper.writeValueAsString(root);
+        } catch (Exception e) {
+            return policy;
+        }
+    }
+
+    private static void collapseSingletonPolicyFields(com.fasterxml.jackson.databind.JsonNode statement) {
+        if (!(statement instanceof com.fasterxml.jackson.databind.node.ObjectNode object)) {
+            return;
+        }
+        for (String field : List.of("Action", "NotAction", "Resource", "NotResource")) {
+            var node = object.get(field);
+            if (node != null && node.isArray() && node.size() == 1) {
+                object.set(field, node.get(0));
+            }
+        }
+    }
+
+    public record ListMultipartUploadsResult(List<MultipartUpload> uploads, List<String> commonPrefixes,
+                                             boolean isTruncated, String nextKeyMarker,
+                                             String nextUploadIdMarker) {}
+
+    /**
+     * Lists the in-progress multipart uploads of {@code bucket} the way S3 pages them: uploads are ordered by
+     * key and, within a key, by initiation time; {@code delimiter} rolls keys up into {@code CommonPrefixes};
+     * and {@code maxUploads} bounds the uploads plus common prefixes returned. Without {@code uploadIdMarker}
+     * the {@code keyMarker} is an exclusive lower bound on the key; with it, the uploads of {@code keyMarker}
+     * that follow the named upload are listed before any greater key.
+     */
+    public ListMultipartUploadsResult listMultipartUploads(String bucket, String prefix, String delimiter,
+                                                           int maxUploads, String keyMarker,
+                                                           String uploadIdMarker) {
+        ensureBucketExists(bucket);
+        String effectivePrefix = prefix != null ? prefix : "";
+        String ownerAccountId = getBucketOwnerAccountId(bucket);
+        List<MultipartUpload> uploads = new ArrayList<>(multipartUploads.values().stream()
+                .filter(u -> u.getBucket().equals(bucket)
+                        && (u.getOwnerAccountId() == null || ownerAccountId.equals(u.getOwnerAccountId())))
+                .filter(u -> u.getKey().startsWith(effectivePrefix))
+                .toList());
+        Comparator<MultipartUpload> order = Comparator.comparing(MultipartUpload::getKey)
+                .thenComparing(MultipartUpload::getInitiated, Comparator.nullsFirst(Comparator.<Instant>naturalOrder()))
+                .thenComparing(MultipartUpload::getUploadId);
+        uploads.sort(order);
+
+        List<String> commonPrefixes = new ArrayList<>();
+        if (delimiter != null && !delimiter.isEmpty()) {
+            Set<String> prefixSet = new TreeSet<>();
+            List<MultipartUpload> direct = new ArrayList<>();
+            for (MultipartUpload upload : uploads) {
+                String remainder = upload.getKey().substring(effectivePrefix.length());
+                int delimIdx = remainder.indexOf(delimiter);
+                if (delimIdx >= 0) {
+                    prefixSet.add(effectivePrefix + remainder.substring(0, delimIdx + delimiter.length()));
+                } else {
+                    direct.add(upload);
+                }
+            }
+            uploads = direct;
+            commonPrefixes.addAll(prefixSet);
+        }
+
+        if (keyMarker != null && !keyMarker.isEmpty()) {
+            String km = keyMarker;
+            commonPrefixes.removeIf(cp -> cp.compareTo(km) <= 0);
+            List<MultipartUpload> remaining = new ArrayList<>();
+            boolean markerNamed = uploadIdMarker != null && !uploadIdMarker.isEmpty();
+            boolean markerFound = markerNamed && uploads.stream().anyMatch(u ->
+                    km.equals(u.getKey()) && uploadIdMarker.equals(u.getUploadId()));
+            boolean afterMarker = false;
+            for (MultipartUpload upload : uploads) {
+                int keyCompare = upload.getKey().compareTo(km);
+                if (keyCompare > 0) {
+                    remaining.add(upload);
+                } else if (keyCompare == 0 && markerNamed) {
+                    if (markerFound) {
+                        if (afterMarker) {
+                            remaining.add(upload);
+                        } else if (uploadIdMarker.equals(upload.getUploadId())) {
+                            afterMarker = true;
+                        }
+                    } else if (upload.getUploadId().compareTo(uploadIdMarker) > 0) {
+                        // The marker upload was completed or aborted between pages.
+                        remaining.add(upload);
+                    }
+                }
+            }
+            uploads = remaining;
+        }
+
+        List<MultipartUpload> pageUploads = new ArrayList<>();
+        List<String> pagePrefixes = new ArrayList<>();
+        int uIdx = 0;
+        int cpIdx = 0;
+        String nextKeyMarker = null;
+        String nextUploadIdMarker = null;
+        while (pageUploads.size() + pagePrefixes.size() < maxUploads
+                && (uIdx < uploads.size() || cpIdx < commonPrefixes.size())) {
+            String uKey = uIdx < uploads.size() ? uploads.get(uIdx).getKey() : null;
+            String cpKey = cpIdx < commonPrefixes.size() ? commonPrefixes.get(cpIdx) : null;
+            if (uKey != null && (cpKey == null || uKey.compareTo(cpKey) <= 0)) {
+                MultipartUpload upload = uploads.get(uIdx++);
+                pageUploads.add(upload);
+                nextKeyMarker = upload.getKey();
+                nextUploadIdMarker = upload.getUploadId();
+            } else {
+                String commonPrefix = commonPrefixes.get(cpIdx++);
+                pagePrefixes.add(commonPrefix);
+                nextKeyMarker = commonPrefix;
+                nextUploadIdMarker = null;
+            }
+        }
+        boolean isTruncated = uIdx < uploads.size() || cpIdx < commonPrefixes.size();
+        if (!isTruncated) {
+            nextKeyMarker = null;
+            nextUploadIdMarker = null;
+        }
+        return new ListMultipartUploadsResult(pageUploads, pagePrefixes, isTruncated, nextKeyMarker,
+                nextUploadIdMarker);
     }
 }

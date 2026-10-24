@@ -612,7 +612,9 @@ public class S3Controller {
                     s3Service.isAuthEnforced(), httpHeaders, uriInfo);
             if (hasQueryParam(uriInfo, "uploads")) {
                 s3Service.authorizeBucketRead(bucket, "s3:ListBucketMultipartUploads", authorization);
-                return handleListMultipartUploads(bucket);
+                return handleListMultipartUploads(bucket, prefix, delimiter, keyMarker,
+                        uriInfo.getQueryParameters().getFirst("upload-id-marker"),
+                        uriInfo.getQueryParameters().getFirst("max-uploads"), encodingType);
             }
             if (hasQueryParam(uriInfo, "notification")) {
                 s3Service.authorizeBucketRead(bucket, "s3:GetBucketNotification", authorization);
@@ -2011,21 +2013,61 @@ public class S3Controller {
         return Response.ok(xml.build()).type(MediaType.APPLICATION_XML).build();
     }
 
-    private Response handleListMultipartUploads(String bucket) {
-        List<MultipartUpload> uploads = s3Service.listMultipartUploads(bucket);
+    private Response handleListMultipartUploads(String bucket, String prefix, String delimiter, String keyMarker,
+                                                String uploadIdMarker, String maxUploadsQuery,
+                                                String encodingType) {
+        int maxUploads = Math.min(resolveMaxUploads(maxUploadsQuery), 1000);
+        S3Service.ListMultipartUploadsResult result = s3Service.listMultipartUploads(
+                bucket, prefix, delimiter, maxUploads, keyMarker, uploadIdMarker);
         XmlBuilder xml = new XmlBuilder()
                 .raw("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
                 .start("ListMultipartUploadsResult", AwsNamespaces.S3)
-                .elem("Bucket", bucket);
-        for (MultipartUpload upload : uploads) {
+                .elem("Bucket", bucket)
+                .elem("KeyMarker", maybeEncode(keyMarker != null ? keyMarker : "", encodingType))
+                // Upload ids are opaque, so they are echoed verbatim like version-id markers.
+                .elem("UploadIdMarker", uploadIdMarker != null ? uploadIdMarker : "");
+        if (result.isTruncated()) {
+            xml.elem("NextKeyMarker", maybeEncode(result.nextKeyMarker(), encodingType))
+               .elem("NextUploadIdMarker", result.nextUploadIdMarker());
+        }
+        if (delimiter != null) {
+            xml.elem("Delimiter", maybeEncode(delimiter, encodingType));
+        }
+        xml.elem("Prefix", maybeEncode(prefix != null ? prefix : "", encodingType))
+           .elem("MaxUploads", maxUploads)
+           .elem("IsTruncated", result.isTruncated());
+        for (MultipartUpload upload : result.uploads()) {
             xml.start("Upload")
-               .elem("Key", upload.getKey())
+               .elem("Key", maybeEncode(upload.getKey(), encodingType))
                .elem("UploadId", upload.getUploadId())
-               .elem("Initiated", ISO_FORMAT.format(upload.getInitiated()))
-               .end("Upload");
+               .start("Initiator")
+               .elem("ID", "owner")
+               .elem("DisplayName", "owner")
+               .end("Initiator")
+               .start("Owner")
+               .elem("ID", "owner")
+               .elem("DisplayName", "owner")
+               .end("Owner")
+               .elem("StorageClass", upload.getStorageClass())
+               .elem("Initiated", ISO_FORMAT.format(upload.getInitiated()));
+            if (upload.getChecksumAlgorithm() != null) {
+                xml.elem("ChecksumAlgorithm", upload.getChecksumAlgorithm().name());
+            }
+            if (upload.getChecksumType() != null) {
+                xml.elem("ChecksumType", upload.getChecksumType().name());
+            }
+            xml.end("Upload");
+        }
+        for (String commonPrefix : result.commonPrefixes()) {
+            xml.start("CommonPrefixes")
+               .elem("Prefix", maybeEncode(commonPrefix, encodingType))
+               .end("CommonPrefixes");
+        }
+        if (encodingType != null) {
+            xml.elem("EncodingType", encodingType);
         }
         xml.end("ListMultipartUploadsResult");
-        return Response.ok(xml.build()).build();
+        return Response.ok(xml.build()).type(MediaType.APPLICATION_XML).build();
     }
 
     private record CompletedPart(int partNumber, String eTag, S3Checksum checksum) {}
