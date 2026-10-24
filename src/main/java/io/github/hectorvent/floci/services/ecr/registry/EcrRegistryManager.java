@@ -304,6 +304,7 @@ public class EcrRegistryManager {
             String previousContainerId = containerId;
             closeLogStream();
             containerId = null;
+            registryInternalHost = null;
             started = false;
             if (presence == ContainerPresence.ABSENT) {
                 portAllocator.release(hostPort);
@@ -341,7 +342,9 @@ public class EcrRegistryManager {
                     config.services().ecr().registryBasePort(),
                     config.services().ecr().registryMaxPort(),
                     port -> {
-                        this.containerId = lifecycleManager.createAndStart(registryContainerSpec(name, port)).containerId();
+                        ContainerInfo info = lifecycleManager.createAndStart(registryContainerSpec(name, port));
+                        this.containerId = info.containerId();
+                        rememberInternalHost(info);
                         return port;
                     });
             this.started = true;
