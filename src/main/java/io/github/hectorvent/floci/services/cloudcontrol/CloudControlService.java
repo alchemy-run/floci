@@ -317,6 +317,24 @@ public class CloudControlService {
         persistRequest(new PersistedRequest(pending, region, desiredStateJson, System.currentTimeMillis()));
         Runnable task = () -> RequestScopes.runAs(accountId, () -> {
             try {
+                // SSM documents and parameters are created by their own backends, so their
+                // identifier is the name the desired state gives, as Cloud Control reports it.
+                if (SsmDocumentResource.TYPE.equals(typeName) || "AWS::SSM::Parameter".equals(typeName)) {
+                    String identifier;
+                    if ("AWS::SSM::Parameter".equals(typeName)) {
+                        identifier = props.path("Name").asText("cloudcontrol-" + token);
+                        ssmBackend.write(identifier, props, false, region);
+                    } else {
+                        identifier = ssmDocuments.create(props, region);
+                    }
+                    String model = resourceModel(region, typeName, identifier, props);
+                    CreatedResource createdResource = new CreatedResource(token, accountId, Map.of(), model);
+                    created.put(createdKey(accountId, region, typeName, identifier), createdResource);
+                    persistCreated(accountId, region, typeName, identifier, createdResource);
+                    record(new ProgressEvent(typeName, identifier,
+                            token, "CREATE", "SUCCESS", null, model, accountId));
+                    return;
+                }
                 StackResource resource = provisioner.provisionStandalone(typeName, props, region, accountId);
                 if (resource == null || resource.getPhysicalId() == null) {
                     recordCreateFailure(pending, "CreateResource is not supported for " + typeName + ".");
