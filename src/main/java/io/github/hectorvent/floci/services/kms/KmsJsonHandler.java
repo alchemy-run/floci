@@ -84,6 +84,7 @@ public class KmsJsonHandler {
             case "GenerateDataKeyPairWithoutPlaintext" -> handleGenerateDataKeyPairWithoutPlaintext(request, region);
             case "GenerateDataKeyPair" -> handleGenerateDataKeyPair(request, region);
             case "Sign" -> handleSign(request, region);
+            case "DeriveSharedSecret" -> handleDeriveSharedSecret(request, region);
             case "Verify" -> handleVerify(request, region);
             case "GenerateMac" -> handleGenerateMac(request, region);
             case "VerifyMac" -> handleVerifyMac(request, region);
@@ -946,4 +947,17 @@ public class KmsJsonHandler {
                 region);
     }
 
+    private Response handleDeriveSharedSecret(JsonNode request, String region) {
+        byte[] publicKey = decodeBlob(request, "PublicKey");
+        KmsService.DeriveSharedSecretResult result = service.deriveSharedSecret(
+                request.path("KeyId").asText(),
+                publicKey,
+                request.path("KeyAgreementAlgorithm").asText(null),
+                region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("KeyId", result.keyArn());
+        response.put("KeyAgreementAlgorithm", result.algorithm());
+        response.put("SharedSecret", Base64.getEncoder().encodeToString(result.sharedSecret()));
+        return Response.ok(response).build();
+    }
 }

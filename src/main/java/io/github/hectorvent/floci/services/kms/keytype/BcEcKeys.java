@@ -41,6 +41,19 @@ import java.security.SecureRandom;
 import java.security.spec.InvalidKeySpecException;
 import java.util.Base64;
 import java.util.Map;
+import org.bouncycastle.crypto.agreement.ECDHBasicAgreement;
+import org.bouncycastle.jcajce.provider.asymmetric.ec.BCECPrivateKey;
+import org.bouncycastle.jcajce.provider.asymmetric.ec.BCECPublicKey;
+import org.bouncycastle.jcajce.provider.asymmetric.ec.KeyFactorySpi;
+import org.bouncycastle.jcajce.provider.asymmetric.ec.KeyPairGeneratorSpi;
+import org.bouncycastle.jcajce.provider.util.AsymmetricKeyInfoConverter;
+import org.bouncycastle.jce.ECNamedCurveTable;
+import org.bouncycastle.jce.spec.ECNamedCurveParameterSpec;
+import org.bouncycastle.util.BigIntegers;
+import java.security.InvalidAlgorithmParameterException;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.spec.ECGenParameterSpec;
 
 // Each curve is built from its own BouncyCastle class. A lookup through BouncyCastle's named curve
 // tables would keep every curve those tables know in the native image.
@@ -240,5 +253,27 @@ final class BcEcKeys {
         AlgorithmIdentifier algorithm() {
             return new AlgorithmIdentifier(X9ObjectIdentifiers.id_ecPublicKey, parameters());
         }
+    }
+
+    static byte[] deriveSharedSecret(KmsKey key, byte[] publicKeyDer, String curveName) throws IOException {
+        AsymmetricKeyInfoConverter converter = new KeyFactorySpi.EC();
+        BCECPublicKey peer = (BCECPublicKey) converter.generatePublic(SubjectPublicKeyInfo.getInstance(publicKeyDer));
+        ECDomainParameters domain = domainParameters(curveName);
+        ECNamedCurveParameterSpec peerSpec = ECNamedCurveTable.getParameterSpec(curveName);
+        if (!peerSpec.getCurve().equals(peer.getParameters().getCurve())
+                || !peerSpec.getG().equals(peer.getParameters().getG())
+                || !peerSpec.getN().equals(peer.getParameters().getN())
+                || !peerSpec.getH().equals(peer.getParameters().getH())) {
+            throw new IllegalArgumentException("Peer public key uses a different curve");
+        }
+        ECDHBasicAgreement agreement = new ECDHBasicAgreement();
+        agreement.init(privateKeyParameters(key, curveName));
+        return BigIntegers.asUnsignedByteArray(agreement.getFieldSize(),
+                agreement.calculateAgreement(new ECPublicKeyParameters(peer.getQ(), domain)));
+    }
+
+    private static ECDomainParameters domainParameters(String curveName) {
+        ECNamedCurveParameterSpec spec = ECNamedCurveTable.getParameterSpec(curveName);
+        return new ECDomainParameters(spec.getCurve(), spec.getG(), spec.getN(), spec.getH());
     }
 }

@@ -9,6 +9,9 @@ import java.security.KeyPairGenerator;
 import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.spec.ECGenParameterSpec;
+import java.security.KeyFactory;
+import java.security.spec.X509EncodedKeySpec;
+import javax.crypto.KeyAgreement;
 
 final class EccNistKeyType implements KmsKeyType {
 
@@ -43,5 +46,15 @@ final class EccNistKeyType implements KmsKeyType {
             case DIGEST -> "NONEwithECDSA";
             case RAW -> algorithm.getJavaName();
         };
+    }
+
+    @Override
+    public byte[] deriveSharedSecret(KmsKey key, byte[] publicKeyDer) throws GeneralSecurityException {
+        PrivateKey privateKey = AsymmetricKeys.privateKey(key, "EC");
+        PublicKey peer = KeyFactory.getInstance("EC").generatePublic(new X509EncodedKeySpec(publicKeyDer));
+        KeyAgreement agreement = KeyAgreement.getInstance("ECDH");
+        agreement.init(privateKey);
+        agreement.doPhase(peer, true);
+        return agreement.generateSecret();
     }
 }

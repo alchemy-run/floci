@@ -41,4 +41,8 @@ public interface KmsKeyType {
     default void importKeyMaterial(KmsKey key, byte[] material) {
         throw new IllegalStateException(key.getKeySpec() + " does not import key material");
     }
+
+    default byte[] deriveSharedSecret(KmsKey key, byte[] publicKeyDer) throws Exception {
+        throw new IllegalStateException(key.getKeySpec() + " does not support key agreement");
+    }
 }

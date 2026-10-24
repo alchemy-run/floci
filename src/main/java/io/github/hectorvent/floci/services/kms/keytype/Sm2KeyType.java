@@ -50,4 +50,9 @@ final class Sm2KeyType implements KmsKeyType {
         verifier.update(message, 0, message.length);
         return verifier.verifySignature(signature);
     }
+
+    @Override
+    public byte[] deriveSharedSecret(KmsKey key, byte[] publicKeyDer) throws IOException {
+        return BcEcKeys.deriveSharedSecret(key, publicKeyDer, CURVE);
+    }
 }
