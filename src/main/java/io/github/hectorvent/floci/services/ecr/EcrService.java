@@ -792,6 +792,7 @@ public class EcrService implements ResourceProvider {
         image.setImageId(new ImageIdentifier(imageTag, finalDigest));
         image.setImageManifest(imageManifest);
         image.setImageManifestMediaType(mediaType);
+        publishImageAction("PUSH", repo, repositoryName, region, finalDigest, imageTag, mediaType);
         return image;
     }
 
