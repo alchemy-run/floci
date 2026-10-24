@@ -116,6 +116,8 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
     private final ImageResolver imageResolver;
     private final RuntimeApiServerFactory runtimeApiServerFactory;
     private final DockerHostResolver dockerHostResolver;
+    @jakarta.inject.Inject
+    ContainerDetector containerDetector;
     private final EmulatorConfig config;
     private final EcrRegistryManager ecrRegistryManager;
     private final LambdaLayerService layerService;
@@ -290,7 +292,10 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
                         env.add(k + "=" + v);
                     }
                 } else {
-                    env.add(k + "=" + v);
+                    // A loopback URL the deployer resolved (a local dev server, say) names the
+                    // host, which a function container reaches through the host gateway.
+                    env.add(k + "=" + ContainerReachableUrls.rewriteFunctionEnv(
+                            v, hostGatewayPort(), containerDetector != null && containerDetector.isRunningInContainer(), hostAddress));
                 }
             });
         }
@@ -1653,5 +1658,10 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
         tar.setLongFileMode(TarArchiveOutputStream.LONGFILE_GNU);
         tar.setBigNumberMode(TarArchiveOutputStream.BIGNUMBER_STAR);
         return tar;
+    }
+
+    private int hostGatewayPort() {
+        int port = config.port();
+        return port > 0 ? port : ContainerReachableUrls.DEFAULT_HOST_GATEWAY_PORT;
     }
 }
