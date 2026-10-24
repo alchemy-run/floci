@@ -1167,7 +1167,29 @@ public class ApiGatewayService implements ResourceProvider {
 
     public Authorizer createAuthorizer(String region, String apiId, Map<String, Object> request) {
         getRestApi(region, apiId);
-        Authorizer authorizer = saveAuthorizer(region, apiId, shortId(6), request);
+        Authorizer authorizer = new Authorizer();
+        authorizer.setId(shortId(6));
+        authorizer.setName((String) request.get("name"));
+        authorizer.setType((String) request.get("type"));
+        authorizer.setAuthorizerUri((String) request.get("authorizerUri"));
+        authorizer.setAuthType((String) request.get("authType"));
+        authorizer.setAuthorizerCredentials((String) request.get("authorizerCredentials"));
+        authorizer.setIdentityValidationExpression((String) request.get("identityValidationExpression"));
+        authorizer.setIdentitySource((String) request.get("identitySource"));
+        Object ttl = request.get("authorizerResultTtlInSeconds");
+        authorizer.setAuthorizerResultTtlInSeconds(validateAuthorizerTtl(ttl == null ? "300" : ttl.toString()));
+        // COGNITO_USER_POOLS authorizers carry the pool ARNs; keep them so get-authorizer reflects them.
+        if (request.get("providerARNs") instanceof List<?> arns) {
+            List<String> providerArns = new ArrayList<>();
+            for (Object arn : arns) {
+                if (arn != null) {
+                    providerArns.add(arn.toString());
+                }
+            }
+            authorizer.setProviderARNs(providerArns);
+        }
+
+        authorizerStore.put(authorizerKey(region, apiId, authorizer.getId()), authorizer);
         LOG.infov("Created authorizer {0} for API {1}", authorizer.getId(), apiId);
         return authorizer;
     }
@@ -1222,47 +1244,49 @@ public class ApiGatewayService implements ResourceProvider {
         String newAuthorizerUri = authorizer.getAuthorizerUri();
         String newIdentitySource = authorizer.getIdentitySource();
         String newTtl = authorizer.getAuthorizerResultTtlInSeconds();
+        String newType = authorizer.getType();
+        String newAuthType = authorizer.getAuthType();
+        String newCredentials = authorizer.getAuthorizerCredentials();
+        String newValidationExpression = authorizer.getIdentityValidationExpression();
         if (patchOperations != null) {
-        for (Map<String, String> op : patchOperations) {
-            if (op == null) {
-                throw new AwsException("BadRequestException", "Invalid patch operation", 400);
-            }
-            String path = op.get("path");
-            String value = op.get("value");
-            String opType = op.get("op");
-            if (!"add".equals(opType) && !"replace".equals(opType)) {
-                throw new AwsException("BadRequestException", "Invalid operation", 400);
-            }
-            if (path == null || value == null) {
-                throw new AwsException("BadRequestException", "Missing path or value", 400);
-            }
-            if ("/name".equals(path)) {
-                newName = value;
-            } else if ("/authorizerUri".equals(path)) {
-                newAuthorizerUri = value;
-            } else if ("/identitySource".equals(path)) {
-                newIdentitySource = value;
-            } else if ("/authorizerResultTtlInSeconds".equals(path)) {
-                // Validate before accepting: the store hands back live objects, and an unparseable TTL
-                // would break serialisation on every later GetAuthorizer/GetAuthorizers.
-                String ttl = value.trim();
-                try {
-                    Integer.parseInt(ttl);
-                } catch (NumberFormatException e) {
-                    throw new AwsException("BadRequestException",
-                            "authorizerResultTtlInSeconds must be an integer", 400);
+            for (Map<String, String> op : patchOperations) {
+                if (op == null) {
+                    throw new AwsException("BadRequestException", "Invalid patch operation", 400);
                 }
-                newTtl = ttl;
-            } else {
-                throw new AwsException("BadRequestException", "Unsupported path: " + path, 400);
+                String path = op.get("path");
+                String value = op.get("value");
+                String opType = op.get("op");
+                boolean remove = "remove".equals(opType);
+                if (!"add".equals(opType) && !"replace".equals(opType) && !remove) {
+                    throw new AwsException("BadRequestException", "Invalid operation", 400);
+                }
+                if (path == null || (!remove && value == null)) {
+                    throw new AwsException("BadRequestException", "Missing path or value", 400);
+                }
+                if (remove && !"/identitySource".equals(path) && !"/authorizerResultTtlInSeconds".equals(path)) {
+                    throw new AwsException("BadRequestException", "Invalid operation", 400);
+                }
+                switch (path) {
+                    case "/type" -> newType = value;
+                    case "/name" -> newName = value;
+                    case "/authType" -> newAuthType = value;
+                    case "/authorizerUri" -> newAuthorizerUri = value;
+                    case "/identitySource" -> newIdentitySource = remove ? null : value;
+                    case "/authorizerCredentials" -> newCredentials = value;
+                    case "/identityValidationExpression" -> newValidationExpression = value;
+                    case "/authorizerResultTtlInSeconds" -> newTtl = remove ? "300" : validateAuthorizerTtl(value);
+                    default -> throw new AwsException("BadRequestException", "Unsupported path: " + path, 400);
+                }
             }
         }
-        }
-        validateRequestAuthorizerIdentitySource(authorizer.getType(), newIdentitySource, newTtl);
+        authorizer.setType(newType);
+        authorizer.setAuthType(newAuthType);
         authorizer.setName(newName);
         authorizer.setAuthorizerUri(newAuthorizerUri);
         authorizer.setIdentitySource(newIdentitySource);
         authorizer.setAuthorizerResultTtlInSeconds(newTtl);
+        authorizer.setAuthorizerCredentials(newCredentials);
+        authorizer.setIdentityValidationExpression(newValidationExpression);
         authorizerStore.put(authorizerKey(region, apiId, authorizerId), authorizer);
         return authorizer;
     }
