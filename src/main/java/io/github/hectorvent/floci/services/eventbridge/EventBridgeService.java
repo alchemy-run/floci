@@ -1354,7 +1354,7 @@ public class EventBridgeService implements ResourceProvider {
         if (eventSourceArn == null || eventSourceArn.isBlank()) {
             throw new AwsException("ValidationException", "EventSourceArn is required.", 400);
         }
-        requireArchiveSource(eventSourceArn, region);
+        ensureArchiveSourceBusExists(eventSourceArn, region);
         String key = archiveKey(region, archiveName);
         if (archiveStore.get(key).isPresent()) {
             throw new AwsException("ResourceAlreadyExistsException",
