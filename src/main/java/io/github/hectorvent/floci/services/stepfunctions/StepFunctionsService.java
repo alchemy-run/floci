@@ -3075,12 +3075,6 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
                 null, false, false, null)).stateMachine();
     }
 
-    public CompletableFuture<JsonNode> registerPendingToken(String token) {
-        CompletableFuture<JsonNode> future = new CompletableFuture<>();
-        pendingTaskTokens.put(token, future);
-        taskHeartbeatNanos.put(token, System.nanoTime());
-        return future;
-    }
 
     public double redriveExecution(String executionArn) {
         Execution exec = describeExecution(executionArn);

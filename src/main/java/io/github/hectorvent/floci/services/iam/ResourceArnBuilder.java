@@ -1602,11 +1602,6 @@ public class ResourceArnBuilder {
 
     private final Instance<ResourceArnResolver> arnResolvers;
 
-    @Inject
-    public ResourceArnBuilder(ObjectMapper objectMapper, Instance<ResourceArnResolver> arnResolvers) {
-        this.objectMapper = objectMapper;
-        this.arnResolvers = arnResolvers;
-    }
 
     public String buildExecutionRoleArn(ContainerRequestContext ctx) {
         JsonNode body = readJsonBody(ctx);

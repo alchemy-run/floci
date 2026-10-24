@@ -1627,33 +1627,6 @@ public class SsmService implements ResourceProvider {
 
     private final KmsService kmsService;
 
-    @Inject
-    public SsmService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver,
-                      KmsService kmsService, Ec2ImageCatalog imageCatalog) {
-        this(
-                storageFactory.create("ssm", "ssm-parameters.json",
-                        new TypeReference<>() {
-                        }),
-                storageFactory.create("ssm", "ssm-history.json",
-                        new TypeReference<>() {
-                        }),
-                storageFactory.create("ssm", "ssm-document-permissions.json",
-                        new TypeReference<>() {
-                        }),
-                storageFactory.create("ssm", "ssm-documents.json",
-                        new TypeReference<>() {
-                        }),
-                storageFactory.create("ssm", "ssm-service-settings.json",
-                        new TypeReference<>() {
-                        }),
-                storageFactory.create("ssm", "ssm-associations.json",
-                        new TypeReference<>() {
-                        }),
-                config.services().ssm().maxParameterHistory(),
-                regionResolver,
-                imageCatalog, kmsService
-        );
-    }
 
     public List<Parameter> getParameters(List<String> names, String region) {
         List<Parameter> result = new ArrayList<>();

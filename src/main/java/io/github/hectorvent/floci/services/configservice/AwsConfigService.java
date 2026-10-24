@@ -1199,14 +1199,6 @@ public class AwsConfigService {
         return UUID.randomUUID().toString().replace("-", "").substring(0, 12);
     }
 
-    public synchronized void putConfigurationRecorder(String region, ConfigurationRecorder recorder,
-            List<Map<String, String>> requestedTags) {
-        boolean creating = !configurationRecorders.containsKey(region);
-        putConfigurationRecorder(region, recorder);
-        if (creating && requestedTags != null && !requestedTags.isEmpty()) {
-            tagResource(configurationRecorders.get(region).arn(), requestedTags);
-        }
-    }
 
     synchronized void requireRunningRecorder(String region) {
         if (!configurationRecorders.containsKey(region)

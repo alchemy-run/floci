@@ -198,14 +198,6 @@ public class DetectiveService implements Resettable {
 
     private final boolean cloudTrailEnabled;
 
-    @Inject
-    public DetectiveService(StorageFactory storageFactory, RegionResolver regionResolver,
-                            OrganizationsService organizationsService, CloudTrailEventService cloudTrailEvents,
-                            ObjectMapper objectMapper, EmulatorConfig config) {
-        this(storageFactory.create("detective", "detective-state.json",
-                new TypeReference<Map<String, DetectiveState>>() {}), regionResolver, organizationsService,
-                cloudTrailEvents, objectMapper, config.services().cloudtrail().enabled());
-    }
 
     public synchronized String createGraph(String region, Map<String, String> tags) {
         Map<String, String> validated = validateTags(tags);

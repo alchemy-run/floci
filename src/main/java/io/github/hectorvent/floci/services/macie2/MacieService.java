@@ -309,13 +309,6 @@ public class MacieService implements Resettable {
 
     private ScheduledExecutorService jobScheduler;
 
-    @Inject
-    public MacieService(StorageFactory storageFactory, S3Service s3Service) {
-        this(storageFactory.create("macie2", "macie2-state.json",
-                        new TypeReference<Map<String, MacieState>>() {}),
-                storageFactory.create("macie2", "macie2-members.json",
-                        new TypeReference<Map<String, MacieMember>>() {}), s3Service, null);
-    }
 
     @PreDestroy
     synchronized void shutdown() {

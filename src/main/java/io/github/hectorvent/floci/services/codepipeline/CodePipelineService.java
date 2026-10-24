@@ -3291,38 +3291,6 @@ public class CodePipelineService {
         return true;
     }
 
-    private ObjectNode putActionRevision(JsonNode request, String region, String account) {
-        CodePipelinePipeline pipeline = requirePipeline(account, region, text(request, "pipelineName"));
-        String stageName = text(request, "stageName");
-        String actionName = text(request, "actionName");
-        JsonNode action = requireAction(pipeline, stageName, actionName);
-        if (!"Source".equals(action.path("actionTypeId").path("category").asText())) {
-            throw new AwsException("ValidationException", "Action revisions require a source action", 400);
-        }
-        JsonNode revision = request.path("actionRevision");
-        String revisionId = text(revision, "revisionId");
-        text(revision, "revisionChangeId");
-        if (!revision.path("created").isNumber()) {
-            throw new AwsException("ValidationException", "actionRevision.created must be a timestamp", 400);
-        }
-        String id = sourcePollCursorId(pipeline.getName(), stageName, actionName);
-        return sourcePollLocks.withLock(pipelineLockKey(account, region, pipeline.getName()), () -> {
-            Optional<CodePipelineStoredItem> previous = itemStore.getForAccount(
-                    account, itemKey(region, "action-revision", id));
-            if (previous.isPresent()
-                    && revisionId.equals(previous.get().getData().path("revision").path("revisionId").asText())) {
-                return mapper.createObjectNode().put("newRevision", false)
-                        .put("pipelineExecutionId", previous.get().getData().path("pipelineExecutionId").asText());
-            }
-            ObjectNode started = startPipelineExecution(mapper.createObjectNode().put("name", pipeline.getName()),
-                    region, account, "PutActionRevision", revisionId);
-            ObjectNode data = mapper.createObjectNode();
-            data.set("revision", revision.deepCopy());
-            data.put("pipelineExecutionId", started.path("pipelineExecutionId").asText());
-            storeItem(account, region, "action-revision", id, "ACTIVE", data);
-            return started.put("newRevision", true);
-        });
-    }
 
     private void runExecution(CodePipelinePipeline pipeline, CodePipelineExecution execution,
                               String startStageName, boolean failedActionsOnly) {

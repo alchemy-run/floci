@@ -6766,37 +6766,6 @@ public class CognitoService implements ResourceProvider {
     private record DeliveryTarget(String attributeName, String deliveryMedium, String destination) {
     }
 
-    @Inject
-    public CognitoService(StorageFactory storageFactory, EmulatorConfig emulatorConfig,
-            RegionResolver regionResolver, LambdaService lambdaService, AcmService acmService,
-            SesService sesService, SnsService snsService, Clock clock,
-            TlsCertificateManager certificateManager) {
-        this(
-                storageFactory.create("cognito", "cognito-pools.json",
-                        new TypeReference<Map<String, UserPool>>() {}),
-                storageFactory.create("cognito", "cognito-clients.json",
-                        new TypeReference<Map<String, UserPoolClient>>() {}),
-                storageFactory.create("cognito", "cognito-resource-servers.json",
-                        new TypeReference<Map<String, ResourceServer>>() {}),
-                storageFactory.create("cognito", "cognito-domains.json",
-                        new TypeReference<Map<String, UserPoolDomain>>() {}),
-                storageFactory.create("cognito", "cognito-identity-providers.json",
-                        new TypeReference<Map<String, IdentityProvider>>() {}),
-                storageFactory.create("cognito", "cognito-users.json",
-                        new TypeReference<Map<String, CognitoUser>>() {}),
-                storageFactory.create("cognito", "cognito-groups.json",
-                        new TypeReference<Map<String, CognitoGroup>>() {}),
-                storageFactory.create("cognito", "cognito-revoked-tokens.json",
-                        new TypeReference<Map<String, RevokedTokenInfo>>() {}),
-                trimTrailingSlash(emulatorConfig.effectiveBaseUrl()),
-                regionResolver,
-                lambdaService,
-                acmService,
-                new VerificationCodeService(storageFactory, clock),
-                new CognitoMessageDispatcher(sesService, snsService),
-                certificateManager
-        );
-    }
 
     /**
      * AWS prefixes custom schema attributes with {@code custom:} (or {@code dev:}

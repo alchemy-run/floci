@@ -2194,12 +2194,6 @@ public class DynamoDbJsonHandler {
         return Response.ok(response).build();
     }
 
-    private Response handleDeleteBackup(JsonNode request, String region) {
-        TableBackup backup = dynamoDbService.deleteBackup(request.path("BackupArn").asText());
-        ObjectNode response = objectMapper.createObjectNode();
-        response.set("BackupDescription", backupDescriptionNode(backup));
-        return Response.ok(response).build();
-    }
 
 
 
@@ -2240,18 +2234,6 @@ public class DynamoDbJsonHandler {
         return description;
     }
 
-    private Response handleExportTable(JsonNode request, String region) {
-        Map<String, Object> params = new java.util.HashMap<>();
-        request.fields().forEachRemaining(e -> params.put(e.getKey(), e.getValue().isTextual()
-                ? e.getValue().asText() : e.getValue()));
-
-        io.github.hectorvent.floci.services.dynamodb.model.ExportDescription desc =
-                dynamoDbService.exportTable(params, region);
-
-        ObjectNode response = objectMapper.createObjectNode();
-        response.set("ExportDescription", objectMapper.valueToTree(desc));
-        return Response.ok(response).build();
-    }
 
     private Response handleDescribeExport(JsonNode request, String region) {
         String exportArn = request.path("ExportArn").asText();

@@ -1137,25 +1137,6 @@ public class GuardDutyService {
 
     private final OrganizationsService organizationsService;
 
-    @Inject
-    public GuardDutyService(StorageFactory storageFactory, S3Service s3Service,
-                            OrganizationsService organizationsService) {
-        this(storageFactory.create(
-                        "guardduty",
-                        "guardduty-detectors.json",
-                        new TypeReference<Map<String, Detector>>() {
-                        }),
-                storageFactory.create(
-                        "guardduty",
-                        "guardduty-admin-accounts.json",
-                        new TypeReference<Map<String, AdminAccount>>() {
-                        }),
-                storageFactory.create(
-                        "guardduty",
-                        "guardduty-members.json",
-                        new TypeReference<Map<String, MemberAccount>>() {
-                        }), s3Service, organizationsService);
-    }
 
     public synchronized String createResource(String region, String detectorId, String kind, JsonNode request) {
         Detector detector = getDetector(region, detectorId);

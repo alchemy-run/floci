@@ -1239,18 +1239,6 @@ public class Route53Service implements Resettable {
         return all;
     }
 
-    public synchronized HealthCheck createHealthCheck(String callerReference, HealthCheckConfig cfg) {
-        for (HealthCheck existing : healthCheckStore.scan(k -> true)) {
-            if (existing.getCallerReference().equals(callerReference)) {
-                throw new AwsException("HealthCheckAlreadyExists",
-                        "A health check with caller reference " + callerReference + " already exists.", 409);
-            }
-        }
-        String id = UUID.randomUUID().toString();
-        HealthCheck hc = new HealthCheck(id, callerReference, cfg);
-        healthCheckStore.put(id, hc);
-        return hc;
-    }
 
     /**
      * The form Route 53 stores and returns a record name in: fully qualified, with every byte

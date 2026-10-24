@@ -3550,14 +3550,6 @@ public class IamQueryHandler {
         return Response.ok(AwsQueryResponse.envelope("ListInstanceProfileTags", AwsNamespaces.IAM, result)).build();
     }
 
-    @Inject
-    public IamQueryHandler(IamService iamService, IamPolicyEvaluator policyEvaluator,
-                           AccountResolver accountResolver, IamExtendedQueryHandler extendedHandler) {
-        this.iamService = iamService;
-        this.policyEvaluator = policyEvaluator;
-        this.accountResolver = accountResolver;
-        this.extendedHandler = extendedHandler;
-    }
 
     private Response handleUpdateAccessKey(MultivaluedMap<String, String> params) {
         iamService.updateAccessKey(getParam(params, "UserName"),

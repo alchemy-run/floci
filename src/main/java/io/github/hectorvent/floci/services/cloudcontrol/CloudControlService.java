@@ -837,16 +837,6 @@ public class CloudControlService {
 
     private final Map<String, ReentrantLock> operationLocks = new ConcurrentHashMap<>();
 
-    @Inject
-    public CloudControlService(S3Service s3Service, Ec2Service ec2Service,
-                               IamService iamService, CloudFormationResourceProvisioner provisioner,
-                               ObjectMapper mapper, StorageFactory storageFactory) {
-        this(s3Service, ec2Service, iamService, provisioner, mapper,
-                storageFactory.create("cloudcontrol", "cloudcontrol-requests.json",
-                        new TypeReference<Map<String, PersistedRequest>>() {}),
-                storageFactory.create("cloudcontrol", "cloudcontrol-created.json",
-                        new TypeReference<Map<String, PersistedCreatedResource>>() {}));
-    }
 
 
     public ProgressEvent requestStatus(String region, String accountId, String token) {

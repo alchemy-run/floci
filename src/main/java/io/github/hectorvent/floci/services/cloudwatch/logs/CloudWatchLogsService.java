@@ -1555,43 +1555,6 @@ public class CloudWatchLogsService implements ResourceProvider, Resettable {
 
     private final Instance<KinesisService> kinesisServices;
 
-    @Inject
-    public CloudWatchLogsService(StorageFactory storageFactory,
-                                  EmulatorConfig config,
-                                  RegionResolver regionResolver,
-                                  Instance<LambdaService> lambdaServices,
-                                  Instance<IamService> iamServices,
-                                  Instance<KinesisService> kinesisServices,
-                                  Event<LogEventsIngested> logEventsIngested,
-                                  Event<LogGroupDeleted> logGroupDeleted) {
-        this(
-                storageFactory.create("cloudwatchlogs", "cwlogs-groups.json",
-                        new TypeReference<>() {}),
-                storageFactory.create("cloudwatchlogs", "cwlogs-streams.json",
-                        new TypeReference<>() {}),
-                storageFactory.create("cloudwatchlogs", "cwlogs-events.json",
-                        new TypeReference<>() {}),
-                storageFactory.create("cloudwatchlogs", "cwlogs-subscription-filters.json",
-                        new TypeReference<>() {}),
-                storageFactory.create("cloudwatchlogs", "cwlogs-destinations.json",
-                        new TypeReference<>() {}),
-                storageFactory.create("cloudwatchlogs", "cwlogs-metric-filters.json",
-                        new TypeReference<>() {}),
-                storageFactory.create("cloudwatchlogs", "cwlogs-resource-policies.json",
-                        new TypeReference<>() {}),
-                config.services().cloudwatchlogs().maxEventsPerQuery(),
-                config.services().cloudwatchlogs().maxStoredEvents(),
-                regionResolver,
-                config.defaultAccountId() != null ? config.defaultAccountId() : CANONICAL_ACCOUNT,
-                lambdaServices,
-                iamServices,
-                kinesisServices,
-                config.services().cloudwatchlogs().queryCompletionDelayMs(),
-                System::currentTimeMillis,
-                logEventsIngested,
-                logGroupDeleted
-        );
-    }
 
     private void migrateLegacyMetricFilters() {
         synchronized (metricFilterStore) {

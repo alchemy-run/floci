@@ -6735,10 +6735,6 @@ public class Ec2QueryHandler {
                 ipamService, null);
     }
 
-    public Ec2QueryHandler(Ec2Service service, EmulatorConfig config, FlowLogService flowLogService,
-                           KmsService kmsService) {
-        this(service, config, flowLogService, null, null, null, kmsService);
-    }
 
     /**
      * Alchemy (and the AWS SDKs) send the primary ENI as

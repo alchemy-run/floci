@@ -918,15 +918,7 @@ public class RamService {
         return putForOwner(share);
     }
 
-    public ResourceShare associateResourceShare(String resourceShareArn, List<String> resourceArns,
-                                                List<String> principals, String callerAccountId) {
-        return associateResourceShare(resourceShareArn, resourceArns, principals, List.of(), callerAccountId);
-    }
 
-    public ResourceShare disassociateResourceShare(String resourceShareArn, List<String> resourceArns,
-                                                    List<String> principals, String callerAccountId) {
-        return disassociateResourceShare(resourceShareArn, resourceArns, principals, List.of(), callerAccountId);
-    }
 
     /**
      * The owner's view of what its shares are associated with. A deleted share reports its

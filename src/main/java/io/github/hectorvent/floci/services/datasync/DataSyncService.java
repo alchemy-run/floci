@@ -769,11 +769,6 @@ public class DataSyncService {
 
     private boolean stopping;
 
-    @Inject
-    public DataSyncService(StorageFactory storageFactory, RegionResolver regionResolver, ObjectMapper mapper,
-                           S3Service s3, RequestContext requestContext) {
-        this(storageFactory, regionResolver, mapper, s3, Executors.newVirtualThreadPerTaskExecutor(), requestContext);
-    }
 
     public synchronized ObjectNode startTaskExecution(JsonNode request, String region) {
         if (stopping) {

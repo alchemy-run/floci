@@ -228,40 +228,6 @@ public class SAMLProviderService {
         }
     }
 
-    public IamSamlProvider create(String accountId, String name, String metadata) {
-        String arn = "arn:aws:iam::" + accountId + ":saml-provider/" + name;
-        if (!ARN.matcher(arn).matches()) {
-            throw new AwsException("InvalidInput", "Invalid SAML provider name.", 400);
-        }
-        if (metadata == null || metadata.isBlank()) {
-            throw new AwsException("InvalidInput", "SAML metadata document must not be empty.", 400);
-        }
-        SAMLMetadata.Parsed parsed;
-        try {
-            parsed = SAMLMetadata.parse(metadata);
-        } catch (Exception e) {
-            throw new AwsException("InvalidInput", "The SAML metadata document is invalid.", 400);
-        }
-        IamSamlProvider provider = new IamSamlProvider();
-        provider.setArn(arn);
-        provider.setName(name);
-        provider.setUuid(UUID.randomUUID().toString());
-        provider.setMetadataDocument(metadata);
-        provider.setEntityId(parsed.entityId());
-        provider.setCertificate(parsed.certificateBase64());
-        synchronized (providerLock) {
-            if (findForAccount(accountId, arn).isPresent()) {
-                throw new AwsException("EntityAlreadyExists",
-                        "SAML provider " + arn + " already exists.", 409);
-            }
-            if (providers instanceof AccountAwareStorageBackend<IamSamlProvider> aware) {
-                aware.putForAccount(accountId, arn, provider);
-            } else {
-                providers.put(arn, provider);
-            }
-        }
-        return provider;
-    }
 
     private void updateLegacyMetadata(String accountId, IamSamlProvider provider) {
         try {
@@ -274,26 +240,6 @@ public class SAMLProviderService {
         }
     }
 
-    public void update(String accountId, String arn, String metadata, String encryptionMode) {
-        synchronized (providerLock) {
-            IamSamlProvider provider = getForAccount(accountId, arn);
-            if (metadata != null) {
-                SAMLMetadata.Parsed parsed;
-                try {
-                    parsed = SAMLMetadata.parse(metadata);
-                } catch (Exception e) {
-                    throw new AwsException("InvalidInput", "The SAML metadata document is invalid.", 400);
-                }
-                provider.setMetadataDocument(metadata);
-                provider.setEntityId(parsed.entityId());
-                provider.setCertificate(parsed.certificateBase64());
-            }
-            if (encryptionMode != null) {
-                provider.setAssertionEncryptionMode(encryptionMode);
-            }
-            save(accountId, provider);
-        }
-    }
 
     private void save(String accountId, IamSamlProvider provider) {
         if (providers instanceof AccountAwareStorageBackend<IamSamlProvider> aware) {

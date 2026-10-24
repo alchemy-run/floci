@@ -6408,27 +6408,6 @@ public class IamService implements SessionAccountLookup, ResourceProvider {
     /** {@code tagListType} / {@code tagKeyListType} are both {@code max: 50}. */
     private static final int MAX_TAGS_PER_INSTANCE_PROFILE = 50;
 
-    @Inject
-    public IamService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver) {
-        this(
-            storageFactory.create("iam", "iam-users.json", new TypeReference<>() {}),
-            storageFactory.create("iam", "iam-groups.json", new TypeReference<>() {}),
-            storageFactory.create("iam", "iam-roles.json", new TypeReference<>() {}),
-            storageFactory.create("iam", "iam-policies.json", new TypeReference<>() {}),
-            storageFactory.create("iam", "iam-access-keys.json", new TypeReference<>() {}),
-            storageFactory.create("iam", "iam-instance-profiles.json", new TypeReference<>() {}),
-            storageFactory.create("iam", "iam-sessions.json", new TypeReference<>() {}),
-            storageFactory.create("iam", "iam-account-aliases.json", new TypeReference<>() {}),
-            storageFactory.create("iam", "iam-password-policy.json", new TypeReference<>() {}),
-            storageFactory.create("iam", "iam-login-profiles.json", new TypeReference<>() {}),
-            storageFactory.create("iam", "iam-oidc-providers.json", new TypeReference<>() {}),
-            storageFactory.create("iam", "iam-slr-deletions.json", new TypeReference<>() {}),
-            storageFactory.create("iam", "iam-org-root-features.json", new TypeReference<>() {}),
-            regionResolver,
-            config.services().iam().seedDeployerPrincipal(),
-            config.services().iam().accountAlias().orElse(null)
-        );
-    }
 
     private static Map<String, IamPolicy> buildAwsManagedPolicies() {
         Map<String, IamPolicy> catalog = new LinkedHashMap<>();

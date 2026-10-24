@@ -948,20 +948,6 @@ public class EmrHandler {
         this.studios = studios;
     }
 
-    private Response handleModifyInstanceGroups(JsonNode request) {
-        List<EmrService.InstanceGroupModification> modifications = new ArrayList<>();
-        JsonNode groups = request.path("InstanceGroups");
-        if (groups.isArray()) {
-            for (JsonNode g : groups) {
-                JsonNode count = g.path("InstanceCount");
-                modifications.add(new EmrService.InstanceGroupModification(
-                        g.path("InstanceGroupId").asText(null),
-                        count.isNumber() ? Integer.valueOf(count.asInt()) : null));
-            }
-        }
-        service.modifyInstanceGroups(text(request, "ClusterId"), modifications);
-        return Response.ok(objectMapper.createObjectNode()).build();
-    }
 
     private Response handleAddTags(JsonNode request, String region) {
         String id = text(request, "ResourceId");

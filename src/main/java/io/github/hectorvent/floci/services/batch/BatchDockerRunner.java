@@ -319,16 +319,6 @@ public class BatchDockerRunner implements ContainerTeardown {
 
     private final UnaryOperator<String> imageResolver;
 
-    @Inject
-    public BatchDockerRunner(ContainerBuilder containerBuilder,
-                             ContainerLifecycleManager lifecycleManager,
-                             ContainerLogStreamer logStreamer,
-                             EmulatorConfig config,
-                             ContainerDetector containerDetector,
-                             EcrRegistryManager ecrRegistryManager) {
-        this(containerBuilder, lifecycleManager, logStreamer, config, containerDetector,
-                ecrRegistryManager::rewriteImageUri);
-    }
 
     private BatchRunResult runContainer(BatchJob job, String inFlightKey, String containerName, String logStreamName,
                                         String logSourceLabel, String image, String platform,
