@@ -322,6 +322,12 @@ public class CloudWatchMetricsJsonHandler {
         String arn = request.has("ResourceARN") ? request.path("ResourceARN").asText() : request.path("ResourceArn").asText();
         if (arn.isEmpty()) arn = request.path("resourceArn").asText();
 
+        if (metadataService != null && metadataService.ownsArn(arn, region)) {
+            return Response.ok(objectMapper.createObjectNode().set("Tags", metadataService.tags(arn, region))).build();
+        }
+        if (insightsService != null && insightsService.ownsArn(arn, region)) {
+            return Response.ok(objectMapper.createObjectNode().set("Tags", insightsService.tags(arn, region))).build();
+        }
         Map<String, String> tags;
         if (CloudWatchDashboardsService.isDashboardArn(arn)) {
             tags = dashboardsService.listTagsForResource(arn, region);
@@ -344,7 +350,11 @@ public class CloudWatchMetricsJsonHandler {
         if (tagsNode.isArray()) {
             tagsNode.forEach(t -> tags.put(t.path("Key").asText(), t.path("Value").asText()));
         }
-        if (CloudWatchDashboardsService.isDashboardArn(arn)) {
+        if (metadataService != null && metadataService.ownsArn(arn, region)) {
+            metadataService.tags(arn, tagsNode, objectMapper.createArrayNode(), region);
+        } else if (insightsService != null && insightsService.ownsArn(arn, region)) {
+            insightsService.tags(arn, tagsNode, objectMapper.createArrayNode(), region);
+        } else if (CloudWatchDashboardsService.isDashboardArn(arn)) {
             dashboardsService.tagResource(arn, tags, region);
         } else if (CloudWatchMetricStreamsService.isMetricStreamArn(arn)) {
             metricStreamsService.tagResource(arn, tags, region);
@@ -363,7 +373,11 @@ public class CloudWatchMetricsJsonHandler {
         if (keysNode.isArray()) {
             keysNode.forEach(k -> keys.add(k.asText()));
         }
-        if (CloudWatchDashboardsService.isDashboardArn(arn)) {
+        if (metadataService != null && metadataService.ownsArn(arn, region)) {
+            metadataService.tags(arn, objectMapper.createArrayNode(), keysNode, region);
+        } else if (insightsService != null && insightsService.ownsArn(arn, region)) {
+            insightsService.tags(arn, objectMapper.createArrayNode(), keysNode, region);
+        } else if (CloudWatchDashboardsService.isDashboardArn(arn)) {
             dashboardsService.untagResource(arn, keys, region);
         } else if (CloudWatchMetricStreamsService.isMetricStreamArn(arn)) {
             metricStreamsService.untagResource(arn, keys, region);
