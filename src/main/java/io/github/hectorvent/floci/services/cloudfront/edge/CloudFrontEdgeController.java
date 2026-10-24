@@ -191,6 +191,31 @@ public class CloudFrontEdgeController {
 
     private Response handle(String method, String distributionId, String rawPath,
                             UriInfo uriInfo, HttpHeaders headers, byte[] body) {
+        return buffered(pipeline(method, distributionId, rawPath, uriInfo, headers, body));
+    }
+
+    /**
+     * The edge port relays this response over HTTP and reads its body back, so a streamed origin
+     * body is written out here, with the response's status and headers, rather than handed on as
+     * a writer the relay cannot run.
+     */
+    private Response buffered(Response response) {
+        if (!(response.getEntity() instanceof jakarta.ws.rs.core.StreamingOutput streaming)) {
+            return response;
+        }
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        try {
+            streaming.write(out);
+        } catch (java.io.IOException e) {
+            return edgeError(502, "The origin response could not be read: " + e.getMessage());
+        }
+        Response.ResponseBuilder builder = Response.status(response.getStatusInfo());
+        response.getStringHeaders().forEach((name, values) -> values.forEach(value -> builder.header(name, value)));
+        return builder.entity(out.toByteArray()).build();
+    }
+
+    private Response pipeline(String method, String distributionId, String rawPath,
+                              UriInfo uriInfo, HttpHeaders headers, byte[] body) {
         Distribution distribution;
         try {
             distribution = service.getDistribution(distributionId);
