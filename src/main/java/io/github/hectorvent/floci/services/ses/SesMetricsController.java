@@ -100,6 +100,13 @@ public class SesMetricsController {
         for (int i = 0; i < queryNodes.size(); i++) {
             queries.add(parseQuery(queryNodes.get(i), i + 1));
         }
+        for (SesMetricData.Query query : queries) {
+            if (!isMidnightUtc(query.startDate()) || !isMidnightUtc(query.endDate())) {
+                throw new AwsException("BadRequestException",
+                        "To get daily aggregated data you must not specify partial-day timestamps. "
+                                + "Please make your interval go from midnight to midnight UTC.", 400);
+            }
+        }
 
         List<SentEmail> emails = withinAnyWindow(sentEmailService.listInRegion(region), queries);
         ObjectNode result = objectMapper.createObjectNode();
@@ -372,5 +379,9 @@ public class SesMetricsController {
 
     private static AwsException aggregated(List<String> violations) {
         return SmithyValidationErrors.badRequest(violations);
+    }
+
+    private static boolean isMidnightUtc(Instant instant) {
+        return instant.atZone(java.time.ZoneOffset.UTC).toLocalTime().equals(java.time.LocalTime.MIDNIGHT);
     }
 }
