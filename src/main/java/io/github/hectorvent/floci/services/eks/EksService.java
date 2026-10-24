@@ -304,7 +304,7 @@ public class EksService implements TagHandler, ResourceProvider {
                     new Tag("kubernetes.io/cluster/" + clusterName, "owned"),
                     new Tag("aws:eks:cluster-name", clusterName)
             );
-            ec2Service.createTags(region, List.of(sg.getGroupId()), tags);
+            ec2Service.createSystemTags(region, List.of(sg.getGroupId()), tags);
 
             UserIdGroupPair selfPair = new UserIdGroupPair();
             selfPair.setGroupId(sg.getGroupId());
