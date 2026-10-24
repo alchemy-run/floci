@@ -25,6 +25,7 @@ import io.github.hectorvent.floci.services.configservice.model.EvaluationModeCon
 import io.github.hectorvent.floci.services.configservice.model.EvaluationResult;
 import io.github.hectorvent.floci.services.configservice.model.EvaluationResultIdentifier;
 import io.github.hectorvent.floci.services.configservice.model.EvaluationResultQualifier;
+import io.github.hectorvent.floci.services.configservice.model.RecordingGroup;
 import io.github.hectorvent.floci.services.configservice.model.RetentionConfiguration;
 import io.github.hectorvent.floci.services.configservice.model.SourceDetail;
 import jakarta.annotation.PostConstruct;
@@ -41,11 +42,8 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.BooleanSupplier;
-import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import io.github.hectorvent.floci.services.configservice.model.RecordingGroup;
 
 @ApplicationScoped
 public class AwsConfigService {
@@ -99,17 +97,17 @@ public class AwsConfigService {
     private Map<String, DeliveryChannel> deliveryChannels = new ConcurrentHashMap<>();
     private Map<String, RetentionConfiguration> retentionConfigurations = new ConcurrentHashMap<>();
 
-    // Transient runtime state is scoped by account and region, like the durable stores.
+    // recorder run-state is transient runtime state (not persisted)
     private final ConcurrentHashMap<String, Boolean> recorderRunning = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long> recorderLastStartTime = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long> recorderLastStopTime = new ConcurrentHashMap<>();
 
-    // per-rule evaluation timing is transient runtime state, keyed account + region + ruleName
+    // per-rule evaluation timing is transient runtime state, keyed region + "|" + ruleName
     private final ConcurrentHashMap<String, Long> ruleFirstActivatedTime = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long> ruleLastInvokedTime = new ConcurrentHashMap<>();
 
     // guards the check-then-act between a rule's existence and its evaluations, keyed
-    // account + region + ruleName, so DeleteConfigRule can't race PutEvaluations/PutExternalEvaluation
+    // region + "|" + ruleName, so DeleteConfigRule can't race PutEvaluations/PutExternalEvaluation
     // into recreating a deleted rule's evaluation bucket for a later same-named rule to inherit
     private final ConcurrentHashMap<String, Object> ruleLocks = new ConcurrentHashMap<>();
 
@@ -188,14 +186,6 @@ public class AwsConfigService {
     // --- Config Rules ---
 
     public ConfigRule putConfigRule(String region, ConfigRule requested) {
-        return putConfigRule(region, requested, null);
-    }
-
-    /** Put is an upsert, and request tags are applied at creation only: the PutConfigRule model
-     *  (config/2014-11-12) says a later Put with different Tags is treated as idempotent and leaves
-     *  the tags alone, which TagResource/UntagResource change instead. The get-then-put runs under
-     *  the lock delete takes, so a delete cannot land between them and orphan the creation tags. */
-    public ConfigRule putConfigRule(String region, ConfigRule requested, List<Map<String, String>> tagList) {
         if (requested == null || isBlank(requested.configRuleName())) {
             throw new AwsException("InvalidParameterValueException",
                     "ConfigRuleName must be specified.", 400);
@@ -234,13 +224,6 @@ public class AwsConfigService {
             }
         }
         String ruleName = requested.configRuleName();
-        synchronized (lockFor(ruleKey(region, ruleName))) {
-            return storeConfigRule(region, requested, ruleName, tagList);
-        }
-    }
-
-    private ConfigRule storeConfigRule(String region, ConfigRule requested, String ruleName,
-                                       List<Map<String, String>> tagList) {
         Map<String, ConfigRule> store = rulesFor(region);
         ConfigRule existing = store.get(ruleName);
         String ruleId;
@@ -264,12 +247,6 @@ public class AwsConfigService {
         ConfigRule rule = new ConfigRule(ruleName, ruleArn, ruleId, requested.description(),
                 requested.scope(), requested.source(), requested.inputParameters(),
                 requested.maximumExecutionFrequency(), state, requested.createdBy(), evaluationModes);
-        // Tags first: a later Put finds the rule and skips them, so a rule stored before its tags
-        // and then a failed tag write could never get them back. This way a failed tag write leaves
-        // no rule and the retry creates both.
-        if (existing == null && tagList != null && !tagList.isEmpty()) {
-            applyTags(ruleArn, tagList);
-        }
         store.put(ruleName, rule);
         persistRegion(configRules, region);
         return rule;
@@ -281,12 +258,10 @@ public class AwsConfigService {
         }
         synchronized (lockFor(ruleKey(region, ruleName))) {
             Map<String, ConfigRule> store = rulesFor(region);
-            ConfigRule removed = store.remove(ruleName);
-            if (removed == null) {
+            if (store.remove(ruleName) == null) {
                 throw new AwsException("NoSuchConfigRuleException", NO_SUCH_CONFIG_RULE_MESSAGE, 400);
             }
             persistRegion(configRules, region);
-            tags.remove(removed.configRuleArn());
             Map<String, Map<String, ConfigEvaluation>> regionEvaluations = evaluations.get(region);
             if (regionEvaluations != null && regionEvaluations.remove(ruleName) != null) {
                 persistRegion(evaluations, region);
@@ -676,13 +651,86 @@ public class AwsConfigService {
 
     // --- Configuration Recorder ---
 
-    public void putConfigurationRecorder(String region, ConfigurationRecorder recorder) {
-        String name = (recorder.name() == null || recorder.name().isEmpty()) ? "default" : recorder.name();
-        ConfigurationRecorder stored = new ConfigurationRecorder(name, recorder.roleARN(), recorder.recordingGroup());
+    public synchronized void putConfigurationRecorder(String region, ConfigurationRecorder recorder) {
+        if (recorder == null || isBlank(recorder.roleARN())
+                || !recorder.roleARN().matches("arn:[^:]+:iam::[0-9]{12}:role/.+")) {
+            throw new AwsException("InvalidRoleException", "A valid configuration recorder role ARN is required.", 400);
+        }
+        validateRecordingConfiguration(recorder);
+        String name = isBlank(recorder.name()) ? "default" : recorder.name();
+        ConfigurationRecorder existing = configurationRecorders.get(region);
+        if (existing != null && !name.equals(existing.name())) {
+            throw new AwsException("MaxNumberOfConfigurationRecordersExceededException",
+                    "Only one customer managed configuration recorder is allowed per account and region.", 400);
+        }
+        String arn = existing != null && existing.arn() != null ? existing.arn()
+                : regionResolver.buildArn("config", region, "configuration-recorder/" + name + "/" + shortId());
+        ConfigurationRecorder stored = new ConfigurationRecorder(name, recorder.roleARN(), recorder.recordingGroup(),
+                recorder.recordingMode(), arn);
         configurationRecorders.put(region, stored);
     }
 
-    public List<ConfigurationRecorder> describeConfigurationRecorders(String region, List<String> names) {
+    public synchronized void putConfigurationRecorder(String region, ConfigurationRecorder recorder,
+            List<Map<String, String>> requestedTags) {
+        boolean creating = !configurationRecorders.containsKey(region);
+        putConfigurationRecorder(region, recorder);
+        if (creating && requestedTags != null && !requestedTags.isEmpty()) {
+            tagResource(configurationRecorders.get(region).arn(), requestedTags);
+        }
+    }
+
+    synchronized void requireRunningRecorder(String region) {
+        if (!configurationRecorders.containsKey(region)
+                || !recorderRunning.getOrDefault(recorderStateKey(region), false)) {
+            throw new AwsException("NoRunningConfigurationRecorderException",
+                    "No configuration recorder is running in this account and region.", 400);
+        }
+    }
+
+    private String recorderStateKey(String region) {
+        return regionResolver.getAccountId() + "|" + region;
+    }
+
+    private void validateRecordingConfiguration(ConfigurationRecorder recorder) {
+        RecordingGroup group = recorder.recordingGroup();
+        if (group != null) {
+            boolean includes = group.resourceTypes() != null && !group.resourceTypes().isEmpty();
+            boolean excludes = group.exclusionByResourceTypes() != null
+                    && group.exclusionByResourceTypes().get("resourceTypes") != null
+                    && !group.exclusionByResourceTypes().get("resourceTypes").isEmpty();
+            String strategy = group.recordingStrategy() == null ? null : group.recordingStrategy().get("useOnly");
+            if ((Boolean.TRUE.equals(group.allSupported()) && (includes || excludes)) || (includes && excludes)
+                    || (strategy != null && !Set.of("ALL_SUPPORTED_RESOURCE_TYPES", "INCLUSION_BY_RESOURCE_TYPES",
+                        "EXCLUSION_BY_RESOURCE_TYPES").contains(strategy))
+                    || ("INCLUSION_BY_RESOURCE_TYPES".equals(strategy) && !includes)
+                    || ("EXCLUSION_BY_RESOURCE_TYPES".equals(strategy) && !excludes)
+                    || ("ALL_SUPPORTED_RESOURCE_TYPES".equals(strategy) && !Boolean.TRUE.equals(group.allSupported()))
+                    || (excludes && !"EXCLUSION_BY_RESOURCE_TYPES".equals(strategy))) {
+                throw new AwsException("InvalidRecordingGroupException", "Invalid resource recording strategy.", 400);
+            }
+        }
+        Map<String, Object> mode = recorder.recordingMode();
+        if (mode != null) {
+            if (!Set.of("CONTINUOUS", "DAILY").contains(String.valueOf(mode.get("recordingFrequency")))) {
+                throw new AwsException("ValidationException", "Invalid recording frequency.", 400);
+            }
+            Object overrides = mode.get("recordingModeOverrides");
+            if (overrides != null) {
+                if (!(overrides instanceof List<?> entries)) {
+                    throw new AwsException("ValidationException", "recordingModeOverrides must be a list.", 400);
+                }
+                for (Object entry : entries) {
+                    if (!(entry instanceof Map<?, ?> override)
+                            || !Set.of("CONTINUOUS", "DAILY").contains(String.valueOf(override.get("recordingFrequency")))
+                            || !(override.get("resourceTypes") instanceof List<?> types) || types.isEmpty()) {
+                        throw new AwsException("ValidationException", "Invalid recording mode override.", 400);
+                    }
+                }
+            }
+        }
+    }
+
+    public synchronized List<ConfigurationRecorder> describeConfigurationRecorders(String region, List<String> names) {
         ConfigurationRecorder recorder = configurationRecorders.get(region);
         if (recorder == null) {
             if (names != null && !names.isEmpty()) {
@@ -699,19 +747,28 @@ public class AwsConfigService {
                 }
             }
         }
+        if (recorder.arn() == null) {
+            recorder = new ConfigurationRecorder(recorder.name(), recorder.roleARN(), recorder.recordingGroup(),
+                    recorder.recordingMode(), regionResolver.buildArn("config", region,
+                            "configuration-recorder/" + recorder.name() + "/" + shortId()));
+            configurationRecorders.put(region, recorder);
+        }
         return List.of(recorder);
     }
 
-    public void deleteConfigurationRecorder(String region, String name) {
+    public synchronized void deleteConfigurationRecorder(String region, String name) {
         ConfigurationRecorder recorder = configurationRecorders.get(region);
         if (recorder == null || !recorder.name().equals(name)) {
             throw new AwsException("NoSuchConfigurationRecorderException",
                     "Cannot find configuration recorder with the specified name.", 400);
         }
         configurationRecorders.remove(region);
-        recorderRunning.remove(runtimeKey(region));
-        recorderLastStartTime.remove(runtimeKey(region));
-        recorderLastStopTime.remove(runtimeKey(region));
+        recorderRunning.remove(recorderStateKey(region));
+        recorderLastStartTime.remove(recorderStateKey(region));
+        recorderLastStopTime.remove(recorderStateKey(region));
+        if (recorder.arn() != null) {
+            tags.remove(recorder.arn());
+        }
     }
 
     public synchronized void startConfigurationRecorder(String region, String name) {
@@ -851,47 +908,33 @@ public class AwsConfigService {
 
     // --- Conformance Packs ---
 
-    /** Put on an existing pack is a get-then-put, so it runs under the lock delete takes. Unlocked,
-     *  a delete landing between the get and the put would remove the pack and its tags, and the
-     *  put would then re-insert it under its old ARN: a successful delete, a pack that survives,
-     *  and tags silently gone. */
     public ConformancePack putConformancePack(String region, String packName,
                                               String templateS3Uri, String templateBody) {
-        synchronized (lockFor(conformancePackLockKey(region, packName))) {
-            Map<String, ConformancePack> store = packsFor(region);
-            ConformancePack existing = store.get(packName);
-            if (existing != null) {
-                ConformancePack updated = new ConformancePack(existing.conformancePackName(),
-                        existing.conformancePackArn(), existing.conformancePackId(), templateS3Uri, templateBody);
-                store.put(packName, updated);
-                persistRegion(conformancePacks, region);
-                return updated;
-            }
-            String packId = "conformance-pack-" + shortId();
-            String packArn = AwsArnUtils.Arn.of("config", region, regionResolver.getAccountId(),
-                    "conformance-pack/" + packName + "/" + packId).toString();
-            ConformancePack pack = new ConformancePack(packName, packArn, packId, templateS3Uri, templateBody);
-            store.put(packName, pack);
+        Map<String, ConformancePack> store = packsFor(region);
+        ConformancePack existing = store.get(packName);
+        if (existing != null) {
+            ConformancePack updated = new ConformancePack(existing.conformancePackName(), existing.conformancePackArn(),
+                    existing.conformancePackId(), templateS3Uri, templateBody);
+            store.put(packName, updated);
             persistRegion(conformancePacks, region);
-            return pack;
+            return updated;
         }
+        String packId = "conformance-pack-" + shortId();
+        String packArn = AwsArnUtils.Arn.of("config", region, regionResolver.getAccountId(),
+                "conformance-pack/" + packName + "/" + packId).toString();
+        ConformancePack pack = new ConformancePack(packName, packArn, packId, templateS3Uri, templateBody);
+        store.put(packName, pack);
+        persistRegion(conformancePacks, region);
+        return pack;
     }
 
     public void deleteConformancePack(String region, String packName) {
-        synchronized (lockFor(conformancePackLockKey(region, packName))) {
-            Map<String, ConformancePack> store = packsFor(region);
-            ConformancePack removed = store.remove(packName);
-            if (removed == null) {
-                throw new AwsException("NoSuchConformancePackException",
-                        "Conformance pack '" + packName + "' does not exist.", 400);
-            }
-            persistRegion(conformancePacks, region);
-            tags.remove(removed.conformancePackArn());
+        Map<String, ConformancePack> store = packsFor(region);
+        if (store.remove(packName) == null) {
+            throw new AwsException("NoSuchConformancePackException",
+                    "Conformance pack '" + packName + "' does not exist.", 400);
         }
-    }
-
-    private static String conformancePackLockKey(String region, String packName) {
-        return "conformance-pack|" + region + "|" + packName;
+        persistRegion(conformancePacks, region);
     }
 
     public List<ConformancePack> describeConformancePacks(String region, List<String> names) {
@@ -959,7 +1002,7 @@ public class AwsConfigService {
             store.put(key, authorization);
             persistRegion(aggregationAuthorizations, region);
             if (tagList != null && !tagList.isEmpty()) {
-                applyTags(authorization.aggregationAuthorizationArn(), tagList);
+                tagResource(authorization.aggregationAuthorizationArn(), tagList);
             }
             return authorization;
         }
@@ -1017,45 +1060,7 @@ public class AwsConfigService {
 
     // --- Tagging ---
 
-    /** TagResource, UntagResource and ListTagsForResource each model ResourceNotFoundException.
-     *  For the kinds Floci stores (config rules, conformance packs, aggregation authorizations)
-     *  the ARN must name a resource that exists in the caller's account and the request Region,
-     *  so a deleted resource, or one in another account, Region or partition, is not found. The
-     *  check and the tag write run under the lock that resource's delete takes, so a delete cannot
-     *  land between them and leave an orphan tag entry for a resource that is gone. ARNs of kinds
-     *  Floci does not model are passed through unchecked, as before. */
-    public void tagResource(String region, String arn, List<Map<String, String>> tagList) {
-        onTaggableResource(region, arn, () -> {
-            applyTags(arn, tagList);
-            return null;
-        });
-    }
-
-    public void untagResource(String region, String arn, List<String> tagKeys) {
-        onTaggableResource(region, arn, () -> {
-            Map<String, String> tagMap = tags.get(arn);
-            if (tagMap != null) {
-                tagKeys.forEach(tagMap::remove);
-                tags.put(arn, tagMap); // write back the in-place inner-map mutation
-            }
-            return null;
-        });
-    }
-
-    public List<Map<String, String>> listTagsForResource(String region, String arn) {
-        return onTaggableResource(region, arn, () -> storedTags(arn).entrySet().stream()
-                .map(e -> Map.of("Key", e.getKey(), "Value", e.getValue()))
-                .collect(Collectors.toList()));
-    }
-
-    /** Tags as stored, with no existence check. Callers that already hold the resource's lock
-     *  (creation tags on Put) write through {@link #applyTags}; tests read through this to see
-     *  whether a delete reached the tags, which the API itself can no longer observe. */
-    Map<String, String> storedTags(String arn) {
-        return tags.getOrDefault(arn, Map.of());
-    }
-
-    void applyTags(String arn, List<Map<String, String>> tagList) {
+    public void tagResource(String arn, List<Map<String, String>> tagList) {
         Map<String, String> tagMap = tags.computeIfAbsent(arn, k -> new ConcurrentHashMap<>());
         for (Map<String, String> t : tagList) {
             tagMap.put(t.get("Key"), t.get("Value"));
@@ -1063,53 +1068,19 @@ public class AwsConfigService {
         tags.put(arn, tagMap); // write back the in-place inner-map mutation
     }
 
-    private <T> T onTaggableResource(String region, String arn, Supplier<T> action) {
-        String resource = AwsArnUtils.resourceIfArnFor(arn, "config").orElse("");
-        String[] parts = resource.split("/", -1);
-        String lockKey;
-        BooleanSupplier exists;
-        switch (parts[0]) {
-            case "conformance-pack" -> {
-                String packName = parts.length > 1 ? parts[1] : "";
-                lockKey = conformancePackLockKey(region, packName);
-                exists = () -> {
-                    ConformancePack pack = packsFor(region).get(packName);
-                    return pack != null && arn.equals(pack.conformancePackArn());
-                };
-            }
-            case "aggregation-authorization" -> {
-                String authorizedAccountId = parts.length == 3 ? parts[1] : "";
-                String authorizedAwsRegion = parts.length == 3 ? parts[2] : "";
-                lockKey = authorizationLockKey(region, authorizedAccountId, authorizedAwsRegion);
-                exists = () -> {
-                    AggregationAuthorization authorization = authorizationsFor(region)
-                            .get(authorizationKey(authorizedAccountId, authorizedAwsRegion));
-                    return authorization != null && arn.equals(authorization.aggregationAuthorizationArn());
-                };
-            }
-            case "config-rule" -> {
-                // A rule ARN carries its id, not its name, and the rule lock is keyed by name.
-                String ruleName = rulesFor(region).values().stream()
-                        .filter(rule -> arn.equals(rule.configRuleArn()))
-                        .map(ConfigRule::configRuleName)
-                        .findFirst().orElse("");
-                lockKey = ruleKey(region, ruleName);
-                exists = () -> {
-                    ConfigRule rule = rulesFor(region).get(ruleName);
-                    return rule != null && arn.equals(rule.configRuleArn());
-                };
-            }
-            default -> {
-                return action.get();
-            }
+    public void untagResource(String arn, List<String> tagKeys) {
+        Map<String, String> tagMap = tags.get(arn);
+        if (tagMap != null) {
+            tagKeys.forEach(tagMap::remove);
+            tags.put(arn, tagMap); // write back the in-place inner-map mutation
         }
-        synchronized (lockFor(lockKey)) {
-            if (!exists.getAsBoolean()) {
-                throw new AwsException("ResourceNotFoundException",
-                        "The resource " + arn + " does not exist.", 400);
-            }
-            return action.get();
-        }
+    }
+
+    public List<Map<String, String>> listTagsForResource(String arn) {
+        Map<String, String> tagMap = tags.getOrDefault(arn, Map.of());
+        return tagMap.entrySet().stream()
+                .map(e -> Map.of("Key", e.getKey(), "Value", e.getValue()))
+                .collect(Collectors.toList());
     }
 
     // --- Pagination ---
@@ -1165,9 +1136,9 @@ public class AwsConfigService {
     /** Aggregation authorizations share {@link #ruleLocks} with the config rules, so their keys
      *  are namespaced apart. A config rule name cannot contain '|', but making the two key spaces
      *  disjoint by construction costs nothing and does not depend on that staying true. */
-    private String authorizationLockKey(String region, String authorizedAccountId,
+    private static String authorizationLockKey(String region, String authorizedAccountId,
             String authorizedAwsRegion) {
-        return "aggregation-authorization|" + runtimeKey(region) + "|"
+        return "aggregation-authorization|" + region + "|"
                 + authorizationKey(authorizedAccountId, authorizedAwsRegion);
     }
 
@@ -1179,12 +1150,8 @@ public class AwsConfigService {
         return resourceType + "|" + resourceId;
     }
 
-    private String runtimeKey(String region) {
-        return regionResolver.getAccountId() + "|" + region;
-    }
-
-    private String ruleKey(String region, String ruleName) {
-        return runtimeKey(region) + "|" + ruleName;
+    private static String ruleKey(String region, String ruleName) {
+        return region + "|" + ruleName;
     }
 
     private Object lockFor(String key) {
@@ -1202,42 +1169,4 @@ public class AwsConfigService {
     private static String shortId() {
         return UUID.randomUUID().toString().replace("-", "").substring(0, 12);
     }
-
-
-    synchronized void requireRunningRecorder(String region) {
-        if (!configurationRecorders.containsKey(region)
-                || !recorderRunning.getOrDefault(recorderStateKey(region), false)) {
-            throw new AwsException("NoRunningConfigurationRecorderException",
-                    "No configuration recorder is running in this account and region.", 400);
-        }
-    }
-
-    private String recorderStateKey(String region) {
-        return regionResolver.getAccountId() + "|" + region;
-    }
-
-
-    public void tagResource(String arn, List<Map<String, String>> tagList) {
-        Map<String, String> tagMap = tags.computeIfAbsent(arn, k -> new ConcurrentHashMap<>());
-        for (Map<String, String> t : tagList) {
-            tagMap.put(t.get("Key"), t.get("Value"));
-        }
-        tags.put(arn, tagMap); // write back the in-place inner-map mutation
-    }
-
-    public void untagResource(String arn, List<String> tagKeys) {
-        Map<String, String> tagMap = tags.get(arn);
-        if (tagMap != null) {
-            tagKeys.forEach(tagMap::remove);
-            tags.put(arn, tagMap); // write back the in-place inner-map mutation
-        }
-    }
-
-    public List<Map<String, String>> listTagsForResource(String arn) {
-        Map<String, String> tagMap = tags.getOrDefault(arn, Map.of());
-        return tagMap.entrySet().stream()
-                .map(e -> Map.of("Key", e.getKey(), "Value", e.getValue()))
-                .collect(Collectors.toList());
-    }
-
 }
