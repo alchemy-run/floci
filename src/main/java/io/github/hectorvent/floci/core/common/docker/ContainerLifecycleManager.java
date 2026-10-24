@@ -1380,6 +1380,17 @@ public class ContainerLifecycleManager {
             hostConfig.withReadonlyRootfs(true);
         }
 
+        // CPU quota and weight
+        if (spec.nanoCpus() != null && spec.nanoCpus() > 0) {
+            hostConfig.withNanoCPUs(clampToHostCpus(spec.nanoCpus()));
+        }
+        if (spec.cpuShares() != null && spec.cpuShares() > 0) {
+            hostConfig.withCpuShares(spec.cpuShares());
+        }
+        if (spec.readonlyRootfs()) {
+            hostConfig.withReadonlyRootfs(true);
+        }
+
         // Port bindings — services decide whether to request them based on their
         // own in-container-vs-native logic. When Floci runs inside Docker, most
         // backends are reached via the docker network IP, so services omit the

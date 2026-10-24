@@ -451,6 +451,16 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
                         task.getTaskArn(), e.getMessage());
             }
         }
+        // Task state is memory-only, so an ENI left behind here would outlive every task that
+        // could claim it and reload from EC2's store as an orphan on the next start.
+        for (EcsTask task : tasks.values()) {
+            try {
+                containerManager.releaseTaskNetwork(task, taskRegion(task));
+            } catch (Exception e) {
+                LOG.warnv("Failed to release the ENI of ECS task {0} on shutdown: {1}",
+                        task.getTaskArn(), e.getMessage());
+            }
+        }
     }
 
     @Override
