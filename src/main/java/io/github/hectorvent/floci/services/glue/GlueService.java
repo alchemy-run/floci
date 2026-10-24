@@ -3190,6 +3190,19 @@ public class GlueService {
         return crawlerStore.get(name).map(crawler -> !CRAWLER_RUNNING.equals(crawler.getState())).orElse(true);
     }
 
+    /**
+     * Crawls a crawler's targets and writes the tables it finds into its database, as a finished
+     * crawl does. The crawl state itself is GlueCrawlerRunService's.
+     */
+    public void crawlIntoCatalog(String name) {
+        Crawler crawler = getCrawler(name);
+        if (crawler.getDatabaseName() == null || crawler.getDatabaseName().isBlank()) {
+            throw new AwsException("InvalidInputException", "Crawler " + name + " has no DatabaseName.", 400);
+        }
+        getDatabase(crawler.getDatabaseName());
+        applyCrawl(crawler, crawlerRunner.crawl(crawler, regionResolver.getAccountId(), () -> false));
+    }
+
     void runCrawl(String name, String accountId, Instant startTime) {
         try {
             Crawler crawler = getCrawler(name);

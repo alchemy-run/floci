@@ -100,6 +100,13 @@ public class GlueCrawlerRunService {
         record.setCurrentWorkflowRunId(workflowRunId);
         recordStore.put(name, record);
         LOG.infov("Started Glue crawler {0}", name);
+        try {
+            glueService.crawlIntoCatalog(name);
+        } catch (RuntimeException e) {
+            LOG.warnv("Glue crawler {0} failed: {1}", name, e.getMessage());
+            finish(record, clock.instant(), "FAILED");
+            return crawlId;
+        }
         settle(record);
         return crawlId;
     }
