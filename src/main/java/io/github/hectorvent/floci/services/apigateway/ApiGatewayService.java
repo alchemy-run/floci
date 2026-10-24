@@ -1154,7 +1154,6 @@ public class ApiGatewayService implements ResourceProvider {
                     setting.setRequireAuthorizationForCacheControl(Boolean.parseBoolean(value));
             case "caching/unauthorizedCacheControlHeaderStrategy" ->
                     setting.setUnauthorizedCacheControlHeaderStrategy(value);
-                    case "/type" -> newType = value;
             default -> { /* unreachable: caller pre-filters by METHOD_SETTING_KEYS */ }
         }
     }
@@ -1441,12 +1440,6 @@ public class ApiGatewayService implements ResourceProvider {
                 if (!"replace".equals(op.get("op"))) { continue; }
                 switch (op.getOrDefault("path", "")) {
                     case "/name"        -> key.setName(op.get("value"));
-                    case "/authorizerResultTtlInSeconds" -> newTtl = remove ? "300" : validateAuthorizerTtl(value);
-                    case "/identityValidationExpression" -> newValidationExpression = value;
-                    case "/authorizerCredentials" -> newCredentials = value;
-                    case "/identitySource" -> newIdentitySource = remove ? null : value;
-                    case "/authorizerUri" -> newAuthorizerUri = value;
-                    case "/authType" -> newAuthType = value;
                     case "/description" -> key.setDescription(op.get("value"));
                     case "/enabled"     -> key.setEnabled(Boolean.parseBoolean(op.get("value")));
                     case "/customerId"  -> key.setCustomerId(op.get("value"));

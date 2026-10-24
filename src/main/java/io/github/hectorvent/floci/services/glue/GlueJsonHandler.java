@@ -329,8 +329,6 @@ public class GlueJsonHandler {
                 yield Response.ok(pageResponse("JobRuns", page.items(), page.nextToken())).build();
             }
             case "BatchStopJobRun" -> handleBatchStopJobRun(request);
-            case "ResetJobBookmark" -> handleResetJobBookmark(request);
-            case "GetJobBookmark" -> handleGetJobBookmark(request);
             case "CreateClassifier" -> {
                 Classifier classifier = mapper.treeToValue(request, Classifier.class);
                 glueService.createClassifier(classifier);

@@ -137,13 +137,8 @@ public class ResourceArnBuilder {
             case "sns"            -> List.of(buildSnsArn(ctx, region, accountId));
             case "dynamodb"       -> buildDynamoDbArns(ctx, region, accountId);
             case "kinesis"        -> List.of(buildKinesisArn(ctx, region, accountId));
-            case "secretsmanager" -> List.of(buildSecretsManagerArn(ctx, region, accountId));
             case "ssm"            -> List.of(buildSsmArn(ctx, region, accountId));
             case "kms"            -> List.of(buildKmsArn(path, region, accountId));
-            case "inspector2"     -> List.of(buildInspector2Arn(ctx, path, region, accountId));
-            case "guardduty"      -> List.of(buildGuardDutyArn(ctx, path, region, accountId));
-            case "emr-serverless" -> List.of(buildEmrServerlessArn(ctx, path, region, accountId));
-            case "ses"            -> List.of(buildSesIdentityArn(ctx, region, accountId));
             case "iam"            -> buildIamArns(ctx, region, accountId);
             case "resource-groups" -> List.of(buildResourceGroupArn(ctx, region, accountId));
             case "scheduler"      -> List.of(buildSchedulerArn(path, ctx, region, accountId, partition));

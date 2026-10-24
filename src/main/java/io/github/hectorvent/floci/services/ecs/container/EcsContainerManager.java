@@ -657,7 +657,6 @@ public class EcsContainerManager {
         task.setDesiredStatus(TaskStatus.RUNNING.name());
         task.setStartedAt(Instant.now());
 
-        Map<String, Integer> stopTimeouts = new LinkedHashMap<>();
         for (ContainerDefinition def : taskDef.getContainerDefinitions()) {
             if (def.getStopTimeout() != null) {
                 stopTimeouts.put(def.getName(), def.getStopTimeout());

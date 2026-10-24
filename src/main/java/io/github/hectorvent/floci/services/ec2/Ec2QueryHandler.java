@@ -338,8 +338,6 @@ public class Ec2QueryHandler {
                 case "AllocateIpamPoolCidr" -> handleAllocateIpamPoolCidr(params, region);
                 case "ReleaseIpamPoolAllocation" -> handleReleaseIpamPoolAllocation(params, region);
                 case "GetIpamPoolAllocations" -> handleGetIpamPoolAllocations(params, region);
-                case "network-interface" -> networkInterfaceTags;
-                case "instance" -> instanceTags;
                 case "DescribeClientVpnRoutes" -> handleDescribeClientVpnRoutes(params, region);
                 case "DeleteClientVpnRoute" -> handleDeleteClientVpnRoute(params, region);
                 case "CreateClientVpnRoute" -> handleCreateClientVpnRoute(params, region);

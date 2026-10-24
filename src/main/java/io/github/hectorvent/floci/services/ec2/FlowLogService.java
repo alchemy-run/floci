@@ -501,14 +501,6 @@ public class FlowLogService {
                     case "VPC" -> resourceId == null || resourceId.equals(inst.getVpcId());
                     case "Subnet" -> resourceId == null || resourceId.equals(inst.getSubnetId());
                     case "NetworkInterface" -> hasEni(inst, resourceId);
-            case "ap-southeast-2" -> "apse2";
-            case "ap-southeast-1" -> "apse1";
-            case "eu-central-1" -> "euc1";
-            case "eu-west-1" -> "euw1";
-            case "us-west-2" -> "usw2";
-            case "us-west-1" -> "usw1";
-            case "us-east-2" -> "use2";
-            case "us-east-1" -> "use1";
                     default -> true;
                 };
                 if (!match) {

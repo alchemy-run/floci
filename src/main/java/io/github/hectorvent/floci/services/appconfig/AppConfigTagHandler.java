@@ -52,16 +52,6 @@ public class AppConfigTagHandler implements TagHandler {
         ResourceRef ref = parseArn(arn);
         return switch (ref.type()) {
             case "application" -> service.getApplicationTags(ref.id());
-            case "extensionassociation" -> service.untagAssociation(ref.id(), tagKeys);
-            case "extension" -> service.untagExtension(ref.id(), tagKeys);
-            case "deploymentstrategy" -> service.untagStrategy(ref.id(), tagKeys);
-            case "configurationprofile" -> service.untagProfile(ref.id(), tagKeys);
-            case "environment" -> service.untagEnvironment(ref.id(), tagKeys);
-            case "extensionassociation" -> service.tagAssociation(ref.id(), tags);
-            case "extension" -> service.tagExtension(ref.id(), tags);
-            case "deploymentstrategy" -> service.tagStrategy(ref.id(), tags);
-            case "configurationprofile" -> service.tagProfile(ref.id(), tags);
-            case "environment" -> service.tagEnvironment(ref.id(), tags);
             case "extensionassociation" -> service.getAssociationTags(ref.id());
             case "extension" -> service.getExtensionTags(ref.id());
             case "deploymentstrategy" -> service.getStrategyTags(ref.id());
