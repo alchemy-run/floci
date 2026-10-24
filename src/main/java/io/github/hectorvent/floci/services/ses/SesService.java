@@ -1353,7 +1353,9 @@ public class SesService {
         // Existence in the signing region is checked before the ARN's region is compared: a missing
         // resource is a 404 even when the regions also differ (probe-confirmed).
         SesTaggable domain = taggableDomains.get(ref.type());
-        domain.listTags(ref.name(), region);
+        if (domain != null) {
+            domain.listTags(ref.name(), region);
+        }
         if (!ref.region().equals(region)) {
             throw new AwsException("BadRequestException", "Failed to tag resource", 400);
         }
@@ -1392,7 +1394,9 @@ public class SesService {
         }
         requireValidResourceName(ref);
         SesTaggable domain = taggableDomains.get(ref.type());
-        domain.listTags(ref.name(), region);
+        if (domain != null) {
+            domain.listTags(ref.name(), region);
+        }
         if (!ref.region().equals(region)) {
             throw new AwsException("BadRequestException", "Failed to untag resource", 400);
         }
@@ -1472,7 +1476,8 @@ public class SesService {
         }
         String type = resource.substring(0, slash);
         String name = resource.substring(slash + 1);
-        if (!taggableDomains.containsKey(type) || name.isBlank()) {
+        // Multi-region endpoints are SesService's own resource, not a domain service's.
+        if ((!taggableDomains.containsKey(type) && !"multi-region-endpoint".equals(type)) || name.isBlank()) {
             throw invalidResourceArn();
         }
         // Identity names keep their pass-through: an email local part may legally hold either character.
