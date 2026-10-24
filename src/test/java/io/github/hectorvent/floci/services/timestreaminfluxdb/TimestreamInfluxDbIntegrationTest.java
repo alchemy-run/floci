@@ -49,8 +49,8 @@ class TimestreamInfluxDbIntegrationTest {
                 .body("dbStorageType", equalTo("InfluxIOIncludedT1"))
                 .body("publiclyAccessible", equalTo(false))
                 .body("availabilityZone", equalTo("us-east-1a"))
-                .body("vpcSubnetIds", contains("subnet-abc123"))
-                .body("vpcSecurityGroupIds", contains("sg-abc123"))
+                .body("vpcSubnetIds", contains("subnet-default-us-east-1-a"))
+                .body("vpcSecurityGroupIds", contains("sg-default-us-east-1"))
                 .body("influxAuthParametersSecretArn", nullValue())
                 .extract().path("id");
 
@@ -117,7 +117,7 @@ class TimestreamInfluxDbIntegrationTest {
     void createInstanceRejectsInputOutsideTheModelConstraints() {
         call("CreateDbInstance", """
                 {"name":"no-password","dbInstanceType":"db.influx.medium","allocatedStorage":20,
-                 "vpcSubnetIds":["subnet-abc123"],"vpcSecurityGroupIds":["sg-abc123"]}
+                 "vpcSubnetIds":["subnet-default-us-east-1-a"],"vpcSecurityGroupIds":["sg-default-us-east-1"]}
                 """)
                 .statusCode(400)
                 .body("__type", equalTo("ValidationException"))
@@ -129,7 +129,7 @@ class TimestreamInfluxDbIntegrationTest {
         assertValidation(instanceBody("reserved-port", "db.influx.medium", 20, "8090"));
         assertValidation("""
                 {"name":"no-subnets","password":"password123","dbInstanceType":"db.influx.medium","allocatedStorage":20,
-                 "vpcSubnetIds":[],"vpcSecurityGroupIds":["sg-abc123"]}
+                 "vpcSubnetIds":[],"vpcSecurityGroupIds":["sg-default-us-east-1"]}
                 """);
     }
 
@@ -206,7 +206,7 @@ class TimestreamInfluxDbIntegrationTest {
     void clusterLifecycleManagesItsMemberInstances() {
         String clusterId = call("CreateDbCluster", """
                 {"name":"lifecycle-cluster","password":"password123","dbInstanceType":"db.influx.large",
-                 "allocatedStorage":40,"vpcSubnetIds":["subnet-abc123","subnet-def456"],"vpcSecurityGroupIds":["sg-abc123"]}
+                 "allocatedStorage":40,"vpcSubnetIds":["subnet-default-us-east-1-a","subnet-default-us-east-1-b"],"vpcSecurityGroupIds":["sg-default-us-east-1"]}
                 """)
                 .statusCode(200)
                 .body("dbClusterId", matchesPattern(ID_PATTERN))
@@ -285,7 +285,7 @@ class TimestreamInfluxDbIntegrationTest {
 
         String clusterId = call("CreateDbCluster", """
                 {"name":"enterprise-cluster","dbInstanceType":"db.influx.large","dbParameterGroupIdentifier":"%s",
-                 "vpcSubnetIds":["subnet-abc123"],"vpcSecurityGroupIds":["sg-abc123"]}
+                 "vpcSubnetIds":["subnet-default-us-east-1-a"],"vpcSecurityGroupIds":["sg-default-us-east-1"]}
                 """.formatted(groupId))
                 .statusCode(200)
                 .extract().path("dbClusterId");
@@ -450,7 +450,7 @@ class TimestreamInfluxDbIntegrationTest {
                 .body("networkType", equalTo("IPV4"))
                 .body("deploymentType", equalTo("SINGLE_AZ"))
                 .body("publiclyAccessible", equalTo(false))
-                .body("vpcSubnetIds", contains("subnet-abc123"));
+                .body("vpcSubnetIds", contains("subnet-default-us-east-1-a"));
 
         call("RestoreFromDbBackup", replaceBase + "}")
                 .statusCode(200)
@@ -464,14 +464,14 @@ class TimestreamInfluxDbIntegrationTest {
     private static ValidatableResponse createInstance(String name, String extraFields) {
         return call("CreateDbInstance", """
                 {"name":"%s","password":"password123","dbInstanceType":"db.influx.medium","allocatedStorage":20,
-                 "vpcSubnetIds":["subnet-abc123"],"vpcSecurityGroupIds":["sg-abc123"]%s}
+                 "vpcSubnetIds":["subnet-default-us-east-1-a"],"vpcSecurityGroupIds":["sg-default-us-east-1"]%s}
                 """.formatted(name, extraFields));
     }
 
     private static String instanceBody(String name, String instanceType, int storage, String port) {
         return """
                 {"name":"%s","password":"password123","dbInstanceType":"%s","allocatedStorage":%d,"port":%s,
-                 "vpcSubnetIds":["subnet-abc123"],"vpcSecurityGroupIds":["sg-abc123"]}
+                 "vpcSubnetIds":["subnet-default-us-east-1-a"],"vpcSecurityGroupIds":["sg-default-us-east-1"]}
                 """.formatted(name, instanceType, storage, port);
     }
 

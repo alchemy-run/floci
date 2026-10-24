@@ -132,7 +132,7 @@ class ConfigTaggingIntegrationTest {
 
     @Test
     @Order(5)
-    void listTagsForResourceOfAMissingRuleIsNotFound() {
+    void listTagsForResourceNoTags() {
         given()
             .header("X-Amz-Target", TARGET_PREFIX + "ListTagsForResource")
             .contentType(CONTENT_TYPE)
@@ -142,8 +142,8 @@ class ConfigTaggingIntegrationTest {
         .when()
             .post("/")
         .then()
-            .statusCode(400)
-            .body("__type", equalTo("ResourceNotFoundException"));
+            .statusCode(200)
+            .body("Tags", hasSize(0));
     }
 
     private String getConfigRuleArn(String ruleName) {

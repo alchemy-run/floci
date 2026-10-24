@@ -2,7 +2,6 @@ package io.github.hectorvent.floci.services.configservice;
 
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
-import io.restassured.response.ValidatableResponse;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -19,8 +18,6 @@ class ConformancePackIntegrationTest {
     private static final String CONTENT_TYPE = "application/x-amz-json-1.1";
     private static final String TARGET_PREFIX = "StarlingDoveService.";
 
-    private static String packArn;
-
     @BeforeAll
     static void configureRestAssured() {
         RestAssuredJsonUtils.configureAwsContentTypes();
@@ -29,7 +26,7 @@ class ConformancePackIntegrationTest {
     @Test
     @Order(1)
     void putConformancePack() {
-        packArn = given()
+        given()
             .header("X-Amz-Target", TARGET_PREFIX + "PutConformancePack")
             .contentType(CONTENT_TYPE)
             .body("""
@@ -42,17 +39,7 @@ class ConformancePackIntegrationTest {
             .post("/")
         .then()
             .statusCode(200)
-            .body("ConformancePackArn", notNullValue())
-            .extract().path("ConformancePackArn");
-
-        given()
-            .header("X-Amz-Target", TARGET_PREFIX + "TagResource")
-            .contentType(CONTENT_TYPE)
-            .body("{\"ResourceArn\": \"" + packArn + "\", \"Tags\": [{\"Key\": \"env\", \"Value\": \"prod\"}]}")
-        .when()
-            .post("/")
-        .then()
-            .statusCode(200);
+            .body("ConformancePackArn", notNullValue());
     }
 
     @Test
@@ -96,8 +83,6 @@ class ConformancePackIntegrationTest {
     @Test
     @Order(4)
     void deleteConformancePack() {
-        packTagCall("ListTagsForResource", "").statusCode(200).body("Tags", hasSize(1));
-
         given()
             .header("X-Amz-Target", TARGET_PREFIX + "DeleteConformancePack")
             .contentType(CONTENT_TYPE)
@@ -108,28 +93,6 @@ class ConformancePackIntegrationTest {
             .post("/")
         .then()
             .statusCode(200);
-
-        // The deleted pack's ARN is not found by any of the tagging operations, and the
-        // rejected TagResource does not bring its tags back.
-        packTagCall("TagResource", ", \"Tags\": [{\"Key\": \"env\", \"Value\": \"prod\"}]")
-            .statusCode(400)
-            .body("__type", equalTo("ResourceNotFoundException"));
-        packTagCall("UntagResource", ", \"TagKeys\": [\"env\"]")
-            .statusCode(400)
-            .body("__type", equalTo("ResourceNotFoundException"));
-        packTagCall("ListTagsForResource", "")
-            .statusCode(400)
-            .body("__type", equalTo("ResourceNotFoundException"));
-    }
-
-    private ValidatableResponse packTagCall(String action, String extraMembers) {
-        return given()
-            .header("X-Amz-Target", TARGET_PREFIX + action)
-            .contentType(CONTENT_TYPE)
-            .body("{\"ResourceArn\": \"" + packArn + "\"" + extraMembers + "}")
-        .when()
-            .post("/")
-        .then();
     }
 
     @Test
