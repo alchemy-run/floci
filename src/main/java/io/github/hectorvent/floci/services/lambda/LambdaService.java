@@ -72,7 +72,6 @@ import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import io.github.hectorvent.floci.services.ec2.model.NetworkInterface;
-import io.github.hectorvent.floci.services.lambda.durable.LambdaDurableService;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
 import jakarta.enterprise.inject.Instance;
 import java.security.MessageDigest;
@@ -4190,15 +4189,7 @@ public class LambdaService implements ResourceProvider {
     }
 
 
-    /**
-     * Optional: durable-execution purge on function delete. Injected lazily so
-     * LambdaDurableService can depend on LambdaService without a CDI cycle.
-     * Unit tests assign it via {@link #setDurableService}.
-     */
-    @Inject
-    Instance<LambdaDurableService> durableServiceInstance;
 
-    private LambdaDurableService durableService;
 
     /** Optional ECR digest resolution for image functions; unit tests assign it via {@link #setImageDigestResolver}. */
     @Inject
@@ -4249,10 +4240,6 @@ public class LambdaService implements ResourceProvider {
         this.objectMapper = objectMapper;
     }
 
-    /** Test hook: wire the durable service without CDI. */
-    void setDurableService(LambdaDurableService durableService) {
-        this.durableService = durableService;
-    }
 
     /** Test hook: wire the image digest resolver without CDI. */
     void setImageDigestResolver(LambdaImageDigestResolver imageDigestResolver) {
@@ -4381,47 +4368,6 @@ public class LambdaService implements ResourceProvider {
         validateLogGroup(logging.get("LogGroup"));
     }
 
-    private void extractZipCodeBytes(LambdaFunction fn, byte[] zipBytes, String region) {
-        Path codePath = codeStore.getCodePath(ownerAccount(fn), region, fn.getFunctionName());
-        try {
-            zipExtractor.extractTo(zipBytes, codePath, configuredZipMaxEntries());
-            // Publish the new code identity under the same per-function lock publishVersion holds.
-            // PublishVersion's CodeSha256 precondition is a check-then-act: it compares the hash and
-            // then snapshots the code. Mutating these fields without the lock lets an overlapping
-            // deploy move $LATEST between those two steps, so a version would carry code whose hash
-            // the caller never authorised even though the check passed. Extraction to disk stays
-            // outside the lock; only the fields that decide what a snapshot copies are inside it.
-            String newSha256 = null;
-            try {
-                byte[] digest = MessageDigest.getInstance("SHA-256").digest(zipBytes);
-                newSha256 = Base64.getEncoder().encodeToString(digest);
-            } catch (NoSuchAlgorithmException ignored) {}
-            synchronized (lockForConcurrencyOp(fn.getFunctionArn())) {
-                fn.setCodeLocalPath(codePath.toAbsolutePath().normalize().toString());
-                fn.setCodeSizeBytes(zipBytes.length);
-                if (newSha256 != null) {
-                    fn.setCodeSha256(newSha256);
-                }
-            }
-
-            // Deploy succeeded: keep the exact package so GetFunction can serve
-            // a real Code.Location.
-            storeDeploymentPackage(fn, zipBytes, region);
-            // Reclaim a directory left behind by a function created before account-scoping;
-            // codePath above is already the new location, so this is a no-op once migrated.
-            // Locked against publishVersion (see its own comment) so a version cannot be
-            // persisted, referencing this legacy path, in the window between the check below
-            // and the actual delete.
-            synchronized (lockForConcurrencyOp(fn.getFunctionArn())) {
-                reclaimLegacyCodeDirectoryIfUnused(fn.getFunctionName());
-            }
-        } catch (AwsException e) {
-            throw e;
-        } catch (IOException e) {
-            throw new AwsException("InvalidParameterValueException",
-                    "Failed to extract deployment package: " + e.getMessage(), 400);
-        }
-    }
 
     public Map<String, Object> addPermission(String region, String functionName, Map<String, Object> request) {
         return addPermission(region, functionName, null, request);

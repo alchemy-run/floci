@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.services.appsync.model.*;
 import io.github.hectorvent.floci.services.appsync.model.ApiKey;
 import io.github.hectorvent.floci.services.appsync.model.AppSyncType;
 import io.github.hectorvent.floci.services.appsync.model.ChannelNamespace;

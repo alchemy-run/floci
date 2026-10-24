@@ -5809,32 +5809,6 @@ public class DynamoDbService {
 
 
 
-    public TableDefinition restoreTableFromBackup(String backupArn, String targetTableName, String region) {
-        TableBackup backup = requireBackup(backupArn);
-        DynamoDbTableNames.requireShortName(targetTableName);
-        String storageKey = regionKey(region, targetTableName);
-        if (tableStore.get(storageKey).isPresent()) {
-            throw new AwsException("TableAlreadyExistsException",
-                    "Table already exists: " + targetTableName, 400);
-        }
-        TableDefinition restored = createTable(
-                targetTableName,
-                new ArrayList<>(backup.getKeySchema()),
-                new ArrayList<>(backup.getAttributeDefinitions()),
-                backup.getReadCapacityUnits(),
-                backup.getWriteCapacityUnits(),
-                List.of(),
-                List.of(),
-                region);
-        if (backup.getBillingMode() != null) {
-            restored.setBillingMode(backup.getBillingMode());
-        }
-        tableStore.put(storageKey, restored);
-        itemsByTable.put(scopedItemsKey(storageKey), new ConcurrentSkipListMap<>(backup.getItems()));
-        persistItems(storageKey);
-        LOG.infov("Restored table {0} from backup {1}", targetTableName, backupArn);
-        return restored;
-    }
 
     public TableDefinition restoreTableToPointInTime(String sourceTableName, String targetTableName, String region) {
         String canonicalSource = canonicalTableName(region, sourceTableName);
@@ -5869,18 +5843,6 @@ public class DynamoDbService {
         return restored;
     }
 
-    private TableBackup requireBackup(String backupArn) {
-        if (backupArn == null || backupArn.isBlank()) {
-            throw new AwsException("ValidationException", "BackupArn must not be empty", 400);
-        }
-        TableBackup backup = backups.get(backupArn);
-        if (backup == null || "DELETED".equals(backup.getBackupStatus())
-                || !regionResolver.getAccountId().equals(AwsArnUtils.parse(backupArn).accountId())) {
-            throw new AwsException("BackupNotFoundException",
-                    "Backup not found: " + backupArn, 400);
-        }
-        return backup;
-    }
 
     public String updateContributorInsights(String tableName, String indexName, String action, String region) {
         TableDefinition table = describeTable(tableName, region);
@@ -5918,8 +5880,4 @@ public class DynamoDbService {
 
 
 
-    @Override
-    public Set<SupportedResourceType> getSupportedResourceTypes() {
-        return Set.of(new SupportedResourceType("dynamodb:table", "dynamodb", true));
-    }
 }

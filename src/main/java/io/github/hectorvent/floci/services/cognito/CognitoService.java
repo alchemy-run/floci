@@ -7053,7 +7053,7 @@ public class CognitoService implements ResourceProvider {
                 String code = verificationCodeService.issue(pool.getId(), user.getUsername(),
                         VerificationCode.Purpose.SIGNUP_CONFIRMATION, Duration.ofHours(24));
                 Map<String, Object> customMessage = authFlowHandler.fireCustomMessage(
-                        pool, client, user, "CustomMessage_SignUp");
+                        pool, client, user, "CustomMessage_SignUp", null);
                 messageDispatcher.dispatch(pool, user, VerificationCode.Purpose.SIGNUP_CONFIRMATION,
                         code, List.of(deliveryTarget.deliveryMedium()), customMessage);
             } catch (VerificationCodeException e) {

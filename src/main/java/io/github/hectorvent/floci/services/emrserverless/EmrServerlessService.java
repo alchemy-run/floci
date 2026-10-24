@@ -525,7 +525,7 @@ public class EmrServerlessService {
         if (!EmrServerlessJobService.terminal(jobs.get(accountId(), region(), applicationId,
                 result.path("jobRunId").asText(), null)) && !"STARTED".equals(app.getState())) {
             app.setState("STARTED");
-            app.setUpdatedAt(System.currentTimeMillis());
+            app.setUpdatedAt(java.time.Instant.now());
             storage.putForAccount(accountId(), storageKey(applicationId), app);
         }
         return result;

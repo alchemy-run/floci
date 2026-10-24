@@ -634,7 +634,7 @@ public class DmsService implements Resettable {
     }
 
     public List<OrderableInstance> orderableReplicationInstances(String region) {
-        List<String> zones = ec2Service.describeAvailabilityZones(region).stream()
+        List<String> zones = ec2Service.describeAvailabilityZones(region, java.util.List.of(), java.util.List.of(), java.util.List.of()).stream()
                 .map(zone -> zone.get("zoneName"))
                 .filter(Objects::nonNull)
                 .toList();

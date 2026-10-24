@@ -3044,23 +3044,6 @@ public class CodeArtifactService implements Resettable {
 
     private final CodeArtifactEventPublisher eventPublisher;
 
-    /**
-     * {@code mavenRepositoryId} is assigned at {@link #createRepository}, but a repository
-     * persisted before that field existed has none; backfills it lazily on first Maven-format use
-     * rather than leaving every caller of {@link CodeArtifactRepository#getMavenRepositoryId()} to
-     * handle a null it can otherwise never see.
-     */
-    public synchronized String ensureMavenRepositoryId(String region, String domain, String domainOwner,
-                                                         String repository) {
-        String owner = effectiveOwner(domainOwner);
-        String key = repositoryKey(region, domain, repository);
-        CodeArtifactRepository r = requireRepository(owner, key, repository);
-        if (r.getMavenRepositoryId() == null) {
-            r.setMavenRepositoryId(newRevision());
-            repositories.putForAccount(owner, key, r);
-        }
-        return r.getMavenRepositoryId();
-    }
 
     public record PackageCoordinate(String region, String domain, String owner, String repository,
                                     String format, String namespace, String name) {}
@@ -3465,76 +3448,7 @@ public class CodeArtifactService implements Resettable {
         savePackages(coordinate, repository, packages);
     }
 
-    private Map<String, CodeArtifactPackage> readPackages(CodeArtifactRepository repository) {
-        migrateStoredVersionKeys(repository);
-        Map<String, CodeArtifactPackage> packages = new LinkedHashMap<>(repository.getPackages());
-        String owner = repository.getDomainOwner();
-        String prefix = repositoryKey(repository.getRegion(), repository.getDomainName(), repository.getName()) + "::";
-        for (CodeArtifactPackageVersion stored : packageVersions.scanForAccount(owner, key -> key.startsWith(prefix))) {
-            String key = packageKey(stored.getFormat(), stored.getNamespace(), stored.getPackageName());
-            CodeArtifactPackage pkg = packages.getOrDefault(key, new CodeArtifactPackage(stored.getFormat(),
-                    stored.getNamespace(), stored.getPackageName(), Map.of("publish", "ALLOW", "upstream", "BLOCK"), Map.of()));
-            String versionKey = packageVersionKey(stored.getRegion(), stored.getDomainName(), stored.getRepositoryName(),
-                    stored.getFormat(), stored.getNamespace(), stored.getPackageName(), stored.getVersion());
-            Map<String, byte[]> assets = new LinkedHashMap<>();
-            stored.getAssets().keySet().forEach(name -> assets.put(name, readAssetContent(owner, versionKey, name)));
-            Map<String, Version> versions = new LinkedHashMap<>(pkg.versions());
-            versions.put(stored.getVersion(), new Version(stored.getVersion(), stored.getRevision(), stored.getStatus(),
-                    stored.getPublishedTime() == null ? 0 : stored.getPublishedTime(),
-                    stored.getOriginRepository() == null ? stored.getRepositoryName() : stored.getOriginRepository(), assets));
-            packages.put(key, withVersions(pkg, versions));
-        }
-        return packages;
-    }
 
-    private void savePackages(PackageCoordinate coordinate, CodeArtifactRepository repository,
-                              Map<String, CodeArtifactPackage> packages) {
-        String owner = effectiveOwner(coordinate.owner());
-        String prefix = repositoryKey(coordinate.region(), coordinate.domain(), coordinate.repository()) + "::";
-        Set<String> retained = new HashSet<>();
-        Map<String, CodeArtifactPackage> metadata = new LinkedHashMap<>();
-        for (Map.Entry<String, CodeArtifactPackage> entry : packages.entrySet()) {
-            CodeArtifactPackage pkg = entry.getValue();
-            metadata.put(entry.getKey(), withVersions(pkg, Map.of()));
-            for (Version version : pkg.versions().values()) {
-                String key = packageVersionKey(coordinate.region(), coordinate.domain(), coordinate.repository(),
-                        pkg.format(), pkg.namespace(), pkg.name(), version.version());
-                retained.add(key);
-                CodeArtifactPackageVersion stored = new CodeArtifactPackageVersion();
-                stored.setDomainName(coordinate.domain());
-                stored.setDomainOwner(owner);
-                stored.setRegion(coordinate.region());
-                stored.setRepositoryName(coordinate.repository());
-                stored.setFormat(pkg.format());
-                stored.setNamespace(pkg.namespace());
-                stored.setPackageName(pkg.name());
-                stored.setVersion(version.version());
-                stored.setRevision(version.revision());
-                stored.setStatus(version.status());
-                stored.setPublishedTime(version.publishedTime());
-                stored.setOriginRepository(version.originRepository());
-                Map<String, PackageAsset> assets = new LinkedHashMap<>();
-                version.assets().forEach((name, content) -> {
-                    PackageAsset asset = new PackageAsset();
-                    asset.setName(name);
-                    asset.setSize(content.length);
-                    asset.setHashes(computeHashes(content));
-                    writeAssetContent(owner, key, name, content);
-                    assets.put(name, asset);
-                });
-                stored.setAssets(assets);
-                packageVersions.getForAccount(owner, key).ifPresent(previous -> previous.getAssets().keySet().stream()
-                        .filter(name -> !assets.containsKey(name))
-                        .forEach(name -> deleteAssetContent(owner, key, name)));
-                packageVersions.putForAccount(owner, key, stored);
-            }
-        }
-        packageVersions.keysForAccount(owner).stream()
-                .filter(key -> key.startsWith(prefix) && !retained.contains(key))
-                .forEach(key -> deleteStoredPackageVersion(owner, key));
-        repository.setPackages(metadata);
-        repositories.putForAccount(owner, repositoryKey(coordinate.region(), coordinate.domain(), coordinate.repository()), repository);
-    }
 
     private synchronized void migrateStoredVersionKeys(CodeArtifactRepository repository) {
         String owner = repository.getDomainOwner();

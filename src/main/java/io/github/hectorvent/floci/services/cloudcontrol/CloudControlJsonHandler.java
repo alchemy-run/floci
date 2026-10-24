@@ -131,7 +131,6 @@ public class CloudControlJsonHandler {
         if (event.resourceModel() != null) {
             pe.put("ResourceModel", event.resourceModel());
         }
-        if (event.errorCode() != null) pe.put("ErrorCode", event.errorCode());
         return pe;
     }
 

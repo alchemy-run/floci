@@ -65,7 +65,6 @@ public class AcmJsonHandler {
             case "GetAccountConfiguration" -> handleGetAccountConfiguration(request, region);
             case "PutAccountConfiguration" -> handlePutAccountConfiguration(request, region);
             case "UpdateCertificateOptions" -> handleUpdateCertificateOptions(request, region);
-            case "SearchCertificates" -> handleSearchCertificates(request, region);
             case "RevokeCertificate" -> handleRevokeCertificate(request, region);
             case "RenewCertificate" -> handleRenewCertificate(request, region);
             case "ResendValidationEmail" -> handleResendValidationEmail(request, region);
@@ -617,26 +616,6 @@ public class AcmJsonHandler {
         return list.isEmpty() ? null : list;
     }
 
-    private Response handleSearchCertificates(JsonNode request, String region) {
-        int maxItems = request.path("MaxResults").asInt(100);
-        String nextToken = request.path("NextToken").asText(null);
-        JsonNode filterStatement = request.get("FilterStatement");
-
-        ListResult result = service.searchCertificates(
-            cert -> matchesFilterStatement(cert, filterStatement),
-            region, maxItems, nextToken);
-
-        ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode results = objectMapper.createArrayNode();
-        for (Certificate cert : result.certificates()) {
-            results.add(buildSearchResult(cert));
-        }
-        response.set("Results", results);
-        if (result.nextToken() != null) {
-            response.put("NextToken", result.nextToken());
-        }
-        return Response.ok(response).build();
-    }
 
     private ObjectNode buildSearchResult(Certificate cert) {
         ObjectNode node = objectMapper.createObjectNode();

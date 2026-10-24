@@ -1429,7 +1429,7 @@ public class EksClusterManager {
                     clusterName, e.getMessage());
             return;
         }
-        List<String> regions = new ArrayList<>(AwsRegions.ALL);
+        List<String> regions = new ArrayList<>(AwsRegions.KNOWN_IDS.stream().sorted().toList());
         if (!regions.contains(config.defaultRegion())) {
             regions.add(config.defaultRegion());
         }

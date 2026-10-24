@@ -36,14 +36,6 @@ public class ServiceQuotasJsonHandler {
             case "GetRequestedServiceQuotaChange" ->
                     Response.ok(service.getRequestedServiceQuotaChange(
                             stringOrNull(request, "RequestId"), region)).build();
-            case "ListRequestedServiceQuotaChangeHistory" ->
-                    Response.ok(service.listRequestedServiceQuotaChangeHistory(
-                            stringOrNull(request, "ServiceCode"),
-                            stringOrNull(request, "Status"),
-                            stringOrNull(request, "QuotaRequestedAtLevel"),
-                            stringOrNull(request, "NextToken"),
-                            integerOrNull(request, "MaxResults"),
-                            region, accountId)).build();
             case "ListRequestedServiceQuotaChangeHistoryByQuota" ->
                     Response.ok(service.listRequestedServiceQuotaChangeHistoryByQuota(
                             stringOrNull(request, "ServiceCode"), stringOrNull(request, "QuotaCode"),

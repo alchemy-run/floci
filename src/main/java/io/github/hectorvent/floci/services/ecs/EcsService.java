@@ -5883,9 +5883,6 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
     static final Duration STEADY_STATE_WINDOW = Duration.ofSeconds(15);
 
 
-    void setClock(Clock clock) {
-        this.clock = clock;
-    }
 
 
 
