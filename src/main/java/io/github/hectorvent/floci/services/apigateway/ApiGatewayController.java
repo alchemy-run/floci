@@ -2912,38 +2912,7 @@ public class ApiGatewayController {
         return node;
     }
 
-    @POST
-    @Path("/restapis")
-    @Consumes(MediaType.WILDCARD)
-    public Response createRestApi(@Context HttpHeaders headers,
-                                  @QueryParam("mode") String mode,
-                                  String body) {
-        String region = regionResolver.resolveRegion(headers);
-        if ("import".equals(mode)) {
-            RestApi api = service.importRestApi(region, body);
-            return Response.status(201).entity(toApiNode(region, api).toString()).type(MediaType.APPLICATION_JSON).build();
-        }
-        try {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> request = objectMapper.readValue(body, Map.class);
-            RestApi api = service.createRestApi(region, request);
-            return Response.status(201).entity(toApiNode(region, api).toString()).type(MediaType.APPLICATION_JSON).build();
-        } catch (IOException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
-    }
 
-    @PUT
-    @Path("/restapis/{apiId}")
-    @Consumes(MediaType.WILDCARD)
-    public Response putRestApi(@Context HttpHeaders headers,
-                               @PathParam("apiId") String apiId,
-                               @QueryParam("mode") String mode,
-                               String body) {
-        String region = regionResolver.resolveRegion(headers);
-        RestApi api = service.putRestApi(region, apiId, mode, body);
-        return Response.ok(toApiNode(region, api).toString()).type(MediaType.APPLICATION_JSON).build();
-    }
 
     @PATCH
     @Path("/usageplans/{usagePlanId}/keys/{keyId}/usage")

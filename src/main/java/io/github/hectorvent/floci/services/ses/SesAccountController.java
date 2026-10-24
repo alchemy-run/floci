@@ -315,62 +315,7 @@ public class SesAccountController {
         return Response.ok(result).build();
     }
 
-    @GET
-    @Path("/insights/{messageId}")
-    public Response getMessageInsights(@Context HttpHeaders headers,
-                                       @PathParam("messageId") String messageId) {
-        String region = regionResolver.resolveRegion(headers);
-        if (!accountService.findAccountVdmAttributes(region).map(AccountVdmAttributes::vdmEnabled).orElse(false)) {
-            throw new AwsException("NotFoundException",
-                    "To use this feature you must enable Virtual Deliverability Manager.", 404);
-        }
-        if (!SesMessageIds.isWellFormed(messageId)) {
-            throw new AwsException("BadRequestException",
-                    "MessageId is not a valid SES message id.", 400);
-        }
-        throw new AwsException("NotFoundException",
-                "Message " + messageId + " was not found.", 404);
-    }
 
-    @POST
-    @Path("/metrics/batch")
-    public Response batchGetMetricData(@Context HttpHeaders headers, String body) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            if (!accountService.findAccountVdmAttributes(region).map(AccountVdmAttributes::vdmEnabled).orElse(false)) {
-                throw new AwsException("BadRequestException",
-                        "To use this feature you must enable Virtual Deliverability Manager.", 400);
-            }
-            JsonNode request = objectMapper.readTree(body == null ? "{}" : body);
-            requireJsonObject(request);
-            JsonNode queries = request.path("Queries");
-            if (!queries.isArray() || queries.isEmpty()) {
-                throw new AwsException("BadRequestException", "Queries is required.", 400);
-            }
-            ArrayNode results = objectMapper.createArrayNode();
-            for (JsonNode query : queries) {
-                Instant start = parseMetricTimestamp(query.path("StartDate"));
-                Instant end = parseMetricTimestamp(query.path("EndDate"));
-                if (start != null && end != null && (!isMidnightUtc(start) || !isMidnightUtc(end))) {
-                    throw new AwsException("BadRequestException",
-                            "To get daily aggregated data you must not specify partial-day timestamps. "
-                                    + "Please make your interval go from midnight to midnight UTC.", 400);
-                }
-                ObjectNode item = objectMapper.createObjectNode();
-                item.put("Id", query.path("Id").asText(""));
-                item.putArray("Timestamps");
-                item.putArray("Values");
-                results.add(item);
-            }
-            ObjectNode result = objectMapper.createObjectNode();
-            result.set("Results", results);
-            return Response.ok(result).build();
-        } catch (AwsException e) {
-            throw remapV1Exception(e);
-        } catch (Exception e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
-    }
 
     private static Instant parseMetricTimestamp(JsonNode node) {
         if (node == null || node.isMissingNode() || node.isNull()) {

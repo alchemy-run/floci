@@ -200,12 +200,6 @@ public class EmrServerlessController {
         return response;
     }
 
-    @POST
-    @Path("/{applicationId}/jobruns")
-    public ObjectNode startJobRun(@PathParam("applicationId") String applicationId,
-                                  @HeaderParam("Authorization") String authorization, JsonNode request) {
-        return service.startJobRun(applicationId, request, authorization);
-    }
 
     @GET
     @Path("/{applicationId}/jobruns/{jobRunId}/dashboard")

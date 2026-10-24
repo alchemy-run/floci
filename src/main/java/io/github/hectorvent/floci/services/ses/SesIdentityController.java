@@ -588,34 +588,6 @@ public class SesIdentityController {
         };
     }
 
-    @GET
-    @Path("/identities")
-    public Response listEmailIdentities(@Context HttpHeaders headers) {
-        String region = regionResolver.resolveRegion(headers);
-        List<Identity> identities = identityService.listIdentities(null, region);
-
-        ObjectNode result = objectMapper.createObjectNode();
-        ArrayNode items = result.putArray("EmailIdentities");
-        for (Identity id : identities) {
-            // Only a not-yet-verified domain can still transition (via its DKIM records),
-            // so refresh just those; refreshing every identity would scan Route53 per call.
-            Identity current = id;
-            if ("Domain".equals(id.getIdentityType()) && !"Success".equals(id.getVerificationStatus())) {
-                Identity refreshed =
-                        identityService.getIdentityVerificationAttributes(id.getIdentity(), region);
-                if (refreshed != null) {
-                    current = refreshed;
-                }
-            }
-            ObjectNode item = objectMapper.createObjectNode();
-            item.put("IdentityType", toV2IdentityType(current.getIdentityType()));
-            item.put("IdentityName", current.getIdentity());
-            item.put("SendingEnabled", "Success".equals(current.getVerificationStatus()));
-            item.put("VerificationStatus", toV2Status(current.getVerificationStatus()));
-            items.add(item);
-        }
-        return Response.ok(result).build();
-    }
 
     @GET
     @Path("/deliverability-dashboard/statistics-report/{domain}")

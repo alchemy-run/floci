@@ -275,13 +275,6 @@ public class LambdaUrlInvocationController {
 
 
 
-    @DELETE
-    @Path("/{proxy: .*}")
-    public Response handleDelete(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
-                                 @Context HttpHeaders headers, @Context UriInfo uriInfo, byte[] body) {
-        // AWS Function URLs forward DELETE request bodies to the event.
-        return invoke("DELETE", urlId, proxy, headers, uriInfo, body);
-    }
 
     /** Visible for tests: AWS SigV4 via Authorization header or query-string signing. */
     static boolean hasSigV4(HttpHeaders headers, UriInfo uriInfo) {
