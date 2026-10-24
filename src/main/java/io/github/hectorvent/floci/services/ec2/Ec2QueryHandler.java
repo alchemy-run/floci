@@ -3577,7 +3577,6 @@ public class Ec2QueryHandler {
                     .elem("createTime", kp.getCreateTime() != null ? ISO_FMT.format(kp.getCreateTime()) : null)
                     .elem("keyName", kp.getKeyName())
                     .elem("keyFingerprint", kp.getKeyFingerprint())
-                    .elem("keyType", kp.getKeyType())
                     .raw(tagSetXml(kp.getTags()))
                     .end("item");
         }
@@ -5397,8 +5396,6 @@ public class Ec2QueryHandler {
                     .elem("networkInterfaceId", r.getNetworkInterfaceId())
                     .elem("egressOnlyInternetGatewayId", r.getEgressOnlyInternetGatewayId())
                     .elem("vpcPeeringConnectionId", r.getVpcPeeringConnectionId())
-                    .elem("networkInterfaceId", r.getNetworkInterfaceId())
-                    .elem("instanceId", r.getInstanceId())
                     .elem("vpcEndpointId", r.getVpcEndpointId())
                     .elem("state", r.getState())
                     .elem("origin", r.getOrigin())
@@ -6261,8 +6258,6 @@ public class Ec2QueryHandler {
                 .elem("associationId", addr.getAssociationId())
                 .elem("networkInterfaceId", addr.getNetworkInterfaceId())
                 .elem("privateIpAddress", addr.getPrivateIpAddress())
-                .elem("publicIpv4Pool", addr.getPublicIpv4Pool())
-                .elem("networkBorderGroup", addr.getNetworkBorderGroup())
                 .raw(tagSetXml(addr.getTags()));
         return xml.build();
     }
