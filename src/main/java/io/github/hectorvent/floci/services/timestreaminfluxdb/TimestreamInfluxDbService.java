@@ -12,6 +12,7 @@ import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.Resettable;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.ec2.Ec2Service;
 import io.github.hectorvent.floci.services.secretsmanager.SecretsManagerService;
 import io.github.hectorvent.floci.services.secretsmanager.model.Secret;
 import io.github.hectorvent.floci.services.timestreaminfluxdb.container.TimestreamInfluxDbContainerManager;
@@ -91,13 +92,15 @@ public class TimestreamInfluxDbService implements Resettable {
     private final SecretsManagerService secretsManagerService;
     private final ObjectMapper objectMapper;
     private final TimestreamInfluxDbContainerManager containerManager;
+    private final TimestreamInfluxDbValidation.VpcResources vpcResources;
     private final boolean mock;
     private final Executor executor;
 
     @Inject
     public TimestreamInfluxDbService(StorageFactory storageFactory, RegionResolver regionResolver,
                                      SecretsManagerService secretsManagerService, ObjectMapper objectMapper,
-                                     EmulatorConfig config, TimestreamInfluxDbContainerManager containerManager) {
+                                     EmulatorConfig config, TimestreamInfluxDbContainerManager containerManager,
+                                     Ec2Service ec2Service) {
         this(storageFactory.create("timestreaminfluxdb", "timestream-influxdb-instances.json",
                         new TypeReference<Map<String, DbInstance>>() {}),
                 storageFactory.create("timestreaminfluxdb", "timestream-influxdb-clusters.json",
@@ -107,6 +110,7 @@ public class TimestreamInfluxDbService implements Resettable {
                 storageFactory.create("timestreaminfluxdb", "timestream-influxdb-backups.json",
                         new TypeReference<Map<String, DbBackup>>() {}),
                 regionResolver, secretsManagerService, objectMapper, containerManager,
+                TimestreamInfluxDbValidation.VpcResources.of(ec2Service),
                 config.services().timestreamInfluxdb().mock(),
                 Executors.newFixedThreadPool(4, runnable -> {
                     Thread thread = new Thread(runnable, "timestream-influxdb-provisioner");
@@ -121,6 +125,7 @@ public class TimestreamInfluxDbService implements Resettable {
                               AccountAwareStorageBackend<DbBackup> backups,
                               RegionResolver regionResolver, SecretsManagerService secretsManagerService,
                               ObjectMapper objectMapper, TimestreamInfluxDbContainerManager containerManager,
+                              TimestreamInfluxDbValidation.VpcResources vpcResources,
                               boolean mock, Executor executor) {
         this.instances = instances;
         this.clusters = clusters;
@@ -130,6 +135,7 @@ public class TimestreamInfluxDbService implements Resettable {
         this.secretsManagerService = secretsManagerService;
         this.objectMapper = objectMapper;
         this.containerManager = containerManager;
+        this.vpcResources = vpcResources;
         this.mock = mock;
         this.executor = executor;
     }
@@ -152,6 +158,7 @@ public class TimestreamInfluxDbService implements Resettable {
                 TimestreamInfluxDbValidation.INSTANCE_TYPES);
         List<String> subnets = TimestreamInfluxDbValidation.subnetIds(request, true);
         List<String> securityGroups = TimestreamInfluxDbValidation.securityGroupIds(request, true);
+        TimestreamInfluxDbValidation.requireVpcResources(vpcResources, region, subnets, securityGroups);
         Boolean publiclyAccessible = TimestreamInfluxDbValidation.optionalBoolean(request, "publiclyAccessible");
         String storageType = orDefault(TimestreamInfluxDbValidation.optionalEnum(request, "dbStorageType",
                 TimestreamInfluxDbValidation.STORAGE_TYPES), "InfluxIOIncludedT1");
@@ -177,7 +184,6 @@ public class TimestreamInfluxDbService implements Resettable {
         String accountId = regionResolver.getAccountId();
         DbInstance instance = new DbInstance();
         instance.setId(newId());
-        instance.setDockerVolumeName(containerManager.volumeName(instance.getId()));
         instance.setName(name);
         instance.setArn(arn(region, "db-instance", instance.getId()));
         instance.setAccountId(accountId);
@@ -215,7 +221,7 @@ public class TimestreamInfluxDbService implements Resettable {
         } else {
             instance.setStatus("CREATING");
             instances.put(key(region, instance.getId()), instance);
-            provision(DB_INSTANCE, accountId, region, instance.getId(), resolveVolumeName(instance), setup, engineEnvironment(group), null,
+            provision(DB_INSTANCE, accountId, region, instance.getId(), setup, engineEnvironment(group), null,
                     "FAILED");
         }
         return new Reported<>(instance, "CREATING");
@@ -276,7 +282,7 @@ public class TimestreamInfluxDbService implements Resettable {
         if (parameterGroupChanged && hasDataPlane(instance.getContainerId())) {
             instance.setStatus(status);
             instances.put(key(region, instance.getId()), instance);
-            provision(DB_INSTANCE, instance.getAccountId(), region, instance.getId(), resolveVolumeName(instance), null, engineEnvironment(group),
+            provision(DB_INSTANCE, instance.getAccountId(), region, instance.getId(), null, engineEnvironment(group),
                     null, "FAILED");
         } else {
             instance.setStatus(AVAILABLE);
@@ -307,7 +313,7 @@ public class TimestreamInfluxDbService implements Resettable {
                     + " belongs to DB cluster " + instance.getDbClusterId()
                     + "; nodes can't be removed individually, delete the DB cluster instead.");
         }
-        removeDataPlane(instance.getId(), instance.getContainerId(), resolveVolumeName(instance));
+        removeDataPlane(instance.getId(), instance.getContainerId());
         instances.delete(key(region, instance.getId()));
         return new Reported<>(instance, "DELETING");
     }
@@ -332,6 +338,7 @@ public class TimestreamInfluxDbService implements Resettable {
         Boolean publiclyAccessible = TimestreamInfluxDbValidation.optionalBoolean(request, "publiclyAccessible");
         List<String> subnets = TimestreamInfluxDbValidation.subnetIds(request, true);
         List<String> securityGroups = TimestreamInfluxDbValidation.securityGroupIds(request, true);
+        TimestreamInfluxDbValidation.requireVpcResources(vpcResources, region, subnets, securityGroups);
         String deploymentType = TimestreamInfluxDbValidation.optionalEnum(request, "deploymentType",
                 TimestreamInfluxDbValidation.CLUSTER_DEPLOYMENT_TYPES);
         String failoverMode = orDefault(TimestreamInfluxDbValidation.optionalEnum(request, "failoverMode",
@@ -352,7 +359,6 @@ public class TimestreamInfluxDbService implements Resettable {
         String accountId = regionResolver.getAccountId();
         DbCluster cluster = new DbCluster();
         cluster.setId(newId());
-        cluster.setDockerVolumeName(containerManager.volumeName(cluster.getId()));
         cluster.setName(name);
         cluster.setArn(arn(region, "db-cluster", cluster.getId()));
         cluster.setAccountId(accountId);
@@ -402,7 +408,7 @@ public class TimestreamInfluxDbService implements Resettable {
             instances.put(key(region, member.getId()), member);
         }
         if (containerBacked) {
-            provision(DB_CLUSTER, accountId, region, cluster.getId(), resolveVolumeName(cluster), setup, engineEnvironment(group), null, "FAILED");
+            provision(DB_CLUSTER, accountId, region, cluster.getId(), setup, engineEnvironment(group), null, "FAILED");
         }
         return new Reported<>(cluster, "CREATING");
     }
@@ -465,7 +471,7 @@ public class TimestreamInfluxDbService implements Resettable {
             instances.put(key(region, member.getId()), member);
         }
         if (recreate) {
-            provision(DB_CLUSTER, cluster.getAccountId(), region, cluster.getId(), resolveVolumeName(cluster), null, engineEnvironment(group),
+            provision(DB_CLUSTER, cluster.getAccountId(), region, cluster.getId(), null, engineEnvironment(group),
                     null, "FAILED");
         }
         return new Reported<>(cluster, status);
@@ -495,7 +501,7 @@ public class TimestreamInfluxDbService implements Resettable {
     public synchronized Reported<DbCluster> deleteDbCluster(JsonNode request, String region) {
         DbCluster cluster = requireCluster(region, clusterIdentifier(request));
         TimestreamInfluxDbValidation.optionalBoolean(request, "retainAutomatedBackups");
-        removeDataPlane(cluster.getId(), cluster.getContainerId(), resolveVolumeName(cluster));
+        removeDataPlane(cluster.getId(), cluster.getContainerId());
         for (DbInstance member : clusterMembers(region, cluster.getId())) {
             instances.delete(key(region, member.getId()));
         }
@@ -641,6 +647,7 @@ public class TimestreamInfluxDbService implements Resettable {
                 TimestreamInfluxDbValidation.RESTORE_MODES), "NEW_RESOURCE");
         List<String> subnets = TimestreamInfluxDbValidation.subnetIds(request, false);
         List<String> securityGroups = TimestreamInfluxDbValidation.securityGroupIds(request, false);
+        TimestreamInfluxDbValidation.requireVpcResources(vpcResources, region, subnets, securityGroups);
         Boolean publiclyAccessible = TimestreamInfluxDbValidation.optionalBoolean(request, "publiclyAccessible");
         JsonNode logDelivery = TimestreamInfluxDbValidation.logDeliveryConfiguration(request);
         JsonNode maintenance = TimestreamInfluxDbValidation.maintenanceSchedule(request);
@@ -672,7 +679,6 @@ public class TimestreamInfluxDbService implements Resettable {
             requireUniqueClusterName(region, name);
             DbCluster cluster = new DbCluster();
             cluster.setId(newId());
-            cluster.setDockerVolumeName(containerManager.volumeName(cluster.getId()));
             cluster.setName(name);
             cluster.setArn(arn(region, "db-cluster", cluster.getId()));
             cluster.setAccountId(backup.getAccountId());
@@ -709,7 +715,7 @@ public class TimestreamInfluxDbService implements Resettable {
                 instances.put(key(region, member.getId()), member);
             }
             if (restoreData) {
-                provision(DB_CLUSTER, cluster.getAccountId(), region, cluster.getId(), resolveVolumeName(cluster), temporarySetup(),
+                provision(DB_CLUSTER, cluster.getAccountId(), region, cluster.getId(), temporarySetup(),
                         engineEnvironment(group), backup.getId(), "RESTORE_FAILED");
             }
             return new RestoreResult(cluster.getId(), DB_CLUSTER, cluster.getEngineType(), cluster.getDeploymentType());
@@ -718,7 +724,6 @@ public class TimestreamInfluxDbService implements Resettable {
         requireUniqueInstanceName(region, name);
         DbInstance instance = new DbInstance();
         instance.setId(newId());
-        instance.setDockerVolumeName(containerManager.volumeName(instance.getId()));
         instance.setName(name);
         instance.setArn(arn(region, "db-instance", instance.getId()));
         instance.setAccountId(backup.getAccountId());
@@ -753,7 +758,7 @@ public class TimestreamInfluxDbService implements Resettable {
         if (restoreData) {
             DbParameterGroup group = parameterGroups.get(key(region, orDefault(backup.getDbParameterGroupId(), "")))
                     .orElse(null);
-            provision(DB_INSTANCE, instance.getAccountId(), region, instance.getId(), resolveVolumeName(instance), temporarySetup(),
+            provision(DB_INSTANCE, instance.getAccountId(), region, instance.getId(), temporarySetup(),
                     engineEnvironment(group), backup.getId(), "RESTORE_FAILED");
         }
         return new RestoreResult(instance.getId(), DB_INSTANCE, instance.getEngineType(), instance.getDeploymentType());
@@ -795,7 +800,7 @@ public class TimestreamInfluxDbService implements Resettable {
             if (instance.getContainerId() != null && instance.getDbClusterId() == null) {
                 DbParameterGroup group = parameterGroup(instance.getAccountId(), instance.getRegion(),
                         instance.getDbParameterGroupIdentifier());
-                provision(DB_INSTANCE, instance.getAccountId(), instance.getRegion(), instance.getId(), resolveVolumeName(instance), null,
+                provision(DB_INSTANCE, instance.getAccountId(), instance.getRegion(), instance.getId(), null,
                         engineEnvironment(group), null, "FAILED");
             }
         }
@@ -803,7 +808,7 @@ public class TimestreamInfluxDbService implements Resettable {
             if (cluster.getContainerId() != null) {
                 DbParameterGroup group = parameterGroup(cluster.getAccountId(), cluster.getRegion(),
                         cluster.getDbParameterGroupIdentifier());
-                provision(DB_CLUSTER, cluster.getAccountId(), cluster.getRegion(), cluster.getId(), resolveVolumeName(cluster), null,
+                provision(DB_CLUSTER, cluster.getAccountId(), cluster.getRegion(), cluster.getId(), null,
                         engineEnvironment(group), null, "FAILED");
             }
         }
@@ -825,26 +830,26 @@ public class TimestreamInfluxDbService implements Resettable {
     }
 
     private void provision(String resourceType, String accountId, String region, String resourceId,
-                           String dataVolumeName, InfluxDbSetup setup, Map<String, String> engineEnvironment,
-                           String backupId, String failureStatus) {
+                           InfluxDbSetup setup, Map<String, String> engineEnvironment, String backupId,
+                           String failureStatus) {
         executor.execute(() -> {
             InfluxDbEndpoint endpoint = null;
             try {
                 if (!containerManager.isDockerReachable()) {
                     LOG.warnv("No Docker daemon is reachable; {0} {1} is available without an InfluxDB container",
                             resourceType, resourceId);
-                    applyDataPlane(resourceType, accountId, region, resourceId, dataVolumeName, null, AVAILABLE);
+                    applyDataPlane(resourceType, accountId, region, resourceId, null, AVAILABLE);
                     return;
                 }
-                endpoint = containerManager.start(resourceId, dataVolumeName, accountId, region, setup, engineEnvironment);
+                endpoint = containerManager.start(resourceId, accountId, region, setup, engineEnvironment);
                 containerManager.waitUntilReady(endpoint);
                 if (backupId != null) {
                     containerManager.restore(endpoint.containerId(), backupId);
                 }
-                applyDataPlane(resourceType, accountId, region, resourceId, dataVolumeName, endpoint, AVAILABLE);
+                applyDataPlane(resourceType, accountId, region, resourceId, endpoint, AVAILABLE);
             } catch (RuntimeException e) {
                 LOG.errorv(e, "Failed to provision the InfluxDB container for {0} {1}", resourceType, resourceId);
-                applyDataPlane(resourceType, accountId, region, resourceId, dataVolumeName, endpoint, failureStatus);
+                applyDataPlane(resourceType, accountId, region, resourceId, endpoint, failureStatus);
             }
         });
     }
@@ -855,10 +860,10 @@ public class TimestreamInfluxDbService implements Resettable {
             try {
                 containerManager.restart(endpoint.containerId());
                 containerManager.waitUntilReady(endpoint);
-                applyDataPlane(resourceType, accountId, region, resourceId, null, endpoint, AVAILABLE);
+                applyDataPlane(resourceType, accountId, region, resourceId, endpoint, AVAILABLE);
             } catch (RuntimeException e) {
                 LOG.errorv(e, "Failed to reboot the InfluxDB container for {0} {1}", resourceType, resourceId);
-                applyDataPlane(resourceType, accountId, region, resourceId, null, endpoint, "REBOOT_FAILED");
+                applyDataPlane(resourceType, accountId, region, resourceId, endpoint, "REBOOT_FAILED");
             }
         });
     }
@@ -888,18 +893,13 @@ public class TimestreamInfluxDbService implements Resettable {
         });
     }
 
-    /**
-     * {@code dataVolumeName} is the volume the creating flow mounted, so an orphaned container
-     * (its record vanished meanwhile) takes its fresh volumes with it; reboots and restores pass
-     * null because a record deleted under them already removed its own volumes.
-     */
     private synchronized void applyDataPlane(String resourceType, String accountId, String region, String resourceId,
-                                             String dataVolumeName, InfluxDbEndpoint endpoint, String status) {
+                                             InfluxDbEndpoint endpoint, String status) {
         String host = endpoint != null ? endpoint.host() : LOCAL_ENDPOINT;
         if (DB_INSTANCE.equals(resourceType)) {
             Optional<DbInstance> stored = instances.getForAccount(accountId, key(region, resourceId));
             if (stored.isEmpty()) {
-                discardOrphan(resourceId, dataVolumeName, endpoint);
+                discardOrphan(resourceId, endpoint);
                 return;
             }
             DbInstance instance = stored.get();
@@ -914,7 +914,7 @@ public class TimestreamInfluxDbService implements Resettable {
         }
         Optional<DbCluster> stored = clusters.getForAccount(accountId, key(region, resourceId));
         if (stored.isEmpty()) {
-            discardOrphan(resourceId, dataVolumeName, endpoint);
+            discardOrphan(resourceId, endpoint);
             return;
         }
         DbCluster cluster = stored.get();
@@ -936,41 +936,19 @@ public class TimestreamInfluxDbService implements Resettable {
         }
     }
 
-    private void discardOrphan(String resourceId, String dataVolumeName, InfluxDbEndpoint endpoint) {
+    private void discardOrphan(String resourceId, InfluxDbEndpoint endpoint) {
         if (endpoint != null) {
-            removeDataPlane(resourceId, endpoint.containerId(), dataVolumeName);
+            removeDataPlane(resourceId, endpoint.containerId());
         }
     }
 
-    /**
-     * The record's data volume name, backfilled once for records written before the field
-     * existed: those predate the {@code floci-aws-} migration, so their data is in the
-     * legacy-named volume and must keep resolving there. Never use the live helper here, which
-     * would strand that data under a freshly created volume.
-     */
-    private String resolveVolumeName(DbInstance instance) {
-        if (instance.getDockerVolumeName() == null || instance.getDockerVolumeName().isBlank()) {
-            instance.setDockerVolumeName(containerManager.legacyVolumeName(instance.getId()));
-        }
-        return instance.getDockerVolumeName();
-    }
-
-    private String resolveVolumeName(DbCluster cluster) {
-        if (cluster.getDockerVolumeName() == null || cluster.getDockerVolumeName().isBlank()) {
-            cluster.setDockerVolumeName(containerManager.legacyVolumeName(cluster.getId()));
-        }
-        return cluster.getDockerVolumeName();
-    }
-
-    private void removeDataPlane(String resourceId, String containerId, String dataVolumeName) {
+    private void removeDataPlane(String resourceId, String containerId) {
         if (mock) {
             return;
         }
         try {
             containerManager.stop(resourceId, containerId);
-            if (dataVolumeName != null) {
-                containerManager.removeStorage(dataVolumeName);
-            }
+            containerManager.removeStorage(resourceId);
         } catch (RuntimeException e) {
             LOG.warnv("Failed to remove the InfluxDB container for {0}: {1}", resourceId, e.getMessage());
         }
@@ -1037,10 +1015,10 @@ public class TimestreamInfluxDbService implements Resettable {
         executor.execute(() -> {
             try {
                 containerManager.restore(endpoint.containerId(), backupId);
-                applyDataPlane(resourceType, accountId, region, resourceId, null, endpoint, AVAILABLE);
+                applyDataPlane(resourceType, accountId, region, resourceId, endpoint, AVAILABLE);
             } catch (RuntimeException e) {
                 LOG.errorv(e, "Failed to restore backup {0} into {1} {2}", backupId, resourceType, resourceId);
-                applyDataPlane(resourceType, accountId, region, resourceId, null, endpoint, "RESTORE_FAILED");
+                applyDataPlane(resourceType, accountId, region, resourceId, endpoint, "RESTORE_FAILED");
             }
         });
     }
