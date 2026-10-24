@@ -3475,19 +3475,9 @@ public class Ec2QueryHandler {
     }
 
     private Response handleDescribeSecurityGroupRules(MultivaluedMap<String, String> p, String region) {
-        List<Map.Entry<String, List<String>>> filters = getFiltersList(p);
-        // The AWS SDK sends the security group id as a filter with name "group-id". Rule ids can
-        // arrive as the SecurityGroupRuleId.N parameter or the "security-group-rule-id" filter;
-        // filters are conjunctive with parameters and with each other, so each one narrows the
-        // rules the parameter names. A filter without values narrows nothing.
-        List<List<String>> ruleIdFilters = Ec2Service.filterValues(filters, "security-group-rule-id");
-        List<List<String>> groupIdFilters = Ec2Service.filterValues(filters, "group-id");
-        List<SecurityGroupRule> named = service.describeSecurityGroupRules(
-                region, List.of(), getList(p, "SecurityGroupRuleId"));
-        List<SecurityGroupRule> rules = named.stream()
-                .filter(rule -> Ec2Service.everyFilterContains(ruleIdFilters, rule.getSecurityGroupRuleId()))
-                .filter(rule -> Ec2Service.everyFilterContains(groupIdFilters, rule.getGroupId()))
-                .toList();
+        Map<String, List<String>> filters = getFilters(p);
+        List<SecurityGroupRule> rules = service.describeSecurityGroupRules(
+                region, getList(p, "SecurityGroupRuleId"), filters);
         XmlBuilder xml = new XmlBuilder()
                 .start("DescribeSecurityGroupRulesResponse", AwsNamespaces.EC2)
                 .elem("requestId", UUID.randomUUID().toString())
@@ -6369,11 +6359,12 @@ public class Ec2QueryHandler {
         }
 
         String snapshotId = p.getFirst("SnapshotId");
+        String kmsKeyId = resolveVolumeKmsKeyId(p.getFirst("KmsKeyId"), region);
 
         List<Tag> volumeTags = parseTagsForResource(p, "volume");
 
         Volume vol = service.createVolume(region, availabilityZone, volumeType, size,
-                encrypted, iops, throughput, snapshotId, volumeTags);
+                encrypted, iops, throughput, snapshotId, kmsKeyId, volumeTags);
         XmlBuilder xml = new XmlBuilder()
                 .start("CreateVolumeResponse", AwsNamespaces.EC2)
                 .elem("requestId", UUID.randomUUID().toString())
@@ -7638,5 +7629,22 @@ public class Ec2QueryHandler {
             throw new AwsException("DependencyViolation", "The " + kind + " '" + resourceId
                     + "' has dependencies and cannot be deleted: it is used by Client VPN endpoint " + endpointId, 400);
         });
+    }
+
+    /**
+     * AWS CreateVolume stores the CMK ARN even when the request passed an alias
+     * name ({@code alias/...}) or key id. Resolve through KMS so DescribeVolumes
+     * matches live EC2.
+     */
+    private String resolveVolumeKmsKeyId(String kmsKeyId, String region) {
+        if (kmsKeyId == null || kmsKeyId.isBlank()) {
+            return null;
+        }
+        try {
+            return kmsService.describeKey(kmsKeyId, region).getArn();
+        } catch (AwsException e) {
+            throw new AwsException("InvalidParameterValue",
+                    "The KMS key " + kmsKeyId + " does not exist, is disabled, or is not usable.", 400);
+        }
     }
 }

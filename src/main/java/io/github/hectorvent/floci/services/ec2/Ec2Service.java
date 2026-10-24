@@ -1508,6 +1508,11 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     List<NetworkAcl> describeNetworkAcls(String region, List<String> ids,
                                          List<Map.Entry<String, List<String>>> filters) {
         ensureDefaultResources(region);
+        if (ids != null && !ids.isEmpty()) {
+            for (String networkAclId : ids) {
+                getRequiredNetworkAcl(region, networkAclId);
+            }
+        }
         return networkAcls.scan(k -> true).stream()
                 .filter(a -> region.equals(a.getRegion()))
                 .filter(a -> ids.isEmpty() || ids.contains(a.getNetworkAclId()))
@@ -7353,6 +7358,11 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     List<SecurityGroup> describeSecurityGroups(String region, List<String> groupIds, List<String> groupNames,
                                                List<Map.Entry<String, List<String>>> filters) {
         ensureDefaultResources(region);
+        if (groupIds != null && !groupIds.isEmpty()) {
+            for (String groupId : groupIds) {
+                getRequiredSecurityGroup(region, groupId);
+            }
+        }
         return securityGroups.scan(k -> true).stream()
                 .filter(sg -> sg.getRegion().equals(region))
                 .filter(sg -> groupIds.isEmpty() || groupIds.contains(sg.getGroupId()))
@@ -7807,11 +7817,30 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     }
 
     public List<SecurityGroupRule> describeSecurityGroupRules(String region, List<String> groupIds, List<String> ruleIds) {
+        return describeSecurityGroupRules(region, ruleIds,
+                groupIds.isEmpty() ? Map.of() : Map.of("group-id", groupIds));
+    }
+
+    public List<SecurityGroupRule> describeSecurityGroupRules(String region, List<String> ruleIds,
+                                                             Map<String, List<String>> filters) {
         ensureDefaultResources(region);
-        String regionPrefix = region + "::";
-        return securityGroupRules.scan(k -> k.startsWith(regionPrefix)).stream()
-                .filter(r -> groupIds.isEmpty() || groupIds.contains(r.getGroupId()))
-                .filter(r -> ruleIds.isEmpty() || ruleIds.contains(r.getSecurityGroupRuleId()))
+        for (String ruleId : ruleIds) {
+            requireSecurityGroupRule(region, null, ruleId);
+        }
+        return securityGroupRules.scan(k -> k.startsWith(region + "::")).stream()
+                .filter(rule -> ruleIds.isEmpty() || ruleIds.contains(rule.getSecurityGroupRuleId()))
+                .filter(rule -> filters.entrySet().stream().allMatch(filter -> {
+                    List<String> values = filter.getValue();
+                    return switch (filter.getKey()) {
+                        case "group-id" -> matchesValue(values, rule.getGroupId());
+                        case "security-group-rule-id" -> matchesValue(values, rule.getSecurityGroupRuleId());
+                        case "group-owner-id", "owner-id" -> matchesValue(values, rule.getGroupOwnerId());
+                        case "tag-value" -> rule.getTags().stream()
+                                .anyMatch(tag -> matchesValue(values, tag.getValue()));
+                        default -> (filter.getKey().startsWith("tag:") || "tag-key".equals(filter.getKey()))
+                                && matchesTagFilter(rule.getTags(), filter.getKey(), values, this::matchesValue);
+                    };
+                }))
                 .collect(Collectors.toList());
     }
 
@@ -10112,6 +10141,11 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     List<InternetGateway> describeInternetGateways(String region, List<String> igwIds,
                                                    List<Map.Entry<String, List<String>>> filters) {
         ensureDefaultResources(region);
+        if (igwIds != null && !igwIds.isEmpty()) {
+            for (String igwId : igwIds) {
+                getRequiredInternetGateway(region, igwId);
+            }
+        }
         return internetGateways.scan(k -> true).stream()
                 .filter(igw -> igw.getRegion().equals(region))
                 .filter(igw -> igwIds.isEmpty() || igwIds.contains(igw.getInternetGatewayId()))
@@ -10689,6 +10723,11 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     List<RouteTable> describeRouteTables(String accountId, String region, List<String> routeTableIds,
                                          List<Map.Entry<String, List<String>>> filters) {
         ensureDefaultResources(region);
+        if (routeTableIds != null && !routeTableIds.isEmpty()) {
+            for (String routeTableId : routeTableIds) {
+                getRequiredRouteTable(region, routeTableId);
+            }
+        }
         String safeAccount = accountId != null ? accountId : callerAccountId();
         List<RouteTable> accountRouteTables = routeTables instanceof AccountAwareStorageBackend<RouteTable> aware
                 ? aware.scanForAccount(safeAccount, k -> true)
@@ -12084,6 +12123,11 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     List<Address> describeAddresses(String region, List<String> allocationIds,
                                     List<Map.Entry<String, List<String>>> filters) {
         ensureDefaultResources(region);
+        if (allocationIds != null) {
+            for (String allocationId : allocationIds) {
+                getRequiredAddress(region, allocationId);
+            }
+        }
         List<Address> candidates = addresses.scan(k -> true).stream()
                 .filter(a -> a.getRegion().equals(region))
                 .filter(a -> allocationIds.isEmpty() || allocationIds.contains(a.getAllocationId()))
@@ -12837,6 +12881,13 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     public Volume createVolume(String region, String availabilityZone, String volumeType,
                                int size, boolean encrypted, int iops, Integer throughput,
                                String snapshotId, List<Tag> volumeTags) {
+        return createVolume(region, availabilityZone, volumeType, size, encrypted, iops, throughput,
+                snapshotId, null, volumeTags);
+    }
+
+    public Volume createVolume(String region, String availabilityZone, String volumeType,
+                               int size, boolean encrypted, int iops, Integer throughput,
+                               String snapshotId, String kmsKeyId, List<Tag> volumeTags) {
         ensureDefaultResources(region);
         String volumeId = "vol-" + randomHex(17);
         String effectiveType = volumeType != null ? volumeType : "gp2";
@@ -12847,7 +12898,11 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         vol.setSize(size > 0 ? size : 8);
         // With encryption by default on, AWS encrypts every new volume and the Encrypted parameter
         // cannot opt out of it.
-        vol.setEncrypted(encrypted || ebsEncryptionByDefault(region));
+        boolean hasKey = kmsKeyId != null && !kmsKeyId.isBlank();
+        vol.setEncrypted(encrypted || hasKey || ebsEncryptionByDefault(region));
+        if (hasKey) {
+            vol.setKmsKeyId(kmsKeyId);
+        }
         vol.setIops(iops > 0 ? iops : (volumeType != null && volumeType.startsWith("io") ? iops : 0));
         // Throughput is a gp3-only attribute; AWS reports 125 MiB/s by default for gp3.
         if ("gp3".equals(effectiveType)) {
