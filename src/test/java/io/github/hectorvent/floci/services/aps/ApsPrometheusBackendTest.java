@@ -44,7 +44,7 @@ class ApsPrometheusBackendTest {
     void usesRealPinnedPrometheusWithIsolatedEphemeralStorageAndBoundedResources() {
         ContainerSpec spec = backend.spec(ARN, backend.containerName(ARN));
         assertEquals("prom/prometheus:v3.5.0", spec.image());
-        assertEquals("floci-amp-test-aps-000000000000-us-east-1-ws-example", spec.name());
+        assertEquals("floci-aws-amp-test-aps-000000000000-us-east-1-ws-example", spec.name());
         assertEquals("floci-test", spec.networkMode());
         assertEquals(512L * 1024 * 1024, spec.memoryBytes());
         assertEquals(List.of(9090), spec.loopbackPortBindings());
