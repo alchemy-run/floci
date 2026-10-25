@@ -53,9 +53,9 @@ class LambdaWebLogsTest {
     @Test
     @SuppressWarnings("unchecked")
     void eventsGoToTheLocalAndTheCentralizedGroupCreatedWhenMissing() {
-        doThrow(notFound()).doReturn("token").when(cloudWatchLogs)
+        doThrow(notFound()).doReturn(new CloudWatchLogsService.PutLogEventsResult("token", null)).when(cloudWatchLogs)
                 .putLogEventsForAccount(eq(ACCOUNT), eq(GROUP + ".local"), eq(STREAM), anyList(), eq(REGION));
-        doThrow(notFound()).doReturn("token").when(cloudWatchLogs)
+        doThrow(notFound()).doReturn(new CloudWatchLogsService.PutLogEventsResult("token", null)).when(cloudWatchLogs)
                 .putLogEventsForAccount(eq(ACCOUNT), eq(GROUP), eq(CENTRAL_STREAM), anyList(), eq(REGION));
 
         logs.open(ACCOUNT, REGION, GROUP, STREAM, "INFO").accept("first\n");
@@ -94,7 +94,7 @@ class LambdaWebLogsTest {
             writing.countDown();
             queued.await(5, TimeUnit.SECONDS);
             throw new IllegalStateException("the store failed");
-        }).doReturn("token").when(cloudWatchLogs)
+        }).doReturn(new CloudWatchLogsService.PutLogEventsResult("token", null)).when(cloudWatchLogs)
                 .putLogEventsForAccount(eq(ACCOUNT), eq(GROUP + ".local"), eq(STREAM), anyList(), eq(REGION));
         LambdaWebLogs.Sink sink = logs.open(ACCOUNT, REGION, GROUP, STREAM, "INFO");
 
@@ -116,7 +116,7 @@ class LambdaWebLogsTest {
             writing.countDown();
             release.await(5, TimeUnit.SECONDS);
             return "token";
-        }).doReturn("token").when(cloudWatchLogs)
+        }).doReturn(new CloudWatchLogsService.PutLogEventsResult("token", null)).when(cloudWatchLogs)
                 .putLogEventsForAccount(eq(ACCOUNT), eq(GROUP + ".local"), eq(STREAM), anyList(), eq(REGION));
         LambdaWebLogs.Sink sink = logs.open(ACCOUNT, REGION, GROUP, STREAM, "INFO");
         sink.accept("first\n");

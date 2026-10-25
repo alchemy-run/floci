@@ -586,6 +586,7 @@ public class S3VectorsService {
         }
 
         S3VectorsMetadataFilter metadataFilter = S3VectorsMetadataFilter.compile(filter);
+        validateFilterKeys(filter, index.getNonFilterableMetadataKeys());
         String metric = index.getDistanceMetric() != null ? index.getDistanceMetric().toLowerCase() : "cosine";
         List<QueryResult> results = new ArrayList<>();
 
