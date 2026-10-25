@@ -62,7 +62,7 @@ public class LakeFormationCatalogService {
     public Map<String, String> getDataLakePrincipal(String authorization) {
         String accessKey = authorization == null ? null : accounts.extractAccessKeyId(authorization);
         String identity = iam.resolveCallerArn(accessKey)
-                .orElseGet(() -> AwsArnUtils.Arn.of("iam", "", regions.getAccountId(), "root").toString());
+                .orElseGet(() -> regions.buildGlobalArn("iam", "root"));
         return Map.of("Identity", identity);
     }
 

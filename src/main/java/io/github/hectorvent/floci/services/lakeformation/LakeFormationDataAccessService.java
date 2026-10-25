@@ -381,7 +381,7 @@ public class LakeFormationDataAccessService {
         String accountId = regions.getAccountId();
         String accessKey = authorization == null ? null : accounts.extractAccessKeyId(authorization);
         String arn = iam.resolveCallerArn(accessKey)
-                .orElseGet(() -> AwsArnUtils.Arn.of("iam", "", accountId, "root").toString());
+                .orElseGet(() -> regions.buildGlobalArn("iam", accountId, "root"));
         List<String> identifiers = new ArrayList<>();
         identifiers.add(arn);
         try {
@@ -389,8 +389,7 @@ public class LakeFormationDataAccessService {
             if ("sts".equals(parsed.service()) && parsed.resource().startsWith("assumed-role/")) {
                 String roleName = parsed.resource().split("/")[1];
                 identifiers.add(iam.findRole(parsed.accountId(), roleName).map(IamRole::getArn)
-                        .orElseGet(() -> AwsArnUtils.Arn.of("iam", "", parsed.accountId(), "role/" + roleName)
-                                .toString()));
+                        .orElseGet(() -> regions.buildGlobalArn("iam", parsed.accountId(), "role/" + roleName)));
             }
         } catch (IllegalArgumentException ignored) {
             // A non-ARN identity only matches grants made to that literal identifier.
