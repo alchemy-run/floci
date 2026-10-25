@@ -148,8 +148,9 @@ class CognitoUserPoolDomainIntegrationTest {
                 }
                 """.formatted(prefixDomain))
                 .then()
-                .statusCode(400)
-                .body("__type", equalTo("ResourceNotFoundException"));
+                // AWS describes a domain that does not exist with an empty description.
+                .statusCode(200)
+                .body("DomainDescription.size()", equalTo(0));
     }
 
     @Test
@@ -342,8 +343,9 @@ class CognitoUserPoolDomainIntegrationTest {
                 }
                 """.formatted(customDomain))
                 .then()
-                .statusCode(400)
-                .body("__type", equalTo("ResourceNotFoundException"));
+                // AWS describes a domain that does not exist with an empty description.
+                .statusCode(200)
+                .body("DomainDescription.size()", equalTo(0));
     }
 
     @Test

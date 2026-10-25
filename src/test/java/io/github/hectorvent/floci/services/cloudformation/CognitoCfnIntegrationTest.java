@@ -231,7 +231,8 @@ class CognitoCfnIntegrationTest {
 
         JsonNode description = describeDomain(PREFIX_DOMAIN);
         assertEquals(outputValue(stacks, "PoolId"), description.path("UserPoolId").asText());
-        assertFalse(description.has("CloudFrontDistribution"));
+        // DescribeUserPoolDomain reports a distribution for a prefix domain too, as on AWS.
+        assertTrue(description.has("CloudFrontDistribution"));
         assertFalse(description.has("CustomDomainConfig"));
 
         cloudFormation(PREFIX_STACK, "DeleteStack", null);
@@ -511,11 +512,12 @@ class CognitoCfnIntegrationTest {
         return cognitoJson("DescribeUserPoolDomain", "{\"Domain\": \"" + domain + "\"}").path("DomainDescription");
     }
 
+    /** AWS answers DescribeUserPoolDomain for a domain that does not exist with an empty description. */
     private static void assertDomainIsGone(String domain) {
         cognitoAction("DescribeUserPoolDomain", "{\"Domain\": \"" + domain + "\"}")
             .then()
-            .statusCode(400)
-            .body("__type", equalTo("ResourceNotFoundException"));
+            .statusCode(200)
+            .body("DomainDescription.size()", equalTo(0));
     }
 
     private static void assertCertificateStatus(String certificateArn, String status) {

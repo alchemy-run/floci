@@ -515,7 +515,13 @@ public class CognitoJsonHandler {
     }
 
     private Response handleCreateUserPoolDomain(JsonNode request) {
-        service.requireNoDomainOfType(request.path("UserPoolId").asText(), customDomainConfig(request) != null);
+        // An unusable certificate is reported before the pool's existing domains are considered.
+        Map<String, Object> customDomain = customDomainConfig(request);
+        if (customDomain != null && customDomain.get("CertificateArn") instanceof String certificateArn
+                && !certificateArn.isBlank()) {
+            service.requireUsableCertificate(certificateArn);
+        }
+        service.requireNoDomainOfType(request.path("UserPoolId").asText(), customDomain != null);
         UserPoolDomain domain = service.createUserPoolDomain(
                 request.path("Domain").asText(),
                 request.path("UserPoolId").asText(),

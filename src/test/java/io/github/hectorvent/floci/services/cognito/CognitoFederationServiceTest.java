@@ -123,7 +123,7 @@ class CognitoFederationServiceTest {
 
     @Test
     void beginAuthorizationRejectsNonOidcProviderBeforeStoringState() {
-        createProvider("ExampleFacebook", "Facebook", Map.of(
+        createProvider("Facebook", "Facebook", Map.of(
                 "client_id", "provider-client",
                 "authorize_url", "https://provider.example.test/authorize",
                 "token_url", endpoint("/token"),
@@ -131,7 +131,7 @@ class CognitoFederationServiceTest {
 
         AwsException exception = assertThrows(AwsException.class, () -> federationService.beginAuthorization(
                 pool.getId(), "cognito-client", "https://application.example.test/callback",
-                List.of("openid"), "nonce-value", "ExampleFacebook"));
+                List.of("openid"), "nonce-value", "Facebook"));
 
         assertEquals("InvalidParameterException", exception.getErrorCode());
         assertNull(tokenRequest.get());
@@ -169,12 +169,12 @@ class CognitoFederationServiceTest {
 
     @Test
     void completeAuthorizationRejectsNonOidcProvider() {
-        createProvider("ExampleFacebook", "Facebook", Map.of(
+        createProvider("Facebook", "Facebook", Map.of(
                 "client_id", "provider-client",
                 "authorize_url", "https://provider.example.test/authorize",
                 "token_url", endpoint("/token"),
                 "attributes_url", endpoint("/userinfo")), Map.of());
-        String state = putTransaction("ExampleFacebook");
+        String state = putTransaction("Facebook");
 
         AwsException exception = assertThrows(AwsException.class,
                 () -> federationService.completeAuthorization(state, "provider-code"));

@@ -1916,7 +1916,7 @@ public class CognitoService implements ResourceProvider {
      * AWS accepts only an issued ACM certificate from us-east-1 behind a custom domain, and answers
      * anything else with this one message.
      */
-    private void requireUsableCertificate(String certificateArn) {
+    void requireUsableCertificate(String certificateArn) {
         AwsArnUtils.Arn arn;
         try {
             arn = AwsArnUtils.parse(certificateArn);

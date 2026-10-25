@@ -359,7 +359,7 @@ public class CognitoCfnProvisioner implements CfnResourceProvisioner {
         r.getAttributes().put("UserPoolId", userPoolId);
         // Only a custom domain has a distribution of its own to alias; a prefix domain resolves empty.
         r.getAttributes().put("CloudFrontDistribution",
-                !provisioned.isCustomDomain() || provisioned.getCloudFrontDistribution() == null
+                customDomainConfig == null || provisioned.getCloudFrontDistribution() == null
                         ? "" : provisioned.getCloudFrontDistribution());
     }
 

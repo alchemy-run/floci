@@ -6834,7 +6834,8 @@ class CognitoServiceTest {
 
         assertEquals(2, updated.getManagedLoginVersion());
         assertFalse(updated.isCustomDomain());
-        assertNull(updated.getCloudFrontDistribution());
+        // A prefix domain is described with a distribution too, as on AWS.
+        assertNotNull(updated.getCloudFrontDistribution());
     }
 
     @Test
