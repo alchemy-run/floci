@@ -369,22 +369,14 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
             return; // AWS silently ignores non-existent LBs on delete
         }
         regionLbs = mutableRegion(loadBalancers, region);
-        LoadBalancer lb = regionLbs.remove(arn);
+        LoadBalancer lb = regionLbs.get(arn);
         if (lb == null) {
             return;
         }
-        // cascade: listeners → rules
-        List<String> listenerArns = lbToListeners.remove(arn);
-        if (listenerArns != null) {
-            Map<String, Listener> regionListeners = mutableRegion(listeners, region);
-            Map<String, Rule> regionRules = mutableRegion(rules, region);
-            for (String listenerArn : listenerArns) {
-                dataPlane.stopListener(listenerArn);
-                regionListeners.remove(listenerArn);
-                List<String> ruleArns = listenerToRules.remove(listenerArn);
-                if (ruleArns != null) {
-                    ruleArns.forEach(regionRules::remove);
-                }
+        List<String> listenerArns;
+        synchronized (lb) {
+            if (!regionLbs.remove(arn, lb)) {
+                return;
             }
             listenerArns = listeners.getOrDefault(region, Map.of()).values().stream()
                     .filter(listener -> arn.equals(listener.getLoadBalancerArn()))
@@ -1485,7 +1477,6 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
     private Map<String, Subnet> resolveSubnetsById(String region, List<String> subnetIds) {
         Map<String, Subnet> described = describeSubnetsQuietly(region, subnetIds);
         Map<String, Subnet> subnetsById = new LinkedHashMap<>();
-        int index = 0;
         for (String subnetId : subnetIds) {
             if (subnetId == null || subnetId.isBlank()) {
                 throw new AwsException("SubnetNotFound",
@@ -1493,21 +1484,10 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
             }
             Subnet subnet = described.containsKey(subnetId) ? described.get(subnetId) : lookupEc2Subnet(region, subnetId);
             if (subnet == null) {
-                // Accept well-formed IDs the EC2 store cannot see under this
-                // RequestContext (wrong account/region key, or a caller that
-                // described subnets out of band). Real ELBv2 still returns
-                // SubnetNotFound for a truly missing or malformed id; we only
-                // synthesize a valid-looking subnet-* so CreateLoadBalancer can
-                // proceed. AZ is positional so two IDs always span two zones
-                // (ALB requirement).
-                if (!AWS_SUBNET_ID.matcher(subnetId).matches()) {
-                    throw new AwsException("SubnetNotFound",
-                            "The subnet ID '" + subnetId + "' does not exist", 400);
-                }
-                subnet = synthesizeAcceptedSubnet(region, subnetId, index);
+                throw new AwsException("SubnetNotFound",
+                        "The subnet ID '" + subnetId + "' does not exist", 400);
             }
             subnetsById.put(subnetId, subnet);
-            index++;
         }
         return subnetsById;
     }
@@ -2059,8 +2039,6 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
         return count;
     }
 
-    /** Classic (8 hex) or current (17 hex) subnet IDs. Anything else is SubnetNotFound. */
-    private static final Pattern AWS_SUBNET_ID = Pattern.compile("subnet-[0-9a-f]{8}(?:[0-9a-f]{9})?");
 
     /** The subnets EC2 describes for these ids in one call; empty when it refuses one of them. */
     private Map<String, Subnet> describeSubnetsQuietly(String region, List<String> subnetIds) {
@@ -2096,15 +2074,6 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
         }
     }
 
-    private static Subnet synthesizeAcceptedSubnet(String region, String subnetId, int index) {
-        Subnet subnet = new Subnet();
-        subnet.setSubnetId(subnetId);
-        subnet.setVpcId("vpc-default");
-        subnet.setRegion(region);
-        subnet.setState("available");
-        subnet.setAvailabilityZone(region + (char) ('a' + Math.floorMod(index, 3)));
-        return subnet;
-    }
 
     private static final String CANONICAL_HOSTED_ZONE_ID = "Z35SXDOTRQ7X7K";
 

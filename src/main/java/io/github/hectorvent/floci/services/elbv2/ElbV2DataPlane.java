@@ -790,6 +790,12 @@ public class ElbV2DataPlane {
         PortState state = portStates.get(port);
         RoutingView routing = state == null ? null : state.routing;
         RoutedListener listener = routing == null ? null : resolveListener(routing, req.host());
+        if (listener == null && routing != null && routing.listeners().size() > 1
+                && ElbV2TargetResolver.isIpLiteral(normalizeHost(req.host()))) {
+            // Every load balancer resolves to one local address; see resolveSharedAddressListener.
+            String selected = resolveSharedAddressListener(port, routing.listeners().keySet(), req);
+            listener = selected == null ? null : routing.listeners().get(selected);
+        }
         if (listener == null) {
             req.response().setStatusCode(502).end("No listener for host");
             return;

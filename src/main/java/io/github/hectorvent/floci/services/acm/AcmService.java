@@ -670,15 +670,15 @@ public class AcmService implements ResourceProvider {
             throw new AwsException("ValidationException",
                 "Certificate " + certificateArn + " cannot be revoked because it is not export-enabled.", 400);
         }
+        if (!certificateInUseBy(cert).isEmpty()) {
+            throw new AwsException("ResourceInUseException",
+                    "Certificate " + certificateArn + " is in use by another service.", 400);
+        }
         if (!cert.isExported()) {
             throw new AwsException("ConflictException", "Only exported certificates can be revoked.", 409);
         }
         if (cert.getStatus() == CertificateStatus.REVOKED) {
             throw new AwsException("ConflictException", "Certificate is already revoked.", 409);
-        }
-        if (!certificateInUseBy(cert).isEmpty()) {
-            throw new AwsException("ResourceInUseException",
-                    "Certificate " + certificateArn + " is in use by another service.", 400);
         }
         cert.setStatus(CertificateStatus.REVOKED);
         cert.setRevokedAt(Instant.now());

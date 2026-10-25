@@ -476,9 +476,15 @@ class ElbV2HttpsDataPlaneIntegrationTest {
             assertAll("A stale successful preflight must not publish the losing request",
                     () -> assertEquals(400, rejected.statusCode()),
                     () -> assertEquals(List.of(String.valueOf(HTTP_PORT)), actualPorts),
-                    () -> assertTrue(given().header("Authorization", AUTH).formParam("Action", "DescribeRules")
-                            .formParam("ListenerArn", attemptedArn.get()).when().post("/").then().statusCode(200)
-                            .extract().xmlPath().getList("DescribeRulesResponse.DescribeRulesResult.Rules.member").isEmpty()),
+                    // The listener was never published, so AWS answers ListenerNotFound; no rule is left either way.
+                    () -> {
+                        Response rules = given().header("Authorization", AUTH).formParam("Action", "DescribeRules")
+                                .formParam("ListenerArn", attemptedArn.get()).when().post("/");
+                        assertTrue(rules.statusCode() == 400
+                                ? "ListenerNotFound".equals(rules.xmlPath().getString("ErrorResponse.Error.Code"))
+                                : rules.xmlPath().getList("DescribeRulesResponse.DescribeRulesResult.Rules.member").isEmpty(),
+                                rules.asString());
+                    },
                     () -> assertTrue(given().header("Authorization", AUTH).formParam("Action", "DescribeTags")
                             .formParam("ResourceArns.member.1", attemptedArn.get()).when().post("/").then().statusCode(200)
                             .extract().xmlPath().getList("DescribeTagsResponse.DescribeTagsResult.TagDescriptions.member.Tags.member").isEmpty()),
@@ -1523,6 +1529,9 @@ class ElbV2HttpsDataPlaneIntegrationTest {
                     () -> awaitHttpsMaterial(loadBalancer.dnsName(), 200, "revocation", certificate, certificate));
             deleteListener(listener);
             listener = null;
+            // Only a certificate that has been exported can be revoked.
+            acmService.exportCertificate(certificate.getArn(),
+                    java.util.Base64.getEncoder().encodeToString("passphrase".getBytes()), REGION);
             given().header("X-Amz-Target", "CertificateManager.RevokeCertificate")
                     .header("Authorization", AUTH.replace("elasticloadbalancing", "acm"))
                     .contentType("application/x-amz-json-1.1")
