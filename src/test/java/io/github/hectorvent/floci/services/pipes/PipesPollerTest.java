@@ -543,9 +543,8 @@ class PipesPollerTest {
         verify(targetInvoker).invoke(eq(pipe), payload.capture(), eq("us-east-1"));
         ObjectNode expected = original.deepCopy();
         expected.put("eventSourceARN", STREAM_ARN);
-        ObjectNode event = MAPPER.createObjectNode();
-        event.putArray("Records").add(expected);
-        assertEquals(event, MAPPER.readTree(payload.getValue()));
+        // Pipes hands a Lambda target the bare array of records, not a {"Records": [...]} envelope.
+        assertEquals(MAPPER.createArrayNode().add(expected), MAPPER.readTree(payload.getValue()));
         assertEquals(original, active.awsRecord(), "the reader's record is never mutated");
     }
 
@@ -568,7 +567,7 @@ class PipesPollerTest {
         ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
         verify(targetInvoker).invoke(eq(pipe), payload.capture(), eq("us-east-1"));
         assertEquals(MAPPER.createObjectNode().put("type", "Service").put("principalId", "dynamodb.amazonaws.com"),
-                MAPPER.readTree(payload.getValue()).path("Records").path(0).path("userIdentity"));
+                MAPPER.readTree(payload.getValue()).path(0).path("userIdentity"));
         assertEquals(original, ttlRemoval.awsRecord(), "the reader's record is never mutated");
     }
 
@@ -687,7 +686,7 @@ class PipesPollerTest {
         List<List<String>> batches = new ArrayList<>();
         for (String payload : payloads.getAllValues()) {
             List<String> batch = new ArrayList<>();
-            for (JsonNode record : MAPPER.readTree(payload).path("Records")) {
+            for (JsonNode record : MAPPER.readTree(payload)) {
                 batch.add(record.path("dynamodb").path("SequenceNumber").asText());
             }
             batches.add(batch);
