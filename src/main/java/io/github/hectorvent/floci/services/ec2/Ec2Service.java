@@ -13861,9 +13861,6 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
      * dies with its instance.
      */
     private void releaseStandaloneInterfacesOnTermination(String region, Instance inst) {
-        if (inst.getState() == null || !"terminated".equals(inst.getState().getName())) {
-            return;
-        }
         for (InstanceNetworkInterface e : List.copyOf(inst.getNetworkInterfaces())) {
             NetworkInterface ni = networkInterfaces.get(key(region, e.getNetworkInterfaceId())).orElse(null);
             NetworkInterfaceAttachment att = ni != null ? ni.getAttachment() : null;
