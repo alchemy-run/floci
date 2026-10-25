@@ -500,7 +500,9 @@ public class EventBridgeHandler {
     private Response handleUpdateArchive(JsonNode request, String region) {
         String archiveName = request.path("ArchiveName").asText(null);
         String description = request.path("Description").asText(null);
-        String eventPattern = textOrJson(request.path("EventPattern"));
+        // An empty EventPattern clears the archive's pattern, so it stays "" rather than absent.
+        JsonNode patternNode = request.path("EventPattern");
+        String eventPattern = patternNode.isTextual() ? patternNode.asText() : textOrJson(patternNode);
         Integer retentionDays = request.hasNonNull("RetentionDays")
                 ? request.get("RetentionDays").asInt() : null;
         Archive archive = eventBridgeService.updateArchive(
