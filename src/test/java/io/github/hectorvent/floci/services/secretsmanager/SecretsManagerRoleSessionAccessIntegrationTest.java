@@ -46,13 +46,13 @@ class SecretsManagerRoleSessionAccessIntegrationTest {
                 .then().statusCode(200).body("ARN", equalTo(arn));
 
         call(session, "DescribeSecret", "{\"SecretId\":\"" + arn + "\"}")
-                .then().statusCode(403).body("__type", equalTo("AccessDeniedException"));
+                .then().statusCode(400).body("__type", equalTo("AccessDeniedException"));
         call(session, "DescribeSecret", "{\"SecretId\":\"" + name + "\"}")
-                .then().statusCode(403).body("__type", equalTo("AccessDeniedException"));
+                .then().statusCode(400).body("__type", equalTo("AccessDeniedException"));
         call(session, "PutSecretValue", "{\"SecretId\":\"" + arn + "\",\"SecretString\":\"other\"}")
-                .then().statusCode(403).body("__type", equalTo("AccessDeniedException"));
+                .then().statusCode(400).body("__type", equalTo("AccessDeniedException"));
         call(session, "ListSecrets", "{}")
-                .then().statusCode(403).body("__type", equalTo("AccessDeniedException"));
+                .then().statusCode(400).body("__type", equalTo("AccessDeniedException"));
     }
 
     @Test
@@ -62,7 +62,7 @@ class SecretsManagerRoleSessionAccessIntegrationTest {
         String session = roleSession(bound, "secretsmanager:GetSecretValue");
 
         call(session, "GetSecretValue", "{\"SecretId\":\"" + other + "\"}")
-                .then().statusCode(403).body("__type", equalTo("AccessDeniedException"));
+                .then().statusCode(400).body("__type", equalTo("AccessDeniedException"));
     }
 
     @Test
@@ -71,7 +71,7 @@ class SecretsManagerRoleSessionAccessIntegrationTest {
         IamRole role = createRole(arn, "secretsmanager:GetSecretValue");
         String session = iamService.mintRoleSession(role.getArn()).accessKeyId();
 
-        call(session, "DescribeSecret", "{\"SecretId\":\"" + arn + "\"}").then().statusCode(403);
+        call(session, "DescribeSecret", "{\"SecretId\":\"" + arn + "\"}").then().statusCode(400);
 
         String policy = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\","
                 + "\"Principal\":{\"AWS\":\"" + role.getArn() + "\"},"
