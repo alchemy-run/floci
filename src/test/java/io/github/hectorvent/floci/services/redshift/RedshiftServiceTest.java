@@ -120,6 +120,8 @@ class RedshiftServiceTest {
 
         credentialBroker = new RedshiftCredentialBroker();
         ec2Service = mock(Ec2Service.class);
+        // requireSubnets refuses an unknown id over the describeSubnets answers each test stubs.
+        when(ec2Service.requireSubnets(anyString(), anyList())).thenCallRealMethod();
         AccountAwareStorageBackend<RedshiftEvent> eventBackend = mock(AccountAwareStorageBackend.class);
         when(sf.<RedshiftEvent>create(eq("redshift"), eq("redshift-events.json"), any())).thenReturn(eventBackend);
         secretsManagerService = mock(SecretsManagerService.class);

@@ -122,7 +122,7 @@ class LambdaUrlInvocationControllerTest {
         byte[] binaryBody = new byte[] {0x00, (byte) 0xff, (byte) 0x80, 0x0a};
 
         controller.handlePost("url-id", "", headersWith("application/octet-stream"),
-                uriInfoFor("http://localhost/lambda-url/url-id/"), binaryBody);
+                uriInfoFor("http://localhost/lambda-url/url-id/"), binaryBody).toCompletableFuture().join();
 
         ArgumentCaptor<byte[]> event = ArgumentCaptor.forClass(byte[].class);
         verify(lambdaService).invokeArn(eq(FUNCTION_ARN), event.capture(), eq(InvocationType.RequestResponse));
@@ -152,7 +152,7 @@ class LambdaUrlInvocationControllerTest {
         try {
             Locale.setDefault(Locale.JAPAN);
             controller.handlePost("url-id", "", headersWith("text/plain"),
-                    uriInfoFor("http://localhost/lambda-url/url-id/"), "hi".getBytes(StandardCharsets.UTF_8));
+                    uriInfoFor("http://localhost/lambda-url/url-id/"), "hi".getBytes(StandardCharsets.UTF_8)).toCompletableFuture().join();
         } finally {
             Locale.setDefault(original);
         }
@@ -182,7 +182,7 @@ class LambdaUrlInvocationControllerTest {
         byte[] textLookingBody = "hello world".getBytes(StandardCharsets.UTF_8);
 
         controller.handlePost("url-id", "", headersWith("application/octet-stream"),
-                uriInfoFor("http://localhost/lambda-url/url-id/"), textLookingBody);
+                uriInfoFor("http://localhost/lambda-url/url-id/"), textLookingBody).toCompletableFuture().join();
 
         ArgumentCaptor<byte[]> event = ArgumentCaptor.forClass(byte[].class);
         verify(lambdaService).invokeArn(eq(FUNCTION_ARN), event.capture(), eq(InvocationType.RequestResponse));
@@ -240,7 +240,7 @@ class LambdaUrlInvocationControllerTest {
         LambdaUrlInvocationController controller = newController(lambdaService);
 
         controller.handlePost("url-id", "", headersWith("application/json"),
-                uriInfoFor("http://localhost/lambda-url/url-id/"), "{\"hello\":\"world\"}".getBytes(StandardCharsets.UTF_8));
+                uriInfoFor("http://localhost/lambda-url/url-id/"), "{\"hello\":\"world\"}".getBytes(StandardCharsets.UTF_8)).toCompletableFuture().join();
 
         ArgumentCaptor<byte[]> event = ArgumentCaptor.forClass(byte[].class);
         verify(lambdaService).invokeArn(eq(FUNCTION_ARN), event.capture(), eq(InvocationType.RequestResponse));
@@ -316,7 +316,7 @@ class LambdaUrlInvocationControllerTest {
                 .thenReturn(invokeResult);
 
         newController(lambdaService).handleGet("url-id", "", headers,
-                uriInfoFor("http://localhost/lambda-url/url-id/"));
+                uriInfoFor("http://localhost/lambda-url/url-id/")).toCompletableFuture().join();
 
         ArgumentCaptor<byte[]> event = ArgumentCaptor.forClass(byte[].class);
         verify(lambdaService).invokeArn(eq(FUNCTION_ARN), event.capture(), eq(InvocationType.RequestResponse));
