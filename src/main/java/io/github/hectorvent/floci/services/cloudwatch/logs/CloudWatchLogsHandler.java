@@ -17,6 +17,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.StreamingOutput;
+import org.jboss.resteasy.reactive.server.spi.ServerHttpResponse;
 import org.jboss.resteasy.reactive.server.spi.ServerRequestContext;
 
 import java.util.ArrayList;
@@ -116,7 +117,7 @@ public class CloudWatchLogsHandler {
                 liveTailStrings(request, "logGroupIdentifiers"), liveTailStrings(request, "logStreamNames"),
                 liveTailStrings(request, "logStreamNamePrefixes"),
                 request.path("logEventFilterPattern").asText(null), region);
-        var response = requestContext.serverResponse();
+        ServerHttpResponse response = requestContext.serverResponse();
         StreamingOutput body = output -> {
             logsService.registerLiveTail(session);
             try {

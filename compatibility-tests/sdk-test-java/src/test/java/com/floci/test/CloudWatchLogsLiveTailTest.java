@@ -1,5 +1,6 @@
 package com.floci.test;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -7,15 +8,18 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
-import software.amazon.eventstream.Message;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.cloudwatchlogs.CloudWatchLogsAsyncClient;
 import software.amazon.awssdk.services.cloudwatchlogs.CloudWatchLogsClient;
 import software.amazon.awssdk.services.cloudwatchlogs.model.*;
+import software.amazon.awssdk.services.lambda.LambdaClient;
+import software.amazon.awssdk.services.lambda.model.InvokeResponse;
+import software.amazon.eventstream.Message;
 
 import java.io.DataInputStream;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.nio.ByteBuffer;
 import java.time.Duration;
@@ -24,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -50,7 +55,7 @@ class CloudWatchLogsLiveTailTest {
                 logs.createLogStream(r -> r.logGroupName(name).logStreamName(stream));
             }
         }
-        var groups = logs.describeLogGroups(r -> r.logGroupNamePrefix(group)).logGroups();
+        List<LogGroup> groups = logs.describeLogGroups(r -> r.logGroupNamePrefix(group)).logGroups();
         arn = groups.stream().filter(g -> g.logGroupName().equals(group)).findFirst().orElseThrow().logGroupArn();
         otherArn = groups.stream().filter(g -> g.logGroupName().equals(other)).findFirst().orElseThrow().logGroupArn();
     }
@@ -72,11 +77,11 @@ class CloudWatchLogsLiveTailTest {
     void streamsNewIngestionAndIdleHeartbeatsWithoutReplayingHistory() throws Exception {
         put(group, "prod/app", "old event");
         Tail tail = start(r -> r.logGroupIdentifiers(arn));
-        var start = tail.started();
+        LiveTailSessionStart start = tail.started();
         assertThat(start.logGroupIdentifiers()).containsExactly(arn);
         assertThat(start.requestId()).isNotBlank();
         assertThat(start.sessionId()).isNotBlank();
-        var idle = tail.update();
+        LiveTailSessionUpdate idle = tail.update();
         assertThat(idle.sessionResults()).isEmpty();
         assertThat(idle.sessionMetadata().sampled()).isFalse();
 
@@ -85,7 +90,7 @@ class CloudWatchLogsLiveTailTest {
                 InputLogEvent.builder().message("new ingestion, older timestamp ☃").timestamp(timestamp).build(),
                 InputLogEvent.builder().message("rejected future event")
                         .timestamp(System.currentTimeMillis() + Duration.ofHours(3).toMillis()).build()));
-        var update = tail.nonempty();
+        LiveTailSessionUpdate update = tail.nonempty();
         assertThat(update.sessionResults()).singleElement().satisfies(event -> {
             assertThat(event.message()).isEqualTo("new ingestion, older timestamp ☃");
             assertThat(event.timestamp()).isEqualTo(timestamp);
@@ -99,7 +104,7 @@ class CloudWatchLogsLiveTailTest {
     @Test
     void sendsInitialResponseBeforeSessionStart() throws Exception {
         HttpURLConnection connection = openWireStream();
-        try (var input = new DataInputStream(connection.getInputStream())) {
+        try (DataInputStream input = new DataInputStream(connection.getInputStream())) {
             Message initial = readFrame(input);
             assertThat(initial.getHeaders().get(":message-type").getString()).isEqualTo("event");
             assertThat(initial.getHeaders().get(":event-type").getString()).isEqualTo("initial-response");
@@ -116,7 +121,7 @@ class CloudWatchLogsLiveTailTest {
     @Timeout(90)
     void slowReaderDropsOldUpdatesAndStillReceivesRecentEvents() throws Exception {
         HttpURLConnection connection = openWireStream();
-        try (var input = new DataInputStream(connection.getInputStream())) {
+        try (DataInputStream input = new DataInputStream(connection.getInputStream())) {
             assertThat(readFrame(input).getHeaders().get(":event-type").getString()).isEqualTo("initial-response");
             assertThat(readFrame(input).getHeaders().get(":event-type").getString()).isEqualTo("sessionStart");
             Tail observer = start(r -> r.logGroupIdentifiers(arn));
@@ -140,8 +145,8 @@ class CloudWatchLogsLiveTailTest {
             while (!received.contains(29)) {
                 Message frame = readFrame(input);
                 assertThat(frame.getHeaders().get(":event-type").getString()).isEqualTo("sessionUpdate");
-                var results = mapper.readTree(frame.getPayload()).get("sessionResults");
-                for (var event : results) {
+                JsonNode results = mapper.readTree(frame.getPayload()).get("sessionResults");
+                for (JsonNode event : results) {
                     String message = event.get("message").asText();
                     int index = Integer.parseInt(message.substring(0, message.indexOf(':')));
                     if (!received.isEmpty() && index > received.get(received.size() - 1) + 1) {
@@ -200,10 +205,10 @@ class CloudWatchLogsLiveTailTest {
     void doesNotMixRegionsOrPublishingAccounts() throws Exception {
         Tail tail = start(r -> r.logGroupIdentifiers(arn));
         tail.started();
-        try (var otherAccount = CloudWatchLogsClient.builder().endpointOverride(TestFixtures.endpoint())
+        try (CloudWatchLogsClient otherAccount = CloudWatchLogsClient.builder().endpointOverride(TestFixtures.endpoint())
                 .region(Region.US_EAST_1).credentialsProvider(StaticCredentialsProvider.create(
                         AwsBasicCredentials.create("111111111111", "test"))).build();
-             var otherRegion = CloudWatchLogsClient.builder().endpointOverride(TestFixtures.endpoint())
+             CloudWatchLogsClient otherRegion = CloudWatchLogsClient.builder().endpointOverride(TestFixtures.endpoint())
                 .region(Region.US_WEST_2).credentialsProvider(StaticCredentialsProvider.create(
                         AwsBasicCredentials.create("test", "test"))).build()) {
             otherAccount.createLogGroup(r -> r.logGroupName(group));
@@ -211,7 +216,7 @@ class CloudWatchLogsLiveTailTest {
             try {
                 otherAccount.createLogStream(r -> r.logGroupName(group).logStreamName("prod/app"));
                 otherRegion.createLogStream(r -> r.logGroupName(group).logStreamName("prod/app"));
-                for (var client : List.of(otherAccount, otherRegion)) {
+                for (CloudWatchLogsClient client : List.of(otherAccount, otherRegion)) {
                     client.putLogEvents(r -> r.logGroupName(group).logStreamName("prod/app").logEvents(
                             InputLogEvent.builder().timestamp(System.currentTimeMillis()).message("not this session").build()));
                 }
@@ -230,7 +235,7 @@ class CloudWatchLogsLiveTailTest {
     void streamsRealLambdaContainerLogs() throws Exception {
         String function = TestFixtures.uniqueName("live-tail-lambda");
         String lambdaGroup = "/aws/lambda/" + function;
-        try (var lambda = TestFixtures.lambdaClient()) {
+        try (LambdaClient lambda = TestFixtures.lambdaClient()) {
             lambda.createFunction(r -> r.functionName(function)
                     .runtime(software.amazon.awssdk.services.lambda.model.Runtime.NODEJS20_X)
                     .role("arn:aws:iam::000000000000:role/lambda-role").handler("index.handler").timeout(30)
@@ -241,7 +246,7 @@ class CloudWatchLogsLiveTailTest {
                         .logGroups().get(0).logGroupArn();
                 Tail tail = start(r -> r.logGroupIdentifiers(lambdaArn));
                 tail.started();
-                var response = lambda.invoke(r -> r.functionName(function)
+                InvokeResponse response = lambda.invoke(r -> r.functionName(function)
                         .payload(software.amazon.awssdk.core.SdkBytes.fromUtf8String("{\"marker\":\"live-tail-container\"}")));
                 assertThat(response.functionError()).isNull();
                 List<String> messages = new ArrayList<>();
@@ -261,14 +266,14 @@ class CloudWatchLogsLiveTailTest {
         Tail tail = start(r -> r.logGroupIdentifiers(arn));
         tail.started();
         long timestamp = System.currentTimeMillis();
-        var events = IntStream.range(0, 600).mapToObj(i -> InputLogEvent.builder()
+        List<InputLogEvent> events = IntStream.range(0, 600).mapToObj(i -> InputLogEvent.builder()
                 .message("event-" + i).timestamp(timestamp + i).build()).toList();
         logs.putLogEvents(r -> r.logGroupName(group).logStreamName("prod/app").logEvents(events.subList(0, 500)));
-        var atLimit = tail.nonempty();
+        LiveTailSessionUpdate atLimit = tail.nonempty();
         assertThat(atLimit.sessionResults()).hasSize(500);
         assertThat(atLimit.sessionMetadata().sampled()).isFalse();
         logs.putLogEvents(r -> r.logGroupName(group).logStreamName("prod/app").logEvents(events));
-        var update = tail.nonempty();
+        LiveTailSessionUpdate update = tail.nonempty();
         assertThat(update.sessionResults()).hasSize(500);
         assertThat(update.sessionResults()).extracting(LiveTailSessionLogEvent::message).doesNotHaveDuplicates();
         assertThat(update.sessionMetadata().sampled()).isTrue();
@@ -292,7 +297,7 @@ class CloudWatchLogsLiveTailTest {
     @Test
     void cancellationReleasesTheSessionQuota() throws Exception {
         String account = String.format("%012d", java.util.concurrent.ThreadLocalRandom.current().nextLong(1_000_000_000_000L));
-        var credentials = StaticCredentialsProvider.create(AwsBasicCredentials.create(account, "test"));
+        StaticCredentialsProvider credentials = StaticCredentialsProvider.create(AwsBasicCredentials.create(account, "test"));
         String quotaArn = "arn:aws:logs:us-east-1:" + account + ":log-group:" + group;
         Consumer<StartLiveTailRequest.Builder> request = r -> r.logGroupIdentifiers(quotaArn)
                 .overrideConfiguration(o -> o.credentialsProvider(credentials));
@@ -337,7 +342,7 @@ class CloudWatchLogsLiveTailTest {
         connection.setRequestProperty("Content-Type", "application/x-amz-json-1.1");
         connection.setRequestProperty("X-Amz-Target", "Logs_20140328.StartLiveTail");
         connection.setDoOutput(true);
-        try (var output = connection.getOutputStream()) {
+        try (OutputStream output = connection.getOutputStream()) {
             output.write(new ObjectMapper().writeValueAsBytes(Map.of("logGroupIdentifiers", List.of(arn))));
         }
         assertThat(connection.getResponseCode()).isEqualTo(200);
@@ -400,7 +405,7 @@ class CloudWatchLogsLiveTailTest {
         Object next() throws InterruptedException {
             Object event = received.poll(10, TimeUnit.SECONDS);
             assertThat(event).as("live tail event or modeled error").isNotNull();
-            while (event instanceof java.util.concurrent.CompletionException error && error.getCause() != null) {
+            while (event instanceof CompletionException error && error.getCause() != null) {
                 event = error.getCause();
             }
             return event;
@@ -420,7 +425,7 @@ class CloudWatchLogsLiveTailTest {
 
         LiveTailSessionUpdate nonempty() throws InterruptedException {
             for (int i = 0; i < 5; i++) {
-                var update = update();
+                LiveTailSessionUpdate update = update();
                 if (!update.sessionResults().isEmpty()) {
                     return update;
                 }
