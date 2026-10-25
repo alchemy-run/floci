@@ -2,7 +2,7 @@ package io.github.hectorvent.floci.services.ses;
 
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.specification.RequestSpecification;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -30,9 +30,14 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class SesBulkV1IntegrationTest {
 
-    @BeforeAll
-    static void verifySenders() {
-        SesVerifiedSenders.verify("bulk@example.com");
+    private static boolean sendersVerified;
+
+    @BeforeEach
+    void verifySenders() {
+        if (!sendersVerified) {
+            SesVerifiedSenders.verify("bulk@example.com");
+            sendersVerified = true;
+        }
     }
 
     private static final String AUTH =

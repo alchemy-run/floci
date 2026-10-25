@@ -103,7 +103,7 @@ class IamAuthValidatorTest {
         when(iamService.resolveCallerArn("AKIAGOOD"))
                 .thenReturn(Optional.of("arn:aws:iam::000000000000:role/execution"));
         Map<String, String> signed = AppSyncRequestSigner.signedHeaders(
-                "api-1", HOST, BODY, "AKIAGOOD", "good-secret", REGION, Instant.now());
+                "api-1", HOST, BODY, "AKIAGOOD", "good-secret", REGION, NOW);
 
         Map<String, Object> identity = validator.validateRequest(
                 authorization(signed), "api-1", infoWith(signed));
@@ -129,7 +129,7 @@ class IamAuthValidatorTest {
         when(iamService.resolveCallerArn("AKIAGOOD"))
                 .thenReturn(Optional.of("arn:aws:iam::000000000000:role/execution"));
         Map<String, String> signed = AppSyncRequestSigner.signedHeaders(
-                "api-1", HOST, BODY, "AKIAGOOD", "good-secret", REGION, Instant.now());
+                "api-1", HOST, BODY, "AKIAGOOD", "good-secret", REGION, NOW);
 
         validator.validateRequest(authorization(signed), "api-1", infoWith(signed));
 

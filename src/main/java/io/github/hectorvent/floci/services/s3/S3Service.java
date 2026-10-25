@@ -3282,8 +3282,7 @@ public class S3Service implements Resettable, ResourceProvider {
      * null, and returns that version's id.
      */
     public String putObjectTagging(String bucketName, String key, String versionId, Map<String, String> tags) {
-        return reportedVersionId(updateObjectTagging(bucketName, key, versionId, "PUT",
-                tags != null ? tags : new HashMap<>()), versionId);
+        return updateObjectTagging(bucketName, key, versionId, "PUT", tags != null ? tags : new HashMap<>());
     }
 
     public Map<String, String> getObjectTagging(String bucketName, String key) {
@@ -3795,11 +3794,10 @@ public class S3Service implements Resettable, ResourceProvider {
     }
 
     public Map<String, String> getBucketTagging(String bucketName) {
-        Map<String, String> tags = listBucketTags(bucketName);
-        if (tags.isEmpty()) {
-            throw new AwsException("NoSuchTagSet", "The TagSet does not exist", 404);
-        }
-        return tags;
+        Bucket bucket = bucketStore.get(bucketName)
+                .orElseThrow(() -> new AwsException("NoSuchBucket",
+                        "The specified bucket does not exist.", 404));
+        return bucket.getTags() != null ? bucket.getTags() : Map.of();
     }
 
     public void putBucketWebsite(String bucketName, WebsiteConfiguration config) {
@@ -6946,8 +6944,11 @@ public class S3Service implements Resettable, ResourceProvider {
 
             ObjectNode objectNode = objectMapper.createObjectNode();
             objectNode.put("key", eventRecordKey(key));
-            objectNode.put("size", size);
-            objectNode.put("eTag", eTag);
+            // S3 records no size or ETag for a removal: nothing was written.
+            if (!eventName.startsWith("ObjectRemoved")) {
+                objectNode.put("size", size);
+                objectNode.put("eTag", eTag);
+            }
             if(isVersionEnabled) {
                 String versionId = obj !=null && obj.getVersionId()!=null ? obj.getVersionId() : "";
                 objectNode.put("versionId", versionId);

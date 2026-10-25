@@ -340,18 +340,22 @@ public class CloudMapService {
     public Operation updateService(String id, String description, String dnsConfig,
                                    String healthCheckConfig, String region) {
         Service service = requireService(id);
-        if (description != null) {
-            service.setDescription(description);
-        }
+        // Only the TTLs of the existing DNS records can change, as on AWS: another record type or count,
+        // a RoutingPolicy change, or a DnsConfig for a service without one, is refused before anything
+        // is written.
+        String merged = null;
         if (dnsConfig != null) {
-            String merged = mergeDnsConfig(service.getDnsConfig(), dnsConfig);
-            // Only the TTLs of the existing DNS records can change, as on AWS: another record type or
-            // count, or a RoutingPolicy change, is refused.
-            if (service.getDnsConfig() != null
-                    && !withoutTtls(parseDnsConfig(merged)).equals(withoutTtls(dnsConfigNode(service)))) {
+            merged = mergeDnsConfig(service.getDnsConfig(), dnsConfig);
+            if (service.getDnsConfig() == null
+                    || !withoutTtls(parseDnsConfig(merged)).equals(withoutTtls(dnsConfigNode(service)))) {
                 throw new AwsException("InvalidInput",
                         "Only the TTLs of a service's DNS records can be updated.", 400);
             }
+        }
+        if (description != null) {
+            service.setDescription(description);
+        }
+        if (merged != null) {
             service.setDnsConfig(merged);
         }
         // AWS UpdateService replaces HealthCheckConfig with whatever was

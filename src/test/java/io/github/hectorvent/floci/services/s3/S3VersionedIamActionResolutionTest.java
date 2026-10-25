@@ -59,6 +59,7 @@ class S3VersionedIamActionResolutionTest {
         when(uriInfo.getQueryParameters()).thenReturn(query);
         when(uriInfo.getPath()).thenReturn("/bucket/folder/key.txt");
         when(uriInfo.getRequestUri()).thenReturn(URI.create("http://localhost:4566/bucket/folder/key.txt"));
+        when(uriInfo.getBaseUri()).thenReturn(URI.create("http://localhost:4566/"));
         when(ctx.getUriInfo()).thenReturn(uriInfo);
         when(ctx.getMethod()).thenReturn(method);
         when(ctx.getEntityStream()).thenReturn(new ByteArrayInputStream(new byte[0]));

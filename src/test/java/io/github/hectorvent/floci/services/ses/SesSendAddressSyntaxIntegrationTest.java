@@ -1,7 +1,7 @@
 package io.github.hectorvent.floci.services.ses;
 
 import io.quarkus.test.junit.QuarkusTest;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -18,9 +18,14 @@ import static org.hamcrest.Matchers.nullValue;
 @QuarkusTest
 class SesSendAddressSyntaxIntegrationTest {
 
-    @BeforeAll
-    static void verifySenders() {
-        SesVerifiedSenders.verify("sender@example.com");
+    private static boolean sendersVerified;
+
+    @BeforeEach
+    void verifySenders() {
+        if (!sendersVerified) {
+            SesVerifiedSenders.verify("sender@example.com");
+            sendersVerified = true;
+        }
     }
 
     private static final String AUTH =

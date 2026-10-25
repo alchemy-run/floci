@@ -1,7 +1,7 @@
 package io.github.hectorvent.floci.services.ses;
 
 import io.quarkus.test.junit.QuarkusTest;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -24,9 +24,14 @@ import static org.hamcrest.Matchers.notNullValue;
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class SesBulkV2IntegrationTest {
 
-    @BeforeAll
-    static void verifySenders() {
-        SesVerifiedSenders.verify("bulk@example.com", "inline@example.com");
+    private static boolean sendersVerified;
+
+    @BeforeEach
+    void verifySenders() {
+        if (!sendersVerified) {
+            SesVerifiedSenders.verify("bulk@example.com", "inline@example.com");
+            sendersVerified = true;
+        }
     }
 
     private static final String AUTH_HEADER =

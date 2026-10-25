@@ -122,7 +122,7 @@ class S3VersionedNotificationServiceTest {
         config.getLambdaFunctionConfigurations().add(new LambdaNotification("all",
                 "arn:aws:lambda:us-east-1:000000000000:function:events",
                 List.of("s3:ObjectCreated:*"), List.of()));
-        s3Service.putBucketNotificationConfiguration("plain", config);
+        s3Service.putBucketNotificationConfiguration("plain", config, true);
 
         s3Service.putObject("plain", "key", "data".getBytes(StandardCharsets.UTF_8), "text/plain", Map.of());
 
