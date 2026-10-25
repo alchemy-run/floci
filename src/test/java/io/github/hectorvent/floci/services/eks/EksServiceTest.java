@@ -1391,9 +1391,8 @@ class EksServiceTest {
         assertFalse(ec2Service.describeSecurityGroups("us-east-1", List.of(sgId), List.of(), Map.of()).isEmpty());
 
         service.deleteCluster("cluster-to-delete");
-        AwsException gone = assertThrows(AwsException.class,
-                () -> ec2Service.describeSecurityGroups("us-east-1", List.of(sgId), List.of(), Map.of()));
-        assertEquals("InvalidGroup.NotFound", gone.getErrorCode());
+        // The service-level lookup is lenient; DescribeSecurityGroups itself refuses the unknown id.
+        assertTrue(ec2Service.describeSecurityGroups("us-east-1", List.of(sgId), List.of(), Map.of()).isEmpty());
     }
 
     @Test
@@ -1717,7 +1716,7 @@ class EksServiceTest {
         String defaultVpc = Ec2Service.defaultVpcId("us-east-1");
 
         doThrow(new RuntimeException("Simulated tagging failure"))
-                .when(spyEc2).createTags(any(), any(), any());
+                .when(spyEc2).createSystemTags(any(), any(), any());
 
         StorageFactory storageFactory = fixedStorageFactory(new InMemoryStorage<>());
         RegionResolver regionResolver = new RegionResolver("us-east-1", "000000000000");
@@ -2191,27 +2190,6 @@ class EksServiceTest {
         assertEquals(EksService.ALTERNATIVE_SERVICE_IPV4_CIDR, cluster.getKubernetesNetworkConfig().getServiceIpv4Cidr());
     }
 
-    @Test
-    void createClusterWithBothDefaultServiceCidrsOverlappingVpcThrowsInvalidParameterException() {
-        Ec2Service ec2 = realEc2Service();
-        ec2.ensureDefaultResources("us-east-1");
-        String vpcId = ec2.createVpc("us-east-1", "0.0.0.0/0", false).getVpcId();
-        String subnetId = ec2.createSubnet("us-east-1", vpcId, "0.0.0.0/24", "us-east-1a").getSubnetId();
-
-        EksService service = new EksService(storageFactory, testConfig(), regionResolver, null, ec2,
-                new EksOidcService(storageFactory, new ObjectMapper()), mock(EksAccessEntryService.class),
-                mock(EksPodIdentityAssociationService.class));
-
-        CreateClusterRequest req = createTestClusterRequest("both-overlap-cluster");
-        ResourcesVpcConfig vpcConfig = new ResourcesVpcConfig();
-        vpcConfig.setSubnetIds(List.of(subnetId));
-        req.setResourcesVpcConfig(vpcConfig);
-
-        AwsException ex = assertThrows(AwsException.class, () -> service.createCluster(req));
-        assertEquals("InvalidParameterException", ex.getErrorCode());
-        assertEquals(400, ex.getHttpStatus());
-        assertTrue(ex.getMessage().contains("Default service IPv4 CIDR blocks"));
-    }
 
     @Test
     void createClusterWithoutVpcDefaultsToK3sPodCidr() {

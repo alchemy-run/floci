@@ -205,7 +205,16 @@ public class EcrRegistryManager {
      * the two must name the same host.
      */
     public String getProxyEndpoint() {
-        return getProxyEndpoint(regionResolver.getAccountId(), regionResolver.getDefaultRegion());
+        if (tlsUriEnabled()) {
+            String host = "path".equalsIgnoreCase(config.services().ecr().uriStyle())
+                    ? "localhost.floci.io"
+                    : regionResolver.getAccountId() + ".dkr.ecr."
+                            + regionResolver.getRegion() + ".localhost.floci.io";
+            return "https://" + host + ":" + advertisedPort();
+        }
+        String scheme = config.services().ecr().tlsEnabled() ? "https" : "http";
+        return scheme + "://" + regionResolver.getAccountId() + ".dkr.ecr."
+                + regionResolver.getRegion() + ".localhost:" + advertisedPort();
     }
 
     /**
@@ -718,30 +727,6 @@ public class EcrRegistryManager {
     static final String BLOB_CACHE_DISABLED = "disabled";
 
 
-    /**
-     * AWS-shaped registry login URL. Hostname style is
-     * {@code http(s)://<account>.dkr.ecr.<region>.localhost:<port>} so the
-     * host matches {@link #getRepositoryUri} and Alchemy's token binding
-     * (which asserts the endpoint contains {@code .ecr.}).
-     */
-    public String getProxyEndpoint(String accountId, String region) {
-        String account = accountId == null || accountId.isBlank()
-                ? regionResolver.getAccountId() : accountId;
-        String resolvedRegion = region == null || region.isBlank()
-                ? regionResolver.getDefaultRegion() : region;
-        boolean pathStyle = "path".equalsIgnoreCase(config.services().ecr().uriStyle());
-        if (tlsUriEnabled()) {
-            String host = pathStyle
-                    ? "localhost.floci.io"
-                    : account + ".dkr.ecr." + resolvedRegion + ".localhost.floci.io";
-            return "https://" + host + ":" + advertisedPort();
-        }
-        String scheme = config.services().ecr().tlsEnabled() ? "https" : "http";
-        if (pathStyle) {
-            return scheme + "://localhost:" + advertisedPort();
-        }
-        return scheme + "://" + account + ".dkr.ecr." + resolvedRegion + ".localhost:" + advertisedPort();
-    }
 
     private void rememberInternalHost(ContainerInfo info) {
         if (info == null) {
