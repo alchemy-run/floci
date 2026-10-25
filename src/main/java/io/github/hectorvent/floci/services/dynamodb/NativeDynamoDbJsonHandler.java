@@ -128,6 +128,7 @@ public class NativeDynamoDbJsonHandler {
             case "DeleteResourcePolicy" -> handleDeleteResourcePolicy(request, region);
             case "EnableKinesisStreamingDestination" -> handleEnableKinesisStreamingDestination(request, region);
             case "DisableKinesisStreamingDestination" -> handleDisableKinesisStreamingDestination(request, region);
+            case "UpdateKinesisStreamingDestination" -> handleUpdateKinesisStreamingDestination(request, region);
             case "DescribeKinesisStreamingDestination" -> handleDescribeKinesisStreamingDestination(request, region);
             case "ExportTableToPointInTime" -> handleExportTable(request, region);
             case "CreateGlobalTable" -> handleCreateGlobalTable(request, region);
@@ -2732,6 +2733,31 @@ public class NativeDynamoDbJsonHandler {
 
         return Response.ok(kinesisDestinationResponse(
                 tableService.enableKinesisStreamingDestination(tableName, streamArn, precision, region))).build();
+    }
+
+    private Response handleUpdateKinesisStreamingDestination(JsonNode request, String region) {
+        String tableName = request.path("TableName").asText();
+        String streamArn = request.path("StreamArn").asText();
+        JsonNode precisionNode = request.path("UpdateKinesisStreamingConfiguration")
+                .path("ApproximateCreationDateTimePrecision");
+        String precision = precisionNode.isMissingNode() || precisionNode.isNull()
+                ? KinesisStreamingDestination.PRECISION_MILLISECOND : precisionNode.asText();
+        if (!KinesisStreamingDestination.PRECISION_MILLISECOND.equals(precision)
+                && !KinesisStreamingDestination.PRECISION_MICROSECOND.equals(precision)) {
+            throw SmithyValidationErrors.validationException(
+                    "Value '" + precision
+                            + "' at 'updateKinesisStreamingConfiguration.approximateCreationDateTimePrecision' "
+                            + "failed to satisfy constraint: Member must satisfy enum value set: [MILLISECOND, MICROSECOND]");
+        }
+
+        KinesisDestination result = tableService.updateKinesisStreamingDestination(tableName, streamArn, precision, region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("TableName", result.tableName());
+        response.put("StreamArn", result.streamArn());
+        response.put("DestinationStatus", result.destinationStatus());
+        response.putObject("UpdateKinesisStreamingConfiguration")
+                .put("ApproximateCreationDateTimePrecision", result.approximateCreationDateTimePrecision());
+        return Response.ok(response).build();
     }
 
     private Response handleDisableKinesisStreamingDestination(JsonNode request, String region) {

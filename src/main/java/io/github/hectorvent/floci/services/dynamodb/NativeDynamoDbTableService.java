@@ -567,6 +567,32 @@ public class NativeDynamoDbTableService {
     }
 
     /**
+     * Changes the ApproximateCreationDateTimePrecision of an active Kinesis streaming destination.
+     *
+     * @param precision an already validated ApproximateCreationDateTimePrecision
+     * @return a snapshot of what this call left on the destination, with the canonical table name
+     */
+    KinesisDestination updateKinesisStreamingDestination(String tableName, String streamArn, String precision, String region) {
+        TableDefinition table = dynamoDbService.describeTable(tableName, region);
+        String resolvedTableName = table.getTableName();
+        Optional<KinesisStreamingDestination> existing = table.findKinesisStreamingDestination(streamArn);
+        if (existing.isEmpty()) {
+            throw new AwsException("ResourceNotFoundException",
+                    "Kinesis streaming destination not found for stream: " + streamArn, 400);
+        }
+        KinesisStreamingDestination destination = existing.get();
+        if (!"ACTIVE".equals(destination.getDestinationStatus())) {
+            throw new AwsException("ValidationException",
+                    "Kinesis streaming destination is not active for stream: " + streamArn, 400);
+        }
+        destination.setApproximateCreationDateTimePrecision(precision);
+        KinesisDestination updated = new KinesisDestination(resolvedTableName, streamArn,
+                destination.getDestinationStatus(), precision);
+        dynamoDbService.persistTable(resolvedTableName, table, region);
+        return updated;
+    }
+
+    /**
      * Turns off forwarding to a Kinesis stream and stops the forwarder draining it.
      *
      * @return a snapshot of what this call left on the destination, with the canonical table name

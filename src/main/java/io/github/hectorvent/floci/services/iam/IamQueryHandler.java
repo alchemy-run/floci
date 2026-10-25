@@ -153,6 +153,7 @@ public class IamQueryHandler {
             case "EnableMFADevice" -> handleEnableMFADevice(params);
             case "DeactivateMFADevice" -> handleDeactivateMFADevice(params, authorization);
             case "ResyncMFADevice" -> handleResyncMFADevice(params);
+            case "GetMFADevice" -> handleGetMFADevice(params);
             case "ListMFADevices" -> handleListMFADevices(params, authorization);
             case "TagMFADevice" -> handleTagMFADevice(params);
             case "UntagMFADevice" -> handleUntagMFADevice(params);
@@ -516,6 +517,15 @@ public class IamQueryHandler {
         iamService.resyncMfaDevice(getParam(params, "UserName"), getParam(params, "SerialNumber"),
                 getParam(params, "AuthenticationCode1"), getParam(params, "AuthenticationCode2"));
         return Response.ok(AwsQueryResponse.envelopeNoResult("ResyncMFADevice", AwsNamespaces.IAM)).build();
+    }
+
+    private Response handleGetMFADevice(MultivaluedMap<String, String> params) {
+        VirtualMfaDevice device = iamService.getVirtualMfaDevice(getParam(params, "SerialNumber"));
+        XmlBuilder xml = new XmlBuilder()
+                .elem("UserName", device.getUserName())
+                .elem("SerialNumber", device.getSerialNumber())
+                .elem("EnableDate", isoDate(device.getEnableDate()));
+        return Response.ok(AwsQueryResponse.envelope("GetMFADevice", AwsNamespaces.IAM, xml.build())).build();
     }
 
     private Response handleListMFADevices(MultivaluedMap<String, String> params, String authorization) {
