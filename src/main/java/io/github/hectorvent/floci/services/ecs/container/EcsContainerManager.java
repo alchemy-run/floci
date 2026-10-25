@@ -65,16 +65,6 @@ import io.github.hectorvent.floci.services.s3.model.S3Object;
 import io.github.hectorvent.floci.services.secretsmanager.SecretsManagerService;
 import io.github.hectorvent.floci.services.secretsmanager.model.SecretVersion;
 import io.github.hectorvent.floci.services.ssm.SsmService;
-import com.github.dockerjava.api.DockerClient;
-import com.github.dockerjava.api.async.ResultCallback;
-import com.github.dockerjava.api.command.InspectContainerResponse;
-import com.github.dockerjava.api.command.StatsCmd;
-import com.github.dockerjava.api.exception.NotFoundException;
-import com.github.dockerjava.api.model.ContainerNetwork;
-import com.github.dockerjava.api.model.ExposedPort;
-import com.github.dockerjava.api.model.LogConfig;
-import com.github.dockerjava.api.model.StatisticNetworksConfig;
-import com.github.dockerjava.api.model.Statistics;
 import io.github.hectorvent.floci.services.ssm.model.Parameter;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -84,12 +74,8 @@ import org.jboss.logging.Logger;
 
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -103,13 +89,13 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
 /**
@@ -657,11 +643,6 @@ public class EcsContainerManager {
         task.setDesiredStatus(TaskStatus.RUNNING.name());
         task.setStartedAt(Instant.now());
 
-        for (ContainerDefinition def : taskDef.getContainerDefinitions()) {
-            if (def.getStopTimeout() != null) {
-                stopTimeouts.put(def.getName(), def.getStopTimeout());
-            }
-        }
         return new EcsTaskHandle(task.getTaskArn(), containerIds, logStreamsByContainerId,
                 firelensVolumeName,
                 protectedNetwork == null ? null : protectedNetwork.eni().getNetworkInterfaceId(), region,
@@ -1453,6 +1434,11 @@ public class EcsContainerManager {
         new ArrayList<>(handle.getLogStreamsByContainerId().keySet())
                 .forEach(dockerId -> finalizeLogStream(handle, dockerId));
         removeFirelensVolume(handle);
+        revokeTaskRoleCredentials(handle.getTaskArn());
+        if (allRemoved) {
+            removeTaskVolumes(handle);
+            releaseTaskLinkLocalAddresses(handle.getTaskArn());
+        }
     }
 
     /**
@@ -1489,6 +1475,9 @@ public class EcsContainerManager {
         // period its container definition asked for.
         Set<String> terminatedContainerIds = new HashSet<>();
         for (Map.Entry<String, String> entry : handle.getContainerIds().entrySet()) {
+            if (handle.isContainerRemoved(entry.getKey())) {
+                continue;
+            }
             String dockerId = entry.getValue();
             try {
                 lifecycleManager.getDockerClient().stopContainerCmd(dockerId)
@@ -1510,7 +1499,12 @@ public class EcsContainerManager {
                 continue;
             }
             String dockerId = entry.getValue();
-            exitCodes.put(name, getExitCodeIfStopped(dockerId));
+            Integer exitCode = handle.getRecordedExitCode(name);
+            if (exitCode == null) {
+                exitCode = getExitCodeIfStopped(dockerId);
+                handle.recordExitCode(name, exitCode);
+            }
+            exitCodes.put(name, exitCode);
             // Read before the removal below, which is the last moment the daemon still knows it.
             handle.recordFinishedAt(name, getFinishedAtIfStopped(dockerId));
             try {
@@ -1528,8 +1522,19 @@ public class EcsContainerManager {
         // A force removal terminates Docker's follow-log transport even when the preceding stop failed.
         // Preserve handles for any container that still may be running after both operations failed.
         terminatedContainerIds.forEach(dockerId -> finalizeLogStream(handle, dockerId));
-        cleanupProtectedNetwork(handle);
-        removeFirelensVolume(handle);
+        if (handle.allContainersRemoved()) {
+            cleanupProtectedNetwork(handle);
+            removeFirelensVolume(handle);
+            removeTaskVolumes(handle);
+            // Only now: a container that survived a failed removal still holds its address.
+            releaseTaskLinkLocalAddresses(handle.getTaskArn());
+        }
+        // Revoked whether or not removal succeeded, unlike everything above. A task being
+        // stopped must not keep usable credentials just because Docker could not remove one of
+        // its containers: the retry that would eventually revoke them depends on the handle
+        // being retained, which only happens while a log stream is still open, so a container
+        // without one (a FireLens router, say) would strand them for the life of the process.
+        revokeTaskRoleCredentials(handle.getTaskArn());
         return exitCodes;
     }
 
@@ -1755,26 +1760,6 @@ public class EcsContainerManager {
                 "Unable to download firelens s3 config file: " + detail, httpStatus);
     }
 
-    private void copyFirelensConfig(
-            String containerId, String configText, boolean fluentd, String externalConfig) {
-        byte[] content = configText.getBytes(StandardCharsets.UTF_8);
-        String fileName = fluentd ? "fluent.conf" : "fluent-bit.conf";
-        String remotePath = fluentd ? "/fluentd/etc" : "/fluent-bit/etc";
-        ByteArrayOutputStream archive = new ByteArrayOutputStream(content.length + 1024);
-        try (TarArchiveOutputStream tar = new TarArchiveOutputStream(archive)) {
-            putTarEntry(tar, fileName, content);
-            if (externalConfig != null) {
-                putTarEntry(tar, "external.conf", externalConfig.getBytes(StandardCharsets.UTF_8));
-            }
-        } catch (IOException e) {
-            throw new AwsException("ClientException",
-                    "unable to write FireLens config: " + e.getMessage(), 500);
-        }
-        lifecycleManager.getDockerClient().copyArchiveToContainerCmd(containerId)
-                .withRemotePath(remotePath)
-                .withTarInputStream(new ByteArrayInputStream(archive.toByteArray()))
-                .exec();
-    }
 
     private static void putTarEntry(TarArchiveOutputStream tar, String name, byte[] content) throws IOException {
         TarArchiveEntry entry = new TarArchiveEntry(name);

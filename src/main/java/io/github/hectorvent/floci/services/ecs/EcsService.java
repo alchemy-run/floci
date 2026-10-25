@@ -131,6 +131,17 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
     private final CloudWatchMetricsService cloudWatchMetricsService;
     private final Clock clock;
     private final boolean dockerMode;
+    /**
+     * How long a Docker-backed service task must stay RUNNING before it counts towards its
+     * deployment's steady state. ECS marks a deployment COMPLETED only once the service reaches a
+     * steady state, and its circuit breaker counts a task that stops before then as a failure, so
+     * a container that exits right after starting must not complete the deployment just because
+     * one reconcile tick saw it running. AWS documents no figure; 15 seconds is the delay of the
+     * SDK's own {@code ServicesStable} waiter and spans three 5-second reconcile ticks, so an
+     * essential container that exits is inspected as stopped before its task could count.
+     * Configured by {@code floci.services.ecs.steady-state-window-seconds}.
+     */
+    private final Duration steadyStateWindow;
     private final boolean sweepLeftoverContainers;
     private final String baseUrl;
     // Replaced by afterReset() after a state reset, whose container teardown shuts this scheduler down.
@@ -270,6 +281,7 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
         this.regionResolver = regionResolver;
         this.containerManager = containerManager;
         this.dockerMode = !config.services().ecs().mock();
+        this.steadyStateWindow = Duration.ofSeconds(Math.max(0, config.services().ecs().steadyStateWindowSeconds()));
         this.sweepLeftoverContainers = dockerMode && config.services().ecs().reconcileContainersOnStartup();
         this.leftoverTaskVolumesRemoved = !sweepLeftoverContainers;
         this.baseUrl = config.effectiveBaseUrl();
@@ -1373,7 +1385,7 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
         }
         td.setStatus(STATUS_INACTIVE);
         td.setDeregisteredAt(Instant.now());
-        taskDefinitions.put(td.getFamily() + ":" + td.getRevision(), td);
+        storeTaskDefinition(td);
         return td;
     }
 
@@ -1408,7 +1420,7 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
             }
             td.setStatus(STATUS_DELETE_IN_PROGRESS);
             td.setDeleteRequestedAt(Instant.now());
-            taskDefinitions.put(td.getFamily() + ":" + td.getRevision(), td);
+            storeTaskDefinition(td);
             deleted.add(td);
         }
         return deleted;
@@ -4146,7 +4158,7 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
         // This deployment's own tasks: counting the ones still draining from the previous
         // deployment would report a task-definition change COMPLETED as soon as it was made.
         long running = runningOnCurrentDeployment(svc);
-        boolean converged = running >= svc.getDesiredCount();
+        boolean converged = steadyOnCurrentDeployment(svc) >= svc.getDesiredCount();
         boolean rollbackPending = latestServiceDeployment(svc.getServiceArn(), candidate ->
                 DEPLOYMENT_STATUS_ROLLBACK_IN_PROGRESS.equals(candidate.getStatus())) != null;
         ServiceDeployment record = lockedCopyOf(deploymentRecordOf(svc));
@@ -4189,7 +4201,104 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
                 : svc.getCreatedAt();
         d.setCreatedAt(startedAt);
         d.setUpdatedAt(startedAt);
-        return List.of(d);
+        if (svc.getFailedDeployments().isEmpty()) {
+            return List.of(d);
+        }
+        // A failed deployment a newer one superseded stays listed, ACTIVE and FAILED as ECS reports
+        // it, until the newer one completes and none of the failed one's tasks are left running.
+        boolean completed = !failed && converged && !rollbackPending;
+        List<Deployment> deployments = new ArrayList<>();
+        deployments.add(d);
+        for (Deployment superseded : svc.getFailedDeployments()) {
+            int stillRunning = (int) runningOnDeployment(svc, superseded.getId());
+            if (completed && stillRunning == 0) {
+                continue;
+            }
+            Deployment entry = copyOf(superseded);
+            entry.setDesiredCount(stillRunning);
+            entry.setRunningCount(stillRunning);
+            deployments.add(entry);
+        }
+        return deployments;
+    }
+
+    private long runningOnDeployment(EcsServiceModel svc, String deploymentId) {
+        return tasks.values().stream()
+                .filter(t -> Objects.equals(svc.getServiceArn(), t.getOwningServiceArn()))
+                .filter(t -> deploymentId.equals(t.getDeploymentId()))
+                .filter(t -> TaskStatus.RUNNING.name().equals(t.getLastStatus()))
+                .count();
+    }
+
+    /** Forgets the superseded failed deployments none of whose tasks are still running. */
+    private void dropDrainedFailedDeployments(String key, EcsServiceModel svc, List<EcsTask> runningTasks) {
+        if (svc.getFailedDeployments().isEmpty()) {
+            return;
+        }
+        List<Deployment> stillDraining = svc.getFailedDeployments().stream()
+                .filter(d -> runningTasks.stream().anyMatch(t -> d.getId().equals(t.getDeploymentId())))
+                .toList();
+        if (stillDraining.size() != svc.getFailedDeployments().size()) {
+            svc.setFailedDeployments(new ArrayList<>(stillDraining));
+            services.put(key, svc);
+        }
+    }
+
+    /**
+     * The deployment the circuit breaker failed, as an ACTIVE entry, taken when a newer deployment
+     * supersedes it. The service already describes the newer one by then, so what the failed one
+     * ran is read off the revision it targeted.
+     */
+    private Deployment supersededFailedDeployment(EcsServiceModel svc) {
+        ServiceDeployment record = failedDeploymentOf(svc);
+        if (record == null) {
+            return null;
+        }
+        Deployment d = new Deployment();
+        d.setId(svc.getFailedDeploymentId());
+        d.setStatus(STATUS_ACTIVE);
+        d.setPendingCount(0);
+        d.setFailedTasks(record.getFailedTasks());
+        d.setRolloutState("FAILED");
+        d.setRolloutStateReason(record.getStatusReason() != null ? record.getStatusReason() : CIRCUIT_BREAKER_REASON);
+        ServiceRevision revision = serviceRevisions.get(record.getTargetServiceRevisionArn());
+        if (revision != null) {
+            d.setTaskDefinition(revision.getTaskDefinition());
+            if (revision.getCapacityProviderStrategy() != null && !revision.getCapacityProviderStrategy().isEmpty()) {
+                d.setCapacityProviderStrategy(revision.getCapacityProviderStrategy());
+            } else {
+                d.setLaunchType(revision.getLaunchType());
+            }
+            d.setPlatformVersion(revision.getPlatformVersion());
+            d.setPlatformFamily(revision.getPlatformFamily());
+            d.setNetworkConfiguration(revision.getNetworkConfiguration());
+            d.setServiceConnectConfiguration(revision.getServiceConnectConfiguration());
+        }
+        d.setCreatedAt(record.getCreatedAt());
+        d.setUpdatedAt(Instant.now());
+        return d;
+    }
+
+    private static Deployment copyOf(Deployment source) {
+        Deployment d = new Deployment();
+        d.setId(source.getId());
+        d.setStatus(source.getStatus());
+        d.setTaskDefinition(source.getTaskDefinition());
+        d.setDesiredCount(source.getDesiredCount());
+        d.setPendingCount(source.getPendingCount());
+        d.setRunningCount(source.getRunningCount());
+        d.setFailedTasks(source.getFailedTasks());
+        d.setRolloutState(source.getRolloutState());
+        d.setRolloutStateReason(source.getRolloutStateReason());
+        d.setLaunchType(source.getLaunchType());
+        d.setCapacityProviderStrategy(source.getCapacityProviderStrategy());
+        d.setPlatformVersion(source.getPlatformVersion());
+        d.setPlatformFamily(source.getPlatformFamily());
+        d.setNetworkConfiguration(source.getNetworkConfiguration());
+        d.setServiceConnectConfiguration(source.getServiceConnectConfiguration());
+        d.setCreatedAt(source.getCreatedAt());
+        d.setUpdatedAt(source.getUpdatedAt());
+        return d;
     }
 
     private ServiceDeployment failedDeploymentOf(EcsServiceModel svc) {
@@ -4220,7 +4329,7 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
      */
     public List<ServiceEvent> eventsFor(EcsServiceModel svc) {
         if (svc == null || !"ACTIVE".equals(svc.getStatus())
-                || runningOnCurrentDeployment(svc) < svc.getDesiredCount()) {
+                || steadyOnCurrentDeployment(svc) < svc.getDesiredCount()) {
             return List.of();
         }
         String deploymentId = deploymentId(svc);
@@ -4302,6 +4411,12 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
      * {@code service-revision/<id>}; AWS's is {@code service-revision/<cluster>/<service>/<id>}.
      */
     private void recordServiceDeployment(EcsServiceModel svc, String taskDefinition, String region) {
+        Deployment superseded = supersededFailedDeployment(svc);
+        if (superseded != null) {
+            List<Deployment> failedDeployments = new ArrayList<>(svc.getFailedDeployments());
+            failedDeployments.addFirst(superseded);
+            svc.setFailedDeployments(failedDeployments);
+        }
         svc.setFailedDeploymentId(null);
         String deploymentId = UUID.randomUUID().toString().replace("-", "");
         String deploymentArn = regionResolver.buildArn("ecs", region,
@@ -4405,7 +4520,7 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
                     && deployment.getTargetServiceRevisionArn().endsWith("/" + taskSetId(svc))
                     && DEPLOYMENT_STATUS_IN_PROGRESS.equals(deployment.getStatus())
                     && STATUS_ACTIVE.equals(svc.getStatus())
-                    && runningOnCurrentDeployment(svc) >= svc.getDesiredCount()) {
+                    && steadyOnCurrentDeployment(svc) >= svc.getDesiredCount()) {
                 Instant now = Instant.now();
                 deployment.setStatus(DEPLOYMENT_STATUS_SUCCESSFUL);
                 if (deployment.getAlarmNames() != null) {
@@ -4456,20 +4571,21 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
         if (deployment == null) {
             return false;
         }
-        Map<String, Object> breaker = circuitBreakerOf(svc);
-        synchronized (deployment) {
-            if (TaskStatus.RUNNING.name().equals(task.getLastStatus())) {
-                if (DEPLOYMENT_STATUS_ROLLBACK_IN_PROGRESS.equals(deployment.getStatus())) {
-                    return false;
+        if (TaskStatus.RUNNING.name().equals(task.getLastStatus())) {
+            // A task merely seen RUNNING neither resets the failure count nor keeps a later exit
+            // from counting; one already steady (with no window to wait out) is judged here.
+            if (reachedSteadyState(task, svc, serviceRegion(svc), clock.instant())) {
+                task.setCircuitBreakerOutcome(CIRCUIT_BREAKER_OUTCOME_HEALTHY);
+                synchronized (deployment) {
+                    if (DEPLOYMENT_STATUS_IN_PROGRESS.equals(deployment.getStatus())
+                            && flag(circuitBreakerOf(svc).get("resetOnHealthyTask"), true)) {
+                        deployment.setFailedTasks(0);
+                    }
                 }
-                if (!DEPLOYMENT_STATUS_IN_PROGRESS.equals(deployment.getStatus())) {
-                    return false;
-                }
-                if (flag(breaker.get("resetOnHealthyTask"), true)) {
-                    deployment.setFailedTasks(0);
-                }
-                return false;
             }
+            return false;
+        }
+        synchronized (deployment) {
             if (DEPLOYMENT_STATUS_ROLLBACK_IN_PROGRESS.equals(deployment.getStatus())) {
                 if (TaskStatus.STOPPED.name().equals(task.getLastStatus())
                         && STOP_CODE_TASK_FAILED_TO_START.equals(task.getStopCode())) {
@@ -4485,6 +4601,21 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
             // Only a task that failed to start counts, not one a user stopped during its pull.
             if (!TaskStatus.STOPPED.name().equals(task.getLastStatus())
                     || !STOP_CODE_TASK_FAILED_TO_START.equals(task.getStopCode())) {
+                return false;
+            }
+        }
+        task.setCircuitBreakerOutcome(CIRCUIT_BREAKER_OUTCOME_FAILED);
+        return countFailedTask(svc, deployment);
+    }
+
+    /**
+     * Counts one failed task against an in-progress deployment's circuit breaker, and ends the
+     * deployment once the failures reach the threshold. Returns whether it ended.
+     */
+    private boolean countFailedTask(EcsServiceModel svc, ServiceDeployment deployment) {
+        Map<String, Object> breaker = circuitBreakerOf(svc);
+        synchronized (deployment) {
+            if (!DEPLOYMENT_STATUS_IN_PROGRESS.equals(deployment.getStatus())) {
                 return false;
             }
             deployment.setFailedTasks(deployment.getFailedTasks() + 1);
@@ -4595,7 +4726,7 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
             services.put(key, svc);
             return true;
         }
-        if (runningOnCurrentDeployment(svc) >= svc.getDesiredCount()
+        if (steadyOnCurrentDeployment(svc) >= svc.getDesiredCount()
                 && !hasRunningTasksFromFailedDeployment(svc, pending)) {
             finishRollback(pending, true, null);
             services.put(key, svc);
@@ -5384,9 +5515,15 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
 
         svc.setRunningCount((int) running);
 
+        if (judgeDeploymentTasks(svc, cluster, region)) {
+            return;
+        }
+        boolean converged = steadyOnCurrentDeployment(svc) >= svc.getDesiredCount();
+        if (converged) {
+            dropDrainedFailedDeployments(key, svc, runningTasks);
+        }
         if (eventPublisher != null) {
             String deploymentId = currentDeploymentId;
-            boolean converged = current >= svc.getDesiredCount();
             ServiceDeployment pendingFailure = latestServiceDeployment(svc.getServiceArn(), candidate ->
                     DEPLOYMENT_STATUS_ROLLBACK_IN_PROGRESS.equals(candidate.getStatus()));
             if (converged && pendingFailure == null) {
@@ -5849,92 +5986,97 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
                 tags != null ? tags : Map.of()));
     }
 
-    public static final String ROLLOUT_STATE_COMPLETED = "COMPLETED";
-
-    public static final String ROLLOUT_STATE_IN_PROGRESS = "IN_PROGRESS";
-
-    public static final String ROLLOUT_STATE_FAILED = "FAILED";
-
-    /** The rolloutStateReason ECS gives a deployment its circuit breaker failed. */
-    static final String CIRCUIT_BREAKER_FAILED_REASON = "ECS deployment circuit breaker: tasks failed to start.";
-
-
 
     /**
-     * How long a Docker-backed service task must stay RUNNING before it counts towards its
-     * deployment's steady state. ECS marks a deployment COMPLETED only once the service reaches a
-     * steady state, and its circuit breaker counts a task that stops before then as a failure, so
-     * a container that exits right after starting must not complete the deployment just because
-     * one reconcile tick saw it running. AWS documents no figure; 15 seconds is the delay of the
-     * SDK's own {@code ServicesStable} waiter and spans three 5-second reconcile ticks, so an
-     * essential container that exits is inspected as stopped before its task could count.
+     * How many of the current deployment's tasks have reached a steady state (see
+     * {@link #reachedSteadyState}). This, not the momentary running count, is what completes a
+     * deployment: a task whose essential container exits right after starting is RUNNING for a
+     * tick, and completing on it would hide the failure from the circuit breaker.
      */
-    static final Duration STEADY_STATE_WINDOW = Duration.ofSeconds(15);
-
-
-
-
-
-    public List<String> listTaskDefinitions(String familyPrefix, String status) {
-        return listTaskDefinitions(familyPrefix, status, null, null, null).arns();
-    }
-
-    /**
-     * Lists task definition ARNs.
-     *
-     * <p>Only {@code ACTIVE} revisions are listed unless another status is asked for, and the
-     * order is lexicographic by family then numeric by revision, so the newest revision of a
-     * family comes last (or first under {@code DESC}). Listing by ARN string alone would put
-     * revision 10 before revision 2.
-     */
-    public ListPage listTaskDefinitions(String familyPrefix, String status, String sort,
-                                                Integer maxResults, String nextToken) {
-        String effectiveStatus = status != null ? status : STATUS_ACTIVE;
-        Comparator<TaskDefinition> order = Comparator
-                .comparing(TaskDefinition::getFamily)
-                .thenComparingInt(TaskDefinition::getRevision);
-        if ("DESC".equals(sort)) {
-            order = order.reversed();
+    private long steadyOnCurrentDeployment(EcsServiceModel svc) {
+        EcsCluster cluster = resolveClusterByArn(svc.getClusterArn());
+        if (cluster == null) {
+            return 0;
         }
-        List<String> arns = taskDefinitions.values().stream()
-                .filter(td -> familyPrefix == null || td.getFamily().startsWith(familyPrefix))
-                .filter(td -> effectiveStatus.equals(td.getStatus()))
-                .sorted(order)
-                .map(TaskDefinition::getTaskDefinitionArn)
-                .toList();
-        return paginate(arns, maxResults, nextToken);
-    }
-
-    public List<String> listTaskDefinitionFamilies(String familyPrefix) {
-        return listTaskDefinitionFamilies(familyPrefix, null, null, null).arns();
+        String region = serviceRegion(svc);
+        String currentDeploymentId = deploymentId(svc);
+        String taskDefinitionArn = resolvedTaskDefinitionArn(svc, region);
+        Instant now = clock.instant();
+        return tasks.values().stream()
+                .filter(t -> ownedBy(t, svc, cluster))
+                .filter(t -> !isStaleForDeployment(t, currentDeploymentId, taskDefinitionArn))
+                .filter(t -> reachedSteadyState(t, svc, region, now))
+                .count();
     }
 
     /**
-     * Lists task definition family names.
-     *
-     * <p>Both active and inactive families are listed unless a status narrows it: {@code ACTIVE}
-     * keeps only the families that still have an ACTIVE revision, {@code INACTIVE} keeps only
-     * those that have none. A family survives the deregistration of all its revisions, which is
-     * why the unfiltered listing still names it.
+     * Whether a service task counts towards its deployment's steady state: RUNNING and not
+     * UNHEALTHY and, for a Docker-backed task, RUNNING without interruption for
+     * {@link #steadyStateWindow}, reported HEALTHY when an essential container declares a health
+     * check, and healthy in every target group the service registers it into. A mock-mode task
+     * has no container that could exit, so RUNNING is enough.
      */
-    public ListPage listTaskDefinitionFamilies(String familyPrefix, String status,
-                                                Integer maxResults, String nextToken) {
-        List<String> families = latestRevisions.keySet().stream()
-                .filter(f -> familyPrefix == null || f.startsWith(familyPrefix))
-                .filter(f -> matchesFamilyStatus(f, status))
-                .sorted()
-                .toList();
-        return paginate(families, maxResults, nextToken);
-    }
-
-    private boolean matchesFamilyStatus(String family, String status) {
-        if (status == null || "ALL".equals(status)) {
+    private boolean reachedSteadyState(EcsTask task, EcsServiceModel svc, String region, Instant now) {
+        if (!TaskStatus.RUNNING.name().equals(task.getLastStatus())
+                || HEALTH_STATUS_UNHEALTHY.equals(task.getHealthStatus())) {
+            return false;
+        }
+        if (!dockerMode) {
             return true;
         }
-        boolean hasActiveRevision = taskDefinitions.values().stream()
-                .anyMatch(td -> family.equals(td.getFamily()) && STATUS_ACTIVE.equals(td.getStatus()));
-        return STATUS_ACTIVE.equals(status) == hasActiveRevision;
+        Instant startedAt = task.getStartedAt();
+        if (startedAt == null || startedAt.plus(steadyStateWindow).isAfter(now)) {
+            return false;
+        }
+        if (essentialContainerDeclaresHealthCheck(task, region)
+                && !HEALTH_STATUS_HEALTHY.equals(task.getHealthStatus())) {
+            return false;
+        }
+        return svc.getLoadBalancers().isEmpty() || lbRegistrar == null
+                || lbRegistrar.targetsHealthy(task, svc, region);
     }
+
+    /**
+     * Judges the current deployment's tasks for its circuit breaker, each once per outcome: a task
+     * whose essential container exited counts as a failed task, as ECS counts a task that stops
+     * before the deployment reaches a steady state, and one that reaches a steady state resets the
+     * count when {@code resetOnHealthyTask} is on. Returns whether the deployment ended.
+     */
+    private boolean judgeDeploymentTasks(EcsServiceModel svc, EcsCluster cluster, String region) {
+        ServiceDeployment deployment = deploymentRecordForCurrentWorkload(svc);
+        if (deployment == null) {
+            return false;
+        }
+        String currentDeploymentId = deploymentId(svc);
+        Instant now = clock.instant();
+        for (EcsTask task : tasks.values()) {
+            if (!ownedBy(task, svc, cluster) || !currentDeploymentId.equals(task.getDeploymentId())
+                    || CIRCUIT_BREAKER_OUTCOME_FAILED.equals(task.getCircuitBreakerOutcome())) {
+                continue;
+            }
+            if (TaskStatus.STOPPED.name().equals(task.getLastStatus())
+                    && STOP_CODE_ESSENTIAL_CONTAINER_EXITED.equals(task.getStopCode())) {
+                task.setCircuitBreakerOutcome(CIRCUIT_BREAKER_OUTCOME_FAILED);
+                if (countFailedTask(svc, deployment)) {
+                    return true;
+                }
+            } else if (task.getCircuitBreakerOutcome() == null && reachedSteadyState(task, svc, region, now)) {
+                task.setCircuitBreakerOutcome(CIRCUIT_BREAKER_OUTCOME_HEALTHY);
+                synchronized (deployment) {
+                    if (DEPLOYMENT_STATUS_IN_PROGRESS.equals(deployment.getStatus())
+                            && flag(circuitBreakerOf(svc).get("resetOnHealthyTask"), true)) {
+                        deployment.setFailedTasks(0);
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+
+
+
+
 
 
     public List<String> listTasks(String clusterRef, String family, String desiredStatus,
@@ -6021,141 +6163,13 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
 
 
 
-    /**
-     * The service's {@code deploymentConfiguration.deploymentCircuitBreaker}, when it is turned on
-     * for a rolling-update ({@code ECS} controller) service.
-     *
-     * @see <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/deployment-circuit-breaker.html">
-     *      How the Amazon ECS deployment circuit breaker detects failures</a>
-     */
-    record CircuitBreaker(boolean rollback, boolean resetOnHealthyTask, String thresholdType, int thresholdValue) {
-
-        static final String THRESHOLD_BOUNDED_PERCENT = "BOUNDED_PERCENT";
-        static final String THRESHOLD_UNBOUNDED_PERCENT = "UNBOUNDED_PERCENT";
-        static final String THRESHOLD_COUNT = "COUNT";
-        private static final int DEFAULT_THRESHOLD_PERCENT = 50;
-        private static final int MIN_BOUNDED_THRESHOLD = 3;
-        private static final int MAX_BOUNDED_THRESHOLD = 200;
-
-        static CircuitBreaker of(EcsServiceModel svc) {
-            String controller = svc.getDeploymentController();
-            if (controller != null && !DEFAULT_DEPLOYMENT_CONTROLLER.equals(controller)) {
-                return null;
-            }
-            Map<String, Object> config = svc.getDeploymentConfiguration();
-            if (config == null || !(config.get("deploymentCircuitBreaker") instanceof Map<?, ?> breaker)
-                    || !isTrue(breaker.get("enable"))) {
-                return null;
-            }
-            Object reset = breaker.get("resetOnHealthyTask");
-            String type = THRESHOLD_BOUNDED_PERCENT;
-            int value = DEFAULT_THRESHOLD_PERCENT;
-            if (breaker.get("thresholdConfiguration") instanceof Map<?, ?> threshold) {
-                if (threshold.get("type") != null) {
-                    type = threshold.get("type").toString();
-                }
-                Integer parsed = integerValue(threshold.get("value"));
-                if (parsed != null) {
-                    value = parsed;
-                }
-            }
-            return new CircuitBreaker(isTrue(breaker.get("rollback")), reset == null || isTrue(reset), type, value);
-        }
-
-        /**
-         * The failure count at which a deployment is marked FAILED, computed against the latest
-         * desired count. {@code BOUNDED_PERCENT} (the default, at 50) is clamped to [3, 200].
-         */
-        int threshold(int desiredCount) {
-            int percentOfDesired = (int) Math.ceil(thresholdValue * (double) desiredCount / 100.0);
-            return switch (thresholdType) {
-                case THRESHOLD_COUNT -> Math.max(1, thresholdValue);
-                case THRESHOLD_UNBOUNDED_PERCENT -> Math.max(1, percentOfDesired);
-                default -> Math.min(MAX_BOUNDED_THRESHOLD, Math.max(MIN_BOUNDED_THRESHOLD, percentOfDesired));
-            };
-        }
-
-        private static boolean isTrue(Object value) {
-            return value instanceof Boolean b ? b : value != null && "true".equalsIgnoreCase(value.toString());
-        }
-
-        private static Integer integerValue(Object value) {
-            if (value instanceof Number number) {
-                return number.intValue();
-            }
-            if (value != null) {
-                try {
-                    return Integer.parseInt(value.toString().trim());
-                } catch (NumberFormatException e) {
-                    LOG.debugv("Ignoring non-numeric circuit breaker threshold value {0}", value);
-                }
-            }
-            return null;
-        }
-    }
-
-    /** A failed, superseded deployment as DescribeServices reports it, with its live task counts. */
-    private Deployment activeFailedDeployment(EcsServiceModel svc, Deployment failed) {
-        int running = (int) tasks.values().stream()
-                .filter(t -> svc.getServiceArn().equals(t.getOwningServiceArn()))
-                .filter(t -> failed.getId().equals(t.getDeploymentId()))
-                .filter(t -> TaskStatus.RUNNING.name().equals(t.getLastStatus()))
-                .count();
-        Deployment d = new Deployment();
-        d.setId(failed.getId());
-        d.setStatus(STATUS_ACTIVE);
-        d.setTaskDefinition(failed.getTaskDefinition());
-        d.setDesiredCount(running);
-        d.setPendingCount(0);
-        d.setRunningCount(running);
-        d.setFailedTasks(failed.getFailedTasks());
-        d.setRolloutState(ROLLOUT_STATE_FAILED);
-        d.setRolloutStateReason(failed.getRolloutStateReason());
-        d.setLaunchType(failed.getLaunchType());
-        d.setCapacityProviderStrategy(failed.getCapacityProviderStrategy());
-        d.setPlatformVersion(failed.getPlatformVersion());
-        d.setPlatformFamily(failed.getPlatformFamily());
-        d.setNetworkConfiguration(failed.getNetworkConfiguration());
-        d.setServiceConnectConfiguration(failed.getServiceConnectConfiguration());
-        d.setCreatedAt(failed.getCreatedAt());
-        d.setUpdatedAt(failed.getUpdatedAt());
-        return d;
-    }
 
 
 
-    /** The family a reference names when it carries no revision, otherwise {@code null}. */
-    private static String familyOnlyReference(String ref) {
-        if (namesARevision(ref)) {
-            return null;
-        }
-        if (ref.startsWith("arn:")) {
-            int slash = ref.lastIndexOf("task-definition/");
-            return slash < 0 ? null : ref.substring(slash + "task-definition/".length());
-        }
-        return ref;
-    }
 
-    private static boolean hasRunningTask(List<EcsTask> runningTasks, String deploymentId) {
-        return runningTasks.stream().anyMatch(t -> deploymentId.equals(t.getDeploymentId()));
-    }
 
-    /** The breaker watches a deployment only while it is rolling out: not once COMPLETED or FAILED. */
-    private boolean isMonitoredByCircuitBreaker(EcsServiceModel svc) {
-        return !ROLLOUT_STATE_FAILED.equals(svc.getDeploymentRolloutState())
-                && !deploymentId(svc).equals(svc.getLastCompletedDeploymentId());
-    }
 
-    private TaskDefinition latestActiveRevision(String family) {
-        TaskDefinition latest = null;
-        for (TaskDefinition td : taskDefinitions.values()) {
-            if (family.equals(td.getFamily()) && STATUS_ACTIVE.equals(td.getStatus())
-                    && (latest == null || td.getRevision() > latest.getRevision())) {
-                latest = td;
-            }
-        }
-        return latest;
-    }
+
 
 
 
@@ -6175,110 +6189,11 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
     }
 
 
-    /**
-     * A service task stopped because it failed: it could not be started, or its essential
-     * container exited on its own. Tasks the scheduler or a caller stopped are not failures.
-     */
-    private static boolean isDeploymentFailure(EcsTask task) {
-        return TaskStatus.STOPPED.name().equals(task.getLastStatus())
-                && (STOP_CODE_TASK_FAILED_TO_START.equals(task.getStopCode())
-                    || STOP_CODE_ESSENTIAL_CONTAINER_EXITED.equals(task.getStopCode()));
-    }
-
-    /**
-     * Whether the PRIMARY deployment has reached a steady state. The reconciler decides that from
-     * the deployment's own tasks (see {@link #reachedSteadyState}), never from a momentary
-     * running count: a task whose essential container exits right after starting is RUNNING for
-     * a tick, and completing on it would hide the failure from the circuit breaker. A plain
-     * deployment with no tasks to run has nothing to wait for and is complete from the start.
-     * Daemon services are not tracked by the reconciler this way and keep the count-derived rule.
-     */
-    private boolean primaryConverged(EcsServiceModel svc) {
-        if (ROLLOUT_STATE_FAILED.equals(svc.getDeploymentRolloutState())) {
-            return false;
-        }
-        if (SCHEDULING_DAEMON.equals(svc.getSchedulingStrategy())) {
-            return svc.getRunningCount() >= svc.getDesiredCount();
-        }
-        if (deploymentId(svc).equals(svc.getLastCompletedDeploymentId())) {
-            return true;
-        }
-        return svc.getFailedDeployments().isEmpty() && svc.getDeploymentRolloutStateReason() == null
-                && svc.getDesiredCount() == 0;
-    }
 
 
 
-    /** DescribeServices reports at most the 100 most recent service events. */
-    private static final int MAX_SERVICE_EVENTS = 100;
 
 
-    /**
-     * Starts a new PRIMARY deployment for the service's current configuration. A superseded
-     * PRIMARY the circuit breaker failed ({@code failedPrimary}, from
-     * {@link #failedPrimaryDeployment}) is kept as an ACTIVE entry, as ECS reports it, until the
-     * new deployment completes; any other superseded deployment is dropped, since Floci applies
-     * the change in place.
-     */
-    private void startDeployment(EcsServiceModel svc, Deployment failedPrimary, String region) {
-        if (failedPrimary != null) {
-            List<Deployment> failedDeployments = new ArrayList<>(svc.getFailedDeployments());
-            failedDeployments.addFirst(failedPrimary);
-            svc.setFailedDeployments(failedDeployments);
-        }
-        svc.setDeploymentId(newDeploymentId());
-        svc.setLastDeploymentAt(Instant.now());
-        svc.setDeploymentFailedTasks(0);
-        svc.setDeploymentRolloutState(null);
-        svc.setDeploymentRolloutStateReason(null);
-        recordServiceDeployment(svc, svc.getTaskDefinition(), region);
-    }
 
-    private Deployment primaryDeployment(EcsServiceModel svc) {
-        String deploymentId = deploymentId(svc);
-        boolean failed = ROLLOUT_STATE_FAILED.equals(svc.getDeploymentRolloutState());
-        boolean converged = primaryConverged(svc);
 
-        Deployment d = new Deployment();
-        d.setId(deploymentId);
-        d.setStatus("PRIMARY");
-        d.setTaskDefinition(svc.getTaskDefinition());
-        d.setDesiredCount(svc.getDesiredCount());
-        d.setPendingCount(svc.getPendingCount());
-        d.setRunningCount(svc.getRunningCount());
-        d.setFailedTasks(svc.getDeploymentFailedTasks());
-        if (failed) {
-            d.setRolloutState(ROLLOUT_STATE_FAILED);
-            d.setRolloutStateReason(svc.getDeploymentRolloutStateReason() != null
-                    ? svc.getDeploymentRolloutStateReason() : CIRCUIT_BREAKER_FAILED_REASON);
-        } else if (converged) {
-            d.setRolloutState(ROLLOUT_STATE_COMPLETED);
-            d.setRolloutStateReason("ECS deployment " + deploymentId + " completed.");
-        } else {
-            d.setRolloutState(ROLLOUT_STATE_IN_PROGRESS);
-            d.setRolloutStateReason(svc.getDeploymentRolloutStateReason() != null
-                    ? svc.getDeploymentRolloutStateReason()
-                    : "ECS deployment " + deploymentId + " in progress.");
-        }
-        // A deployment reports the placement it runs under the same way the service does: a
-        // capacity provider strategy when there is one, a launch type otherwise, never both.
-        if (svc.getCapacityProviderStrategy() != null && !svc.getCapacityProviderStrategy().isEmpty()) {
-            d.setCapacityProviderStrategy(svc.getCapacityProviderStrategy());
-        } else {
-            d.setLaunchType(svc.getLaunchType());
-        }
-        d.setPlatformVersion(svc.getPlatformVersion());
-        d.setPlatformFamily(svc.getPlatformFamily());
-        d.setNetworkConfiguration(svc.getNetworkConfiguration());
-        d.setServiceConnectConfiguration(svc.getServiceConnectConfiguration());
-        // The deployment's own start time, not the service's: a task-definition change mints a
-        // new deployment id, so reporting service creation here would contradict it. Older
-        // persisted services predate the field and fall back to the service creation time.
-        Instant startedAt = svc.getLastDeploymentAt() != null
-                ? svc.getLastDeploymentAt()
-                : svc.getCreatedAt();
-        d.setCreatedAt(startedAt);
-        d.setUpdatedAt(startedAt);
-        return d;
-    }
 }

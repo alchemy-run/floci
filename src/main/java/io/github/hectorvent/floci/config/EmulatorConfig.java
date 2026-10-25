@@ -2390,6 +2390,13 @@ public interface EmulatorConfig {
         boolean mock();
 
         /**
+         * How long, in seconds, a Docker-backed service task must stay RUNNING before it counts
+         * towards its deployment's steady state.
+         */
+        @WithDefault("15")
+        int steadyStateWindowSeconds();
+
+        /**
          * Publish {@code awsvpc} task ports on the Docker host so local host processes can
          * reach them. This is an emulator-only escape hatch and can cause port collisions
          * when more than one task exposes the same port.

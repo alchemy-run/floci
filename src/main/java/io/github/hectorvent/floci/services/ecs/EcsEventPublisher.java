@@ -15,8 +15,6 @@ import org.jboss.logging.Logger;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * Publishes AWS-shaped {@code aws.ecs} lifecycle events to the default EventBridge bus.
@@ -104,7 +102,18 @@ public class EcsEventPublisher {
 
     /** Emits one ECS Deployment State Change. */
     public void emitDeploymentStateChange(EcsServiceModel svc, String eventName, String reason, String region) {
-        emitDeploymentStateChange(svc, "INFO", eventName, reason, region);
+        try {
+            ObjectNode detail = objectMapper.createObjectNode();
+            detail.put("eventType", "SERVICE_DEPLOYMENT_FAILED".equals(eventName) ? "ERROR" : "INFO");
+            detail.put("eventName", eventName);
+            detail.put("deploymentId", svc.getDeploymentId());
+            detail.put("updatedAt", Instant.now().toString());
+            detail.put("reason", reason);
+            putEvent(DEPLOYMENT_DETAIL_TYPE, svc.getServiceArn(), detail, region);
+        } catch (Exception e) {
+            LOG.warnv("Failed to emit ECS Deployment State Change for {0}: {1}",
+                    svc.getServiceArn(), e.getMessage());
+        }
     }
 
     private void putEvent(String detailType, String resourceArn, ObjectNode detail, String region)
@@ -119,25 +128,5 @@ public class EcsEventPublisher {
 
     private static String asIso(Instant instant) {
         return instant != null ? instant.toString() : null;
-    }
-
-    /**
-     * Emits one ECS Deployment State Change. {@code eventType} is {@code ERROR} for
-     * {@code SERVICE_DEPLOYMENT_FAILED} and {@code INFO} for the other deployment events.
-     */
-    public void emitDeploymentStateChange(EcsServiceModel svc, String eventType, String eventName,
-                                          String reason, String region) {
-        try {
-            ObjectNode detail = objectMapper.createObjectNode();
-            detail.put("eventType", eventType);
-            detail.put("eventName", eventName);
-            detail.put("deploymentId", svc.getDeploymentId());
-            detail.put("updatedAt", Instant.now().toString());
-            detail.put("reason", reason);
-            putEvent(DEPLOYMENT_DETAIL_TYPE, svc.getServiceArn(), detail, region);
-        } catch (Exception e) {
-            LOG.warnv("Failed to emit ECS Deployment State Change for {0}: {1}",
-                    svc.getServiceArn(), e.getMessage());
-        }
     }
 }
