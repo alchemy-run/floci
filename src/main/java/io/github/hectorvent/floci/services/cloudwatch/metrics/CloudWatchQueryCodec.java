@@ -32,7 +32,9 @@ final class CloudWatchQueryCodec {
                            MultivaluedMap<String, String> params, String region) {
         ObjectNode request = JsonNodeFactory.instance.objectNode();
         params.forEach((path, values) -> {
-            if (!path.equals("Action") && !path.equals("Version") && !values.isEmpty()) {
+            // A presigned query request carries its signature as X-Amz-* parameters.
+            if (!path.equals("Action") && !path.equals("Version") && !path.startsWith("X-Amz-")
+                    && !values.isEmpty()) {
                 insert(request, path.split("\\."), 0, values.getFirst(), path);
             }
         });

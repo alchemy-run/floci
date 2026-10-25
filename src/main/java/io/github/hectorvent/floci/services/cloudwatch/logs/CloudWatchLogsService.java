@@ -1037,6 +1037,7 @@ public class CloudWatchLogsService implements ResourceProvider {
                 .filter(f -> (startTime == null || f.event().getTimestamp() >= startTime)
                         && (endTime == null || f.event().getTimestamp() <= endTime))
                 .filter(f -> matchesFilterPattern(f.event().getMessage(), filterPattern))
+                .sorted(Comparator.comparing(FilteredEvent::event, EVENT_ORDER))
                 .toList();
 
         // The cursor indexes matches rather than stored events, which is why the window is applied
