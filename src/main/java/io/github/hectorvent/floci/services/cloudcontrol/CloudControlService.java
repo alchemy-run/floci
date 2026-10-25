@@ -297,7 +297,6 @@ public class CloudControlService {
         if (props == null || !props.isObject()) {
             throw new AwsException("InvalidRequestException", "DesiredState must be a JSON object.", 400);
         }
-        listResources(region, accountId, typeName);
         String token = UUID.randomUUID().toString();
         ProgressEvent pending = new ProgressEvent(typeName, null, token, "CREATE", "IN_PROGRESS", null, null, accountId);
         operationLocks.put(token, new ReentrantLock());
@@ -316,7 +315,15 @@ public class CloudControlService {
                               String token, ProgressEvent pending, JsonNode props, boolean replay) {
         persistRequest(new PersistedRequest(pending, region, desiredStateJson, System.currentTimeMillis()));
         Runnable task = () -> RequestScopes.runAs(accountId, () -> {
+            // Held while provisioning, so CancelResourceRequest only cancels a create that has not
+            // started; one that has runs to its outcome.
+            ReentrantLock lock = operationLocks.computeIfAbsent(token, ignored -> new ReentrantLock());
+            lock.lock();
             try {
+                ProgressEvent current = requests.get(token);
+                if (current == null || !"IN_PROGRESS".equals(current.operationStatus())) {
+                    return;
+                }
                 // SSM documents and parameters are created by their own backends, so their
                 // identifier is the name the desired state gives, as Cloud Control reports it.
                 if (SsmDocumentResource.TYPE.equals(typeName) || "AWS::SSM::Parameter".equals(typeName)) {
@@ -327,7 +334,7 @@ public class CloudControlService {
                     } else {
                         identifier = ssmDocuments.create(props, region);
                     }
-                    String model = resourceModel(region, typeName, identifier, props);
+                    String model = getResource(region, accountId, typeName, identifier).properties();
                     CreatedResource createdResource = new CreatedResource(token, accountId, Map.of(), model);
                     created.put(createdKey(accountId, region, typeName, identifier), createdResource);
                     persistCreated(accountId, region, typeName, identifier, createdResource);
@@ -348,8 +355,13 @@ public class CloudControlService {
                     record(new ProgressEvent(typeName, identifier,
                             token, "CREATE", "SUCCESS", null, model, accountId));
                 }
+            } catch (AwsException e) {
+                recordCreateFailure(pending, e);
             } catch (Exception e) {
                 recordCreateFailure(pending, e.getMessage() == null ? e.toString() : e.getMessage());
+            } finally {
+                operationLocks.remove(token, lock);
+                lock.unlock();
             }
         });
         try {
@@ -385,6 +397,13 @@ public class CloudControlService {
             return;
         }
         record(pending.failed(message));
+    }
+
+    private void recordCreateFailure(ProgressEvent pending, AwsException error) {
+        if (executor.isShutdown()) {
+            return;
+        }
+        record(pending.failed(error));
     }
 
     /**
@@ -527,20 +546,40 @@ public class CloudControlService {
                     + "not hold for " + identifier + ".", null, accountId));
         }
 
-        RequestScopes.runAs(accountId, () -> {
-            // SSM documents and parameters are deleted by the backends that created them.
-            if ("AWS::SSM::Parameter".equals(typeName)) {
-                ssmBackend.delete(identifier, region);
-            } else if (SsmDocumentResource.TYPE.equals(typeName)) {
-                ssmDocuments.delete(identifier, region);
-            } else {
-                provisioner.deleteStandalone(typeName, identifier, region, attributes);
+        // A resource that is not there is ResourceNotFoundException, as DeleteResource declares,
+        // rather than whatever the owning backend's own not-found error is. Only a type Cloud
+        // Control can list can be checked; the rest are left to the backend.
+        boolean listable = RequestScopes.callAs(accountId, () -> resourcesForType(region, typeName)) != null;
+        if (state == null && listable) {
+            getResource(region, accountId, typeName, identifier);
+        }
+        ProgressEvent pending = new ProgressEvent(typeName, identifier, UUID.randomUUID().toString(),
+                "DELETE", "IN_PROGRESS", null, null, accountId);
+        persistRequest(new PersistedRequest(pending, region, null, System.currentTimeMillis()));
+        record(pending);
+        try {
+            RequestScopes.runAs(accountId, () -> {
+                // SSM documents and parameters are deleted by the backends that created them.
+                if ("AWS::SSM::Parameter".equals(typeName)) {
+                    ssmBackend.delete(identifier, region);
+                } else if (SsmDocumentResource.TYPE.equals(typeName)) {
+                    ssmDocuments.delete(identifier, region);
+                } else {
+                    provisioner.deleteStandalone(typeName, identifier, region, attributes);
+                }
+            });
+            boolean exists = listable && listResources(region, accountId, typeName).stream()
+                    .anyMatch(resource -> identifier.equals(resource.identifier()));
+            if (exists) {
+                return record(pending.failed("Backend still contains resource after deletion."));
             }
-        });
-        created.remove(key);
-        removePersistedCreated(accountId, region, typeName, identifier);
-        return record(new ProgressEvent(typeName, identifier,
-                UUID.randomUUID().toString(), "DELETE", "SUCCESS", null, null, accountId));
+            created.remove(key);
+            removePersistedCreated(accountId, region, typeName, identifier);
+            return record(new ProgressEvent(typeName, identifier, pending.requestToken(),
+                    "DELETE", "SUCCESS", null, null, accountId));
+        } catch (AwsException e) {
+            return record(pending.failed(e));
+        }
     }
 
     /** Compatibility entry point for direct callers without request account context. */
@@ -573,6 +612,12 @@ public class CloudControlService {
                     return d;
                 }
             }
+        }
+        // CreateResource provisions the whole CFN type set while the read side lists six types, so
+        // fall back to what the create recorded — otherwise a successful create is unreadable.
+        CreatedResource state = created.get(createdKey(accountId, region, typeName, identifier));
+        if (state != null) {
+            return new ResourceDescription(identifier, state.model());
         }
         if (listed == null) {
             throw new AwsException("UnsupportedActionException", "GetResource is not supported for " + typeName, 400);
@@ -620,7 +665,14 @@ public class CloudControlService {
     @RegisterForReflection
     public record ProgressEvent(String typeName, String identifier, String requestToken,
                                 String operation, String operationStatus, String statusMessage,
-                                String resourceModel, String accountId) {
+                                String resourceModel, String accountId, String errorCode) {
+        public ProgressEvent(String typeName, String identifier, String requestToken,
+                             String operation, String operationStatus, String statusMessage,
+                             String resourceModel, String accountId) {
+            this(typeName, identifier, requestToken, operation, operationStatus, statusMessage,
+                    resourceModel, accountId, "FAILED".equals(operationStatus) ? "GeneralServiceException" : null);
+        }
+
         public ProgressEvent(String typeName, String identifier, String requestToken,
                              String operation, String operationStatus, String statusMessage,
                              String resourceModel) {
@@ -630,6 +682,20 @@ public class CloudControlService {
 
         ProgressEvent failed(String message) {
             return new ProgressEvent(typeName, identifier, requestToken, operation, "FAILED", message, resourceModel, accountId);
+        }
+
+        /** FAILED with the Cloud Control handler error code the backend's error maps to. */
+        ProgressEvent failed(AwsException error) {
+            String code = switch (error.getErrorCode()) {
+                case "ParameterAlreadyExists", "DocumentAlreadyExists" -> "AlreadyExists";
+                case "ParameterNotFound", "ResourceNotFoundException", "InvalidDocument" -> "NotFound";
+                case "NotUpdatableException" -> "NotUpdatable";
+                case "ValidationException", "InvalidRequestException", "ParameterPatternMismatchException",
+                     "DuplicateDocumentContent", "InvalidDocumentContent" -> "InvalidRequest";
+                default -> "GeneralServiceException";
+            };
+            return new ProgressEvent(typeName, identifier, requestToken, operation, "FAILED", error.getMessage(),
+                    resourceModel, accountId, code);
         }
     }
 
@@ -882,7 +948,7 @@ public class CloudControlService {
             return record(new ProgressEvent(typeName, identifier, token, "UPDATE", "SUCCESS", null,
                     actual, accountId));
         } catch (AwsException e) {
-            return record(pending.failed(e.getMessage()));
+            return record(pending.failed(e));
         }
     }
 

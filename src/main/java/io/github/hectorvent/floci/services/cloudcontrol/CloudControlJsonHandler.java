@@ -33,7 +33,7 @@ public class CloudControlJsonHandler {
             case "UpdateResource" -> progressResponse(service.updateResource(region, accountId,
                     required(request, "TypeName"), required(request, "Identifier"), required(request, "PatchDocument")));
             case "GetResourceRequestStatus" -> progressResponse(
-                    service.requestStatus(accountId, requestToken(request)));
+                    service.requestStatus(region, accountId, requestToken(request)));
             case "ListResourceRequests" -> listRequests(request, region, accountId);
             case "CancelResourceRequest" -> progressResponse(
                     service.cancelRequest(region, accountId, requestToken(request)));
@@ -124,6 +124,9 @@ public class CloudControlJsonHandler {
         }
         if (event.resourceModel() != null) {
             pe.put("ResourceModel", event.resourceModel());
+        }
+        if (event.errorCode() != null) {
+            pe.put("ErrorCode", event.errorCode());
         }
         return pe;
     }
