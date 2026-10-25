@@ -21,6 +21,8 @@ import jakarta.ws.rs.core.Response;
 import java.time.DateTimeException;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -99,6 +101,13 @@ public class SesMetricsController {
         List<SesMetricData.Query> queries = new ArrayList<>(queryNodes.size());
         for (int i = 0; i < queryNodes.size(); i++) {
             queries.add(parseQuery(queryNodes.get(i), i + 1));
+        }
+        for (SesMetricData.Query query : queries) {
+            if (!isMidnightUtc(query.startDate()) || !isMidnightUtc(query.endDate())) {
+                throw new AwsException("BadRequestException",
+                        "To get daily aggregated data you must not specify partial-day timestamps. "
+                                + "Please make your interval go from midnight to midnight UTC.", 400);
+            }
         }
 
         List<SentEmail> emails = withinAnyWindow(sentEmailService.listInRegion(region), queries);
@@ -372,5 +381,9 @@ public class SesMetricsController {
 
     private static AwsException aggregated(List<String> violations) {
         return SmithyValidationErrors.badRequest(violations);
+    }
+
+    private static boolean isMidnightUtc(Instant instant) {
+        return instant.atZone(ZoneOffset.UTC).toLocalTime().equals(LocalTime.MIDNIGHT);
     }
 }

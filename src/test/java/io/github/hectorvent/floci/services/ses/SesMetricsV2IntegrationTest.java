@@ -44,12 +44,15 @@ class SesMetricsV2IntegrationTest {
     // equal-dates case below into a valid one-second interval.
     private static final long NOW = Instant.now().getEpochSecond();
 
+    /** Today's midnight UTC: BatchGetMetricData takes whole days only, as on AWS. */
+    private static final long TODAY = Math.floorDiv(NOW, Duration.ofDays(1).toSeconds()) * Duration.ofDays(1).toSeconds();
+
     private static long start() {
-        return NOW - Duration.ofDays(1).toSeconds();
+        return TODAY - Duration.ofDays(1).toSeconds();
     }
 
     private static long end() {
-        return NOW + Duration.ofDays(1).toSeconds();
+        return TODAY + Duration.ofDays(1).toSeconds();
     }
 
     private static String query(String id, String metric) {

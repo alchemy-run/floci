@@ -84,8 +84,8 @@ class SesMessageInsightsV2IntegrationTest {
     @Order(2)
     void getMessageInsights_unknownMessage_namesTheAccount() {
         given().header("Authorization", AUTH)
-        .when().get("/v2/email/insights/no-such-message").then().statusCode(404)
-                .body("message", containsString("Message <no-such-message> not found for account <"));
+        .when().get("/v2/email/insights/0100018c7f3b1f2a-00000000-0000-4000-8000-000000000000-000000").then().statusCode(404)
+                .body("message", containsString("Message <0100018c7f3b1f2a-00000000-0000-4000-8000-000000000000-000000> not found for account <"));
     }
 
     @Test

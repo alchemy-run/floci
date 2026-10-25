@@ -30,6 +30,8 @@ import static org.mockito.Mockito.when;
  */
 class SesInsightsControllerTest {
 
+    private static final String LEGACY_ID = "0100018c7f3b1f2a-11111111-2222-4333-8444-555555555555-000000";
+
     private static final String REGION = "eu-north-1";
 
     private final SesSentEmailService sentEmailService = mock(SesSentEmailService.class);
@@ -73,29 +75,30 @@ class SesInsightsControllerTest {
         vdmEnabled(true);
         when(sentEmailService.find(anyString(), anyString())).thenReturn(Optional.empty());
 
+        String messageId = "0100018c7f3b1f2a-00000000-0000-4000-8000-000000000001-000000";
         AwsException thrown = assertThrows(AwsException.class,
-                () -> controller.getMessageInsights(null, "missing"));
+                () -> controller.getMessageInsights(null, messageId));
 
         assertEquals(404, thrown.getHttpStatus());
-        assertEquals("Message <missing> not found for account <000000000000>", thrown.getMessage());
+        assertEquals("Message <" + messageId + "> not found for account <000000000000>", thrown.getMessage());
     }
 
     @Test
     void aMessageStoredBeforeInsightsExistedStillRenders() {
         // Records written by an older Floci carry no Insights and no EmailTags. The message is
         // still a real message, so it is served as an empty timeline rather than reported missing.
-        SentEmail legacy = new SentEmail("legacy-id", REGION, "sender@example.com",
+        SentEmail legacy = new SentEmail(LEGACY_ID, REGION, "sender@example.com",
                 List.of("user@example.com"), List.of(), List.of(), List.of(), "old", "hi", null);
         legacy.setInsights(null);
         legacy.setEmailTags(null);
         vdmEnabled(true);
-        when(sentEmailService.find(REGION, "legacy-id")).thenReturn(Optional.of(legacy));
+        when(sentEmailService.find(REGION, LEGACY_ID)).thenReturn(Optional.of(legacy));
 
-        Response response = controller.getMessageInsights(null, "legacy-id");
+        Response response = controller.getMessageInsights(null, LEGACY_ID);
 
         assertEquals(200, response.getStatus());
         ObjectNode body = (ObjectNode) response.getEntity();
-        assertEquals("legacy-id", body.get("MessageId").asText());
+        assertEquals(LEGACY_ID, body.get("MessageId").asText());
         assertEquals("sender@example.com", body.get("FromEmailAddress").asText());
         assertTrue(body.get("Insights").isEmpty(), "Insights should be an empty array");
         assertTrue(body.get("EmailTags").isEmpty(), "EmailTags should be an empty array");

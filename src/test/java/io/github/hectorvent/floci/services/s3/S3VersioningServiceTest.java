@@ -633,8 +633,9 @@ class S3VersioningServiceTest {
         // An object written before versioning is the null version.
         s3Service.putObject("versioned-bucket", "old", "v0".getBytes(StandardCharsets.UTF_8), "text/plain", null);
         s3Service.putBucketVersioning("versioned-bucket", "Enabled");
-        assertNull(s3Service.putObjectTagging("versioned-bucket", "old", "null", Map.of("version", "null")));
-        assertEquals(new S3Service.ObjectTaggingResult(null, Map.of("version", "null")),
+        // The null version is reported as "null", as S3 names it.
+        assertEquals("null", s3Service.putObjectTagging("versioned-bucket", "old", "null", Map.of("version", "null")));
+        assertEquals(new S3Service.ObjectTaggingResult("null", Map.of("version", "null")),
                 s3Service.getObjectTaggingResult("versioned-bucket", "old", "null"));
 
         // A key written only with versioning on has no null version, and its current version is

@@ -24,6 +24,7 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
 import java.util.List;
+import java.util.regex.Pattern;
 
 import static io.github.hectorvent.floci.services.ses.SesV2Json.putTimestamp;
 
@@ -61,6 +62,9 @@ public class SesInsightsController {
                                        @PathParam("messageId") String messageId) {
         String region = regionResolver.resolveRegion(headers);
         accountService.requireVdmEnabled(region);
+        if (!isWellFormedMessageId(messageId)) {
+            throw new AwsException("BadRequestException", "MessageId is not a valid SES message id.", 400);
+        }
         SentEmail email = sentEmailService.find(region, messageId)
                 .orElseThrow(() -> new AwsException("NotFoundException",
                         "Message <" + messageId + "> not found for account <"
@@ -140,4 +144,13 @@ public class SesInsightsController {
     private static <T> List<T> orEmpty(List<T> values) {
         return values == null ? List.of() : values;
     }
+
+    /** An SES message id ({@code 0100018c7f3b1f2a-<uuid>-000000}) or the bare UUID Floci mints. */
+    private static boolean isWellFormedMessageId(String messageId) {
+        return messageId != null && MESSAGE_ID.matcher(messageId).matches();
+    }
+
+    private static final Pattern MESSAGE_ID = Pattern.compile(
+            "(?:[0-9a-f]{16}-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:-[0-9]{6})?",
+            Pattern.CASE_INSENSITIVE);
 }

@@ -343,14 +343,23 @@ public class CloudMapService {
         // Only the TTLs of the existing DNS records can change, as on AWS: another record type or count,
         // a RoutingPolicy change, or a DnsConfig for a service without one, is refused before anything
         // is written.
+        // UpdateService carries a DnsConfigChange: only DnsRecords, which replace the stored records;
+        // the namespace and RoutingPolicy stay as created.
         String merged = null;
         if (dnsConfig != null) {
-            merged = mergeDnsConfig(service.getDnsConfig(), dnsConfig);
-            if (service.getDnsConfig() == null
-                    || !withoutTtls(parseDnsConfig(merged)).equals(withoutTtls(dnsConfigNode(service)))) {
+            if (!(dnsConfigNode(service) instanceof ObjectNode storedConfig)) {
                 throw new AwsException("InvalidInput",
                         "Only the TTLs of a service's DNS records can be updated.", 400);
             }
+            JsonNode change = parseDnsConfig(dnsConfig);
+            ObjectNode stored = storedConfig.deepCopy();
+            ObjectNode updated = stored.deepCopy();
+            updated.set("DnsRecords", change.path("DnsRecords").deepCopy());
+            if (!withoutTtls(updated).equals(withoutTtls(stored))) {
+                throw new AwsException("InvalidInput",
+                        "Only the TTLs of a service's DNS records can be updated.", 400);
+            }
+            merged = updated.toString();
         }
         if (description != null) {
             service.setDescription(description);
@@ -1005,39 +1014,7 @@ public class CloudMapService {
         return sb.toString();
     }
 
-    private String dnsConfigNamespaceId(String dnsConfig) {
-        // Best-effort extraction of a NamespaceId embedded in the DnsConfig JSON.
-        int idx = dnsConfig.indexOf("\"NamespaceId\"");
-        if (idx < 0) {
-            return null;
-        }
-        int start = dnsConfig.indexOf('"', dnsConfig.indexOf(':', idx) + 1);
-        int end = dnsConfig.indexOf('"', start + 1);
-        return (start > 0 && end > start) ? dnsConfig.substring(start + 1, end) : null;
-    }
 
-    private String mergeDnsConfig(String existing, String incoming) {
-        if (existing == null || existing.isBlank()) {
-            return incoming;
-        }
-        if (incoming == null || incoming.isBlank()) {
-            return existing;
-        }
-        String namespaceId = dnsConfigNamespaceId(existing);
-        if (namespaceId == null) {
-            return incoming;
-        }
-        if (incoming.contains("\"NamespaceId\"")) {
-            return incoming;
-        }
-        int brace = incoming.indexOf('{');
-        if (brace < 0) {
-            return incoming;
-        }
-        return incoming.substring(0, brace + 1)
-                + "\"NamespaceId\":\"" + namespaceId + "\","
-                + incoming.substring(brace + 1);
-    }
 
     private String generateHostedZoneId() {
         StringBuilder sb = new StringBuilder("Z");
