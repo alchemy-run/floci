@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
+import io.github.hectorvent.floci.core.common.AwsRegions;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
@@ -240,7 +241,7 @@ public class EmrStudioService {
                 : iam.getPolicy(role.getPermissionsBoundaryArn()).getDefaultDocument();
         CallerContext caller = new CallerContext(documents, null, boundary, null, role.getArn());
         List<String> bucketPolicies = bucketInfo.policy() == null ? List.of() : List.of(bucketInfo.policy());
-        String bucketArn = AwsArnUtils.Arn.of("s3", "", "", bucket).toString();
+        String bucketArn = AwsArnUtils.Arn.global(AwsRegions.partitionFor(regionResolver.getRegion()), "s3", "", bucket).toString();
         String path = uri.getPath() == null ? "" : uri.getPath();
         String objectArn = bucketArn + (path.endsWith("/") ? path : path + "/") + "*";
         IamPolicyEvaluator.ResourceAccountRelationship relationship =

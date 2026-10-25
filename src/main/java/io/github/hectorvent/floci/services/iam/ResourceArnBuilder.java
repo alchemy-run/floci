@@ -1603,23 +1603,6 @@ public class ResourceArnBuilder {
                 ? role.textValue() : null;
     }
 
-    private String buildS3Arn(String path) {
-        // path: /bucket or /bucket/key
-        String stripped = path.startsWith("/") ? path.substring(1) : path;
-        if (stripped.isEmpty()) {
-            return AwsArnUtils.Arn.of("s3", "", "", "*").toString();
-        }
-        // S3VirtualHostFilter rewrites a bucket-level virtual-hosted request (GET /) to
-        // /bucket/, and the empty key after that separator is not part of the resource.
-        // A policy names the bucket as arn:aws:s3:::bucket, so the trailing slash has to
-        // go or a bucket-level ARN never matches. A key that itself ends in a slash
-        // (a folder marker such as folder/) keeps it, because there the slash is key data.
-        int firstSlash = stripped.indexOf('/');
-        if (firstSlash == stripped.length() - 1) {
-            stripped = stripped.substring(0, firstSlash);
-        }
-        return AwsArnUtils.Arn.of("s3", "", "", stripped).toString();
-    }
 
     private String buildLambdaArn(String path, String region, String accountId) {
         // path: /2015-03-31/functions/name or similar
