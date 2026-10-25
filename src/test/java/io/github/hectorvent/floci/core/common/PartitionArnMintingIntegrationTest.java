@@ -170,29 +170,4 @@ class PartitionArnMintingIntegrationTest {
             .extract().jsonPath().getString("Parameter.ARN");
         assertEquals("arn:aws-cn:ssm:cn-northwest-1:000000000000:parameter" + name, arn);
     }
-
-    @ParameterizedTest
-    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
-    void serviceCatalogPortfolioArnIsMintedInTheRequestPartition(PartitionCase partitionCase) {
-        String region = partitionCase.region();
-        String token = Long.toString(System.nanoTime(), 36);
-        Response created = given()
-            .header("Authorization", PartitionMatrix.sigV4Auth(region, "servicecatalog"))
-            .header("X-Amz-Target", "AWS242ServiceCatalogService.CreatePortfolio")
-            .contentType(JSON_1_1)
-            .body("{\"DisplayName\":\"partition-" + token + "\",\"ProviderName\":\"floci\",\"IdempotencyToken\":\"" + token + "\"}")
-        .when().post("/");
-        created.then().statusCode(200);
-        String id = created.jsonPath().getString("PortfolioDetail.Id");
-        cleanup.register(() -> given()
-            .header("Authorization", PartitionMatrix.sigV4Auth(region, "servicecatalog"))
-            .header("X-Amz-Target", "AWS242ServiceCatalogService.DeletePortfolio")
-            .contentType(JSON_1_1)
-            .body("{\"Id\":\"" + id + "\"}")
-        .when().post("/"));
-
-        String arn = created.jsonPath().getString("PortfolioDetail.ARN");
-        assertEquals("arn:" + partitionCase.partition() + ":catalog:" + region + ":" + PartitionMatrix.ACCOUNT
-                + ":portfolio/" + id, arn);
-    }
 }

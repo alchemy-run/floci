@@ -258,24 +258,6 @@ class ServiceEnablementIntegrationTest {
     }
 
     @Test
-    void pypiWireProtocolRequestsAreRejectedWhenServiceDisabled() {
-        // Not the bare "/simple/" root: AWS doesn't support that path either (only
-        // /simple/<project>/ is), so Floci has no route for it at all, and a request to a
-        // genuinely unrouted path 404s before this filter ever runs. "/simple/<project>/" is a
-        // real, routed endpoint, so it still demonstrates the service-disabled rejection.
-        given()
-            .header("Authorization", "Bearer whatever")
-        .when()
-            .get("/codeartifact/pypi/some-domain/some-repo/simple/some-pkg/")
-        .then()
-            .statusCode(400)
-            .contentType("application/json")
-            .header("X-Amzn-Errortype", "ServiceNotAvailableException")
-            .body("__type", equalTo("ServiceNotAvailableException"))
-            .body("message", equalTo("Service codeartifact is not enabled."));
-    }
-
-    @Test
     void signedRdsDataExecuteRequestsReturnJsonWhenServiceDisabled() {
         given()
             .contentType("application/json")

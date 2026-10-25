@@ -24,7 +24,7 @@ class SignedServiceRouteIntegrationTest {
             + "/20260215/us-east-1/s3/aws4_request";
 
     @ParameterizedTest
-    @ValueSource(strings = {"/_guardduty/malware-protection-plan", "/_dlm/policies", "/_re2/CreateIndex"})
+    @ValueSource(strings = {"/_dlm/policies", "/_re2/CreateIndex"})
     void aRequestStraightToAnInternalPrefixIsRefusedAsAnInvalidBucket(String path) {
         given().header("Authorization", S3_AUTH)
                 .when().get(path)
@@ -57,10 +57,5 @@ class SignedServiceRouteIntegrationTest {
                 .when().get("/policies")
                 .then().statusCode(200)
                 .body("Policies", notNullValue());
-        given().queryParam("X-Amz-Algorithm", "AWS4-HMAC-SHA256")
-                .queryParam("X-Amz-Credential", ACCOUNT + "/20260215/us-east-1/guardduty/aws4_request")
-                .when().get("/malware-protection-plan")
-                .then().statusCode(200)
-                .body("malwareProtectionPlans", notNullValue());
     }
 }

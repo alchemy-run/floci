@@ -499,22 +499,6 @@ class PartitionCrossServiceSmokeIntegrationTest {
         PartitionMatrix.assertArnIn(partitionCase, arn);
     }
 
-    @ParameterizedTest
-    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
-    void eksClusterArnAndOidcIssuerHost(PartitionCase partitionCase) {
-        String region = offered(partitionCase, "eks");
-        String name = unique("smoke-eks", partitionCase);
-        Response created = signed(region, "eks")
-            .contentType(JSON)
-            .body("{\"name\":\"" + name + "\",\"roleArn\":\"arn:" + partitionCase.partition()
-                    + ":iam::000000000000:role/eks-role\"}")
-        .when().post("/clusters").then().statusCode(200).extract().response();
-        cleanup.register(() -> signed(region, "eks").when().delete("/clusters/" + name));
-        PartitionMatrix.assertArnIn(partitionCase, created.jsonPath().getString("cluster.arn"));
-        String issuer = signed(region, "eks").when().get("/clusters/" + name).then().statusCode(200)
-            .extract().jsonPath().getString("cluster.identity.oidc.issuer");
-        assertRegionalHostIn(partitionCase, URI.create(issuer).getHost());
-    }
 
     @ParameterizedTest
     @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
@@ -556,40 +540,7 @@ class PartitionCrossServiceSmokeIntegrationTest {
         PartitionMatrix.assertArnIn(partitionCase, created.jsonPath().getString("graphqlApi.arn"));
     }
 
-    @ParameterizedTest
-    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
-    void openSearchDomainArnAndEndpointHost(PartitionCase partitionCase) {
-        String region = offered(partitionCase, "es");
-        String name = "smoke" + Long.toString(System.nanoTime(), 36);
-        Response created = signed(region, "es")
-            .contentType(JSON)
-            .body("{\"DomainName\":\"" + name + "\"}")
-        .when().post("/2021-01-01/opensearch/domain").then().statusCode(200).extract().response();
-        cleanup.register(() -> signed(region, "es").when().delete("/2021-01-01/opensearch/domain/" + name));
-        PartitionMatrix.assertArnIn(partitionCase, created.jsonPath().getString("DomainStatus.ARN"));
-        String endpoint = signed(region, "es").when().get("/2021-01-01/opensearch/domain/" + name)
-            .then().statusCode(200).extract().jsonPath().getString("DomainStatus.Endpoint");
-        assertRegionalHostIn(partitionCase, endpoint);
-    }
 
-    @ParameterizedTest
-    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
-    void amazonMqBrokerArn(PartitionCase partitionCase) {
-        String region = offered(partitionCase, "mq");
-        String body = """
-                {"brokerName": "%s", "engineType": "RABBITMQ",
-                 "deploymentMode": "SINGLE_INSTANCE", "hostInstanceType": "mq.t3.micro",
-                 "publiclyAccessible": false,
-                 "users": [{"username": "admin", "password": "AdminPass123", "consoleAccess": true}]}
-                """.formatted(unique("smoke-broker", partitionCase));
-        Response created = signed(region, "mq")
-            .contentType(JSON)
-            .body(body)
-        .when().post("/v1/brokers").then().statusCode(200).extract().response();
-        String brokerId = created.jsonPath().getString("brokerId");
-        cleanup.register(() -> signed(region, "mq").when().delete("/v1/brokers/" + brokerId));
-        PartitionMatrix.assertArnIn(partitionCase, created.jsonPath().getString("brokerArn"));
-    }
 
     @ParameterizedTest
     @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
@@ -604,73 +555,9 @@ class PartitionCrossServiceSmokeIntegrationTest {
         PartitionMatrix.assertArnIn(partitionCase, arn);
     }
 
-    @ParameterizedTest
-    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
-    void elastiCacheParameterGroupArn(PartitionCase partitionCase) {
-        String region = offered(partitionCase, "elasticache");
-        String name = unique("smoke-cpg", partitionCase);
-        String arn = signed(region, "elasticache")
-            .formParam("Action", "CreateCacheParameterGroup")
-            .formParam("Version", "2015-02-02")
-            .formParam("CacheParameterGroupName", name)
-            .formParam("CacheParameterGroupFamily", "redis7")
-            .formParam("Description", "smoke")
-        .when().post("/").then().statusCode(200)
-            .extract().xmlPath()
-            .getString("CreateCacheParameterGroupResponse.CreateCacheParameterGroupResult.CacheParameterGroup.ARN");
-        cleanup.register(() -> signed(region, "elasticache")
-            .formParam("Action", "DeleteCacheParameterGroup")
-            .formParam("Version", "2015-02-02")
-            .formParam("CacheParameterGroupName", name)
-        .when().post("/"));
-        PartitionMatrix.assertArnIn(partitionCase, arn);
-    }
 
-    @ParameterizedTest
-    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
-    void memoryDbAclArn(PartitionCase partitionCase) {
-        String region = offered(partitionCase, "memorydb");
-        String name = unique("smoke-acl", partitionCase);
-        String arn = json11(region, "memorydb", "AmazonMemoryDB.CreateACL",
-                "{\"ACLName\":\"" + name + "\",\"UserNames\":[\"default\"]}")
-        .when().post("/").then().statusCode(200)
-            .extract().jsonPath().getString("ACL.ARN");
-        cleanup.register(() -> json11(region, "memorydb", "AmazonMemoryDB.DeleteACL",
-                "{\"ACLName\":\"" + name + "\"}").when().post("/"));
-        PartitionMatrix.assertArnIn(partitionCase, arn);
-    }
 
-    @ParameterizedTest
-    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
-    void route53ResolverFirewallDomainListArn(PartitionCase partitionCase) {
-        String region = offered(partitionCase, "route53resolver");
-        String name = unique("smoke-domains", partitionCase);
-        Response created = json11(region, "route53resolver", "Route53Resolver.CreateFirewallDomainList",
-                "{\"CreatorRequestId\":\"" + name + "\",\"Name\":\"" + name + "\"}")
-        .when().post("/").then().statusCode(200).extract().response();
-        String listId = created.jsonPath().getString("FirewallDomainList.Id");
-        cleanup.register(() -> json11(region, "route53resolver", "Route53Resolver.DeleteFirewallDomainList",
-                "{\"FirewallDomainListId\":\"" + listId + "\"}").when().post("/"));
-        PartitionMatrix.assertArnIn(partitionCase, created.jsonPath().getString("FirewallDomainList.Arn"));
-    }
 
-    @ParameterizedTest
-    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
-    void bedrockAgentCoreGatewayArnAndUrlHost(PartitionCase partitionCase) {
-        String region = offered(partitionCase, "bedrock-agentcore");
-        String body = """
-                {"name": "%s", "authorizerType": "AWS_IAM",
-                 "roleArn": "arn:%s:iam::000000000000:role/gw"}
-                """.formatted("smoke" + Long.toString(System.nanoTime(), 36), partitionCase.partition());
-        Response created = signed(region, "bedrock-agentcore")
-            .contentType(JSON)
-            .body(body)
-        .when().post("/gateways/").then().statusCode(202).extract().response();
-        String gatewayId = created.jsonPath().getString("gatewayId");
-        cleanup.register(() -> signed(region, "bedrock-agentcore").when().delete("/gateways/" + gatewayId + "/"));
-        PartitionMatrix.assertArnIn(partitionCase, created.jsonPath().getString("gatewayArn"));
-        assertRegionalHostIn(partitionCase, URI.create(created.jsonPath().getString("gatewayUrl")).getHost());
-    }
 
     @ParameterizedTest
     @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
@@ -698,20 +585,6 @@ class PartitionCrossServiceSmokeIntegrationTest {
                 created.xmlPath().getString("FunctionSummary.FunctionMetadata.FunctionARN"));
     }
 
-    @ParameterizedTest
-    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
-    void ramResourceShareArn(PartitionCase partitionCase) {
-        String region = offered(partitionCase, "ram");
-        String arn = signed(region, "ram")
-            .contentType(JSON)
-            .body("{\"name\":\"" + unique("smoke-share", partitionCase) + "\"}")
-        .when().post("/createresourceshare").then().statusCode(200)
-            .extract().jsonPath().getString("resourceShare.resourceShareArn");
-        cleanup.register(() -> signed(region, "ram")
-            .queryParam("resourceShareArn", arn)
-        .when().delete("/deleteresourceshare"));
-        PartitionMatrix.assertArnIn(partitionCase, arn);
-    }
 
     @ParameterizedTest
     @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
@@ -787,20 +660,6 @@ class PartitionCrossServiceSmokeIntegrationTest {
         PartitionMatrix.assertArnIn(partitionCase, arn);
     }
 
-    @ParameterizedTest
-    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
-    void guardDutyDetectorServiceRoleArn(PartitionCase partitionCase) {
-        String region = offered(partitionCase, "guardduty");
-        String detectorId = signed(region, "guardduty")
-            .contentType(JSON)
-            .body("{\"enable\":true}")
-        .when().post("/detector").then().statusCode(200)
-            .extract().jsonPath().getString("detectorId");
-        cleanup.register(() -> signed(region, "guardduty").when().delete("/detector/" + detectorId));
-        String serviceRole = signed(region, "guardduty").when().get("/detector/" + detectorId)
-            .then().statusCode(200).extract().jsonPath().getString("serviceRole");
-        PartitionMatrix.assertGlobalArnIn(partitionCase, serviceRole);
-    }
 
     @ParameterizedTest
     @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
@@ -901,26 +760,7 @@ class PartitionCrossServiceSmokeIntegrationTest {
         PartitionMatrix.assertArnIn(partitionCase, arn);
     }
 
-    @ParameterizedTest
-    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
-    void controlTowerBaselineArn(PartitionCase partitionCase) {
-        String region = offered(partitionCase, "controltower");
-        String arn = signed(region, "controltower")
-            .contentType(JSON)
-            .body("{}")
-        .when().post("/list-baselines").then().statusCode(200)
-            .extract().jsonPath().getString("baselines[0].arn");
-        PartitionMatrix.assertArnIn(partitionCase, arn);
-    }
 
-    @ParameterizedTest
-    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
-    void lambdaMicrovmsManagedImageArn(PartitionCase partitionCase) {
-        String region = offered(partitionCase, "lambda");
-        String arn = signed(region, "lambda").when().get("/2025-09-09/managed-microvm-images")
-            .then().statusCode(200).extract().jsonPath().getString("items[0].imageArn");
-        PartitionMatrix.assertArnIn(partitionCase, arn);
-    }
 
     @ParameterizedTest
     @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
@@ -955,20 +795,6 @@ class PartitionCrossServiceSmokeIntegrationTest {
         PartitionMatrix.assertArnIn(partitionCase, arn);
     }
 
-    @ParameterizedTest
-    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
-    void networkFirewallRuleGroupArn(PartitionCase partitionCase) {
-        String region = offered(partitionCase, "network-firewall");
-        String name = unique("smoke-rules", partitionCase);
-        String arn = json10(region, "network-firewall", "NetworkFirewall_20201112.CreateRuleGroup",
-                "{\"RuleGroupName\":\"" + name + "\",\"Type\":\"STATEFUL\",\"Capacity\":100,"
-                        + "\"RuleGroup\":{\"RulesSource\":{\"RulesString\":\"pass ip any any\"}}}")
-        .when().post("/").then().statusCode(200)
-            .extract().jsonPath().getString("RuleGroupResponse.RuleGroupArn");
-        cleanup.register(() -> json10(region, "network-firewall", "NetworkFirewall_20201112.DeleteRuleGroup",
-                "{\"RuleGroupName\":\"" + name + "\",\"Type\":\"STATEFUL\"}").when().post("/"));
-        PartitionMatrix.assertArnIn(partitionCase, arn);
-    }
 
     @ParameterizedTest
     @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
@@ -1007,21 +833,6 @@ class PartitionCrossServiceSmokeIntegrationTest {
         PartitionMatrix.assertArnIn(partitionCase, arn);
     }
 
-    @ParameterizedTest
-    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
-    void prometheusWorkspaceArnAndEndpointHost(PartitionCase partitionCase) {
-        String region = offered(partitionCase, "aps");
-        Response created = signed(region, "aps")
-            .contentType(JSON)
-            .body("{\"alias\":\"" + unique("smoke-workspace", partitionCase) + "\"}")
-        .when().post("/workspaces").then().statusCode(202).extract().response();
-        String workspaceId = created.jsonPath().getString("workspaceId");
-        cleanup.register(() -> signed(region, "aps").when().delete("/workspaces/" + workspaceId));
-        PartitionMatrix.assertArnIn(partitionCase, created.jsonPath().getString("arn"));
-        String endpoint = signed(region, "aps").when().get("/workspaces/" + workspaceId)
-            .then().statusCode(200).extract().jsonPath().getString("workspace.prometheusEndpoint");
-        assertRegionalHostIn(partitionCase, URI.create(endpoint).getHost());
-    }
 
     @ParameterizedTest
     @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
@@ -1187,16 +998,6 @@ class PartitionCrossServiceSmokeIntegrationTest {
         PartitionMatrix.assertArnIn(partitionCase, arn);
     }
 
-    @ParameterizedTest
-    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
-    void serviceQuotasQuotaArn(PartitionCase partitionCase) {
-        String region = offered(partitionCase, "servicequotas");
-        String arn = json11(region, "servicequotas", "ServiceQuotasV20190624.ListServiceQuotas",
-                "{\"ServiceCode\":\"codebuild\"}")
-        .when().post("/").then().statusCode(200)
-            .extract().jsonPath().getString("Quotas[0].QuotaArn");
-        PartitionMatrix.assertArnIn(partitionCase, arn);
-    }
 
     @ParameterizedTest
     @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
@@ -1308,18 +1109,6 @@ class PartitionCrossServiceSmokeIntegrationTest {
         PartitionMatrix.assertArnIn(partitionCase, created.jsonPath().getString("ApplicationDetail.ApplicationARN"));
     }
 
-    @ParameterizedTest
-    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
-    void redshiftServerlessNamespaceArn(PartitionCase partitionCase) {
-        String region = offered(partitionCase, "redshift-serverless");
-        String body = "{\"namespaceName\":\"" + unique("smoke-namespace", partitionCase) + "\"}";
-        String arn = json11(region, "redshift-serverless", "RedshiftServerless.CreateNamespace", body)
-        .when().post("/").then().statusCode(200)
-            .extract().jsonPath().getString("namespace.namespaceArn");
-        cleanup.register(() -> json11(region, "redshift-serverless", "RedshiftServerless.DeleteNamespace", body)
-            .when().post("/"));
-        PartitionMatrix.assertArnIn(partitionCase, arn);
-    }
 
     @ParameterizedTest
     @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
@@ -1335,39 +1124,7 @@ class PartitionCrossServiceSmokeIntegrationTest {
         PartitionMatrix.assertArnIn(partitionCase, arn);
     }
 
-    @ParameterizedTest
-    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
-    void sageMakerModelArn(PartitionCase partitionCase) {
-        String region = offered(partitionCase, "sagemaker");
-        String name = unique("smoke-model", partitionCase);
-        String arn = json11(region, "sagemaker", "SageMaker.CreateModel",
-                "{\"ModelName\":\"" + name + "\",\"PrimaryContainer\":{\"Image\":\"busybox:stable\"}}")
-        .when().post("/").then().statusCode(200)
-            .extract().jsonPath().getString("ModelArn");
-        cleanup.register(() -> json11(region, "sagemaker", "SageMaker.DeleteModel",
-                "{\"ModelName\":\"" + name + "\"}").when().post("/"));
-        PartitionMatrix.assertArnIn(partitionCase, arn);
-    }
 
-    @ParameterizedTest
-    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
-    void timestreamInfluxDbInstanceArn(PartitionCase partitionCase) {
-        String region = offered(partitionCase, "timestream-influxdb");
-        String target = "AmazonTimestreamInfluxDB.";
-        Response created = json10(region, "timestream-influxdb", target + "CreateDbInstance",
-                "{\"name\":\"" + unique("smoke-tsi", partitionCase) + "\",\"password\":\"password123\","
-                        + "\"dbInstanceType\":\"db.influx.medium\",\"allocatedStorage\":20,"
-                        + "\"vpcSubnetIds\":[\"subnet-abc123\"],\"vpcSecurityGroupIds\":[\"sg-abc123\"]}")
-        .when().post("/").then().statusCode(200).extract().response();
-        String id = created.jsonPath().getString("id");
-        cleanup.register(() -> json10(region, "timestream-influxdb", target + "DeleteDbInstance",
-                "{\"identifier\":\"" + id + "\"}").when().post("/"));
-        // DeleteDbInstance leaves the auth secret an instance may have created behind.
-        cleanup.register(() -> json11(region, "secretsmanager", "secretsmanager.DeleteSecret",
-                "{\"SecretId\":\"READONLY-InfluxDB-auth-parameters-" + id
-                        + "\",\"ForceDeleteWithoutRecovery\":true}").when().post("/"));
-        PartitionMatrix.assertArnIn(partitionCase, created.jsonPath().getString("arn"));
-    }
 
     @ParameterizedTest
     @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)

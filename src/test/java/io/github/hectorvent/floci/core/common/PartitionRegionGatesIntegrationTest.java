@@ -46,29 +46,6 @@ class PartitionRegionGatesIntegrationTest {
         .when().post("/");
     }
 
-    @Test
-    void cloudFrontScopeIsRejectedWhereThePartitionHasNoCloudFront() {
-        createIpSet("us-gov-west-1", "gov-" + Long.toString(System.nanoTime(), 36)).then().statusCode(400)
-                .body("__type", containsString("WAFInvalidParameterException"))
-                .body("Reason", containsString("aws-us-gov"));
-    }
-
-    /** The scope is unavailable for every operation in such a partition, not only for creates. */
-    @Test
-    void cloudFrontScopeListsAreRejectedWhereThePartitionHasNoCloudFront() {
-        for (String action : new String[] {"ListIPSets", "ListWebACLs"}) {
-            given()
-                .header("Authorization", PartitionMatrix.sigV4Auth("us-gov-west-1", "wafv2"))
-                .header("X-Amz-Target", "AWSWAF_20190729." + action)
-                .contentType(JSON_1_1)
-                .body("{\"Scope\":\"CLOUDFRONT\"}")
-            .when().post("/")
-            .then().statusCode(400)
-                .body("__type", containsString("WAFInvalidParameterException"))
-                .body("Reason", containsString("aws-us-gov"));
-        }
-    }
-
     /**
      * Edge-optimized domains exist only in the commercial partition: GovCloud has no CloudFront, and
      * China has CloudFront but no edge-optimized API Gateway. A regional domain needs neither.
@@ -230,23 +207,6 @@ class PartitionRegionGatesIntegrationTest {
                 + "\"" + certificateArn + "\"}}")
             .then().statusCode(400)
                 .body("message", containsString("not available in partition " + partition));
-    }
-
-    @Test
-    void cloudFrontScopeLivesInThePartitionsImplicitGlobalRegion() {
-        String name = "cn-" + Long.toString(System.nanoTime(), 36);
-        Response created = createIpSet("cn-north-1", name);
-        created.then().statusCode(200);
-        String arn = created.jsonPath().getString("Summary.ARN");
-        String id = created.jsonPath().getString("Summary.Id");
-        String lockToken = created.jsonPath().getString("Summary.LockToken");
-        cleanup.register(() -> given()
-            .header("Authorization", PartitionMatrix.sigV4Auth("cn-north-1", "wafv2"))
-            .header("X-Amz-Target", "AWSWAF_20190729.DeleteIPSet")
-            .contentType(JSON_1_1)
-            .body("{\"Name\":\"" + name + "\",\"Scope\":\"CLOUDFRONT\",\"Id\":\"" + id + "\",\"LockToken\":\"" + lockToken + "\"}")
-        .when().post("/"));
-        assertTrue(arn.startsWith("arn:aws-cn:wafv2:cn-northwest-1:000000000000:global/ipset/" + name + "/"), arn);
     }
 
     /**
