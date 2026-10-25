@@ -764,7 +764,10 @@ public class Ec2ClientVpnService {
     }
 
     private Vpc requireVpc(String region, String vpcId) {
-        return ec2.describeVpcs(region, List.of(vpcId), Map.of()).getFirst();
+        // DescribeVpcs' service lookup answers an unknown id with no VPCs rather than an error.
+        return ec2.describeVpcs(region, List.of(vpcId), Map.of()).stream().findFirst()
+                .orElseThrow(() -> new AwsException("InvalidVpcID.NotFound",
+                        "The vpc ID '" + vpcId + "' does not exist", 400));
     }
 
     private static List<String> vpcIpv4Cidrs(Vpc vpc) {
