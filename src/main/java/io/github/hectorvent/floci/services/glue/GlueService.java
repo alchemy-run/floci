@@ -207,23 +207,31 @@ public class GlueService {
                        RegionResolver regionResolver,
                        ResourceGroupsTaggingService resourceGroupsTaggingService,
                        KmsService kmsService) {
-        this.databaseStore = storageFactory.create("glue", "databases.json", new TypeReference<>() {});
-        this.tableStore = storageFactory.create("glue", "tables.json", new TypeReference<>() {});
-        this.tableVersionStore = storageFactory.create("glue", "table_versions.json", new TypeReference<>() {});
-        this.columnStatisticsStore = storageFactory.create("glue", "column_statistics.json", new TypeReference<>() {});
-        this.partitionStore = storageFactory.create("glue", "partitions.json", new TypeReference<>() {});
-        this.partitionIndexStore = storageFactory.create(
-                "glue", "partition_indexes.json", new TypeReference<>() {});
-        this.partitionColumnStatisticsStore = storageFactory.create(
-                "glue", "partition_column_statistics.json", new TypeReference<>() {});
-        this.functionStore = storageFactory.create("glue", "functions.json", new TypeReference<>() {});
+        this.databaseStore = new GlueCatalogStorage<>(storageFactory.create(
+                "glue", "databases.json", new TypeReference<>() {}), regionResolver);
+        this.tableStore = new GlueCatalogStorage<>(storageFactory.create(
+                "glue", "tables.json", new TypeReference<>() {}), regionResolver);
+        this.tableVersionStore = new GlueCatalogStorage<>(storageFactory.create(
+                "glue", "table_versions.json", new TypeReference<>() {}), regionResolver);
+        this.columnStatisticsStore = new GlueCatalogStorage<>(storageFactory.create(
+                "glue", "column_statistics.json", new TypeReference<>() {}), regionResolver);
+        this.partitionStore = new GlueCatalogStorage<>(storageFactory.create(
+                "glue", "partitions.json", new TypeReference<>() {}), regionResolver);
+        this.partitionIndexStore = new GlueCatalogStorage<>(storageFactory.create(
+                "glue", "partition_indexes.json", new TypeReference<>() {}), regionResolver);
+        this.partitionColumnStatisticsStore = new GlueCatalogStorage<>(storageFactory.create(
+                "glue", "partition_column_statistics.json", new TypeReference<>() {}), regionResolver);
+        this.functionStore = new GlueCatalogStorage<>(storageFactory.create(
+                "glue", "functions.json", new TypeReference<>() {}), regionResolver);
         this.jobStore = storageFactory.create("glue", "jobs.json", new TypeReference<>() {});
         this.crawlerStore = storageFactory.create("glue", "crawlers.json", new TypeReference<>() {});
         this.classifierStore = storageFactory.create("glue", "classifiers.json", new TypeReference<>() {});
-        this.connectionStore = storageFactory.create("glue", "connections.json", new TypeReference<>() {});
-        this.resourcePolicyStore = storageFactory.create("glue", "resource_policy.json", new TypeReference<>() {});
-        this.encryptionSettingsStore = storageFactory.create(
-                "glue", "catalog_encryption_settings.json", new TypeReference<>() {});
+        this.connectionStore = new GlueCatalogStorage<>(storageFactory.create(
+                "glue", "connections.json", new TypeReference<>() {}), regionResolver);
+        this.resourcePolicyStore = new GlueCatalogStorage<>(storageFactory.create(
+                "glue", "resource_policy.json", new TypeReference<>() {}), regionResolver);
+        this.encryptionSettingsStore = new GlueCatalogStorage<>(storageFactory.create(
+                "glue", "catalog_encryption_settings.json", new TypeReference<>() {}), regionResolver);
         this.securityConfigurationStore = storageFactory.create(
             "glue", "security_configurations.json", new TypeReference<>() {});
         this.triggerStore = storageFactory.create("glue", "triggers.json", new TypeReference<>() {});
@@ -232,7 +240,6 @@ public class GlueService {
         this.regionResolver = regionResolver;
         this.resourceGroupsTaggingService = resourceGroupsTaggingService;
         this.kmsService = kmsService;
-        this.jobRunStore = storageFactory.create("glue", "job_runs.json", new TypeReference<>() {});
         this.jobBookmarkStore = storageFactory.create("glue", "job_bookmarks.json", new TypeReference<>() {});
         this.resourceTagStore = storageFactory.create("glue", "resource_tags.json", new TypeReference<>() {});
     }
@@ -279,7 +286,6 @@ public class GlueService {
         this.regionResolver = regionResolver;
         this.resourceGroupsTaggingService = resourceGroupsTaggingService;
         this.kmsService = kmsService;
-        this.jobRunStore = new io.github.hectorvent.floci.core.storage.InMemoryStorage<>();
         this.jobBookmarkStore = new io.github.hectorvent.floci.core.storage.InMemoryStorage<>();
         this.resourceTagStore = new io.github.hectorvent.floci.core.storage.InMemoryStorage<>();
     }
@@ -1906,10 +1912,6 @@ public class GlueService {
         // Jobs and crawlers skip normalizeName because AWS preserves their case
         String normalizedName = name;
         jobStore.delete(normalizedName);
-        jobRunStore.scan(k -> true).stream()
-                .filter(run -> name.equals(run.getJobName()))
-                .map(JobRun::getId)
-                .forEach(jobRunStore::delete);
         jobBookmarkStore.delete(name);
         deleteResourceTags(jobArn(region, normalizedName), region);
         LOG.infov("Deleted Glue Job: {0}", name);
@@ -2547,9 +2549,6 @@ public class GlueService {
         Crawler existing = crawlerStore.get(name)
                 .orElseThrow(() -> new AwsException("EntityNotFoundException", "Crawler " + update.getName() + " not found.", 400));
 
-        if (crawlerActive(existing)) {
-            throw new AwsException("CrawlerRunningException", "Crawler is running: " + name, 400);
-        }
         Crawler updated = new Crawler();
         updated.setName(existing.getName());
         updated.setCreationTime(existing.getCreationTime());
@@ -2583,9 +2582,6 @@ public class GlueService {
         String normalizedName = name;
         if (crawlerStore.get(normalizedName).isEmpty()) {
             throw new AwsException("EntityNotFoundException", "Crawler " + name + " not found.", 400);
-        }
-        if (crawlerActive(getCrawler(name))) {
-            throw new AwsException("CrawlerRunningException", "Crawler is running: " + name, 400);
         }
         crawlerStore.delete(normalizedName);
         deleteResourceTags(crawlerArn(region, normalizedName), region);
@@ -3070,11 +3066,8 @@ public class GlueService {
 
     private static final String CRAWLER_READY = "READY";
 
-    private static final String CRAWLER_RUNNING = "RUNNING";
 
-    private static final String CRAWLER_STOPPING = "STOPPING";
 
-    private final StorageBackend<String, JobRun> jobRunStore;
 
     private final StorageBackend<String, Map<String, Object>> jobBookmarkStore;
 
@@ -3082,62 +3075,13 @@ public class GlueService {
     @Inject
     GlueCrawlerRunner crawlerRunner;
 
-    public String startJobRun(String jobName, Map<String, String> arguments) {
-        getJob(jobName);
-        JobRun run = new JobRun();
-        run.setId("jr_" + UUID.randomUUID().toString().replace("-", ""));
-        run.setJobName(jobName);
-        run.setJobRunState("SUCCEEDED");
-        Instant now = Instant.now();
-        run.setStartedOn(now);
-        run.setCompletedOn(now);
-        run.setArguments(arguments);
-        jobRunStore.put(run.getId(), run);
-        jobBookmarkStore.put(jobName, defaultBookmark(jobName, run.getId()));
-        return run.getId();
-    }
 
-    public JobRun getJobRun(String jobName, String runId) {
-        JobRun run = jobRunStore.get(runId)
-                .orElseThrow(() -> new AwsException("EntityNotFoundException", "Job run not found: " + runId, 400));
-        if (!jobName.equals(run.getJobName())) {
-            throw new AwsException("EntityNotFoundException", "Job run not found: " + runId, 400);
-        }
-        return run;
-    }
 
-    public List<JobRun> getJobRuns(String jobName) {
-        getJob(jobName);
-        return jobRunStore.scan(k -> true).stream()
-                .filter(run -> jobName.equals(run.getJobName()))
-                .sorted(Comparator.comparing(JobRun::getStartedOn, Comparator.nullsLast(Comparator.reverseOrder())))
-                .toList();
-    }
 
-    public Map<String, Object> batchStopJobRun(String jobName, List<String> jobRunIds) {
-        List<Map<String, Object>> successful = new ArrayList<>();
-        List<Map<String, Object>> errors = new ArrayList<>();
-        for (String runId : jobRunIds == null ? List.<String>of() : jobRunIds) {
-            Optional<JobRun> found = jobRunStore.get(runId);
-            if (found.isEmpty() || !jobName.equals(found.get().getJobName())) {
-                errors.add(Map.of(
-                        "JobName", jobName,
-                        "JobRunId", runId,
-                        "ErrorDetail", Map.of(
-                                "ErrorCode", "EntityNotFoundException",
-                                "ErrorMessage", "Job run not found: " + runId)));
-                continue;
-            }
-            JobRun run = found.get();
-            if ("RUNNING".equals(run.getJobRunState()) || "STARTING".equals(run.getJobRunState())
-                    || "STOPPING".equals(run.getJobRunState())) {
-                run.setJobRunState("STOPPED");
-                run.setCompletedOn(Instant.now());
-                jobRunStore.put(runId, run);
-            }
-            successful.add(Map.of("JobName", jobName, "JobRunId", runId));
-        }
-        return Map.of("SuccessfulSubmissions", successful, "Errors", errors);
+
+    /** A job run's bookmark: the run just started becomes the job's latest. */
+    public void recordJobRunBookmark(String jobName, String runId) {
+        jobBookmarkStore.put(jobName, defaultBookmark(jobName, runId));
     }
 
     public Map<String, Object> getJobBookmark(String jobName, String runId) {
@@ -3158,43 +3102,9 @@ public class GlueService {
         return bookmark;
     }
 
-    public void startCrawler(String name) {
-        Objects.requireNonNull(crawlerRunner, "Glue crawler runner is not configured");
-        String accountId = regionResolver.getAccountId();
-        String region = regionResolver.getRegion();
-        synchronized (crawlerStore) {
-            Crawler crawler = getCrawler(name);
-            if (crawlerActive(crawler)) {
-                throw new AwsException("CrawlerRunningException", "Crawler is already running: " + name, 400);
-            }
-            crawler.setState(CRAWLER_RUNNING);
-            crawlerStore.put(name, crawler);
-        }
-        Instant startTime = Instant.now();
-        crawlerRunner.launch(accountId, region, () -> runCrawl(name, accountId, startTime));
-    }
 
-    public void stopCrawler(String name) {
-        synchronized (crawlerStore) {
-            Crawler crawler = getCrawler(name);
-            if (CRAWLER_STOPPING.equals(crawler.getState())) {
-                throw new AwsException("CrawlerStoppingException", "Crawler is stopping: " + name, 400);
-            }
-            if (!CRAWLER_RUNNING.equals(crawler.getState())) {
-                throw new AwsException("CrawlerNotRunningException", "Crawler is not running: " + name, 400);
-            }
-            crawler.setState(CRAWLER_STOPPING);
-            crawlerStore.put(name, crawler);
-        }
-    }
 
-    private static boolean crawlerActive(Crawler crawler) {
-        return CRAWLER_RUNNING.equals(crawler.getState()) || CRAWLER_STOPPING.equals(crawler.getState());
-    }
 
-    private boolean crawlStopRequested(String name) {
-        return crawlerStore.get(name).map(crawler -> !CRAWLER_RUNNING.equals(crawler.getState())).orElse(true);
-    }
 
     /**
      * Crawls a crawler's targets and writes the tables it finds into its database, as a finished
@@ -3202,39 +3112,14 @@ public class GlueService {
      */
     public void crawlIntoCatalog(String name) {
         Crawler crawler = getCrawler(name);
-        if (crawler.getDatabaseName() == null || crawler.getDatabaseName().isBlank()) {
-            throw new AwsException("InvalidInputException", "Crawler " + name + " has no DatabaseName.", 400);
+        // A crawler with no database has nowhere to write; its run is upstream's simulated one.
+        if (crawlerRunner == null || crawler.getDatabaseName() == null || crawler.getDatabaseName().isBlank()) {
+            return;
         }
         getDatabase(crawler.getDatabaseName());
         applyCrawl(crawler, crawlerRunner.crawl(crawler, regionResolver.getAccountId(), () -> false));
     }
 
-    void runCrawl(String name, String accountId, Instant startTime) {
-        try {
-            Crawler crawler = getCrawler(name);
-            if (crawlStopRequested(name)) {
-                finishCrawl(name, "CANCELLED", null, startTime);
-                return;
-            }
-            if (crawler.getDatabaseName() == null || crawler.getDatabaseName().isBlank()) {
-                throw new AwsException("InvalidInputException", "Crawler " + name + " has no DatabaseName.", 400);
-            }
-            getDatabase(crawler.getDatabaseName());
-            List<GlueCrawlerRunner.CrawledTable> tables =
-                    crawlerRunner.crawl(crawler, accountId, () -> crawlStopRequested(name));
-            if (crawlStopRequested(name)) {
-                finishCrawl(name, "CANCELLED", null, startTime);
-                return;
-            }
-            applyCrawl(crawler, tables);
-            finishCrawl(name, "SUCCEEDED", null, startTime);
-        } catch (AwsException e) {
-            finishCrawl(name, "FAILED", e.getMessage(), startTime);
-        } catch (RuntimeException e) {
-            LOG.warnv(e, "Glue crawler {0} failed", name);
-            finishCrawl(name, "FAILED", "Internal Service Exception", startTime);
-        }
-    }
 
     private void applyCrawl(Crawler crawler, List<GlueCrawlerRunner.CrawledTable> tables) {
         String databaseName = crawler.getDatabaseName();
@@ -3257,25 +3142,6 @@ public class GlueService {
         }
     }
 
-    private void finishCrawl(String name, String status, String errorMessage, Instant startTime) {
-        synchronized (crawlerStore) {
-            Optional<Crawler> stored = crawlerStore.get(name);
-            if (stored.isEmpty()) {
-                return;
-            }
-            Crawler crawler = stored.get();
-            LastCrawlInfo lastCrawl = new LastCrawlInfo();
-            lastCrawl.setStatus(status);
-            lastCrawl.setStartTime(startTime);
-            lastCrawl.setErrorMessage(errorMessage);
-            lastCrawl.setMessagePrefix(UUID.randomUUID().toString());
-            crawler.setLastCrawl(lastCrawl);
-            crawler.setCrawlElapsedTime(0L);
-            crawler.setState(CRAWLER_READY);
-            crawlerStore.put(name, crawler);
-        }
-        LOG.infov("Glue Crawler {0} finished: {1}", name, status);
-    }
 
     public boolean handlesResourceArn(String resourceArn) {
         if (resourceArn == null) {

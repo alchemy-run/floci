@@ -319,6 +319,7 @@ public class GlueJsonHandler {
             case "StartJobRun" -> {
                 JobRun run = jobRunService.startJobRun(request.path("JobName").asText(null),
                         request.path("JobRunId").asText(null), jobRunOverrides(request));
+                glueService.recordJobRunBookmark(run.getJobName(), run.getId());
                 yield Response.ok(Map.of("JobRunId", run.getId())).build();
             }
             case "GetJobRun" -> Response.ok(Map.of("JobRun", jobRunService.getJobRun(
@@ -1423,15 +1424,7 @@ public class GlueJsonHandler {
                 request.path("RunId").asText(null)))).build();
     }
 
-    private Response handleGetJobRun(JsonNode request) {
-        return Response.ok(Map.of("JobRun", glueService.getJobRun(
-                request.get("JobName").asText(),
-                request.get("RunId").asText()))).build();
-    }
 
-    private Response handleGetJobRuns(JsonNode request) {
-        return Response.ok(Map.of("JobRuns", glueService.getJobRuns(request.get("JobName").asText()))).build();
-    }
 
     private Response handleResetJobBookmark(JsonNode request) {
         return Response.ok(Map.of("JobBookmarkEntry", glueService.resetJobBookmark(
@@ -1439,13 +1432,4 @@ public class GlueJsonHandler {
                 request.path("RunId").asText(null)))).build();
     }
 
-    @SuppressWarnings("unchecked")
-    private Response handleStartJobRun(JsonNode request) {
-        String jobName = request.get("JobName").asText();
-        Map<String, String> arguments = request.has("Arguments")
-                ? mapper.convertValue(request.get("Arguments"), Map.class)
-                : null;
-        String id = glueService.startJobRun(jobName, arguments);
-        return Response.ok(Map.of("JobRunId", id)).build();
-    }
 }

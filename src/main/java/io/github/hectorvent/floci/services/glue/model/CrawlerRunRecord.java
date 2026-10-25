@@ -21,6 +21,7 @@ public class CrawlerRunRecord {
     private Instant lastStart;
     private String lastStatus;
     private String lastMessagePrefix;
+    private String lastErrorMessage;
     private List<Double> runtimeSeconds = new ArrayList<>();
     private long finishedCount;
     private List<FinishedCrawl> recentCrawls = new ArrayList<>();
@@ -53,6 +54,9 @@ public class CrawlerRunRecord {
 
     public String getLastMessagePrefix() { return lastMessagePrefix; }
     public void setLastMessagePrefix(String lastMessagePrefix) { this.lastMessagePrefix = lastMessagePrefix; }
+
+    public String getLastErrorMessage() { return lastErrorMessage; }
+    public void setLastErrorMessage(String lastErrorMessage) { this.lastErrorMessage = lastErrorMessage; }
 
     public List<Double> getRuntimeSeconds() { return runtimeSeconds; }
     public void setRuntimeSeconds(List<Double> runtimeSeconds) { this.runtimeSeconds = runtimeSeconds; }

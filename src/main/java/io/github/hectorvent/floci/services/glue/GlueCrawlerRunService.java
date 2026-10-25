@@ -100,10 +100,12 @@ public class GlueCrawlerRunService {
         record.setCurrentWorkflowRunId(workflowRunId);
         recordStore.put(name, record);
         LOG.infov("Started Glue crawler {0}", name);
+        record.setLastErrorMessage(null);
         try {
             glueService.crawlIntoCatalog(name);
         } catch (RuntimeException e) {
             LOG.warnv("Glue crawler {0} failed: {1}", name, e.getMessage());
+            record.setLastErrorMessage(e instanceof AwsException ? e.getMessage() : "Internal Service Exception");
             finish(record, clock.instant(), "FAILED");
             return crawlId;
         }
@@ -139,6 +141,7 @@ public class GlueCrawlerRunService {
             lastCrawl.setLogGroup(LOG_GROUP);
             lastCrawl.setLogStream(crawler.getName());
             lastCrawl.setMessagePrefix(record.getLastMessagePrefix());
+            lastCrawl.setErrorMessage(record.getLastErrorMessage());
             crawler.setLastCrawl(lastCrawl);
         } else {
             crawler.setLastCrawl(null);
