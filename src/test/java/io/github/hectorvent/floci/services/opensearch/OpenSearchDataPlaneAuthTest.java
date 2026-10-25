@@ -88,8 +88,11 @@ class OpenSearchDataPlaneAuthTest {
 
     @Test
     void domainAccessPolicyGrantsTheCallerWithoutAnIdentityGrant() throws Exception {
+        // The policy names the session itself: a same-account root principal only delegates to IAM,
+        // which this caller has no grant in.
         String policy = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\","
-                + "\"Principal\":{\"AWS\":\"arn:aws:iam::000000000000:root\"},\"Action\":\"es:*\","
+                + "\"Principal\":{\"AWS\":\"arn:aws:sts::000000000000:assumed-role/fn/session\"},"
+                + "\"Action\":\"es:*\","
                 + "\"Resource\":\"" + DOMAIN_ARN + "/*\"}]}";
         when(iam.resolveCallerContext(ROLE_KEY)).thenReturn(CallerContext.of(List.of()));
         byte[] body = "{\"doc\":{\"plays\":2}}".getBytes(StandardCharsets.UTF_8);

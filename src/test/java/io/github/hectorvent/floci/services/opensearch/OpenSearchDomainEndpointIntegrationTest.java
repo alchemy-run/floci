@@ -5,8 +5,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.emptyString;
-import static org.hamcrest.Matchers.endsWith;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.startsWith;
@@ -45,7 +45,7 @@ class OpenSearchDomainEndpointIntegrationTest {
                 .post("/2021-01-01/opensearch/domain")
             .then()
                 .statusCode(200)
-                .body("DomainStatus.Endpoint", endsWith(".cn-north-1.es.amazonaws.com.cn"));
+                .body("DomainStatus.Endpoint", containsString(".cn-north-1.es."));
         } finally {
             given().header("Authorization",
                             "AWS4-HMAC-SHA256 Credential=AKID/20260101/cn-north-1/es/aws4_request")
@@ -65,8 +65,8 @@ class OpenSearchDomainEndpointIntegrationTest {
             .statusCode(200)
             .body("DomainStatus.Processing", is(false))
             .body("DomainStatus.Endpoint", not(emptyString()))
-            .body("DomainStatus.Endpoint", startsWith("search-" + DOMAIN + "-"))
-            .body("DomainStatus.Endpoint", endsWith(".us-east-1.es.amazonaws.com"));
+            // The endpoint is Floci's data-plane gateway, reachable as given: <domain>.<region>.es.<host>.
+            .body("DomainStatus.Endpoint", startsWith(DOMAIN + ".us-east-1.es."));
 
         String first = given()
             .header("Authorization", AUTH_HEADER)
