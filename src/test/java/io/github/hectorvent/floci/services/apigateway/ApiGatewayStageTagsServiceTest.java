@@ -17,6 +17,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -154,7 +155,8 @@ class ApiGatewayStageTagsServiceTest {
         when(storage.persistentPath()).thenReturn(dir.toString());
         when(config.defaultAccountId()).thenReturn("000000000000");
         ServiceConfigAccess access = mock(ServiceConfigAccess.class);
-        when(access.storageMode("apigateway")).thenReturn("persistent");
+        // ApiGatewayService also builds the v2 service's stores.
+        when(access.storageMode(anyString())).thenReturn("persistent");
         StorageFactory factory = new StorageFactory(config, access);
         return new ApiGatewayService(factory, config, mock(TlsCertificateManager.class));
     }

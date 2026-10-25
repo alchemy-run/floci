@@ -321,8 +321,8 @@ class FlinkContainerManagerTest {
 
         assertThrows(RuntimeException.class, () -> manager.startCluster(app));
 
-        verify(lifecycleManager, times(2)).removeIfExists("floci-kinesisanalytics-000000000000-us-west-2-jm-failure");
-        verify(lifecycleManager, atLeastOnce()).removeIfExists("floci-kinesisanalytics-000000000000-us-west-2-jm-failure-tm");
+        verify(lifecycleManager, times(2)).removeIfExists("floci-aws-kinesisanalytics-000000000000-us-west-2-jm-failure");
+        verify(lifecycleManager, atLeastOnce()).removeIfExists("floci-aws-kinesisanalytics-000000000000-us-west-2-jm-failure-tm");
         assertNull(app.getContainerId());
         assertNull(app.getTaskManagerContainerId());
     }
@@ -342,7 +342,7 @@ class FlinkContainerManagerTest {
         assertThrows(RuntimeException.class, () -> manager.startCluster(app));
 
         verify(lifecycleManager).stopAndRemove("jm-id", null);
-        verify(lifecycleManager, atLeastOnce()).removeIfExists("floci-kinesisanalytics-000000000000-us-west-2-tm-failure-tm");
+        verify(lifecycleManager, atLeastOnce()).removeIfExists("floci-aws-kinesisanalytics-000000000000-us-west-2-tm-failure-tm");
         assertNull(app.getContainerId());
         assertNull(app.getRestEndpoint());
         assertNull(app.getTaskManagerContainerId());
@@ -361,8 +361,8 @@ class FlinkContainerManagerTest {
 
         assertThrows(RuntimeException.class, () -> manager.startCluster(app));
 
-        verify(lifecycleManager, times(2)).removeIfExists("floci-kinesisanalytics-000000000000-us-west-2-log4j-copy-failure");
-        verify(lifecycleManager, atLeastOnce()).removeIfExists("floci-kinesisanalytics-000000000000-us-west-2-log4j-copy-failure-tm");
+        verify(lifecycleManager, times(2)).removeIfExists("floci-aws-kinesisanalytics-000000000000-us-west-2-log4j-copy-failure");
+        verify(lifecycleManager, atLeastOnce()).removeIfExists("floci-aws-kinesisanalytics-000000000000-us-west-2-log4j-copy-failure-tm");
         verify(lifecycleManager, Mockito.never()).startCreated(any(), any());
         assertNull(app.getContainerId());
     }
@@ -384,8 +384,8 @@ class FlinkContainerManagerTest {
         manager.stopCluster(otherRegion);
         manager.stopCluster(otherAccount);
         verify(lifecycleManager, Mockito.never()).stopAndRemove(eq("owned-jm"), any());
-        verify(lifecycleManager).removeIfExists("floci-kinesisanalytics-000000000000-us-east-1-shared");
-        verify(lifecycleManager).removeIfExists("floci-kinesisanalytics-111111111111-us-west-2-shared");
+        verify(lifecycleManager).removeIfExists("floci-aws-kinesisanalytics-000000000000-us-east-1-shared");
+        verify(lifecycleManager).removeIfExists("floci-aws-kinesisanalytics-111111111111-us-west-2-shared");
         manager.stopAll();
         verify(lifecycleManager).stopAndRemove("owned-jm", null);
     }
@@ -406,7 +406,7 @@ class FlinkContainerManagerTest {
 
         manager.startCluster(app);
 
-        String volume = "floci-kinesisanalytics-000000000000-us-west-2-snap-savepoints";
+        String volume = "floci-aws-kinesisanalytics-000000000000-us-west-2-snap-savepoints";
         for (ContainerSpec spec : captureCreatedSpecs()) {
             assertTrue(spec.mounts().stream().anyMatch(m -> volume.equals(m.getSource())
                     && "/opt/flink/savepoints".equals(m.getTarget())), spec.cmd() + " must mount " + volume);
