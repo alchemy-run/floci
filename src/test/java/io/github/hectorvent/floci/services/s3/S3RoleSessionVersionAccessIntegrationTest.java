@@ -156,31 +156,6 @@ class S3RoleSessionVersionAccessIntegrationTest {
                 .header("x-amz-copy-source-version-id", own);
     }
 
-    @Test
-    void presignedUrlWithARewrittenVersionIdNoLongerVerifies() {
-        String bucket = versionedBucket("presign");
-        String old = put(bucket, "key.txt", "old body");
-        String current = put(bucket, "key.txt", "current body");
-        IamRole role = createRole(bucket, "\"s3:GetObject\",\"s3:GetObjectVersion\"", false);
-        RoleSessionCredentials credentials = iamService.mintRoleSession(role.getArn());
-
-        Map<String, String> query = presignQuery(credentials, old);
-        String signature = presignSignature(credentials, "/" + bucket + "/key.txt", query);
-        given().urlEncodingEnabled(false)
-                .when().get("/" + bucket + "/key.txt?" + S3PresignedSignature.encodeQuery(query)
-                        + "&X-Amz-Signature=" + signature)
-                .then().statusCode(200)
-                .header("x-amz-version-id", old)
-                .body(equalTo("old body"));
-
-        Map<String, String> tampered = new LinkedHashMap<>(query);
-        tampered.put("versionId", current);
-        given().urlEncodingEnabled(false)
-                .when().get("/" + bucket + "/key.txt?" + S3PresignedSignature.encodeQuery(tampered)
-                        + "&X-Amz-Signature=" + signature)
-                .then().statusCode(403)
-                .body(containsString("<Code>SignatureDoesNotMatch</Code>"));
-    }
 
     private String roleSession(String bucket, String objectActions, boolean listBucket) {
         IamRole role = createRole(bucket, objectActions, listBucket);

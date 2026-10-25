@@ -6,6 +6,7 @@ import io.github.hectorvent.floci.core.common.TagHandler;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -30,7 +31,7 @@ public class ApiGatewayTagHandler implements TagHandler {
     private static final String REST_APIS = "/restapis/";
     private static final String USAGE_PLANS = "/usageplans/";
     private static final String VPC_LINKS = "/vpclinks/";
-    private static final Pattern STAGE_RESOURCE = Pattern.compile("/restapis/[^/]+/stages/([^/]+)");
+    private static final Pattern STAGE_RESOURCE = Pattern.compile("/restapis/[^/?#]+/stages/([^/?#]+)");
 
     private final ApiGatewayService service;
 
@@ -69,9 +70,10 @@ public class ApiGatewayTagHandler implements TagHandler {
             return service.getVpcLink(region, vpcLinkId).getTags();
         }
         String stageName = stageNameFromArn(arn);
-        return stageName != null
+        // A copy: the caller may change the map it gets without changing the stored tags.
+        return new LinkedHashMap<>(stageName != null
                 ? service.getStageTags(region, apiIdFromArn(arn), stageName)
-                : service.getTags(region, restApiIdFromArn(arn));
+                : service.getTags(region, restApiIdFromArn(arn)));
     }
 
     @Override
@@ -190,10 +192,7 @@ public class ApiGatewayTagHandler implements TagHandler {
             return null;
         }
         String id = resource.substring(prefix.length());
-        return id.isEmpty() || id.contains("/") ? null : id;
+        // A query or fragment is not part of any resource id, so such an ARN names nothing.
+        return id.isEmpty() || id.contains("/") || id.contains("?") || id.contains("#") ? null : id;
     }
-
-
-
-
 }

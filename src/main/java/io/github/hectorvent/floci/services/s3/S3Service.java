@@ -3306,8 +3306,7 @@ public class S3Service implements Resettable, ResourceProvider {
      */
     public ObjectTaggingResult getObjectTaggingResult(String bucketName, String key, String versionId) {
         S3Object obj = getTaggingTargetEntry(bucketName, key, versionId, "GET").value();
-        return new ObjectTaggingResult(reportedVersionId(obj.getVersionId(), versionId),
-                obj.getTags() != null ? obj.getTags() : Map.of());
+        return new ObjectTaggingResult(obj.getVersionId(), obj.getTags() != null ? obj.getTags() : Map.of());
     }
 
     public void deleteObjectTagging(String bucketName, String key) {
@@ -3319,8 +3318,7 @@ public class S3Service implements Resettable, ResourceProvider {
      * null, and returns that version's id.
      */
     public String deleteObjectTagging(String bucketName, String key, String versionId) {
-        return reportedVersionId(updateObjectTagging(bucketName, key, versionId, "DELETE", new HashMap<>()),
-                versionId);
+        return updateObjectTagging(bucketName, key, versionId, "DELETE", new HashMap<>());
     }
 
     /**

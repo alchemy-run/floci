@@ -2458,19 +2458,7 @@ public class ApiGatewayService implements ResourceProvider {
     }
 
     public BasePathMapping createBasePathMapping(String region, String domainName, Map<String, Object> request) {
-        String basePath = canonicalBasePath((String) request.get("basePath"));
-        String apiId = (String) request.get("restApiId");
-        String stage = (String) request.get("stage");
-
-        BasePathMapping mapping = new BasePathMapping(basePath, apiId, stage);
-        // New IDs use a separate namespace from the legacy path-encoded IDs.
-        mapping.setApiMappingId("a" + UUID.randomUUID().toString().replace("-", ""));
-        synchronized (domainNameLock) {
-            requireMappingPathAvailable(region, domainName, basePath, null);
-            basePathMappingStore.put(mappingKey(region, domainName, basePath), mapping);
-        }
-        LOG.infov("Created mapping for {0} path={1} -> API {2}", domainName, basePath, apiId);
-        return mapping;
+        return createBasePathMapping(region, domainName, request, REST_API_TYPE, Set.of());
     }
 
     private BasePathMapping createBasePathMapping(String region, String domainName, Map<String, Object> request,
@@ -2511,19 +2499,15 @@ public class ApiGatewayService implements ResourceProvider {
     }
 
     public BasePathMapping getBasePathMapping(String region, String domainName, String basePath) {
-        synchronized (domainNameLock) {
-            String path = (basePath == null || basePath.isEmpty() || "/" .equals(basePath)) ? "(none)" : basePath;
-            return basePathMappingStore.get(mappingKey(region, domainName, path))
-                    .orElseThrow(() -> new AwsException("NotFoundException", "Base path mapping not found", 404));
-        }
+        String path = (basePath == null || basePath.isEmpty() || "/" .equals(basePath)) ? "(none)" : basePath;
+        return basePathMappingStore.get(mappingKey(region, domainName, path))
+                .orElseThrow(() -> new AwsException("NotFoundException", "Base path mapping not found", 404));
     }
 
     public List<BasePathMapping> getBasePathMappings(String region, String domainName) {
-        synchronized (domainNameLock) {
-            getDomainName(region, domainName);
-            String prefix = region + "::" + domainName + "::";
-            return basePathMappingStore.scan(k -> k.startsWith(prefix));
-        }
+        getDomainName(region, domainName);
+        String prefix = region + "::" + domainName + "::";
+        return basePathMappingStore.scan(k -> k.startsWith(prefix));
     }
 
     public void deleteBasePathMapping(String region, String domainName, String basePath) {
@@ -2534,20 +2518,26 @@ public class ApiGatewayService implements ResourceProvider {
         }
     }
 
-    /** Maps exact stored paths to records, preserving distinct legacy root spellings. */
+    /**
+     * The mappings on a domain, keyed by the base path each record is stored under.
+     *
+     * <p>That path is the record's identity, and it is not always what the record reports:
+     * {@link BasePathMapping} normalises an empty base path to {@code (none)} in its constructor,
+     * so a record written before writes were canonicalised can sit under the key {@code ""} while
+     * its own field reads {@code (none)}. Anything identifying a record — an id derived from it, a
+     * delete aimed at it — has to use the key rather than the field.
+     */
     public Map<String, BasePathMapping> basePathMappingsByStoredPath(String region, String domainName) {
-        synchronized (domainNameLock) {
-            getDomainName(region, domainName);
-            String prefix = region + "::" + domainName + "::";
-            Map<String, BasePathMapping> byStoredPath = new LinkedHashMap<>();
-            for (String key : basePathMappingStore.keys()) {
-                if (key.startsWith(prefix)) {
-                    basePathMappingStore.get(key)
-                            .ifPresent(mapping -> byStoredPath.put(key.substring(prefix.length()), mapping));
-                }
+        getDomainName(region, domainName);
+        String prefix = region + "::" + domainName + "::";
+        Map<String, BasePathMapping> byStoredPath = new LinkedHashMap<>();
+        for (String key : basePathMappingStore.keys()) {
+            if (key.startsWith(prefix)) {
+                basePathMappingStore.get(key)
+                        .ifPresent(mapping -> byStoredPath.put(key.substring(prefix.length()), mapping));
             }
-            return byStoredPath;
         }
+        return byStoredPath;
     }
 
     /**
@@ -2608,10 +2598,10 @@ public class ApiGatewayService implements ResourceProvider {
             }
         }
 
-        BasePathMapping updated = new BasePathMapping(mapping.getBasePath(), newRestApiId, newStage);
-        updated.setApiMappingId(apiMappingId(normalizedPath, mapping));
-        basePathMappingStore.put(mappingKey(region, domainName, normalizedPath), updated);
-        return updated;
+        mapping.setRestApiId(newRestApiId);
+        mapping.setStage(newStage);
+        basePathMappingStore.put(mappingKey(region, domainName, normalizedPath), mapping);
+        return mapping;
     }
 
     // ──────────────────────────── Custom Domains and API Mappings (v2) ────────────────────────────
@@ -4870,54 +4860,9 @@ public class ApiGatewayService implements ResourceProvider {
         }
     }
 
-    static String legacyApiMappingId(String storedPath) {
-        return "m" + HexFormat.of().formatHex(
-                (storedPath == null ? "" : storedPath).getBytes(StandardCharsets.UTF_8));
-    }
 
-    static String apiMappingId(String storedPath, BasePathMapping mapping) {
-        return mapping.getApiMappingId() == null ? legacyApiMappingId(storedPath) : mapping.getApiMappingId();
-    }
 
-    public StoredMapping updateApiMapping(String region, String domainName, String apiMappingId,
-                                          Map<String, Object> request, BiConsumer<String, String> validateTarget) {
-        synchronized (domainNameLock) {
-            StoredMapping found = getApiMapping(region, domainName, apiMappingId);
-            if (request == null || !(request.get("apiId") instanceof String apiId) || apiId.isBlank()) {
-                throw new AwsException("BadRequestException", "apiId is required", 400);
-            }
-            for (String field : List.of("stage", "apiMappingKey")) {
-                if (request.containsKey(field) && !(request.get(field) instanceof String)) {
-                    throw new AwsException("BadRequestException", field + " must be a string", 400);
-                }
-            }
-            String stage = request.containsKey("stage") ? (String) request.get("stage") : found.mapping().getStage();
-            String path = request.containsKey("apiMappingKey")
-                    ? canonicalBasePath((String) request.get("apiMappingKey")) : found.storedPath();
-            if (!path.equals(found.storedPath())) {
-                requireMappingPathAvailable(region, domainName, path, found.storedPath());
-            }
-            validateTarget.accept(apiId, stage);
 
-            BasePathMapping updated = new BasePathMapping(
-                    path.equals(found.storedPath()) ? found.mapping().getBasePath() : path, apiId, stage);
-            updated.setApiMappingId(apiMappingId(found.storedPath(), found.mapping()));
-            basePathMappingStore.put(mappingKey(region, domainName, path), updated);
-            if (!path.equals(found.storedPath())) {
-                basePathMappingStore.delete(mappingKey(region, domainName, found.storedPath()));
-            }
-            return new StoredMapping(path, updated);
-        }
-    }
-
-    private void requireMappingPathAvailable(String region, String domainName, String path, String currentPath) {
-        boolean taken = basePathMappingsByStoredPath(region, domainName).keySet().stream()
-                .anyMatch(existing -> !existing.equals(currentPath)
-                        && canonicalBasePath(existing).equals(canonicalBasePath(path)));
-        if (taken) {
-            throw new AwsException("ConflictException", "Base path already exists for this domain name", 409);
-        }
-    }
 
     private OpenAPI parseOpenApiSpec(String specBody) {
         SwaggerParseResult result = new io.swagger.parser.OpenAPIParser().readContents(specBody, null, null);

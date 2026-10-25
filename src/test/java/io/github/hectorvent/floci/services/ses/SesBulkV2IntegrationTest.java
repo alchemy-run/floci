@@ -29,7 +29,7 @@ class SesBulkV2IntegrationTest {
     @BeforeEach
     void verifySenders() {
         if (!sendersVerified) {
-            SesVerifiedSenders.verify("bulk@example.com", "inline@example.com");
+            SesVerifiedSenders.verify("bulk@example.com", "bulk2@example.com", "inline@example.com");
             sendersVerified = true;
         }
     }

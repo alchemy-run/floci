@@ -1728,7 +1728,7 @@ public class ApiGatewayController {
                                   @PathParam("apiMappingId") String apiMappingId) {
         String region = regionResolver.resolveRegion(headers);
         StoredMapping found = service.getApiMapping(region, domainName, apiMappingId);
-        return Response.ok(toApiMappingNode(found.storedPath(), found.mapping()).toString())
+        return Response.ok(toApiMappingNode(found).toString())
                 .type(MediaType.APPLICATION_JSON).build();
     }
 
@@ -3073,23 +3073,8 @@ public class ApiGatewayController {
         return node;
     }
 
-    private ObjectNode toApiMappingNode(String storedPath, BasePathMapping mapping) {
-        ObjectNode node = objectMapper.createObjectNode();
-        node.put("apiMappingId", ApiGatewayService.apiMappingId(storedPath, mapping));
-        node.put("apiId", mapping.getRestApiId());
-        node.put("stage", mapping.getStage());
-        // v1 stores the root mapping as "(none)"; v2 expresses it as an empty key.
-        // Legacy records can report a different base path than their stored key.
-        String canonical = ApiGatewayService.canonicalBasePath(storedPath);
-        node.put("apiMappingKey", "(none)".equals(canonical) ? "" : canonical);
-        return node;
-    }
 
 
-    /** Legacy records without a persisted ID retain their exact stored-path identity. */
-    static String apiMappingId(String storedPath) {
-        return ApiGatewayService.legacyApiMappingId(storedPath);
-    }
 
 
     private ObjectNode exportOpenApi(String region, String apiId, String specification) {
