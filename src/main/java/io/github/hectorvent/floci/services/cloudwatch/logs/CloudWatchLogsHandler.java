@@ -564,7 +564,7 @@ public class CloudWatchLogsHandler {
 
     private Response handleListTagsForResource(JsonNode request, String region) {
         String resourceArn = request.path("resourceArn").asText();
-        String groupName = extractLogGroupNameFromArn(resourceArn);
+        String groupName = logsService.resolveTagTarget(resourceArn, region).name();
         Map<String, String> tags = logsService.listTagsLogGroup(groupName, region);
 
         ObjectNode response = objectMapper.createObjectNode();
@@ -576,7 +576,7 @@ public class CloudWatchLogsHandler {
 
     private Response handleTagResource(JsonNode request, String region) {
         String resourceArn = request.path("resourceArn").asText();
-        String groupName = extractLogGroupNameFromArn(resourceArn);
+        String groupName = logsService.resolveTagTarget(resourceArn, region).name();
         Map<String, String> tags = extractTags(request.path("tags"));
         logsService.tagLogGroup(groupName, tags, region);
         return Response.ok(objectMapper.createObjectNode()).build();
@@ -584,7 +584,7 @@ public class CloudWatchLogsHandler {
 
     private Response handleUntagResource(JsonNode request, String region) {
         String resourceArn = request.path("resourceArn").asText();
-        String groupName = extractLogGroupNameFromArn(resourceArn);
+        String groupName = logsService.resolveTagTarget(resourceArn, region).name();
         List<String> tagKeys = new ArrayList<>();
         request.path("tagKeys").forEach(k -> tagKeys.add(k.asText()));
         logsService.untagLogGroup(groupName, tagKeys, region);

@@ -2365,7 +2365,7 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
         String id = generateVpcOriginId();
         origin.setId(id);
         origin.setAccountId(accountId);
-        origin.setArn(AwsArnUtils.Arn.of("cloudfront", "", accountId, "vpcorigin/" + id).toString());
+        origin.setArn(arn("vpcorigin/" + id));
         origin.setStatus("Deployed");
         origin.setCreatedTime(now);
         origin.setLastModifiedTime(now);
@@ -2432,7 +2432,7 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
         Instant now = Instant.now();
         String id = UUID.randomUUID().toString();
         store.setId(id);
-        store.setArn(AwsArnUtils.Arn.of("cloudfront", "", accountId, "key-value-store/" + id).toString());
+        store.setArn(arn("key-value-store/" + id));
         store.setStatus("READY");
         store.setCreatedTime(now);
         store.setLastModifiedTime(now);

@@ -492,6 +492,11 @@ public class CloudWatchLogsService implements ResourceProvider {
         groupStore.put(key, group);
     }
 
+    /** The log group a tagging request's resourceArn names, refused when it is another account's or region's. */
+    public LogGroupTagTarget resolveTagTarget(String resourceArn, String region) {
+        return LogGroupTagTarget.resolve(resourceArn, region, regionResolver.getAccountId(), regionResolver.getPartition());
+    }
+
     public void tagLogGroup(String groupName, Map<String, String> tags, String region) {
         String key = groupKey(region, groupName);
         LogGroup group = groupStore.get(key)
