@@ -9,6 +9,7 @@ import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
+import io.github.hectorvent.floci.testing.InlineMocks;
 import org.junit.jupiter.api.Test;
 
 import java.net.ServerSocket;
@@ -74,9 +75,9 @@ class ServerlessCacheContainerManagerTest {
         when(docker.inspectContainerCmd("engine-id").exec().getState()).thenReturn(state);
         when(lifecycleManager.getDockerClient()).thenReturn(docker);
         ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
-        ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
+        ContainerBuilder.Builder builder = InlineMocks.inlineMock(ContainerBuilder.Builder.class, RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-        when(builder.build()).thenReturn(mock(ContainerSpec.class));
+        when(builder.build()).thenReturn(InlineMocks.inlineMock(ContainerSpec.class));
         EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
         when(config.services().elasticache().dockerNetwork()).thenReturn(Optional.empty());
         ServerlessCacheContainerManager manager = new ServerlessCacheContainerManager(containerBuilder,
