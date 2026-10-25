@@ -9,6 +9,7 @@ import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.ses.model.Tag;
 import io.github.hectorvent.floci.services.ses.model.Tenant;
+import io.github.hectorvent.floci.services.ses.model.TenantResource;
 import io.github.hectorvent.floci.services.ses.model.TenantResourceAssociation;
 import io.github.hectorvent.floci.services.ses.model.TenantSuppressionAttributes;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -31,7 +32,6 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
-import io.github.hectorvent.floci.services.ses.model.TenantResource;
 
 /**
  * SES v2 tenants (multi-tenancy), owning the {@code tenantStore}. The domain owns id/ARN generation,

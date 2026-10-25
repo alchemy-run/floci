@@ -9,10 +9,16 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.CookieHeaders;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.RequestContext;
+import io.github.hectorvent.floci.core.common.RequestHost;
 import io.github.hectorvent.floci.services.lambda.model.InvocationType;
 import io.github.hectorvent.floci.services.lambda.model.InvokeResult;
 import io.github.hectorvent.floci.services.lambda.model.LambdaAlias;
 import io.github.hectorvent.floci.services.lambda.model.LambdaFunction;
+import io.github.hectorvent.floci.services.lambda.model.LambdaUrlConfig;
+import io.github.hectorvent.floci.services.lambda.model.StreamingPayload;
+import io.quarkus.vertx.http.runtime.CurrentVertxRequest;
+import io.vertx.core.http.HttpServerRequest;
+import io.vertx.ext.web.RoutingContext;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
@@ -27,28 +33,24 @@ import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.StreamingOutput;
 import jakarta.ws.rs.core.UriInfo;
 import org.jboss.logging.Logger;
 
+import java.io.ByteArrayOutputStream;
+import java.net.URI;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.UUID;
-import io.github.hectorvent.floci.core.common.RequestHost;
-import io.github.hectorvent.floci.services.lambda.model.LambdaUrlConfig;
-import io.github.hectorvent.floci.services.lambda.model.StreamingPayload;
-import io.quarkus.vertx.http.runtime.CurrentVertxRequest;
-import io.vertx.ext.web.RoutingContext;
-import jakarta.ws.rs.core.StreamingOutput;
-import java.net.URI;
-import java.net.URLDecoder;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutorService;
@@ -383,7 +385,7 @@ public class LambdaUrlInvocationController {
      * already received after it.
      */
     Prelude readPrelude(StreamingPayload stream) throws Exception {
-        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         while (true) {
             byte[] accumulated = buffer.toByteArray();
             int delimiter = indexOfDelimiter(accumulated);
@@ -517,7 +519,7 @@ public class LambdaUrlInvocationController {
      * space. The Vert.x request is never rewritten, so it is the authoritative source.
      */
     private RawTarget rawTarget(String urlId, HttpHeaders headers, UriInfo uriInfo) {
-        io.vertx.core.http.HttpServerRequest vertxRequest = currentRequest();
+        HttpServerRequest vertxRequest = currentRequest();
         String rawPath;
         String rawQuery;
         String host;
@@ -535,7 +537,7 @@ public class LambdaUrlInvocationController {
                 rawQuery != null ? rawQuery : "");
     }
 
-    private io.vertx.core.http.HttpServerRequest currentRequest() {
+    private HttpServerRequest currentRequest() {
         if (currentVertxRequest == null) {
             return null;
         }

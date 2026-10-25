@@ -1,9 +1,14 @@
 package io.github.hectorvent.floci.services.cloudfront;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.AwsNamespaces;
 import io.github.hectorvent.floci.core.common.XmlBuilder;
 import io.github.hectorvent.floci.core.common.XmlParser;
+import io.github.hectorvent.floci.services.cloudfront.edge.CloudFrontFunctionRuntime;
 import io.github.hectorvent.floci.services.cloudfront.model.*;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
@@ -13,18 +18,16 @@ import org.jboss.logging.Logger;
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
+
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.hectorvent.floci.core.common.AwsArnUtils;
-import io.github.hectorvent.floci.services.cloudfront.edge.CloudFrontFunctionRuntime;
-import java.util.Base64;
+import java.util.regex.Matcher;
 
 @Path("/2020-05-31")
 public class CloudFrontController {
@@ -3999,7 +4002,7 @@ public class CloudFrontController {
     /** CloudFront returns the result wrapped as {@code {"request":…}} or {@code {"response":…}}. */
     private String functionOutput(CloudFrontFunctionRuntime.Execution execution) {
         try {
-            var wrapper = mapper.createObjectNode();
+            ObjectNode wrapper = mapper.createObjectNode();
             wrapper.set(execution.isResponse() ? "response" : "request", execution.output());
             return mapper.writeValueAsString(wrapper);
         } catch (Exception e) {
@@ -4311,7 +4314,7 @@ public class CloudFrontController {
             return null;
         }
         String pattern = "(?is)<(?:[\\w.-]+:)?" + localName + "\\b[^>]*>.*?</(?:[\\w.-]+:)?" + localName + ">";
-        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile(pattern).matcher(body);
+        Matcher matcher = java.util.regex.Pattern.compile(pattern).matcher(body);
         return matcher.find() ? matcher.group() : null;
     }
 

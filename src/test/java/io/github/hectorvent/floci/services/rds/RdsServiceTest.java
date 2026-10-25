@@ -24,6 +24,7 @@ import io.github.hectorvent.floci.services.rds.model.DatabaseEngine;
 import io.github.hectorvent.floci.services.rds.model.DbCluster;
 import io.github.hectorvent.floci.services.rds.model.DbClusterEndpoint;
 import io.github.hectorvent.floci.services.rds.model.DbClusterParameterGroup;
+import io.github.hectorvent.floci.services.rds.model.DbClusterSettings;
 import io.github.hectorvent.floci.services.rds.model.DbClusterSnapshot;
 import io.github.hectorvent.floci.services.rds.model.DbEndpoint;
 import io.github.hectorvent.floci.services.rds.model.DbInstance;
@@ -40,12 +41,11 @@ import io.github.hectorvent.floci.services.rds.model.DbSnapshot;
 import io.github.hectorvent.floci.services.rds.model.DbSubnetGroup;
 import io.github.hectorvent.floci.services.rds.model.GlobalCluster;
 import io.github.hectorvent.floci.services.rds.model.GlobalClusterMember;
-import io.github.hectorvent.floci.services.rds.model.DbClusterSettings;
 import io.github.hectorvent.floci.services.rds.model.LogExportChanges;
 import io.github.hectorvent.floci.services.rds.model.OptionGroup;
 import io.github.hectorvent.floci.services.rds.model.OptionGroupOption;
-import io.github.hectorvent.floci.services.rds.model.RdsEvent;
 import io.github.hectorvent.floci.services.rds.model.PointInTimeRestoreRequest;
+import io.github.hectorvent.floci.services.rds.model.RdsEvent;
 import io.github.hectorvent.floci.services.rds.model.ReadReplicaRequest;
 import io.github.hectorvent.floci.services.rds.proxy.RdsAuthProxy;
 import io.github.hectorvent.floci.services.rds.proxy.RdsProxyManager;
@@ -1589,7 +1589,7 @@ class RdsServiceTest {
 
     @Test
     void describeOrderableDbInstanceOptionsFiltersByEngineVersionAndClass() {
-        var result = rdsService.describeOrderableDbInstanceOptions(
+        List<Map<String, String>> result = rdsService.describeOrderableDbInstanceOptions(
                 "postgres", "18.1", "db.t3.micro");
 
         assertEquals(1, result.size());
@@ -1600,9 +1600,9 @@ class RdsServiceTest {
 
     @Test
     void describeOrderableDbInstanceOptionsIncludesModernGravitonPostgresClasses() {
-        var flociPinned = rdsService.describeOrderableDbInstanceOptions(
+        List<Map<String, String>> flociPinned = rdsService.describeOrderableDbInstanceOptions(
                 "postgres", "18.1", "db.m8g.large");
-        var awsEquivalent = rdsService.describeOrderableDbInstanceOptions(
+        List<Map<String, String>> awsEquivalent = rdsService.describeOrderableDbInstanceOptions(
                 "postgres", "18.4", "db.m8g.large");
 
         assertEquals(1, flociPinned.size());
@@ -1615,7 +1615,7 @@ class RdsServiceTest {
 
     @Test
     void describeOrderableDbInstanceOptionsIncludesCurrentSmallGravitonPostgresClass() {
-        var result = rdsService.describeOrderableDbInstanceOptions(
+        List<Map<String, String>> result = rdsService.describeOrderableDbInstanceOptions(
                 "postgres", "16.14", "db.t4g.small");
 
         assertEquals(1, result.size());
@@ -6812,7 +6812,7 @@ class RdsServiceTest {
 
         assertEquals(DbInstanceStatus.FAILED, refreshed.getStatus());
         verify(proxyManager).stopProxy("rds-resource:" + refreshed.getDbInstanceArn());
-        var events = rdsService.describeEvents("dead-db", "db-instance", null, null, 60);
+        List<RdsEvent> events = rdsService.describeEvents("dead-db", "db-instance", null, null, 60);
         assertEquals(1, events.size());
         assertEquals(List.of("availability"), events.getFirst().eventCategories());
         assertEquals(refreshed.getDbInstanceArn(), events.getFirst().sourceArn());

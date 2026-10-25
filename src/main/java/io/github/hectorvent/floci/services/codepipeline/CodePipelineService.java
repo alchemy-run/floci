@@ -49,6 +49,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.Enumeration;
 import java.util.HashSet;
@@ -73,7 +74,6 @@ import java.util.zip.CRC32;
 import java.util.zip.Inflater;
 import java.util.zip.InflaterInputStream;
 import java.util.zip.ZipEntry;
-import java.util.Base64;
 
 @ApplicationScoped
 public class CodePipelineService {

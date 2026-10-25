@@ -41,8 +41,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.ToLongFunction;
 import java.util.regex.Pattern;
 
 import static io.github.hectorvent.floci.services.sagemaker.SageMakerFeatureStoreService.boundedInt;
@@ -1352,7 +1354,7 @@ public class SageMakerHyperPodService {
     }
 
     private static <T> Predicate<T> createdWithin(JsonNode request, String afterField, String beforeField,
-                                                  java.util.function.ToLongFunction<T> creationTime) {
+                                                  ToLongFunction<T> creationTime) {
         JsonNode after = request.path(afterField);
         JsonNode before = request.path(beforeField);
         return item -> (!after.isNumber() || creationTime.applyAsLong(item) > (long) (after.asDouble() * 1000))
@@ -1372,7 +1374,7 @@ public class SageMakerHyperPodService {
     }
 
     private <T> ObjectNode page(List<T> items, JsonNode request, String field,
-                                java.util.function.BiConsumer<T, ObjectNode> render) {
+                                BiConsumer<T, ObjectNode> render) {
         int max = boundedInt(request, "MaxResults", 10, 1, 100);
         int start = offsetToken(text(request, "NextToken"));
         ArrayNode out = mapper.createArrayNode();

@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.core.common.dns;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.BuildImageResultCallback;
 import com.github.dockerjava.api.exception.NotFoundException;
+import com.github.dockerjava.api.model.ContainerNetwork;
 import com.github.dockerjava.core.command.ExecStartResultCallback;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
@@ -92,9 +93,9 @@ public class SourceNetworkHelper {
         try {
             containerId = lifecycleManager.create(spec);
             lifecycleManager.startCreated(containerId, spec);
-            var networks = lifecycleManager.getDockerClient().inspectContainerCmd(containerId).exec()
+            Map<String, ContainerNetwork> networks = lifecycleManager.getDockerClient().inspectContainerCmd(containerId).exec()
                     .getNetworkSettings().getNetworks();
-            var endpoint = networks.get(network);
+            ContainerNetwork endpoint = networks.get(network);
             if (endpoint == null && networks.size() == 1) {
                 endpoint = networks.values().iterator().next();
             }
@@ -259,7 +260,7 @@ public class SourceNetworkHelper {
                 + "&& [ -n \"$(ss -H -ltn 'sport = :443')\" ] "
                 + "&& [ -n \"$(ss -H -ltn 'sport = :" + config.port() + "')\" ]; then exit 0; fi; "
                 + "sleep 0.1; done; exit 1";
-        var docker = lifecycleManager.getDockerClient();
+        DockerClient docker = lifecycleManager.getDockerClient();
         String execId = docker.execCreateCmd(containerId).withCmd("sh", "-c", probe)
                 .withAttachStdout(true).withAttachStderr(true).exec().getId();
         ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -373,7 +374,7 @@ public class SourceNetworkHelper {
             return;
         }
         String image = containerBuilder.resolveImage(DEFAULT_IMAGE);
-        var docker = lifecycleManager.getDockerClient();
+        DockerClient docker = lifecycleManager.getDockerClient();
         try {
             docker.inspectImageCmd(image).exec();
             return;

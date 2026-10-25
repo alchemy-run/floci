@@ -8,6 +8,7 @@ import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.cognito.model.CognitoFederatedIdentity;
 import io.github.hectorvent.floci.services.cognito.model.CognitoIdentityPool;
+import io.github.hectorvent.floci.services.cognitoidentity.CognitoIdentityJsonHandler;
 import io.github.hectorvent.floci.services.cognitoidentity.model.CognitoIdentityProvider;
 import io.github.hectorvent.floci.services.cognitoidentity.model.IdentityPool;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -24,7 +25,7 @@ public class CognitoIdentityService {
 
     // The legacy and canonical services share a class name, so qualify the delegate type.
     private final io.github.hectorvent.floci.services.cognitoidentity.CognitoIdentityService delegate;
-    private final io.github.hectorvent.floci.services.cognitoidentity.CognitoIdentityJsonHandler handler;
+    private final CognitoIdentityJsonHandler handler;
     private final ObjectMapper objectMapper;
     private final RegionResolver regionResolver;
 
@@ -35,7 +36,7 @@ public class CognitoIdentityService {
         this.delegate = delegate;
         this.objectMapper = objectMapper;
         this.regionResolver = regionResolver;
-        this.handler = new io.github.hectorvent.floci.services.cognitoidentity.CognitoIdentityJsonHandler(
+        this.handler = new CognitoIdentityJsonHandler(
                 delegate, objectMapper);
     }
 
@@ -132,7 +133,7 @@ public class CognitoIdentityService {
                 "identitypool/" + identityPoolId);
     }
 
-    io.github.hectorvent.floci.services.cognitoidentity.CognitoIdentityJsonHandler handler() {
+    CognitoIdentityJsonHandler handler() {
         return handler;
     }
 

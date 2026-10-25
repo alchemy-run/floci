@@ -1,7 +1,5 @@
 package io.github.hectorvent.floci.services.lambdamicrovms;
 
-import io.github.hectorvent.floci.testing.InlineMocks;
-
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
@@ -17,6 +15,7 @@ import io.github.hectorvent.floci.services.lambda.microvm.MicrovmImageService;
 import io.github.hectorvent.floci.services.lambda.microvm.MicrovmImageStore;
 import io.github.hectorvent.floci.services.lambda.microvm.MicrovmRuntimeService;
 import io.github.hectorvent.floci.services.lambda.microvm.MicrovmStore;
+import io.github.hectorvent.floci.testing.InlineMocks;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

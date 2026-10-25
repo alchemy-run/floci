@@ -35,6 +35,7 @@ import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -865,7 +866,7 @@ public class Ec2ClientVpnService {
     }
 
     private void requireCertificate(String region, String certificateArn) {
-        var match = CERTIFICATE_ARN.matcher(certificateArn);
+        Matcher match = CERTIFICATE_ARN.matcher(certificateArn);
         if (!match.matches()) {
             throw new AwsException("InvalidParameterValue", "Invalid certificate ARN " + certificateArn, 400);
         }

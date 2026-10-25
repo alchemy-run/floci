@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -293,7 +294,7 @@ class SageMakerFeatureStoreServiceTest {
     }
 
     private static Map<String, String> values(JsonNode response) {
-        Map<String, String> out = new java.util.LinkedHashMap<>();
+        Map<String, String> out = new LinkedHashMap<>();
         response.path("Record").forEach(v -> out.put(v.path("FeatureName").asText(), v.path("ValueAsString").asText()));
         return out;
     }

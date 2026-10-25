@@ -18,6 +18,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.container.ContainerRequestContext;
+import org.jboss.logging.Logger;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -33,7 +34,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
-import org.jboss.logging.Logger;
 import java.util.regex.Pattern;
 
 /**
@@ -1656,7 +1656,7 @@ public class ResourceArnBuilder {
             return requestArn;
         }
         for (ResourceArnResolver resolver : arnResolvers) {
-            java.util.Optional<String> resolved = resolver.resolve(credentialScope, requestArn, region);
+            Optional<String> resolved = resolver.resolve(credentialScope, requestArn, region);
             if (resolved.isPresent()) {
                 return resolved.get();
             }

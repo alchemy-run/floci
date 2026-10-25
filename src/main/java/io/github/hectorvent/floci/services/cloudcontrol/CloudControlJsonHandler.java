@@ -9,6 +9,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 
+import java.util.ArrayList;
+import java.util.List;
+
 @ApplicationScoped
 public class CloudControlJsonHandler {
 
@@ -96,7 +99,7 @@ public class CloudControlJsonHandler {
         ObjectNode response = mapper.createObjectNode();
         response.put("TypeName", typeName);
         ArrayNode resources = response.putArray("ResourceDescriptions");
-        var listed = service.listResources(region, accountId, typeName).stream()
+        List<CloudControlService.ResourceDescription> listed = service.listResources(region, accountId, typeName).stream()
                 .sorted(java.util.Comparator.comparing(CloudControlService.ResourceDescription::identifier)).toList();
         int start = offset(request, listed.size());
         int end = Math.min(listed.size(), start + pageSize(request));
@@ -132,20 +135,20 @@ public class CloudControlJsonHandler {
     }
 
     private Response listRequests(JsonNode request, String region, String accountId) {
-        var filter = request.path("ResourceRequestStatusFilter");
-        var events = service.listRequests(region, accountId, strings(filter.path("Operations")),
+        JsonNode filter = request.path("ResourceRequestStatusFilter");
+        List<CloudControlService.ProgressEvent> events = service.listRequests(region, accountId, strings(filter.path("Operations")),
                 strings(filter.path("OperationStatuses")));
         ObjectNode response = mapper.createObjectNode();
         ArrayNode summaries = response.putArray("ResourceRequestStatusSummaries");
         int start = offset(request, events.size());
         int end = Math.min(events.size(), start + pageSize(request));
-        for (var event : events.subList(start, end)) summaries.add(progressNode(event));
+        for (CloudControlService.ProgressEvent event : events.subList(start, end)) summaries.add(progressNode(event));
         if (end < events.size()) response.put("NextToken", Integer.toString(end));
         return Response.ok(response).build();
     }
 
-    private java.util.List<String> strings(JsonNode node) {
-        java.util.List<String> result = new java.util.ArrayList<>();
+    private List<String> strings(JsonNode node) {
+        List<String> result = new ArrayList<>();
         if (!node.isMissingNode() && !node.isArray()) {
             throw new AwsException("InvalidRequestException", "Request filters must be arrays.", 400);
         }

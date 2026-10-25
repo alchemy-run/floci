@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.TreeSet;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -175,6 +176,6 @@ class OpenSearchDataPlaneAuthTest {
 
     /** The test queries are already RFC 3986 encoded, so canonical form is just key order. */
     private static String sortedQuery(String query) {
-        return String.join("&", new java.util.TreeSet<>(List.of(query.split("&"))));
+        return String.join("&", new TreeSet<>(List.of(query.split("&"))));
     }
 }

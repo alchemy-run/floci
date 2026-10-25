@@ -10,6 +10,7 @@ import io.github.hectorvent.floci.services.opensearch.model.AdvancedSecurityOpti
 import io.github.hectorvent.floci.services.opensearch.model.ClusterConfig;
 import io.github.hectorvent.floci.services.opensearch.model.Domain;
 import io.github.hectorvent.floci.services.opensearch.model.DomainEndpointOptions;
+import io.github.hectorvent.floci.services.opensearch.model.DomainMaintenance;
 import io.github.hectorvent.floci.services.opensearch.model.EbsOptions;
 import io.github.hectorvent.floci.services.opensearch.model.EncryptionAtRestOptions;
 import io.github.hectorvent.floci.services.opensearch.model.NodeToNodeEncryptionOptions;
@@ -28,7 +29,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import io.github.hectorvent.floci.services.opensearch.model.DomainMaintenance;
 
 @Path("/2021-01-01")
 @Produces(MediaType.APPLICATION_JSON)

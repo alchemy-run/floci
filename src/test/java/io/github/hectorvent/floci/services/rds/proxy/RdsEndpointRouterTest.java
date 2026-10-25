@@ -15,6 +15,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -36,7 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RdsEndpointRouterTest {
 
     private final RdsEndpointRouter router = new RdsEndpointRouter(2000, 2000, 10);
-    private final List<ServerSocket> backends = new java.util.ArrayList<>();
+    private final List<ServerSocket> backends = new ArrayList<>();
 
     @AfterEach
     void tearDown() throws IOException {

@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.apigateway;
 import io.github.hectorvent.floci.core.common.RequestHost;
 import io.github.hectorvent.floci.core.common.RequestScopes;
 import io.github.hectorvent.floci.services.apigateway.model.BasePathMapping;
+import io.github.hectorvent.floci.services.apigateway.model.CustomDomain;
 import io.github.hectorvent.floci.services.apigatewayv2.ApiGatewayV2Service;
 import jakarta.annotation.Priority;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -15,7 +16,6 @@ import jakarta.ws.rs.ext.Provider;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
-import io.github.hectorvent.floci.services.apigateway.model.CustomDomain;
 
 /**
  * Routes requests based on the Host header for API Gateway custom domains.

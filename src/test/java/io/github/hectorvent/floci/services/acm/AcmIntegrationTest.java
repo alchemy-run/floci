@@ -1,15 +1,14 @@
 package io.github.hectorvent.floci.services.acm;
 
-import io.github.hectorvent.floci.testing.AcmDnsRecordValidationProfile;
-import io.quarkus.test.junit.TestProfile;
-
 import io.github.hectorvent.floci.services.acm.model.Certificate;
 import io.github.hectorvent.floci.services.acm.model.DomainValidation;
 import io.github.hectorvent.floci.services.route53.Route53Service;
 import io.github.hectorvent.floci.services.route53.model.ResourceRecord;
 import io.github.hectorvent.floci.services.route53.model.ResourceRecordSet;
+import io.github.hectorvent.floci.testing.AcmDnsRecordValidationProfile;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.TestProfile;
 import io.restassured.path.json.JsonPath;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeAll;

@@ -1,9 +1,9 @@
 package io.github.hectorvent.floci.services.eventbridge.model;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
-import com.fasterxml.jackson.annotation.JsonAlias;
 
 @RegisterForReflection
 public class Connection {

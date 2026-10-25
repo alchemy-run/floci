@@ -1620,7 +1620,7 @@ public class SesQueryHandler {
 
     private Response handleListTemplates(String region) {
         List<EmailTemplate> templates = templateService.listTemplates(region);
-        var xml = new XmlBuilder().start("TemplatesMetadata");
+        XmlBuilder xml = new XmlBuilder().start("TemplatesMetadata");
         for (EmailTemplate t : templates) {
             xml.start("member")
                     .elem("Name", t.getTemplateName());

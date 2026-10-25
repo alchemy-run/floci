@@ -4,6 +4,7 @@ import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.iam.model.IamRole;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.Response;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -104,7 +105,7 @@ class SecretsManagerRoleSessionAccessIntegrationTest {
         return role;
     }
 
-    private static io.restassured.response.Response call(String accessKeyId, String operation, String body) {
+    private static Response call(String accessKeyId, String operation, String body) {
         return given()
                 .header("Authorization", "AWS4-HMAC-SHA256 Credential=" + accessKeyId
                         + "/20260720/us-east-1/secretsmanager/aws4_request, SignedHeaders=host, Signature=abc")

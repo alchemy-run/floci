@@ -1,7 +1,5 @@
 package io.github.hectorvent.floci.services.batch;
 
-import io.github.hectorvent.floci.testing.InlineMocks;
-
 import com.github.dockerjava.api.DockerClient;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
@@ -15,6 +13,7 @@ import io.github.hectorvent.floci.services.batch.model.BatchNodeExecution;
 import io.github.hectorvent.floci.services.batch.model.BatchResourceRequirement;
 import io.github.hectorvent.floci.services.batch.model.BatchRunResult;
 import io.github.hectorvent.floci.services.batch.model.BatchRuntimePlatform;
+import io.github.hectorvent.floci.testing.InlineMocks;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -36,9 +35,9 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.RETURNS_SELF;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;

@@ -2,7 +2,9 @@ package io.github.hectorvent.floci.core.common.docker;
 
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.BuildImageResultCallback;
+import com.github.dockerjava.api.command.InspectImageResponse;
 import com.github.dockerjava.api.exception.NotFoundException;
+import com.github.dockerjava.api.model.ContainerConfig;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 
@@ -52,11 +54,11 @@ public final class LocallyBuiltHelperImage {
         }
         String image = containerBuilder.resolveImage(configuredImage);
         try {
-            var inspected = dockerClient.inspectImageCmd(image).exec();
+            InspectImageResponse inspected = dockerClient.inspectImageCmd(image).exec();
             if (versionLabel == null || inspected == null) {
                 return;
             }
-            var current = inspected == null ? null : inspected.getConfig();
+            ContainerConfig current = inspected == null ? null : inspected.getConfig();
             if (current != null && current.getLabels() != null
                     && version.equals(current.getLabels().get(versionLabel))) {
                 return;

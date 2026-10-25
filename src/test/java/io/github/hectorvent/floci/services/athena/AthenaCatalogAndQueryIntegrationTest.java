@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.athena;
 
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.ValidatableResponse;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -225,7 +226,7 @@ class AthenaCatalogAndQueryIntegrationTest {
                 .statusCode(200)
                 .extract().path("QueryExecutionId");
 
-        io.restassured.response.ValidatableResponse received = null;
+        ValidatableResponse received = null;
         for (int attempt = 0; attempt < 10; attempt++) {
             received = given()
                     .contentType("application/x-amz-json-1.0")
@@ -246,7 +247,7 @@ class AthenaCatalogAndQueryIntegrationTest {
                 .body("Messages[0].Body", containsString("\"workgroupName\":\"primary\""));
     }
 
-    private static io.restassured.response.ValidatableResponse athena(String action, String body) {
+    private static ValidatableResponse athena(String action, String body) {
         return given()
                 .header("X-Amz-Target", "AmazonAthena." + action)
                 .contentType(CONTENT_TYPE)

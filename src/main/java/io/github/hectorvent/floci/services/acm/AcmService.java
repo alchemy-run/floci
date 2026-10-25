@@ -25,12 +25,16 @@ import io.github.hectorvent.floci.services.acm.model.ListResult;
 import io.github.hectorvent.floci.services.acm.model.ResourceRecord;
 import io.github.hectorvent.floci.services.acm.model.RevocationReason;
 import io.github.hectorvent.floci.services.acm.model.ValidationMethod;
+import io.github.hectorvent.floci.services.route53.Route53Service;
+import io.github.hectorvent.floci.services.route53.model.HostedZone;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.cert.X509Certificate;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -40,6 +44,7 @@ import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -52,14 +57,9 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import io.github.hectorvent.floci.services.route53.Route53Service;
-import io.github.hectorvent.floci.services.route53.model.HostedZone;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
-import java.util.function.Predicate;
 
 /**
  * ACM (AWS Certificate Manager) service implementation for the local emulator.

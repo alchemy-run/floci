@@ -1,8 +1,9 @@
 package io.github.hectorvent.floci.services.securityhub;
 
 import io.github.hectorvent.floci.services.organizations.OrganizationsService;
-import jakarta.inject.Inject;
+import io.github.hectorvent.floci.services.organizations.model.Handshake;
 import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 
 import static io.restassured.RestAssured.given;
@@ -146,7 +147,7 @@ class SecurityHubOrganizationIntegrationTest {
     private void createOrganization(String managementAccountId, String... members) {
         organizationsService.createOrganization(managementAccountId, "ALL");
         for (String member : members) {
-            var handshake = organizationsService.inviteAccountToOrganization(
+            Handshake handshake = organizationsService.inviteAccountToOrganization(
                     managementAccountId, member, "ACCOUNT", null);
             organizationsService.acceptHandshake(member, handshake.getId());
         }

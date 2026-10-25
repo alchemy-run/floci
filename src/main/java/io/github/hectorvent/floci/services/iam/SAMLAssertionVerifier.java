@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.iam;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsRegionFacts;
 import io.github.hectorvent.floci.core.common.Digests;
+import io.github.hectorvent.floci.services.iam.model.IamSamlProvider;
 import io.github.hectorvent.floci.services.iam.model.SAMLProvider;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
@@ -13,8 +14,10 @@ import javax.xml.crypto.dsig.Transform;
 import javax.xml.crypto.dsig.XMLSignature;
 import javax.xml.crypto.dsig.XMLSignatureFactory;
 import javax.xml.crypto.dsig.dom.DOMValidateContext;
+
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.time.Instant;
@@ -23,8 +26,6 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Set;
-import io.github.hectorvent.floci.services.iam.model.IamSamlProvider;
-import java.security.MessageDigest;
 
 /** Verifies the specific SAML assertion contract consumed by STS. */
 final class SAMLAssertionVerifier {

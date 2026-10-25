@@ -8,10 +8,14 @@ import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.PersistentStorage;
 import io.github.hectorvent.floci.services.rum.model.AppMonitor;
+import io.github.hectorvent.floci.services.rum.model.RumMetricDefinition;
+import io.github.hectorvent.floci.services.rum.model.RumMetricsDestination;
+import io.github.hectorvent.floci.services.rum.model.RumResourcePolicy;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -192,7 +196,7 @@ class RumServiceTest {
     @Test
     void appMonitorConfigurationCanBeReloadedFromPersistentStorage(@TempDir Path tempDir) throws Exception {
         Path file = tempDir.resolve("rum.json");
-        var firstStore = new PersistentStorage<String, AppMonitor>(
+        PersistentStorage<String, AppMonitor> firstStore = new PersistentStorage<String, AppMonitor>(
                 file, new TypeReference<Map<String, AppMonitor>>() {
                 });
         firstStore.load();
@@ -207,7 +211,7 @@ class RumServiceTest {
                 }
                 """));
 
-        var reloadedStore = new PersistentStorage<String, AppMonitor>(
+        PersistentStorage<String, AppMonitor> reloadedStore = new PersistentStorage<String, AppMonitor>(
                 file, new TypeReference<Map<String, AppMonitor>>() {
                 });
         reloadedStore.load();
@@ -252,7 +256,7 @@ class RumServiceTest {
     @Test
     void tagResourceEnforcesTheFiftyTagLimit() throws Exception {
         service.createAppMonitor(REGION, request("{\"Name\":\"full\",\"Domain\":\"example.com\"}"));
-        Map<String, String> tags = new java.util.HashMap<>();
+        Map<String, String> tags = new HashMap<>();
         for (int i = 0; i < 51; i++) {
             tags.put("key" + i, "value");
         }
@@ -294,7 +298,7 @@ class RumServiceTest {
                   }
                 }
                 """.formatted(sessionCountId)));
-        var definitions = service.batchGetRumMetricDefinitions(REGION, "metrics", "CloudWatch", null, null, null);
+        RumService.Slice<RumMetricDefinition> definitions = service.batchGetRumMetricDefinitions(REGION, "metrics", "CloudWatch", null, null, null);
         assertEquals(Map.of("metadata.browserName", "BrowserName"),
                 definitions.items().getFirst().getDimensionKeys());
         assertEquals(sessionCountId, definitions.items().getFirst().getMetricDefinitionId());
@@ -357,7 +361,7 @@ class RumServiceTest {
         service.putRumMetricsDestination(REGION, "evidently", request(
                 "{\"Destination\":\"Evidently\",\"DestinationArn\":\"" + experiment + "\",\"IamRoleArn\":\""
                         + role + "\"}"));
-        var destination = service.listRumMetricsDestinations(REGION, "evidently", null, null).items().getFirst();
+        RumMetricsDestination destination = service.listRumMetricsDestinations(REGION, "evidently", null, null).items().getFirst();
         assertEquals(experiment, destination.getDestinationArn());
         assertEquals(role, destination.getIamRoleArn());
     }
@@ -368,14 +372,14 @@ class RumServiceTest {
         AwsException missing = assertThrows(AwsException.class, () -> service.getResourcePolicy(REGION, "policy"));
         assertEquals("PolicyNotFoundException", missing.getErrorCode());
 
-        var first = service.putResourcePolicy(REGION, "policy", policyRequest("One", null));
+        RumResourcePolicy first = service.putResourcePolicy(REGION, "policy", policyRequest("One", null));
         assertEquals(first.getPolicyRevisionId(), service.getResourcePolicy(REGION, "policy").getPolicyRevisionId());
 
         AwsException stale = assertThrows(AwsException.class,
                 () -> service.putResourcePolicy(REGION, "policy", policyRequest("Two", "stale-revision")));
         assertEquals("InvalidPolicyRevisionIdException", stale.getErrorCode());
 
-        var second = service.putResourcePolicy(REGION, "policy", policyRequest("Two", first.getPolicyRevisionId()));
+        RumResourcePolicy second = service.putResourcePolicy(REGION, "policy", policyRequest("Two", first.getPolicyRevisionId()));
         assertNotEquals(first.getPolicyRevisionId(), second.getPolicyRevisionId());
         assertTrue(service.getResourcePolicy(REGION, "policy").getPolicyDocument().contains("Two"));
 
@@ -509,7 +513,7 @@ class RumServiceTest {
                 {"Version":"2012-10-17","Statement":[{"Sid":"%s","Effect":"Allow",
                 "Principal":{"AWS":"arn:aws:iam::000000000000:root"},"Action":["rum:PutRumEvents"],
                 "Resource":"arn:aws:rum:us-east-1:000000000000:appmonitor/policy"}]}""".formatted(sid);
-        Map<String, String> body = new java.util.HashMap<>();
+        Map<String, String> body = new HashMap<>();
         body.put("PolicyDocument", document);
         if (revisionId != null) {
             body.put("PolicyRevisionId", revisionId);

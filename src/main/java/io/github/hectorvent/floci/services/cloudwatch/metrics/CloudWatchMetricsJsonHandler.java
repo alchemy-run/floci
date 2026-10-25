@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsErrorResponse;
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.services.cloudwatch.dashboards.CloudWatchDashboardsService;
 import io.github.hectorvent.floci.services.cloudwatch.dashboards.model.Dashboard;
@@ -65,7 +66,7 @@ public class CloudWatchMetricsJsonHandler {
             case "TagResource" -> handleTagResource(request, region);
             case "UntagResource" -> handleUntagResource(request, region);
             case "GetMetricData" -> handleGetMetricData(request, region);
-            case "ListManagedInsightRules" -> throw new io.github.hectorvent.floci.core.common.AwsException(
+            case "ListManagedInsightRules" -> throw new AwsException(
                     "InvalidParameterValueException", "Managed Contributor Insights rules are not supported for this resource", 400);
             case "GetInsightRuleReport" -> Response.ok(insightsService.report(request, region)).build();
             case "DeleteInsightRules", "EnableInsightRules", "DisableInsightRules" ->
@@ -828,8 +829,8 @@ public class CloudWatchMetricsJsonHandler {
             for (String field : List.of("Namespace", "MetricName", "Statistic", "ExtendedStatistic", "Period", "Unit")) {
                 if (request.has(field) && !request.get(field).asText().equals(alarm.path(field).asText())) matches = false;
             }
-            var expected = parseDimensionsJson(request.path("Dimensions"));
-            var actual = parseDimensionsJson(alarm.path("Dimensions"));
+            List<Dimension> expected = parseDimensionsJson(request.path("Dimensions"));
+            List<Dimension> actual = parseDimensionsJson(alarm.path("Dimensions"));
             if (!CloudWatchMetricsService.buildDimKey(expected).equals(CloudWatchMetricsService.buildDimKey(actual))) matches = false;
             if (!matches) alarms.remove(i);
         }
@@ -840,7 +841,7 @@ public class CloudWatchMetricsJsonHandler {
         String name = CloudWatchMetadataService.required(request, "AlarmName");
         if (metricsService.describeAlarms(List.of(name), null, region).isEmpty()
                 && !metadataService.isComposite(name, region)) throw CloudWatchMetadataService.notFound(name);
-        throw new io.github.hectorvent.floci.core.common.AwsException("ValidationException",
+        throw new AwsException("ValidationException",
                 "Contributor data is available only for contributor-enabled Metrics Insights alarms", 400);
     }
 

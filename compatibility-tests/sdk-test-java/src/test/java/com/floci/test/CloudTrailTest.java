@@ -4,10 +4,17 @@ import org.junit.jupiter.api.*;
 import software.amazon.awssdk.services.cloudtrail.CloudTrailClient;
 import software.amazon.awssdk.services.cloudtrail.model.CreateTrailResponse;
 import software.amazon.awssdk.services.cloudtrail.model.DescribeTrailsResponse;
+import software.amazon.awssdk.services.cloudtrail.model.Event;
+import software.amazon.awssdk.services.cloudtrail.model.GetEventDataStoreResponse;
 import software.amazon.awssdk.services.cloudtrail.model.GetTrailStatusResponse;
 import software.amazon.awssdk.services.cloudtrail.model.Trail;
 import software.amazon.awssdk.services.cloudtrail.model.TrailNotFoundException;
+import software.amazon.awssdk.services.cloudtrail.model.UpdateEventDataStoreResponse;
 import software.amazon.awssdk.services.cloudtrail.model.UpdateTrailResponse;
+import software.amazon.awssdk.services.ssm.SsmClient;
+
+import java.time.Instant;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.*;
 
@@ -114,11 +121,11 @@ class CloudTrailTest {
     @Order(7)
     void lookupEventsReadsActualSsmCallsWithoutATrail() {
         String name = "/cloudtrail/" + TestFixtures.uniqueName("history");
-        java.time.Instant start = java.time.Instant.now().minusSeconds(1);
-        try (var ssm = TestFixtures.ssmClient()) {
+        Instant start = Instant.now().minusSeconds(1);
+        try (SsmClient ssm = TestFixtures.ssmClient()) {
             try {
                 ssm.putParameter(r -> r.name(name).type("String").value("private-value"));
-                var events = cloudTrail.lookupEvents(r -> r.startTime(start).maxResults(50)
+                List<Event> events = cloudTrail.lookupEvents(r -> r.startTime(start).maxResults(50)
                         .lookupAttributes(a -> a.attributeKey("EventName").attributeValue("PutParameter"))).events();
                 assertThat(events).anySatisfy(event -> {
                     assertThat(event.eventSource()).isEqualTo("ssm.amazonaws.com");
@@ -151,13 +158,13 @@ class CloudTrailTest {
                 .multiRegionEnabled(false).startIngestion(false).terminationProtectionEnabled(false))
                 .eventDataStoreArn();
         try {
-            var observed = cloudTrail.getEventDataStore(r -> r.eventDataStore(arn));
+            GetEventDataStoreResponse observed = cloudTrail.getEventDataStore(r -> r.eventDataStore(arn));
             assertThat(observed.name()).isEqualTo(name);
             assertThat(observed.statusAsString()).isEqualTo("STOPPED_INGESTION");
             assertThat(cloudTrail.listEventDataStoresPaginator(r -> {}).stream()
                     .flatMap(page -> page.eventDataStores().stream()).toList())
                     .anySatisfy(store -> assertThat(store.eventDataStoreArn()).isEqualTo(arn));
-            var updated = cloudTrail.updateEventDataStore(r -> r.eventDataStore(arn).retentionPeriod(14));
+            UpdateEventDataStoreResponse updated = cloudTrail.updateEventDataStore(r -> r.eventDataStore(arn).retentionPeriod(14));
             assertThat(updated.eventDataStoreArn()).isEqualTo(arn);
             assertThat(updated.retentionPeriod()).isEqualTo(14);
             assertThatThrownBy(() -> cloudTrail.createEventDataStore(r -> r.name(name)))

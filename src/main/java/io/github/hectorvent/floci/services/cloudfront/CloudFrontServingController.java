@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.cloudfront;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RequestHost;
+import io.github.hectorvent.floci.services.cloudfront.CloudFrontResolvedOrigin.AccessControl;
 import io.github.hectorvent.floci.services.cloudfront.model.CloudFrontOriginAccessIdentity;
 import io.github.hectorvent.floci.services.cloudfront.model.Distribution;
 import io.github.hectorvent.floci.services.cloudfront.model.DistributionConfig;
@@ -45,6 +46,7 @@ import java.io.PushbackInputStream;
 import java.net.IDN;
 import java.net.URI;
 import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -57,8 +59,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import io.github.hectorvent.floci.services.cloudfront.CloudFrontResolvedOrigin.AccessControl;
-import java.net.http.HttpResponse;
 
 /**
  * Serves viewer requests routed to a CloudFront distribution (via {@link CloudFrontDistributionFilter})
@@ -1686,7 +1686,7 @@ public class CloudFrontServingController {
 
         String oaiId = originAccessIdentityId(origin);
         if (oaiId != null) {
-            var oai = service.getCloudFrontOriginAccessIdentity(oaiId);
+            CloudFrontOriginAccessIdentity oai = service.getCloudFrontOriginAccessIdentity(oaiId);
             s3Service.authorizeCloudFrontOaiGetObject(
                     bucket, key, oaiId, oai.getS3CanonicalUserId());
             return;

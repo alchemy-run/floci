@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.sagemaker;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
+import io.restassured.specification.RequestSpecification;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -94,7 +95,7 @@ class SageMakerFeatureStoreIntegrationTest {
         post("SageMaker.DeleteFeatureGroup", "{\"FeatureGroupName\":\"" + group + "\"}").then().statusCode(200);
     }
 
-    private io.restassured.specification.RequestSpecification runtime() {
+    private RequestSpecification runtime() {
         return given().header("Authorization", AUTH).contentType("application/json");
     }
 

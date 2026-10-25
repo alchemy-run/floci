@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.opensearch;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.config.TlsCertificateManager;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.AwsRegions;
@@ -17,6 +18,7 @@ import io.github.hectorvent.floci.services.opensearch.model.AdvancedSecurityOpti
 import io.github.hectorvent.floci.services.opensearch.model.ClusterConfig;
 import io.github.hectorvent.floci.services.opensearch.model.Domain;
 import io.github.hectorvent.floci.services.opensearch.model.DomainEndpointOptions;
+import io.github.hectorvent.floci.services.opensearch.model.DomainMaintenance;
 import io.github.hectorvent.floci.services.opensearch.model.EbsOptions;
 import io.github.hectorvent.floci.services.opensearch.model.EncryptionAtRestOptions;
 import io.github.hectorvent.floci.services.opensearch.model.NodeToNodeEncryptionOptions;
@@ -28,19 +30,17 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import io.github.hectorvent.floci.config.TlsCertificateManager;
-import io.github.hectorvent.floci.services.opensearch.model.DomainMaintenance;
-import java.nio.charset.StandardCharsets;
-import java.util.UUID;
 
 @ApplicationScoped
 public class OpenSearchService implements ResourceProvider {

@@ -14,10 +14,6 @@ import io.github.hectorvent.floci.services.docdb.container.DocDbContainerManager
 import io.github.hectorvent.floci.services.dynamodb.DynamoDbRuntime;
 import io.github.hectorvent.floci.services.ec2.Ec2MetadataServer;
 import io.github.hectorvent.floci.services.ecr.registry.EcrRegistryManager;
-import io.github.hectorvent.floci.services.floci.ui.FlociUiManager;
-import io.github.hectorvent.floci.services.amazonmq.container.RabbitMqManager;
-import io.github.hectorvent.floci.services.kinesisanalytics.container.FlinkContainerManager;
-import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.ecs.EcsService;
 import io.github.hectorvent.floci.services.ecs.container.EcsTaskRoleCredentialsServer;
 import io.github.hectorvent.floci.services.eks.EksService;

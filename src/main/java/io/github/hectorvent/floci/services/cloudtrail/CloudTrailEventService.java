@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.cloudtrail;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
@@ -138,7 +139,7 @@ public class CloudTrailEventService {
         JsonNode identity = record.path("userIdentity");
         if (identity.has("userName")) row.put("Username", identity.path("userName").asText());
         if (identity.has("accessKeyId")) row.put("AccessKeyId", identity.path("accessKeyId").asText());
-        var resources = row.putArray("Resources");
+        ArrayNode resources = row.putArray("Resources");
         for (JsonNode resource : record.path("resources")) {
             String name = resource.path("ARN").asText();
             if ("AWS::S3::Bucket".equals(resource.path("type").asText())) name = name.substring("arn:aws:s3:::".length());

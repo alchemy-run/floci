@@ -154,7 +154,7 @@ public class AppSyncController {
     public Response createApiCache(@PathParam("apiId") String apiId, String body) throws IOException {
         @SuppressWarnings("unchecked")
         Map<String, Object> request = objectMapper.readValue(body, Map.class);
-        var cache = service.createApiCache(apiId, request);
+        ApiCache cache = service.createApiCache(apiId, request);
         ObjectNode root = objectMapper.createObjectNode();
         root.set("apiCache", objectMapper.valueToTree(cache));
         return Response.ok(root).build();
@@ -163,7 +163,7 @@ public class AppSyncController {
     @GET
     @Path("/v1/apis/{apiId}/ApiCaches")
     public Response getApiCache(@PathParam("apiId") String apiId) {
-        var cache = service.getApiCache(apiId);
+        ApiCache cache = service.getApiCache(apiId);
         ObjectNode root = objectMapper.createObjectNode();
         root.set("apiCache", objectMapper.valueToTree(cache));
         return Response.ok(root).build();
@@ -174,7 +174,7 @@ public class AppSyncController {
     public Response updateApiCache(@PathParam("apiId") String apiId, String body) throws IOException {
         @SuppressWarnings("unchecked")
         Map<String, Object> request = objectMapper.readValue(body, Map.class);
-        var cache = service.updateApiCache(apiId, request);
+        ApiCache cache = service.updateApiCache(apiId, request);
         ObjectNode root = objectMapper.createObjectNode();
         root.set("apiCache", objectMapper.valueToTree(cache));
         return Response.ok(root).build();

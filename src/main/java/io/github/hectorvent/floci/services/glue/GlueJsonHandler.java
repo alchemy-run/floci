@@ -5,23 +5,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.glue.model.*;
-import io.github.hectorvent.floci.services.glue.schemaregistry.GlueSchemaRegistryService;
-import io.github.hectorvent.floci.services.glue.schemaregistry.model.Registry;
-import io.github.hectorvent.floci.services.glue.schemaregistry.model.RegistryId;
-import io.github.hectorvent.floci.services.glue.schemaregistry.model.Schema;
-import io.github.hectorvent.floci.services.glue.schemaregistry.model.SchemaId;
-import io.github.hectorvent.floci.services.glue.schemaregistry.model.SchemaVersion;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
-import jakarta.ws.rs.core.Response;
-
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
 import io.github.hectorvent.floci.services.glue.model.Classifier;
 import io.github.hectorvent.floci.services.glue.model.Connection;
 import io.github.hectorvent.floci.services.glue.model.ConnectionInput;
@@ -52,6 +35,23 @@ import io.github.hectorvent.floci.services.glue.model.UpdateCrawlerRequest;
 import io.github.hectorvent.floci.services.glue.model.UpdateJobRequest;
 import io.github.hectorvent.floci.services.glue.model.UpdateJobResponse;
 import io.github.hectorvent.floci.services.glue.model.UserDefinedFunction;
+import io.github.hectorvent.floci.services.glue.schemaregistry.GlueSchemaRegistryService;
+import io.github.hectorvent.floci.services.glue.schemaregistry.model.Registry;
+import io.github.hectorvent.floci.services.glue.schemaregistry.model.RegistryId;
+import io.github.hectorvent.floci.services.glue.schemaregistry.model.Schema;
+import io.github.hectorvent.floci.services.glue.schemaregistry.model.SchemaId;
+import io.github.hectorvent.floci.services.glue.schemaregistry.model.SchemaVersion;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.core.Response;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 @ApplicationScoped
 public class GlueJsonHandler {

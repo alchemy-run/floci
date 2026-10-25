@@ -1,10 +1,9 @@
 package io.github.hectorvent.floci.services.acm;
 
 import io.github.hectorvent.floci.testing.AcmDnsRecordValidationProfile;
-import io.quarkus.test.junit.TestProfile;
-
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.TestProfile;
 import io.restassured.response.ValidatableResponse;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.BeforeAll;

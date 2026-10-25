@@ -22,6 +22,7 @@ import io.github.hectorvent.floci.services.appsync.graphql.resolver.AppSyncResol
 import io.github.hectorvent.floci.services.appsync.graphql.resolver.AppSyncResolverExecutor;
 import io.github.hectorvent.floci.services.appsync.graphql.resolver.ResolverCallbackSessions;
 import io.github.hectorvent.floci.services.appsync.model.GraphqlApi;
+import io.quarkus.vertx.http.runtime.CurrentVertxRequest;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
@@ -54,7 +55,7 @@ public class AppSyncExecutionController {
 
     // The path a SigV4 client signed: the original one, before virtual-host routing rewrites it.
     @jakarta.inject.Inject
-    io.quarkus.vertx.http.runtime.CurrentVertxRequest currentVertxRequest;
+    CurrentVertxRequest currentVertxRequest;
 
     private static final Logger LOG = Logger.getLogger(AppSyncExecutionController.class);
     private static final String HEADER_ERROR_TYPE = "x-amzn-errortype";

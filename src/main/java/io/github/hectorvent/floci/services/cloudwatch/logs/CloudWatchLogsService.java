@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.cloudwatch.logs;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
@@ -1493,7 +1494,7 @@ public class CloudWatchLogsService implements ResourceProvider {
                 names.add("@logStream");
             }
             try {
-                var node = PAYLOAD_MAPPER.readTree(event.getMessage() != null ? event.getMessage() : "");
+                JsonNode node = PAYLOAD_MAPPER.readTree(event.getMessage() != null ? event.getMessage() : "");
                 if (node.isObject()) {
                     node.fieldNames().forEachRemaining(names::add);
                 }

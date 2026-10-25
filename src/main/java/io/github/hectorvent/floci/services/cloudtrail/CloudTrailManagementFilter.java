@@ -7,9 +7,11 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AccountResolver;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.ResolvedServiceCatalog;
+import io.github.hectorvent.floci.core.common.ServiceCatalog;
 import io.github.hectorvent.floci.core.common.XmlParser;
 import io.github.hectorvent.floci.services.iam.IamActionRegistry;
 import io.quarkus.vertx.http.runtime.CurrentVertxRequest;
+import io.vertx.ext.web.RoutingContext;
 import jakarta.annotation.Priority;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -22,9 +24,11 @@ import jakarta.ws.rs.ext.Provider;
 import org.jboss.logging.Logger;
 
 import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 import java.io.SequenceInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Provider
@@ -73,20 +77,20 @@ public class CloudTrailManagementFilter implements ContainerRequestFilter, Conta
                 String credential = request.getUriInfo().getQueryParameters().getFirst("X-Amz-Credential");
                 if (credential != null) auth = "Credential=" + credential;
             }
-            var scope = SCOPE.matcher(auth == null ? "" : auth);
+            Matcher scope = SCOPE.matcher(auth == null ? "" : auth);
             if (!scope.find()) return;
             String signingService = scope.group(3);
             String service = catalog.canonicalCredentialScope(signingService);
             String target = request.getHeaderString("X-Amz-Target");
             if (target != null) {
-                var match = catalog.matchTarget(target).orElse(null);
+                ServiceCatalog.TargetMatch match = catalog.matchTarget(target).orElse(null);
                 if (match == null || !match.descriptor().credentialScopes().contains(signingService)) return;
             }
             if (!CONTROL_SERVICES.contains(service) && !"s3".equals(service) && !"lambda".equals(service)) return;
             ObjectNode parameters = mapper.createObjectNode();
             if (!"s3".equals(service) && request.hasEntity()) {
                 // Only inspect bounded management payloads; leave larger streams untouched.
-                var stream = request.getEntityStream();
+                InputStream stream = request.getEntityStream();
                 byte[] bytes = stream.readNBytes(256 * 1024 + 1);
                 request.setEntityStream(new SequenceInputStream(new ByteArrayInputStream(bytes), stream));
                 if (bytes.length > 256 * 1024) return;
@@ -114,7 +118,7 @@ public class CloudTrailManagementFilter implements ContainerRequestFilter, Conta
                     || operation.startsWith("Describe") || operation.startsWith("Lookup")
                     || operation.startsWith("Head");
             String sourceIp = null;
-            var routing = currentRequest.getCurrent();
+            RoutingContext routing = currentRequest.getCurrent();
             if (routing != null && routing.request().remoteAddress() != null) {
                 sourceIp = routing.request().remoteAddress().host();
             }

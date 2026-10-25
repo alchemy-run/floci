@@ -6,12 +6,12 @@ import io.github.hectorvent.floci.services.ec2.model.SecurityGroup;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.LinkedHashMap;
 
 /** Builds only rules for an endpoint's private nftables table. Docker's tables are untouched. */
 public final class SecurityGroupNftCompiler {

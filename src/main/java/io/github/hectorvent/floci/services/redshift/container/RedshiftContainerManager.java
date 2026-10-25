@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.redshift.container;
 
 import com.github.dockerjava.api.async.ResultCallback;
+import com.github.dockerjava.api.model.Container;
 import com.github.dockerjava.api.model.Frame;
 import com.github.dockerjava.api.model.StreamType;
 import io.github.hectorvent.floci.config.EmulatorConfig;
@@ -111,7 +112,7 @@ public class RedshiftContainerManager {
      */
     public RedshiftContainerHandle adoptOrStart(String accountId, String clusterIdentifier, String masterUsername, String masterPassword) {
         String containerName = containerName(accountId, clusterIdentifier);
-        var existing = lifecycleManager.findByName(containerName);
+        Optional<Container> existing = lifecycleManager.findByName(containerName);
         if (existing.isEmpty()) {
             LOG.warnv("No surviving container for cluster {0}; starting a fresh empty one — the previous"
                     + " contents are not recoverable (no Docker volume backs Redshift containers)", clusterIdentifier);

@@ -5,6 +5,7 @@ import io.github.hectorvent.floci.core.common.AwsQueryResponse;
 import io.github.hectorvent.floci.core.common.XmlBuilder;
 import io.github.hectorvent.floci.services.cloudformation.model.ChangeSet;
 import io.github.hectorvent.floci.services.cloudformation.model.Stack;
+import io.github.hectorvent.floci.services.cloudformation.model.StackDriftDetection;
 import io.github.hectorvent.floci.services.cloudformation.model.StackEvent;
 import io.github.hectorvent.floci.services.cloudformation.model.StackInstance;
 import io.github.hectorvent.floci.services.cloudformation.model.StackResource;
@@ -1168,7 +1169,7 @@ public class CloudFormationQueryHandler {
     }
 
     private Response detectStackDrift(MultivaluedMap<String, String> params, String region) {
-        var detection = cfnService.detectStackDrift(params.getFirst("StackName"),
+        StackDriftDetection detection = cfnService.detectStackDrift(params.getFirst("StackName"),
                 extractList(params, "LogicalResourceIds.member."), region);
         return Response.ok(new XmlBuilder().start("DetectStackDriftResponse", CF_NS).start("DetectStackDriftResult")
                 .elem("StackDriftDetectionId", detection.detectionId()).end("DetectStackDriftResult")
@@ -1176,7 +1177,7 @@ public class CloudFormationQueryHandler {
     }
 
     private Response describeStackDriftDetectionStatus(MultivaluedMap<String, String> params, String region) {
-        var detection = cfnService.describeStackDriftDetection(params.getFirst("StackDriftDetectionId"), region);
+        StackDriftDetection detection = cfnService.describeStackDriftDetection(params.getFirst("StackDriftDetectionId"), region);
         return Response.ok(new XmlBuilder().start("DescribeStackDriftDetectionStatusResponse", CF_NS)
                 .start("DescribeStackDriftDetectionStatusResult").elem("StackId", detection.stackId())
                 .elem("StackDriftDetectionId", detection.detectionId()).elem("DetectionStatus", detection.detectionStatus())
@@ -1189,7 +1190,7 @@ public class CloudFormationQueryHandler {
     private Response describeStackResourceDrifts(MultivaluedMap<String, String> params, String region) {
         String name = params.getFirst("StackName");
         Stack stack = cfnService.describeStacks(name, region).getFirst();
-        var drifts = cfnService.describeStackResourceDrifts(name,
+        List<StackDriftDetection.ResourceDrift> drifts = cfnService.describeStackResourceDrifts(name,
                 extractList(params, "StackResourceDriftStatusFilters.member."), region);
         int start;
         int size;
@@ -1203,13 +1204,13 @@ public class CloudFormationQueryHandler {
         int end = Math.min(drifts.size(), start + size);
         XmlBuilder xml = new XmlBuilder().start("DescribeStackResourceDriftsResponse", CF_NS)
                 .start("DescribeStackResourceDriftsResult").start("StackResourceDrifts");
-        for (var drift : drifts.subList(start, end)) {
+        for (StackDriftDetection.ResourceDrift drift : drifts.subList(start, end)) {
             xml.start("member").elem("StackId", stack.getStackId()).elem("LogicalResourceId", drift.logicalId())
                     .elem("PhysicalResourceId", drift.physicalId()).elem("ResourceType", drift.resourceType())
                     .elem("StackResourceDriftStatus", drift.status()).elem("Timestamp", ISO.format(drift.timestamp()))
                     .elem("ExpectedProperties", drift.expectedProperties()).elem("ActualProperties", drift.actualProperties())
                     .start("PropertyDifferences");
-            for (var difference : drift.differences()) {
+            for (StackDriftDetection.PropertyDifference difference : drift.differences()) {
                 xml.start("member").elem("PropertyPath", difference.path()).elem("ExpectedValue", difference.expectedValue())
                         .elem("ActualValue", difference.actualValue()).elem("DifferenceType", difference.type()).end("member");
             }

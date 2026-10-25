@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.eks;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.eks.model.AccessConfig;
@@ -245,7 +246,7 @@ class EksAccessEntryServiceTest {
         Fixture fixture = fixture();
         fixture.service.create(fixture.cluster, request(PRINCIPAL, "STANDARD", null));
         ObjectMapper mapper = new ObjectMapper();
-        com.fasterxml.jackson.databind.node.ObjectNode legacy =
+        ObjectNode legacy =
                 mapper.valueToTree(fixture.storage.scan(key -> true).getFirst());
         legacy.remove("accessPolicies");
         EksAccessEntryService.StoredEntry restored = mapper.treeToValue(legacy, EksAccessEntryService.StoredEntry.class);

@@ -2,6 +2,8 @@ package io.github.hectorvent.floci.services.controltower;
 
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.ExtractableResponse;
+import io.restassured.response.Response;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -71,7 +73,7 @@ class ControlTowerControlControllerIntegrationTest {
     void listControlOperationsReturnsRecordedOperations() {
         String target = "arn:aws:organizations::000000000000:ou/o-example/ou-example-listops1";
         String control = "arn:aws:controltower:us-east-1::control/AWS-GR_EBS_OPTIMIZED_INSTANCE";
-        var enabled = post("/enable-control", "{\"controlIdentifier\":\"" + control
+        ExtractableResponse<Response> enabled = post("/enable-control", "{\"controlIdentifier\":\"" + control
                 + "\",\"targetIdentifier\":\"" + target + "\"}").then().statusCode(200).extract();
         String enabledArn = enabled.path("arn");
         String enableOperation = enabled.path("operationIdentifier");

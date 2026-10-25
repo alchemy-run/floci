@@ -2,9 +2,11 @@ package io.github.hectorvent.floci.services.bedrockagentcorecontrol;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.bedrockagentcore.BedrockAgentCoreSandboxRuntime;
@@ -112,9 +114,9 @@ public class BedrockAgentCoreToolsController {
         String region = regionResolver.resolveRegion(headers);
         try {
             Integer maxResults = Pagination.parseMaxResults(maxResultsParam, "ValidationException");
-            var result = service.listCodeInterpreters(maxResults, nextToken, type, region);
+            PaginatedResult<ObjectNode> result = service.listCodeInterpreters(maxResults, nextToken, type, region);
             ObjectNode response = objectMapper.createObjectNode();
-            var summaries = response.putArray("codeInterpreterSummaries");
+            ArrayNode summaries = response.putArray("codeInterpreterSummaries");
             for (ObjectNode interpreter : result.items()) {
                 ObjectNode summary = summaries.addObject();
                 copyText(interpreter, summary, "codeInterpreterArn");
@@ -180,9 +182,9 @@ public class BedrockAgentCoreToolsController {
             Integer maxResults = Pagination.parseMaxResults(maxResultsParam, "ValidationException");
             ObjectNode request = object(body);
             String name = request.hasNonNull("name") ? request.get("name").asText() : null;
-            var result = service.listBrowserProfiles(maxResults, nextToken, name, region);
+            PaginatedResult<ObjectNode> result = service.listBrowserProfiles(maxResults, nextToken, name, region);
             ObjectNode response = objectMapper.createObjectNode();
-            var summaries = response.putArray("profileSummaries");
+            ArrayNode summaries = response.putArray("profileSummaries");
             for (ObjectNode profile : result.items()) {
                 ObjectNode summary = summaries.addObject();
                 copyText(profile, summary, "createdAt");
@@ -281,9 +283,9 @@ public class BedrockAgentCoreToolsController {
         String region = regionResolver.resolveRegion(headers);
         try {
             Integer maxResults = Pagination.parseMaxResults(maxResultsParam, "ValidationException");
-            var result = service.listBrowsers(maxResults, nextToken, type, region);
+            PaginatedResult<ObjectNode> result = service.listBrowsers(maxResults, nextToken, type, region);
             ObjectNode response = objectMapper.createObjectNode();
-            var summaries = response.putArray("browserSummaries");
+            ArrayNode summaries = response.putArray("browserSummaries");
             for (ObjectNode browser : result.items()) {
                 ObjectNode summary = summaries.addObject();
                 copyText(browser, summary, "browserArn");

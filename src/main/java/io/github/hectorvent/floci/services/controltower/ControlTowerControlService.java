@@ -11,6 +11,7 @@ import jakarta.inject.Inject;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -251,7 +252,7 @@ public class ControlTowerControlService {
                 control.getTargetIdentifier(), now, now));
         long inScope = operations.keySet().stream().filter(key -> key.startsWith(scopePrefix)).count();
         if (inScope > MAX_OPERATIONS_PER_SCOPE) {
-            var iterator = operations.keySet().iterator();
+            Iterator<String> iterator = operations.keySet().iterator();
             while (iterator.hasNext()) {
                 if (iterator.next().startsWith(scopePrefix)) {
                     iterator.remove();

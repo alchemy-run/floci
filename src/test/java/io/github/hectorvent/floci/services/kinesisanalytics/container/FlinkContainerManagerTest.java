@@ -1,12 +1,11 @@
 package io.github.hectorvent.floci.services.kinesisanalytics.container;
 
-import io.github.hectorvent.floci.testing.InlineMocks;
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.dockerjava.api.DockerClient;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
 import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
@@ -16,10 +15,13 @@ import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
 import io.github.hectorvent.floci.core.common.docker.LaunchedContainerAwsEnv;
-import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.services.kinesisanalytics.model.FlinkApplication;
+import io.github.hectorvent.floci.services.kinesisanalytics.model.Snapshot;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
+import io.github.hectorvent.floci.testing.InlineMocks;
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -420,9 +422,9 @@ class FlinkContainerManagerTest {
     @Test
     void savepointMountPointTarIsAFlinkOwnedDirectory() throws Exception {
         byte[] tar = FlinkContainerManager.flinkOwnedDirectoryTar("savepoints");
-        try (var in = new org.apache.commons.compress.archivers.tar.TarArchiveInputStream(
+        try (TarArchiveInputStream in = new org.apache.commons.compress.archivers.tar.TarArchiveInputStream(
                 new java.io.ByteArrayInputStream(tar))) {
-            var entry = in.getNextEntry();
+            TarArchiveEntry entry = in.getNextEntry();
             assertEquals("savepoints/", entry.getName());
             assertTrue(entry.isDirectory());
             assertEquals(9999L, entry.getLongUserId());
@@ -436,7 +438,7 @@ class FlinkContainerManagerTest {
         FlinkApplication app = application("retry");
         app.setRestEndpoint("http://jm:8081");
         app.setFlinkJobId("job-1");
-        var snapshot = new io.github.hectorvent.floci.services.kinesisanalytics.model.Snapshot("snap", 1L, "FLINK-1_20");
+        Snapshot snapshot = new io.github.hectorvent.floci.services.kinesisanalytics.model.Snapshot("snap", 1L, "FLINK-1_20");
         snapshot.setFlinkRequestId("req-1");
         when(flinkRest.savepointStatus("http://jm:8081", "job-1", "req-1")).thenReturn(
                 new FlinkRestClient.SavepointStatus("COMPLETED", null, true,
@@ -462,7 +464,7 @@ class FlinkContainerManagerTest {
         FlinkApplication app = application("bounded");
         app.setRestEndpoint("http://jm:8081");
         app.setFlinkJobId("job-1");
-        var snapshot = new io.github.hectorvent.floci.services.kinesisanalytics.model.Snapshot("snap", 1L, "FLINK-1_20");
+        Snapshot snapshot = new io.github.hectorvent.floci.services.kinesisanalytics.model.Snapshot("snap", 1L, "FLINK-1_20");
         snapshot.setFlinkRequestId("req-1");
         snapshot.setFlinkTriggerAttempts(FlinkContainerManager.MAX_SAVEPOINT_TRIGGER_ATTEMPTS);
         when(flinkRest.savepointStatus(any(), any(), any())).thenReturn(new FlinkRestClient.SavepointStatus(
@@ -471,7 +473,7 @@ class FlinkContainerManagerTest {
         assertEquals(io.github.hectorvent.floci.services.kinesisanalytics.model.SnapshotStatus.FAILED,
                 snapshot.getSnapshotStatus());
 
-        var ioFailure = new io.github.hectorvent.floci.services.kinesisanalytics.model.Snapshot("io", 1L, "FLINK-1_20");
+        Snapshot ioFailure = new io.github.hectorvent.floci.services.kinesisanalytics.model.Snapshot("io", 1L, "FLINK-1_20");
         ioFailure.setFlinkRequestId("req-io");
         when(flinkRest.savepointStatus(any(), any(), eq("req-io"))).thenReturn(new FlinkRestClient.SavepointStatus(
                 "COMPLETED", null, true, "java.io.IOException: Failed to create savepoint directory"));

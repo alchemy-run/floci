@@ -1,7 +1,5 @@
 package io.github.hectorvent.floci.services.codebuild;
 
-import io.github.hectorvent.floci.testing.InlineMocks;
-
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.CopyArchiveFromContainerCmd;
@@ -26,6 +24,7 @@ import io.github.hectorvent.floci.services.codebuild.model.ProjectSource;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.secretsmanager.SecretsManagerService;
 import io.github.hectorvent.floci.services.ssm.SsmService;
+import io.github.hectorvent.floci.testing.InlineMocks;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;

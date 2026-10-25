@@ -29,6 +29,7 @@ import java.util.*;
 import java.util.Base64;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -831,7 +832,7 @@ public class AutoScalingService implements PassedRoleLookup {
      * {@code AccessDenied}: the caller's group-scoped grant cannot match.
      */
     private void updateGroupOfInstance(String region, String instanceId,
-                                       java.util.function.Supplier<AwsException> notFound,
+                                       Supplier<AwsException> notFound,
                                        Consumer<AutoScalingGroup> update) {
         String name = groups.values().stream()
                 .filter(Objects::nonNull)

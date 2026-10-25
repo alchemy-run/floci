@@ -1,6 +1,8 @@
 package io.github.hectorvent.floci.services.secretsmanager;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
@@ -49,8 +51,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
 
 @ApplicationScoped
 public class SecretsManagerService implements ResourceProvider {
@@ -1924,7 +1924,7 @@ public class SecretsManagerService implements ResourceProvider {
      * The secret {@code secretId} (name, partial ARN or full ARN) names in the request's account,
      * or empty when there is none. Used by IAM to evaluate policies against the secret's real ARN.
      */
-    public java.util.Optional<Secret> findSecret(String secretId, String region) {
+    public Optional<Secret> findSecret(String secretId, String region) {
         if (secretId == null || secretId.isBlank()) {
             return java.util.Optional.empty();
         }

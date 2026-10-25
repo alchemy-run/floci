@@ -1,7 +1,5 @@
 package io.github.hectorvent.floci.services.redshift;
 
-import io.github.hectorvent.floci.testing.InlineMocks;
-
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
@@ -31,6 +29,7 @@ import io.github.hectorvent.floci.services.redshift.proxy.RedshiftProxyManager;
 import io.github.hectorvent.floci.services.secretsmanager.SecretsManagerService;
 import io.github.hectorvent.floci.services.secretsmanager.model.Secret;
 import io.github.hectorvent.floci.services.sns.SnsService;
+import io.github.hectorvent.floci.testing.InlineMocks;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -354,7 +353,7 @@ class RedshiftServiceTest {
         persisted.setClusterStatus("available");
         persisted.setProxyPort(7108);
 
-        var entry = InlineMocks.inlineMock(AccountAwareStorageBackend.AccountEntry.class);
+        AccountAwareStorageBackend.AccountEntry entry = InlineMocks.inlineMock(AccountAwareStorageBackend.AccountEntry.class);
         when(entry.value()).thenReturn(persisted);
         when(entry.accountId()).thenReturn("111111111111");
         when(entry.key()).thenReturn("c1");

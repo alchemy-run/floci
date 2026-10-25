@@ -740,7 +740,7 @@ public class SnsQueryHandler {
     }
 
     private Response handleListPhoneNumbersOptedOut(String region) {
-        var xml = new XmlBuilder().start("phoneNumbers");
+        XmlBuilder xml = new XmlBuilder().start("phoneNumbers");
         for (String number : snsService.listPhoneNumbersOptedOut(region)) {
             xml.elem("member", number);
         }
@@ -755,12 +755,12 @@ public class SnsQueryHandler {
     }
 
     private Response handleListOriginationNumbers() {
-        var xml = new XmlBuilder().start("PhoneNumbers").end("PhoneNumbers");
+        XmlBuilder xml = new XmlBuilder().start("PhoneNumbers").end("PhoneNumbers");
         return Response.ok(AwsQueryResponse.envelope("ListOriginationNumbers", AwsNamespaces.SNS, xml.build())).build();
     }
 
     private Response handleListSmsSandboxPhoneNumbers(String region) {
-        var xml = new XmlBuilder().start("PhoneNumbers");
+        XmlBuilder xml = new XmlBuilder().start("PhoneNumbers");
         for (Map<String, String> number : snsService.listSmsSandboxPhoneNumbers(region)) {
             xml.start("member")
                     .elem("PhoneNumber", number.get("PhoneNumber"))

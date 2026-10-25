@@ -3,6 +3,8 @@ package io.github.hectorvent.floci.services.lambda;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.services.lambda.microvm.MicrovmImageService;
+import io.github.hectorvent.floci.services.lambdamicrovms.LambdaMicrovmsService;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
@@ -17,8 +19,6 @@ import jakarta.ws.rs.core.Response;
 
 import java.util.List;
 import java.util.Map;
-import io.github.hectorvent.floci.services.lambda.microvm.MicrovmImageService;
-import io.github.hectorvent.floci.services.lambdamicrovms.LambdaMicrovmsService;
 
 /**
  * Lambda tag endpoints — use the /2017-03-31 API version prefix.

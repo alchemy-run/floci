@@ -6,11 +6,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import javax.net.ssl.SSLContext;
+
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.security.cert.X509Certificate;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -79,12 +81,12 @@ class RdsProxyTlsCertificatesTest {
         certs.ensureHost("172.17.0.5");
 
         CertificateGenerator generator = new CertificateGenerator();
-        var firstCertificate = generator.parseCertificate(
+        X509Certificate firstCertificate = generator.parseCertificate(
                 Files.readString(tempDir.resolve("tls").resolve("rds-ca.crt")));
 
         certs.ensureHost("host.docker.internal");
 
-        var secondCertificate = generator.parseCertificate(
+        X509Certificate secondCertificate = generator.parseCertificate(
                 Files.readString(tempDir.resolve("tls").resolve("rds-ca.crt")));
 
         assertEquals(firstCertificate.getPublicKey(), secondCertificate.getPublicKey(),
@@ -117,7 +119,7 @@ class RdsProxyTlsCertificatesTest {
         certs.ensureHost("172.17.0.5");
 
         CertificateGenerator generator = new CertificateGenerator();
-        var certificate = generator.parseCertificate(
+        X509Certificate certificate = generator.parseCertificate(
                 Files.readString(tempDir.resolve("tls").resolve("rds-ca.crt")));
 
         assertEquals(certificate.getIssuerX500Principal(), certificate.getSubjectX500Principal());

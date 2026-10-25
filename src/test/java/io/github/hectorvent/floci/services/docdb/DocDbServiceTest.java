@@ -2,48 +2,49 @@ package io.github.hectorvent.floci.services.docdb;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.BackupWindows;
+import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.docdb.container.DocDbContainerHandle;
 import io.github.hectorvent.floci.services.docdb.container.DocDbContainerManager;
-import io.github.hectorvent.floci.services.docdb.proxy.DocDbProxyManager;
-import io.github.hectorvent.floci.services.secretsmanager.SecretsManagerService;
-import io.github.hectorvent.floci.services.secretsmanager.model.Secret;
 import io.github.hectorvent.floci.services.docdb.model.DocDbCluster;
-import io.github.hectorvent.floci.services.docdb.model.DocDbInstance;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
 import io.github.hectorvent.floci.services.docdb.model.DocDbClusterSettings;
+import io.github.hectorvent.floci.services.docdb.model.DocDbInstance;
 import io.github.hectorvent.floci.services.docdb.model.DocDbInstanceSettings;
+import io.github.hectorvent.floci.services.docdb.proxy.DocDbProxyManager;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
 import io.github.hectorvent.floci.services.ec2.model.SecurityGroup;
 import io.github.hectorvent.floci.services.kms.KmsService;
 import io.github.hectorvent.floci.services.kms.model.KmsKey;
 import io.github.hectorvent.floci.services.rds.RdsService;
-import io.github.hectorvent.floci.services.rds.model.DbSubnetGroup;
 import io.github.hectorvent.floci.services.rds.model.DbClusterParameterGroup;
+import io.github.hectorvent.floci.services.rds.model.DbSubnetGroup;
+import io.github.hectorvent.floci.services.secretsmanager.SecretsManagerService;
+import io.github.hectorvent.floci.services.secretsmanager.model.Secret;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.mockito.ArgumentMatchers.anyList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -65,8 +66,8 @@ class DocDbServiceTest {
                 .thenAnswer(inv -> AccountAwareStorageBackend.inMemory("000000000000"));
 
         EmulatorConfig config = Mockito.mock(EmulatorConfig.class);
-        var servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
-        var docdbConfig = Mockito.mock(EmulatorConfig.DocDbServiceConfig.class);
+        EmulatorConfig.ServicesConfig servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.DocDbServiceConfig docdbConfig = Mockito.mock(EmulatorConfig.DocDbServiceConfig.class);
         when(config.services()).thenReturn(servicesConfig);
         when(servicesConfig.docdb()).thenReturn(docdbConfig);
         when(docdbConfig.mock()).thenReturn(true);
@@ -171,8 +172,8 @@ class DocDbServiceTest {
         when(storageFactory.create(anyString(), anyString(), any()))
                 .thenAnswer(inv -> AccountAwareStorageBackend.inMemory("000000000000"));
         EmulatorConfig config = Mockito.mock(EmulatorConfig.class);
-        var servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
-        var docdbConfig = Mockito.mock(EmulatorConfig.DocDbServiceConfig.class);
+        EmulatorConfig.ServicesConfig servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.DocDbServiceConfig docdbConfig = Mockito.mock(EmulatorConfig.DocDbServiceConfig.class);
         when(config.services()).thenReturn(servicesConfig);
         when(servicesConfig.docdb()).thenReturn(docdbConfig);
         when(docdbConfig.mock()).thenReturn(false);
@@ -242,8 +243,8 @@ class DocDbServiceTest {
                 "docdb-clusters.json".equals(inv.getArgument(1)) ? clusterStore : instanceStore);
 
         EmulatorConfig config = Mockito.mock(EmulatorConfig.class);
-        var servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
-        var docdbConfig = Mockito.mock(EmulatorConfig.DocDbServiceConfig.class);
+        EmulatorConfig.ServicesConfig servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.DocDbServiceConfig docdbConfig = Mockito.mock(EmulatorConfig.DocDbServiceConfig.class);
         when(config.services()).thenReturn(servicesConfig);
         when(servicesConfig.docdb()).thenReturn(docdbConfig);
         when(docdbConfig.mock()).thenReturn(true);
@@ -336,8 +337,8 @@ class DocDbServiceTest {
         when(storageFactory.create(anyString(), anyString(), any())).thenAnswer(inv ->
                 "docdb-clusters.json".equals(inv.getArgument(1)) ? clusterStore : instanceStore);
         EmulatorConfig config = Mockito.mock(EmulatorConfig.class);
-        var servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
-        var docdbConfig = Mockito.mock(EmulatorConfig.DocDbServiceConfig.class);
+        EmulatorConfig.ServicesConfig servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.DocDbServiceConfig docdbConfig = Mockito.mock(EmulatorConfig.DocDbServiceConfig.class);
         when(config.services()).thenReturn(servicesConfig);
         when(servicesConfig.docdb()).thenReturn(docdbConfig);
         when(docdbConfig.mock()).thenReturn(true);
@@ -608,8 +609,8 @@ class DocDbServiceTest {
         when(storageFactory.create(anyString(), anyString(), any()))
                 .thenAnswer(inv -> AccountAwareStorageBackend.inMemory("000000000000"));
         EmulatorConfig config = Mockito.mock(EmulatorConfig.class);
-        var servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
-        var docdbConfig = Mockito.mock(EmulatorConfig.DocDbServiceConfig.class);
+        EmulatorConfig.ServicesConfig servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.DocDbServiceConfig docdbConfig = Mockito.mock(EmulatorConfig.DocDbServiceConfig.class);
         when(config.services()).thenReturn(servicesConfig);
         when(servicesConfig.docdb()).thenReturn(docdbConfig);
         when(docdbConfig.mock()).thenReturn(false);

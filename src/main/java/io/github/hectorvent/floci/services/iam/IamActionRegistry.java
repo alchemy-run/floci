@@ -15,8 +15,8 @@ import jakarta.ws.rs.core.UriInfo;
 import org.jboss.logging.Logger;
 
 import java.util.List;
-import java.util.regex.Pattern;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * Maps (credentialScope, httpMethod, requestPath) → IAM action string.

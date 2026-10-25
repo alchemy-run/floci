@@ -1,13 +1,13 @@
 package io.github.hectorvent.floci.services.ses.model;
 
-import io.quarkus.runtime.annotations.RegisterForReflection;
-
-import java.time.Instant;
-import java.util.List;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import io.quarkus.runtime.annotations.RegisterForReflection;
+
+import java.time.Instant;
+import java.util.List;
 
 /**
  * A SES v2 tenant (multi-tenancy). Created by {@code CreateTenant} and returned by

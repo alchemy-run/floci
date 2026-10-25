@@ -12,6 +12,7 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.AwsPartitions;
 import io.github.hectorvent.floci.core.common.AwsRegions;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.RequestContext;
 import io.github.hectorvent.floci.core.common.RequestScopes;
 import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
@@ -22,6 +23,9 @@ import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.cloudformation.model.ChangeSet;
 import io.github.hectorvent.floci.services.cloudformation.model.Stack;
+import io.github.hectorvent.floci.services.cloudformation.model.StackDriftDetection;
+import io.github.hectorvent.floci.services.cloudformation.model.StackDriftDetection.PropertyDifference;
+import io.github.hectorvent.floci.services.cloudformation.model.StackDriftDetection.ResourceDrift;
 import io.github.hectorvent.floci.services.cloudformation.model.StackEvent;
 import io.github.hectorvent.floci.services.cloudformation.model.StackResource;
 import io.github.hectorvent.floci.services.cloudformation.model.StackUpdateSnapshot;
@@ -33,6 +37,8 @@ import io.github.hectorvent.floci.services.cloudformation.provisioners.UpdateCle
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
 import io.github.hectorvent.floci.services.ssm.SsmService;
+import io.quarkus.arc.Arc;
+import io.quarkus.arc.ManagedContext;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -41,6 +47,7 @@ import org.jboss.logging.Logger;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
@@ -64,12 +71,6 @@ import java.util.function.UnaryOperator;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import io.github.hectorvent.floci.core.common.RequestContext;
-import io.quarkus.arc.Arc;
-import io.quarkus.arc.ManagedContext;
-import io.github.hectorvent.floci.services.cloudformation.model.StackDriftDetection;
-import io.github.hectorvent.floci.services.cloudformation.model.StackDriftDetection.ResourceDrift;
-import io.github.hectorvent.floci.services.cloudformation.model.StackDriftDetection.PropertyDifference;
 
 /**
  * CloudFormation stack lifecycle management — Create, Update, Delete stacks via ChangeSets.

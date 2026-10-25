@@ -3570,7 +3570,7 @@ public class IamQueryHandler {
     }
 
     private String instanceProfileXml(InstanceProfile p) {
-        var xml = new XmlBuilder()
+        XmlBuilder xml = new XmlBuilder()
                 .elem("InstanceProfileName", p.getInstanceProfileName())
                 .elem("InstanceProfileId", p.getInstanceProfileId())
                 .elem("Arn", p.getArn())

@@ -9,6 +9,7 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.Resettable;
+import io.github.hectorvent.floci.services.dynamodb.DynamoDbStreamService;
 import io.github.hectorvent.floci.services.dynamodb.DynamoDbTtlIdentity;
 import io.github.hectorvent.floci.services.dynamodb.backend.DynamoDbStreamReader;
 import io.github.hectorvent.floci.services.kinesis.KinesisService;
@@ -34,7 +35,6 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import io.github.hectorvent.floci.services.dynamodb.DynamoDbStreamService;
 
 @ApplicationScoped
 public class PipesPoller implements Resettable {
@@ -927,7 +927,7 @@ public class PipesPoller implements Resettable {
 
     static String wrapPipeBatch(ObjectMapper mapper, List<JsonNode> records) {
         try {
-            var recordsArray = mapper.createArrayNode();
+            ArrayNode recordsArray = mapper.createArrayNode();
             records.forEach(recordsArray::add);
             return mapper.writeValueAsString(recordsArray);
         } catch (Exception e) {

@@ -1,5 +1,7 @@
 package io.github.hectorvent.floci.services.cloudwatch.metrics;
 
+import com.cronutils.model.Cron;
+import com.cronutils.parser.CronParser;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -9,10 +11,13 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricAlarm;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.time.DateTimeException;
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -91,7 +96,7 @@ public class CloudWatchMetadataService {
             }
             ObjectNode composite = store.get(key(region, "composite", referencedName)).orElse(null);
             if (composite != null) return refreshComposite(composite, region, visiting);
-            var found = metrics.describeAlarms(List.of(referencedName), null, region);
+            List<MetricAlarm> found = metrics.describeAlarms(List.of(referencedName), null, region);
             return found.isEmpty() ? null : found.getFirst().getStateValue();
         }).evaluate();
         visiting.remove(name);
@@ -173,7 +178,7 @@ public class CloudWatchMetadataService {
     }
 
     public ObjectNode describeHistory(JsonNode request, String region) {
-        var items = rows(region, "history").stream()
+        List<ObjectNode> items = rows(region, "history").stream()
                 .filter(e -> !request.has("AlarmName") || request.path("AlarmName").equals(e.path("AlarmName")))
                 .filter(e -> !request.has("HistoryItemType") || request.path("HistoryItemType").equals(e.path("HistoryItemType")))
                 .filter(e -> !request.has("AlarmTypes") || contains(request.path("AlarmTypes"), e.path("AlarmType").asText()))
@@ -205,7 +210,7 @@ public class CloudWatchMetadataService {
     }
 
     public ObjectNode describeDetectors(JsonNode request, String region) {
-        var result = rows(region, "detector").stream().filter(d -> {
+        List<ObjectNode> result = rows(region, "detector").stream().filter(d -> {
             JsonNode single = d.path("SingleMetricAnomalyDetector");
             if (request.has("AnomalyDetectorTypes") && !contains(request.get("AnomalyDetectorTypes"),
                     single.isMissingNode() ? "METRIC_MATH" : "SINGLE_METRIC")) return false;
@@ -274,7 +279,7 @@ public class CloudWatchMetadataService {
             if (java.time.Duration.parse(duration).isNegative() || java.time.Duration.parse(duration).isZero()) {
                 throw invalid("Duration must be positive");
             }
-        } catch (java.time.format.DateTimeParseException e) {
+        } catch (DateTimeParseException e) {
             throw invalid("Duration must be an ISO-8601 duration");
         }
         ObjectNode rule = ((ObjectNode) request).deepCopy();
@@ -327,9 +332,9 @@ public class CloudWatchMetadataService {
             }
             String cronText = expression.startsWith("cron(") && expression.endsWith(")")
                     ? expression.substring(5, expression.length() - 1) : expression;
-            com.cronutils.model.Cron cron;
+            Cron cron;
             if (cronText.trim().split("\\s+").length == 5) {
-                cron = new com.cronutils.parser.CronParser(com.cronutils.model.definition.CronDefinitionBuilder
+                cron = new CronParser(com.cronutils.model.definition.CronDefinitionBuilder
                         .instanceDefinitionFor(com.cronutils.model.CronType.UNIX)).parse(cronText);
             } else {
                 cron = io.github.hectorvent.floci.core.common.AwsCronDefinitions.newParser().parse("0 " + cronText);
@@ -338,13 +343,13 @@ public class CloudWatchMetadataService {
             return com.cronutils.model.time.ExecutionTime.forCron(cron)
                     .lastExecution(current.plusNanos(1).atZone(java.time.ZoneOffset.UTC))
                     .map(java.time.ZonedDateTime::toInstant).orElse(null);
-        } catch (IllegalArgumentException | java.time.DateTimeException e) {
+        } catch (IllegalArgumentException | DateTimeException e) {
             throw invalid("Invalid mute schedule expression: " + expression);
         }
     }
 
     public ObjectNode listMuteRules(JsonNode request, String region) {
-        var rules = rows(region, "mute").stream().map(this::muteDescription)
+        List<ObjectNode> rules = rows(region, "mute").stream().map(this::muteDescription)
                 .filter(r -> !request.has("Statuses") || contains(request.get("Statuses"), r.path("Status").asText()))
                 .filter(r -> !request.has("AlarmName") || contains(r.path("MuteTargets").path("AlarmNames"),
                         request.path("AlarmName").asText())).map(r -> {
@@ -436,7 +441,7 @@ public class CloudWatchMetadataService {
         if (value.isNumber()) return value.asDouble();
         try {
             return Instant.parse(value.asText()).toEpochMilli() / 1000.0;
-        } catch (java.time.format.DateTimeParseException e) {
+        } catch (DateTimeParseException e) {
             try {
                 return Double.parseDouble(value.asText());
             } catch (NumberFormatException ignored) {

@@ -14,8 +14,9 @@ import io.github.hectorvent.floci.services.glue.model.Partition;
 import io.github.hectorvent.floci.services.glue.model.Table;
 import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.iam.model.IamRole;
-import io.github.hectorvent.floci.services.lakeformation.model.DataLakeSettings;
+import io.github.hectorvent.floci.services.lakeformation.model.DataCellsFilterResource;
 import io.github.hectorvent.floci.services.lakeformation.model.DataLakePrincipal;
+import io.github.hectorvent.floci.services.lakeformation.model.DataLakeSettings;
 import io.github.hectorvent.floci.services.lakeformation.model.PrincipalResourcePermissions;
 import io.github.hectorvent.floci.services.lakeformation.model.Resource;
 import io.github.hectorvent.floci.services.lakeformation.model.ResourceInfo;
@@ -337,7 +338,7 @@ public class LakeFormationDataAccessService {
                     (allColumns ? full : partial).addAll(grant.getPermissions());
                 }
             } else if (resource.getDataCellsFilter() != null) {
-                var filter = resource.getDataCellsFilter();
+                DataCellsFilterResource filter = resource.getDataCellsFilter();
                 if (sameTable(filter.getTableCatalogId(), filter.getDatabaseName(), target)
                         && target.name().equalsIgnoreCase(filter.getTableName())) {
                     partial.addAll(grant.getPermissions());

@@ -4,6 +4,7 @@ import io.github.hectorvent.floci.services.lambda.model.ExtensionEvent;
 import io.github.hectorvent.floci.services.lambda.model.InvokeResult;
 import io.github.hectorvent.floci.services.lambda.model.PendingInvocation;
 import io.github.hectorvent.floci.services.lambda.model.RegisteredExtension;
+import io.github.hectorvent.floci.services.lambda.model.StreamingPayload;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpServer;
@@ -26,9 +27,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Supplier;
-import io.github.hectorvent.floci.services.lambda.model.StreamingPayload;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * Per-container HTTP server implementing the AWS Lambda Runtime API and, for

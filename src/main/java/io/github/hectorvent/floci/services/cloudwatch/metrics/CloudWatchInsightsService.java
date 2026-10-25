@@ -11,6 +11,7 @@ import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.cloudwatch.logs.LogEventsIngested;
+import io.github.hectorvent.floci.services.cloudwatch.logs.model.LogEvent;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
@@ -68,7 +69,7 @@ public class CloudWatchInsightsService {
             validatePath(required(filter, "Match"));
             long conditions = filter.properties().stream().filter(e -> !e.getKey().equals("Match")).count();
             if (conditions != 1) throw invalid("Each contribution filter requires one condition");
-            for (var property : filter.properties()) {
+            for (Map.Entry<String, JsonNode> property : filter.properties()) {
                 if (!List.of("Match", "In", "NotIn", "StartsWith", "NotStartsWith", "GreaterThan",
                         "GreaterThanOrEqualTo", "LessThan", "LessThanOrEqualTo", "IsPresent").contains(property.getKey())) {
                     throw invalid("Unsupported contribution filter: " + property.getKey());
@@ -157,7 +158,7 @@ public class CloudWatchInsightsService {
                 if (glob(group.asText(), batch.logGroupName())) matches = true;
             }
             if (!matches) continue;
-            for (var event : batch.events()) {
+            for (LogEvent event : batch.events()) {
                 JsonNode log;
                 try {
                     log = mapper.readTree(event.getMessage());

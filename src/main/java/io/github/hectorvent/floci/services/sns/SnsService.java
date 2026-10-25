@@ -51,6 +51,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
@@ -72,8 +74,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 
 @ApplicationScoped
 public class SnsService implements Resettable, ResourceProvider {
@@ -3136,7 +3136,7 @@ public class SnsService implements Resettable, ResourceProvider {
                     String body = rawDelivery
                             ? protocolMessage
                             : buildSnsHttpNotification(protocolMessage, subject, messageAttributes, topicArn, messageId, sub.getSubscriptionArn());
-                    var requestBuilder = HttpRequest.newBuilder()
+                    HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                             .uri(URI.create(sub.getEndpoint()))
                             .timeout(Duration.ofSeconds(5))
                             .header("Content-Type", "text/plain; charset=UTF-8")
@@ -3256,7 +3256,7 @@ public class SnsService implements Resettable, ResourceProvider {
             snsNode.put("UnsubscribeUrl", "EXAMPLE");
             ObjectNode attrs = snsNode.putObject("MessageAttributes");
             if (messageAttributes != null) {
-                for (var entry : messageAttributes.entrySet()) {
+                for (Map.Entry<String, MessageAttributeValue> entry : messageAttributes.entrySet()) {
                     ObjectNode attr = attrs.putObject(entry.getKey());
                     attr.put("Type", entry.getValue().getDataType());
                     if (entry.getValue().getBinaryValue() != null) {
@@ -3320,7 +3320,7 @@ public class SnsService implements Resettable, ResourceProvider {
             node.put("Message", message);
             ObjectNode attrs = node.putObject("MessageAttributes");
             if (messageAttributes != null) {
-                for (var entry : messageAttributes.entrySet()) {
+                for (Map.Entry<String, MessageAttributeValue> entry : messageAttributes.entrySet()) {
                     ObjectNode attr = attrs.putObject(entry.getKey());
                     attr.put("Type", entry.getValue().getDataType());
                     if (entry.getValue().getBinaryValue() != null) {
@@ -3357,7 +3357,7 @@ public class SnsService implements Resettable, ResourceProvider {
             node.put("UnsubscribeURL", baseUrl + "/?Action=Unsubscribe&SubscriptionArn=" + subscriptionArn);
             ObjectNode attrs = node.putObject("MessageAttributes");
             if (messageAttributes != null) {
-                for (var entry : messageAttributes.entrySet()) {
+                for (Map.Entry<String, MessageAttributeValue> entry : messageAttributes.entrySet()) {
                     ObjectNode attr = attrs.putObject(entry.getKey());
                     attr.put("Type", entry.getValue().getDataType());
                     if (entry.getValue().getBinaryValue() != null) {
@@ -3411,7 +3411,7 @@ public class SnsService implements Resettable, ResourceProvider {
     public List<Map<String, String>> listSmsSandboxPhoneNumbers(String region) {
         String prefix = region + "::";
         List<Map<String, String>> numbers = new ArrayList<>();
-        for (var entry : sandboxNumbers.entrySet()) {
+        for (Map.Entry<String, String> entry : sandboxNumbers.entrySet()) {
             if (!entry.getKey().startsWith(prefix)) {
                 continue;
             }

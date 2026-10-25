@@ -21,6 +21,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -239,7 +241,7 @@ public class CloudTrailLakeService {
                 String name = field.path("Field").asText();
                 if (!FIELDS.contains(name)) throw unsupported("Unsupported Lake selector field: " + name);
                 int operators = 0;
-                var names = field.fieldNames();
+                Iterator<String> names = field.fieldNames();
                 while (names.hasNext()) {
                     String operator = names.next();
                     if ("Field".equals(operator)) continue;
@@ -280,7 +282,7 @@ public class CloudTrailLakeService {
 
     public synchronized Map<String, String> tags(String arn, String region) {
         ObjectNode value = taggedStore(arn, region);
-        Map<String, String> result = new java.util.LinkedHashMap<>();
+        Map<String, String> result = new LinkedHashMap<>();
         value.path("TagsList").forEach(t -> result.put(t.path("Key").asText(), t.path("Value").asText("")));
         return result;
     }
@@ -291,7 +293,7 @@ public class CloudTrailLakeService {
         Map<String, String> tags = tags(arn, region);
         tags.putAll(additions);
         removals.forEach(tags::remove);
-        var array = value.putArray("TagsList");
+        ArrayNode array = value.putArray("TagsList");
         tags.forEach((k, v) -> array.addObject().put("Key", k).put("Value", v == null ? "" : v));
         validateTags(array);
         save(region, value);
@@ -300,7 +302,7 @@ public class CloudTrailLakeService {
     private static void validateTags(JsonNode tags) {
         if (!tags.isArray()) throw invalid("TagsList must be an array.");
         if (tags.size() > 50) throw new AwsException("TagsLimitExceededException", "Maximum 50 tags.", 400);
-        Set<String> keys = new java.util.HashSet<>();
+        Set<String> keys = new HashSet<>();
         for (JsonNode tag : tags) {
             if (!tag.path("Key").isTextual() || tag.path("Key").asText().isEmpty()
                     || tag.path("Key").asText().length() > 128 || !keys.add(tag.path("Key").asText())
@@ -337,7 +339,7 @@ public class CloudTrailLakeService {
                 String path = field.path("Field").asText();
                 List<String> values;
                 if (path.startsWith("resources.")) {
-                    var resources = new java.util.ArrayList<String>();
+                    ArrayList<String> resources = new ArrayList<String>();
                     event.path("resources").forEach(r -> {
                         if (r.has(path.substring(10))) resources.add(r.path(path.substring(10)).asText());
                     });

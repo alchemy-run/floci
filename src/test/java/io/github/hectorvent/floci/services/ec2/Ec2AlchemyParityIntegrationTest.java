@@ -1,10 +1,10 @@
 package io.github.hectorvent.floci.services.ec2;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import io.github.hectorvent.floci.testing.DocumentationPublicAddressesProfile;
-import io.quarkus.test.junit.TestProfile;
-
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -409,7 +409,7 @@ class Ec2AlchemyParityIntegrationTest {
     @Order(20)
     void createEncryptedVolumeResolvesKmsAliasToKeyArn() throws Exception {
         RestAssuredJsonUtils.configureAwsContentTypes();
-        var key = RestAssuredJsonUtils.awsActionJson("TrentService", "CreateKey",
+        JsonNode key = RestAssuredJsonUtils.awsActionJson("TrentService", "CreateKey",
                 "{\"Description\":\"ec2-encrypted-volume\"}");
         String keyId = key.path("KeyMetadata").path("KeyId").asText();
         String keyArn = key.path("KeyMetadata").path("Arn").asText();

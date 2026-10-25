@@ -53,6 +53,7 @@ import org.jboss.resteasy.reactive.server.ServerExceptionMapper;
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
@@ -87,10 +88,10 @@ import java.util.StringJoiner;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import static io.github.hectorvent.floci.services.s3.S3RequestParser.hasQueryParam;
-import java.util.function.Supplier;
 
 /**
  * S3 controller handling REST-style S3 API requests.

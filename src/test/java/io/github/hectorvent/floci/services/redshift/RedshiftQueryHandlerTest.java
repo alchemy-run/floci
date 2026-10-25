@@ -17,6 +17,8 @@ import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -824,7 +826,7 @@ class RedshiftQueryHandlerTest {
 
         handler.handle("GetClusterCredentials", params);
 
-        java.time.Instant expiresAt = credentialBroker.resolve("acc", "c1", "IAM:analyst").orElseThrow().expiresAt();
+        Instant expiresAt = credentialBroker.resolve("acc", "c1", "IAM:analyst").orElseThrow().expiresAt();
         assertTrue(expiresAt.isAfter(java.time.Instant.now().plusSeconds(800)),
                 "an out-of-range config default must fall back to the AWS minimum, not be used as-is");
     }

@@ -26,6 +26,7 @@ import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -120,7 +121,7 @@ public class MacieController {
         return Response.ok(response).build();
     }
 
-    private static java.util.List<String> stringList(JsonNode request, String field) {
+    private static List<String> stringList(JsonNode request, String field) {
         JsonNode value = request.get(field);
         if (value == null || value.isNull()) {
             return java.util.List.of();
@@ -128,7 +129,7 @@ public class MacieController {
         if (!value.isArray()) {
             throw new AwsException("ValidationException", field + " must be an array of strings.", 400);
         }
-        java.util.List<String> result = new java.util.ArrayList<>();
+        List<String> result = new ArrayList<>();
         for (JsonNode item : value) {
             if (!item.isTextual()) {
                 throw new AwsException("ValidationException", field + " must be an array of strings.", 400);
@@ -194,7 +195,7 @@ public class MacieController {
     public Response listInvitations(@Context HttpHeaders headers,
                                     @QueryParam("maxResults") String maxResults,
                                     @QueryParam("nextToken") String nextToken) {
-        var page = macieService.listInvitations(region(headers), regionResolver.getAccountId(), maxResults, nextToken);
+        MacieService.Page<MacieMember> page = macieService.listInvitations(region(headers), regionResolver.getAccountId(), maxResults, nextToken);
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode invitations = response.putArray("invitations");
         page.items().forEach(member -> invitations.add(invitationNode(member)));

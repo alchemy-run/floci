@@ -10,9 +10,8 @@ import org.junit.jupiter.api.TestMethodOrder;
 
 import java.time.Duration;
 
-import static org.awaitility.Awaitility.await;
-
 import static io.github.hectorvent.floci.testing.RestAssuredJsonUtils.awsAction;
+import static org.awaitility.Awaitility.await;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.emptyIterable;
 import static org.hamcrest.Matchers.equalTo;

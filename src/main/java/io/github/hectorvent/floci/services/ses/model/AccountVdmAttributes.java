@@ -1,11 +1,11 @@
 package io.github.hectorvent.floci.services.ses.model;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import io.quarkus.runtime.annotations.RegisterForReflection;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
+import io.quarkus.runtime.annotations.RegisterForReflection;
 
 /**
  * Account-level Virtual Deliverability Manager (VDM) settings, returned by GetAccount and set by

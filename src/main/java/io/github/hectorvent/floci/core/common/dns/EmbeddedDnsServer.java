@@ -36,8 +36,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.SequencedSet;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -205,7 +205,7 @@ public class EmbeddedDnsServer {
             socket.handler(packet -> handleQuery(
                     vertx, socket, packet.data().getBytes(),
                     packet.sender().host(), packet.sender().port(), serverIp));
-            var bind = socket.listen(port, bindHost);
+            Future<DatagramSocket> bind = socket.listen(port, bindHost);
             if (sourceMode) {
                 bind.toCompletionStage().toCompletableFuture().get(10, java.util.concurrent.TimeUnit.SECONDS);
                 this.sourceHelper = sourceHelper;

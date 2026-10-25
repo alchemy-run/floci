@@ -11,6 +11,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.DateTimeException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -80,12 +81,12 @@ public class MetricWidgetRenderer {
             }
             int period = options.path("period").asInt(widget.path("period").asInt(300));
             if (period < 1) throw invalid("Widget period must be positive");
-            var data = metrics.getMetricStatistics(fields.get(0), fields.get(1), dimensions, start, end, period,
+            List<CloudWatchMetricsService.Datapoint> data = metrics.getMetricStatistics(fields.get(0), fields.get(1), dimensions, start, end, period,
                     List.of(stat), options.path("unit").asText(null), requestedRegion);
             if (!options.path("visible").asBoolean(true)) continue;
             series.add(data);
             statistics.add(stat);
-            for (var point : data) {
+            for (CloudWatchMetricsService.Datapoint point : data) {
                 double value = CloudWatchMetricsService.resolveStatValue(point, stat);
                 min = Math.min(min, value);
                 max = Math.max(max, value);
@@ -104,7 +105,7 @@ public class MetricWidgetRenderer {
         int[] colors = {0x2277bb, 0xe08022, 0x229955, 0xbb3377, 0x7755cc};
         for (int i = 0; i < series.size(); i++) {
             int lastX = -1, lastY = -1;
-            for (var point : series.get(i)) {
+            for (CloudWatchMetricsService.Datapoint point : series.get(i)) {
                 double value = CloudWatchMetricsService.resolveStatValue(point, statistics.get(i));
                 double fraction = (point.timestamp().toEpochMilli() - start.toEpochMilli())
                         / (double) (end.toEpochMilli() - start.toEpochMilli());
@@ -125,7 +126,7 @@ public class MetricWidgetRenderer {
             if (text.startsWith("-P")) return now.minus(Duration.parse(text.substring(1)));
             if (text.startsWith("P")) return now.plus(Duration.parse(text));
             return Instant.parse(text);
-        } catch (java.time.DateTimeException e) {
+        } catch (DateTimeException e) {
             throw invalid("Invalid widget time: " + text);
         }
     }

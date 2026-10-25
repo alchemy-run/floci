@@ -33,6 +33,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.*;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
@@ -49,7 +50,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.*;
 
 @ApplicationScoped
 public class FirehoseService implements ResourceProvider {

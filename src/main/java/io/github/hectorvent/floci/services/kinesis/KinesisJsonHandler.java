@@ -392,7 +392,7 @@ public class KinesisJsonHandler {
     private Response handleRegisterStreamConsumer(JsonNode request, String region) {
         String streamArn = request.path("StreamARN").asText();
         String consumerName = request.path("ConsumerName").asText();
-        var consumer = service.registerStreamConsumer(
+        KinesisConsumer consumer = service.registerStreamConsumer(
                 streamArn, consumerName, readTagMap(request.path("Tags")), region);
         ObjectNode response = objectMapper.createObjectNode();
         response.set("Consumer", consumerToNode(consumer));

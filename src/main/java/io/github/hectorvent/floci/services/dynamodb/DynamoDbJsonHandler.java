@@ -1,18 +1,6 @@
 package io.github.hectorvent.floci.services.dynamodb;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.services.dynamodb.backend.DynamoDbOperations;
-import io.github.hectorvent.floci.services.dynamodb.backend.DynamoDbOperations.Api;
-import io.github.hectorvent.floci.services.dynamodb.backend.DynamoDbOperations.Call;
-import io.github.hectorvent.floci.services.dynamodb.backend.DynamoDbOperations.Reply;
-import io.github.hectorvent.floci.services.dynamodb.backend.DynamoDbOperations.Scope;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
-import jakarta.ws.rs.core.Response;
-
-import java.util.List;
-import java.util.Map;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -20,9 +8,21 @@ import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsErrorResponse;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.AwsJsonController;
+import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.services.dynamodb.backend.DynamoDbOperations;
+import io.github.hectorvent.floci.services.dynamodb.backend.DynamoDbOperations.Api;
+import io.github.hectorvent.floci.services.dynamodb.backend.DynamoDbOperations.Call;
+import io.github.hectorvent.floci.services.dynamodb.backend.DynamoDbOperations.Reply;
+import io.github.hectorvent.floci.services.dynamodb.backend.DynamoDbOperations.Scope;
 import io.github.hectorvent.floci.services.dynamodb.model.*;
 import io.github.hectorvent.floci.services.kinesis.KinesisService;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.core.Response;
+
 import java.util.*;
+import java.util.List;
+import java.util.Map;
 import java.util.function.Supplier;
 
 /**

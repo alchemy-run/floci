@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.account;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.quarkus.runtime.StartupEvent;
@@ -27,7 +28,7 @@ public class AccountBootstrap {
             return;
         }
         config.services().account().bootstrapContactInformation().ifPresent(contact -> {
-            var request = mapper.createObjectNode();
+            ObjectNode request = mapper.createObjectNode();
             try {
                 request.set("ContactInformation", mapper.readTree(contact));
             } catch (JsonProcessingException error) {

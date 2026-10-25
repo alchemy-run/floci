@@ -1,11 +1,13 @@
 package io.github.hectorvent.floci.services.cloudtrail;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.ServiceConfigAccess;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.eventbridge.EventBridgeService;
 import io.github.hectorvent.floci.services.iam.IamService;
@@ -49,10 +51,10 @@ class CloudTrailPersistenceTest {
             assertEquals("STOPPED_INGESTION", observed.path("Status").asText());
             assertEquals(7, observed.path("RetentionPeriod").asInt());
             assertEquals(Map.of("team", "audit"), restoredLake.tags(arn, "us-east-1"));
-            var records = restoredLake.collectedEvents(arn, "us-east-1");
+            List<ObjectNode> records = restoredLake.collectedEvents(arn, "us-east-1");
             assertEquals(1, records.size());
             assertEquals("request-one", records.getFirst().path("requestID").asText());
-            var history = restoredEvents.lookup(mapper.createObjectNode(), "us-east-1").path("Events");
+            JsonNode history = restoredEvents.lookup(mapper.createObjectNode(), "us-east-1").path("Events");
             assertEquals(1, history.size());
             assertEquals(records.getFirst().path("eventID").asText(), history.get(0).path("EventId").asText());
             assertTrue(restoredEvents.lookup(mapper.createObjectNode(), "us-west-2").path("Events").isEmpty());
@@ -80,7 +82,7 @@ class CloudTrailPersistenceTest {
     void historyExpiresAfterNinetyDays(@TempDir Path directory) {
         StorageFactory factory = factory(directory);
         try {
-            var history = factory.create("cloudtrail", "cloudtrail-event-history.json",
+            AccountAwareStorageBackend<ObjectNode> history = factory.create("cloudtrail", "cloudtrail-event-history.json",
                     new TypeReference<Map<String, ObjectNode>>() {});
             history.put("us-east-1:expired", mapper.createObjectNode().put("eventID", "expired")
                     .put("eventTime", Instant.now().minusSeconds(91L * 86400).toString()));

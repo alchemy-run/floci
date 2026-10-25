@@ -1,14 +1,14 @@
 package io.github.hectorvent.floci.services.dynamodb.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.List;
-import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**

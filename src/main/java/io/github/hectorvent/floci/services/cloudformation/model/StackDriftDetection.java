@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.cloudformation.model;
 
 import io.quarkus.runtime.annotations.RegisterForReflection;
+
 import java.time.Instant;
 import java.util.List;
 
