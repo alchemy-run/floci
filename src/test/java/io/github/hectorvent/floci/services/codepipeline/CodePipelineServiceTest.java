@@ -26,6 +26,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -797,6 +798,15 @@ class CodePipelineServiceTest {
         private final Set<Thread> deployWaiters = ConcurrentHashMap.newKeySet();
 
         private CatchUpFixture() throws Exception {
+            // PollForJobs answers only for a custom action type that exists, as on AWS.
+            for (String type : List.of("Build:ReviewBuild", "Deploy:ReviewDeploy")) {
+                String[] parts = type.split(":");
+                handle("CreateCustomActionType", """
+                        {"category":"%s","provider":"%s","version":"1",
+                         "inputArtifactDetails":{"minimumCount":0,"maximumCount":1},
+                         "outputArtifactDetails":{"minimumCount":0,"maximumCount":1}}
+                        """.formatted(parts[0], parts[1]));
+            }
             handle("CreatePipeline", """
                     {"pipeline": {
                       "name":"review-catch-up", "executionMode":"SUPERSEDED",

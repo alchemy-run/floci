@@ -78,8 +78,8 @@ class TimestreamInfluxDbContainerManagerTest {
         verify(builder).withEnv("DOCKER_INFLUXDB_INIT_BUCKET", "metrics");
         verify(builder).withEnv("INFLUXD_LOG_LEVEL", "debug");
         verify(builder).withPortBinding(8086, 8090);
-        verify(builder).withNamedVolume("floci-timestream-influxdb-abc1234567", "/var/lib/influxdb2");
-        verify(builder).withNamedVolume("floci-timestream-influxdb-abc1234567-config", "/etc/influxdb2");
+        verify(builder).withNamedVolume("floci-aws-timestream-influxdb-abc1234567", "/var/lib/influxdb2");
+        verify(builder).withNamedVolume("floci-aws-timestream-influxdb-abc1234567-config", "/etc/influxdb2");
         verify(builder).withLabels(Map.of(
                 "io.floci", "aws",
                 "io.floci.service", "timestream-influxdb",
@@ -106,7 +106,7 @@ class TimestreamInfluxDbContainerManagerTest {
                 new InfluxDbSetup("admin", "password123", "acme", "metrics"), Map.of()));
 
         verify(portAllocator).release(8090);
-        verify(lifecycleManager, Mockito.times(2)).removeIfExists("floci-timestream-influxdb-abc1234567");
+        verify(lifecycleManager, Mockito.times(2)).removeIfExists("floci-aws-timestream-influxdb-abc1234567");
     }
 
     @Test
