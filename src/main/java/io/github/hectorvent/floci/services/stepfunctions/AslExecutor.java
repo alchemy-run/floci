@@ -6301,7 +6301,6 @@ public class AslExecutor {
         }
     }
 
-    private static final int DEFAULT_TASK_TOKEN_TIMEOUT_SECONDS = 300;
 
     private static final int ECS_SYNC_POLL_ATTEMPTS = 600;
 
@@ -6384,62 +6383,6 @@ public class AslExecutor {
         }
     }
 
-    /**
-     * Waits for the worker to answer the task token under the two independent bounds AWS enforces:
-     * {@code TimeoutSeconds} is the whole wait, and {@code HeartbeatSeconds} is the longest gap
-     * allowed between two SendTaskHeartbeat calls, each of which pushes that gap forward. Either
-     * clock ends the state as a {@link TaskTimedOutException}: the error is {@code States.Timeout}
-     * and there is no cause.
-     *
-     * <p>Both clocks start when the task is scheduled. AWS starts TimeoutSeconds when a worker
-     * picks the task up, which is the instant it emits ActivityStarted; Floci emits that event at
-     * schedule time, so there is no later instant to anchor on here.
-     */
-    private JsonNode awaitToken(CompletableFuture<JsonNode> future, JsonNode stateDef, String taskToken,
-                                long executionDeadlineNanos) throws Exception {
-        int timeoutSeconds = stateDef.path("TimeoutSeconds").asInt(0);
-        if (timeoutSeconds <= 0) {
-            timeoutSeconds = DEFAULT_TASK_TOKEN_TIMEOUT_SECONDS;
-        }
-        int heartbeatSeconds = stateDef.path("HeartbeatSeconds").asInt(0);
-        long timeoutDeadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
-        try {
-            while (true) {
-                long wakeAtNanos = Math.min(executionDeadlineNanos, Math.min(timeoutDeadlineNanos,
-                        heartbeatDeadlineNanos(taskToken, heartbeatSeconds)));
-                try {
-                    return future.get(wakeAtNanos - System.nanoTime(), TimeUnit.NANOSECONDS);
-                } catch (java.util.concurrent.TimeoutException e) {
-                    // The execution's budget is read first: when it is the clock that ran out, the
-                    // execution ends as TIMED_OUT and the task's own timeout never applies.
-                    if (System.nanoTime() >= executionDeadlineNanos) {
-                        future.cancel(true);
-                        throw new ExecutionTimedOutException();
-                    }
-                    if (System.nanoTime() >= timeoutDeadlineNanos) {
-                        future.cancel(true);
-                        throw new TaskTimedOutException("States.Timeout");
-                    }
-                    // Read the gap again rather than trusting the one this thread parked on: a
-                    // heartbeat that landed meanwhile has already moved it past now, and the task
-                    // goes back to waiting on the later deadline.
-                    if (System.nanoTime() >= heartbeatDeadlineNanos(taskToken, heartbeatSeconds)) {
-                        future.cancel(true);
-                        throw new TaskTimedOutException("States.HeartbeatTimeout");
-                    }
-                }
-            }
-        } catch (ExecutionException e) {
-            Throwable cause = e.getCause();
-            if (cause instanceof FailStateException fse) {
-                throw fse;
-            }
-            throw new FailStateException("States.TaskFailed",
-                    cause != null ? cause.getMessage() : "Task failed");
-        } finally {
-            sfnService.get().discardPendingToken(taskToken);
-        }
-    }
 
 
 
