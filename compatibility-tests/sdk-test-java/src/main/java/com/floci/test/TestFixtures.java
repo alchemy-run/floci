@@ -4,53 +4,6 @@ import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.SdkBytes;
 import software.amazon.awssdk.core.client.config.SdkAdvancedClientOption;
-import software.amazon.awssdk.services.eventbridge.EventBridgeClient;
-import software.amazon.awssdk.services.servicediscovery.ServiceDiscoveryClient;
-import software.amazon.awssdk.services.emr.EmrClient;
-import software.amazon.awssdk.services.wafv2.Wafv2Client;
-import software.amazon.awssdk.services.iam.IamClient;
-import software.amazon.awssdk.services.kinesis.KinesisAsyncClient;
-import software.amazon.awssdk.services.kinesis.KinesisClient;
-import software.amazon.awssdk.http.nio.netty.NettyNioAsyncHttpClient;
-import software.amazon.awssdk.http.Protocol;
-import software.amazon.awssdk.services.kms.KmsClient;
-import software.amazon.awssdk.services.lambda.LambdaClient;
-import software.amazon.awssdk.services.opensearch.OpenSearchClient;
-import software.amazon.awssdk.services.oam.OamClient;
-import software.amazon.awssdk.services.neptune.NeptuneClient;
-import software.amazon.awssdk.services.rds.RdsClient;
-import software.amazon.awssdk.services.redshift.RedshiftClient;
-import software.amazon.awssdk.services.redshiftdata.RedshiftDataClient;
-import software.amazon.awssdk.services.guardduty.GuardDutyClient;
-import software.amazon.awssdk.services.fis.FisClient;
-import software.amazon.awssdk.services.organizations.OrganizationsClient;
-import software.amazon.awssdk.services.sso.SsoClient;
-import software.amazon.awssdk.services.ssoadmin.SsoAdminClient;
-import software.amazon.awssdk.services.ssooidc.SsoOidcClient;
-import software.amazon.awssdk.services.identitystore.IdentitystoreClient;
-import software.amazon.awssdk.services.budgets.BudgetsClient;
-import software.amazon.awssdk.services.bcmpricingcalculator.BcmPricingCalculatorClient;
-import software.amazon.awssdk.services.timestreaminfluxdb.TimestreamInfluxDbClient;
-import software.amazon.awssdk.services.macie2.Macie2Client;
-import software.amazon.awssdk.services.controlcatalog.ControlCatalogClient;
-import software.amazon.awssdk.services.marketplacecatalog.MarketplaceCatalogClient;
-import software.amazon.awssdk.services.marketplaceagreement.MarketplaceAgreementClient;
-import software.amazon.awssdk.services.marketplaceentitlement.MarketplaceEntitlementClient;
-import software.amazon.awssdk.services.verifiedpermissions.VerifiedPermissionsClient;
-import software.amazon.awssdk.services.marketplacedeployment.MarketplaceDeploymentClient;
-import software.amazon.awssdk.services.marketplacereporting.MarketplaceReportingClient;
-import software.amazon.awssdk.services.marketplacemetering.MarketplaceMeteringClient;
-import software.amazon.awssdk.services.marketplacediscovery.MarketplaceDiscoveryClient;
-import software.amazon.awssdk.services.inspector2.Inspector2Client;
-import software.amazon.awssdk.services.securityhub.SecurityHubClient;
-import software.amazon.awssdk.services.databasemigration.DatabaseMigrationClient;
-import software.amazon.awssdk.services.detective.DetectiveClient;
-import software.amazon.awssdk.services.globalaccelerator.GlobalAcceleratorClient;
-import software.amazon.awssdk.services.rum.RumClient;
-import software.amazon.awssdk.services.resourceexplorer2.ResourceExplorer2Client;
-import software.amazon.awssdk.services.ram.RamClient;
-import software.amazon.awssdk.services.s3.S3AsyncClient;
-import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.core.retry.backoff.FixedDelayBackoffStrategy;
 import software.amazon.awssdk.core.waiters.WaiterOverrideConfiguration;
@@ -62,6 +15,7 @@ import software.amazon.awssdk.regions.RegionMetadata;
 import software.amazon.awssdk.services.accessanalyzer.AccessAnalyzerClient;
 import software.amazon.awssdk.services.account.AccountClient;
 import software.amazon.awssdk.services.acm.AcmClient;
+import software.amazon.awssdk.services.acm.model.CertificateDetail;
 import software.amazon.awssdk.services.amp.AmpClient;
 import software.amazon.awssdk.services.apigateway.ApiGatewayClient;
 import software.amazon.awssdk.services.apigatewayv2.ApiGatewayV2Client;
@@ -218,6 +172,7 @@ import software.amazon.awssdk.services.wafv2.Wafv2Client;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
+
 import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -1335,7 +1290,7 @@ public final class TestFixtures {
      * the certificate issued once validation succeeded.
      */
     public static void validateAcmCertificateViaRoute53(AcmClient acm, String certificateArn) {
-        software.amazon.awssdk.services.acm.model.CertificateDetail pending =
+        CertificateDetail pending =
                 acm.describeCertificate(b -> b.certificateArn(certificateArn)).certificate();
         List<ResourceRecordSet> records = pending.domainValidationOptions().stream()
                 .map(software.amazon.awssdk.services.acm.model.DomainValidation::resourceRecord)
